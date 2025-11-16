@@ -5,8 +5,7 @@
   "type": "module",
   "publishConfig": {
     "access": "public",
-    "directory": "dist",
-    "provenance": true
+    "directory": "dist"
   },
   "repository": {
     "type": "git",
