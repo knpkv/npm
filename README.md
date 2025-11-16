@@ -77,12 +77,14 @@ Packages are published to npm under the [@knpkv scope](https://www.npmjs.com/org
 
 ```bash
 # Package management
-pnpm install              # Install dependencies
+pnpm install             # Install dependencies
 pnpm build               # Build all packages
 pnpm test                # Run all tests
 pnpm check               # TypeScript type checking
 pnpm lint                # Lint code
-pnpm lint --fix          # Fix linting issues
+pnpm lint:fix            # Fix linting issues
+pnpm format              # Check formatting
+pnpm format:fix          # Fix formatting
 
 # Versioning
 pnpm changeset           # Create a changeset
