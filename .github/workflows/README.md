@@ -75,6 +75,46 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 ---
 
+### Release (`release.yml`)
+
+**Purpose**: Automated npm publishing workflow for releasing packages to npm registry.
+
+**Triggers**:
+
+- Pushes to `main` branch
+
+**Condition**: Only runs if repository owner is 'knpkv'
+
+**Security**: Uses minimal required permissions and repository owner restriction
+
+**Jobs**:
+
+#### Release
+
+- Creates release pull requests when changesets are ready
+- Publishes packages to npm when release PRs are merged
+- Generates GitHub releases with changelog
+- **Steps**:
+  1. Checkout repository
+  2. Install dependencies using existing setup action
+  3. Run changesets action for version management and publishing
+- **Commands**:
+  - `pnpm changeset-version` - Version packages based on changesets
+  - `pnpm changeset-publish` - Build and publish packages to npm
+- **Timeout**: 30 minutes
+- **Required Secrets**:
+  - `NPM_TOKEN` - npm authentication token for publishing
+  - `GITHUB_TOKEN` - GitHub token for creating releases and PRs
+
+**Release Process**:
+
+1. Developer adds changeset files describing package changes
+2. When changesets are ready, workflow creates a Version PR
+3. Merging Version PR triggers package publishing
+4. Packages are published to npm with GitHub releases
+
+---
+
 ## Concurrency Control
 
 All workflows use concurrency groups to cancel in-progress runs when new commits are pushed:
