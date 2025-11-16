@@ -19,7 +19,7 @@ permissions: {}
 jobs:
   release:
     # Security: Only run for repository owner to prevent unauthorized publishing
-    if: github.repository_owner == 'konopkov'
+    if: github.repository_owner == 'knpkv'
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
