@@ -99,8 +99,8 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   2. Install dependencies using existing setup action
   3. Run changesets action for version management and publishing
 - **Commands**:
-  - `pnpm changeset-version` - Version packages based on changesets
-  - `pnpm changeset-publish` - Build and publish packages to npm
+  - `pnpm changeset:version` - Version packages based on changesets
+  - `pnpm changeset:publish` - Build and publish packages to npm
 - **Timeout**: 30 minutes
 - **Required Secrets**:
   - `TOKEN_NPM` - npm authentication token for publishing

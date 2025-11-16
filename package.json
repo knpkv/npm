@@ -14,8 +14,8 @@
     "lint:fix": "pnpm lint --fix",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "changeset-version": "changeset version",
-    "changeset-publish": "pnpm build && changeset publish",
+    "changeset:version": "changeset version",
+    "changeset:publish": "pnpm build && changeset publish",
     "prepare": "husky"
   },
   "devDependencies": {
