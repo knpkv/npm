@@ -103,7 +103,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   - `pnpm changeset-publish` - Build and publish packages to npm
 - **Timeout**: 30 minutes
 - **Required Secrets**:
-  - `NPM_TOKEN` - npm authentication token for publishing
+  - `TOKEN_NPM` - npm authentication token for publishing
   - `GITHUB_TOKEN` - GitHub token for creating releases and PRs
 
 **Release Process**:
