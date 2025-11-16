@@ -40,4 +40,4 @@ jobs:
           publish: pnpm changeset:publish
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
-          TOKEN_NPM: ${{ secrets.TOKEN_NPM }}
+          NPM_TOKEN: ${{ secrets.TOKEN_NPM }}
