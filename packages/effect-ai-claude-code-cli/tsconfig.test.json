@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "rootDir": "test"
+  },
+  "include": ["test"],
+  "references": [{ "path": "tsconfig.src.json" }]
+}
