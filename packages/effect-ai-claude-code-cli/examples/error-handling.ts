@@ -5,25 +5,24 @@
  *
  * @since 1.0.0
  */
-import type { ClaudeCodeCliError } from "../src/ClaudeCodeCliError.js"
-import { ClaudeCodeCliClient } from "../src/ClaudeCodeCliClient.js"
-import { layer } from "../src/ClaudeCodeCliClient.js"
+import { Console, Effect, Match } from "effect"
+import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "../src/ClaudeCodeCliConfig.js"
-import { Effect, Match } from "effect"
+import type { ClaudeCodeCliError } from "../src/ClaudeCodeCliError.js"
 
 const program = Effect.gen(function*() {
   // Get client service
   const client = yield* ClaudeCodeCliClient
 
-  console.log("🤖 Asking Claude: What is Effect-TS?\n")
+  yield* Console.log("Asking Claude: What is Effect-TS?\n")
 
   const response = yield* client.query("What is Effect-TS?")
 
-  console.log("📝 Response:")
-  console.log("---")
-  console.log(response)
-  console.log("---")
-  console.log("✅ Query completed successfully!")
+  yield* Console.log("Response:")
+  yield* Console.log("---")
+  yield* Console.log(response)
+  yield* Console.log("---")
+  yield* Console.log("Query completed successfully!")
 
   return response
 })
@@ -31,37 +30,37 @@ const program = Effect.gen(function*() {
 // Handle errors with pattern matching
 const handleError = Match.type<ClaudeCodeCliError>().pipe(
   Match.tag("CliNotFoundError", () =>
-    Effect.sync(() => {
-      console.error("Error: Claude CLI not found. Please install it:")
-      console.error("  npm install -g @anthropics/claude-code")
+    Effect.gen(function*() {
+      yield* Console.error("Error: Claude CLI not found. Please install it:")
+      yield* Console.error("  npm install -g @anthropics/claude-code")
       process.exit(1)
     })),
   Match.tag("RateLimitError", (error) =>
-    Effect.sync(() => {
-      console.error("Error: Rate limit exceeded")
+    Effect.gen(function*() {
+      yield* Console.error("Error: Rate limit exceeded")
       if (error.retryAfter) {
-        console.error(`  Retry after ${error.retryAfter} seconds`)
+        yield* Console.error(`  Retry after ${error.retryAfter} seconds`)
       }
-      console.error(`  Details: ${error.stderr}`)
+      yield* Console.error(`  Details: ${error.stderr}`)
       process.exit(1)
     })),
   Match.tag("InvalidApiKeyError", (error) =>
-    Effect.sync(() => {
-      console.error("Error: Invalid API key")
-      console.error(`  Details: ${error.stderr}`)
-      console.error("  Please check your Anthropic API key configuration")
+    Effect.gen(function*() {
+      yield* Console.error("Error: Invalid API key")
+      yield* Console.error(`  Details: ${error.stderr}`)
+      yield* Console.error("  Please check your Anthropic API key configuration")
       process.exit(1)
     })),
   Match.tag("StreamParsingError", (error) =>
-    Effect.sync(() => {
-      console.error("Error: Failed to parse stream")
-      console.error(`  Line: ${error.line}`)
+    Effect.gen(function*() {
+      yield* Console.error("Error: Failed to parse stream")
+      yield* Console.error(`  Line: ${error.line}`)
       process.exit(1)
     })),
   Match.orElse((error) =>
-    Effect.sync(() => {
-      console.error("Error: Unknown error occurred")
-      console.error(`  Message: ${error.message}`)
+    Effect.gen(function*() {
+      yield* Console.error("Error: Unknown error occurred")
+      yield* Console.error(`  Message: ${error.message}`)
       process.exit(1)
     })
   )

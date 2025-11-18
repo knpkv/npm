@@ -4,13 +4,11 @@
  * @since 1.0.0
  */
 import * as AiError from "@effect/ai/AiError"
-import type * as IdGenerator from "@effect/ai/IdGenerator"
+import * as IdGenerator from "@effect/ai/IdGenerator"
 import * as LanguageModel from "@effect/ai/LanguageModel"
 import * as AiModel from "@effect/ai/Model"
 import type * as Prompt from "@effect/ai/Prompt"
-import type * as Response from "@effect/ai/Response"
 import * as Context from "effect/Context"
-
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
@@ -18,8 +16,6 @@ import type { Simplify } from "effect/Types"
 import { ClaudeCodeCliClient } from "./ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
 import type { ClaudeCodeCliError } from "./ClaudeCodeCliError.js"
-import { accumulateText } from "./internal/utilities.js"
-import type { MessageChunk } from "./StreamEvents.js"
 
 /**
  * Configuration for Claude Code CLI Language Model.
@@ -62,7 +58,7 @@ export const make = Effect.gen(function*() {
   const client = yield* ClaudeCodeCliClient
 
   return yield* LanguageModel.make({
-generateText: (providerOptions: LanguageModel.ProviderOptions) =>
+    generateText: (providerOptions: LanguageModel.ProviderOptions) =>
       Effect.gen(function*() {
         // Convert prompt to text
         const promptText = promptToText(providerOptions.prompt)
@@ -72,14 +68,10 @@ generateText: (providerOptions: LanguageModel.ProviderOptions) =>
           Effect.mapError(mapError)
         )
 
-        // Generate mock usage info
-        const timestamp = Date.now()
-        const msgId = `msg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`
-
-        const parts: any[] = [
+        const parts: Array<any> = [
           {
-            type: "text-delta",
-            textDelta: responseText
+            type: "text",
+            text: responseText
           },
           {
             type: "finish",
@@ -93,18 +85,35 @@ generateText: (providerOptions: LanguageModel.ProviderOptions) =>
         ]
 
         return parts
-      }).pipe(
-        Effect.map((parts) => LanguageModel.SuccessResult({
-          parts,
-          text: accumulateText(parts),
-          usage: {
-            promptTokens: 0,
-            completionTokens: 0,
-            totalTokens: 0
-          }
-        })),
-        Effect.mapError(mapError)
-      ),
+      }),
+
+    streamText: (providerOptions: LanguageModel.ProviderOptions) =>
+      Stream.unwrap(
+        Effect.gen(function*() {
+          const idGenerator = yield* IdGenerator.IdGenerator
+
+          // Convert prompt to text
+          const promptText = promptToText(providerOptions.prompt)
+
+          // Use streaming query
+          const stream = client.queryStream(promptText)
+
+          return stream.pipe(
+            Stream.mapError(mapError),
+            Stream.filter((chunk) => chunk.type === "text"),
+            Stream.mapEffect((chunk) =>
+              Effect.gen(function*() {
+                const id = yield* idGenerator.generateId()
+                return {
+                  type: "text-delta" as const,
+                  id,
+                  delta: chunk.text
+                }
+              })
+            )
+          )
+        })
+      )
   })
 })
 
@@ -141,13 +150,14 @@ generateText: (providerOptions: LanguageModel.ProviderOptions) =>
  */
 export const layer = (
   config?: Config.Service
-): Layer.Layer<LanguageModel.LanguageModel, never, ClaudeCodeCliClient | IdGenerator.IdGenerator> => {
+): Layer.Layer<LanguageModel.LanguageModel, never, ClaudeCodeCliClient> => {
   const configLayer = config
     ? Layer.succeed(ClaudeCodeCliConfig, ClaudeCodeCliConfig.of(config))
     : ClaudeCodeCliConfig.default
 
   return Layer.effect(LanguageModel.LanguageModel, make).pipe(
-    Layer.provide(configLayer)
+    Layer.provide(configLayer),
+    Layer.provide(Layer.succeed(IdGenerator.IdGenerator, IdGenerator.defaultIdGenerator))
   )
 }
 
@@ -169,7 +179,7 @@ export const layer = (
  */
 export const model = (
   config?: Config.Service
-): AiModel.Model<"claude-code-cli", LanguageModel.LanguageModel, ClaudeCodeCliClient | IdGenerator.IdGenerator> =>
+): AiModel.Model<"claude-code-cli", LanguageModel.LanguageModel, ClaudeCodeCliClient> =>
   AiModel.make("claude-code-cli", layer(config))
 
 /**

@@ -5,37 +5,32 @@
  *
  * @since 1.0.0
  */
+import { Console, Effect } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "../src/ClaudeCodeCliConfig.js"
-import { Effect, Stream } from "effect"
 
 const program = Effect.gen(function*() {
   // Get the client service
   const client = yield* ClaudeCodeCliClient
 
-  console.log("🤖 Asking Claude to write a haiku about functional programming...\n")
+  yield* Console.log("Asking Claude to write a haiku about functional programming...\n")
 
   // Simulate streaming by getting regular response and outputting it character by character
-  console.log("🔧 Getting response...")
+  yield* Console.log("Getting response...")
   const response = yield* client.query("Write a haiku about functional programming")
-  console.log("✅ Response received, simulating stream...")
-  
-  console.log("📡 Streaming response:")
-  console.log("---")
-  
+  yield* Console.log("Response received, simulating stream...")
+
+  yield* Console.log("Streaming response:")
+
   // Simulate streaming by outputting characters with delays
   for (let i = 0; i < response.length; i++) {
-    process.stdout.write(response[i])
+    yield* Console.log(response[i])
     if (i % 10 === 0) {
       yield* Effect.sleep(50)
     }
   }
-  
-  console.log("\n---")
-  console.log("✅ Streaming complete!")
 
-  console.log("\n---")
-  console.log("✅ Streaming complete!")
+  yield* Console.log("Streaming complete!")
 })
 
 // Run the program with the client layer

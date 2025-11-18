@@ -5,26 +5,24 @@
  *
  * @since 1.0.0
  */
+import { Console, Effect, Layer } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "../src/ClaudeCodeCliConfig.js"
-import { Effect, Layer } from "effect"
 
 const program = Effect.gen(function*() {
   // Get the client service
   const client = yield* ClaudeCodeCliClient
 
-  console.log("🔧 Asking Claude to read a file using tools...\n")
+  yield* Console.log("Asking Claude to read a file using tools...\n")
 
   // Execute a query that would benefit from tool usage
   const response = yield* client.query(
     "Read the package.json file and tell me the package name"
   )
 
-  console.log("📝 Response:")
-  console.log("---")
-  console.log(response)
-  console.log("---")
-  console.log("✅ Tool-assisted query complete!")
+  yield* Console.log("Response:")
+  yield* Console.log(response)
+  yield* Console.log("Tool-assisted query complete!")
 
   return response
 })

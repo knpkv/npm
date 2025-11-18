@@ -11,10 +11,11 @@ import type { ClaudeCodeCliError } from "../ClaudeCodeCliError.js"
 /**
  * Build CLI command with optional parameters.
  *
- * @param prompt - The text prompt
+ * @param prompt - The text prompt (passed as argument if no tools, omitted if tools are configured)
  * @param model - Optional model name
  * @param allowedTools - Optional list of allowed tools
  * @param disallowedTools - Optional list of disallowed tools
+ * @param streamJson - Whether to use stream-json output format
  * @returns Command instance
  *
  * @since 1.0.0
@@ -24,19 +25,25 @@ export const buildCommand = (
   prompt: string,
   model?: string,
   allowedTools?: ReadonlyArray<string>,
-  disallowedTools?: ReadonlyArray<string>
-): Command.Command =>
-  Command.make(
+  disallowedTools?: ReadonlyArray<string>,
+  streamJson = true
+): Command.Command => {
+  // When tools are configured, the prompt must be passed via stdin, not as an argument
+  const hasTools = (allowedTools && allowedTools.length > 0) || (disallowedTools && disallowedTools.length > 0)
+
+  return Command.make(
     "claude",
-    "-p",
-    prompt,
+    "--print",
     "--output-format",
-    "json",
+    streamJson ? "stream-json" : "json",
     "--dangerously-skip-permissions",
+    ...(streamJson ? ["--verbose", "--include-partial-messages"] : []),
     ...(model ? ["--model", model] : []),
     ...(allowedTools ? allowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
-    ...(disallowedTools ? disallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : [])
+    ...(disallowedTools ? disallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
+    ...(hasTools ? [] : [prompt]) // Only include prompt as argument if no tools
   )
+}
 
 /**
  * Rate limit retry schedule with exponential backoff.
