@@ -136,6 +136,27 @@ export type ClaudeCodeCliError =
   | ContextLengthError
 
 /**
+ * Type guard to check if error is a ClaudeCodeCliError.
+ *
+ * @param error - The error to check
+ * @returns True if error is a ClaudeCodeCliError
+ *
+ * @category Utilities
+ * @since 1.0.0
+ */
+export const isClaudeCodeCliError = (error: unknown): error is ClaudeCodeCliError =>
+  typeof error === "object" && error !== null && "_tag" in error &&
+  (
+    error._tag === "CliNotFoundError" ||
+    error._tag === "CliExecutionError" ||
+    error._tag === "StreamParsingError" ||
+    error._tag === "RateLimitError" ||
+    error._tag === "InvalidApiKeyError" ||
+    error._tag === "NetworkError" ||
+    error._tag === "ContextLengthError"
+  )
+
+/**
  * Parse stderr output to determine error type.
  *
  * @param stderr - The stderr output from CLI

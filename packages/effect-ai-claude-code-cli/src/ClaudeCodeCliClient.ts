@@ -10,11 +10,10 @@ import type * as PlatformError from "@effect/platform/Error"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
-import { type ClaudeCodeCliError, CliNotFoundError, parseStderr } from "./ClaudeCodeCliError.js"
+import { type ClaudeCodeCliError, CliNotFoundError, isClaudeCodeCliError, parseStderr } from "./ClaudeCodeCliError.js"
 import { buildCommand, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
 import {
   ContentBlockDeltaEvent,
@@ -246,8 +245,7 @@ const executeCommand = (
         Stream.decodeText(),
         Stream.splitLines,
         Stream.filter((line) => line.trim().length > 0), // Skip empty lines
-        Stream.filterMap((line) => {
-          // Try to parse line, return None if it fails
+        Stream.flatMap((line) => {
           try {
             const json = Schema.decodeUnknownSync(Schema.parseJson())(line)
 
@@ -257,21 +255,28 @@ const executeCommand = (
               "event" in json
             ) {
               const parseResult = Schema.decodeUnknownSync(StreamEventSchema)(json.event)
-              return Option.some(parseResult)
+              return Stream.make(parseResult)
             }
 
             // Handle direct stream events (unlikely but possible)
             const parseResult = Schema.decodeUnknownSync(StreamEventSchema)(json)
-            return Option.some(parseResult)
-          } catch {
-            // Skip lines that can't be parsed as stream events
-            return Option.none()
+            return Stream.make(parseResult)
+          } catch (error) {
+            // Log parse failures for debugging
+            return Stream.unwrap(
+              Effect.logDebug("Failed to parse stream event line", {
+                line: line.length > 100 ? line.substring(0, 100) + "..." : line,
+                error
+              }).pipe(
+                Effect.as(Stream.empty)
+              )
+            )
           }
         }),
         Stream.flatMap(eventToChunk),
         Stream.mapError((error: ClaudeCodeCliError | PlatformError.PlatformError) =>
-          typeof error === "object" && "_tag" in error && typeof error._tag === "string"
-            ? error as ClaudeCodeCliError
+          isClaudeCodeCliError(error)
+            ? error
             : parseStderr(String(error), 1)
         )
       )
@@ -353,7 +358,12 @@ const make = (options?: {
   })
 
 /**
- * Layer that provides ClaudeCodeCliClient service.
+ * Layer that provides ClaudeCodeCliClient service with direct configuration.
+ *
+ * Use this layer when you want to provide configuration inline without using
+ * ClaudeCodeCliConfig service. This is the simpler approach for most use cases.
+ *
+ * For configuration via ClaudeCodeCliConfig service, use {@link layerConfig} instead.
  *
  * @param options - Optional configuration overrides
  * @returns Layer providing the client service
@@ -382,13 +392,20 @@ export const layer = (options?: {
   model?: string
   allowedTools?: ReadonlyArray<string>
   disallowedTools?: ReadonlyArray<string>
-}): Layer.Layer<ClaudeCodeCliClient, CliNotFoundError, ClaudeCodeCliConfig> =>
+}): Layer.Layer<ClaudeCodeCliClient, CliNotFoundError> =>
   Layer.effect(ClaudeCodeCliClient, make(options)).pipe(
+    Layer.provide(ClaudeCodeCliConfig.default),
     Layer.provide(NodeContext.layer)
   )
 
 /**
- * Layer that provides ClaudeCodeCliClient using ClaudeCodeCliConfig.
+ * Layer that provides ClaudeCodeCliClient using ClaudeCodeCliConfig service.
+ *
+ * Use this layer when you want to share configuration across multiple services
+ * via ClaudeCodeCliConfig. This is useful when building larger applications where
+ * configuration needs to be centralized.
+ *
+ * For simpler use cases with inline configuration, use {@link layer} instead.
  *
  * @example
  * ```typescript

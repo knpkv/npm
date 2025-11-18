@@ -181,13 +181,13 @@ export const model = (
   AiModel.make("claude-code-cli", layer(config))
 
 /**
- * Convert a Prompt to a simple text string.
+ * Convert a Prompt to a text string for Claude Code CLI.
  *
- * For Claude Code CLI, we extract text content from all messages
- * and concatenate them into a single prompt string.
+ * Preserves message structure and includes tool messages.
+ * Format: "Role: content" with double newline separators.
  *
  * @param prompt - The prompt to convert
- * @returns The prompt text
+ * @returns The formatted prompt text
  * @internal
  */
 const promptToText = (prompt: Prompt.Prompt): string => {
@@ -201,29 +201,43 @@ const promptToText = (prompt: Prompt.Prompt): string => {
         break
       }
       case "user": {
-        // Extract text from all parts
-        const textParts = message.content
-          .filter((part: Prompt.UserMessagePart): part is Prompt.TextPart => part.type === "text")
-          .map((part: Prompt.TextPart) => part.text)
+        const contentParts: Array<string> = []
 
-        if (textParts.length > 0) {
-          parts.push(`User: ${textParts.join("\n")}`)
+        for (const part of message.content) {
+          if (part.type === "text") {
+            contentParts.push(part.text)
+          } else if (part.type === "image") {
+            contentParts.push("[Image content]")
+          }
+        }
+
+        if (contentParts.length > 0) {
+          parts.push(`User: ${contentParts.join("\n")}`)
         }
         break
       }
       case "assistant": {
-        // Extract text from all parts
-        const textParts = message.content
-          .filter((part: Prompt.AssistantMessagePart): part is Prompt.TextPart => part.type === "text")
-          .map((part: Prompt.TextPart) => part.text)
+        const contentParts: Array<string> = []
 
-        if (textParts.length > 0) {
-          parts.push(`Assistant: ${textParts.join("\n")}`)
+        for (const part of message.content) {
+          if (part.type === "text") {
+            contentParts.push(part.text)
+          } else if (part.type === "tool-call") {
+            contentParts.push(`[Tool call: ${part.name}]`)
+          }
+        }
+
+        if (contentParts.length > 0) {
+          parts.push(`Assistant: ${contentParts.join("\n")}`)
         }
         break
       }
       case "tool": {
-        // Skip tool messages for now
+        // Include tool results with tool name
+        const result = typeof message.content === "string"
+          ? message.content
+          : JSON.stringify(message.content)
+        parts.push(`Tool (${message.name}): ${result}`)
         break
       }
     }
