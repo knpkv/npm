@@ -101,6 +101,26 @@ export class InvalidApiKeyError extends Data.TaggedError("InvalidApiKeyError")<{
 }> {}
 
 /**
+ * Error thrown when network request fails.
+ *
+ * @category Errors
+ * @since 1.0.0
+ */
+export class NetworkError extends Data.TaggedError("NetworkError")<{
+  readonly stderr: string
+}> {}
+
+/**
+ * Error thrown when context length is exceeded.
+ *
+ * @category Errors
+ * @since 1.0.0
+ */
+export class ContextLengthError extends Data.TaggedError("ContextLengthError")<{
+  readonly stderr: string
+}> {}
+
+/**
  * Union of all possible CLI errors.
  *
  * @category Errors
@@ -112,6 +132,8 @@ export type ClaudeCodeCliError =
   | StreamParsingError
   | RateLimitError
   | InvalidApiKeyError
+  | NetworkError
+  | ContextLengthError
 
 /**
  * Parse stderr output to determine error type.
@@ -124,8 +146,10 @@ export type ClaudeCodeCliError =
  * @internal
  */
 export const parseStderr = (stderr: string, exitCode: number): ClaudeCodeCliError => {
+  const stderrLower = stderr.toLowerCase()
+
   // Check for rate limit errors
-  if (stderr.includes("rate limit") || stderr.includes("429") || exitCode === 429) {
+  if (stderrLower.includes("rate limit") || stderrLower.includes("429") || exitCode === 429) {
     const retryAfter = extractRetryAfter(stderr)
     return retryAfter !== undefined
       ? new RateLimitError({ retryAfter, stderr })
@@ -134,13 +158,34 @@ export const parseStderr = (stderr: string, exitCode: number): ClaudeCodeCliErro
 
   // Check for authentication errors
   if (
-    stderr.includes("invalid") ||
-    stderr.includes("unauthorized") ||
-    stderr.includes("authentication") ||
-    stderr.includes("auth") ||
+    stderrLower.includes("invalid") && (stderrLower.includes("key") || stderrLower.includes("api")) ||
+    stderrLower.includes("unauthorized") ||
+    stderrLower.includes("authentication") ||
     exitCode === 401
   ) {
     return new InvalidApiKeyError({ stderr })
+  }
+
+  // Check for network errors
+  if (
+    stderrLower.includes("network") ||
+    stderrLower.includes("connection") ||
+    stderrLower.includes("econnrefused") ||
+    stderrLower.includes("enotfound") ||
+    stderrLower.includes("timeout") ||
+    stderrLower.includes("etimedout")
+  ) {
+    return new NetworkError({ stderr })
+  }
+
+  // Check for context length errors
+  if (
+    stderrLower.includes("context") && stderrLower.includes("length") ||
+    stderrLower.includes("token limit") ||
+    stderrLower.includes("too many tokens") ||
+    stderrLower.includes("maximum context")
+  ) {
+    return new ContextLengthError({ stderr })
   }
 
   // Generic execution error

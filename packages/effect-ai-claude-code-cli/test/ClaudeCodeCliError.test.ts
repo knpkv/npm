@@ -6,7 +6,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   CliNotFoundError,
+  ContextLengthError,
   InvalidApiKeyError,
+  NetworkError,
   parseStderr,
   RateLimitError,
   StreamParsingError
@@ -72,6 +74,54 @@ describe("ClaudeCodeCliError", () => {
 
       expect(error._tag).toBe("CliExecutionError")
     })
+
+    it("should parse network error", () => {
+      const stderr = "Network connection failed"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("NetworkError")
+      if (error._tag === "NetworkError") {
+        expect(error.stderr).toBe(stderr)
+      }
+    })
+
+    it("should parse ECONNREFUSED network error", () => {
+      const stderr = "Error: ECONNREFUSED"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("NetworkError")
+    })
+
+    it("should parse timeout error", () => {
+      const stderr = "Request timeout"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("NetworkError")
+    })
+
+    it("should parse context length error", () => {
+      const stderr = "Context length exceeded"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("ContextLengthError")
+      if (error._tag === "ContextLengthError") {
+        expect(error.stderr).toBe(stderr)
+      }
+    })
+
+    it("should parse token limit error", () => {
+      const stderr = "Token limit exceeded"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("ContextLengthError")
+    })
+
+    it("should parse too many tokens error", () => {
+      const stderr = "Too many tokens in request"
+      const error = parseStderr(stderr, 1)
+
+      expect(error._tag).toBe("ContextLengthError")
+    })
   })
 
   describe("Error constructors", () => {
@@ -107,6 +157,22 @@ describe("ClaudeCodeCliError", () => {
       const error = new InvalidApiKeyError({ stderr })
 
       expect(error._tag).toBe("InvalidApiKeyError")
+      expect(error.stderr).toBe(stderr)
+    })
+
+    it("should create NetworkError with stderr", () => {
+      const stderr = "Network error"
+      const error = new NetworkError({ stderr })
+
+      expect(error._tag).toBe("NetworkError")
+      expect(error.stderr).toBe(stderr)
+    })
+
+    it("should create ContextLengthError with stderr", () => {
+      const stderr = "Context length exceeded"
+      const error = new ContextLengthError({ stderr })
+
+      expect(error._tag).toBe("ContextLengthError")
       expect(error.stderr).toBe(stderr)
     })
   })
