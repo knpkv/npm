@@ -9,9 +9,28 @@ import * as Schedule from "effect/Schedule"
 import type { ClaudeCodeCliError } from "../ClaudeCodeCliError.js"
 
 /**
+ * Check if tools are configured.
+ *
+ * @param allowedTools - Optional allowed tools
+ * @param disallowedTools - Optional disallowed tools
+ * @returns True if any tools are configured
+ *
+ * @since 1.0.0
+ * @internal
+ */
+export const hasToolsConfigured = (
+  allowedTools?: ReadonlyArray<string>,
+  disallowedTools?: ReadonlyArray<string>
+): boolean =>
+  (allowedTools !== undefined && allowedTools.length > 0) ||
+  (disallowedTools !== undefined && disallowedTools.length > 0)
+
+/**
  * Build CLI command with optional parameters.
  *
- * @param prompt - The text prompt (passed as argument if no tools, omitted if tools are configured)
+ * When tools are configured, prompt must be passed via stdin (not as argument).
+ *
+ * @param prompt - The text prompt (passed as argument only if no tools configured)
  * @param model - Optional model name
  * @param allowedTools - Optional list of allowed tools
  * @param disallowedTools - Optional list of disallowed tools
@@ -28,8 +47,7 @@ export const buildCommand = (
   disallowedTools?: ReadonlyArray<string>,
   streamJson = true
 ): Command.Command => {
-  // When tools are configured, the prompt must be passed via stdin, not as an argument
-  const hasTools = (allowedTools && allowedTools.length > 0) || (disallowedTools && disallowedTools.length > 0)
+  const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
 
   return Command.make(
     "claude",
@@ -41,7 +59,7 @@ export const buildCommand = (
     ...(model ? ["--model", model] : []),
     ...(allowedTools ? allowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
     ...(disallowedTools ? disallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
-    ...(hasTools ? [] : [prompt]) // Only include prompt as argument if no tools
+    ...(useStdin ? [] : [prompt])
   )
 }
 

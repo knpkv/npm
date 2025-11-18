@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
 import { type ClaudeCodeCliError, CliNotFoundError, parseStderr } from "./ClaudeCodeCliError.js"
-import { buildCommand, rateLimitSchedule } from "./internal/utilities.js"
+import { buildCommand, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
 import {
   ContentBlockDeltaEvent,
   ContentBlockStartChunk,
@@ -308,10 +308,9 @@ const make = (options?: {
 
     const query = (prompt: string): Effect.Effect<string, ClaudeCodeCliError> =>
       Effect.gen(function*() {
-        const hasTools = (allowedTools && allowedTools.length > 0) || (disallowedTools && disallowedTools.length > 0)
-        const stdinStream = hasTools ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty
+        const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
         const command = buildCommand(prompt, model, allowedTools, disallowedTools, false).pipe(
-          Command.stdin(stdinStream)
+          Command.stdin(useStdin ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty)
         )
         const output = yield* Command.string(command).pipe(
           Effect.mapError((error: PlatformError.PlatformError) => parseStderr(String(error), 1))
@@ -342,10 +341,9 @@ const make = (options?: {
     const queryStream = (
       prompt: string
     ): Stream.Stream<MessageChunk, ClaudeCodeCliError> => {
-      const hasTools = (allowedTools && allowedTools.length > 0) || (disallowedTools && disallowedTools.length > 0)
       const command = buildCommand(prompt, model, allowedTools, disallowedTools)
-      // When tools are configured, pass prompt via stdin
-      return executeCommand(command, hasTools ? prompt : undefined)
+      const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
+      return executeCommand(command, useStdin ? prompt : undefined)
     }
 
     return ClaudeCodeCliClient.of({
