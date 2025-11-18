@@ -11,6 +11,8 @@ import type * as Prompt from "@effect/ai/Prompt"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type { Simplify } from "effect/Types"
 import { ClaudeCodeCliClient } from "./ClaudeCodeCliClient.js"
@@ -60,7 +62,7 @@ export const make = Effect.gen(function*() {
   return yield* LanguageModel.make({
     generateText: (providerOptions: LanguageModel.ProviderOptions) =>
       Effect.gen(function*() {
-        // Convert prompt to text
+        // Convert prompt to text (handles @effect/ai's {content: [...]} wrapping)
         const promptText = promptToText(providerOptions.prompt)
 
         // Use basic query for non-streaming text generation
@@ -90,7 +92,7 @@ export const make = Effect.gen(function*() {
         Effect.gen(function*() {
           const idGenerator = yield* IdGenerator.IdGenerator
 
-          // Convert prompt to text
+          // Convert prompt to text (handles @effect/ai's {content: [...]} wrapping)
           const promptText = promptToText(providerOptions.prompt)
 
           // Use streaming query
@@ -181,6 +183,86 @@ export const model = (
   AiModel.make("claude-code-cli", layer(config))
 
 /**
+ * Schema for message-like objects.
+ * Validates basic Message structure without full type information from @effect/ai.
+ *
+ * @internal
+ */
+const MessageLikeSchema = Schema.Struct({
+  role: Schema.String,
+  content: Schema.Unknown
+})
+
+type MessageLike = Schema.Schema.Type<typeof MessageLikeSchema>
+
+/**
+ * Schema for @effect/ai prompt wrapper structure.
+ *
+ * @internal
+ */
+const PromptWrapperSchema = Schema.Struct({
+  content: Schema.Array(MessageLikeSchema)
+})
+
+/**
+ * Schema for array of messages.
+ *
+ * @internal
+ */
+const MessageArraySchema = Schema.Array(MessageLikeSchema)
+
+/**
+ * Extract messages array from @effect/ai Prompt structure using Schema validation.
+ *
+ * @effect/ai wraps prompts in {content: [...]} structure at runtime,
+ * while the type suggests it could be an array or single message.
+ * This helper safely extracts the messages array with runtime validation.
+ *
+ * @param prompt - The prompt from ProviderOptions
+ * @returns Array of messages
+ * @internal
+ */
+
+const extractMessages = (prompt: Prompt.Prompt): ReadonlyArray<MessageLike> => {
+  const wrapperOption = Schema.decodeUnknownOption(PromptWrapperSchema)(prompt)
+
+  return Option.match(wrapperOption, {
+    onNone: () => {
+      const arrayOption = Schema.decodeUnknownOption(MessageArraySchema)(prompt)
+      return Option.match(arrayOption, {
+        onNone: () => {
+          const messageOption = Schema.decodeUnknownOption(MessageLikeSchema)(prompt)
+          return Option.match(messageOption, {
+            onNone: () => [],
+            onSome: (msg) => [msg]
+          })
+        },
+        onSome: (arr) => arr
+      })
+    },
+    onSome: (wrapper) => wrapper.content
+  })
+}
+
+/**
+ * Type guard for text content part.
+ * @internal
+ */
+const isTextPart = (part: unknown): part is { type: "text"; text: string } =>
+  typeof part === "object" && part !== null &&
+  "type" in part && part.type === "text" &&
+  "text" in part && typeof part.text === "string"
+
+/**
+ * Type guard for tool call content part.
+ * @internal
+ */
+const isToolCallPart = (part: unknown): part is { type: "tool-call"; name: string } =>
+  typeof part === "object" && part !== null &&
+  "type" in part && part.type === "tool-call" &&
+  "name" in part && typeof part.name === "string"
+
+/**
  * Convert a Prompt to a text string for Claude Code CLI.
  *
  * Preserves message structure and includes tool messages.
@@ -192,7 +274,7 @@ export const model = (
  */
 const promptToText = (prompt: Prompt.Prompt): string => {
   const parts: Array<string> = []
-  const messages = Array.isArray(prompt) ? prompt : [prompt]
+  const messages = extractMessages(prompt)
 
   for (const message of messages) {
     switch (message.role) {
@@ -203,11 +285,13 @@ const promptToText = (prompt: Prompt.Prompt): string => {
       case "user": {
         const contentParts: Array<string> = []
 
-        for (const part of message.content) {
-          if (part.type === "text") {
-            contentParts.push(part.text)
-          } else if (part.type === "image") {
-            contentParts.push("[Image content]")
+        if (Array.isArray(message.content)) {
+          for (const part of message.content) {
+            if (isTextPart(part)) {
+              contentParts.push(part.text)
+            } else {
+              contentParts.push("[File content]")
+            }
           }
         }
 
@@ -219,11 +303,13 @@ const promptToText = (prompt: Prompt.Prompt): string => {
       case "assistant": {
         const contentParts: Array<string> = []
 
-        for (const part of message.content) {
-          if (part.type === "text") {
-            contentParts.push(part.text)
-          } else if (part.type === "tool-call") {
-            contentParts.push(`[Tool call: ${part.name}]`)
+        if (Array.isArray(message.content)) {
+          for (const part of message.content) {
+            if (isTextPart(part)) {
+              contentParts.push(part.text)
+            } else if (isToolCallPart(part)) {
+              contentParts.push(`[Tool call: ${part.name}]`)
+            }
           }
         }
 
@@ -233,11 +319,14 @@ const promptToText = (prompt: Prompt.Prompt): string => {
         break
       }
       case "tool": {
-        // Include tool results with tool name
+        // Include tool results
         const result = typeof message.content === "string"
           ? message.content
           : JSON.stringify(message.content)
-        parts.push(`Tool (${message.name}): ${result}`)
+        // Extract tool name safely
+        const nameValue = (message as { name?: unknown }).name
+        const toolName = typeof nameValue === "string" ? nameValue : "unknown"
+        parts.push(`Tool (${toolName}): ${result}`)
         break
       }
     }
