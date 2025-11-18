@@ -53,3 +53,8 @@ export * as Validation from "./Validation.js"
  * @since 1.0.0
  */
 export * as CliVersion from "./CliVersion.js"
+
+/**
+ * @since 1.0.0
+ */
+export * as TypeGuards from "./TypeGuards.js"

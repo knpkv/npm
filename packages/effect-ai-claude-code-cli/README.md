@@ -161,6 +161,81 @@ yield *
   )
 ```
 
+## Type Safety Features
+
+### Branded Types
+
+The package provides branded types for critical identifiers to prevent string confusion:
+
+```typescript
+import { Brand, Validation } from "@knpkv/effect-ai-claude-code-cli"
+
+// Validate and construct branded types
+const model = yield * Validation.validateModel("claude-4-sonnet-20250514") // ModelId
+const prompt = yield * Validation.validatePrompt("Your prompt here") // PromptText
+const tool = yield * Validation.validateToolName("Read") // ToolName
+```
+
+### Input Validation
+
+Comprehensive validation functions ensure inputs meet requirements:
+
+```typescript
+import { Validation } from "@knpkv/effect-ai-claude-code-cli"
+
+// Validate prompt (non-empty, length limits)
+const prompt = yield * Validation.validatePrompt("Explain TypeScript")
+
+// Validate model ID (starts with "claude-")
+const model = yield * Validation.validateModel("claude-4-sonnet")
+
+// Validate tool name (PascalCase format)
+const tool = yield * Validation.validateToolName("Read", false) // strict mode optional
+
+// Validate file path (no null bytes, no path traversal)
+const path = yield * Validation.validateFilePath("/home/user/file.txt")
+
+// Validate timeout (1s to 10min)
+const timeout = yield * Validation.validateTimeout(30000)
+
+// Validate multiple tools
+const tools = yield * Validation.validateTools(["Read", "Write", "Bash"])
+```
+
+### Type Guards
+
+Helper functions for working with stream chunks:
+
+```typescript
+import { TypeGuards } from "@knpkv/effect-ai-claude-code-cli"
+import { Stream } from "effect"
+
+// Filter to only text chunks
+const textStream = stream.pipe(Stream.filter(TypeGuards.isTextChunk))
+
+// Extract usage information
+const usage = stream.pipe(
+  Stream.filterMap((chunk) => TypeGuards.extractUsage(chunk)),
+  Stream.runLast
+)
+```
+
+### CLI Version Checking
+
+Ensure CLI compatibility:
+
+```typescript
+import { CliVersion } from "@knpkv/effect-ai-claude-code-cli"
+
+const program = Effect.gen(function* () {
+  // Check CLI version on startup
+  yield* CliVersion.checkCliVersion() // Validates minimum version
+
+  const client = yield* ClaudeCodeCliClient.ClaudeCodeCliClient
+  // ... use client
+})
+```
+
 ## Error Handling
 
 The package provides typed error handling with specific error types:
@@ -173,8 +248,12 @@ const handleError = Match.type<ClaudeCodeCliError.ClaudeCodeCliError>().pipe(
   Match.tag("CliNotFoundError", () => Console.error("Claude CLI not found. Install: npm i -g @anthropics/claude-code")),
   Match.tag("RateLimitError", (error) => Console.error(`Rate limited. Retry after ${error.retryAfter}s`)),
   Match.tag("InvalidApiKeyError", (error) => Console.error("Invalid API key:", error.stderr)),
+  Match.tag("ValidationError", (error) => Console.error("Validation failed:", error.message)),
+  Match.tag("CliVersionMismatchError", (error) =>
+    Console.error(`Version ${error.installed} < required ${error.required}`)
+  ),
   Match.tag("StreamParsingError", (error) => Console.error(`Parse error at line: ${error.line}`)),
-  Match.orElse((error) => Console.error("Error:", error.message))
+  Match.orElse((error) => Console.error("Error:", error))
 )
 
 Effect.runPromise(program.pipe(Effect.catchAll(handleError), Effect.provide(ClaudeCodeCliClient.layer())))
