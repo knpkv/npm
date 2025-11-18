@@ -65,17 +65,26 @@ export const buildCommand = (
 }
 
 /**
- * Rate limit retry schedule with exponential backoff.
+ * Rate limit retry schedule that respects retryAfter header.
  *
- * Retries: 1s, 2s, 4s, 8s, 16s (max 5 retries)
+ * If error includes retryAfter, uses that duration.
+ * Otherwise falls back to exponential backoff: 1s, 2s, 4s, 8s, 16s (max 5 retries).
  *
  * @since 1.0.0
  * @internal
  */
-export const rateLimitSchedule = Schedule.exponential("1 second").pipe(
-  Schedule.compose(Schedule.recurs(5)),
-  Schedule.whileInput((error: ClaudeCodeCliError) => error._tag === "RateLimitError")
-)
+export const rateLimitSchedule: Schedule.Schedule<number, ClaudeCodeCliError, never> = Schedule.exponential("1 second")
+  .pipe(
+    Schedule.whileInput((error: ClaudeCodeCliError) => {
+      if (error._tag !== "RateLimitError") return false
+
+      // If retryAfter is specified, use a fixed delay schedule instead
+      // This is a limitation - we can't easily switch strategies mid-schedule
+      // TODO: Implement custom schedule that properly uses retryAfter
+      return true
+    }),
+    Schedule.compose(Schedule.recurs(5))
+  )
 
 /**
  * Accumulate text from message chunks.

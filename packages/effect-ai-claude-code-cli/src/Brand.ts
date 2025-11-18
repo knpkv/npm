@@ -176,7 +176,7 @@ export const PromptTextSchema = Schema.String.pipe(
  */
 export const PromptText = Brand.refined<PromptText>(
   (s): s is PromptText & string => Schema.is(PromptTextSchema)(s),
-  (s) => Brand.error(`Invalid prompt text: must be non-empty trimmed string`)
+  (_s) => Brand.error(`Invalid prompt text: must be non-empty trimmed string`)
 )
 
 /**

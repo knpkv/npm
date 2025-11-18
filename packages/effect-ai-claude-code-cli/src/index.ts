@@ -43,3 +43,13 @@ export * as StreamEvents from "./StreamEvents.js"
  * @since 1.0.0
  */
 export * as ResponseSchemas from "./ResponseSchemas.js"
+
+/**
+ * @since 1.0.0
+ */
+export * as Validation from "./Validation.js"
+
+/**
+ * @since 1.0.0
+ */
+export * as CliVersion from "./CliVersion.js"

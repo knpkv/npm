@@ -121,6 +121,28 @@ export class ContextLengthError extends Data.TaggedError("ContextLengthError")<{
 }> {}
 
 /**
+ * Error thrown when input validation fails.
+ *
+ * @category Errors
+ * @since 1.0.0
+ */
+export class ValidationError extends Data.TaggedError("ValidationError")<{
+  readonly message: string
+}> {}
+
+/**
+ * Error thrown when CLI version is incompatible.
+ *
+ * @category Errors
+ * @since 1.0.0
+ */
+export class CliVersionMismatchError extends Data.TaggedError("CliVersionMismatchError")<{
+  readonly installed: string
+  readonly required: string
+  readonly message: string
+}> {}
+
+/**
  * Union of all possible CLI errors.
  *
  * @category Errors
@@ -134,6 +156,8 @@ export type ClaudeCodeCliError =
   | InvalidApiKeyError
   | NetworkError
   | ContextLengthError
+  | ValidationError
+  | CliVersionMismatchError
 
 /**
  * Type guard to check if error is a ClaudeCodeCliError.
@@ -153,7 +177,9 @@ export const isClaudeCodeCliError = (error: unknown): error is ClaudeCodeCliErro
     error._tag === "RateLimitError" ||
     error._tag === "InvalidApiKeyError" ||
     error._tag === "NetworkError" ||
-    error._tag === "ContextLengthError"
+    error._tag === "ContextLengthError" ||
+    error._tag === "ValidationError" ||
+    error._tag === "CliVersionMismatchError"
   )
 
 /**

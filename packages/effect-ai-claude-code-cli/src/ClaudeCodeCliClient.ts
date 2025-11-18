@@ -207,6 +207,9 @@ const eventToChunk = (event: StreamEventType): Stream.Stream<MessageChunk> => {
 /**
  * Execute CLI command and return stream of message chunks.
  *
+ * Uses Stream.unwrapScoped for proper resource management - the CLI process
+ * is automatically cleaned up when the stream completes or is interrupted.
+ *
  * @param command - Command to execute
  * @param promptText - Optional prompt text to pass via stdin
  * @returns Stream of message chunks with automatic retry on rate limits
@@ -217,8 +220,11 @@ const executeCommand = (
   promptText?: string
 ): Stream.Stream<MessageChunk, ClaudeCodeCliError> => {
   const stdinStream = promptText ? Stream.make(promptText).pipe(Stream.encodeText) : Stream.empty
+
   return Stream.unwrapScoped(
     Effect.gen(function*() {
+      // Command.start returns a scoped resource that automatically kills
+      // the process when the scope is closed
       const process = yield* Command.start(command.pipe(Command.stdin(stdinStream))).pipe(
         Effect.mapError(
           (error: PlatformError.PlatformError) => parseStderr(extractErrorMessage(error), 1)
