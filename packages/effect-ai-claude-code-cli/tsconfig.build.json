@@ -1,9 +1,9 @@
 {
   "$schema": "http://json.schemastore.org/tsconfig",
-  "extends": "../../tsconfig.base.jsonc",
-  "include": [],
+  "extends": "./tsconfig.src.json",
+  "references": [{ "path": "tsconfig.src.json" }],
   "compilerOptions": {
+    "tsBuildInfoFile": ".tsbuildinfo/build.tsbuildinfo",
     "stripInternal": true
-  },
-  "references": [{ "path": "tsconfig.src.json" }]
+  }
 }

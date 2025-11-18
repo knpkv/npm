@@ -69,6 +69,7 @@ const handleError = Match.type<ClaudeCodeCliError>().pipe(
 // Run the program with error handling
 Effect.runPromise(
   program.pipe(
+    Effect.catchAll(handleError),
     Effect.provide(layer()),
     Effect.provide(ClaudeCodeCliConfig.default),
     Effect.timeout("10 seconds")

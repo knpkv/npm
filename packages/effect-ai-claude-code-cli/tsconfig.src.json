@@ -1,10 +1,11 @@
 {
   "$schema": "http://json.schemastore.org/tsconfig",
   "extends": "../../tsconfig.base.jsonc",
-  "include": ["src/**/*.ts"],
+  "include": ["src"],
   "compilerOptions": {
-    "outDir": "dist",
+    "tsBuildInfoFile": ".tsbuildinfo/src.tsbuildinfo",
     "rootDir": "src",
+    "outDir": "dist",
     "types": ["node"]
   }
 }
