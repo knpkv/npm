@@ -10,11 +10,13 @@ import type * as PlatformError from "@effect/platform/Error"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
 import { type ClaudeCodeCliError, CliNotFoundError, isClaudeCodeCliError, parseStderr } from "./ClaudeCodeCliError.js"
-import { buildCommand, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
+import { buildCommand, extractErrorMessage, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
+import { extractText, JsonResponse } from "./ResponseSchemas.js"
 import {
   ContentBlockStartChunk,
   ContentBlockStopChunk,
@@ -140,16 +142,16 @@ const checkCliAvailable = () =>
 const eventToChunk = (event: StreamEventType): Stream.Stream<MessageChunk> => {
   // Handle content block start
   if (event.type === "content_block_start") {
-    const blockType = "type" in event.content_block ? String(event.content_block.type) : "unknown"
+    const blockType = event.content_block.type
 
     // If it's a tool_use block, emit both content_block_start and tool_use_start
-    if (blockType === "tool_use" && "id" in event.content_block && "name" in event.content_block) {
+    if (event.content_block.type === "tool_use") {
       return Stream.make(
         new ContentBlockStartChunk({ type: "content_block_start", blockType, index: event.index }),
         new ToolUseStartChunk({
           type: "tool_use_start",
-          id: String(event.content_block.id),
-          name: String(event.content_block.name),
+          id: event.content_block.id,
+          name: event.content_block.name,
           index: event.index
         })
       )
@@ -219,7 +221,7 @@ const executeCommand = (
     Effect.gen(function*() {
       const process = yield* Command.start(command.pipe(Command.stdin(stdinStream))).pipe(
         Effect.mapError(
-          (error: PlatformError.PlatformError) => parseStderr(String(error), 1)
+          (error: PlatformError.PlatformError) => parseStderr(extractErrorMessage(error), 1)
         ),
         Effect.provide(NodeContext.layer)
       )
@@ -255,12 +257,12 @@ const executeCommand = (
         Stream.mapError((error: ClaudeCodeCliError | PlatformError.PlatformError) =>
           isClaudeCodeCliError(error)
             ? error
-            : parseStderr(String(error), 1)
+            : parseStderr(extractErrorMessage(error), 1)
         )
       )
     }).pipe(
       Effect.mapError((error): ClaudeCodeCliError =>
-        isClaudeCodeCliError(error) ? error : parseStderr(String(error), 1)
+        isClaudeCodeCliError(error) ? error : parseStderr(extractErrorMessage(error), 1)
       )
     )
   )
@@ -300,26 +302,22 @@ const make = (options?: {
           Command.stdin(useStdin ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty)
         )
         const output = yield* Command.string(command).pipe(
-          Effect.mapError((error: PlatformError.PlatformError) => parseStderr(String(error), 1))
+          Effect.mapError((error: PlatformError.PlatformError) => parseStderr(extractErrorMessage(error), 1))
         )
 
         // Parse JSON response to extract text
-        const json = yield* Schema.decodeUnknown(Schema.parseJson())(output).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
+        const jsonOption = yield* Schema.decodeUnknown(Schema.parseJson())(output).pipe(
+          Effect.andThen((json) => Schema.decodeUnknown(JsonResponse)(json)),
+          Effect.match({
+            onFailure: () => Option.none(),
+            onSuccess: Option.some
+          })
         )
 
-        if (typeof json === "object" && json !== null) {
-          if ("result" in json && typeof json.result === "string") return json.result
-          if (
-            "content" in json && Array.isArray(json.content) && json.content[0] &&
-            typeof json.content[0] === "object" && "text" in json.content[0]
-          ) {
-            return String(json.content[0].text)
-          }
-          if ("text" in json && typeof json.text === "string") return json.text
-        }
-
-        return output.trim()
+        return Option.match(jsonOption, {
+          onNone: () => output.trim(),
+          onSome: extractText
+        })
       }).pipe(
         Effect.retry(rateLimitSchedule),
         Effect.provide(NodeContext.layer)

@@ -7,6 +7,11 @@
 /**
  * @since 1.0.0
  */
+export * as Brand from "./Brand.js"
+
+/**
+ * @since 1.0.0
+ */
 export * as ClaudeCodeCliClient from "./ClaudeCodeCliClient.js"
 
 /**
@@ -33,3 +38,8 @@ export * as ClaudeCodeCliTool from "./ClaudeCodeCliTool.js"
  * @since 1.0.0
  */
 export * as StreamEvents from "./StreamEvents.js"
+
+/**
+ * @since 1.0.0
+ */
+export * as ResponseSchemas from "./ResponseSchemas.js"

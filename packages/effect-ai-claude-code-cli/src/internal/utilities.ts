@@ -5,6 +5,7 @@
  * @internal
  */
 import * as Command from "@effect/platform/Command"
+import type * as PlatformError from "@effect/platform/Error"
 import * as Schedule from "effect/Schedule"
 import type { ClaudeCodeCliError } from "../ClaudeCodeCliError.js"
 
@@ -86,3 +87,22 @@ export const rateLimitSchedule = Schedule.exponential("1 second").pipe(
  * @internal
  */
 export const accumulateText = (chunks: ReadonlyArray<{ text: string }>): string => chunks.map((c) => c.text).join("")
+
+/**
+ * Extract error message from PlatformError.
+ *
+ * Safely extracts the message from various PlatformError types
+ * without unsafe string coercion.
+ *
+ * @param error - Platform error
+ * @returns Error message string
+ *
+ * @since 1.0.0
+ * @internal
+ */
+export const extractErrorMessage = (error: PlatformError.PlatformError): string => {
+  if ("message" in error && typeof error.message === "string") {
+    return error.message
+  }
+  return String(error)
+}

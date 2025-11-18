@@ -21,38 +21,6 @@ export const Usage = Schema.Struct({
 export type Usage = Schema.Schema.Type<typeof Usage>
 
 /**
- * Message metadata from message_start event.
- *
- * @category Schemas
- * @since 1.0.0
- */
-export const Message = Schema.Struct({
-  id: Schema.String,
-  type: Schema.Literal("message"),
-  role: Schema.Literal("assistant"),
-  content: Schema.Array(Schema.Unknown),
-  model: Schema.String,
-  stop_reason: Schema.NullOr(Schema.String),
-  stop_sequence: Schema.NullOr(Schema.String),
-  usage: Usage
-})
-
-export type Message = Schema.Schema.Type<typeof Message>
-
-/**
- * Message start event - indicates beginning of message.
- *
- * @category Schemas
- * @since 1.0.0
- */
-export const MessageStartEvent = Schema.Struct({
-  type: Schema.Literal("message_start"),
-  message: Message
-})
-
-export type MessageStartEvent = Schema.Schema.Type<typeof MessageStartEvent>
-
-/**
  * Text content block.
  *
  * @category Schemas
@@ -64,6 +32,19 @@ export const TextContentBlock = Schema.Struct({
 })
 
 /**
+ * Tool input - any valid JSON value.
+ *
+ * Accepts null, boolean, number, string, array, or object.
+ * This is explicitly unknown as tool inputs are arbitrary JSON.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const ToolInput = Schema.Unknown
+
+export type ToolInput = Schema.Schema.Type<typeof ToolInput>
+
+/**
  * Tool use content block.
  *
  * @category Schemas
@@ -73,7 +54,7 @@ export const ToolUseContentBlock = Schema.Struct({
   type: Schema.Literal("tool_use"),
   id: Schema.String,
   name: Schema.String,
-  input: Schema.optional(Schema.Unknown)
+  input: Schema.optional(ToolInput)
 })
 
 /**
@@ -99,6 +80,38 @@ export const ContentBlock = Schema.Union(
 )
 
 export type ContentBlock = Schema.Schema.Type<typeof ContentBlock>
+
+/**
+ * Message metadata from message_start event.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const Message = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literal("message"),
+  role: Schema.Literal("assistant"),
+  content: Schema.Array(ContentBlock),
+  model: Schema.String,
+  stop_reason: Schema.NullOr(Schema.String),
+  stop_sequence: Schema.NullOr(Schema.String),
+  usage: Usage
+})
+
+export type Message = Schema.Schema.Type<typeof Message>
+
+/**
+ * Message start event - indicates beginning of message.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const MessageStartEvent = Schema.Struct({
+  type: Schema.Literal("message_start"),
+  message: Message
+})
+
+export type MessageStartEvent = Schema.Schema.Type<typeof MessageStartEvent>
 
 /**
  * Content block start event - indicates beginning of content block.
