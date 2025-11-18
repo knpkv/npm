@@ -16,22 +16,18 @@ import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
 import { type ClaudeCodeCliError, CliNotFoundError, isClaudeCodeCliError, parseStderr } from "./ClaudeCodeCliError.js"
 import { buildCommand, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
 import {
-  ContentBlockDeltaEvent,
   ContentBlockStartChunk,
-  ContentBlockStartEvent,
   ContentBlockStopChunk,
-  ContentBlockStopEvent,
   type MessageChunk,
   MessageDeltaChunk,
-  MessageDeltaEvent,
   MessageStartChunk,
-  MessageStartEvent,
   MessageStopChunk,
-  MessageStopEvent,
-  type StreamEvent,
+  StreamEvent,
+  type StreamEvent as StreamEventType,
   TextChunk,
   ToolInputChunk,
-  ToolUseStartChunk
+  ToolUseStartChunk,
+  WrappedStreamEvent
 } from "./StreamEvents.js"
 
 /**
@@ -135,26 +131,13 @@ const checkCliAvailable = () =>
   })
 
 /**
- * Schema for all stream event types.
- * @internal
- */
-const StreamEventSchema = Schema.Union(
-  MessageStartEvent,
-  ContentBlockStartEvent,
-  ContentBlockDeltaEvent,
-  ContentBlockStopEvent,
-  MessageDeltaEvent,
-  MessageStopEvent
-)
-
-/**
  * Convert stream event to message chunk(s).
  *
  * @param event - Stream event
  * @returns Stream of message chunks
  * @internal
  */
-const eventToChunk = (event: StreamEvent): Stream.Stream<MessageChunk> => {
+const eventToChunk = (event: StreamEventType): Stream.Stream<MessageChunk> => {
   // Handle content block start
   if (event.type === "content_block_start") {
     const blockType = "type" in event.content_block ? String(event.content_block.type) : "unknown"
@@ -245,34 +228,29 @@ const executeCommand = (
         Stream.decodeText(),
         Stream.splitLines,
         Stream.filter((line) => line.trim().length > 0), // Skip empty lines
-        Stream.flatMap((line) => {
-          try {
-            const json = Schema.decodeUnknownSync(Schema.parseJson())(line)
+        Stream.flatMap((line) =>
+          Stream.unwrap(
+            Effect.gen(function*() {
+              const json = yield* Schema.decodeUnknown(Schema.parseJson())(line)
 
-            // Handle wrapped stream events: {"type":"stream_event","event":{...}}
-            if (
-              typeof json === "object" && json !== null && "type" in json && json.type === "stream_event" &&
-              "event" in json
-            ) {
-              const parseResult = Schema.decodeUnknownSync(StreamEventSchema)(json.event)
-              return Stream.make(parseResult)
-            }
+              // Try wrapped format first: {"type":"stream_event","event":{...}}
+              // Falls back to direct stream event format if wrapped decode fails
+              const event = yield* Schema.decodeUnknown(WrappedStreamEvent)(json).pipe(
+                Effect.map((wrapped) => wrapped.event),
+                Effect.orElse(() => Schema.decodeUnknown(StreamEvent)(json))
+              )
 
-            // Handle direct stream events (unlikely but possible)
-            const parseResult = Schema.decodeUnknownSync(StreamEventSchema)(json)
-            return Stream.make(parseResult)
-          } catch (error) {
-            // Log parse failures for debugging
-            return Stream.unwrap(
-              Effect.logDebug("Failed to parse stream event line", {
-                line: line.length > 100 ? line.substring(0, 100) + "..." : line,
-                error
-              }).pipe(
-                Effect.as(Stream.empty)
+              return Stream.make(event)
+            }).pipe(
+              Effect.catchAll((error) =>
+                Effect.logDebug("Failed to parse stream event line", {
+                  line: line.length > 100 ? line.substring(0, 100) + "..." : line,
+                  error
+                }).pipe(Effect.as(Stream.empty))
               )
             )
-          }
-        }),
+          )
+        ),
         Stream.flatMap(eventToChunk),
         Stream.mapError((error: ClaudeCodeCliError | PlatformError.PlatformError) =>
           isClaudeCodeCliError(error)
@@ -280,7 +258,11 @@ const executeCommand = (
             : parseStderr(String(error), 1)
         )
       )
-    })
+    }).pipe(
+      Effect.mapError((error): ClaudeCodeCliError =>
+        isClaudeCodeCliError(error) ? error : parseStderr(String(error), 1)
+      )
+    )
   )
 }
 
@@ -322,22 +304,22 @@ const make = (options?: {
         )
 
         // Parse JSON response to extract text
-        try {
-          const json = Schema.decodeUnknownSync(Schema.parseJson())(output)
-          if (typeof json === "object" && json !== null) {
-            if ("result" in json && typeof json.result === "string") return json.result
-            if (
-              "content" in json && Array.isArray(json.content) && json.content[0] &&
-              typeof json.content[0] === "object" && "text" in json.content[0]
-            ) {
-              return String(json.content[0].text)
-            }
-            if ("text" in json && typeof json.text === "string") return json.text
+        const json = yield* Schema.decodeUnknown(Schema.parseJson())(output).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+
+        if (typeof json === "object" && json !== null) {
+          if ("result" in json && typeof json.result === "string") return json.result
+          if (
+            "content" in json && Array.isArray(json.content) && json.content[0] &&
+            typeof json.content[0] === "object" && "text" in json.content[0]
+          ) {
+            return String(json.content[0].text)
           }
-          return output.trim()
-        } catch {
-          return output.trim()
+          if ("text" in json && typeof json.text === "string") return json.text
         }
+
+        return output.trim()
       }).pipe(
         Effect.retry(rateLimitSchedule),
         Effect.provide(NodeContext.layer)

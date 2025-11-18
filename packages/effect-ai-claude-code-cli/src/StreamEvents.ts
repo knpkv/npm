@@ -8,6 +8,38 @@
 import * as Schema from "effect/Schema"
 
 /**
+ * Usage information for token consumption.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const Usage = Schema.Struct({
+  input_tokens: Schema.Number,
+  output_tokens: Schema.Number
+})
+
+export type Usage = Schema.Schema.Type<typeof Usage>
+
+/**
+ * Message metadata from message_start event.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const Message = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literal("message"),
+  role: Schema.Literal("assistant"),
+  content: Schema.Array(Schema.Unknown),
+  model: Schema.String,
+  stop_reason: Schema.NullOr(Schema.String),
+  stop_sequence: Schema.NullOr(Schema.String),
+  usage: Usage
+})
+
+export type Message = Schema.Schema.Type<typeof Message>
+
+/**
  * Message start event - indicates beginning of message.
  *
  * @category Schemas
@@ -15,10 +47,58 @@ import * as Schema from "effect/Schema"
  */
 export const MessageStartEvent = Schema.Struct({
   type: Schema.Literal("message_start"),
-  message: Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  message: Message
 })
 
 export type MessageStartEvent = Schema.Schema.Type<typeof MessageStartEvent>
+
+/**
+ * Text content block.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const TextContentBlock = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.String
+})
+
+/**
+ * Tool use content block.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const ToolUseContentBlock = Schema.Struct({
+  type: Schema.Literal("tool_use"),
+  id: Schema.String,
+  name: Schema.String,
+  input: Schema.optional(Schema.Unknown)
+})
+
+/**
+ * Thinking content block.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const ThinkingContentBlock = Schema.Struct({
+  type: Schema.Literal("thinking")
+})
+
+/**
+ * Union of all content block types.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const ContentBlock = Schema.Union(
+  TextContentBlock,
+  ToolUseContentBlock,
+  ThinkingContentBlock
+)
+
+export type ContentBlock = Schema.Schema.Type<typeof ContentBlock>
 
 /**
  * Content block start event - indicates beginning of content block.
@@ -29,7 +109,7 @@ export type MessageStartEvent = Schema.Schema.Type<typeof MessageStartEvent>
 export const ContentBlockStartEvent = Schema.Struct({
   type: Schema.Literal("content_block_start"),
   index: Schema.Number,
-  content_block: Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  content_block: ContentBlock
 })
 
 export type ContentBlockStartEvent = Schema.Schema.Type<typeof ContentBlockStartEvent>
@@ -88,6 +168,31 @@ export const ContentBlockStopEvent = Schema.Struct({
 export type ContentBlockStopEvent = Schema.Schema.Type<typeof ContentBlockStopEvent>
 
 /**
+ * Message delta metadata.
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const MessageDelta = Schema.Struct({
+  stop_reason: Schema.optional(Schema.String),
+  stop_sequence: Schema.optional(Schema.NullOr(Schema.String))
+})
+
+export type MessageDelta = Schema.Schema.Type<typeof MessageDelta>
+
+/**
+ * Output usage information (for message_delta events).
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const OutputUsage = Schema.Struct({
+  output_tokens: Schema.Number
+})
+
+export type OutputUsage = Schema.Schema.Type<typeof OutputUsage>
+
+/**
  * Message delta event - contains message metadata updates.
  *
  * @category Schemas
@@ -95,9 +200,8 @@ export type ContentBlockStopEvent = Schema.Schema.Type<typeof ContentBlockStopEv
  */
 export const MessageDeltaEvent = Schema.Struct({
   type: Schema.Literal("message_delta"),
-  delta: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-  usage: Schema.optional(Schema.Unknown),
-  context_management: Schema.optional(Schema.Unknown)
+  delta: MessageDelta,
+  usage: Schema.optional(OutputUsage)
 })
 
 export type MessageDeltaEvent = Schema.Schema.Type<typeof MessageDeltaEvent>
@@ -136,6 +240,21 @@ export const StreamEvent = Schema.Union(
  * @since 1.0.0
  */
 export type StreamEvent = Schema.Schema.Type<typeof StreamEvent>
+
+/**
+ * Wrapped stream event format from CLI --output-format stream-json.
+ *
+ * The CLI wraps events in: {"type":"stream_event","event":{...}}
+ *
+ * @category Schemas
+ * @since 1.0.0
+ */
+export const WrappedStreamEvent = Schema.Struct({
+  type: Schema.Literal("stream_event"),
+  event: StreamEvent
+})
+
+export type WrappedStreamEvent = Schema.Schema.Type<typeof WrappedStreamEvent>
 
 /**
  * Text chunk - represents streaming text content.
@@ -256,7 +375,7 @@ export class MessageStartChunk extends Schema.Class<MessageStartChunk>("MessageS
   /**
    * Message metadata
    */
-  message: Schema.Record({ key: Schema.String, value: Schema.Unknown })
+  message: Message
 }) {}
 
 /**
@@ -273,11 +392,11 @@ export class MessageDeltaChunk extends Schema.Class<MessageDeltaChunk>("MessageD
   /**
    * Delta metadata
    */
-  delta: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  delta: MessageDelta,
   /**
    * Usage information
    */
-  usage: Schema.optional(Schema.Unknown)
+  usage: Schema.optional(OutputUsage)
 }) {}
 
 /**
