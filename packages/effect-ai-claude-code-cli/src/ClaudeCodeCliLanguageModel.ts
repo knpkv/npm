@@ -68,13 +68,13 @@ export const make = Effect.gen(function*() {
           Effect.mapError(mapError)
         )
 
-        const parts: Array<any> = [
+        return [
           {
-            type: "text",
+            type: "text" as const,
             text: responseText
           },
           {
-            type: "finish",
+            type: "finish" as const,
             reason: "stop" as const,
             usage: {
               inputTokens: 0,
@@ -83,8 +83,6 @@ export const make = Effect.gen(function*() {
             }
           }
         ]
-
-        return parts
       }),
 
     streamText: (providerOptions: LanguageModel.ProviderOptions) =>

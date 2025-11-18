@@ -1,0 +1,278 @@
+# @knpkv/effect-ai-claude-code-cli
+
+Effect-TS wrapper for [Claude Code CLI](https://github.com/anthropics/claude-code) with [@effect/ai](https://effect.website/docs/ai/introduction) integration.
+
+Provides a type-safe, functional interface to programmatically interact with Claude Code CLI, including:
+
+- Non-blocking query execution
+- Streaming responses with full event support
+- Tool call visibility (Read, Write, Bash, etc.)
+- Comprehensive error handling
+- @effect/ai LanguageModel integration
+
+## Installation
+
+```bash
+npm install @knpkv/effect-ai-claude-code-cli effect
+```
+
+**Prerequisites:**
+
+- [Claude Code CLI](https://github.com/anthropics/claude-code) installed globally
+- Node.js 18+
+- Effect-TS 3.x
+
+```bash
+npm install -g @anthropics/claude-code
+```
+
+## Quick Start
+
+### Basic Query
+
+```typescript
+import { ClaudeCodeCliClient } from "@knpkv/effect-ai-claude-code-cli"
+import { Effect } from "effect"
+
+const program = Effect.gen(function* () {
+  const client = yield* ClaudeCodeCliClient.ClaudeCodeCliClient
+  const response = yield* client.query("What is Effect-TS?")
+  console.log(response)
+})
+
+Effect.runPromise(program.pipe(Effect.provide(ClaudeCodeCliClient.layer())))
+```
+
+### Streaming Responses
+
+```typescript
+import { ClaudeCodeCliClient } from "@knpkv/effect-ai-claude-code-cli"
+import { Effect, Stream } from "effect"
+
+const program = Effect.gen(function* () {
+  const client = yield* ClaudeCodeCliClient.ClaudeCodeCliClient
+  const stream = client.queryStream("Write a haiku about TypeScript")
+
+  yield* stream.pipe(
+    Stream.runForEach((chunk) =>
+      Effect.sync(() => {
+        if (chunk.type === "text") {
+          process.stdout.write(chunk.text)
+        }
+      })
+    )
+  )
+})
+
+Effect.runPromise(program.pipe(Effect.provide(ClaudeCodeCliClient.layer())))
+```
+
+### @effect/ai Integration
+
+```typescript
+import { LanguageModel } from "@effect/ai"
+import { ClaudeCodeCliClient, ClaudeCodeCliLanguageModel } from "@knpkv/effect-ai-claude-code-cli"
+import { Effect } from "effect"
+
+const program = Effect.gen(function* () {
+  const model = yield* LanguageModel.LanguageModel
+  const response = yield* model.generateText({
+    prompt: [{ role: "user", content: [{ type: "text", text: "Explain monads" }] }]
+  })
+
+  console.log(response.text)
+  console.log("Usage:", response.usage)
+})
+
+Effect.runPromise(
+  program.pipe(Effect.provide(ClaudeCodeCliLanguageModel.layer()), Effect.provide(ClaudeCodeCliClient.layer()))
+)
+```
+
+## Configuration
+
+### Tool Permissions
+
+Control which tools Claude can use:
+
+```typescript
+import { ClaudeCodeCliConfig } from "@knpkv/effect-ai-claude-code-cli"
+import { Layer } from "effect"
+
+const config = Layer.succeed(
+  ClaudeCodeCliConfig.ClaudeCodeCliConfig,
+  ClaudeCodeCliConfig.ClaudeCodeCliConfig.of({
+    allowedTools: ["Read", "Glob", "Bash"],
+    disallowedTools: ["Write", "Edit"]
+  })
+)
+
+Effect.runPromise(program.pipe(Effect.provide(ClaudeCodeCliClient.layer()), Effect.provide(config)))
+```
+
+### Model Selection
+
+```typescript
+const config = ClaudeCodeCliConfig.ClaudeCodeCliConfig.of({
+  model: "claude-sonnet-4-5"
+})
+```
+
+## Streaming Events
+
+The client emits detailed chunk types for comprehensive event handling:
+
+### Chunk Types
+
+- **TextChunk** - Text content deltas
+- **ToolUseStartChunk** - Tool invocation begins (includes tool name and ID)
+- **ToolInputChunk** - Tool input JSON streaming
+- **ContentBlockStartChunk** - Content block boundaries
+- **ContentBlockStopChunk** - Content block completion
+- **MessageStartChunk** - Message metadata (model, usage)
+- **MessageDeltaChunk** - Updates (stop_reason, usage)
+- **MessageStopChunk** - Stream completion
+
+### Example: Logging All Events
+
+```typescript
+const stream = client.queryStream("Read package.json and summarize it")
+
+yield *
+  stream.pipe(
+    Stream.runForEach((chunk) =>
+      Effect.gen(function* () {
+        switch (chunk.type) {
+          case "text":
+            yield* Console.log("Text:", chunk.text)
+            break
+          case "tool_use_start":
+            yield* Console.log(`Tool: ${chunk.name} (${chunk.id})`)
+            break
+          case "tool_input":
+            yield* Console.log("Input:", chunk.partialJson)
+            break
+          case "message_delta":
+            yield* Console.log("Usage:", chunk.usage)
+            break
+        }
+      })
+    )
+  )
+```
+
+## Error Handling
+
+The package provides typed error handling with specific error types:
+
+```typescript
+import { ClaudeCodeCliError } from "@knpkv/effect-ai-claude-code-cli"
+import { Match } from "effect"
+
+const handleError = Match.type<ClaudeCodeCliError.ClaudeCodeCliError>().pipe(
+  Match.tag("CliNotFoundError", () => Console.error("Claude CLI not found. Install: npm i -g @anthropics/claude-code")),
+  Match.tag("RateLimitError", (error) => Console.error(`Rate limited. Retry after ${error.retryAfter}s`)),
+  Match.tag("InvalidApiKeyError", (error) => Console.error("Invalid API key:", error.stderr)),
+  Match.tag("StreamParsingError", (error) => Console.error(`Parse error at line: ${error.line}`)),
+  Match.orElse((error) => Console.error("Error:", error.message))
+)
+
+Effect.runPromise(program.pipe(Effect.catchAll(handleError), Effect.provide(ClaudeCodeCliClient.layer())))
+```
+
+## API Reference
+
+### ClaudeCodeCliClient
+
+**Service Tag:** `ClaudeCodeCliClient.ClaudeCodeCliClient`
+
+#### Methods
+
+- `query(prompt: string): Effect<string, ClaudeCodeCliError>` - Execute non-streaming query
+- `queryStream(prompt: string): Stream<MessageChunk, ClaudeCodeCliError>` - Stream response with full event visibility
+
+#### Layers
+
+- `layer(): Layer<ClaudeCodeCliClient, never, ClaudeCodeCliConfig>` - Default layer
+- `layerConfig(config): Layer<ClaudeCodeCliClient>` - Layer with inline config
+
+### ClaudeCodeCliConfig
+
+**Service Tag:** `ClaudeCodeCliConfig.ClaudeCodeCliConfig`
+
+#### Configuration
+
+```typescript
+interface ClaudeCodeCliConfig {
+  model?: string // Model name (default: from CLI config)
+  allowedTools?: ReadonlyArray<string> // Allowed tools (e.g., ["Read", "Bash"])
+  disallowedTools?: ReadonlyArray<string> // Disallowed tools
+}
+```
+
+#### Layers
+
+- `ClaudeCodeCliConfig.default` - Empty configuration (uses CLI defaults)
+
+### ClaudeCodeCliLanguageModel
+
+**Service Tag:** `LanguageModel.LanguageModel` (from @effect/ai)
+
+#### Layers
+
+- `layer(config?): Layer<LanguageModel, never, ClaudeCodeCliClient>` - @effect/ai integration
+
+#### Model Constructor
+
+- `model(config?): AiModel<"claude-code-cli", LanguageModel, ClaudeCodeCliClient>`
+
+## Examples
+
+See the [examples](./examples) directory for complete working examples:
+
+- **[basic.ts](./examples/basic.ts)** - Simple query
+- **[streaming.ts](./examples/streaming.ts)** - Streaming responses
+- **[tools.ts](./examples/tools.ts)** - Tool permissions
+- **[error-handling.ts](./examples/error-handling.ts)** - Error handling patterns
+- **[language-model.ts](./examples/language-model.ts)** - @effect/ai integration
+- **[chunk-logging.ts](./examples/chunk-logging.ts)** - Complete event visibility
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Run tests
+pnpm test
+
+# Type check
+pnpm check
+
+# Lint
+pnpm lint
+
+# Build
+pnpm build
+```
+
+## Architecture
+
+This package follows Effect-TS patterns:
+
+- **Services** - Context.Tag-based dependency injection
+- **Layers** - Composable service providers
+- **Effects** - Typed, referentially transparent computations
+- **Streams** - Incremental, backpressure-aware processing
+- **Errors** - Typed error channel with discriminated unions
+
+## License
+
+MIT
+
+## Links
+
+- [Effect Documentation](https://effect.website)
+- [@effect/ai Documentation](https://effect.website/docs/ai/introduction)
+- [Claude Code CLI](https://github.com/anthropics/claude-code)
+- [GitHub Repository](https://github.com/knpkv/npm)

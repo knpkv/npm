@@ -3,16 +3,29 @@
   "version": "0.0.1",
   "type": "module",
   "description": "Effect-TS wrapper for Claude Code CLI with @effect/ai integration",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/effect-ai-claude-code-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/effect-ai-claude-code-cli#readme",
   "publishConfig": {
     "access": "public",
     "directory": "dist"
   },
   "exports": {
-    ".": "./dist/index.js"
+    "./package.json": "./package.json",
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./internal/*": null
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && pnpm run build:copy",
-    "build:copy": "cp package.json dist/",
+    "build": "tsc -b tsconfig.build.json && node scripts/build-package.js",
     "clean": "rimraf dist dist-test .tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -43,7 +56,5 @@
     "ai",
     "llm",
     "anthropic"
-  ],
-  "author": "",
-  "license": "MIT"
+  ]
 }
