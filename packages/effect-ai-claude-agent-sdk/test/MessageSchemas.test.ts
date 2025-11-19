@@ -171,6 +171,80 @@ describe("MessageSchemas", () => {
     })
   })
 
+  describe("TokenUsage", () => {
+    it("should validate assistant message with token usage", async () => {
+      const message: MessageSchemas.MessageEvent = {
+        type: "assistant",
+        content: "Hello!",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 50
+        }
+      }
+
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
+
+      expect(result).toEqual(message)
+      if (result.type === "assistant") {
+        expect(result.usage).toEqual({
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 50
+        })
+      }
+    })
+
+    it("should validate result message with usage and summary", async () => {
+      const message: MessageSchemas.MessageEvent = {
+        type: "result",
+        content: "Success",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50
+        },
+        summary: {
+          duration_ms: 5000,
+          duration_api_ms: 4500,
+          num_turns: 2,
+          total_cost_usd: 0.001
+        }
+      }
+
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
+
+      expect(result).toEqual(message)
+      if (result.type === "result") {
+        expect(result.usage).toEqual({
+          input_tokens: 100,
+          output_tokens: 50
+        })
+        expect(result.summary).toEqual({
+          duration_ms: 5000,
+          duration_api_ms: 4500,
+          num_turns: 2,
+          total_cost_usd: 0.001
+        })
+      }
+    })
+
+    it("should allow optional usage fields", async () => {
+      const message: MessageSchemas.MessageEvent = {
+        type: "assistant",
+        content: "Hello!"
+      }
+
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
+
+      expect(result).toEqual(message)
+      if (result.type === "assistant") {
+        expect(result.usage).toBeUndefined()
+      }
+    })
+  })
+
   describe("Type safety", () => {
     it("should provide proper type inference for assistant messages", () => {
       const message: MessageSchemas.MessageEvent = {

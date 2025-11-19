@@ -53,12 +53,29 @@ export const make = Effect.gen(function*() {
         // Convert prompt to text
         const promptText = promptToText(providerOptions.prompt)
 
-        // Use queryText for non-streaming text generation
-        const responseText = yield* client
-          .queryText({
-            prompt: promptText
-          })
-          .pipe(Effect.mapError(mapError))
+        // Use query stream to get both text and usage
+        const stream = client.query({
+          prompt: promptText
+        })
+
+        // Collect all messages to extract text and usage
+        const messages = yield* Stream.runCollect(stream).pipe(
+          Effect.map((chunk) => Array.from(chunk)),
+          Effect.mapError(mapError)
+        )
+
+        // Extract text from assistant messages
+        const responseText = messages
+          .filter((m) => m.type === "assistant")
+          .map((m) => m.content)
+          .join("")
+
+        // Extract usage from result message
+        const resultMessage = messages.find((m) => m.type === "result")
+        const usage = resultMessage?.usage || {
+          input_tokens: 0,
+          output_tokens: 0
+        }
 
         return [
           {
@@ -69,9 +86,9 @@ export const make = Effect.gen(function*() {
             type: "finish" as const,
             reason: "stop" as const,
             usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: 0
+              inputTokens: usage.input_tokens || 0,
+              outputTokens: usage.output_tokens || 0,
+              totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0)
             }
           }
         ]

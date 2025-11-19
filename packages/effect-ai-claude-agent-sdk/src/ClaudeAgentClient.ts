@@ -212,14 +212,17 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
 
         // Warn if dangerouslySkipPermissions is enabled
         if (dangerouslySkipPermissions) {
-          yield* Console.warn(
-            "[WARNING] dangerouslySkipPermissions is enabled. All tool permissions are bypassed. " +
+          yield* Console.error(
+            "⚠️  SECURITY WARNING: dangerouslySkipPermissions is enabled! " +
+              "All tool permissions are bypassed. " +
               "Only use this for trusted, non-interactive automation."
           )
         }
 
         // Handle empty allowedTools array as "deny all"
         // Convert to disallowedTools: allTools (same as CLI behavior)
+        // IMPORTANT: Tool.allTools must be kept in sync with SDK tools.
+        // When the SDK adds new tools, update ClaudeAgentTool.allTools to include them.
         if (allowedTools !== undefined && allowedTools.length === 0) {
           allowedTools = undefined
           disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
@@ -235,10 +238,17 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           ...(canUseTool && {
             // Convert Effect-based canUseTool to Promise-based for SDK
             canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-              const result = await Effect.runPromise(canUseTool(toolName))
-              return result
-                ? { behavior: "allow" as const, updatedInput: input }
-                : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
+              try {
+                const result = await Effect.runPromise(canUseTool(toolName))
+                return result
+                  ? { behavior: "allow" as const, updatedInput: input }
+                  : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
+              } catch (error) {
+                return {
+                  behavior: "deny" as const,
+                  message: `Tool permission check failed: ${String(error)}`
+                }
+              }
             }
           })
         }
