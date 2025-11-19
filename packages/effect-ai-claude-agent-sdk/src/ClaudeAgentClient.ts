@@ -219,6 +219,15 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           )
         }
 
+        // Warn if hooks are configured but not yet implemented
+        if (config.hooks && Object.keys(config.hooks).length > 0) {
+          yield* Console.warn(
+            "⚠️  WARNING: Lifecycle hooks are configured but not yet implemented. " +
+              "Hook handlers will not be executed in this version. " +
+              "See README 'Known Limitations' section for details."
+          )
+        }
+
         // Handle empty allowedTools array as "deny all"
         // Convert to disallowedTools: allTools (same as CLI behavior)
         // IMPORTANT: Tool.allTools must be kept in sync with SDK tools.

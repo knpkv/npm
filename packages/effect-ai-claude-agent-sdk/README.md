@@ -8,6 +8,18 @@ Effect-TS wrapper for the Anthropic Claude Agent SDK with type-safe integration.
 pnpm add @knpkv/effect-ai-claude-agent-sdk @anthropic-ai/claude-agent-sdk effect
 ```
 
+## Authentication
+
+**ANTHROPIC_API_KEY is optional** if running on an authenticated machine with Claude Code Pro/Max subscription. The SDK will use authentication automatically.
+
+For unauthenticated environments, set your API key:
+
+```bash
+export ANTHROPIC_API_KEY=your-key-here
+```
+
+Get your API key from: https://console.anthropic.com/
+
 ## Quick Start
 
 ```typescript
@@ -128,7 +140,9 @@ See the `examples/` directory for comprehensive usage patterns:
 # Install dependencies
 pnpm install
 
-# Run an example (requires ANTHROPIC_API_KEY)
+# Run an example
+# Note: ANTHROPIC_API_KEY is optional on authenticated machines
+# (Claude Code Pro/Max subscription)
 npx tsx examples/basic-query.ts
 npx tsx examples/streaming.ts
 npx tsx examples/error-handling.ts
@@ -142,7 +156,9 @@ npx tsx examples/language-model.ts
 Integration tests verify compatibility with the latest `@anthropic-ai/claude-agent-sdk`:
 
 ```bash
-# Run integration tests (requires ANTHROPIC_API_KEY)
+# Run integration tests
+# Note: ANTHROPIC_API_KEY is optional on authenticated machines
+# (Claude Code Pro/Max subscription). Otherwise:
 export ANTHROPIC_API_KEY=your-key-here
 pnpm test:integration
 ```

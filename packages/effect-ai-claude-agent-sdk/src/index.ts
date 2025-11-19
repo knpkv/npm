@@ -48,3 +48,26 @@ export * as Brand from "./Brand.js"
 
 /** */
 export * as ClaudeAgentLanguageModel from "./ClaudeAgentLanguageModel.js"
+
+/**
+ * Convenience type exports for advanced users.
+ *
+ * These types are re-exported from their respective modules for easier access.
+ */
+export type { ClaudeAgentClient as ClaudeAgentClientInterface, QueryOptions } from "./ClaudeAgentClient.js"
+
+export type { ClaudeAgentConfig as ClaudeAgentConfigInterface, ClaudeAgentConfigOptions } from "./ClaudeAgentConfig.js"
+
+export type { CanUseToolCallback, ToolName, ToolNameOrString } from "./ClaudeAgentTool.js"
+
+export type { HookHandlers, HookName } from "./ClaudeAgentHook.js"
+
+export type {
+  AssistantMessage,
+  MessageEvent,
+  ResultMessage,
+  SessionSummary,
+  SystemMessage,
+  TokenUsage,
+  UserMessage
+} from "./MessageSchemas.js"
