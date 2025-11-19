@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/effect-ai-claude-agent-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Effect-TS wrapper for Anthropic Claude Agent SDK with @effect/ai integration",
   "license": "MIT",
   "author": "knpkv",
