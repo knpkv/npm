@@ -127,4 +127,92 @@ describe("Integration: Claude Agent SDK", () => {
     },
     INTEGRATION_TIMEOUT
   )
+
+  it(
+    "should track token usage in messages",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
+
+        let hasUsage = false
+        let hasSummary = false
+
+        const stream = client.query({
+          prompt: "Say 'test' in one word",
+          allowedTools: []
+        })
+
+        yield* stream.pipe(
+          Stream.runForEach((message) =>
+            Effect.sync(() => {
+              if (message.type === "assistant" && message.usage) {
+                hasUsage = true
+              }
+              if (message.type === "result" && message.summary) {
+                hasSummary = true
+              }
+            })
+          )
+        )
+
+        return { hasUsage, hasSummary }
+      })
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
+
+      expect(result.hasUsage).toBe(true)
+      expect(result.hasSummary).toBe(true)
+    },
+    INTEGRATION_TIMEOUT
+  )
+
+  it(
+    "should work with dangerouslySkipPermissions flag",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
+
+        const result = yield* client.queryText({
+          prompt: "What is 1+1? Answer with just the number.",
+          dangerouslySkipPermissions: true
+        })
+
+        return result
+      })
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
+
+      expect(result).toContain("2")
+    },
+    INTEGRATION_TIMEOUT
+  )
+
+  it(
+    "should work with custom canUseTool callback",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
+
+        const deniedTools: Array<string> = []
+
+        const result = yield* client.queryText({
+          prompt: "What is 3+3? Answer with just the number.",
+          canUseTool: (toolName) =>
+            Effect.sync(() => {
+              // Deny all tools and track what was requested
+              deniedTools.push(toolName)
+              return false
+            }),
+          allowedTools: [] // Explicitly deny all
+        })
+
+        return { result, deniedTools }
+      })
+
+      const { result } = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
+
+      expect(result).toContain("6")
+    },
+    INTEGRATION_TIMEOUT
+  )
 })

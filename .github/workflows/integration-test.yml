@@ -20,9 +20,13 @@ on:
 
 jobs:
   test-sdk:
-    name: SDK Integration Tests
+    name: SDK Integration Tests (${{ matrix.sdk-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        sdk-version: ["locked", "latest"]
+      fail-fast: false
 
     steps:
       - name: Checkout
@@ -41,6 +45,7 @@ jobs:
         run: pnpm install
 
       - name: Update to latest Anthropic SDK
+        if: matrix.sdk-version == 'latest'
         run: |
           cd packages/effect-ai-claude-agent-sdk
           pnpm add @anthropic-ai/claude-agent-sdk@latest

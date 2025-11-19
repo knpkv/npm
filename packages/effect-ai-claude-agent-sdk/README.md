@@ -155,13 +155,21 @@ These tests run automatically:
 
 If a test fails, it indicates a potential breaking change in the Anthropic SDK.
 
-## Development Status & Limitations
+## Known Limitations
 
-**Important Limitations**:
+This package is actively developed. Current limitations:
 
-1. **Hooks Not Implemented**: The ClaudeAgentHook module defines types for lifecycle hooks, but hook execution is not yet implemented. Hook handlers will be added in a future version.
+### Not Yet Implemented
 
-**Note**: This package is in early development.
+1. **Lifecycle Hooks**: The `ClaudeAgentHook` module provides type definitions for lifecycle hooks (SessionStart, PreToolUse, etc.), but hook execution is not implemented. Hooks defined in query options will not be called.
+
+### Maintenance Requirements
+
+2. **Tool Synchronization**: The `Tool.allTools` array must be manually kept in sync with tools added to the Claude Agent SDK. When new tools are added upstream, they should be added to `ClaudeAgentTool.ts`.
+
+### API Compatibility
+
+3. **SDK Dependency**: This package wraps `@anthropic-ai/claude-agent-sdk` and may lag behind SDK updates. Integration tests run twice daily to detect breaking changes.
 
 ## License
 
