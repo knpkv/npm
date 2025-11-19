@@ -16,6 +16,8 @@ const program = Effect.gen(function*() {
   yield* Console.log("Asking Claude to read a file using tools...\n")
 
   // Execute a query that would benefit from tool usage
+  // Note: allowedTools are configured via the config layer (below)
+  // The CLI subprocess will be invoked with: --allowedTools Read,Bash,Glob
   const response = yield* client.query(
     "Read the package.json file and tell me the package name"
   )

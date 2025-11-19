@@ -29,8 +29,10 @@
     "clean": "rimraf dist dist-test .tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src",
-    "check": "tsc --noEmit --project tsconfig.src.json && tsc --noEmit --project tsconfig.test.json"
+    "lint": "eslint src examples",
+    "check": "tsc --noEmit --project tsconfig.src.json && tsc --noEmit --project tsconfig.test.json",
+    "check:examples": "tsc --noEmit --project tsconfig.examples.json",
+    "check:all": "pnpm check && pnpm check:examples"
   },
   "peerDependencies": {
     "effect": "^3.19.3"

@@ -9,6 +9,7 @@ Provides a type-safe, functional interface to programmatically interact with Cla
 - Tool call visibility (Read, Write, Bash, etc.)
 - Comprehensive error handling
 - @effect/ai LanguageModel integration
+- Type-safe tool names with IDE autocomplete
 
 ## Installation
 
@@ -102,7 +103,7 @@ import { Layer } from "effect"
 const config = Layer.succeed(
   ClaudeCodeCliConfig.ClaudeCodeCliConfig,
   ClaudeCodeCliConfig.ClaudeCodeCliConfig.of({
-    allowedTools: ["Read", "Glob", "Bash"],
+    allowedTools: ["Read", "Glob", "Bash"], // IDE autocomplete for known tools
     disallowedTools: ["Write", "Edit"]
   })
 )
@@ -284,8 +285,8 @@ Effect.runPromise(program.pipe(Effect.catchAll(handleError), Effect.provide(Clau
 ```typescript
 interface ClaudeCodeCliConfig {
   model?: string // Model name (default: from CLI config)
-  allowedTools?: ReadonlyArray<string> // Allowed tools (e.g., ["Read", "Bash"])
-  disallowedTools?: ReadonlyArray<string> // Disallowed tools
+  allowedTools?: ReadonlyArray<ToolNameOrString> // Allowed tools with autocomplete
+  disallowedTools?: ReadonlyArray<ToolNameOrString> // Disallowed tools with autocomplete
 }
 ```
 

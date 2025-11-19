@@ -217,3 +217,56 @@ const ProviderToolNamesMap: Map<string, string> = new Map([
  * @since 1.0.0
  */
 export const getProviderDefinedToolName = (name: string): string | undefined => ProviderToolNamesMap.get(name)
+
+/**
+ * All 16 built-in tools available in the Claude Code CLI.
+ *
+ * @example
+ * ```typescript
+ * import * as Tool from "@knpkv/effect-ai-claude-code-cli/ClaudeCodeCliTool"
+ *
+ * // Use specific tools
+ * const config = {
+ *   allowedTools: Tool.allTools.slice(0, 3) // Read, Write, Edit
+ * }
+ * ```
+ *
+ * @since 1.0.0
+ * @category Tools
+ */
+export const allTools = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Glob",
+  "Grep",
+  "WebSearch",
+  "WebFetch",
+  "Task",
+  "SlashCommand",
+  "Skill",
+  "TodoWrite",
+  "AskUserQuestion",
+  "NotebookEdit",
+  "BashOutput",
+  "KillShell"
+] as const
+
+/**
+ * Union type of all known tool names.
+ *
+ * @since 1.0.0
+ * @category Tools
+ */
+export type KnownToolName = (typeof allTools)[number]
+
+/**
+ * Tool name that can be either a known tool or a custom string.
+ *
+ * Provides autocomplete for known tools while allowing custom tool names.
+ *
+ * @since 1.0.0
+ * @category Tools
+ */
+export type ToolNameOrString = KnownToolName | (string & {})

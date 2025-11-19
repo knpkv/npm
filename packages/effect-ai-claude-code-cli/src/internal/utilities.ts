@@ -8,6 +8,7 @@ import * as Command from "@effect/platform/Command"
 import type * as PlatformError from "@effect/platform/Error"
 import * as Schedule from "effect/Schedule"
 import type { ClaudeCodeCliError } from "../ClaudeCodeCliError.js"
+import * as Tool from "../ClaudeCodeCliTool.js"
 
 /**
  * Check if tools are configured.
@@ -23,7 +24,7 @@ export const hasToolsConfigured = (
   allowedTools?: ReadonlyArray<string>,
   disallowedTools?: ReadonlyArray<string>
 ): boolean =>
-  (allowedTools !== undefined && allowedTools.length > 0) ||
+  allowedTools !== undefined ||
   (disallowedTools !== undefined && disallowedTools.length > 0)
 
 /**
@@ -31,10 +32,15 @@ export const hasToolsConfigured = (
  *
  * When tools are configured, prompt must be passed via stdin (not as argument).
  *
+ * Special handling for empty allowedTools array:
+ * - allowedTools: [] means "deny all tools"
+ * - allowedTools: undefined means "no restriction"
+ *
  * @param prompt - The text prompt (passed as argument only if no tools configured)
  * @param model - Optional model name
- * @param allowedTools - Optional list of allowed tools
+ * @param allowedTools - Optional list of allowed tools (empty array = deny all)
  * @param disallowedTools - Optional list of disallowed tools
+ * @param dangerouslySkipPermissions - Skip all permission checks (default: false)
  * @param streamJson - Whether to use stream-json output format
  * @returns Command instance
  *
@@ -46,20 +52,32 @@ export const buildCommand = (
   model?: string,
   allowedTools?: ReadonlyArray<string>,
   disallowedTools?: ReadonlyArray<string>,
+  dangerouslySkipPermissions = false,
   streamJson = true
 ): Command.Command => {
-  const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
+  // Handle empty allowedTools array as "deny all"
+  // Convert to disallowedTools: allTools
+  let effectiveAllowedTools = allowedTools
+  let effectiveDisallowedTools = disallowedTools
+
+  if (allowedTools !== undefined && allowedTools.length === 0) {
+    // Empty allowedTools = deny all tools
+    effectiveAllowedTools = undefined
+    effectiveDisallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
+  }
+
+  const useStdin = hasToolsConfigured(effectiveAllowedTools, effectiveDisallowedTools)
 
   return Command.make(
     "claude",
     "--print",
     "--output-format",
     streamJson ? "stream-json" : "json",
-    "--dangerously-skip-permissions",
+    ...(dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
     ...(streamJson ? ["--verbose", "--include-partial-messages"] : []),
     ...(model ? ["--model", model] : []),
-    ...(allowedTools ? allowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
-    ...(disallowedTools ? disallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
+    ...(effectiveAllowedTools ? effectiveAllowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
+    ...(effectiveDisallowedTools ? effectiveDisallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
     ...(useStdin ? [] : [prompt])
   )
 }

@@ -4,7 +4,7 @@
  * @since 1.0.0
  */
 import { describe, expect, it } from "@effect/vitest"
-import { accumulateText, buildCommand, rateLimitSchedule } from "../src/internal/utilities.js"
+import { accumulateText, buildCommand, hasToolsConfigured, rateLimitSchedule } from "../src/internal/utilities.js"
 
 describe("utilities", () => {
   describe("buildCommand", () => {
@@ -42,6 +42,51 @@ describe("utilities", () => {
       )
 
       expect(command).toBeDefined()
+    })
+
+    it("should handle empty allowedTools array as deny all", () => {
+      const command = buildCommand("Hello", undefined, [])
+
+      expect(command).toBeDefined()
+      // Empty array should use __none__ as placeholder
+    })
+
+    it("should differentiate undefined from empty array", () => {
+      const withUndefined = buildCommand("Hello", undefined, undefined)
+      const withEmpty = buildCommand("Hello", undefined, [])
+
+      expect(withUndefined).toBeDefined()
+      expect(withEmpty).toBeDefined()
+      // Both should be different commands
+      expect(withUndefined).not.toEqual(withEmpty)
+    })
+  })
+
+  describe("hasToolsConfigured", () => {
+    it("should return false when no tools configured", () => {
+      expect(hasToolsConfigured(undefined, undefined)).toBe(false)
+    })
+
+    it("should return true for non-empty allowedTools", () => {
+      expect(hasToolsConfigured(["Read"], undefined)).toBe(true)
+    })
+
+    it("should return true for empty allowedTools array", () => {
+      // Empty array means "deny all" - tools are configured
+      expect(hasToolsConfigured([], undefined)).toBe(true)
+    })
+
+    it("should return true for non-empty disallowedTools", () => {
+      expect(hasToolsConfigured(undefined, ["Bash"])).toBe(true)
+    })
+
+    it("should return false for empty disallowedTools array", () => {
+      // Empty disallowed array with no allowed = no configuration
+      expect(hasToolsConfigured(undefined, [])).toBe(false)
+    })
+
+    it("should return true when both are configured", () => {
+      expect(hasToolsConfigured(["Read"], ["Bash"])).toBe(true)
     })
   })
 

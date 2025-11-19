@@ -285,6 +285,7 @@ const make = (options?: {
   model?: string
   allowedTools?: ReadonlyArray<string>
   disallowedTools?: ReadonlyArray<string>
+  dangerouslySkipPermissions?: boolean
 }): Effect.Effect<
   Context.Tag.Service<typeof ClaudeCodeCliClient>,
   CliNotFoundError,
@@ -300,13 +301,15 @@ const make = (options?: {
     const model = options?.model ?? config.model
     const allowedTools = options?.allowedTools ?? config.allowedTools
     const disallowedTools = options?.disallowedTools ?? config.disallowedTools
+    const dangerouslySkipPermissions = options?.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ?? false
 
     const query = (prompt: string): Effect.Effect<string, ClaudeCodeCliError> =>
       Effect.gen(function*() {
         const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
-        const command = buildCommand(prompt, model, allowedTools, disallowedTools, false).pipe(
-          Command.stdin(useStdin ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty)
-        )
+        const command = buildCommand(prompt, model, allowedTools, disallowedTools, dangerouslySkipPermissions, false)
+          .pipe(
+            Command.stdin(useStdin ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty)
+          )
         const output = yield* Command.string(command).pipe(
           Effect.mapError((error: PlatformError.PlatformError) => parseStderr(extractErrorMessage(error), 1))
         )
@@ -332,7 +335,7 @@ const make = (options?: {
     const queryStream = (
       prompt: string
     ): Stream.Stream<MessageChunk, ClaudeCodeCliError> => {
-      const command = buildCommand(prompt, model, allowedTools, disallowedTools)
+      const command = buildCommand(prompt, model, allowedTools, disallowedTools, dangerouslySkipPermissions)
       const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
       return executeCommand(command, useStdin ? prompt : undefined)
     }
@@ -378,6 +381,7 @@ export const layer = (options?: {
   model?: string
   allowedTools?: ReadonlyArray<string>
   disallowedTools?: ReadonlyArray<string>
+  dangerouslySkipPermissions?: boolean
 }): Layer.Layer<ClaudeCodeCliClient, CliNotFoundError> =>
   Layer.effect(ClaudeCodeCliClient, make(options)).pipe(
     Layer.provide(ClaudeCodeCliConfig.default),
