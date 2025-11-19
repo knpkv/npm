@@ -6,8 +6,6 @@
  * NOTE: This only blocks built-in Claude Code tools. MCP server tools
  * (like ReadMcpResourceTool) may still be available. To fully restrict
  * tool access, disable MCP servers in your Claude Code configuration.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Layer, Stream } from "effect"
 import { ClaudeCodeCliClient, layerConfig } from "../src/ClaudeCodeCliClient.js"

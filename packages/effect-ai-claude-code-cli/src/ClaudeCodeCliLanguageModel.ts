@@ -1,7 +1,5 @@
 /**
  * LanguageModel integration for Claude Code CLI.
- *
- * @since 1.0.0
  */
 import * as AiError from "@effect/ai/AiError"
 import * as IdGenerator from "@effect/ai/IdGenerator"
@@ -23,20 +21,16 @@ import type { ClaudeCodeCliError } from "./ClaudeCodeCliError.js"
  * Configuration for Claude Code CLI Language Model.
  *
  * @category Configuration
- * @since 1.0.0
  */
 export class Config extends Context.Tag("@knpkv/effect-ai-claude-code-cli/ClaudeCodeCliLanguageModel/Config")<
   Config,
   Config.Service
 >() {}
 
-/**
- * @since 1.0.0
- */
+/** */
 export declare namespace Config {
   /**
    * @category Configuration
-   * @since 1.0.0
    */
   export interface Service extends
     Simplify<{
@@ -54,7 +48,6 @@ export declare namespace Config {
  * @returns Effect that yields a LanguageModel
  *
  * @category Constructors
- * @since 1.0.0
  */
 export const make = Effect.gen(function*() {
   const client = yield* ClaudeCodeCliClient
@@ -146,7 +139,6 @@ export const make = Effect.gen(function*() {
  * ```
  *
  * @category Layers
- * @since 1.0.0
  */
 export const layer = (
   config?: Config.Service
@@ -175,7 +167,6 @@ export const layer = (
  * ```
  *
  * @category Models
- * @since 1.0.0
  */
 export const model = (
   config?: Config.Service

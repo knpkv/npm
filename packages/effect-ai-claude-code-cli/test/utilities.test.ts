@@ -1,7 +1,5 @@
 /**
  * Tests for internal utilities.
- *
- * @since 1.0.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { accumulateText, buildCommand, hasToolsConfigured, rateLimitSchedule } from "../src/internal/utilities.js"

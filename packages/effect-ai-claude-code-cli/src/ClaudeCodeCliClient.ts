@@ -1,7 +1,5 @@
 /**
  * Claude Code CLI client service.
- *
- * @since 1.0.0
  */
 import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as Command from "@effect/platform/Command"
@@ -55,7 +53,6 @@ import {
  * ```
  *
  * @category Client
- * @since 1.0.0
  */
 export class ClaudeCodeCliClient extends Context.Tag("@knpkv/effect-ai-claude-code-cli/ClaudeCodeCliClient")<
   ClaudeCodeCliClient,
@@ -77,8 +74,6 @@ export class ClaudeCodeCliClient extends Context.Tag("@knpkv/effect-ai-claude-co
      *   console.log(response)
      * })
      * ```
-     *
-     * @since 1.0.0
      */
     readonly query: (prompt: string) => Effect.Effect<string, ClaudeCodeCliError>
 
@@ -105,8 +100,6 @@ export class ClaudeCodeCliClient extends Context.Tag("@knpkv/effect-ai-claude-co
      *   )
      * })
      * ```
-     *
-     * @since 1.0.0
      */
     readonly queryStream: (
       prompt: string
@@ -375,7 +368,6 @@ const make = (options?: {
  * ```
  *
  * @category Layers
- * @since 1.0.0
  */
 export const layer = (options?: {
   model?: string
@@ -421,7 +413,6 @@ export const layer = (options?: {
  * ```
  *
  * @category Layers
- * @since 1.0.0
  */
 export const layerConfig: Layer.Layer<ClaudeCodeCliClient, CliNotFoundError, ClaudeCodeCliConfig> = Layer.effect(
   ClaudeCodeCliClient,

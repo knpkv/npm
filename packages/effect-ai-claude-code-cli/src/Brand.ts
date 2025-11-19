@@ -1,7 +1,5 @@
 /**
  * Branded types for type-safe identifiers and values.
- *
- * @since 1.0.0
  */
 
 import * as Brand from "effect/Brand"
@@ -12,7 +10,6 @@ import * as Schema from "effect/Schema"
  *
  * Ensures tool names are non-empty strings that match expected format.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type ToolName = string & Brand.Brand<"ToolName">
@@ -20,7 +17,6 @@ export type ToolName = string & Brand.Brand<"ToolName">
 /**
  * Schema for validating and constructing ToolName.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const ToolNameSchema = Schema.String.pipe(
@@ -32,7 +28,6 @@ export const ToolNameSchema = Schema.String.pipe(
 /**
  * Constructs a ToolName from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  * @example
  *   import { ToolName } from "@knpkv/effect-ai-claude-code-cli"
@@ -54,7 +49,6 @@ export const unsafeToolName = (s: string): ToolName => s as ToolName
 /**
  * A branded type for Claude model identifiers.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type ModelId = string & Brand.Brand<"ModelId">
@@ -62,7 +56,6 @@ export type ModelId = string & Brand.Brand<"ModelId">
 /**
  * Schema for validating and constructing ModelId.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const ModelIdSchema = Schema.String.pipe(
@@ -74,7 +67,6 @@ export const ModelIdSchema = Schema.String.pipe(
 /**
  * Constructs a ModelId from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  * @example
  *   import { ModelId } from "@knpkv/effect-ai-claude-code-cli"
@@ -96,7 +88,6 @@ export const unsafeModelId = (s: string): ModelId => s as ModelId
 /**
  * A branded type for file paths.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type FilePath = string & Brand.Brand<"FilePath">
@@ -106,7 +97,6 @@ export type FilePath = string & Brand.Brand<"FilePath">
  *
  * Validates path is non-empty and doesn't contain null bytes or path traversal.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const FilePathSchema = Schema.String.pipe(
@@ -123,7 +113,6 @@ export const FilePathSchema = Schema.String.pipe(
 /**
  * Constructs a FilePath from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  * @example
  *   import { FilePath } from "@knpkv/effect-ai-claude-code-cli"
@@ -147,7 +136,6 @@ export const unsafeFilePath = (s: string): FilePath => s as FilePath
  *
  * Ensures prompts are non-empty.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type PromptText = string & Brand.Brand<"PromptText">
@@ -155,7 +143,6 @@ export type PromptText = string & Brand.Brand<"PromptText">
 /**
  * Schema for validating and constructing PromptText.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const PromptTextSchema = Schema.String.pipe(
@@ -167,7 +154,6 @@ export const PromptTextSchema = Schema.String.pipe(
 /**
  * Constructs a PromptText from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  * @example
  *   import { PromptText } from "@knpkv/effect-ai-claude-code-cli"
@@ -189,7 +175,6 @@ export const unsafePromptText = (s: string): PromptText => s as PromptText
 /**
  * A branded type for stream event IDs.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type EventId = string & Brand.Brand<"EventId">
@@ -197,7 +182,6 @@ export type EventId = string & Brand.Brand<"EventId">
 /**
  * Schema for validating and constructing EventId.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const EventIdSchema = Schema.String.pipe(
@@ -208,7 +192,6 @@ export const EventIdSchema = Schema.String.pipe(
 /**
  * Constructs an EventId from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  */
 export const EventId = Brand.refined<EventId>(
@@ -226,7 +209,6 @@ export const unsafeEventId = (s: string): EventId => s as EventId
 /**
  * A branded type for content block IDs.
  *
- * @since 1.0.0
  * @category Brands
  */
 export type BlockId = string & Brand.Brand<"BlockId">
@@ -234,7 +216,6 @@ export type BlockId = string & Brand.Brand<"BlockId">
 /**
  * Schema for validating and constructing BlockId.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const BlockIdSchema = Schema.String.pipe(
@@ -245,7 +226,6 @@ export const BlockIdSchema = Schema.String.pipe(
 /**
  * Constructs a BlockId from a string with validation.
  *
- * @since 1.0.0
  * @category Constructors
  */
 export const BlockId = Brand.refined<BlockId>(

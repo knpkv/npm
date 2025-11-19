@@ -1,7 +1,5 @@
 /**
  * Provider-defined tools for Claude Code CLI built-in tools.
- *
- * @since 1.0.0
  */
 import * as Tool from "@effect/ai/Tool"
 import * as Schema from "effect/Schema"
@@ -17,7 +15,6 @@ import * as Schema from "effect/Schema"
  * ```
  *
  * @category Tools
- * @since 1.0.0
  */
 export const Bash = Tool.providerDefined({
   id: "claude_code_cli.bash",
@@ -45,7 +42,6 @@ export const Bash = Tool.providerDefined({
  * ```
  *
  * @category Tools
- * @since 1.0.0
  */
 export const Read = Tool.providerDefined({
   id: "claude_code_cli.read",
@@ -81,7 +77,6 @@ export const Read = Tool.providerDefined({
  * ```
  *
  * @category Tools
- * @since 1.0.0
  */
 export const Edit = Tool.providerDefined({
   id: "claude_code_cli.edit",
@@ -121,7 +116,6 @@ export const Edit = Tool.providerDefined({
  * ```
  *
  * @category Tools
- * @since 1.0.0
  */
 export const Grep = Tool.providerDefined({
   id: "claude_code_cli.grep",
@@ -165,7 +159,6 @@ export const Grep = Tool.providerDefined({
  * ```
  *
  * @category Tools
- * @since 1.0.0
  */
 export const Glob = Tool.providerDefined({
   id: "claude_code_cli.glob",
@@ -214,7 +207,6 @@ const ProviderToolNamesMap: Map<string, string> = new Map([
  * ```
  *
  * @category Tool Calling
- * @since 1.0.0
  */
 export const getProviderDefinedToolName = (name: string): string | undefined => ProviderToolNamesMap.get(name)
 
@@ -231,7 +223,6 @@ export const getProviderDefinedToolName = (name: string): string | undefined => 
  * }
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const allTools = [
@@ -256,7 +247,6 @@ export const allTools = [
 /**
  * Union type of all known tool names.
  *
- * @since 1.0.0
  * @category Tools
  */
 export type KnownToolName = (typeof allTools)[number]
@@ -266,7 +256,6 @@ export type KnownToolName = (typeof allTools)[number]
  *
  * Provides autocomplete for known tools while allowing custom tool names.
  *
- * @since 1.0.0
  * @category Tools
  */
 export type ToolNameOrString = KnownToolName | (string & {})

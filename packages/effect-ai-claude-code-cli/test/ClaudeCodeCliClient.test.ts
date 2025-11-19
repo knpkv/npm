@@ -1,7 +1,5 @@
 /**
  * Tests for ClaudeCodeCliClient.
- *
- * @since 1.0.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"

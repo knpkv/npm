@@ -1,7 +1,5 @@
 /**
  * Type guards and type utilities for working with message chunks.
- *
- * @since 1.0.0
  */
 
 import type {
@@ -22,7 +20,6 @@ import type {
  * @param chunk - Message chunk to check
  * @returns True if chunk is a TextChunk
  *
- * @since 1.0.0
  * @category Type Guards
  * @example
  *   import { isTextChunk } from "@knpkv/effect-ai-claude-code-cli/TypeGuards"
@@ -40,7 +37,6 @@ export const isTextChunk = (chunk: MessageChunk): chunk is TextChunk => chunk.ty
  * @param chunk - Message chunk to check
  * @returns True if chunk is a ToolUseStartChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isToolUseStartChunk = (chunk: MessageChunk): chunk is ToolUseStartChunk => chunk.type === "tool_use_start"
@@ -51,7 +47,6 @@ export const isToolUseStartChunk = (chunk: MessageChunk): chunk is ToolUseStartC
  * @param chunk - Message chunk to check
  * @returns True if chunk is a ToolInputChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isToolInputChunk = (chunk: MessageChunk): chunk is ToolInputChunk => chunk.type === "tool_input"
@@ -62,7 +57,6 @@ export const isToolInputChunk = (chunk: MessageChunk): chunk is ToolInputChunk =
  * @param chunk - Message chunk to check
  * @returns True if chunk is a ContentBlockStartChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isContentBlockStartChunk = (chunk: MessageChunk): chunk is ContentBlockStartChunk =>
@@ -74,7 +68,6 @@ export const isContentBlockStartChunk = (chunk: MessageChunk): chunk is ContentB
  * @param chunk - Message chunk to check
  * @returns True if chunk is a ContentBlockStopChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isContentBlockStopChunk = (chunk: MessageChunk): chunk is ContentBlockStopChunk =>
@@ -86,7 +79,6 @@ export const isContentBlockStopChunk = (chunk: MessageChunk): chunk is ContentBl
  * @param chunk - Message chunk to check
  * @returns True if chunk is a MessageStartChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isMessageStartChunk = (chunk: MessageChunk): chunk is MessageStartChunk => chunk.type === "message_start"
@@ -97,7 +89,6 @@ export const isMessageStartChunk = (chunk: MessageChunk): chunk is MessageStartC
  * @param chunk - Message chunk to check
  * @returns True if chunk is a MessageDeltaChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isMessageDeltaChunk = (chunk: MessageChunk): chunk is MessageDeltaChunk => chunk.type === "message_delta"
@@ -108,7 +99,6 @@ export const isMessageDeltaChunk = (chunk: MessageChunk): chunk is MessageDeltaC
  * @param chunk - Message chunk to check
  * @returns True if chunk is a MessageStopChunk
  *
- * @since 1.0.0
  * @category Type Guards
  */
 export const isMessageStopChunk = (chunk: MessageChunk): chunk is MessageStopChunk => chunk.type === "message_stop"
@@ -116,7 +106,6 @@ export const isMessageStopChunk = (chunk: MessageChunk): chunk is MessageStopChu
 /**
  * Extract all text chunks from a stream.
  *
- * @since 1.0.0
  * @category Utilities
  * @example
  *   import { extractTextChunks } from "@knpkv/effect-ai-claude-code-cli/TypeGuards"
@@ -134,7 +123,6 @@ export const extractTextChunks = (chunk: MessageChunk): chunk is TextChunk => is
  * @param chunk - Message chunk
  * @returns Usage object if chunk is MessageDeltaChunk, undefined otherwise
  *
- * @since 1.0.0
  * @category Utilities
  * @example
  *   import { extractUsage } from "@knpkv/effect-ai-claude-code-cli/TypeGuards"

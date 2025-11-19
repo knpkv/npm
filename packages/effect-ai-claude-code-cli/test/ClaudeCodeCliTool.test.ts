@@ -1,7 +1,5 @@
 /**
  * Tests for ClaudeCodeCliTool.
- *
- * @since 1.0.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Bash, Edit, getProviderDefinedToolName, Glob, Grep, Read } from "../src/ClaudeCodeCliTool.js"

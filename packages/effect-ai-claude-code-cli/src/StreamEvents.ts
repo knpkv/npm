@@ -2,8 +2,6 @@
  * Stream event schemas for Claude Code CLI stream-json output.
  *
  * Defines all event types returned by the CLI's --output-format stream-json.
- *
- * @since 1.0.0
  */
 import * as Schema from "effect/Schema"
 
@@ -11,7 +9,6 @@ import * as Schema from "effect/Schema"
  * Usage information for token consumption.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const Usage = Schema.Struct({
   input_tokens: Schema.Number,
@@ -24,7 +21,6 @@ export type Usage = Schema.Schema.Type<typeof Usage>
  * Text content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const TextContentBlock = Schema.Struct({
   type: Schema.Literal("text"),
@@ -38,7 +34,6 @@ export const TextContentBlock = Schema.Struct({
  * This is explicitly unknown as tool inputs are arbitrary JSON.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ToolInput = Schema.Unknown
 
@@ -48,7 +43,6 @@ export type ToolInput = Schema.Schema.Type<typeof ToolInput>
  * Tool use content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ToolUseContentBlock = Schema.Struct({
   type: Schema.Literal("tool_use"),
@@ -61,7 +55,6 @@ export const ToolUseContentBlock = Schema.Struct({
  * Thinking content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ThinkingContentBlock = Schema.Struct({
   type: Schema.Literal("thinking")
@@ -71,7 +64,6 @@ export const ThinkingContentBlock = Schema.Struct({
  * Union of all content block types.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ContentBlock = Schema.Union(
   TextContentBlock,
@@ -85,7 +77,6 @@ export type ContentBlock = Schema.Schema.Type<typeof ContentBlock>
  * Message metadata from message_start event.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const Message = Schema.Struct({
   id: Schema.String,
@@ -104,7 +95,6 @@ export type Message = Schema.Schema.Type<typeof Message>
  * Message start event - indicates beginning of message.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const MessageStartEvent = Schema.Struct({
   type: Schema.Literal("message_start"),
@@ -117,7 +107,6 @@ export type MessageStartEvent = Schema.Schema.Type<typeof MessageStartEvent>
  * Content block start event - indicates beginning of content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ContentBlockStartEvent = Schema.Struct({
   type: Schema.Literal("content_block_start"),
@@ -131,7 +120,6 @@ export type ContentBlockStartEvent = Schema.Schema.Type<typeof ContentBlockStart
  * Text delta for streaming text content.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const TextDelta = Schema.Struct({
   type: Schema.Literal("text_delta"),
@@ -144,7 +132,6 @@ export type TextDelta = Schema.Schema.Type<typeof TextDelta>
  * Input JSON delta for streaming tool input construction.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const InputJsonDelta = Schema.Struct({
   type: Schema.Literal("input_json_delta"),
@@ -157,7 +144,6 @@ export type InputJsonDelta = Schema.Schema.Type<typeof InputJsonDelta>
  * Content block delta event - contains incremental content (text or tool input).
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ContentBlockDeltaEvent = Schema.Struct({
   type: Schema.Literal("content_block_delta"),
@@ -171,7 +157,6 @@ export type ContentBlockDeltaEvent = Schema.Schema.Type<typeof ContentBlockDelta
  * Content block stop event - indicates end of content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const ContentBlockStopEvent = Schema.Struct({
   type: Schema.Literal("content_block_stop"),
@@ -184,7 +169,6 @@ export type ContentBlockStopEvent = Schema.Schema.Type<typeof ContentBlockStopEv
  * Message delta metadata.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const MessageDelta = Schema.Struct({
   stop_reason: Schema.optional(Schema.String),
@@ -197,7 +181,6 @@ export type MessageDelta = Schema.Schema.Type<typeof MessageDelta>
  * Output usage information (for message_delta events).
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const OutputUsage = Schema.Struct({
   output_tokens: Schema.Number
@@ -209,7 +192,6 @@ export type OutputUsage = Schema.Schema.Type<typeof OutputUsage>
  * Message delta event - contains message metadata updates.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const MessageDeltaEvent = Schema.Struct({
   type: Schema.Literal("message_delta"),
@@ -223,7 +205,6 @@ export type MessageDeltaEvent = Schema.Schema.Type<typeof MessageDeltaEvent>
  * Message stop event - indicates end of message stream.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const MessageStopEvent = Schema.Struct({
   type: Schema.Literal("message_stop")
@@ -235,7 +216,6 @@ export type MessageStopEvent = Schema.Schema.Type<typeof MessageStopEvent>
  * Union of all stream event types.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const StreamEvent = Schema.Union(
   MessageStartEvent,
@@ -250,7 +230,6 @@ export const StreamEvent = Schema.Union(
  * Inferred type for stream events.
  *
  * @category Types
- * @since 1.0.0
  */
 export type StreamEvent = Schema.Schema.Type<typeof StreamEvent>
 
@@ -260,7 +239,6 @@ export type StreamEvent = Schema.Schema.Type<typeof StreamEvent>
  * The CLI wraps events in: {"type":"stream_event","event":{...}}
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const WrappedStreamEvent = Schema.Struct({
   type: Schema.Literal("stream_event"),
@@ -273,7 +251,6 @@ export type WrappedStreamEvent = Schema.Schema.Type<typeof WrappedStreamEvent>
  * Text chunk - represents streaming text content.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class TextChunk extends Schema.Class<TextChunk>("TextChunk")({
   /**
@@ -294,7 +271,6 @@ export class TextChunk extends Schema.Class<TextChunk>("TextChunk")({
  * Tool use start chunk - indicates a tool is being invoked.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class ToolUseStartChunk extends Schema.Class<ToolUseStartChunk>("ToolUseStartChunk")({
   /**
@@ -319,7 +295,6 @@ export class ToolUseStartChunk extends Schema.Class<ToolUseStartChunk>("ToolUseS
  * Tool input chunk - represents streaming tool input JSON.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class ToolInputChunk extends Schema.Class<ToolInputChunk>("ToolInputChunk")({
   /**
@@ -340,7 +315,6 @@ export class ToolInputChunk extends Schema.Class<ToolInputChunk>("ToolInputChunk
  * Content block start chunk - indicates start of a content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class ContentBlockStartChunk extends Schema.Class<ContentBlockStartChunk>("ContentBlockStartChunk")({
   /**
@@ -361,7 +335,6 @@ export class ContentBlockStartChunk extends Schema.Class<ContentBlockStartChunk>
  * Content block stop chunk - indicates end of a content block.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class ContentBlockStopChunk extends Schema.Class<ContentBlockStopChunk>("ContentBlockStopChunk")({
   /**
@@ -378,7 +351,6 @@ export class ContentBlockStopChunk extends Schema.Class<ContentBlockStopChunk>("
  * Message start chunk - indicates beginning of message with metadata.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class MessageStartChunk extends Schema.Class<MessageStartChunk>("MessageStartChunk")({
   /**
@@ -395,7 +367,6 @@ export class MessageStartChunk extends Schema.Class<MessageStartChunk>("MessageS
  * Message delta chunk - contains message metadata updates (usage, stop_reason, etc).
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class MessageDeltaChunk extends Schema.Class<MessageDeltaChunk>("MessageDeltaChunk")({
   /**
@@ -416,7 +387,6 @@ export class MessageDeltaChunk extends Schema.Class<MessageDeltaChunk>("MessageD
  * Message stop chunk - indicates end of message stream.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export class MessageStopChunk extends Schema.Class<MessageStopChunk>("MessageStopChunk")({
   /**
@@ -429,7 +399,6 @@ export class MessageStopChunk extends Schema.Class<MessageStopChunk>("MessageSto
  * Union of all chunk types.
  *
  * @category Schemas
- * @since 1.0.0
  */
 export const MessageChunk = Schema.Union(
   TextChunk,
@@ -446,6 +415,5 @@ export const MessageChunk = Schema.Union(
  * Inferred type for message chunks.
  *
  * @category Types
- * @since 1.0.0
  */
 export type MessageChunk = Schema.Schema.Type<typeof MessageChunk>

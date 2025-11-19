@@ -1,7 +1,6 @@
 /**
  * Internal utility functions.
  *
- * @since 1.0.0
  * @internal
  */
 import * as Command from "@effect/platform/Command"
@@ -17,7 +16,6 @@ import * as Tool from "../ClaudeCodeCliTool.js"
  * @param disallowedTools - Optional disallowed tools
  * @returns True if any tools are configured
  *
- * @since 1.0.0
  * @internal
  */
 export const hasToolsConfigured = (
@@ -44,7 +42,6 @@ export const hasToolsConfigured = (
  * @param streamJson - Whether to use stream-json output format
  * @returns Command instance
  *
- * @since 1.0.0
  * @internal
  */
 export const buildCommand = (
@@ -88,7 +85,6 @@ export const buildCommand = (
  * If error includes retryAfter, uses that duration.
  * Otherwise falls back to exponential backoff: 1s, 2s, 4s, 8s, 16s (max 5 retries).
  *
- * @since 1.0.0
  * @internal
  */
 export const rateLimitSchedule: Schedule.Schedule<number, ClaudeCodeCliError, never> = Schedule.exponential("1 second")
@@ -110,7 +106,6 @@ export const rateLimitSchedule: Schedule.Schedule<number, ClaudeCodeCliError, ne
  * @param chunks - Array of text chunks
  * @returns Concatenated text
  *
- * @since 1.0.0
  * @internal
  */
 export const accumulateText = (chunks: ReadonlyArray<{ text: string }>): string => chunks.map((c) => c.text).join("")
@@ -124,7 +119,6 @@ export const accumulateText = (chunks: ReadonlyArray<{ text: string }>): string 
  * @param error - Platform error
  * @returns Error message string
  *
- * @since 1.0.0
  * @internal
  */
 export const extractErrorMessage = (error: PlatformError.PlatformError): string => {

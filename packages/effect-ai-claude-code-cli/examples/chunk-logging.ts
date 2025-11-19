@@ -3,8 +3,6 @@
  *
  * Demonstrates logging every response chunk during streaming,
  * including tool call events.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Layer, Stream } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"

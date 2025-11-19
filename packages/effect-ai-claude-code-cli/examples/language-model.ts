@@ -2,8 +2,6 @@
  * Language Model example.
  *
  * Demonstrates @effect/ai LanguageModel integration.
- *
- * @since 1.0.0
  */
 import { LanguageModel } from "@effect/ai"
 import { ClaudeCodeCliClient, ClaudeCodeCliConfig, ClaudeCodeCliLanguageModel } from "@knpkv/effect-ai-claude-code-cli"

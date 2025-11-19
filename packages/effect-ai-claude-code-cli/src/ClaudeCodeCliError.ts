@@ -1,6 +1,4 @@
-/**
- * @since 1.0.0
- */
+/** */
 import * as Data from "effect/Data"
 
 /**
@@ -25,14 +23,11 @@ import * as Data from "effect/Data"
  * ```
  *
  * @category Errors
- * @since 1.0.0
  */
 export class CliNotFoundError extends Data.TaggedError("CliNotFoundError")<{
   readonly message: string
 }> {
-  /**
-   * @since 1.0.0
-   */
+  /** */
   constructor() {
     super({
       message: "Claude Code CLI not found. Install with: npm i -g @anthropics/claude-code"
@@ -44,7 +39,6 @@ export class CliNotFoundError extends Data.TaggedError("CliNotFoundError")<{
  * Error thrown when CLI execution fails.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class CliExecutionError extends Data.TaggedError("CliExecutionError")<{
   readonly stderr: string
@@ -55,7 +49,6 @@ export class CliExecutionError extends Data.TaggedError("CliExecutionError")<{
  * Error thrown when stream JSON parsing fails.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class StreamParsingError extends Data.TaggedError("StreamParsingError")<{
   readonly line: string
@@ -83,7 +76,6 @@ export class StreamParsingError extends Data.TaggedError("StreamParsingError")<{
  * ```
  *
  * @category Errors
- * @since 1.0.0
  */
 export class RateLimitError extends Data.TaggedError("RateLimitError")<{
   readonly retryAfter?: number
@@ -94,7 +86,6 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * Error thrown when API key is invalid.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class InvalidApiKeyError extends Data.TaggedError("InvalidApiKeyError")<{
   readonly stderr: string
@@ -104,7 +95,6 @@ export class InvalidApiKeyError extends Data.TaggedError("InvalidApiKeyError")<{
  * Error thrown when network request fails.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class NetworkError extends Data.TaggedError("NetworkError")<{
   readonly stderr: string
@@ -114,7 +104,6 @@ export class NetworkError extends Data.TaggedError("NetworkError")<{
  * Error thrown when context length is exceeded.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class ContextLengthError extends Data.TaggedError("ContextLengthError")<{
   readonly stderr: string
@@ -124,7 +113,6 @@ export class ContextLengthError extends Data.TaggedError("ContextLengthError")<{
  * Error thrown when input validation fails.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class ValidationError extends Data.TaggedError("ValidationError")<{
   readonly message: string
@@ -134,7 +122,6 @@ export class ValidationError extends Data.TaggedError("ValidationError")<{
  * Error thrown when CLI version is incompatible.
  *
  * @category Errors
- * @since 1.0.0
  */
 export class CliVersionMismatchError extends Data.TaggedError("CliVersionMismatchError")<{
   readonly installed: string
@@ -146,7 +133,6 @@ export class CliVersionMismatchError extends Data.TaggedError("CliVersionMismatc
  * Union of all possible CLI errors.
  *
  * @category Errors
- * @since 1.0.0
  */
 export type ClaudeCodeCliError =
   | CliNotFoundError
@@ -166,7 +152,6 @@ export type ClaudeCodeCliError =
  * @returns True if error is a ClaudeCodeCliError
  *
  * @category Utilities
- * @since 1.0.0
  */
 export const isClaudeCodeCliError = (error: unknown): error is ClaudeCodeCliError =>
   typeof error === "object" && error !== null && "_tag" in error &&
@@ -189,7 +174,7 @@ export const isClaudeCodeCliError = (error: unknown): error is ClaudeCodeCliErro
  * @returns Appropriate error instance
  *
  * @category Utilities
- * @since 1.0.0
+
  * @internal
  */
 export const parseStderr = (stderr: string, exitCode: number): ClaudeCodeCliError => {

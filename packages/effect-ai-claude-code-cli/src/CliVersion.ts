@@ -1,7 +1,5 @@
 /**
  * CLI version detection and compatibility checking.
- *
- * @since 1.0.0
  */
 
 import * as NodeContext from "@effect/platform-node/NodeContext"
@@ -13,7 +11,6 @@ import { CliNotFoundError, CliVersionMismatchError } from "./ClaudeCodeCliError.
 /**
  * Minimum supported CLI version.
  *
- * @since 1.0.0
  * @category Constants
  */
 export const MIN_CLI_VERSION = "0.1.0"
@@ -21,7 +18,6 @@ export const MIN_CLI_VERSION = "0.1.0"
 /**
  * Version schema for parsing semver strings.
  *
- * @since 1.0.0
  * @category Schemas
  */
 export const VersionSchema = Schema.Struct({
@@ -38,7 +34,6 @@ export type Version = Schema.Schema.Type<typeof VersionSchema>
  * @param versionString - Semver string like "1.2.3"
  * @returns Parsed version or null if invalid
  *
- * @since 1.0.0
  * @category Utilities
  * @internal
  */
@@ -60,7 +55,6 @@ export const parseVersion = (versionString: string): Version | null => {
  * @param b - Second version
  * @returns Negative if a < b, 0 if equal, positive if a > b
  *
- * @since 1.0.0
  * @category Utilities
  * @internal
  */
@@ -77,7 +71,6 @@ export const compareVersions = (a: Version, b: Version): number => {
  *
  * @returns Effect with version string or CliNotFoundError
  *
- * @since 1.0.0
  * @category Version
  * @example
  *   import { getCliVersion } from "@knpkv/effect-ai-claude-code-cli/CliVersion"
@@ -106,7 +99,6 @@ export const getCliVersion = (): Effect.Effect<string, CliNotFoundError> =>
  * @param minVersion - Minimum required version string
  * @returns Effect with version check result or error
  *
- * @since 1.0.0
  * @category Version
  * @example
  *   import { checkCliVersion } from "@knpkv/effect-ai-claude-code-cli/CliVersion"

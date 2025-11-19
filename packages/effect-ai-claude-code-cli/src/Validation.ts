@@ -1,7 +1,5 @@
 /**
  * Input validation for Claude Code CLI parameters.
- *
- * @since 1.0.0
  */
 
 import * as Effect from "effect/Effect"
@@ -13,7 +11,6 @@ import { ValidationError } from "./ClaudeCodeCliError.js"
 /**
  * Maximum prompt length in characters.
  *
- * @since 1.0.0
  * @category Constants
  */
 export const MAX_PROMPT_LENGTH = 1_000_000
@@ -21,7 +18,6 @@ export const MAX_PROMPT_LENGTH = 1_000_000
 /**
  * Maximum timeout in milliseconds (10 minutes).
  *
- * @since 1.0.0
  * @category Constants
  */
 export const MAX_TIMEOUT_MS = 600_000
@@ -29,7 +25,6 @@ export const MAX_TIMEOUT_MS = 600_000
 /**
  * Minimum timeout in milliseconds (1 second).
  *
- * @since 1.0.0
  * @category Constants
  */
 export const MIN_TIMEOUT_MS = 1000
@@ -37,7 +32,6 @@ export const MIN_TIMEOUT_MS = 1000
 /**
  * Valid known tool names.
  *
- * @since 1.0.0
  * @category Constants
  */
 export const KNOWN_TOOLS = [
@@ -60,7 +54,6 @@ export const KNOWN_TOOLS = [
  * @param prompt - Prompt text to validate
  * @returns Effect with validated PromptText or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validatePrompt } from "@knpkv/effect-ai-claude-code-cli/Validation"
@@ -97,7 +90,6 @@ export const validatePrompt = (prompt: string): Effect.Effect<Brand.PromptText, 
  * @param model - Model ID to validate
  * @returns Effect with validated ModelId or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validateModel } from "@knpkv/effect-ai-claude-code-cli/Validation"
@@ -122,7 +114,6 @@ export const validateModel = (model: string): Effect.Effect<Brand.ModelId, Valid
  * @param strict - If true, fails on unknown tools. Default: false (warning only)
  * @returns Effect with validated ToolName or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validateToolName } from "@knpkv/effect-ai-claude-code-cli/Validation"
@@ -165,7 +156,6 @@ export const validateToolName = (
  * @param path - File path to validate
  * @returns Effect with validated FilePath or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validateFilePath } from "@knpkv/effect-ai-claude-code-cli/Validation"
@@ -188,7 +178,6 @@ export const validateFilePath = (path: string): Effect.Effect<Brand.FilePath, Va
  * @param timeoutMs - Timeout in milliseconds
  * @returns Effect with validated timeout or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validateTimeout } from "@knpkv/effect-ai-claude-code-cli/Validation"
@@ -225,7 +214,6 @@ export const validateTimeout = (timeoutMs: number): Effect.Effect<number, Valida
  * @param strict - If true, fails on unknown tools
  * @returns Effect with validated array of ToolNames or ValidationError
  *
- * @since 1.0.0
  * @category Validation
  * @example
  *   import { validateTools } from "@knpkv/effect-ai-claude-code-cli/Validation"

@@ -2,8 +2,6 @@
  * Tool calling example.
  *
  * Demonstrates using the CLI with allowed tools for enhanced capabilities.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Layer } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"

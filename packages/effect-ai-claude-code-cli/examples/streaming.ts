@@ -2,8 +2,6 @@
  * Streaming query example.
  *
  * Demonstrates streaming text generation with real-time chunk output.
- *
- * @since 1.0.0
  */
 import { Console, Effect } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"

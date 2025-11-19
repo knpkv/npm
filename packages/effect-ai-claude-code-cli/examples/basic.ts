@@ -2,8 +2,6 @@
  * Basic example.
  *
  * Demonstrates basic usage of the ClaudeCodeCliClient.
- *
- * @since 1.0.0
  */
 import { ClaudeCodeCliClient, ClaudeCodeCliConfig } from "@knpkv/effect-ai-claude-code-cli"
 import { Console, Effect } from "effect"

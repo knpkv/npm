@@ -2,8 +2,6 @@
  * Integration tests for ClaudeCodeCliClient.
  *
  * Tests actual CLI execution, streaming, tool calls, and error scenarios.
- *
- * @since 1.0.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Array, Effect, Layer, Stream } from "effect"

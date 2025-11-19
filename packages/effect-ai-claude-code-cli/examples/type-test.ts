@@ -3,8 +3,6 @@
  *
  * This file demonstrates that IDE autocomplete works for known tool names
  * while still allowing custom tool names.
- *
- * @since 1.0.0
  */
 import * as CliTool from "../src/ClaudeCodeCliTool.js"
 
