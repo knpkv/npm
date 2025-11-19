@@ -42,6 +42,40 @@ describe("ClaudeAgentTool", () => {
 
       expect(Tool.allTools).toEqual(expected)
     })
+
+    it("should maintain complete tool list for SDK compatibility", () => {
+      // MAINTENANCE NOTE: This test ensures Tool.allTools is kept in sync with
+      // the Claude Agent SDK. When the SDK adds new tools, update ClaudeAgentTool.allTools
+      // and this test. Integration tests will fail if SDK has tools not in our list.
+      //
+      // Known tools as of @anthropic-ai/claude-agent-sdk@0.1.12:
+      const knownTools = new Set([
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Task",
+        "SlashCommand",
+        "Skill",
+        "TodoWrite",
+        "AskUserQuestion",
+        "NotebookEdit",
+        "BashOutput",
+        "KillShell"
+      ])
+
+      // Verify all tools in allTools are known
+      for (const tool of Tool.allTools) {
+        expect(knownTools.has(tool)).toBe(true)
+      }
+
+      // Verify no tools are missing
+      expect(Tool.allTools.length).toBe(knownTools.size)
+    })
   })
 
   describe("allowAll", () => {
