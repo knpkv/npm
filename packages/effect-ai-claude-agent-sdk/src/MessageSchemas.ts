@@ -42,7 +42,7 @@ export const BaseMessage = Schema.Struct({
  * @example
  * ```typescript
  * import { Schema } from "@effect/schema"
- * import * as MessageSchemas from "@knpkv/effect-ai-claude-code-sdk/MessageSchemas"
+ * import * as MessageSchemas from "@knpkv/effect-ai-claude-agent-sdk/MessageSchemas"
  *
  * const message = {
  *   type: "assistant" as const,
@@ -138,7 +138,7 @@ export const PermissionDenialMessage = Schema.Struct({
  * ```typescript
  * import { Effect, Stream } from "effect"
  * import { Schema } from "@effect/schema"
- * import * as MessageSchemas from "@knpkv/effect-ai-claude-code-sdk/MessageSchemas"
+ * import * as MessageSchemas from "@knpkv/effect-ai-claude-agent-sdk/MessageSchemas"
  *
  * const processMessage = (message: MessageSchemas.MessageEvent) => {
  *   switch (message.type) {

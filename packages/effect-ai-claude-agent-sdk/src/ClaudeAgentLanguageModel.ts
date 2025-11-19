@@ -20,7 +20,7 @@ import type * as AgentError from "./ClaudeAgentError.js"
  * @category Configuration
  * @since 1.0.0
  */
-export class Config extends Context.Tag("@knpkv/effect-ai-claude-code-sdk/ClaudeAgentLanguageModel/Config")<
+export class Config extends Context.Tag("@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentLanguageModel/Config")<
   Config,
   Config.Service
 >() {}
@@ -122,7 +122,7 @@ export const make = Effect.gen(function*() {
  *
  * @example
  * ```typescript
- * import { ClaudeAgentLanguageModel, ClaudeAgentClient } from "@knpkv/effect-ai-claude-code-sdk"
+ * import { ClaudeAgentLanguageModel, ClaudeAgentClient } from "@knpkv/effect-ai-claude-agent-sdk"
  * import { LanguageModel } from "@effect/ai"
  * import { Effect } from "effect"
  *
@@ -166,7 +166,7 @@ export const layer = (
  *
  * @example
  * ```typescript
- * import { ClaudeAgentLanguageModel } from "@knpkv/effect-ai-claude-code-sdk"
+ * import { ClaudeAgentLanguageModel } from "@knpkv/effect-ai-claude-agent-sdk"
  *
  * const model = ClaudeAgentLanguageModel.model()
  * ```

@@ -1,18 +1,18 @@
-# @knpkv/effect-ai-claude-code-sdk
+# @knpkv/effect-ai-claude-agent-sdk
 
 Effect-TS wrapper for the Anthropic Claude Agent SDK with type-safe integration.
 
 ## Installation
 
 ```bash
-pnpm add @knpkv/effect-ai-claude-code-sdk @anthropic-ai/claude-agent-sdk effect
+pnpm add @knpkv/effect-ai-claude-agent-sdk @anthropic-ai/claude-agent-sdk effect
 ```
 
 ## Quick Start
 
 ```typescript
 import { Effect } from "effect"
-import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk"
+import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk"
 
 const program = Effect.gen(function* () {
   const client = yield* AgentClient.ClaudeAgentClient.ClaudeAgentClient
@@ -49,8 +49,8 @@ The package follows Effect-TS best practices:
 ## Configuration
 
 ```typescript
-import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk"
-import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
+import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk"
+import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
 
 const configLayer = AgentConfig.layer({
   apiKeySource: "project",

@@ -17,8 +17,8 @@ import { Brand } from "effect"
  *
  * @example
  * ```typescript
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -47,7 +47,7 @@ export type ApiKeySource = "user" | "project" | "org" | "temporary"
  * @example
  * ```typescript
  * import { Brand } from "effect"
- * import * as AgentBrand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as AgentBrand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * // Create a tool name
  * const toolName: AgentBrand.ToolName = Brand.nominal<AgentBrand.ToolName>()("Read")
@@ -70,7 +70,7 @@ export type ToolName = string & Brand.Brand<"ToolName">
  *
  * @example
  * ```typescript
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * const readTool = Brand.ToolName("Read")
  * const bashTool = Brand.ToolName("Bash")
@@ -89,7 +89,7 @@ export const ToolName = Brand.nominal<ToolName>()
  * @example
  * ```typescript
  * import { Brand } from "effect"
- * import * as AgentBrand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as AgentBrand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * // Create a hook name
  * const hookName: AgentBrand.HookName = Brand.nominal<AgentBrand.HookName>()("SessionStart")
@@ -110,7 +110,7 @@ export type HookName = string & Brand.Brand<"HookName">
  *
  * @example
  * ```typescript
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * const sessionStart = Brand.HookName("SessionStart")
  * const toolUse = Brand.HookName("PreToolUse")
@@ -129,8 +129,8 @@ export const HookName = Brand.nominal<HookName>()
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  *
  * const program = Effect.gen(function* () {
  *   // Create working directory with validation
@@ -160,7 +160,7 @@ export type WorkingDirectory = string & Brand.Brand<"WorkingDirectory">
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * // Valid directory
  * const validDir = Brand.WorkingDirectory("/home/user/project")
@@ -191,7 +191,7 @@ export const WorkingDirectory = Brand.refined<WorkingDirectory>(
  * @example
  * ```typescript
  * import { Brand } from "effect"
- * import * as AgentBrand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as AgentBrand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * // Create a message ID
  * const messageId: AgentBrand.MessageId = Brand.nominal<AgentBrand.MessageId>()("msg_123")
@@ -213,7 +213,7 @@ export type MessageId = string & Brand.Brand<"MessageId">
  *
  * @example
  * ```typescript
- * import * as Brand from "@knpkv/effect-ai-claude-code-sdk/Brand"
+ * import * as Brand from "@knpkv/effect-ai-claude-agent-sdk/Brand"
  *
  * const msgId = Brand.MessageId("msg_abc123")
  * ```

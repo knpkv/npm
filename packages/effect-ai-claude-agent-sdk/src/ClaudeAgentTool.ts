@@ -21,8 +21,8 @@ export type ToolName = Brand.ToolName
  *
  * @example
  * ```typescript
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -87,7 +87,7 @@ export type ToolNameOrString = KnownToolName | (string & {})
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
  *
  * // Simple permission callback
  * const canUseTool: Tool.CanUseToolCallback = (toolName) =>
@@ -119,8 +119,8 @@ export type CanUseToolCallback = (toolName: string) => Effect.Effect<boolean, ne
  *
  * @example
  * ```typescript
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -145,8 +145,8 @@ export const allowAll: CanUseToolCallback = () => Effect.succeed(true)
  *
  * @example
  * ```typescript
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -172,8 +172,8 @@ export const denyAll: CanUseToolCallback = () => Effect.succeed(false)
  *
  * @example
  * ```typescript
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -200,8 +200,8 @@ export const allowList = (tools: ReadonlyArray<ToolNameOrString>): CanUseToolCal
  *
  * @example
  * ```typescript
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {

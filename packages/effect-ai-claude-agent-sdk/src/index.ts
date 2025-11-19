@@ -11,7 +11,7 @@
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk"
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* AgentClient.ClaudeAgentClient

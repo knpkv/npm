@@ -15,8 +15,8 @@ import type * as Tool from "./ClaudeAgentTool.js"
  *
  * @example
  * ```typescript
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
  * import { Effect } from "effect"
  *
  * const config: AgentConfig.ClaudeAgentConfigOptions = {
@@ -105,7 +105,7 @@ export interface ClaudeAgentConfig extends ClaudeAgentConfigOptions {
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
  *
  * const program = Effect.gen(function* () {
  *   const config = yield* AgentConfig.ClaudeAgentConfig
@@ -119,7 +119,7 @@ export interface ClaudeAgentConfig extends ClaudeAgentConfigOptions {
  * @category Config
  */
 export const ClaudeAgentConfig = Context.GenericTag<ClaudeAgentConfig>(
-  "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
+  "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
 )
 
 /**
@@ -128,8 +128,8 @@ export const ClaudeAgentConfig = Context.GenericTag<ClaudeAgentConfig>(
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
  *
  * const config = AgentConfig.make({
  *   apiKeySource: "project",
@@ -158,8 +158,8 @@ export const make = (options: ClaudeAgentConfigOptions = {}): ClaudeAgentConfig 
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
  *
  * const configLayer = AgentConfig.layer({
  *   apiKeySource: "user",
@@ -192,7 +192,7 @@ export const layer = (options: ClaudeAgentConfigOptions = {}): Layer.Layer<Claud
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
  *
  * const program = Effect.gen(function* () {
  *   const config = yield* AgentConfig.ClaudeAgentConfig

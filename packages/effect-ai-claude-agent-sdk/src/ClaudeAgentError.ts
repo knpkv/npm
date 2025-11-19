@@ -15,7 +15,7 @@ import { Data } from "effect"
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const program = Effect.gen(function* () {
  *   // SDK operation that might fail
@@ -61,7 +61,7 @@ export class SdkError extends Data.TaggedError("SdkError")<{
  * @example
  * ```typescript
  * import { Effect, Stream } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const handleStream = (stream: Stream.Stream<Message, StreamError>) =>
  *   stream.pipe(
@@ -103,7 +103,7 @@ export class StreamError extends Data.TaggedError("StreamError")<{
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const executeTool = (toolName: string) =>
  *   Effect.gen(function* () {
@@ -155,7 +155,7 @@ export class ToolError extends Data.TaggedError("ToolError")<{
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const validatePrompt = (prompt: string) =>
  *   prompt.length > 0
@@ -205,7 +205,7 @@ export class ValidationError extends Data.TaggedError("ValidationError")<{
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const checkPermission = (toolName: string, allowed: boolean) =>
  *   allowed
@@ -250,7 +250,7 @@ export class PermissionError extends Data.TaggedError("PermissionError")<{
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentError from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentError"
+ * import * as AgentError from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentError"
  *
  * const handleError = (error: AgentError.AgentError) => {
  *   switch (error._tag) {

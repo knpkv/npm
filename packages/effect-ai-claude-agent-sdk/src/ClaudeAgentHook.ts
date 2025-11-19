@@ -132,8 +132,8 @@ export interface ModelResponseContext {
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as Hook from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentHook"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as Hook from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentHook"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  *
  * const hooks: Hook.HookHandlers = {
  *   onSessionStart: (context) =>

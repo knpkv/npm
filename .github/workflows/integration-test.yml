@@ -12,8 +12,8 @@ on:
   pull_request:
     paths:
       - "packages/*/test/integration.test.ts"
-      - "packages/effect-ai-claude-code-sdk/src/**"
-      - "packages/effect-ai-claude-code-sdk/package.json"
+      - "packages/effect-ai-claude-agent-sdk/src/**"
+      - "packages/effect-ai-claude-agent-sdk/package.json"
       - "packages/effect-ai-claude-code-cli/src/**"
       - "packages/effect-ai-claude-code-cli/package.json"
       - ".github/workflows/integration-test.yml"
@@ -44,16 +44,16 @@ jobs:
 
       - name: Update to latest Anthropic SDK
         run: |
-          cd packages/effect-ai-claude-code-sdk
+          cd packages/effect-ai-claude-agent-sdk
           pnpm add @anthropic-ai/claude-agent-sdk@latest
 
       - name: Build SDK package
-        run: pnpm --filter @knpkv/effect-ai-claude-code-sdk build
+        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk build
 
       - name: Run SDK integration tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pnpm --filter @knpkv/effect-ai-claude-code-sdk test test/integration.test.ts
+        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk test test/integration.test.ts
 
   test-cli:
     name: CLI Integration Tests

@@ -85,7 +85,7 @@ export interface ClaudeAgentClient {
    * @example
    * ```typescript
    * import { Effect, Stream } from "effect"
-   * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
    *
    * const program = Effect.gen(function* () {
    *   const client = yield* AgentClient.ClaudeAgentClient
@@ -114,7 +114,7 @@ export interface ClaudeAgentClient {
    * @example
    * ```typescript
    * import { Effect } from "effect"
-   * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
    *
    * const program = Effect.gen(function* () {
    *   const client = yield* AgentClient.ClaudeAgentClient
@@ -144,7 +144,7 @@ export interface ClaudeAgentClient {
    * @example
    * ```typescript
    * import { Effect, Stream } from "effect"
-   * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
    *
    * const program = Effect.gen(function* () {
    *   const client = yield* AgentClient.ClaudeAgentClient
@@ -174,7 +174,7 @@ export interface ClaudeAgentClient {
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* AgentClient.ClaudeAgentClient
@@ -186,7 +186,7 @@ export interface ClaudeAgentClient {
  * @category Client
  */
 export const ClaudeAgentClient = Context.GenericTag<ClaudeAgentClient>(
-  "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+  "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
 )
 
 /**
@@ -336,8 +336,8 @@ const makeClient = (
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
- * import * as Tool from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentTool"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* AgentClient.ClaudeAgentClient
@@ -378,8 +378,8 @@ export const layer = (
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
- * import * as AgentConfig from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentConfig"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
  *
  * const configLayer = AgentConfig.layer({
  *   apiKeySource: "org",
@@ -419,7 +419,7 @@ export const layerConfig = (): Layer.Layer<ClaudeAgentClient, never, AgentConfig
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  *
  * const program = AgentClient.query({ prompt: "Hello!" })
  *
@@ -445,7 +445,7 @@ export const query = (
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as AgentClient from "@knpkv/effect-ai-claude-code-sdk/ClaudeAgentClient"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
  *
  * const program = AgentClient.queryText({ prompt: "What is 2+2?" })
  *

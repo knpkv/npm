@@ -94,6 +94,34 @@ importers:
         specifier: 4.0.0-beta.10
         version: 4.0.0-beta.10(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/effect-ai-claude-agent-sdk:
+    dependencies:
+      "@effect/ai":
+        specifier: ^0.32.0
+        version: 0.32.1(@effect/experimental@0.57.1(@effect/platform@0.93.2(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.2(effect@3.19.3))(@effect/rpc@0.72.1(@effect/platform@0.93.2(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)
+      "@effect/platform":
+        specifier: ^0.93.0
+        version: 0.93.2(effect@3.19.3)
+      "@effect/schema":
+        specifier: ^0.75.0
+        version: 0.75.5(effect@3.19.3)
+    devDependencies:
+      "@anthropic-ai/claude-agent-sdk":
+        specifier: ^0.1.12
+        version: 0.1.45(zod@3.25.76)
+      "@effect/vitest":
+        specifier: ^0.15.0
+        version: 0.15.0(effect@3.19.3)(vitest@2.1.9(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10(playwright@1.56.1)(vite@7.1.10(@types/node@24.8.1)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.0-beta.10))(happy-dom@20.0.4)(terser@5.44.0))
+      effect:
+        specifier: ^3.19.3
+        version: 3.19.3
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10(playwright@1.56.1)(vite@7.1.10(@types/node@24.8.1)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.0-beta.10))(happy-dom@20.0.4)(terser@5.44.0)
+
   packages/effect-ai-claude-code-cli:
     dependencies:
       "@effect/ai":
@@ -122,34 +150,6 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10(playwright@1.56.1)(vite@7.1.10(@types/node@24.8.1)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.0-beta.10))(happy-dom@20.0.4)(terser@5.44.0)
     publishDirectory: dist
-
-  packages/effect-ai-claude-code-sdk:
-    dependencies:
-      "@anthropic-ai/claude-agent-sdk":
-        specifier: ^0.1.12
-        version: 0.1.45(zod@3.25.76)
-      "@effect/ai":
-        specifier: ^0.32.0
-        version: 0.32.1(@effect/experimental@0.57.1(@effect/platform@0.93.2(effect@3.19.3))(effect@3.19.3))(@effect/platform@0.93.2(effect@3.19.3))(@effect/rpc@0.72.1(@effect/platform@0.93.2(effect@3.19.3))(effect@3.19.3))(effect@3.19.3)
-      "@effect/platform":
-        specifier: ^0.93.0
-        version: 0.93.2(effect@3.19.3)
-      "@effect/schema":
-        specifier: ^0.75.0
-        version: 0.75.5(effect@3.19.3)
-    devDependencies:
-      "@effect/vitest":
-        specifier: ^0.15.0
-        version: 0.15.0(effect@3.19.3)(vitest@2.1.9(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10(playwright@1.56.1)(vite@7.1.10(@types/node@24.8.1)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.0-beta.10))(happy-dom@20.0.4)(terser@5.44.0))
-      effect:
-        specifier: ^3.19.3
-        version: 3.19.3
-      typescript:
-        specifier: ~5.9.0
-        version: 5.9.3
-      vitest:
-        specifier: ^2.0.0
-        version: 2.1.9(@edge-runtime/vm@5.0.0)(@types/node@24.8.1)(@vitest/browser@4.0.0-beta.10(playwright@1.56.1)(vite@7.1.10(@types/node@24.8.1)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.0-beta.10))(happy-dom@20.0.4)(terser@5.44.0)
 
   packages/hello:
     dependencies:
