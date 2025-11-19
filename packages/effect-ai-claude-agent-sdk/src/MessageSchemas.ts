@@ -34,6 +34,18 @@ export const BaseMessage = Schema.Struct({
 })
 
 /**
+ * Token usage information from API response.
+ *
+ * @category Messages
+ */
+export const TokenUsage = Schema.Struct({
+  input_tokens: Schema.optional(Schema.Number),
+  cache_creation_input_tokens: Schema.optional(Schema.Number),
+  cache_read_input_tokens: Schema.optional(Schema.Number),
+  output_tokens: Schema.optional(Schema.Number)
+})
+
+/**
  * Assistant message containing Claude's response.
  *
  * @example
@@ -55,7 +67,8 @@ export const BaseMessage = Schema.Struct({
 export const AssistantMessage = Schema.Struct({
   type: Schema.Literal("assistant"),
   content: Schema.String,
-  toolCalls: Schema.optional(Schema.Array(Schema.Unknown))
+  toolCalls: Schema.optional(Schema.Array(Schema.Unknown)),
+  usage: Schema.optional(TokenUsage)
 })
 
 /**
@@ -69,6 +82,18 @@ export const UserMessage = Schema.Struct({
 })
 
 /**
+ * Session summary with aggregate usage statistics.
+ *
+ * @category Messages
+ */
+export const SessionSummary = Schema.Struct({
+  duration_ms: Schema.optional(Schema.Number),
+  duration_api_ms: Schema.optional(Schema.Number),
+  num_turns: Schema.optional(Schema.Number),
+  total_cost_usd: Schema.optional(Schema.Number)
+})
+
+/**
  * Result message containing tool execution results.
  *
  * @category Messages
@@ -76,7 +101,9 @@ export const UserMessage = Schema.Struct({
 export const ResultMessage = Schema.Struct({
   type: Schema.Literal("result"),
   content: Schema.String,
-  toolName: Schema.optional(Schema.String)
+  toolName: Schema.optional(Schema.String),
+  usage: Schema.optional(TokenUsage),
+  summary: Schema.optional(SessionSummary)
 })
 
 /**
@@ -168,6 +195,20 @@ export const MessageEvent = Schema.Union(
  * @category Messages
  */
 export type MessageEvent = Schema.Schema.Type<typeof MessageEvent>
+
+/**
+ * Type extracted from TokenUsage schema.
+ *
+ * @category Messages
+ */
+export type TokenUsage = Schema.Schema.Type<typeof TokenUsage>
+
+/**
+ * Type extracted from SessionSummary schema.
+ *
+ * @category Messages
+ */
+export type SessionSummary = Schema.Schema.Type<typeof SessionSummary>
 
 /**
  * Type extracted from AssistantMessage schema.

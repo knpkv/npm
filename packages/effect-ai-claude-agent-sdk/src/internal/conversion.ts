@@ -3,21 +3,42 @@
  * Conversion utilities between SDK types and Effect types.
  */
 
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { Effect } from "effect"
 import * as AgentError from "../ClaudeAgentError.js"
 import type * as MessageSchemas from "../MessageSchemas.js"
 
 /**
+ * Type guard for text content blocks.
+ */
+const isTextBlock = (block: unknown): block is { type: "text"; text: string } =>
+  typeof block === "object" &&
+  block !== null &&
+  "type" in block &&
+  block.type === "text" &&
+  "text" in block &&
+  typeof block.text === "string"
+
+/**
+ * Type guard for tool_use content blocks.
+ */
+const isToolUseBlock = (block: unknown): block is { type: "tool_use" } =>
+  typeof block === "object" &&
+  block !== null &&
+  "type" in block &&
+  block.type === "tool_use"
+
+/**
  * @internal
  * Extract text content from Anthropic SDK message content array.
  */
-const extractTextFromContent = (content: any): string => {
+const extractTextFromContent = (content: unknown): string => {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
 
   return content
-    .filter((block: any) => block?.type === "text")
-    .map((block: any) => block.text || "")
+    .filter(isTextBlock)
+    .map((block) => block.text)
     .join("")
 }
 
@@ -26,7 +47,7 @@ const extractTextFromContent = (content: any): string => {
  * Convert SDK message to MessageEvent.
  */
 export const convertSdkMessage = (
-  sdkMessage: any
+  sdkMessage: SDKMessage
 ): Effect.Effect<MessageSchemas.MessageEvent, AgentError.StreamError> =>
   Effect.gen(function*() {
     try {
@@ -42,13 +63,24 @@ export const convertSdkMessage = (
 
           // Extract tool_use blocks from content array
           const toolCalls = Array.isArray(apiMessage?.content)
-            ? apiMessage.content.filter((block: any) => block?.type === "tool_use")
+            ? apiMessage.content.filter(isToolUseBlock)
             : undefined
+
+          // Extract token usage if available
+          const usage = apiMessage?.usage ?
+            {
+              input_tokens: apiMessage.usage.input_tokens,
+              cache_creation_input_tokens: apiMessage.usage.cache_creation_input_tokens,
+              cache_read_input_tokens: apiMessage.usage.cache_read_input_tokens,
+              output_tokens: apiMessage.usage.output_tokens
+            } :
+            undefined
 
           return {
             type: "assistant" as const,
             content,
-            toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined
+            toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+            usage
           }
         }
 
@@ -63,12 +95,32 @@ export const convertSdkMessage = (
         }
 
         case "result": {
-          // SDKResultMessage: result string or errors array
-          const content = sdkMessage.result || sdkMessage.errors?.join("\n") || ""
+          // SDKResultMessage: discriminated union based on subtype
+          const content = sdkMessage.subtype === "success"
+            ? sdkMessage.result
+            : sdkMessage.errors.join("\n")
+
+          // Extract aggregate usage and session summary
+          const usage = {
+            input_tokens: sdkMessage.usage.input_tokens,
+            cache_creation_input_tokens: sdkMessage.usage.cache_creation_input_tokens,
+            cache_read_input_tokens: sdkMessage.usage.cache_read_input_tokens,
+            output_tokens: sdkMessage.usage.output_tokens
+          }
+
+          const summary = {
+            duration_ms: sdkMessage.duration_ms,
+            duration_api_ms: sdkMessage.duration_api_ms,
+            num_turns: sdkMessage.num_turns,
+            total_cost_usd: sdkMessage.total_cost_usd
+          }
+
           return {
             type: "result" as const,
             content,
-            toolName: undefined
+            toolName: undefined,
+            usage,
+            summary
           }
         }
 

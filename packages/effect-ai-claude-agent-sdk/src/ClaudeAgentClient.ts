@@ -4,7 +4,7 @@
  * @category Client
  */
 
-import type { Options as SdkOptions } from "@anthropic-ai/claude-agent-sdk"
+import type { Options as SdkOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk"
 import type { Scope } from "effect"
 import { Console, Context, Effect, Layer, Stream } from "effect"
@@ -150,7 +150,7 @@ export interface ClaudeAgentClient {
    * )
    * ```
    */
-  readonly queryRaw: (options: QueryOptions) => Stream.Stream<any, AgentError.AgentError, never>
+  readonly queryRaw: (options: QueryOptions) => Stream.Stream<SDKMessage, AgentError.AgentError, never>
 }
 
 /**
