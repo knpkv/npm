@@ -12,112 +12,119 @@ import * as AgentConfig from "../src/ClaudeAgentConfig.js"
 const INTEGRATION_TIMEOUT = 60_000
 
 describe("Integration: Claude Agent SDK", () => {
-  it("should execute basic query without tools", async () => {
-    const program = Effect.gen(function*() {
-      const client = yield* AgentClient.ClaudeAgentClient
+  it(
+    "should execute basic query without tools",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
 
-      const result = yield* client.queryText({
-        prompt: "What is 2+2? Answer with just the number.",
-        allowedTools: [] // No tools needed for math
+        const result = yield* client.queryText({
+          prompt: "What is 2+2? Answer with just the number.",
+          allowedTools: [] // No tools needed for math
+        })
+
+        return result
       })
 
-      return result
-    })
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
 
-    const result = await Effect.runPromise(
-      program.pipe(Effect.provide(AgentClient.layer()))
-    )
+      expect(result).toContain("4")
+    },
+    INTEGRATION_TIMEOUT
+  )
 
-    expect(result).toContain("4")
-  }, INTEGRATION_TIMEOUT)
+  it(
+    "should respect tool restrictions (allowedTools: [])",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
 
-  it("should respect tool restrictions (allowedTools: [])", async () => {
-    const program = Effect.gen(function*() {
-      const client = yield* AgentClient.ClaudeAgentClient
+        let toolsUsed = 0
+        const stream = client.query({
+          prompt: "Read the package.json file",
+          allowedTools: [] // Deny all tools
+        })
 
-      let toolsUsed = 0
-      const stream = client.query({
-        prompt: "Read the package.json file",
-        allowedTools: [] // Deny all tools
-      })
-
-      yield* stream.pipe(
-        Stream.runForEach((message) =>
-          Effect.sync(() => {
-            if (message.type === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
-              toolsUsed += message.toolCalls.length
-            }
-          })
+        yield* stream.pipe(
+          Stream.runForEach((message) =>
+            Effect.sync(() => {
+              if (message.type === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+                toolsUsed += message.toolCalls.length
+              }
+            })
+          )
         )
-      )
 
-      return toolsUsed
-    })
-
-    const toolsUsed = await Effect.runPromise(
-      program.pipe(Effect.provide(AgentClient.layer()))
-    )
-
-    expect(toolsUsed).toBe(0)
-  }, INTEGRATION_TIMEOUT)
-
-  it("should work with layerConfig", async () => {
-    const config = AgentConfig.layer({
-      allowedTools: []
-    })
-
-    const program = Effect.gen(function*() {
-      const client = yield* AgentClient.ClaudeAgentClient
-
-      const result = yield* client.queryText({
-        prompt: "What is Effect-TS? Answer in one sentence."
+        return toolsUsed
       })
 
-      return result
-    })
+      const toolsUsed = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
 
-    const result = await Effect.runPromise(
-      program.pipe(
-        Effect.provide(AgentClient.layerConfig()),
-        Effect.provide(config)
-      )
-    )
+      expect(toolsUsed).toBe(0)
+    },
+    INTEGRATION_TIMEOUT
+  )
 
-    expect(result).toBeTruthy()
-    expect(result.length).toBeGreaterThan(10)
-  }, INTEGRATION_TIMEOUT)
-
-  it("should stream responses correctly", async () => {
-    const program = Effect.gen(function*() {
-      const client = yield* AgentClient.ClaudeAgentClient
-
-      let messageCount = 0
-      let hasText = false
-
-      const stream = client.query({
-        prompt: "Say hello",
+  it(
+    "should work with layerConfig",
+    async () => {
+      const config = AgentConfig.layer({
         allowedTools: []
       })
 
-      yield* stream.pipe(
-        Stream.runForEach((message) =>
-          Effect.sync(() => {
-            messageCount++
-            if (message.type === "assistant" && message.content.length > 0) {
-              hasText = true
-            }
-          })
-        )
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
+
+        const result = yield* client.queryText({
+          prompt: "What is Effect-TS? Answer in one sentence."
+        })
+
+        return result
+      })
+
+      const result = await Effect.runPromise(
+        program.pipe(Effect.provide(AgentClient.layerConfig()), Effect.provide(config))
       )
 
-      return { messageCount, hasText }
-    })
+      expect(result).toBeTruthy()
+      expect(result.length).toBeGreaterThan(10)
+    },
+    INTEGRATION_TIMEOUT
+  )
 
-    const result = await Effect.runPromise(
-      program.pipe(Effect.provide(AgentClient.layer()))
-    )
+  it(
+    "should stream responses correctly",
+    async () => {
+      const program = Effect.gen(function*() {
+        const client = yield* AgentClient.ClaudeAgentClient
 
-    expect(result.messageCount).toBeGreaterThan(1)
-    expect(result.hasText).toBe(true)
-  }, INTEGRATION_TIMEOUT)
+        let messageCount = 0
+        let hasText = false
+
+        const stream = client.query({
+          prompt: "Say hello",
+          allowedTools: []
+        })
+
+        yield* stream.pipe(
+          Stream.runForEach((message) =>
+            Effect.sync(() => {
+              messageCount++
+              if (message.type === "assistant" && message.content.length > 0) {
+                hasText = true
+              }
+            })
+          )
+        )
+
+        return { messageCount, hasText }
+      })
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentClient.layer())))
+
+      expect(result.messageCount).toBeGreaterThan(1)
+      expect(result.hasText).toBe(true)
+    },
+    INTEGRATION_TIMEOUT
+  )
 })

@@ -53,6 +53,4 @@ function add(a, b) {
 // Compose all layers
 const AppLayer = AnalysisServiceLive.pipe(Layer.provide(AgentClient.ClaudeAgentClient.layer()))
 
-Effect.runPromise(
-  program.pipe(Effect.provide(AppLayer), Effect.timeout("30 seconds"))
-).catch(console.error)
+Effect.runPromise(program.pipe(Effect.provide(AppLayer), Effect.timeout("30 seconds"))).catch(console.error)

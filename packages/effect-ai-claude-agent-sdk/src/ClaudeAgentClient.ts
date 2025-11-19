@@ -101,9 +101,7 @@ export interface ClaudeAgentClient {
    * )
    * ```
    */
-  readonly query: (
-    options: QueryOptions
-  ) => Stream.Stream<MessageSchemas.MessageEvent, AgentError.AgentError, never>
+  readonly query: (options: QueryOptions) => Stream.Stream<MessageSchemas.MessageEvent, AgentError.AgentError, never>
 
   /**
    * Execute a query and collect all assistant messages into a single string.
@@ -129,9 +127,7 @@ export interface ClaudeAgentClient {
    * )
    * ```
    */
-  readonly queryText: (
-    options: QueryOptions
-  ) => Effect.Effect<string, AgentError.AgentError, never>
+  readonly queryText: (options: QueryOptions) => Effect.Effect<string, AgentError.AgentError, never>
 
   /**
    * Execute a query and return a stream of raw SDK messages without conversion.
@@ -160,9 +156,7 @@ export interface ClaudeAgentClient {
    * )
    * ```
    */
-  readonly queryRaw: (
-    options: QueryOptions
-  ) => Stream.Stream<any, AgentError.AgentError, never>
+  readonly queryRaw: (options: QueryOptions) => Stream.Stream<any, AgentError.AgentError, never>
 }
 
 /**
@@ -190,9 +184,7 @@ export const ClaudeAgentClient = Context.GenericTag<ClaudeAgentClient>(
  *
  * @internal
  */
-const makeClient = (
-  config: AgentConfig.ClaudeAgentConfig
-): Effect.Effect<ClaudeAgentClient, never, never> =>
+const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<ClaudeAgentClient, never, never> =>
   Effect.gen(function*() {
     const queryImpl = (options: QueryOptions) =>
       Stream.unwrap(
@@ -208,8 +200,7 @@ const makeClient = (
           let allowedTools = options.allowedTools ?? config.allowedTools
           let disallowedTools = options.disallowedTools ?? config.disallowedTools
           const canUseTool = options.canUseTool ?? config.canUseTool
-          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ??
-            config.dangerouslySkipPermissions ??
+          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
             false
 
           // Handle empty allowedTools array as "deny all"
@@ -248,9 +239,7 @@ const makeClient = (
                 message: `SDK query failed: ${String(error)}`,
                 cause: error
               })
-          ).pipe(
-            Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage))
-          )
+          ).pipe(Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage)))
         })
       )
 
@@ -268,8 +257,7 @@ const makeClient = (
           let allowedTools = options.allowedTools ?? config.allowedTools
           let disallowedTools = options.disallowedTools ?? config.disallowedTools
           const canUseTool = options.canUseTool ?? config.canUseTool
-          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ??
-            config.dangerouslySkipPermissions ??
+          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
             false
 
           // Handle empty allowedTools array as "deny all"
@@ -359,13 +347,8 @@ const makeClient = (
  *
  * @category Client
  */
-export const layer = (
-  options?: AgentConfig.ClaudeAgentConfigOptions
-): Layer.Layer<ClaudeAgentClient, never, never> =>
-  Layer.effect(
-    ClaudeAgentClient,
-    makeClient(AgentConfig.make(options))
-  )
+export const layer = (options?: AgentConfig.ClaudeAgentConfigOptions): Layer.Layer<ClaudeAgentClient, never, never> =>
+  Layer.effect(ClaudeAgentClient, makeClient(AgentConfig.make(options)))
 
 /**
  * Create a Layer that provides the Claude Agent Client service using the config service.
@@ -402,10 +385,7 @@ export const layer = (
  * @category Client
  */
 export const layerConfig = (): Layer.Layer<ClaudeAgentClient, never, AgentConfig.ClaudeAgentConfig> =>
-  Layer.effect(
-    ClaudeAgentClient,
-    Effect.flatMap(AgentConfig.ClaudeAgentConfig, makeClient)
-  )
+  Layer.effect(ClaudeAgentClient, Effect.flatMap(AgentConfig.ClaudeAgentConfig, makeClient))
 
 /**
  * Convenience function to execute a query without manually accessing the service.

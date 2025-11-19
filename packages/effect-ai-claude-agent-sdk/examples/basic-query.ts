@@ -22,8 +22,5 @@ const program = Effect.gen(function*() {
 
 // Provide layers
 Effect.runPromise(
-  program.pipe(
-    Effect.provide(AgentClient.ClaudeAgentClient.layer()),
-    Effect.timeout("30 seconds")
-  )
+  program.pipe(Effect.provide(AgentClient.ClaudeAgentClient.layer()), Effect.timeout("30 seconds"))
 ).catch(console.error)

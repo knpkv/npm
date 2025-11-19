@@ -77,9 +77,7 @@ describe("ClaudeAgentConfig", () => {
         return config
       })
 
-      const result = await Effect.runPromise(
-        program.pipe(Effect.provide(AgentConfig.layer({})))
-      )
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentConfig.layer({}))))
 
       expect(result.apiKeySource).toBeUndefined()
       expect(result.workingDirectory).toBeUndefined()
@@ -112,9 +110,7 @@ describe("ClaudeAgentConfig", () => {
         return config
       })
 
-      const result = await Effect.runPromise(
-        program.pipe(Effect.provide(AgentConfig.layer({ allowedTools: [] })))
-      )
+      const result = await Effect.runPromise(program.pipe(Effect.provide(AgentConfig.layer({ allowedTools: [] }))))
 
       expect(result.allowedTools).toEqual([])
     })

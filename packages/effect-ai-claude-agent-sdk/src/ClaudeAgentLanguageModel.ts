@@ -54,11 +54,11 @@ export const make = Effect.gen(function*() {
         const promptText = promptToText(providerOptions.prompt)
 
         // Use queryText for non-streaming text generation
-        const responseText = yield* client.queryText({
-          prompt: promptText
-        }).pipe(
-          Effect.mapError(mapError)
-        )
+        const responseText = yield* client
+          .queryText({
+            prompt: promptText
+          })
+          .pipe(Effect.mapError(mapError))
 
         return [
           {
@@ -140,9 +140,7 @@ export const make = Effect.gen(function*() {
 export const layer = (
   config?: Config.Service
 ): Layer.Layer<LanguageModel.LanguageModel, never, AgentClient.ClaudeAgentClient> => {
-  const configLayer = config
-    ? AgentConfig.layer(config)
-    : AgentConfig.layer()
+  const configLayer = config ? AgentConfig.layer(config) : AgentConfig.layer()
 
   return Layer.effect(LanguageModel.LanguageModel, make).pipe(
     Layer.provide(configLayer),
@@ -225,18 +223,24 @@ const extractMessages = (prompt: Prompt.Prompt): ReadonlyArray<MessageLike> => {
  * @internal
  */
 const isTextPart = (part: unknown): part is { type: "text"; text: string } =>
-  typeof part === "object" && part !== null &&
-  "type" in part && part.type === "text" &&
-  "text" in part && typeof part.text === "string"
+  typeof part === "object" &&
+  part !== null &&
+  "type" in part &&
+  part.type === "text" &&
+  "text" in part &&
+  typeof part.text === "string"
 
 /**
  * Type guard for tool call content part.
  * @internal
  */
 const isToolCallPart = (part: unknown): part is { type: "tool-call"; name: string } =>
-  typeof part === "object" && part !== null &&
-  "type" in part && part.type === "tool-call" &&
-  "name" in part && typeof part.name === "string"
+  typeof part === "object" &&
+  part !== null &&
+  "type" in part &&
+  part.type === "tool-call" &&
+  "name" in part &&
+  typeof part.name === "string"
 
 /**
  * Convert a Prompt to a text string for Claude Agent SDK.
@@ -289,9 +293,7 @@ const promptToText = (prompt: Prompt.Prompt): string => {
         break
       }
       case "tool": {
-        const result = typeof message.content === "string"
-          ? message.content
-          : JSON.stringify(message.content)
+        const result = typeof message.content === "string" ? message.content : JSON.stringify(message.content)
         const nameValue = (message as { name?: unknown }).name
         const toolName = typeof nameValue === "string" ? nameValue : "unknown"
         parts.push(`Tool (${toolName}): ${result}`)

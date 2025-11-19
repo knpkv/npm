@@ -37,6 +37,4 @@ const program = Effect.gen(function*() {
   yield* Console.log("Query completed successfully!")
 })
 
-Effect.runPromise(
-  program.pipe(Effect.provide(AgentClient.ClaudeAgentClient.layer()))
-).catch(console.error)
+Effect.runPromise(program.pipe(Effect.provide(AgentClient.ClaudeAgentClient.layer()))).catch(console.error)

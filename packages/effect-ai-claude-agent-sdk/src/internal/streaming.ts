@@ -23,29 +23,25 @@ export const wrapAsyncGenerator = <A, E>(
   generator: AsyncIterator<A>,
   onError: (error: unknown) => E
 ): Stream.Stream<A, E> =>
-  Stream.unfoldEffect(
-    generator,
-    (gen) =>
-      Effect.gen(function*() {
-        try {
-          const result = yield* Effect.promise(() => gen.next())
-          if (result.done) {
-            return Option.none()
-          }
-          return Option.some([result.value, gen] as const)
-        } catch (error) {
-          return yield* Effect.fail(onError(error))
+  Stream.unfoldEffect(generator, (gen) =>
+    Effect.gen(function*() {
+      try {
+        const result = yield* Effect.promise(() => gen.next())
+        if (result.done) {
+          return Option.none()
         }
-      })
-  )
+        return Option.some([result.value, gen] as const)
+      } catch (error) {
+        return yield* Effect.fail(onError(error))
+      }
+    }))
 
 /**
  * @internal
  * Collect stream to array.
  */
-export const collectStream = <A, E, R>(
-  stream: Stream.Stream<A, E, R>
-): Effect.Effect<ReadonlyArray<A>, E, R> => Stream.runCollect(stream).pipe(Effect.map((chunk) => Array.from(chunk)))
+export const collectStream = <A, E, R>(stream: Stream.Stream<A, E, R>): Effect.Effect<ReadonlyArray<A>, E, R> =>
+  Stream.runCollect(stream).pipe(Effect.map((chunk) => Array.from(chunk)))
 
 /**
  * @internal

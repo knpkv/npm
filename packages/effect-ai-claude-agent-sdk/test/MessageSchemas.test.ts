@@ -14,9 +14,7 @@ describe("MessageSchemas", () => {
         content: "Hello, world!"
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result).toEqual(message)
     })
@@ -35,9 +33,7 @@ describe("MessageSchemas", () => {
         ]
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result).toEqual(message)
     })
@@ -48,9 +44,7 @@ describe("MessageSchemas", () => {
         content: ""
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result).toEqual(message)
     })
@@ -63,9 +57,7 @@ describe("MessageSchemas", () => {
         content: "Hello, assistant!"
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result).toEqual(message)
     })
@@ -84,9 +76,7 @@ describe("MessageSchemas", () => {
       ]
 
       for (const message of messages) {
-        const result = await Effect.runPromise(
-          Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-        )
+        const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
         expect(result).toEqual(message)
       }
     })
@@ -97,9 +87,7 @@ describe("MessageSchemas", () => {
         content: "test"
       }
 
-      const exit = await Effect.runPromiseExit(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage)
-      )
+      const exit = await Effect.runPromiseExit(Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage))
 
       expect(exit._tag).toBe("Failure")
     })
@@ -109,9 +97,7 @@ describe("MessageSchemas", () => {
         content: "test"
       }
 
-      const exit = await Effect.runPromiseExit(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage)
-      )
+      const exit = await Effect.runPromiseExit(Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage))
 
       expect(exit._tag).toBe("Failure")
     })
@@ -121,9 +107,7 @@ describe("MessageSchemas", () => {
         type: "assistant"
       }
 
-      const exit = await Effect.runPromiseExit(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage)
-      )
+      const exit = await Effect.runPromiseExit(Schema.decodeUnknown(MessageSchemas.MessageEvent)(invalidMessage))
 
       expect(exit._tag).toBe("Failure")
     })
@@ -144,9 +128,7 @@ describe("MessageSchemas", () => {
         toolCalls: [toolCall]
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result.toolCalls).toEqual([toolCall])
     })
@@ -165,9 +147,7 @@ describe("MessageSchemas", () => {
         toolCalls: [toolCall]
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result.toolCalls).toEqual([toolCall])
     })
@@ -185,9 +165,7 @@ describe("MessageSchemas", () => {
         toolCalls
       }
 
-      const result = await Effect.runPromise(
-        Schema.decodeUnknown(MessageSchemas.MessageEvent)(message)
-      )
+      const result = await Effect.runPromise(Schema.decodeUnknown(MessageSchemas.MessageEvent)(message))
 
       expect(result.toolCalls).toEqual(toolCalls)
     })

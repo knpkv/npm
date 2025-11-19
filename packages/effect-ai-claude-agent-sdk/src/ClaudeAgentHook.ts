@@ -188,9 +188,7 @@ export interface HookHandlers {
   /**
    * Called when user submits a prompt.
    */
-  readonly onUserPromptSubmit?: (
-    context: UserPromptSubmitContext
-  ) => Effect.Effect<void, never, never>
+  readonly onUserPromptSubmit?: (context: UserPromptSubmitContext) => Effect.Effect<void, never, never>
 
   /**
    * Called before an API call to Anthropic.

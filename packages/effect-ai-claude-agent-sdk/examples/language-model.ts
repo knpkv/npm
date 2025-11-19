@@ -13,9 +13,7 @@ const generateTextExample = Effect.gen(function*() {
 
   const model = yield* LanguageModel.LanguageModel
   const response = yield* model.generateText({
-    prompt: [
-      { role: "user", content: [{ type: "text", text: "Explain Effect-TS in one sentence" }] }
-    ]
+    prompt: [{ role: "user", content: [{ type: "text", text: "Explain Effect-TS in one sentence" }] }]
   })
 
   yield* Console.log("Response:")
@@ -31,9 +29,7 @@ const streamTextExample = Effect.gen(function*() {
 
   const model = yield* LanguageModel.LanguageModel
   const stream = model.streamText({
-    prompt: [
-      { role: "user", content: [{ type: "text", text: "Write a haiku about functional programming" }] }
-    ]
+    prompt: [{ role: "user", content: [{ type: "text", text: "Write a haiku about functional programming" }] }]
   })
 
   yield* Console.log("Streaming response:")
@@ -61,9 +57,7 @@ const conversationExample = Effect.gen(function*() {
 
   // First turn
   const response1 = yield* model.generateText({
-    prompt: [
-      { role: "user", content: [{ type: "text", text: "What is a monad?" }] }
-    ]
+    prompt: [{ role: "user", content: [{ type: "text", text: "What is a monad?" }] }]
   })
   yield* Console.log("User: What is a monad?")
   yield* Console.log("Assistant:", response1.text)
