@@ -5,7 +5,7 @@ Effect-TS wrapper for the Anthropic Claude Agent SDK with type-safe integration.
 ## Installation
 
 ```bash
-pnpm add @knpkv/effect-ai-claude-code-sdk effect
+pnpm add @knpkv/effect-ai-claude-code-sdk @anthropic-ai/claude-agent-sdk effect
 ```
 
 ## Quick Start
@@ -134,6 +134,24 @@ npx tsx examples/chunk-logging.ts
 npx tsx examples/tools.ts
 npx tsx examples/language-model.ts
 ```
+
+### Integration Tests
+
+Integration tests verify compatibility with the latest `@anthropic-ai/claude-agent-sdk`:
+
+```bash
+# Run integration tests (requires ANTHROPIC_API_KEY)
+export ANTHROPIC_API_KEY=your-key-here
+pnpm test:integration
+```
+
+These tests run automatically:
+
+- **Twice daily** via GitHub Actions (9-10 AM and 6-7 PM CET)
+- **On demand** via workflow dispatch
+- **On PRs** that modify integration tests or SDK packages
+
+If a test fails, it indicates a potential breaking change in the Anthropic SDK.
 
 ## Development Status & Limitations
 

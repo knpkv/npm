@@ -63,6 +63,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run test/integration.test.ts",
     "check": "tsc --noEmit",
     "check:examples": "tsc --noEmit --project tsconfig.examples.json",
     "check:all": "pnpm check && pnpm check:examples",
@@ -72,15 +73,16 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "effect": "^3.19.3"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.12",
     "@effect/ai": "^0.32.0",
     "@effect/platform": "^0.93.0",
     "@effect/schema": "^0.75.0"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.12",
     "@effect/vitest": "^0.15.0",
     "effect": "^3.19.3",
     "typescript": "~5.9.0",

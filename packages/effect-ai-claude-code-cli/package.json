@@ -29,6 +29,7 @@
     "clean": "rimraf dist dist-test .tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run test/integration.test.ts",
     "lint": "eslint src examples",
     "check": "tsc --noEmit --project tsconfig.src.json && tsc --noEmit --project tsconfig.test.json",
     "check:examples": "tsc --noEmit --project tsconfig.examples.json",

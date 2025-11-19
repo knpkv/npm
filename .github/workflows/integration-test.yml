@@ -1,0 +1,137 @@
+name: Integration Tests
+
+on:
+  # Run twice daily (9-10 AM and 6-7 PM CET)
+  schedule:
+    - cron: "0 8,17 * * *"
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+  # Run on PRs that modify integration tests or SDK packages
+  pull_request:
+    paths:
+      - "packages/*/test/integration.test.ts"
+      - "packages/effect-ai-claude-code-sdk/src/**"
+      - "packages/effect-ai-claude-code-sdk/package.json"
+      - "packages/effect-ai-claude-code-cli/src/**"
+      - "packages/effect-ai-claude-code-cli/package.json"
+      - ".github/workflows/integration-test.yml"
+
+jobs:
+  test-sdk:
+    name: SDK Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Update to latest Anthropic SDK
+        run: |
+          cd packages/effect-ai-claude-code-sdk
+          pnpm add @anthropic-ai/claude-agent-sdk@latest
+
+      - name: Build SDK package
+        run: pnpm --filter @knpkv/effect-ai-claude-code-sdk build
+
+      - name: Run SDK integration tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm --filter @knpkv/effect-ai-claude-code-sdk test test/integration.test.ts
+
+  test-cli:
+    name: CLI Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Claude CLI
+        run: |
+          # Install claude CLI globally
+          npm install -g @anthropic-ai/claude-code
+
+          # Verify installation
+          claude --version
+
+      - name: Build CLI package
+        run: pnpm --filter @knpkv/effect-ai-claude-code-cli build
+
+      - name: Run CLI integration tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm --filter @knpkv/effect-ai-claude-code-cli test test/integration.test.ts
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [test-sdk, test-cli]
+    if: failure()
+
+    steps:
+      - name: Create Issue on Failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 Integration Tests Failed';
+            const body = `
+            Integration tests failed for the latest Anthropic SDK version.
+
+            **Workflow**: ${context.workflow}
+            **Run**: ${context.runId}
+            **Trigger**: ${context.eventName}
+
+            Please check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+
+            This may indicate a breaking change in the Anthropic SDK that requires updates to our packages.
+            `;
+
+            // Check if an issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'integration-test-failure'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['integration-test-failure', 'automated']
+              });
+            }
