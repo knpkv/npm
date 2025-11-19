@@ -31,11 +31,10 @@ Initial release of `@knpkv/effect-ai-claude-agent-sdk` - Effect-TS wrapper for A
   - `AgentRateLimitError` - Rate limiting
   - Type-safe error handling with Match
 
-- **ClaudeAgentHook** - Hook system
-  - Pre-execution hooks
-  - Post-execution hooks
-  - Custom hook composition
-  - Error handling in hooks
+- **ClaudeAgentHook** - Hook type definitions (not yet implemented)
+  - Types for lifecycle hooks
+  - Future support for pre/post execution hooks
+  - Planned: Hook execution in future versions
 
 ### Type Safety
 
@@ -59,7 +58,6 @@ Initial release of `@knpkv/effect-ai-claude-agent-sdk` - Effect-TS wrapper for A
   - Error handling
   - Language model integration
   - Service composition
-  - Hook usage
 
 - **Complete Documentation**
   - API reference

@@ -11,7 +11,6 @@ import { Context, Effect, Layer, Stream } from "effect"
 import type * as Brand from "./Brand.js"
 import * as AgentConfig from "./ClaudeAgentConfig.js"
 import * as AgentError from "./ClaudeAgentError.js"
-import type * as Hook from "./ClaudeAgentHook.js"
 import * as Tool from "./ClaudeAgentTool.js"
 import * as Conversion from "./internal/conversion.js"
 import * as Streaming from "./internal/streaming.js"
@@ -53,11 +52,6 @@ export interface QueryOptions {
    * Custom permission callback.
    */
   readonly canUseTool?: Tool.CanUseToolCallback
-
-  /**
-   * Lifecycle hook handlers.
-   */
-  readonly hooks?: Hook.HookHandlers
 
   /**
    * Dangerously skip all permission checks.
@@ -186,109 +180,86 @@ export const ClaudeAgentClient = Context.GenericTag<ClaudeAgentClient>(
  */
 const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<ClaudeAgentClient, never, never> =>
   Effect.gen(function*() {
+    /**
+     * Shared query preparation logic.
+     * Handles validation, config merging, and SDK option building.
+     *
+     * @param options - Query options
+     * @returns Effect that resolves to validated SDK options and prompt
+     */
+    const prepareQuery = (options: QueryOptions): Effect.Effect<
+      {
+        readonly prompt: string
+        readonly sdkOptions: SdkOptions
+      },
+      AgentError.ValidationError,
+      never
+    > =>
+      Effect.gen(function*() {
+        // Validate inputs
+        yield* Validation.validatePrompt(options.prompt)
+        yield* Validation.validateToolLists(options)
+        yield* Validation.validateWorkingDirectory(options.workingDirectory)
+
+        // Merge config with query options (query options take precedence)
+        const apiKeySource = options.apiKeySource ?? config.apiKeySource
+        const workingDirectory = options.workingDirectory ?? config.workingDirectory
+        let allowedTools = options.allowedTools ?? config.allowedTools
+        let disallowedTools = options.disallowedTools ?? config.disallowedTools
+        const canUseTool = options.canUseTool ?? config.canUseTool
+        const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
+          false
+
+        // Handle empty allowedTools array as "deny all"
+        // Convert to disallowedTools: allTools (same as CLI behavior)
+        if (allowedTools !== undefined && allowedTools.length === 0) {
+          allowedTools = undefined
+          disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
+        }
+
+        // Build SDK query options
+        const sdkOptions: SdkOptions = {
+          ...(apiKeySource && { apiKeySource }),
+          ...(workingDirectory && { cwd: workingDirectory }),
+          ...(allowedTools && { allowedTools: [...allowedTools] }),
+          ...(disallowedTools && { disallowedTools: [...disallowedTools] }),
+          ...(dangerouslySkipPermissions && { allowDangerouslySkipPermissions: dangerouslySkipPermissions }),
+          ...(canUseTool && {
+            // Convert Effect-based canUseTool to Promise-based for SDK
+            canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+              const result = await Effect.runPromise(canUseTool(toolName))
+              return result
+                ? { behavior: "allow" as const, updatedInput: input }
+                : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
+            }
+          })
+        }
+
+        return { prompt: options.prompt, sdkOptions }
+      })
+
     const queryImpl = (options: QueryOptions) =>
       Stream.unwrap(
         Effect.gen(function*() {
-          // Validate inputs
-          yield* Validation.validatePrompt(options.prompt)
-          yield* Validation.validateToolLists(options)
-          yield* Validation.validateWorkingDirectory(options.workingDirectory)
-
-          // Merge config with query options (query options take precedence)
-          const apiKeySource = options.apiKeySource ?? config.apiKeySource
-          const workingDirectory = options.workingDirectory ?? config.workingDirectory
-          let allowedTools = options.allowedTools ?? config.allowedTools
-          let disallowedTools = options.disallowedTools ?? config.disallowedTools
-          const canUseTool = options.canUseTool ?? config.canUseTool
-          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
-            false
-
-          // Handle empty allowedTools array as "deny all"
-          // Convert to disallowedTools: allTools (same as CLI behavior)
-          if (allowedTools !== undefined && allowedTools.length === 0) {
-            allowedTools = undefined
-            disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
-          }
-
-          // Build SDK query options
-          const sdkOptions: SdkOptions = {
-            ...(apiKeySource && { apiKeySource }),
-            ...(workingDirectory && { cwd: workingDirectory }),
-            ...(allowedTools && { allowedTools: [...allowedTools] }),
-            ...(disallowedTools && { disallowedTools: [...disallowedTools] }),
-            ...(dangerouslySkipPermissions && { allowDangerouslySkipPermissions: dangerouslySkipPermissions }),
-            ...(canUseTool && {
-              // Convert Effect-based canUseTool to Promise-based for SDK
-              canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-                const result = await Effect.runPromise(canUseTool(toolName))
-                return result
-                  ? { behavior: "allow" as const, updatedInput: input }
-                  : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
-              }
-            })
-          }
-
-          // Call SDK query function with prompt and options
-          const generator = sdkQuery({ prompt: options.prompt, options: sdkOptions })
-
-          // Convert async generator to Stream
-          return Streaming.asyncIterableToStream(
+          const { prompt, sdkOptions } = yield* prepareQuery(options)
+          const generator = sdkQuery({ prompt, options: sdkOptions })
+          const rawStream = Streaming.asyncIterableToStream(
             generator,
             (error) =>
               new AgentError.SdkError({
                 message: `SDK query failed: ${String(error)}`,
                 cause: error
               })
-          ).pipe(Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage)))
+          )
+          return rawStream.pipe(Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage)))
         })
       )
 
     const queryRawImpl = (options: QueryOptions) =>
       Stream.unwrap(
         Effect.gen(function*() {
-          // Validate inputs
-          yield* Validation.validatePrompt(options.prompt)
-          yield* Validation.validateToolLists(options)
-          yield* Validation.validateWorkingDirectory(options.workingDirectory)
-
-          // Merge config with query options (query options take precedence)
-          const apiKeySource = options.apiKeySource ?? config.apiKeySource
-          const workingDirectory = options.workingDirectory ?? config.workingDirectory
-          let allowedTools = options.allowedTools ?? config.allowedTools
-          let disallowedTools = options.disallowedTools ?? config.disallowedTools
-          const canUseTool = options.canUseTool ?? config.canUseTool
-          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
-            false
-
-          // Handle empty allowedTools array as "deny all"
-          // Convert to disallowedTools: allTools (same as CLI behavior)
-          if (allowedTools !== undefined && allowedTools.length === 0) {
-            allowedTools = undefined
-            disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
-          }
-
-          // Build SDK query options
-          const sdkOptions: SdkOptions = {
-            ...(apiKeySource && { apiKeySource }),
-            ...(workingDirectory && { cwd: workingDirectory }),
-            ...(allowedTools && { allowedTools: [...allowedTools] }),
-            ...(disallowedTools && { disallowedTools: [...disallowedTools] }),
-            ...(dangerouslySkipPermissions && { allowDangerouslySkipPermissions: dangerouslySkipPermissions }),
-            ...(canUseTool && {
-              // Convert Effect-based canUseTool to Promise-based for SDK
-              canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-                const result = await Effect.runPromise(canUseTool(toolName))
-                return result
-                  ? { behavior: "allow" as const, updatedInput: input }
-                  : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
-              }
-            })
-          }
-
-          // Call SDK query function with prompt and options
-          const generator = sdkQuery({ prompt: options.prompt, options: sdkOptions })
-
-          // Convert async generator to Stream WITHOUT conversion
+          const { prompt, sdkOptions } = yield* prepareQuery(options)
+          const generator = sdkQuery({ prompt, options: sdkOptions })
           return Streaming.asyncIterableToStream(
             generator,
             (error) =>

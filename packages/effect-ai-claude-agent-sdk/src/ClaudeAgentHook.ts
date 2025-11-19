@@ -1,6 +1,15 @@
 /**
  * Lifecycle hook definitions for Claude Agent SDK.
  *
+ * NOTE: Hooks are not yet implemented. This module defines the types and
+ * interfaces for future hook support. Hook handlers will not be executed
+ * in the current version.
+ *
+ * TODO: Implement hook execution in ClaudeAgentClient by:
+ * - Parsing SDK message stream for hook trigger points
+ * - Calling appropriate hook handlers at lifecycle events
+ * - Handling hook errors gracefully
+ *
  * @category Hooks
  */
 
@@ -118,49 +127,7 @@ export interface ModelResponseContext {
  *
  * All hook handlers are optional and executed as Effect computations.
  *
- * @example
- * ```typescript
- * import { Effect } from "effect"
- * import * as Hook from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentHook"
- * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
- *
- * const hooks: Hook.HookHandlers = {
- *   onSessionStart: (context) =>
- *     Effect.sync(() => {
- *       console.log("Session started:", context.workingDirectory)
- *     }),
- *
- *   onPreToolUse: (context) =>
- *     Effect.sync(() => {
- *       console.log("About to use tool:", context.toolName)
- *     }),
- *
- *   onPostToolUse: (context) =>
- *     Effect.sync(() => {
- *       if (context.error) {
- *         console.error(`Tool ${context.toolName} failed:`, context.error)
- *       } else {
- *         console.log(`Tool ${context.toolName} succeeded`)
- *       }
- *     }),
- *
- *   onModelResponse: (context) =>
- *     Effect.sync(() => {
- *       console.log("Model response:", context.content.slice(0, 100))
- *     })
- * }
- *
- * const program = Effect.gen(function* () {
- *   const client = yield* AgentClient.ClaudeAgentClient
- *
- *   const result = yield* client.queryText({
- *     prompt: "Hello!",
- *     hooks
- *   })
- *
- *   return result
- * })
- * ```
+ * NOTE: Not yet implemented. This interface is provided for future use.
  *
  * @category Hooks
  */

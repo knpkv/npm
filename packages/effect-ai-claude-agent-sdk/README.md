@@ -157,7 +157,7 @@ If a test fails, it indicates a potential breaking change in the Anthropic SDK.
 
 **Important Limitations**:
 
-1. **Hooks Not Implemented**: Hook handlers are accepted but not executed.
+1. **Hooks Not Implemented**: The ClaudeAgentHook module defines types for lifecycle hooks, but hook execution is not yet implemented. Hook handlers will be added in a future version.
 
 **Note**: This package is in early development.
 
