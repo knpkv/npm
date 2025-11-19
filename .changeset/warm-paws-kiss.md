@@ -48,6 +48,13 @@ Initial release of `@knpkv/effect-ai-claude-agent-sdk` - Effect-TS wrapper for A
   - Tool call schemas
   - Result schemas
   - Content block types
+  - Token usage tracking (per-message and aggregate)
+  - Session summary with cost and duration
+
+### Security & Quality
+
+- **Runtime Safety Warnings**
+  - Warning when `dangerouslySkipPermissions` is enabled
 
 ### Developer Experience
 
@@ -58,6 +65,7 @@ Initial release of `@knpkv/effect-ai-claude-agent-sdk` - Effect-TS wrapper for A
   - Error handling
   - Language model integration
   - Service composition
+  - Token usage tracking
 
 - **Complete Documentation**
   - API reference

@@ -36,6 +36,7 @@ Effect.runPromise(program.pipe(Effect.provide(AgentClient.ClaudeAgentClient.laye
 - ✅ Full TypeScript support with strict mode
 - ✅ JSDoc documentation for all public APIs
 - ✅ Type-safe tool names with IDE autocomplete
+- ✅ Token usage tracking (per-message and aggregate)
 
 ## Architecture
 
@@ -105,6 +106,7 @@ See the `examples/` directory for comprehensive usage patterns:
 - **`chunk-logging.ts`** - Detailed chunk logging with tool calls
 - **`tools.ts`** - Using SDK with allowed tools for enhanced capabilities
 - **`deny-all-tools.ts`** - Empty allowedTools array (demonstrates limitation)
+- **`token-usage.ts`** - Track token usage and API costs
 
 ### Error Handling & Resilience
 
