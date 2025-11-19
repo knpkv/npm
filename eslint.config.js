@@ -132,6 +132,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/*/src/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "error"
+    }
+  },
+  {
     files: ["scratchpad/eslint/**/*"],
     plugins: {
       "unused-imports": unusedImports

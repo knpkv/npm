@@ -1,0 +1,95 @@
+{
+  "name": "@knpkv/effect-ai-claude-agent-sdk",
+  "version": "0.1.0",
+  "description": "Effect-TS wrapper for Anthropic Claude Agent SDK with @effect/ai integration",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/knpkv.dev.git",
+    "directory": "npm/packages/effect-ai-claude-agent-sdk"
+  },
+  "keywords": [
+    "effect",
+    "anthropic",
+    "claude",
+    "agent-sdk",
+    "ai",
+    "effect-ai",
+    "typescript"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./ClaudeAgentClient": {
+      "import": "./dist/ClaudeAgentClient.js",
+      "types": "./dist/ClaudeAgentClient.d.ts"
+    },
+    "./ClaudeAgentConfig": {
+      "import": "./dist/ClaudeAgentConfig.js",
+      "types": "./dist/ClaudeAgentConfig.d.ts"
+    },
+    "./ClaudeAgentLanguageModel": {
+      "import": "./dist/ClaudeAgentLanguageModel.js",
+      "types": "./dist/ClaudeAgentLanguageModel.d.ts"
+    },
+    "./ClaudeAgentTool": {
+      "import": "./dist/ClaudeAgentTool.js",
+      "types": "./dist/ClaudeAgentTool.d.ts"
+    },
+    "./ClaudeAgentHook": {
+      "import": "./dist/ClaudeAgentHook.js",
+      "types": "./dist/ClaudeAgentHook.d.ts"
+    },
+    "./ClaudeAgentError": {
+      "import": "./dist/ClaudeAgentError.js",
+      "types": "./dist/ClaudeAgentError.d.ts"
+    },
+    "./MessageSchemas": {
+      "import": "./dist/MessageSchemas.js",
+      "types": "./dist/MessageSchemas.d.ts"
+    },
+    "./Brand": {
+      "import": "./dist/Brand.js",
+      "types": "./dist/Brand.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "check": "tsc --noEmit",
+    "check:examples": "tsc --noEmit --project tsconfig.examples.json",
+    "check:all": "pnpm check && pnpm check:examples",
+    "check:strict": "tsc --noEmit --strict",
+    "lint": "eslint src examples",
+    "lint:fix": "eslint src examples --fix",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/ai": "^0.32.0",
+    "@effect/platform": "^0.93.0",
+    "@effect/schema": "^0.75.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.12",
+    "@effect/vitest": "^0.15.0",
+    "effect": "^3.19.3",
+    "typescript": "~5.9.0",
+    "vitest": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

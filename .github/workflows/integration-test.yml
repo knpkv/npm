@@ -1,0 +1,101 @@
+name: Integration Tests
+
+on:
+  # Run twice daily (9-10 AM and 6-7 PM CET)
+  schedule:
+    - cron: "0 8,17 * * *"
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+  # Run on PRs that modify integration tests or SDK packages
+  pull_request:
+    paths:
+      - "packages/*/test/integration.test.ts"
+      - "packages/effect-ai-claude-agent-sdk/src/**"
+      - "packages/effect-ai-claude-agent-sdk/package.json"
+      - "packages/effect-ai-claude-code-cli/src/**"
+      - "packages/effect-ai-claude-code-cli/package.json"
+      - ".github/workflows/integration-test.yml"
+
+jobs:
+  test-sdk:
+    name: SDK Integration Tests (${{ matrix.sdk-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        sdk-version: ["locked", "latest"]
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Update to latest Anthropic SDK
+        if: matrix.sdk-version == 'latest'
+        run: |
+          cd packages/effect-ai-claude-agent-sdk
+          pnpm add @anthropic-ai/claude-agent-sdk@latest
+
+      - name: Build SDK package
+        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk build
+
+      - name: Run SDK integration tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk test:integration
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [test-sdk]
+    if: failure()
+
+    steps:
+      - name: Create Issue on Failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 Integration Tests Failed';
+            const body = `
+            Integration tests failed for the latest Anthropic SDK version.
+
+            **Workflow**: ${context.workflow}
+            **Run**: ${context.runId}
+            **Trigger**: ${context.eventName}
+
+            Please check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+
+            This may indicate a breaking change in the Anthropic SDK that requires updates to our packages.
+            `;
+
+            // Check if an issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'integration-test-failure'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['integration-test-failure', 'automated']
+              });
+            }
