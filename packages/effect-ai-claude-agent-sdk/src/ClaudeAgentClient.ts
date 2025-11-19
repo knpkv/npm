@@ -1,0 +1,455 @@
+/**
+ * Claude Agent SDK client service.
+ *
+ * @category Client
+ */
+
+import type { Options as SdkOptions } from "@anthropic-ai/claude-agent-sdk"
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk"
+import type { Scope } from "effect"
+import { Context, Effect, Layer, Stream } from "effect"
+import type * as Brand from "./Brand.js"
+import * as AgentConfig from "./ClaudeAgentConfig.js"
+import * as AgentError from "./ClaudeAgentError.js"
+import type * as Hook from "./ClaudeAgentHook.js"
+import * as Tool from "./ClaudeAgentTool.js"
+import * as Conversion from "./internal/conversion.js"
+import * as Streaming from "./internal/streaming.js"
+import * as Validation from "./internal/validation.js"
+import type * as MessageSchemas from "./MessageSchemas.js"
+
+/**
+ * Options for executing a query.
+ *
+ * @category Client
+ */
+export interface QueryOptions {
+  /**
+   * The prompt to send to the agent.
+   */
+  readonly prompt: string
+
+  /**
+   * API key source for authentication.
+   */
+  readonly apiKeySource?: Brand.ApiKeySource
+
+  /**
+   * Working directory for SDK execution.
+   */
+  readonly workingDirectory?: string
+
+  /**
+   * List of allowed tools.
+   */
+  readonly allowedTools?: ReadonlyArray<Tool.ToolNameOrString>
+
+  /**
+   * List of disallowed tools.
+   */
+  readonly disallowedTools?: ReadonlyArray<Tool.ToolNameOrString>
+
+  /**
+   * Custom permission callback.
+   */
+  readonly canUseTool?: Tool.CanUseToolCallback
+
+  /**
+   * Lifecycle hook handlers.
+   */
+  readonly hooks?: Hook.HookHandlers
+
+  /**
+   * Dangerously skip all permission checks.
+   * WARNING: Only use for trusted, non-interactive automation.
+   * Default: false (permissions required)
+   */
+  readonly dangerouslySkipPermissions?: boolean
+}
+
+/**
+ * Claude Agent Client service interface.
+ *
+ * Provides methods for executing queries against the Claude Agent SDK
+ * with full Effect integration.
+ *
+ * @category Client
+ */
+export interface ClaudeAgentClient {
+  /**
+   * Execute a query and return a stream of message events.
+   *
+   * @example
+   * ```typescript
+   * import { Effect, Stream } from "effect"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+   *
+   * const program = Effect.gen(function* () {
+   *   const client = yield* AgentClient.ClaudeAgentClient
+   *
+   *   const stream = client.query({
+   *     prompt: "What is Effect?"
+   *   })
+   *
+   *   yield* Stream.runForEach(stream, (message) =>
+   *     Effect.sync(() => console.log(message))
+   *   )
+   * })
+   *
+   * Effect.runPromise(
+   *   program.pipe(Effect.provide(AgentClient.layer()))
+   * )
+   * ```
+   */
+  readonly query: (
+    options: QueryOptions
+  ) => Stream.Stream<MessageSchemas.MessageEvent, AgentError.AgentError, never>
+
+  /**
+   * Execute a query and collect all assistant messages into a single string.
+   *
+   * @example
+   * ```typescript
+   * import { Effect } from "effect"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+   *
+   * const program = Effect.gen(function* () {
+   *   const client = yield* AgentClient.ClaudeAgentClient
+   *
+   *   const result = yield* client.queryText({
+   *     prompt: "Explain TypeScript in one sentence",
+   *     allowedTools: []
+   *   })
+   *
+   *   console.log(result)
+   * })
+   *
+   * Effect.runPromise(
+   *   program.pipe(Effect.provide(AgentClient.layer()))
+   * )
+   * ```
+   */
+  readonly queryText: (
+    options: QueryOptions
+  ) => Effect.Effect<string, AgentError.AgentError, never>
+
+  /**
+   * Execute a query and return a stream of raw SDK messages without conversion.
+   *
+   * Returns unconverted SDK message objects for low-level access to chunk details.
+   *
+   * @example
+   * ```typescript
+   * import { Effect, Stream } from "effect"
+   * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+   *
+   * const program = Effect.gen(function* () {
+   *   const client = yield* AgentClient.ClaudeAgentClient
+   *
+   *   const stream = client.queryRaw({
+   *     prompt: "What is Effect?"
+   *   })
+   *
+   *   yield* Stream.runForEach(stream, (sdkMessage) =>
+   *     Effect.sync(() => console.log(sdkMessage))
+   *   )
+   * })
+   *
+   * Effect.runPromise(
+   *   program.pipe(Effect.provide(AgentClient.layer()))
+   * )
+   * ```
+   */
+  readonly queryRaw: (
+    options: QueryOptions
+  ) => Stream.Stream<any, AgentError.AgentError, never>
+}
+
+/**
+ * Claude Agent Client service tag.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ *
+ * const program = Effect.gen(function* () {
+ *   const client = yield* AgentClient.ClaudeAgentClient
+ *   return client
+ * })
+ * ```
+ *
+ * @category Client
+ */
+export const ClaudeAgentClient = Context.GenericTag<ClaudeAgentClient>(
+  "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+)
+
+/**
+ * Create a Claude Agent Client service.
+ *
+ * @internal
+ */
+const makeClient = (
+  config: AgentConfig.ClaudeAgentConfig
+): Effect.Effect<ClaudeAgentClient, never, never> =>
+  Effect.gen(function*() {
+    const queryImpl = (options: QueryOptions) =>
+      Stream.unwrap(
+        Effect.gen(function*() {
+          // Validate inputs
+          yield* Validation.validatePrompt(options.prompt)
+          yield* Validation.validateToolLists(options)
+          yield* Validation.validateWorkingDirectory(options.workingDirectory)
+
+          // Merge config with query options (query options take precedence)
+          const apiKeySource = options.apiKeySource ?? config.apiKeySource
+          const workingDirectory = options.workingDirectory ?? config.workingDirectory
+          let allowedTools = options.allowedTools ?? config.allowedTools
+          let disallowedTools = options.disallowedTools ?? config.disallowedTools
+          const canUseTool = options.canUseTool ?? config.canUseTool
+          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ??
+            config.dangerouslySkipPermissions ??
+            false
+
+          // Handle empty allowedTools array as "deny all"
+          // Convert to disallowedTools: allTools (same as CLI behavior)
+          if (allowedTools !== undefined && allowedTools.length === 0) {
+            allowedTools = undefined
+            disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
+          }
+
+          // Build SDK query options
+          const sdkOptions: SdkOptions = {
+            ...(apiKeySource && { apiKeySource }),
+            ...(workingDirectory && { cwd: workingDirectory }),
+            ...(allowedTools && { allowedTools: [...allowedTools] }),
+            ...(disallowedTools && { disallowedTools: [...disallowedTools] }),
+            ...(dangerouslySkipPermissions && { allowDangerouslySkipPermissions: dangerouslySkipPermissions }),
+            ...(canUseTool && {
+              // Convert Effect-based canUseTool to Promise-based for SDK
+              canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+                const result = await Effect.runPromise(canUseTool(toolName))
+                return result
+                  ? { behavior: "allow" as const, updatedInput: input }
+                  : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
+              }
+            })
+          }
+
+          // Call SDK query function with prompt and options
+          const generator = sdkQuery({ prompt: options.prompt, options: sdkOptions })
+
+          // Convert async generator to Stream
+          return Streaming.asyncIterableToStream(
+            generator,
+            (error) =>
+              new AgentError.SdkError({
+                message: `SDK query failed: ${String(error)}`,
+                cause: error
+              })
+          ).pipe(
+            Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage))
+          )
+        })
+      )
+
+    const queryRawImpl = (options: QueryOptions) =>
+      Stream.unwrap(
+        Effect.gen(function*() {
+          // Validate inputs
+          yield* Validation.validatePrompt(options.prompt)
+          yield* Validation.validateToolLists(options)
+          yield* Validation.validateWorkingDirectory(options.workingDirectory)
+
+          // Merge config with query options (query options take precedence)
+          const apiKeySource = options.apiKeySource ?? config.apiKeySource
+          const workingDirectory = options.workingDirectory ?? config.workingDirectory
+          let allowedTools = options.allowedTools ?? config.allowedTools
+          let disallowedTools = options.disallowedTools ?? config.disallowedTools
+          const canUseTool = options.canUseTool ?? config.canUseTool
+          const dangerouslySkipPermissions = options.dangerouslySkipPermissions ??
+            config.dangerouslySkipPermissions ??
+            false
+
+          // Handle empty allowedTools array as "deny all"
+          // Convert to disallowedTools: allTools (same as CLI behavior)
+          if (allowedTools !== undefined && allowedTools.length === 0) {
+            allowedTools = undefined
+            disallowedTools = [...Tool.allTools, ...(disallowedTools || [])]
+          }
+
+          // Build SDK query options
+          const sdkOptions: SdkOptions = {
+            ...(apiKeySource && { apiKeySource }),
+            ...(workingDirectory && { cwd: workingDirectory }),
+            ...(allowedTools && { allowedTools: [...allowedTools] }),
+            ...(disallowedTools && { disallowedTools: [...disallowedTools] }),
+            ...(dangerouslySkipPermissions && { allowDangerouslySkipPermissions: dangerouslySkipPermissions }),
+            ...(canUseTool && {
+              // Convert Effect-based canUseTool to Promise-based for SDK
+              canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+                const result = await Effect.runPromise(canUseTool(toolName))
+                return result
+                  ? { behavior: "allow" as const, updatedInput: input }
+                  : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }
+              }
+            })
+          }
+
+          // Call SDK query function with prompt and options
+          const generator = sdkQuery({ prompt: options.prompt, options: sdkOptions })
+
+          // Convert async generator to Stream WITHOUT conversion
+          return Streaming.asyncIterableToStream(
+            generator,
+            (error) =>
+              new AgentError.SdkError({
+                message: `SDK query failed: ${String(error)}`,
+                cause: error
+              })
+          )
+        })
+      )
+
+    const queryTextImpl = (options: QueryOptions) =>
+      Effect.gen(function*() {
+        const stream = queryImpl(options)
+        const messages = yield* Streaming.collectStream(stream)
+        return Conversion.collectAssistantText(messages)
+      })
+
+    return {
+      query: queryImpl,
+      queryRaw: queryRawImpl,
+      queryText: queryTextImpl
+    }
+  })
+
+/**
+ * Create a Layer that provides the Claude Agent Client service with direct configuration.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ * import * as Tool from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentTool"
+ *
+ * const program = Effect.gen(function* () {
+ *   const client = yield* AgentClient.ClaudeAgentClient
+ *
+ *   const result = yield* client.queryText({
+ *     prompt: "Hello!"
+ *   })
+ *
+ *   return result
+ * })
+ *
+ * Effect.runPromise(
+ *   program.pipe(
+ *     Effect.provide(
+ *       AgentClient.layer({
+ *         apiKeySource: "project",
+ *         canUseTool: Tool.allowList(["Read", "Write"])
+ *       })
+ *     )
+ *   )
+ * )
+ * ```
+ *
+ * @category Client
+ */
+export const layer = (
+  options?: AgentConfig.ClaudeAgentConfigOptions
+): Layer.Layer<ClaudeAgentClient, never, never> =>
+  Layer.effect(
+    ClaudeAgentClient,
+    makeClient(AgentConfig.make(options))
+  )
+
+/**
+ * Create a Layer that provides the Claude Agent Client service using the config service.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ * import * as AgentConfig from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentConfig"
+ *
+ * const configLayer = AgentConfig.layer({
+ *   apiKeySource: "org",
+ *   workingDirectory: "/my/project"
+ * })
+ *
+ * const program = Effect.gen(function* () {
+ *   const client = yield* AgentClient.ClaudeAgentClient
+ *
+ *   const result = yield* client.queryText({
+ *     prompt: "What files are in this directory?"
+ *   })
+ *
+ *   return result
+ * })
+ *
+ * Effect.runPromise(
+ *   program.pipe(
+ *     Effect.provide(AgentClient.layerConfig()),
+ *     Effect.provide(configLayer)
+ *   )
+ * )
+ * ```
+ *
+ * @category Client
+ */
+export const layerConfig = (): Layer.Layer<ClaudeAgentClient, never, AgentConfig.ClaudeAgentConfig> =>
+  Layer.effect(
+    ClaudeAgentClient,
+    Effect.flatMap(AgentConfig.ClaudeAgentConfig, makeClient)
+  )
+
+/**
+ * Convenience function to execute a query without manually accessing the service.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ *
+ * const program = AgentClient.query({ prompt: "Hello!" })
+ *
+ * Effect.runPromise(
+ *   program.pipe(Effect.provide(AgentClient.layer()))
+ * )
+ * ```
+ *
+ * @category Client
+ */
+export const query = (
+  options: QueryOptions
+): Effect.Effect<
+  Stream.Stream<MessageSchemas.MessageEvent, AgentError.AgentError, Scope.Scope>,
+  never,
+  ClaudeAgentClient
+> => Effect.map(ClaudeAgentClient, (client) => client.query(options))
+
+/**
+ * Convenience function to execute a query and get text without manually accessing the service.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import * as AgentClient from "@knpkv/effect-ai-claude-agent-sdk/ClaudeAgentClient"
+ *
+ * const program = AgentClient.queryText({ prompt: "What is 2+2?" })
+ *
+ * Effect.runPromise(
+ *   program.pipe(Effect.provide(AgentClient.layer()))
+ * ).then(console.log)
+ * ```
+ *
+ * @category Client
+ */
+export const queryText = (
+  options: QueryOptions
+): Effect.Effect<string, AgentError.AgentError, ClaudeAgentClient | Scope.Scope> =>
+  Effect.flatMap(ClaudeAgentClient, (client) => client.queryText(options))
