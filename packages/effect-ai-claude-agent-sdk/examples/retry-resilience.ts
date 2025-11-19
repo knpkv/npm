@@ -2,8 +2,6 @@
  * Retry and resilience example.
  *
  * Demonstrates error recovery with retry logic and timeouts.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Schedule } from "effect"
 import * as AgentClient from "../src/index.js"

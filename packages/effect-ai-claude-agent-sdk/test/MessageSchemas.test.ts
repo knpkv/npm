@@ -1,7 +1,5 @@
 /**
  * Unit tests for MessageSchemas.
- *
- * @since 1.0.0
  */
 import { Schema } from "@effect/schema"
 import { Effect } from "effect"

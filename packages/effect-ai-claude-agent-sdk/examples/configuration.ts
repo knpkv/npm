@@ -2,8 +2,6 @@
  * Configuration example.
  *
  * Demonstrates custom configuration with layers.
- *
- * @since 1.0.0
  */
 import { Console, Effect } from "effect"
 import * as AgentConfig from "../src/ClaudeAgentConfig.js"

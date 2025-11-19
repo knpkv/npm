@@ -1,7 +1,6 @@
 /**
  * Tool definitions and permission management for Claude Agent SDK.
  *
- * @since 1.0.0
  * @category Tools
  */
 
@@ -11,7 +10,6 @@ import type * as Brand from "./Brand.js"
 /**
  * Type alias for tool names (using branded type).
  *
- * @since 1.0.0
  * @category Tools
  */
 export type ToolName = Brand.ToolName
@@ -38,7 +36,6 @@ export type ToolName = Brand.ToolName
  * })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const allTools = [
@@ -63,7 +60,6 @@ export const allTools = [
 /**
  * Union type of all known tool names.
  *
- * @since 1.0.0
  * @category Tools
  */
 export type KnownToolName = (typeof allTools)[number]
@@ -73,7 +69,6 @@ export type KnownToolName = (typeof allTools)[number]
  *
  * Provides autocomplete for known tools while allowing custom tool names.
  *
- * @since 1.0.0
  * @category Tools
  */
 export type ToolNameOrString = KnownToolName | (string & {})
@@ -109,7 +104,6 @@ export type ToolNameOrString = KnownToolName | (string & {})
  *   })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export type CanUseToolCallback = (toolName: string) => Effect.Effect<boolean, never, never>
@@ -135,7 +129,6 @@ export type CanUseToolCallback = (toolName: string) => Effect.Effect<boolean, ne
  * })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const allowAll: CanUseToolCallback = () => Effect.succeed(true)
@@ -162,7 +155,6 @@ export const allowAll: CanUseToolCallback = () => Effect.succeed(true)
  * })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const denyAll: CanUseToolCallback = () => Effect.succeed(false)
@@ -189,7 +181,6 @@ export const denyAll: CanUseToolCallback = () => Effect.succeed(false)
  * })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const allowList = (tools: ReadonlyArray<ToolNameOrString>): CanUseToolCallback => (toolName) =>
@@ -217,7 +208,6 @@ export const allowList = (tools: ReadonlyArray<ToolNameOrString>): CanUseToolCal
  * })
  * ```
  *
- * @since 1.0.0
  * @category Tools
  */
 export const denyList = (tools: ReadonlyArray<ToolNameOrString>): CanUseToolCallback => (toolName) =>

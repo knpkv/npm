@@ -1,7 +1,6 @@
 /**
  * Error types for Claude Agent SDK operations.
  *
- * @since 1.0.0
  * @category Errors
  */
 
@@ -38,7 +37,6 @@ import { Data } from "effect"
  * )
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export class SdkError extends Data.TaggedError("SdkError")<{
@@ -76,7 +74,6 @@ export class SdkError extends Data.TaggedError("SdkError")<{
  *   )
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export class StreamError extends Data.TaggedError("StreamError")<{
@@ -128,7 +125,6 @@ export class StreamError extends Data.TaggedError("StreamError")<{
  * )
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export class ToolError extends Data.TaggedError("ToolError")<{
@@ -178,7 +174,6 @@ export class ToolError extends Data.TaggedError("ToolError")<{
  * )
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export class ValidationError extends Data.TaggedError("ValidationError")<{
@@ -228,7 +223,6 @@ export class ValidationError extends Data.TaggedError("ValidationError")<{
  * )
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export class PermissionError extends Data.TaggedError("PermissionError")<{
@@ -268,7 +262,6 @@ export class PermissionError extends Data.TaggedError("PermissionError")<{
  * }
  * ```
  *
- * @since 1.0.0
  * @category Errors
  */
 export type AgentError = SdkError | StreamError | ToolError | ValidationError | PermissionError

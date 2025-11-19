@@ -1,7 +1,6 @@
 /**
  * Branded types for type-safe domain primitives.
  *
- * @since 1.0.0
  * @category Validation
  */
 
@@ -34,7 +33,6 @@ import { Brand } from "effect"
  * })
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export type ApiKeySource = "user" | "project" | "org" | "temporary"
@@ -60,7 +58,6 @@ export type ApiKeySource = "user" | "project" | "org" | "temporary"
  * ]
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export type ToolName = string & Brand.Brand<"ToolName">
@@ -76,7 +73,6 @@ export type ToolName = string & Brand.Brand<"ToolName">
  * const bashTool = Brand.ToolName("Bash")
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export const ToolName = Brand.nominal<ToolName>()
@@ -100,7 +96,6 @@ export const ToolName = Brand.nominal<ToolName>()
  * }
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export type HookName = string & Brand.Brand<"HookName">
@@ -116,7 +111,6 @@ export type HookName = string & Brand.Brand<"HookName">
  * const toolUse = Brand.HookName("PreToolUse")
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export const HookName = Brand.nominal<HookName>()
@@ -147,7 +141,6 @@ export const HookName = Brand.nominal<HookName>()
  * })
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export type WorkingDirectory = string & Brand.Brand<"WorkingDirectory">
@@ -175,7 +168,6 @@ export type WorkingDirectory = string & Brand.Brand<"WorkingDirectory">
  * })
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export const WorkingDirectory = Brand.refined<WorkingDirectory>(
@@ -203,7 +195,6 @@ export const WorkingDirectory = Brand.refined<WorkingDirectory>(
  * })
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export type MessageId = string & Brand.Brand<"MessageId">
@@ -218,7 +209,6 @@ export type MessageId = string & Brand.Brand<"MessageId">
  * const msgId = Brand.MessageId("msg_abc123")
  * ```
  *
- * @since 1.0.0
  * @category Validation
  */
 export const MessageId = Brand.nominal<MessageId>()

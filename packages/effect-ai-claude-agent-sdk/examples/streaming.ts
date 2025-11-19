@@ -2,8 +2,6 @@
  * Streaming query example.
  *
  * Demonstrates streaming message processing with real-time output.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Stream } from "effect"
 import * as AgentClient from "../src/index.js"

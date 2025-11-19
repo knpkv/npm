@@ -2,8 +2,6 @@
  * Service composition example.
  *
  * Demonstrates building custom services on top of ClaudeAgentClient.
- *
- * @since 1.0.0
  */
 import { Console, Context, Effect, Layer } from "effect"
 import * as AgentClient from "../src/index.js"

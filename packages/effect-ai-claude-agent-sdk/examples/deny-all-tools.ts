@@ -2,8 +2,6 @@
  * Empty allowedTools array example for SDK.
  *
  * Demonstrates that allowedTools: [] successfully denies all tools.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Stream } from "effect"
 import * as AgentConfig from "../src/ClaudeAgentConfig.js"

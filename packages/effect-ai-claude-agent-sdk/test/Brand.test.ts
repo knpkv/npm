@@ -1,7 +1,5 @@
 /**
  * Unit tests for Brand module.
- *
- * @since 1.0.0
  */
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"

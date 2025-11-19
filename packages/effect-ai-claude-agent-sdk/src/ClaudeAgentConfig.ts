@@ -1,7 +1,6 @@
 /**
  * Configuration service for Claude Agent SDK.
  *
- * @since 1.0.0
  * @category Config
  */
 
@@ -31,7 +30,6 @@ import type * as Tool from "./ClaudeAgentTool.js"
  * }
  * ```
  *
- * @since 1.0.0
  * @category Config
  */
 export interface ClaudeAgentConfigOptions {
@@ -92,7 +90,6 @@ export interface ClaudeAgentConfigOptions {
 /**
  * Configuration service interface.
  *
- * @since 1.0.0
  * @category Config
  */
 export interface ClaudeAgentConfig extends ClaudeAgentConfigOptions {
@@ -115,7 +112,6 @@ export interface ClaudeAgentConfig extends ClaudeAgentConfigOptions {
  * })
  * ```
  *
- * @since 1.0.0
  * @category Config
  */
 export const ClaudeAgentConfig = Context.GenericTag<ClaudeAgentConfig>(
@@ -144,7 +140,6 @@ export const ClaudeAgentConfig = Context.GenericTag<ClaudeAgentConfig>(
  * }).pipe(Effect.provideService(AgentConfig.ClaudeAgentConfig, config))
  * ```
  *
- * @since 1.0.0
  * @category Config
  */
 export const make = (options: ClaudeAgentConfigOptions = {}): ClaudeAgentConfig => ({
@@ -175,7 +170,6 @@ export const make = (options: ClaudeAgentConfigOptions = {}): ClaudeAgentConfig 
  * Effect.runPromise(program.pipe(Effect.provide(configLayer)))
  * ```
  *
- * @since 1.0.0
  * @category Config
  */
 export const layer = (options: ClaudeAgentConfigOptions = {}): Layer.Layer<ClaudeAgentConfig> =>
@@ -200,7 +194,6 @@ export const layer = (options: ClaudeAgentConfigOptions = {}): Layer.Layer<Claud
  * }).pipe(Effect.provideService(AgentConfig.ClaudeAgentConfig, AgentConfig.defaultConfig))
  * ```
  *
- * @since 1.0.0
  * @category Config
  */
 export const defaultConfig: ClaudeAgentConfig = make()

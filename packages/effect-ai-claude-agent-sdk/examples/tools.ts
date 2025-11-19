@@ -2,8 +2,6 @@
  * Tool calling example.
  *
  * Demonstrates using the SDK with allowed tools for enhanced capabilities.
- *
- * @since 1.0.0
  */
 import { Console, Effect } from "effect"
 import * as AgentConfig from "../src/ClaudeAgentConfig.js"

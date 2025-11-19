@@ -1,12 +1,11 @@
 /**
  * Claude Agent SDK client service.
  *
- * @since 1.0.0
  * @category Client
  */
 
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk"
 import type { Options as SdkOptions } from "@anthropic-ai/claude-agent-sdk"
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk"
 import type { Scope } from "effect"
 import { Context, Effect, Layer, Stream } from "effect"
 import type * as Brand from "./Brand.js"
@@ -22,7 +21,6 @@ import type * as MessageSchemas from "./MessageSchemas.js"
 /**
  * Options for executing a query.
  *
- * @since 1.0.0
  * @category Client
  */
 export interface QueryOptions {
@@ -75,7 +73,6 @@ export interface QueryOptions {
  * Provides methods for executing queries against the Claude Agent SDK
  * with full Effect integration.
  *
- * @since 1.0.0
  * @category Client
  */
 export interface ClaudeAgentClient {
@@ -182,7 +179,6 @@ export interface ClaudeAgentClient {
  * })
  * ```
  *
- * @since 1.0.0
  * @category Client
  */
 export const ClaudeAgentClient = Context.GenericTag<ClaudeAgentClient>(
@@ -361,7 +357,6 @@ const makeClient = (
  * )
  * ```
  *
- * @since 1.0.0
  * @category Client
  */
 export const layer = (
@@ -404,7 +399,6 @@ export const layer = (
  * )
  * ```
  *
- * @since 1.0.0
  * @category Client
  */
 export const layerConfig = (): Layer.Layer<ClaudeAgentClient, never, AgentConfig.ClaudeAgentConfig> =>
@@ -428,7 +422,6 @@ export const layerConfig = (): Layer.Layer<ClaudeAgentClient, never, AgentConfig
  * )
  * ```
  *
- * @since 1.0.0
  * @category Client
  */
 export const query = (
@@ -454,7 +447,6 @@ export const query = (
  * ).then(console.log)
  * ```
  *
- * @since 1.0.0
  * @category Client
  */
 export const queryText = (

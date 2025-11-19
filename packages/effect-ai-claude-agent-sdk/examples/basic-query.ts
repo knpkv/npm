@@ -2,8 +2,6 @@
  * Basic example.
  *
  * Demonstrates basic usage of the ClaudeAgentClient.
- *
- * @since 1.0.0
  */
 import { Console, Effect } from "effect"
 import * as AgentClient from "../src/index.js"

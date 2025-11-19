@@ -1,7 +1,6 @@
 /**
  * Lifecycle hook definitions for Claude Agent SDK.
  *
- * @since 1.0.0
  * @category Hooks
  */
 
@@ -11,7 +10,6 @@ import type * as Brand from "./Brand.js"
 /**
  * Type alias for hook names (using branded type).
  *
- * @since 1.0.0
  * @category Hooks
  */
 export type HookName = Brand.HookName
@@ -19,7 +17,6 @@ export type HookName = Brand.HookName
 /**
  * All 8 lifecycle hooks available in the Claude Agent SDK.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export const allHooks: ReadonlyArray<string> = [
@@ -36,7 +33,6 @@ export const allHooks: ReadonlyArray<string> = [
 /**
  * Context provided to SessionStart hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface SessionStartContext {
@@ -47,7 +43,6 @@ export interface SessionStartContext {
 /**
  * Context provided to SessionEnd hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface SessionEndContext {
@@ -58,7 +53,6 @@ export interface SessionEndContext {
 /**
  * Context provided to PreToolUse hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface PreToolUseContext {
@@ -69,7 +63,6 @@ export interface PreToolUseContext {
 /**
  * Context provided to PostToolUse hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface PostToolUseContext {
@@ -82,7 +75,6 @@ export interface PostToolUseContext {
 /**
  * Context provided to UserPromptSubmit hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface UserPromptSubmitContext {
@@ -93,7 +85,6 @@ export interface UserPromptSubmitContext {
 /**
  * Context provided to PreApiCall hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface PreApiCallContext {
@@ -104,7 +95,6 @@ export interface PreApiCallContext {
 /**
  * Context provided to PostApiCall hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface PostApiCallContext {
@@ -116,7 +106,6 @@ export interface PostApiCallContext {
 /**
  * Context provided to ModelResponse hook.
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface ModelResponseContext {
@@ -173,7 +162,6 @@ export interface ModelResponseContext {
  * })
  * ```
  *
- * @since 1.0.0
  * @category Hooks
  */
 export interface HookHandlers {

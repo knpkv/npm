@@ -1,7 +1,6 @@
 /**
  * Schema definitions for Claude Agent SDK message types.
  *
- * @since 1.0.0
  * @category Messages
  */
 
@@ -12,7 +11,6 @@ import { Schema } from "@effect/schema"
  *
  * The SDK emits 7 different message types during query execution.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const MessageType = Schema.Literal(
@@ -28,7 +26,6 @@ export const MessageType = Schema.Literal(
 /**
  * Base message content.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const BaseMessage = Schema.Struct({
@@ -53,7 +50,6 @@ export const BaseMessage = Schema.Struct({
  * const decoded = Schema.decodeUnknownSync(MessageSchemas.AssistantMessage)(message)
  * ```
  *
- * @since 1.0.0
  * @category Messages
  */
 export const AssistantMessage = Schema.Struct({
@@ -65,7 +61,6 @@ export const AssistantMessage = Schema.Struct({
 /**
  * User message containing user input.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const UserMessage = Schema.Struct({
@@ -76,7 +71,6 @@ export const UserMessage = Schema.Struct({
 /**
  * Result message containing tool execution results.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const ResultMessage = Schema.Struct({
@@ -88,7 +82,6 @@ export const ResultMessage = Schema.Struct({
 /**
  * System message containing system-level information.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const SystemMessage = Schema.Struct({
@@ -99,7 +92,6 @@ export const SystemMessage = Schema.Struct({
 /**
  * Partial assistant message for streaming responses.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const PartialAssistantMessage = Schema.Struct({
@@ -111,7 +103,6 @@ export const PartialAssistantMessage = Schema.Struct({
 /**
  * Compact boundary message indicating message boundaries.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const CompactBoundaryMessage = Schema.Struct({
@@ -122,7 +113,6 @@ export const CompactBoundaryMessage = Schema.Struct({
 /**
  * Permission denial message when tool use is denied.
  *
- * @since 1.0.0
  * @category Messages
  */
 export const PermissionDenialMessage = Schema.Struct({
@@ -160,7 +150,6 @@ export const PermissionDenialMessage = Schema.Struct({
  * }
  * ```
  *
- * @since 1.0.0
  * @category Messages
  */
 export const MessageEvent = Schema.Union(
@@ -176,7 +165,6 @@ export const MessageEvent = Schema.Union(
 /**
  * Type extracted from MessageEvent schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type MessageEvent = Schema.Schema.Type<typeof MessageEvent>
@@ -184,7 +172,6 @@ export type MessageEvent = Schema.Schema.Type<typeof MessageEvent>
 /**
  * Type extracted from AssistantMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type AssistantMessage = Schema.Schema.Type<typeof AssistantMessage>
@@ -192,7 +179,6 @@ export type AssistantMessage = Schema.Schema.Type<typeof AssistantMessage>
 /**
  * Type extracted from UserMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type UserMessage = Schema.Schema.Type<typeof UserMessage>
@@ -200,7 +186,6 @@ export type UserMessage = Schema.Schema.Type<typeof UserMessage>
 /**
  * Type extracted from ResultMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type ResultMessage = Schema.Schema.Type<typeof ResultMessage>
@@ -208,7 +193,6 @@ export type ResultMessage = Schema.Schema.Type<typeof ResultMessage>
 /**
  * Type extracted from SystemMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type SystemMessage = Schema.Schema.Type<typeof SystemMessage>
@@ -216,7 +200,6 @@ export type SystemMessage = Schema.Schema.Type<typeof SystemMessage>
 /**
  * Type extracted from PartialAssistantMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type PartialAssistantMessage = Schema.Schema.Type<typeof PartialAssistantMessage>
@@ -224,7 +207,6 @@ export type PartialAssistantMessage = Schema.Schema.Type<typeof PartialAssistant
 /**
  * Type extracted from CompactBoundaryMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type CompactBoundaryMessage = Schema.Schema.Type<typeof CompactBoundaryMessage>
@@ -232,7 +214,6 @@ export type CompactBoundaryMessage = Schema.Schema.Type<typeof CompactBoundaryMe
 /**
  * Type extracted from PermissionDenialMessage schema.
  *
- * @since 1.0.0
  * @category Messages
  */
 export type PermissionDenialMessage = Schema.Schema.Type<typeof PermissionDenialMessage>

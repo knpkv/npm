@@ -3,8 +3,6 @@
  *
  * Tests real API calls to verify compatibility with @anthropic-ai/claude-agent-sdk.
  * Requires ANTHROPIC_API_KEY environment variable.
- *
- * @since 1.0.0
  */
 import { Effect, Stream } from "effect"
 import { describe, expect, it } from "vitest"

@@ -2,8 +2,6 @@
  * Error handling example.
  *
  * Demonstrates proper error handling with typed errors.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Match } from "effect"
 import type * as AgentError from "../src/ClaudeAgentError.js"

@@ -2,8 +2,6 @@
  * Advanced stream processing example.
  *
  * Demonstrates filtering and transformation of message streams.
- *
- * @since 1.0.0
  */
 import { Console, Effect, Stream } from "effect"
 import * as AgentClient from "../src/index.js"

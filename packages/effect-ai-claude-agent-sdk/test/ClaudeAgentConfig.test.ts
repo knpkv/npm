@@ -1,7 +1,5 @@
 /**
  * Unit tests for ClaudeAgentConfig.
- *
- * @since 1.0.0
  */
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"

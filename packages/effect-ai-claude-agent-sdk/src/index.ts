@@ -1,6 +1,4 @@
-/**
- * @since 1.0.0
- */
+/** */
 
 /**
  * Effect-TS wrapper for Anthropic Claude Agent SDK.
@@ -27,42 +25,26 @@
  *   program.pipe(Effect.provide(AgentClient.layer()))
  * )
  * ```
- *
- * @since 1.0.0
  */
 export * as ClaudeAgentClient from "./ClaudeAgentClient.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as ClaudeAgentConfig from "./ClaudeAgentConfig.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as ClaudeAgentTool from "./ClaudeAgentTool.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as ClaudeAgentHook from "./ClaudeAgentHook.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as ClaudeAgentError from "./ClaudeAgentError.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as MessageSchemas from "./MessageSchemas.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as Brand from "./Brand.js"
 
-/**
- * @since 1.0.0
- */
+/** */
 export * as ClaudeAgentLanguageModel from "./ClaudeAgentLanguageModel.js"
