@@ -64,7 +64,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run test/integration.test.ts",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
     "check": "tsc --noEmit",
     "check:examples": "tsc --noEmit --project tsconfig.examples.json",
     "check:all": "pnpm check && pnpm check:examples",
