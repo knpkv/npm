@@ -56,7 +56,7 @@ jobs:
       - name: Run SDK integration tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk test test/integration.test.ts
+        run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk test:integration
 
   notify:
     name: Notify on Failure
