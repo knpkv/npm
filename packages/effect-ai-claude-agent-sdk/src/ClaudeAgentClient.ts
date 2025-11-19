@@ -100,6 +100,10 @@ export interface ClaudeAgentClient {
   /**
    * Execute a query and collect all assistant messages into a single string.
    *
+   * **Performance Note**: This method collects the entire message stream into memory
+   * before returning the concatenated text. For very large responses, consider using
+   * `query()` to process the stream incrementally.
+   *
    * @example
    * ```typescript
    * import { Effect } from "effect"
@@ -219,12 +223,16 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           )
         }
 
-        // Warn if hooks are configured but not yet implemented
+        // Fail fast if hooks are configured but not yet implemented
         if (config.hooks && Object.keys(config.hooks).length > 0) {
-          yield* Console.warn(
-            "⚠️  WARNING: Lifecycle hooks are configured but not yet implemented. " +
-              "Hook handlers will not be executed in this version. " +
-              "See README 'Known Limitations' section for details."
+          return yield* Effect.fail(
+            new AgentError.ValidationError({
+              field: "hooks",
+              message: "Lifecycle hooks are not yet implemented. " +
+                "Remove hooks from config or wait for future release. " +
+                "See README 'Known Limitations' section for details.",
+              input: Object.keys(config.hooks)
+            })
           )
         }
 
@@ -248,7 +256,12 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
             // Convert Effect-based canUseTool to Promise-based for SDK
             canUseTool: async (toolName: string, input: Record<string, unknown>) => {
               try {
-                const result = await Effect.runPromise(canUseTool(toolName))
+                // Add catchAll for safety - ensures Effect failures are handled gracefully
+                const result = await Effect.runPromise(
+                  canUseTool(toolName).pipe(
+                    Effect.catchAll(() => Effect.succeed(false))
+                  )
+                )
                 return result
                   ? { behavior: "allow" as const, updatedInput: input }
                   : { behavior: "deny" as const, message: `Tool '${toolName}' is not allowed` }

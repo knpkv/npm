@@ -177,9 +177,10 @@ export const convertSdkMessage = (
           }
       }
     } catch (error) {
+      const messageType = sdkMessage.type
       return yield* Effect.fail(
         new AgentError.StreamError({
-          message: `Failed to convert SDK message: ${String(error)}`,
+          message: `Failed to convert SDK message of type '${messageType}': ${String(error)}`,
           cause: error
         })
       )
