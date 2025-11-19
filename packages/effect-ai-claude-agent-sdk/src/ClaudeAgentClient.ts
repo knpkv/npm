@@ -7,7 +7,7 @@
 import type { Options as SdkOptions } from "@anthropic-ai/claude-agent-sdk"
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk"
 import type { Scope } from "effect"
-import { Context, Effect, Layer, Stream } from "effect"
+import { Console, Context, Effect, Layer, Stream } from "effect"
 import type * as Brand from "./Brand.js"
 import * as AgentConfig from "./ClaudeAgentConfig.js"
 import * as AgentError from "./ClaudeAgentError.js"
@@ -209,6 +209,14 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
         const canUseTool = options.canUseTool ?? config.canUseTool
         const dangerouslySkipPermissions = options.dangerouslySkipPermissions ?? config.dangerouslySkipPermissions ??
           false
+
+        // Warn if dangerouslySkipPermissions is enabled
+        if (dangerouslySkipPermissions) {
+          yield* Console.warn(
+            "[WARNING] dangerouslySkipPermissions is enabled. All tool permissions are bypassed. " +
+              "Only use this for trusted, non-interactive automation."
+          )
+        }
 
         // Handle empty allowedTools array as "deny all"
         // Convert to disallowedTools: allTools (same as CLI behavior)
