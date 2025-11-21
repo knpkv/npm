@@ -18,6 +18,43 @@ import * as Validation from "./internal/validation.js"
 import type * as MessageSchemas from "./MessageSchemas.js"
 
 /**
+ * Extract detailed error information from an unknown error.
+ * @internal
+ */
+const extractErrorDetails = (
+  error: unknown
+): { message: string; exitCode?: number; stderr?: string } => {
+  if (error instanceof Error) {
+    // Check if it's a process exit error with exit code
+    const exitCodeMatch = error.message.match(/exited with code (\d+)/)
+    const exitCode = exitCodeMatch?.[1] ? Number.parseInt(exitCodeMatch[1], 10) : undefined
+
+    const result: { message: string; exitCode?: number; stderr?: string } = {
+      message: error.message
+    }
+
+    if (exitCode !== undefined) {
+      result.exitCode = exitCode
+    }
+
+    // stderr would need to be captured from process spawn
+    return result
+  }
+  return { message: String(error) }
+}
+
+/**
+ * Format error message with stack trace if available.
+ * @internal
+ */
+const formatErrorMessage = (error: unknown, context: string): string => {
+  if (error instanceof Error) {
+    return `${context}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
+  }
+  return `${context}: ${String(error)}`
+}
+
+/**
  * Options for executing a query.
  *
  * @category Client
@@ -268,7 +305,7 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
               } catch (error) {
                 return {
                   behavior: "deny" as const,
-                  message: `Tool permission check failed: ${String(error)}`
+                  message: formatErrorMessage(error, "Tool permission check failed")
                 }
               }
             }
@@ -285,11 +322,15 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           const generator = sdkQuery({ prompt, options: sdkOptions })
           const rawStream = Streaming.asyncIterableToStream(
             generator,
-            (error) =>
-              new AgentError.SdkError({
-                message: `SDK query failed: ${String(error)}`,
-                cause: error
+            (error) => {
+              const details = extractErrorDetails(error)
+              return new AgentError.SdkError({
+                message: formatErrorMessage(error, "SDK query failed"),
+                cause: error,
+                ...(details.exitCode !== undefined && { exitCode: details.exitCode }),
+                ...(details.stderr !== undefined && { stderr: details.stderr })
               })
+            }
           )
           return rawStream.pipe(Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage)))
         })
@@ -302,11 +343,15 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           const generator = sdkQuery({ prompt, options: sdkOptions })
           return Streaming.asyncIterableToStream(
             generator,
-            (error) =>
-              new AgentError.SdkError({
-                message: `SDK query failed: ${String(error)}`,
-                cause: error
+            (error) => {
+              const details = extractErrorDetails(error)
+              return new AgentError.SdkError({
+                message: formatErrorMessage(error, "SDK query failed"),
+                cause: error,
+                ...(details.exitCode !== undefined && { exitCode: details.exitCode }),
+                ...(details.stderr !== undefined && { stderr: details.stderr })
               })
+            }
           )
         })
       )
