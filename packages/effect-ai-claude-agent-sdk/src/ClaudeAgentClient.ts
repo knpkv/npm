@@ -19,6 +19,14 @@ import type * as MessageSchemas from "./MessageSchemas.js"
 
 /**
  * Extract detailed error information from an unknown error.
+ *
+ * Attempts to extract:
+ * - Exit codes from error messages matching patterns:
+ *   - "exited with code N"
+ *   - "exit code N"
+ *   - "process exited with status N"
+ * - Error message and stack trace
+ *
  * @internal
  */
 const extractErrorDetails = (
@@ -26,8 +34,21 @@ const extractErrorDetails = (
 ): { message: string; exitCode?: number; stderr?: string } => {
   if (error instanceof Error) {
     // Check if it's a process exit error with exit code
-    const exitCodeMatch = error.message.match(/exited with code (\d+)/)
-    const exitCode = exitCodeMatch?.[1] ? Number.parseInt(exitCodeMatch[1], 10) : undefined
+    // Support multiple error message formats
+    const exitCodePatterns = [
+      /exited with code (\d+)/i,
+      /exit code[:\s]+(\d+)/i,
+      /process exited with status (\d+)/i
+    ]
+
+    let exitCode: number | undefined
+    for (const pattern of exitCodePatterns) {
+      const match = error.message.match(pattern)
+      if (match?.[1]) {
+        exitCode = Number.parseInt(match[1], 10)
+        break
+      }
+    }
 
     const result: { message: string; exitCode?: number; stderr?: string } = {
       message: error.message
@@ -37,7 +58,8 @@ const extractErrorDetails = (
       result.exitCode = exitCode
     }
 
-    // stderr would need to be captured from process spawn
+    // Note: stderr would need to be captured at process spawn level
+    // Currently not available from the error object
     return result
   }
   return { message: String(error) }
