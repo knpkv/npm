@@ -27,6 +27,12 @@ import type * as MessageSchemas from "./MessageSchemas.js"
  *   - "process exited with status N"
  * - Error message and stack trace
  *
+ * @remarks
+ * Exit code extraction is best-effort and relies on parsing error message strings.
+ * If the SDK changes its error message format, extraction may fail silently and
+ * exitCode will be undefined. This is acceptable as exitCode is optional metadata
+ * and the core error message/cause are always preserved.
+ *
  * @internal
  */
 const extractErrorDetails = (

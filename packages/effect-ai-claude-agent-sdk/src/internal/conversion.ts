@@ -103,9 +103,7 @@ export const convertSdkMessage = (
             ? sdkMessage.result
             : sdkMessage.errors && sdkMessage.errors.length > 0
             ? `${sdkMessage.subtype}\n\nErrors:\n${sdkMessage.errors.map((e, i) => `${i + 1}. ${e}`).join("\n")}`
-            : Array.isArray(sdkMessage.errors)
-            ? sdkMessage.errors.join("\n")
-            : String(sdkMessage.subtype)
+            : String(sdkMessage.subtype || "Unknown error")
 
           // Extract aggregate usage and session summary
           const usage = {

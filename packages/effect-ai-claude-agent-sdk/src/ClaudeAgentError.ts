@@ -53,7 +53,11 @@ export class SdkError extends Data.TaggedError("SdkError")<{
    */
   readonly exitCode?: number
   /**
-   * Standard error output from the process (if available).
+   * Standard error output from the process.
+   *
+   * @remarks
+   * Currently not implemented - always undefined. Future enhancement will capture
+   * stderr from the underlying SDK process. Reserved for forward compatibility.
    */
   readonly stderr?: string
   /**
