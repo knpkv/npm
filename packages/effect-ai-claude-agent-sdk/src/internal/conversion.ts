@@ -96,9 +96,14 @@ export const convertSdkMessage = (
 
         case "result": {
           // SDKResultMessage: discriminated union based on subtype
-          const content = sdkMessage.subtype === "success"
+          const isSuccess = sdkMessage.subtype === "success"
+
+          // Build content with enhanced error details for error results
+          const content = isSuccess
             ? sdkMessage.result
-            : sdkMessage.errors.join("\n")
+            : sdkMessage.errors && sdkMessage.errors.length > 0
+            ? `${sdkMessage.subtype}\n\nErrors:\n${sdkMessage.errors.map((e, i) => `${i + 1}. ${e}`).join("\n")}`
+            : String(sdkMessage.subtype || "Unknown error")
 
           // Extract aggregate usage and session summary
           const usage = {
@@ -178,10 +183,20 @@ export const convertSdkMessage = (
       }
     } catch (error) {
       const messageType = sdkMessage.type
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorSubtype = sdkMessage.type === "result" && sdkMessage.subtype !== "success"
+        ? sdkMessage.subtype
+        : undefined
+      const errors = sdkMessage.type === "result" && sdkMessage.subtype !== "success"
+        ? sdkMessage.errors
+        : undefined
+
       return yield* Effect.fail(
         new AgentError.StreamError({
-          message: `Failed to convert SDK message of type '${messageType}': ${String(error)}`,
-          cause: error
+          message: `Failed to convert SDK message of type '${messageType}': ${errorMessage}`,
+          cause: error,
+          ...(errorSubtype !== undefined && { errorSubtype }),
+          ...(errors !== undefined && { errors })
         })
       )
     }

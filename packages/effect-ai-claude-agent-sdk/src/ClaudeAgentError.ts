@@ -48,6 +48,26 @@ export class SdkError extends Data.TaggedError("SdkError")<{
    * Optional underlying error that caused this SDK error.
    */
   readonly cause?: unknown
+  /**
+   * Exit code when the error is from a process exit.
+   */
+  readonly exitCode?: number
+  /**
+   * Standard error output from the process.
+   *
+   * @remarks
+   * Currently not implemented - always undefined. Future enhancement will capture
+   * stderr from the underlying SDK process. Reserved for forward compatibility.
+   */
+  readonly stderr?: string
+  /**
+   * SDK error subtype (e.g., "error_during_execution", "error_max_turns").
+   */
+  readonly errorSubtype?: string
+  /**
+   * Structured error messages from the SDK (when multiple errors occurred).
+   */
+  readonly errors?: ReadonlyArray<string>
 }> {}
 
 /**
@@ -89,6 +109,14 @@ export class StreamError extends Data.TaggedError("StreamError")<{
    * Optional underlying error that caused the stream failure.
    */
   readonly cause?: unknown
+  /**
+   * SDK error subtype (e.g., "error_during_execution", "error_max_turns").
+   */
+  readonly errorSubtype?: string
+  /**
+   * Structured error messages from the SDK (when multiple errors occurred).
+   */
+  readonly errors?: ReadonlyArray<string>
 }> {}
 
 /**
@@ -234,6 +262,10 @@ export class PermissionError extends Data.TaggedError("PermissionError")<{
    * Human-readable error message describing why permission was denied.
    */
   readonly message: string
+  /**
+   * Optional underlying error from the permission check.
+   */
+  readonly cause?: unknown
 }> {}
 
 /**

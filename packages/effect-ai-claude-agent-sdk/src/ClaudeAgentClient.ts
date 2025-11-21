@@ -18,6 +18,71 @@ import * as Validation from "./internal/validation.js"
 import type * as MessageSchemas from "./MessageSchemas.js"
 
 /**
+ * Extract detailed error information from an unknown error.
+ *
+ * Attempts to extract:
+ * - Exit codes from error messages matching patterns:
+ *   - "exited with code N"
+ *   - "exit code N"
+ *   - "process exited with status N"
+ * - Error message and stack trace
+ *
+ * @remarks
+ * Exit code extraction is best-effort and relies on parsing error message strings.
+ * If the SDK changes its error message format, extraction may fail silently and
+ * exitCode will be undefined. This is acceptable as exitCode is optional metadata
+ * and the core error message/cause are always preserved.
+ *
+ * @internal
+ */
+const extractErrorDetails = (
+  error: unknown
+): { message: string; exitCode?: number; stderr?: string } => {
+  if (error instanceof Error) {
+    // Check if it's a process exit error with exit code
+    // Support multiple error message formats
+    const exitCodePatterns = [
+      /exited with code (\d+)/i,
+      /exit code[:\s]+(\d+)/i,
+      /process exited with status (\d+)/i
+    ]
+
+    let exitCode: number | undefined
+    for (const pattern of exitCodePatterns) {
+      const match = error.message.match(pattern)
+      if (match?.[1]) {
+        exitCode = Number.parseInt(match[1], 10)
+        break
+      }
+    }
+
+    const result: { message: string; exitCode?: number; stderr?: string } = {
+      message: error.message
+    }
+
+    if (exitCode !== undefined) {
+      result.exitCode = exitCode
+    }
+
+    // Note: stderr would need to be captured at process spawn level
+    // Currently not available from the error object
+    return result
+  }
+  return { message: String(error) }
+}
+
+/**
+ * Format error message with stack trace if available.
+ * @internal
+ */
+const formatErrorMessage = (error: unknown, context: string): string => {
+  if (error instanceof Error) {
+    return `${context}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
+  }
+  return `${context}: ${String(error)}`
+}
+
+/**
  * Options for executing a query.
  *
  * @category Client
@@ -268,7 +333,7 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
               } catch (error) {
                 return {
                   behavior: "deny" as const,
-                  message: `Tool permission check failed: ${String(error)}`
+                  message: formatErrorMessage(error, "Tool permission check failed")
                 }
               }
             }
@@ -285,11 +350,15 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           const generator = sdkQuery({ prompt, options: sdkOptions })
           const rawStream = Streaming.asyncIterableToStream(
             generator,
-            (error) =>
-              new AgentError.SdkError({
-                message: `SDK query failed: ${String(error)}`,
-                cause: error
+            (error) => {
+              const details = extractErrorDetails(error)
+              return new AgentError.SdkError({
+                message: formatErrorMessage(error, "SDK query failed"),
+                cause: error,
+                ...(details.exitCode !== undefined && { exitCode: details.exitCode }),
+                ...(details.stderr !== undefined && { stderr: details.stderr })
               })
+            }
           )
           return rawStream.pipe(Stream.mapEffect((sdkMessage) => Conversion.convertSdkMessage(sdkMessage)))
         })
@@ -302,11 +371,15 @@ const makeClient = (config: AgentConfig.ClaudeAgentConfig): Effect.Effect<Claude
           const generator = sdkQuery({ prompt, options: sdkOptions })
           return Streaming.asyncIterableToStream(
             generator,
-            (error) =>
-              new AgentError.SdkError({
-                message: `SDK query failed: ${String(error)}`,
-                cause: error
+            (error) => {
+              const details = extractErrorDetails(error)
+              return new AgentError.SdkError({
+                message: formatErrorMessage(error, "SDK query failed"),
+                cause: error,
+                ...(details.exitCode !== undefined && { exitCode: details.exitCode }),
+                ...(details.stderr !== undefined && { stderr: details.stderr })
               })
+            }
           )
         })
       )

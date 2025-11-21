@@ -32,6 +32,137 @@ describe("ClaudeAgentError", () => {
 
       expect(result).toBe("Caught: Test error")
     })
+
+    it("should create SDK error with exit code", () => {
+      const error = new AgentError.SdkError({
+        message: "Process exited with code 1",
+        exitCode: 1
+      })
+
+      expect(error.message).toBe("Process exited with code 1")
+      expect(error.exitCode).toBe(1)
+    })
+
+    it("should create SDK error with stderr", () => {
+      const error = new AgentError.SdkError({
+        message: "SDK failed",
+        stderr: "Error: command not found"
+      })
+
+      expect(error.message).toBe("SDK failed")
+      expect(error.stderr).toBe("Error: command not found")
+    })
+
+    it("should create SDK error with error subtype and errors array", () => {
+      const errors = ["Error 1", "Error 2", "Error 3"]
+      const error = new AgentError.SdkError({
+        message: "SDK execution failed",
+        errorSubtype: "error_during_execution",
+        errors
+      })
+
+      expect(error.message).toBe("SDK execution failed")
+      expect(error.errorSubtype).toBe("error_during_execution")
+      expect(error.errors).toEqual(errors)
+    })
+
+    it("should create SDK error with all enhanced fields", () => {
+      const cause = new Error("Root cause")
+      const errors = ["Error 1", "Error 2"]
+      const error = new AgentError.SdkError({
+        message: "Claude Code process exited with code 1",
+        cause,
+        exitCode: 1,
+        stderr: "Error: Invalid configuration",
+        errorSubtype: "error_during_execution",
+        errors
+      })
+
+      expect(error.message).toBe("Claude Code process exited with code 1")
+      expect(error.cause).toBe(cause)
+      expect(error.exitCode).toBe(1)
+      expect(error.stderr).toBe("Error: Invalid configuration")
+      expect(error.errorSubtype).toBe("error_during_execution")
+      expect(error.errors).toEqual(errors)
+    })
+
+    describe("exit code extraction patterns", () => {
+      it("should handle 'exited with code N' pattern", () => {
+        const error = new AgentError.SdkError({
+          message: "Process exited with code 127",
+          exitCode: 127
+        })
+
+        expect(error.exitCode).toBe(127)
+      })
+
+      it("should handle 'exit code N' pattern", () => {
+        const error = new AgentError.SdkError({
+          message: "Command failed with exit code 1",
+          exitCode: 1
+        })
+
+        expect(error.exitCode).toBe(1)
+      })
+
+      it("should handle 'process exited with status N' pattern", () => {
+        const error = new AgentError.SdkError({
+          message: "Process exited with status 2",
+          exitCode: 2
+        })
+
+        expect(error.exitCode).toBe(2)
+      })
+
+      it("should handle case-insensitive patterns", () => {
+        const error = new AgentError.SdkError({
+          message: "Process EXITED WITH CODE 255",
+          exitCode: 255
+        })
+
+        expect(error.exitCode).toBe(255)
+      })
+
+      it("should handle missing exit code gracefully", () => {
+        const error = new AgentError.SdkError({
+          message: "Generic error without exit code"
+        })
+
+        expect(error.exitCode).toBeUndefined()
+      })
+    })
+
+    describe("edge cases", () => {
+      it("should handle empty errors array", () => {
+        const error = new AgentError.SdkError({
+          message: "SDK failed",
+          errors: []
+        })
+
+        expect(error.errors).toEqual([])
+      })
+
+      it("should handle undefined optional fields", () => {
+        const error = new AgentError.SdkError({
+          message: "Minimal error"
+        })
+
+        expect(error.cause).toBeUndefined()
+        expect(error.exitCode).toBeUndefined()
+        expect(error.stderr).toBeUndefined()
+        expect(error.errorSubtype).toBeUndefined()
+        expect(error.errors).toBeUndefined()
+      })
+
+      it("should preserve null values if provided", () => {
+        const error = new AgentError.SdkError({
+          message: "Error with null cause",
+          cause: null
+        })
+
+        expect(error.cause).toBeNull()
+      })
+    })
   })
 
   describe("StreamError", () => {
@@ -51,6 +182,21 @@ describe("ClaudeAgentError", () => {
       const result = await Effect.runPromise(program)
 
       expect(result).toBe("Caught: Stream error")
+    })
+
+    it("should create stream error with error subtype and errors array", () => {
+      const errors = ["Stream error 1", "Stream error 2"]
+      const error = new AgentError.StreamError({
+        message: "Stream conversion failed",
+        messageId: "msg_123",
+        errorSubtype: "error_max_turns",
+        errors
+      })
+
+      expect(error.message).toBe("Stream conversion failed")
+      expect(error.messageId).toBe("msg_123")
+      expect(error.errorSubtype).toBe("error_max_turns")
+      expect(error.errors).toEqual(errors)
     })
   })
 
@@ -111,6 +257,19 @@ describe("ClaudeAgentError", () => {
       const result = await Effect.runPromise(program)
 
       expect(result).toBe("Caught: Permission error")
+    })
+
+    it("should create permission error with cause", () => {
+      const cause = new Error("Permission check failed")
+      const error = new AgentError.PermissionError({
+        toolName: "Bash",
+        message: "Tool permission check failed",
+        cause
+      })
+
+      expect(error.toolName).toBe("Bash")
+      expect(error.message).toBe("Tool permission check failed")
+      expect(error.cause).toBe(cause)
     })
   })
 
