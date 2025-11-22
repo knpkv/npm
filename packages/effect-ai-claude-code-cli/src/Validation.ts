@@ -32,18 +32,27 @@ export const MIN_TIMEOUT_MS = 1000
 /**
  * Valid known tool names.
  *
+ * Matches ClaudeCodeCliTool.allTools for consistency.
+ *
  * @category Constants
  */
 export const KNOWN_TOOLS = [
-  "Bash",
   "Read",
-  "Edit",
   "Write",
-  "Grep",
+  "Edit",
+  "Bash",
   "Glob",
-  "Task",
+  "Grep",
+  "WebSearch",
   "WebFetch",
-  "WebSearch"
+  "Task",
+  "SlashCommand",
+  "Skill",
+  "TodoWrite",
+  "AskUserQuestion",
+  "NotebookEdit",
+  "BashOutput",
+  "KillShell"
 ] as const
 
 /**

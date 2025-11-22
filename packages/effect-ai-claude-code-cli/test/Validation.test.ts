@@ -210,4 +210,24 @@ describe("Validation", () => {
       expect(result).toEqual([])
     })
   })
+
+  describe("KNOWN_TOOLS consistency", () => {
+    it("should match ClaudeCodeCliTool.allTools", async () => {
+      // Dynamically import to avoid circular dependencies
+      const Tool = await import("../src/ClaudeCodeCliTool.js")
+
+      // KNOWN_TOOLS should have same length and tools as allTools
+      expect(Validation.KNOWN_TOOLS.length).toBe(Tool.allTools.length)
+
+      // All tools in allTools should be in KNOWN_TOOLS
+      for (const tool of Tool.allTools) {
+        expect(Validation.KNOWN_TOOLS).toContain(tool)
+      }
+
+      // All tools in KNOWN_TOOLS should be in allTools
+      for (const tool of Validation.KNOWN_TOOLS) {
+        expect(Tool.allTools).toContain(tool)
+      }
+    })
+  })
 })
