@@ -1,12 +1,14 @@
 /**
- * Integration tests for ClaudeCodeCliClient.
+ * Integration tests for ClaudeCodeCliClient and ClaudeCodeCliLanguageModel.
  *
- * Tests actual CLI execution, streaming, tool calls, and error scenarios.
+ * Tests actual CLI execution, streaming, tool calls, error scenarios, and @effect/ai integration.
  */
+import { LanguageModel } from "@effect/ai"
 import { describe, expect, it } from "@effect/vitest"
 import { Array, Effect, Layer, Stream } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "../src/ClaudeCodeCliConfig.js"
+import * as ClaudeCodeCliLanguageModel from "../src/ClaudeCodeCliLanguageModel.js"
 import type { MessageChunk } from "../src/StreamEvents.js"
 
 describe("ClaudeCodeCliClient - Integration", () => {
@@ -345,5 +347,152 @@ describe("ClaudeCodeCliClient - Integration", () => {
         Effect.timeout("30 seconds")
       )
     }, { timeout: 60000 })
+  })
+
+  describe("LanguageModel Integration", () => {
+    const languageModelLayer = ClaudeCodeCliLanguageModel.layer().pipe(
+      Layer.provide(layer())
+    )
+
+    it.effect("should generate text with accurate token usage", () =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const result = yield* model.generateText({
+          prompt: [{ role: "user", content: "Say 'hello' in one word" }]
+        })
+
+        // Should have text
+        expect(result.text).toBeDefined()
+        expect(typeof result.text).toBe("string")
+        expect(result.text.length).toBeGreaterThan(0)
+
+        // Should have usage with non-zero values
+        expect(result.usage).toBeDefined()
+        expect(result.usage.inputTokens).toBeGreaterThan(0)
+        expect(result.usage.outputTokens).toBeGreaterThan(0)
+        expect(result.usage.totalTokens).toBe(
+          result.usage.inputTokens + result.usage.outputTokens
+        )
+      }).pipe(
+        Effect.provide(languageModelLayer),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("30 seconds")
+      ), { timeout: 60000 })
+
+    it.effect("should stream text with finish event and usage", () =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const stream = model.streamText({
+          prompt: [{ role: "user", content: "Count to three" }]
+        })
+
+        const chunks = yield* Stream.runCollect(stream)
+        const chunksArray = Array.fromIterable(chunks)
+
+        expect(chunksArray.length).toBeGreaterThan(0)
+
+        // Should have text-delta chunks
+        const textDeltas = chunksArray.filter((chunk) => chunk.type === "text-delta")
+        expect(textDeltas.length).toBeGreaterThan(0)
+
+        // Each text-delta should have an id
+        for (const delta of textDeltas) {
+          if (delta.type === "text-delta") {
+            expect(delta.id).toBeDefined()
+            expect(delta.delta).toBeDefined()
+          }
+        }
+
+        // Should have finish event
+        const finishEvent = chunksArray.find((chunk) => chunk.type === "finish")
+        expect(finishEvent).toBeDefined()
+        expect(finishEvent?.type).toBe("finish")
+
+        if (finishEvent?.type === "finish") {
+          // Should have accurate usage
+          expect(finishEvent.usage.inputTokens).toBeGreaterThan(0)
+          expect(finishEvent.usage.outputTokens).toBeGreaterThan(0)
+          expect(finishEvent.usage.totalTokens).toBe(
+            finishEvent.usage.inputTokens + finishEvent.usage.outputTokens
+          )
+        }
+      }).pipe(
+        Effect.provide(languageModelLayer),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("30 seconds")
+      ), { timeout: 60000 })
+
+    it.effect("should track usage correctly for longer responses", () =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const result = yield* model.generateText({
+          prompt: [{ role: "user", content: "Explain TypeScript in two sentences" }]
+        })
+
+        expect(result.text).toBeDefined()
+        expect(result.usage).toBeDefined()
+
+        // Longer response should have higher token counts
+        expect(result.usage.inputTokens).toBeGreaterThan(0)
+        expect(result.usage.outputTokens).toBeGreaterThan(5)
+        expect(result.usage.totalTokens).toBeGreaterThan(5)
+      }).pipe(
+        Effect.provide(languageModelLayer),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("30 seconds")
+      ), { timeout: 60000 })
+
+    it.effect("should handle multi-turn conversation context", () =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const result = yield* model.generateText({
+          prompt: [
+            { role: "system", content: "You are a helpful assistant" },
+            { role: "user", content: "What is 2+2?" },
+            { role: "assistant", content: "4" },
+            { role: "user", content: "What about 3+3?" }
+          ]
+        })
+
+        expect(result.text).toBeDefined()
+        expect(typeof result.text).toBe("string")
+        expect(result.text.length).toBeGreaterThan(0)
+
+        expect(result.usage).toBeDefined()
+        // Multi-turn context should have higher input tokens than single turn
+        expect(result.usage.inputTokens).toBeGreaterThan(0)
+        expect(result.usage.outputTokens).toBeGreaterThan(0)
+        expect(result.usage.totalTokens).toBeGreaterThan(0)
+      }).pipe(
+        Effect.provide(languageModelLayer),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("30 seconds")
+      ), { timeout: 60000 })
+
+    it.effect("should accumulate text correctly in stream", () =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const stream = model.streamText({
+          prompt: [{ role: "user", content: "Say 'Effect-TS' in two words" }]
+        })
+
+        const chunks = yield* Stream.runCollect(stream)
+        const chunksArray = Array.fromIterable(chunks)
+
+        // Collect all text deltas
+        const textDeltas = chunksArray.filter(
+          (chunk): chunk is Extract<typeof chunk, { type: "text-delta" }> => chunk.type === "text-delta"
+        )
+
+        // Combine all text
+        const fullText = textDeltas.map((chunk) => chunk.delta).join("")
+
+        expect(fullText.length).toBeGreaterThan(0)
+        expect(fullText.toLowerCase()).toContain("effect")
+      }).pipe(
+        Effect.provide(languageModelLayer),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("30 seconds")
+      ), { timeout: 60000 })
   })
 })
