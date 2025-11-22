@@ -23,10 +23,10 @@
     "@effect/build-utils": "^0.8.9",
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.45.1",
-    "@effect/vitest": "^0.16.2",
+    "@effect/vitest": "^0.27.0",
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.8.1",
-    "@vitest/coverage-v8": "4.0.0-beta.10",
+    "@vitest/coverage-v8": "^4.0.13",
     "eslint": "^9.36.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.1",
@@ -43,7 +43,7 @@
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.46.1",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "4.0.0-beta.10"
+    "vitest": "^4.0.13"
   },
   "pnpm": {
     "patchedDependencies": {
