@@ -92,9 +92,9 @@
     "@effect/schema": "^0.75.0"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.15.0",
+    "@effect/vitest": "^0.27.0",
     "typescript": "~5.9.0",
-    "vitest": "^2.0.0",
+    "vitest": "^4.0.13",
     "effect": "^3.19.3"
   },
   "keywords": [
