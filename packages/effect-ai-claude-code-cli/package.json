@@ -1,0 +1,110 @@
+{
+  "name": "@knpkv/effect-ai-claude-code-cli",
+  "version": "0.0.1",
+  "description": "Effect-TS wrapper for Claude Code CLI with @effect/ai integration",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/effect-ai-claude-code-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/effect-ai-claude-code-cli#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./Brand": {
+      "import": "./dist/Brand.js",
+      "types": "./dist/Brand.d.ts"
+    },
+    "./ClaudeCodeCliClient": {
+      "import": "./dist/ClaudeCodeCliClient.js",
+      "types": "./dist/ClaudeCodeCliClient.d.ts"
+    },
+    "./ClaudeCodeCliConfig": {
+      "import": "./dist/ClaudeCodeCliConfig.js",
+      "types": "./dist/ClaudeCodeCliConfig.d.ts"
+    },
+    "./ClaudeCodeCliError": {
+      "import": "./dist/ClaudeCodeCliError.js",
+      "types": "./dist/ClaudeCodeCliError.d.ts"
+    },
+    "./ClaudeCodeCliLanguageModel": {
+      "import": "./dist/ClaudeCodeCliLanguageModel.js",
+      "types": "./dist/ClaudeCodeCliLanguageModel.d.ts"
+    },
+    "./ClaudeCodeCliTool": {
+      "import": "./dist/ClaudeCodeCliTool.js",
+      "types": "./dist/ClaudeCodeCliTool.d.ts"
+    },
+    "./StreamEvents": {
+      "import": "./dist/StreamEvents.js",
+      "types": "./dist/StreamEvents.d.ts"
+    },
+    "./ResponseSchemas": {
+      "import": "./dist/ResponseSchemas.js",
+      "types": "./dist/ResponseSchemas.d.ts"
+    },
+    "./Validation": {
+      "import": "./dist/Validation.js",
+      "types": "./dist/Validation.d.ts"
+    },
+    "./CliVersion": {
+      "import": "./dist/CliVersion.js",
+      "types": "./dist/CliVersion.d.ts"
+    },
+    "./TypeGuards": {
+      "import": "./dist/TypeGuards.js",
+      "types": "./dist/TypeGuards.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "lint": "eslint src examples",
+    "lint:fix": "eslint src examples --fix",
+    "check": "tsc --noEmit",
+    "check:examples": "tsc --noEmit --project tsconfig.examples.json",
+    "check:all": "pnpm check && pnpm check:examples"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/ai": "^0.32.0",
+    "@effect/platform": "^0.93.0",
+    "@effect/platform-node": "^0.87.0",
+    "@effect/schema": "^0.75.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.15.0",
+    "typescript": "~5.9.0",
+    "vitest": "^2.0.0",
+    "effect": "^3.19.3"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "claude",
+    "claude-code",
+    "cli",
+    "ai",
+    "llm",
+    "anthropic"
+  ]
+}
