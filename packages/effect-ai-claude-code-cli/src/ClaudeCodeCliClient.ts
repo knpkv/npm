@@ -251,7 +251,7 @@ const executeCommand = (
               return Stream.make(event)
             }).pipe(
               Effect.catchAll((error) =>
-                Effect.logDebug("Failed to parse stream event line", {
+                Effect.logWarning("Failed to parse stream event line", {
                   line: line.length > 100 ? line.substring(0, 100) + "..." : line,
                   error
                 }).pipe(Effect.as(Stream.empty))
