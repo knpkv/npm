@@ -75,28 +75,25 @@ export const buildCommand = (
     ...(model ? ["--model", model] : []),
     ...(effectiveAllowedTools ? effectiveAllowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
     ...(effectiveDisallowedTools ? effectiveDisallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
-    ...(useStdin ? [] : [prompt])
+    ...(useStdin ? [] : ["--", prompt])
   )
 }
 
 /**
- * Rate limit retry schedule that respects retryAfter header.
+ * Rate limit retry schedule with exponential backoff.
  *
- * If error includes retryAfter, uses that duration.
- * Otherwise falls back to exponential backoff: 1s, 2s, 4s, 8s, 16s (max 5 retries).
+ * Uses exponential backoff: 1s, 2s, 4s, 8s, 16s (max 5 retries).
+ *
+ * Note: RateLimitError.retryAfter is available in the error but Schedule.modifyDelay
+ * doesn't provide access to the input error. Custom schedule implementation would be
+ * needed to honor retryAfter values. Current implementation provides reasonable
+ * backoff that works well in practice.
  *
  * @internal
  */
 export const rateLimitSchedule: Schedule.Schedule<number, ClaudeCodeCliError, never> = Schedule.exponential("1 second")
   .pipe(
-    Schedule.whileInput((error: ClaudeCodeCliError) => {
-      if (error._tag !== "RateLimitError") return false
-
-      // If retryAfter is specified, use a fixed delay schedule instead
-      // This is a limitation - we can't easily switch strategies mid-schedule
-      // TODO: Implement custom schedule that properly uses retryAfter
-      return true
-    }),
+    Schedule.whileInput((error: ClaudeCodeCliError) => error._tag === "RateLimitError"),
     Schedule.compose(Schedule.recurs(5))
   )
 

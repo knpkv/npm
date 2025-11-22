@@ -12,7 +12,13 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
-import { type ClaudeCodeCliError, CliNotFoundError, isClaudeCodeCliError, parseStderr } from "./ClaudeCodeCliError.js"
+import {
+  type ClaudeCodeCliError,
+  CliNotFoundError,
+  isClaudeCodeCliError,
+  parseStderr,
+  ValidationError
+} from "./ClaudeCodeCliError.js"
 import { buildCommand, extractErrorMessage, hasToolsConfigured, rateLimitSchedule } from "./internal/utilities.js"
 import { extractText, JsonResponse } from "./ResponseSchemas.js"
 import {
@@ -29,6 +35,7 @@ import {
   ToolUseStartChunk,
   WrappedStreamEvent
 } from "./StreamEvents.js"
+import * as Validation from "./Validation.js"
 
 /**
  * Claude Code CLI client for executing queries programmatically.
@@ -298,6 +305,10 @@ const make = (options?: {
 
     const query = (prompt: string): Effect.Effect<string, ClaudeCodeCliError> =>
       Effect.gen(function*() {
+        // Validate prompt for security (prevent command injection)
+        yield* Validation.validatePrompt(prompt).pipe(
+          Effect.mapError((error) => new ValidationError({ message: error.message }))
+        )
         const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
         const command = buildCommand(prompt, model, allowedTools, disallowedTools, dangerouslySkipPermissions, false)
           .pipe(
@@ -328,9 +339,17 @@ const make = (options?: {
     const queryStream = (
       prompt: string
     ): Stream.Stream<MessageChunk, ClaudeCodeCliError> => {
-      const command = buildCommand(prompt, model, allowedTools, disallowedTools, dangerouslySkipPermissions)
-      const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
-      return executeCommand(command, useStdin ? prompt : undefined)
+      // Validate prompt for security (prevent command injection)
+      const validated = Validation.validatePrompt(prompt).pipe(
+        Effect.mapError((error) => new ValidationError({ message: error.message }))
+      )
+      return Stream.unwrap(
+        Effect.map(validated, () => {
+          const command = buildCommand(prompt, model, allowedTools, disallowedTools, dangerouslySkipPermissions)
+          const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
+          return executeCommand(command, useStdin ? prompt : undefined)
+        })
+      )
     }
 
     return ClaudeCodeCliClient.of({
