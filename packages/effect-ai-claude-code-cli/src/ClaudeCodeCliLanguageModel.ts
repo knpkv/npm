@@ -16,6 +16,7 @@ import type { Simplify } from "effect/Types"
 import { ClaudeCodeCliClient } from "./ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "./ClaudeCodeCliConfig.js"
 import type { ClaudeCodeCliError } from "./ClaudeCodeCliError.js"
+import type { MessageChunk } from "./StreamEvents.js"
 
 /**
  * Configuration for Claude Code CLI Language Model.
@@ -58,23 +59,40 @@ export const make = Effect.gen(function*() {
         // Convert prompt to text (handles @effect/ai's {content: [...]} wrapping)
         const promptText = promptToText(providerOptions.prompt)
 
-        // Use basic query for non-streaming text generation
-        const responseText = yield* client.query(promptText).pipe(
+        // Use streaming to collect both text and usage
+        const chunks = yield* client.queryStream(promptText).pipe(
+          Stream.runCollect,
           Effect.mapError(mapError)
         )
+
+        // Accumulate text and usage from chunks
+        let text = ""
+        let inputTokens = 0
+        let outputTokens = 0
+
+        for (const chunk of chunks) {
+          if (chunk.type === "text") {
+            text += chunk.text
+          } else if (chunk.type === "message_start") {
+            inputTokens = chunk.message.usage.input_tokens
+            outputTokens = chunk.message.usage.output_tokens
+          } else if (chunk.type === "message_delta" && chunk.usage) {
+            outputTokens += chunk.usage.output_tokens
+          }
+        }
 
         return [
           {
             type: "text" as const,
-            text: responseText
+            text
           },
           {
             type: "finish" as const,
             reason: "stop" as const,
             usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              totalTokens: 0
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens
             }
           }
         ]
@@ -91,19 +109,68 @@ export const make = Effect.gen(function*() {
           // Use streaming query
           const stream = client.queryStream(promptText)
 
+          // Track usage across stream
+          let inputTokens = 0
+          let outputTokens = 0
+
           return stream.pipe(
             Stream.mapError(mapError),
-            Stream.filter((chunk) => chunk.type === "text"),
-            Stream.mapEffect((chunk) =>
+            Stream.mapEffect((chunk: MessageChunk) =>
               Effect.gen(function*() {
-                const id = yield* idGenerator.generateId()
-                return {
-                  type: "text-delta" as const,
-                  id,
-                  delta: chunk.text
+                // Track usage from message_start and message_delta chunks
+                if (chunk.type === "message_start") {
+                  inputTokens = chunk.message.usage.input_tokens
+                  outputTokens = chunk.message.usage.output_tokens
+                  return Option.none<
+                    | { type: "text-delta"; id: string; delta: string }
+                    | {
+                      type: "finish"
+                      reason: "stop"
+                      usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+                    }
+                  >()
+                } else if (chunk.type === "message_delta" && chunk.usage) {
+                  outputTokens += chunk.usage.output_tokens
+                  return Option.none<
+                    | { type: "text-delta"; id: string; delta: string }
+                    | {
+                      type: "finish"
+                      reason: "stop"
+                      usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+                    }
+                  >()
+                } else if (chunk.type === "message_stop") {
+                  // Emit finish event with actual usage
+                  return Option.some({
+                    type: "finish" as const,
+                    reason: "stop" as const,
+                    usage: {
+                      inputTokens,
+                      outputTokens,
+                      totalTokens: inputTokens + outputTokens
+                    }
+                  })
+                } else if (chunk.type === "text") {
+                  // Emit text delta
+                  const id = yield* idGenerator.generateId()
+                  return Option.some({
+                    type: "text-delta" as const,
+                    id,
+                    delta: chunk.text
+                  })
                 }
+
+                return Option.none<
+                  | { type: "text-delta"; id: string; delta: string }
+                  | {
+                    type: "finish"
+                    reason: "stop"
+                    usage: { inputTokens: number; outputTokens: number; totalTokens: number }
+                  }
+                >()
               })
-            )
+            ),
+            Stream.filterMap((x) => x)
           )
         })
       )
