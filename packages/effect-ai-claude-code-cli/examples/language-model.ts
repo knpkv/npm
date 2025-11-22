@@ -39,7 +39,7 @@ const streamTextExample = Effect.gen(function*() {
   yield* Console.log("Streaming response:")
   yield* Console.log("---")
   yield* stream.pipe(
-    Stream.runForEach((part: any) =>
+    Stream.runForEach((part) =>
       Effect.gen(function*() {
         if (part.type === "text-delta") {
           yield* Console.log(part.delta)
