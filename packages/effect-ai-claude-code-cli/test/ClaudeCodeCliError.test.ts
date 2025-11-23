@@ -6,9 +6,13 @@ import {
   CliNotFoundError,
   ContextLengthError,
   InvalidApiKeyError,
+  InvalidSessionIdError,
+  isInvalidSessionIdError,
+  isSessionNotFoundError,
   NetworkError,
   parseStderr,
   RateLimitError,
+  SessionNotFoundError,
   StreamParsingError
 } from "../src/ClaudeCodeCliError.js"
 
@@ -172,6 +176,38 @@ describe("ClaudeCodeCliError", () => {
 
       expect(error._tag).toBe("ContextLengthError")
       expect(error.stderr).toBe(stderr)
+    })
+
+    it("should create SessionNotFoundError with sessionId", () => {
+      const sessionId = "631f187f-fd79-41d9-9cae-cb255c96acfd"
+      const error = new SessionNotFoundError({ sessionId })
+
+      expect(error._tag).toBe("SessionNotFoundError")
+      expect(error.sessionId).toBe(sessionId)
+    })
+
+    it("should detect SessionNotFoundError with type guard", () => {
+      const sessionId = "631f187f-fd79-41d9-9cae-cb255c96acfd"
+      const error = new SessionNotFoundError({ sessionId })
+
+      expect(isSessionNotFoundError(error)).toBe(true)
+      expect(isInvalidSessionIdError(error)).toBe(false)
+    })
+
+    it("should create InvalidSessionIdError with providedValue", () => {
+      const providedValue = "not-a-uuid"
+      const error = new InvalidSessionIdError({ providedValue })
+
+      expect(error._tag).toBe("InvalidSessionIdError")
+      expect(error.providedValue).toBe(providedValue)
+    })
+
+    it("should detect InvalidSessionIdError with type guard", () => {
+      const providedValue = "not-a-uuid"
+      const error = new InvalidSessionIdError({ providedValue })
+
+      expect(isInvalidSessionIdError(error)).toBe(true)
+      expect(isSessionNotFoundError(error)).toBe(false)
     })
   })
 })

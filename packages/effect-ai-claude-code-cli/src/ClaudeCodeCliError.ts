@@ -130,6 +130,59 @@ export class CliVersionMismatchError extends Data.TaggedError("CliVersionMismatc
 }> {}
 
 /**
+ * Error thrown when a session ID is not found in storage.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import { ClaudeCodeCliClient } from "@knpkv/effect-ai-claude-code-cli"
+ * import { SessionId } from "@knpkv/effect-ai-claude-code-cli/Brand"
+ *
+ * Effect.gen(function* () {
+ *   const client = yield* ClaudeCodeCliClient
+ *   const sessionId = yield* SessionId("631f187f-fd79-41d9-9cae-cb255c96acfd")
+ *   return yield* client.resumeQuery("Continue", sessionId)
+ * }).pipe(
+ *   Effect.catchTag("SessionNotFoundError", (error) =>
+ *     Effect.sync(() => {
+ *       console.error(`Session ${error.sessionId} not found`)
+ *     })
+ *   )
+ * )
+ * ```
+ *
+ * @category Errors
+ */
+export class SessionNotFoundError extends Data.TaggedError("SessionNotFoundError")<{
+  readonly sessionId: string
+}> {}
+
+/**
+ * Error thrown when a session ID has an invalid format.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import { SessionId } from "@knpkv/effect-ai-claude-code-cli/Brand"
+ *
+ * Effect.gen(function* () {
+ *   return yield* SessionId("not-a-uuid")
+ * }).pipe(
+ *   Effect.catchTag("InvalidSessionIdError", (error) =>
+ *     Effect.sync(() => {
+ *       console.error(`Invalid session ID: ${error.providedValue}`)
+ *     })
+ *   )
+ * )
+ * ```
+ *
+ * @category Errors
+ */
+export class InvalidSessionIdError extends Data.TaggedError("InvalidSessionIdError")<{
+  readonly providedValue: string
+}> {}
+
+/**
  * Union of all possible CLI errors.
  *
  * @category Errors
@@ -144,6 +197,8 @@ export type ClaudeCodeCliError =
   | ContextLengthError
   | ValidationError
   | CliVersionMismatchError
+  | SessionNotFoundError
+  | InvalidSessionIdError
 
 /**
  * Type guard to check if error is a ClaudeCodeCliError.
@@ -164,8 +219,38 @@ export const isClaudeCodeCliError = (error: unknown): error is ClaudeCodeCliErro
     error._tag === "NetworkError" ||
     error._tag === "ContextLengthError" ||
     error._tag === "ValidationError" ||
-    error._tag === "CliVersionMismatchError"
+    error._tag === "CliVersionMismatchError" ||
+    error._tag === "SessionNotFoundError" ||
+    error._tag === "InvalidSessionIdError"
   )
+
+/**
+ * Type guard for SessionNotFoundError.
+ *
+ * @param error - The error to check
+ * @returns True if error is a SessionNotFoundError
+ *
+ * @category Utilities
+ */
+export const isSessionNotFoundError = (error: unknown): error is SessionNotFoundError =>
+  typeof error === "object" &&
+  error !== null &&
+  "_tag" in error &&
+  error._tag === "SessionNotFoundError"
+
+/**
+ * Type guard for InvalidSessionIdError.
+ *
+ * @param error - The error to check
+ * @returns True if error is an InvalidSessionIdError
+ *
+ * @category Utilities
+ */
+export const isInvalidSessionIdError = (error: unknown): error is InvalidSessionIdError =>
+  typeof error === "object" &&
+  error !== null &&
+  "_tag" in error &&
+  error._tag === "InvalidSessionIdError"
 
 /**
  * Parse stderr output to determine error type.

@@ -46,6 +46,10 @@
       "import": "./dist/ClaudeCodeCliTool.js",
       "types": "./dist/ClaudeCodeCliTool.d.ts"
     },
+    "./SessionDiscovery": {
+      "import": "./dist/SessionDiscovery.js",
+      "types": "./dist/SessionDiscovery.d.ts"
+    },
     "./StreamEvents": {
       "import": "./dist/StreamEvents.js",
       "types": "./dist/StreamEvents.d.ts"
