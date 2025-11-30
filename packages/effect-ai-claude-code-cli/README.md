@@ -1,5 +1,8 @@
 # @knpkv/effect-ai-claude-code-cli
 
+> **Warning**
+> This package is experimental and in early development. Code is primarily AI-generated and not yet publicly published. For preview, use snapshot releases.
+
 Effect-TS wrapper for [Claude Code CLI](https://github.com/anthropics/claude-code) with [@effect/ai](https://effect.website/docs/ai/introduction) integration.
 
 Provides a type-safe, functional interface to programmatically interact with Claude Code CLI, including:

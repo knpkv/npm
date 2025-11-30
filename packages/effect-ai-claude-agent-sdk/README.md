@@ -1,5 +1,8 @@
 # @knpkv/effect-ai-claude-agent-sdk
 
+> **Warning**
+> This package is experimental and in early development. Code is primarily AI-generated and not yet publicly published. For preview, use snapshot releases.
+
 Effect-TS wrapper for the Anthropic Claude Agent SDK with type-safe integration.
 
 ## Installation

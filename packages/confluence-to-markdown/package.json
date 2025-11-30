@@ -1,0 +1,113 @@
+{
+  "name": "@knpkv/confluence-to-markdown",
+  "version": "0.1.0",
+  "description": "Sync Confluence Cloud pages to local GitHub Flavored Markdown files",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/confluence-to-markdown"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/confluence-to-markdown#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "confluence": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./Brand": {
+      "import": "./dist/Brand.js",
+      "types": "./dist/Brand.d.ts"
+    },
+    "./Schemas": {
+      "import": "./dist/Schemas.js",
+      "types": "./dist/Schemas.d.ts"
+    },
+    "./ConfluenceError": {
+      "import": "./dist/ConfluenceError.js",
+      "types": "./dist/ConfluenceError.d.ts"
+    },
+    "./ConfluenceConfig": {
+      "import": "./dist/ConfluenceConfig.js",
+      "types": "./dist/ConfluenceConfig.d.ts"
+    },
+    "./ConfluenceAuth": {
+      "import": "./dist/ConfluenceAuth.js",
+      "types": "./dist/ConfluenceAuth.d.ts"
+    },
+    "./ConfluenceClient": {
+      "import": "./dist/ConfluenceClient.js",
+      "types": "./dist/ConfluenceClient.d.ts"
+    },
+    "./MarkdownConverter": {
+      "import": "./dist/MarkdownConverter.js",
+      "types": "./dist/MarkdownConverter.d.ts"
+    },
+    "./LocalFileSystem": {
+      "import": "./dist/LocalFileSystem.js",
+      "types": "./dist/LocalFileSystem.d.ts"
+    },
+    "./SyncEngine": {
+      "import": "./dist/SyncEngine.js",
+      "types": "./dist/SyncEngine.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "check": "tsc --noEmit",
+    "link": "npm link"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.61.0",
+    "@effect/platform": "^0.93.0",
+    "@effect/platform-node": "^0.87.0",
+    "gray-matter": "^4.0.3",
+    "rehype-parse": "^9.0.1",
+    "rehype-remark": "^10.0.1",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.1",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^22.15.21",
+    "effect": "^3.19.3",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "confluence",
+    "markdown",
+    "sync",
+    "atlassian",
+    "documentation",
+    "cli"
+  ]
+}
