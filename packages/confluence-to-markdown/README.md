@@ -50,6 +50,13 @@ export CONFLUENCE_API_KEY=your-api-token
 export CONFLUENCE_EMAIL=your-email@example.com
 ```
 
+## Known Limitations
+
+- **Page creation**: Creating new pages from local markdown is not yet implemented
+- **Conflict detection**: Bidirectional sync does not detect conflicts (last write wins)
+- **Attachments**: Image and file attachments are not synced
+- **Comments**: Page comments are not preserved
+
 ## License
 
 MIT

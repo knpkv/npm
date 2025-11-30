@@ -8,20 +8,25 @@ import * as path from "node:path"
 
 /**
  * Convert a page title to a URL-safe slug.
+ * Prevents path traversal by only allowing alphanumeric characters and hyphens.
  *
  * @param title - The page title
  * @returns A slugified version of the title
  *
  * @internal
  */
-export const slugify = (title: string): string =>
-  title
+export const slugify = (title: string): string => {
+  const slug = title
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // Remove diacritics
-    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphens
+    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with hyphens (prevents ../ path traversal)
     .replace(/^-+|-+$/g, "") // Trim leading/trailing hyphens
     .substring(0, 100) // Limit length
+
+  // Ensure we have a valid slug (not empty after sanitization)
+  return slug || "untitled"
+}
 
 /**
  * Convert a page to a local file path.
