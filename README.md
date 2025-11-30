@@ -1,8 +1,19 @@
 # @knpkv Package Collection
 
+> **Warning**
+> This project is experimental and in early development. Code is primarily AI-generated and not yet publicly published. For preview, use snapshot releases.
+
 A monorepo containing npm packages published under the **@knpkv** scope.
 
 This repository uses [Effect-TS](https://effect.website) for type-safe functional programming patterns and leverages modern tooling for package development and publishing.
+
+## Packages
+
+| Package                                                                              | Description                                   |
+| ------------------------------------------------------------------------------------ | --------------------------------------------- |
+| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md)         | Sync Confluence Cloud pages to local markdown |
+| [@knpkv/effect-ai-claude-code-cli](./packages/effect-ai-claude-code-cli/README.md)   | Effect-TS wrapper for Claude Code CLI         |
+| [@knpkv/effect-ai-claude-agent-sdk](./packages/effect-ai-claude-agent-sdk/README.md) | Effect-TS wrapper for Claude Agent SDK        |
 
 ## Repository Structure
 
