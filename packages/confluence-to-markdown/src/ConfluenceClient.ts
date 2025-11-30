@@ -258,8 +258,21 @@ const make = (
       Effect.gen(function*() {
         const allChildren: Array<PageListItem> = []
         let cursor: string | undefined
+        let iterations = 0
+        const maxIterations = 100 // Prevent unbounded pagination
 
         do {
+          if (iterations >= maxIterations) {
+            return yield* Effect.fail(
+              new ApiError({
+                status: 0,
+                message: `Pagination limit exceeded: more than ${maxIterations} pages of children`,
+                endpoint: `/pages/${id}/children`,
+                pageId: id
+              })
+            )
+          }
+
           const path = cursor
             ? `/pages/${id}/children?body-format=storage&cursor=${cursor}`
             : `/pages/${id}/children?body-format=storage`
@@ -284,6 +297,8 @@ const make = (
           cursor = response._links?.next
             ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
             : undefined
+
+          iterations++
         } while (cursor)
 
         return allChildren

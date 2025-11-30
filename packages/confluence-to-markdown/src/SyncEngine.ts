@@ -213,7 +213,7 @@ export const layer: Layer.Layer<
           pageId: page.id as PageId,
           version: fullPage.version.number,
           title: fullPage.title,
-          updated: new Date(fullPage.version.createdAt ?? new Date().toISOString()),
+          updated: fullPage.version.createdAt ? new Date(fullPage.version.createdAt) : new Date(),
           ...(page.parentId ? { parentId: page.parentId as PageId } : {}),
           ...(page.position !== undefined ? { position: page.position } : {}),
           contentHash
@@ -253,53 +253,67 @@ export const layer: Layer.Layer<
         const errors: Array<string> = []
 
         for (const filePath of files) {
-          const localFile = yield* localFs.readMarkdownFile(filePath)
+          yield* Effect.gen(function*() {
+            const localFile = yield* localFs.readMarkdownFile(filePath)
 
-          if (localFile.isNew || !localFile.frontMatter) {
-            // New file - would create page
-            if (!options.dryRun) {
-              // TODO: Implement page creation
-              errors.push(`Page creation not yet implemented: ${filePath}`)
-            }
-            created++
-            continue
-          }
-
-          const fm = localFile.frontMatter
-          const currentHash = computeHash(localFile.content)
-
-          if (currentHash === fm.contentHash) {
-            skipped++
-            continue
-          }
-
-          if (!options.dryRun) {
-            const html = yield* converter.markdownToHtml(localFile.content)
-            yield* client.updatePage({
-              id: fm.pageId,
-              title: fm.title,
-              status: "current",
-              version: {
-                number: fm.version + 1,
-                message: "Updated via confluence-to-markdown"
-              },
-              body: {
-                representation: "storage",
-                value: html
+            if (localFile.isNew || !localFile.frontMatter) {
+              // New file - create page
+              if (!options.dryRun) {
+                // For now, skip page creation - need space ID in config
+                errors.push(
+                  `Page creation requires space ID in config (not yet supported): ${filePath}`
+                )
               }
-            })
-
-            // Update front-matter with new version
-            const newFrontMatter: PageFrontMatter = {
-              ...fm,
-              version: fm.version + 1,
-              updated: new Date(),
-              contentHash: currentHash
+              created++
+              return
             }
-            yield* localFs.writeMarkdownFile(filePath, newFrontMatter, localFile.content)
-          }
 
-          pushed++
+            const fm = localFile.frontMatter
+            const currentHash = computeHash(localFile.content)
+
+            if (currentHash === fm.contentHash) {
+              skipped++
+              return
+            }
+
+            if (!options.dryRun) {
+              // Fetch current version to avoid conflicts
+              const remotePage = yield* client.getPage(fm.pageId)
+              const html = yield* converter.markdownToHtml(localFile.content)
+              const updatedPage = yield* client.updatePage({
+                id: fm.pageId,
+                title: fm.title,
+                status: "current",
+                version: {
+                  number: remotePage.version.number + 1,
+                  message: "Updated via confluence-to-markdown"
+                },
+                body: {
+                  representation: "storage",
+                  value: html
+                }
+              })
+
+              // Update front-matter with new version
+              const newFrontMatter: PageFrontMatter = {
+                ...fm,
+                version: updatedPage.version.number,
+                updated: new Date(),
+                contentHash: currentHash
+              }
+              yield* localFs.writeMarkdownFile(filePath, newFrontMatter, localFile.content)
+            }
+
+            pushed++
+          }).pipe(
+            Effect.catchAll((error) =>
+              Effect.sync(() => {
+                errors.push(
+                  `Failed to push ${filePath}: ${error._tag === "ApiError" ? error.message : error._tag}`
+                )
+              })
+            )
+          )
         }
 
         return { pushed, created, skipped, errors: errors as ReadonlyArray<string> }
@@ -307,18 +321,32 @@ export const layer: Layer.Layer<
 
     const sync = (): Effect.Effect<SyncResult, SyncError | ConflictError> =>
       Effect.gen(function*() {
-        // First pull to get latest
+        // First, check for conflicts
+        const statusResult = yield* status()
+        const conflictErrors: Array<string> = []
+
+        if (statusResult.conflicts > 0) {
+          for (const file of statusResult.files) {
+            if (file._tag === "Conflict") {
+              conflictErrors.push(
+                `Conflict in ${file.path}: local v${file.localVersion} vs remote v${file.remoteVersion}`
+              )
+            }
+          }
+        }
+
+        // Pull remote changes
         const pullResult = yield* pull({ force: false })
 
-        // Then push local changes
+        // Push local changes
         const pushResult = yield* push({ dryRun: false })
 
         return {
           pulled: pullResult.pulled,
           pushed: pushResult.pushed,
           created: pushResult.created,
-          conflicts: 0, // TODO: Implement conflict detection
-          errors: [...pullResult.errors, ...pushResult.errors] as ReadonlyArray<string>
+          conflicts: statusResult.conflicts,
+          errors: [...conflictErrors, ...pullResult.errors, ...pushResult.errors] as ReadonlyArray<string>
         }
       })
 
