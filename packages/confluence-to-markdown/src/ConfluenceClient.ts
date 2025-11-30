@@ -148,11 +148,15 @@ const make = (
       HttpClientRequest.setHeader("Content-Type", "application/json")
     )
 
-    const request = <A>(
+    /**
+     * Make an HTTP request to the Confluence API.
+     * Returns raw JSON - callers must validate with Schema.decodeUnknown.
+     */
+    const request = (
       method: "GET" | "POST" | "PUT" | "DELETE",
       path: string,
       body?: unknown
-    ): Effect.Effect<A, ApiError | RateLimitError, never> =>
+    ): Effect.Effect<unknown, ApiError | RateLimitError, never> =>
       Effect.gen(function*() {
         let req = baseRequest.pipe(
           HttpClientRequest.setMethod(method),
@@ -200,7 +204,7 @@ const make = (
         }
 
         if (method === "DELETE" && response.status === 204) {
-          return undefined as A
+          return undefined
         }
 
         const json = yield* response.json.pipe(
@@ -213,14 +217,14 @@ const make = (
           )
         )
 
-        return json as A
+        return json
       }).pipe(
         Effect.retry(rateLimitSchedule)
       )
 
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        const raw = yield* request<unknown>(
+        const raw = yield* request(
           "GET",
           `/pages/${id}?body-format=storage`
         )
@@ -238,7 +242,7 @@ const make = (
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        const raw = yield* request<unknown>(
+        const raw = yield* request(
           "GET",
           `/pages/${id}/children?body-format=storage`
         )
@@ -277,7 +281,7 @@ const make = (
             ? `/pages/${id}/children?body-format=storage&cursor=${cursor}`
             : `/pages/${id}/children?body-format=storage`
 
-          const raw = yield* request<unknown>("GET", path)
+          const raw = yield* request("GET", path)
           const response = yield* Schema.decodeUnknown(PageChildrenResponseSchema)(raw).pipe(
             Effect.mapError((error) =>
               new ApiError({
@@ -306,7 +310,7 @@ const make = (
 
     const createPage = (req: CreatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        const raw = yield* request<unknown>("POST", "/pages", req)
+        const raw = yield* request("POST", "/pages", req)
         return yield* Schema.decodeUnknown(PageResponseSchema)(raw).pipe(
           Effect.mapError((error) =>
             new ApiError({
@@ -320,7 +324,7 @@ const make = (
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        const raw = yield* request<unknown>("PUT", `/pages/${req.id}`, req)
+        const raw = yield* request("PUT", `/pages/${req.id}`, req)
         return yield* Schema.decodeUnknown(PageResponseSchema)(raw).pipe(
           Effect.mapError((error) =>
             new ApiError({
@@ -334,7 +338,7 @@ const make = (
       })
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
-      request<void>("DELETE", `/pages/${id}`)
+      request("DELETE", `/pages/${id}`).pipe(Effect.asVoid)
 
     return ConfluenceClient.of({
       getPage,

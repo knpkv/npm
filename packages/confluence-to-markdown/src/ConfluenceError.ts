@@ -39,6 +39,15 @@ export class ConfigParseError extends Data.TaggedError("ConfigParseError")<{
 }> {}
 
 /**
+ * Error thrown when configuration validation fails.
+ *
+ * @category Errors
+ */
+export class ConfigError extends Data.TaggedError("ConfigError")<{
+  readonly message: string
+}> {}
+
+/**
  * Error thrown when authentication is missing.
  *
  * @example
@@ -147,6 +156,7 @@ export class FrontMatterError extends Data.TaggedError("FrontMatterError")<{
 export type ConfluenceError =
   | ConfigNotFoundError
   | ConfigParseError
+  | ConfigError
   | AuthMissingError
   | ApiError
   | RateLimitError
@@ -171,6 +181,7 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
   [
     "ConfigNotFoundError",
     "ConfigParseError",
+    "ConfigError",
     "AuthMissingError",
     "ApiError",
     "RateLimitError",

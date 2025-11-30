@@ -21,7 +21,7 @@ import {
   layer as ConfluenceConfigLayer,
   layerFromValues as ConfluenceConfigLayerFromValues
 } from "./ConfluenceConfig.js"
-import { AuthMissingError } from "./ConfluenceError.js"
+import { AuthMissingError, ConfigError } from "./ConfluenceError.js"
 import { layer as LocalFileSystemLayer } from "./LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "./MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "./SyncEngine.js"
@@ -48,17 +48,39 @@ const baseUrlOption = Options.text("base-url").pipe(
   Options.optional
 )
 
+/** Validate page ID format */
+const validatePageId = (input: string): Effect.Effect<string, ConfigError> =>
+  input.trim().length > 0
+    ? Effect.succeed(input.trim())
+    : Effect.fail(new ConfigError({ message: "Page ID cannot be empty" }))
+
+/** Validate base URL format */
+const validateBaseUrl = (input: string): Effect.Effect<string, ConfigError> => {
+  const pattern = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/
+  return pattern.test(input)
+    ? Effect.succeed(input)
+    : Effect.fail(
+      new ConfigError({
+        message: `Invalid Confluence URL: ${input}. Expected format: https://yoursite.atlassian.net`
+      })
+    )
+}
+
 const initCommand = Command.make(
   "init",
   { rootPageId: rootPageIdOption, baseUrl: baseUrlOption },
   ({ baseUrl, rootPageId }) =>
     Effect.gen(function*() {
-      const pageId = Option.isSome(rootPageId)
+      const rawPageId = Option.isSome(rootPageId)
         ? rootPageId.value
         : yield* Prompt.text({ message: "Enter Confluence root page ID:" })
-      const url = Option.isSome(baseUrl)
+      const rawUrl = Option.isSome(baseUrl)
         ? baseUrl.value
         : yield* Prompt.text({ message: "Enter Confluence base URL (e.g., https://yoursite.atlassian.net):" })
+
+      const pageId = yield* validatePageId(rawPageId)
+      const url = yield* validateBaseUrl(rawUrl)
+
       const path = yield* createConfigFile(pageId, url)
       yield* Console.log(`Created configuration file: ${path}`)
     })
