@@ -4,11 +4,13 @@
  * Tests actual CLI execution, streaming, tool calls, error scenarios, and @effect/ai integration.
  */
 import { LanguageModel } from "@effect/ai"
+import { NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Array, Effect, Layer, Stream } from "effect"
 import { ClaudeCodeCliClient, layer } from "../src/ClaudeCodeCliClient.js"
 import { ClaudeCodeCliConfig } from "../src/ClaudeCodeCliConfig.js"
 import * as ClaudeCodeCliLanguageModel from "../src/ClaudeCodeCliLanguageModel.js"
+import * as SessionDiscovery from "../src/SessionDiscovery.js"
 import type { MessageChunk } from "../src/StreamEvents.js"
 
 describe("ClaudeCodeCliClient - Integration", () => {
@@ -494,5 +496,75 @@ describe("ClaudeCodeCliClient - Integration", () => {
         Effect.provide(ClaudeCodeCliConfig.default),
         Effect.timeout("30 seconds")
       ), { timeout: 60000 })
+  })
+
+  describe("Session Resume", () => {
+    it.effect("should discover sessions, create new session, and resume it", () =>
+      Effect.gen(function*() {
+        const client = yield* ClaudeCodeCliClient
+
+        // List sessions before and validate structure
+        const sessionsBefore = yield* SessionDiscovery.listProjectSessions(process.cwd())
+        expect(Array.isArray(sessionsBefore)).toBe(true)
+        const countBefore = sessionsBefore.length
+
+        if (sessionsBefore.length > 0) {
+          const session = sessionsBefore[0]
+          expect(session.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+          expect(session.projectPath).toBeDefined()
+          expect(typeof session.timestamp).toBe("number")
+        }
+
+        // Parse history index and validate structure
+        const history = yield* SessionDiscovery.parseHistoryIndex()
+        expect(Array.isArray(history)).toBe(true)
+        if (history.length > 0) {
+          const entry = history[0]
+          expect(entry.display).toBeDefined()
+          expect(typeof entry.timestamp).toBe("number")
+          expect(entry.project).toBeDefined()
+        }
+
+        // Create new session with query
+        const initialResponse = yield* client.query("What is 2+2? Answer with just the number.")
+        expect(initialResponse).toBeDefined()
+
+        // List sessions after - should have one more
+        const sessionsAfter = yield* SessionDiscovery.listProjectSessions(process.cwd())
+        expect(sessionsAfter.length).toBe(countBefore + 1)
+
+        // Find new session (most recent)
+        const byTimestamp = (a: SessionDiscovery.SessionRecord, b: SessionDiscovery.SessionRecord) =>
+          b.timestamp - a.timestamp
+        const sortedSessions = Array.fromIterable(sessionsAfter).sort(byTimestamp)
+        const newSession = sortedSessions[0]
+        expect(newSession).toBeDefined()
+
+        // Resume with resumeQuery
+        const resumeResponse = yield* client.resumeQuery(
+          "What was my previous question?",
+          newSession.sessionId
+        )
+        expect(resumeResponse).toBeDefined()
+        expect(typeof resumeResponse).toBe("string")
+        expect(resumeResponse.length).toBeGreaterThan(0)
+
+        // Resume with resumeQueryStream
+        const stream = client.resumeQueryStream(
+          "Repeat your last answer",
+          newSession.sessionId
+        )
+        const chunks = yield* Stream.runCollect(stream)
+        const chunksArray = Array.fromIterable(chunks)
+        expect(chunksArray.length).toBeGreaterThan(0)
+
+        const textChunks = chunksArray.filter((chunk: MessageChunk) => chunk.type === "text")
+        expect(textChunks.length).toBeGreaterThan(0)
+      }).pipe(
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(layer()),
+        Effect.provide(ClaudeCodeCliConfig.default),
+        Effect.timeout("90 seconds")
+      ), { timeout: 120000 })
   })
 })

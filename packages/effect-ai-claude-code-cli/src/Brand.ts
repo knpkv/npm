@@ -239,3 +239,44 @@ export const BlockId = Brand.refined<BlockId>(
  * @internal
  */
 export const unsafeBlockId = (s: string): BlockId => s as BlockId
+
+/**
+ * A branded type for session identifiers.
+ *
+ * Ensures session IDs conform to UUID v4 format.
+ *
+ * @category Brands
+ */
+export type SessionId = string & Brand.Brand<"SessionId">
+
+/**
+ * Schema for validating and constructing SessionId.
+ *
+ * @category Schemas
+ */
+export const SessionIdSchema = Schema.UUID.pipe(Schema.brand("SessionId"))
+
+/**
+ * Constructs a SessionId from a string with validation.
+ *
+ * @category Constructors
+ * @example
+ *   import { SessionId } from "@knpkv/effect-ai-claude-code-cli/Brand"
+ *   import { Effect } from "effect"
+ *
+ *   const program = Effect.gen(function* () {
+ *     const sessionId = yield* SessionId.make("631f187f-fd79-41d9-9cae-cb255c96acfd")
+ *     console.log(sessionId)
+ *   })
+ */
+export const SessionId = Brand.refined<SessionId>(
+  (s): s is SessionId & string => Schema.is(SessionIdSchema)(s),
+  (s) => Brand.error(`Invalid session ID: ${s}. Must be UUID v4 format.`)
+)
+
+/**
+ * Unsafe constructor for SessionId (for internal use only).
+ *
+ * @internal
+ */
+export const unsafeSessionId = (s: string): SessionId => s as SessionId

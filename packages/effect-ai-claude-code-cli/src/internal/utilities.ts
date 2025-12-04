@@ -50,7 +50,8 @@ export const buildCommand = (
   allowedTools?: ReadonlyArray<string>,
   disallowedTools?: ReadonlyArray<string>,
   dangerouslySkipPermissions = false,
-  streamJson = true
+  streamJson = true,
+  sessionId?: string
 ): Command.Command => {
   // Handle empty allowedTools array as "deny all"
   // Convert to disallowedTools: allTools
@@ -73,6 +74,7 @@ export const buildCommand = (
     ...(dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
     ...(streamJson ? ["--verbose", "--include-partial-messages"] : []),
     ...(model ? ["--model", model] : []),
+    ...(sessionId ? ["--resume", sessionId] : []),
     ...(effectiveAllowedTools ? effectiveAllowedTools.flatMap((tool) => ["--allowedTools", tool]) : []),
     ...(effectiveDisallowedTools ? effectiveDisallowedTools.flatMap((tool) => ["--disallowedTools", tool]) : []),
     ...(useStdin ? [] : ["--", prompt])

@@ -111,6 +111,60 @@ export class ClaudeCodeCliClient extends Context.Tag("@knpkv/effect-ai-claude-co
     readonly queryStream: (
       prompt: string
     ) => Stream.Stream<MessageChunk, ClaudeCodeCliError>
+
+    /**
+     * Resume an existing session with a new query.
+     *
+     * @param prompt - The text prompt to send to Claude
+     * @param sessionId - The session ID to resume
+     * @returns Effect that yields the complete response text
+     *
+     * @example
+     * ```typescript
+     * import { ClaudeCodeCliClient } from "@knpkv/effect-ai-claude-code-cli"
+     * import { SessionId } from "@knpkv/effect-ai-claude-code-cli/Brand"
+     * import { Effect } from "effect"
+     *
+     * const program = Effect.gen(function* () {
+     *   const client = yield* ClaudeCodeCliClient
+     *   const sessionId = yield* SessionId("631f187f-fd79-41d9-9cae-cb255c96acfd")
+     *   const response = yield* client.resumeQuery("Continue", sessionId)
+     *   console.log(response)
+     * })
+     * ```
+     */
+    readonly resumeQuery: (
+      prompt: string,
+      sessionId: string
+    ) => Effect.Effect<string, ClaudeCodeCliError>
+
+    /**
+     * Resume an existing session with a streaming query.
+     *
+     * @param prompt - The text prompt to send to Claude
+     * @param sessionId - The session ID to resume
+     * @returns Stream of message chunks
+     *
+     * @example
+     * ```typescript
+     * import { ClaudeCodeCliClient } from "@knpkv/effect-ai-claude-code-cli"
+     * import { Effect, Stream } from "effect"
+     *
+     * const program = Effect.gen(function* () {
+     *   const client = yield* ClaudeCodeCliClient
+     *   const stream = client.resumeQueryStream("Continue", sessionId)
+     *   yield* stream.pipe(
+     *     Stream.runForEach(chunk =>
+     *       Effect.sync(() => process.stdout.write(chunk.text))
+     *     )
+     *   )
+     * })
+     * ```
+     */
+    readonly resumeQueryStream: (
+      prompt: string,
+      sessionId: string
+    ) => Stream.Stream<MessageChunk, ClaudeCodeCliError>
   }
 >() {}
 
@@ -352,9 +406,76 @@ const make = (options?: {
       )
     }
 
+    const resumeQuery = (prompt: string, sessionId: string): Effect.Effect<string, ClaudeCodeCliError> =>
+      Effect.gen(function*() {
+        // Validate prompt for security (prevent command injection)
+        yield* Validation.validatePrompt(prompt).pipe(
+          Effect.mapError((error) => new ValidationError({ message: error.message }))
+        )
+        const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
+        const command = buildCommand(
+          prompt,
+          model,
+          allowedTools,
+          disallowedTools,
+          dangerouslySkipPermissions,
+          false,
+          sessionId
+        ).pipe(
+          Command.stdin(useStdin ? Stream.make(prompt).pipe(Stream.encodeText) : Stream.empty)
+        )
+        const output = yield* Command.string(command).pipe(
+          Effect.mapError((error: PlatformError.PlatformError) => parseStderr(extractErrorMessage(error), 1))
+        )
+
+        // Parse JSON response to extract text
+        const jsonOption = yield* Schema.decodeUnknown(Schema.parseJson())(output).pipe(
+          Effect.andThen((json) => Schema.decodeUnknown(JsonResponse)(json)),
+          Effect.match({
+            onFailure: () => Option.none(),
+            onSuccess: Option.some
+          })
+        )
+
+        return Option.match(jsonOption, {
+          onNone: () => output.trim(),
+          onSome: extractText
+        })
+      }).pipe(
+        Effect.retry(rateLimitSchedule),
+        Effect.provide(NodeContext.layer)
+      )
+
+    const resumeQueryStream = (
+      prompt: string,
+      sessionId: string
+    ): Stream.Stream<MessageChunk, ClaudeCodeCliError> => {
+      // Validate prompt for security (prevent command injection)
+      const validated = Validation.validatePrompt(prompt).pipe(
+        Effect.mapError((error) => new ValidationError({ message: error.message }))
+      )
+      return Stream.unwrap(
+        Effect.map(validated, () => {
+          const command = buildCommand(
+            prompt,
+            model,
+            allowedTools,
+            disallowedTools,
+            dangerouslySkipPermissions,
+            true,
+            sessionId
+          )
+          const useStdin = hasToolsConfigured(allowedTools, disallowedTools)
+          return executeCommand(command, useStdin ? prompt : undefined)
+        })
+      )
+    }
+
     return ClaudeCodeCliClient.of({
       query,
-      queryStream
+      queryStream,
+      resumeQuery,
+      resumeQueryStream
     })
   })
 

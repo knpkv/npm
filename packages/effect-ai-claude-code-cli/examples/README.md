@@ -19,6 +19,7 @@ pnpm install
 # Run any example
 npx tsx examples/basic.ts
 npx tsx examples/streaming.ts
+npx tsx examples/session-resume.ts
 ```
 
 ## Basic Usage
@@ -73,6 +74,17 @@ Empty `allowedTools` array - denies all tools.
 - Using `allowedTools: []` to deny tools
 - Fallback behavior without tools
 - Ensuring queries run without tool access
+
+### `session-resume.ts`
+
+Discover and resume existing Claude Code sessions.
+
+**Key concepts:**
+
+- Using `SessionDiscovery.listProjectSessions()` to find sessions
+- Resuming sessions with `resumeQuery()` and `resumeQueryStream()`
+- Reading session metadata (timestamp, sessionId, projectPath)
+- Continuing conversations from previous sessions
 
 ## Error Handling
 
