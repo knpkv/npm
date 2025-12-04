@@ -1,5 +1,19 @@
 # @knpkv/effect-ai-claude-code-cli
 
+## 0.2.0
+
+### Minor Changes
+
+- [#13](https://github.com/knpkv/npm/pull/13) [`3ccfd72`](https://github.com/knpkv/npm/commit/3ccfd727dd60bb2404e2fecee78e4dc5e1e1ba93) Thanks @konopkov! - Add session resume functionality
+  - Add SessionId branded type with UUID validation
+  - Add SessionNotFoundError and InvalidSessionIdError
+  - Create SessionDiscovery module for listing sessions from ~/.claude/
+  - Implement resumeQuery() and resumeQueryStream() methods
+  - Add --resume flag support to CLI integration
+  - Fix encodeProjectPath() to handle leading / and . characters
+  - Add session-resume.ts example
+  - Add comprehensive integration test
+
 ## 0.1.0
 
 ### Minor Changes
