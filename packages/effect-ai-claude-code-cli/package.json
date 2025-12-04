@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/effect-ai-claude-code-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Effect-TS wrapper for Claude Code CLI with @effect/ai integration",
   "license": "MIT",
   "author": "knpkv",
