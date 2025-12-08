@@ -1,0 +1,103 @@
+<ac:layout><ac:layout-section ac:type="fixed-width" ac:breakout-mode="default"><ac:layout-cell><table><thead><tr><th /><th /></tr></thead><tbody><tr><td>Owner</td><td><ac:link><ri:user ri:account-id="557058:76c20100-e45a-495d-9cb2-4d7c809e6a9b" /></ac:link></td></tr><tr><td>On this page</td><td><ac:structured-macro ac:name="toc" ac:schema-version="1" ac:macro-id="d452bad4-700f-4973-ae06-574776a14687" /></td></tr></tbody></table>
+<p>Normal text</p>
+<h2>Headings</h2>
+<h1>Heading 1</h1>
+<h2>Heading 2</h2>
+<h3>Heading 3</h3>
+<h4>Heading 4</h4>
+<h5>Heading 5</h5>
+<h6>Heading 6</h6>
+<h2>Text Formatting</h2>
+<h3>Basic Styles</h3>
+<p><strong>Bold</strong></p>
+<p><em>Italic</em></p>
+<p><u>Inderline</u></p>
+<p><del>Strikethrough</del></p>
+<p><code>Code</code></p>
+<p><sub>Subscript</sub></p>
+<p><sup>Superscript</sup></p>
+<h3>Quotes</h3>
+<blockquote><p>Quote</p></blockquote>
+<h3>Alignment</h3>
+<p style="text-align: center;">Align center</p>
+<p style="text-align: right;">Align right</p>
+<p>Default</p>
+<h2>Colors</h2>
+<h3>Text Colors</h3>
+<p><span style="color: rgb(151,160,175);">Gray</span></p>
+<p><span style="color: rgb(255,255,255);">White</span></p>
+<p><span style="color: rgb(7,71,166);">Bold blue</span></p>
+<p><span style="color: rgb(76,154,255);">Blue</span></p>
+<p><span style="color: rgb(179,212,255);">Subtle blue</span></p>
+<p><span style="color: rgb(0,141,166);">Bold teal</span></p>
+<p><span style="color: rgb(0,184,217);">Teal</span></p>
+<p><span style="color: rgb(179,245,255);">Subtle blue</span></p>
+<p><span style="color: rgb(0,102,68);">Bold green</span></p>
+<p><span style="color: rgb(54,179,126);">Green</span></p>
+<p><span style="color: rgb(171,245,209);">Subtle green</span></p>
+<p><span style="color: rgb(255,153,31);">Bold orange</span></p>
+<p><span style="color: rgb(255,196,0);">Yellow</span></p>
+<p><span style="color: rgb(255,240,179);">Subtle yellow</span></p>
+<p><span style="color: rgb(191,38,0);">Bold red</span></p>
+<p><span style="color: rgb(255,86,48);">Red</span></p>
+<p><span style="color: rgb(255,189,173);">Subtle red</span></p>
+<p><span style="color: rgb(64,50,148);">Bold purple</span></p>
+<p><span style="color: rgb(101,84,192);">Purple</span></p>
+<p><span style="color: rgb(234,230,255);">Subtle purple</span></p>
+<h3>Highlights</h3>
+<p><span style="background-color: rgb(220,223,228);">Gray highlight</span></p>
+<p><span style="background-color: rgb(198,237,251);">Teal highlight</span></p>
+<p><span style="background-color: rgb(211,241,167);">Lime highlight</span></p>
+<p><span style="background-color: rgb(254,222,200);">Yellow highlight</span></p>
+<p><span style="background-color: rgb(253,208,236);">Magenta highlight</span></p>
+<p><span style="background-color: rgb(223,216,253);">Purple highlight</span></p>
+<h2>Lists</h2>
+<h3>Bullet Lists</h3>
+<ul><li><p>Bullet list 1</p><ul local-id="bed75a55-f8b9-45fb-9346-7531dd9ea338"><li local-id="30852041-2521-40ed-acbb-1a8469be3c30"><p local-id="5b0cccdf-3a87-4b32-b618-910a94529992">Bullet list 1.1</p><ul local-id="453de478-a2d7-4b2f-9b93-91732877c960"><li local-id="cc32bd38-0927-42f2-b2bc-8f480ea97762"><p local-id="308bc2ca-c9b5-4734-a0ff-dea8e319184d">Bullet list 1.1.1</p></li></ul></li></ul></li><li><p>Bullet list 2</p></li></ul>
+<h3>Numbered Lists</h3>
+<ol><li><p>Numbered list 1</p><ol start="1" local-id="d40d0651-9647-4012-aa44-22dea36dca0f"><li local-id="16340895-0a02-4369-a4f2-7fe3f7c56112"><p local-id="d5ad263d-afe0-4ca3-8299-929fbc1c7cd0">Numbered list a</p><ol start="1" local-id="897771c4-1ff1-4b72-832b-c8d6cc79f57b"><li local-id="25120a69-d5ff-41e0-9192-35e036d752f0"><p local-id="6bd35901-285f-4f58-872f-51e4152e296b">Numbered list i</p></li></ol></li></ol></li><li><p>Numbered list 2</p></li></ol>
+<h3>Indentation</h3>
+<p style="margin-left: 30.0px;">Indent tab 1</p>
+<p style="margin-left: 60.0px;">Indent tab 2</p>
+<p style="margin-left: 90.0px;">Indent tab 3</p>
+<h3>Action Items</h3>
+<ac:task-list>
+<ac:task><ac:task-id>43</ac:task-id><ac:task-uuid>b94e5334-74dc-4b95-bd6f-a030c1df7068</ac:task-uuid><ac:task-status>incomplete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action Item unchecked</span></ac:task-body></ac:task>
+<ac:task><ac:task-id>44</ac:task-id><ac:task-uuid>f7f340e1-72cf-465b-a17a-44048f53b4f5</ac:task-uuid><ac:task-status>complete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action item checked</span></ac:task-body></ac:task>
+</ac:task-list>
+<h2>Links &amp; Media</h2>
+<h3>Links</h3>
+<p><a href="http://example.com">Link</a></p>
+<h3>Images</h3>
+<ac:image ac:align="center" ac:width="250" ac:alt="Atlassian_Confluence_2017_logo.svg"><ri:attachment ri:filename="Atlassian_Confluence_2017_logo.svg" ri:version-at-save="1" /></ac:image>
+<h3>User Mentions</h3>
+<p><ac:link><ri:user ri:account-id="557058:76c20100-e45a-495d-9cb2-4d7c809e6a9b" /></ac:link></p>
+<h3>Emoticons</h3>
+<p><ac:emoticon ac:emoji-shortname=":grinning:" ac:emoji-id="1f600" ac:emoji-fallback="😀" /> <ac:emoticon ac:emoji-shortname=":smiley:" ac:emoji-id="1f603" ac:emoji-fallback="😃" /> <ac:emoticon ac:emoji-shortname=":smile:" ac:emoji-id="1f604" ac:emoji-fallback="😄" /> <ac:emoticon ac:emoji-shortname=":grin:" ac:emoji-id="1f601" ac:emoji-fallback="😁" /> <ac:emoticon ac:emoji-shortname=":laughing:" ac:emoji-id="1f606" ac:emoji-fallback="😆" /> <ac:emoticon ac:emoji-shortname=":sweat_smile:" ac:emoji-id="1f605" ac:emoji-fallback="😅" /> <ac:emoticon ac:emoji-shortname=":joy:" ac:emoji-id="1f602" ac:emoji-fallback="😂" /> <ac:emoticon ac:emoji-shortname=":rofl:" ac:emoji-id="1f923" ac:emoji-fallback="🤣" /></p>
+<h2>Tables</h2>
+<table><thead><tr><th><strong>Header 1</strong></th><th><strong>Header 2</strong></th><th><strong>Header 3</strong></th></tr></thead><tbody><tr><td>Cell 1.1</td><td>Cell 2.1</td><td>Cell 3.1</td></tr><tr><td>Cell 1.2</td><td>Cell 2.2</td><td>Cell 3.2</td></tr></tbody></table></ac:layout-cell></ac:layout-section><ac:layout-section ac:type="two_equal" ac:breakout-mode="wide" ac:breakout-width="760"><ac:layout-cell><p>Column 1</p></ac:layout-cell><ac:layout-cell><p>Column 2</p></ac:layout-cell></ac:layout-section><ac:layout-section ac:type="fixed-width" ac:breakout-mode="default"><ac:layout-cell><h3>Code Blocks</h3>
+<ac:structured-macro ac:name="code" ac:schema-version="1" ac:macro-id="84de7e03-e3b0-4884-aa7b-34cbfce6c1c1"><ac:parameter ac:name="language">typescript</ac:parameter><ac:plain-text-body><![CDATA[const typescript = {};]]></ac:plain-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="code" ac:schema-version="1" ac:macro-id="0d60fe56-c93c-4f6b-979b-3432c79db9ba"><ac:parameter ac:name="language">json</ac:parameter><ac:plain-text-body><![CDATA[{
+  "json": true
+}]]></ac:plain-text-body></ac:structured-macro>
+<h3>Decisions</h3>
+<ac:adf-extension><ac:adf-node type="decision-list"><ac:adf-node type="decision-item"><ac:adf-attribute key="local-id">7c3012f5-3ad3-47e1-89cc-cd87267668d3</ac:adf-attribute><ac:adf-attribute key="state">DECIDED</ac:adf-attribute><ac:adf-content>Decision</ac:adf-content></ac:adf-node></ac:adf-node><ac:adf-fallback><ul class="decision-list"><li>Decision</li></ul></ac:adf-fallback></ac:adf-extension>
+<hr />
+<h3>Expand</h3>
+<ac:structured-macro ac:name="expand" ac:schema-version="1" ac:macro-id="a1c56c2d-d8a1-4b83-8dbc-c1283a401cb8"><ac:parameter ac:name="title">Expand title</ac:parameter><ac:rich-text-body><p>Expand content</p></ac:rich-text-body></ac:structured-macro>
+<h3>Dates</h3>
+<p><time datetime="2026-01-01" /></p>
+<h3>Status</h3>
+<p><ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="ba0a4297-9ff9-4d44-bf69-3469663636f7"><ac:parameter ac:name="title">Gray</ac:parameter></ac:structured-macro> <ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="f220ee0c-735a-4613-bbb6-64b5f9952472"><ac:parameter ac:name="colour">Blue</ac:parameter></ac:structured-macro> <ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="71234fd5-5442-4557-a6de-ed762923d99d"><ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro> <ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="72ac3007-9264-468e-b0f2-858465e5e9cd"><ac:parameter ac:name="colour">Yellow</ac:parameter></ac:structured-macro> <ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="27fafb59-40d9-44b9-979a-7b820ccc1ba6"><ac:parameter ac:name="colour">Red</ac:parameter></ac:structured-macro> <ac:structured-macro ac:name="status" ac:schema-version="1" ac:macro-id="cc376419-1aa0-4fc3-9378-4a9e0efc5a4e"><ac:parameter ac:name="colour">Purple</ac:parameter></ac:structured-macro></p>
+<h3>Smart Links</h3>
+<p><a href="https://knpkv-team.atlassian.net/issues/?jql=project%20in%20(LEARNJIRA)%20ORDER%20BY%20created%20DESC" data-card-appearance="block" data-datasource="{&quot;id&quot;:&quot;d8b75300-dfda-4519-b6cd-e49abbd50401&quot;,&quot;parameters&quot;:{&quot;cloudId&quot;:&quot;85fe2d49-d86f-4afa-be53-e7ec408a4d5e&quot;,&quot;jql&quot;:&quot;project in (LEARNJIRA) ORDER BY created DESC&quot;},&quot;views&quot;:[{&quot;type&quot;:&quot;table&quot;,&quot;properties&quot;:{&quot;columns&quot;:[{&quot;key&quot;:&quot;issuetype&quot;},{&quot;key&quot;:&quot;key&quot;},{&quot;key&quot;:&quot;summary&quot;},{&quot;key&quot;:&quot;assignee&quot;},{&quot;key&quot;:&quot;priority&quot;},{&quot;key&quot;:&quot;status&quot;},{&quot;key&quot;:&quot;updated&quot;}]}}]}">https://knpkv-team.atlassian.net/issues/?jql=project%20in%20(LEARNJIRA)%20ORDER%20BY%20created%20DESC</a></p>
+<p><a href="https://knpkv-team.atlassian.net/wiki/search?text=Getting+started" data-card-appearance="block" data-datasource="{&quot;id&quot;:&quot;768fc736-3af4-4a8f-b27e-203602bff8ca&quot;,&quot;parameters&quot;:{&quot;cloudId&quot;:&quot;85fe2d49-d86f-4afa-be53-e7ec408a4d5e&quot;,&quot;searchString&quot;:&quot;Getting started&quot;},&quot;views&quot;:[{&quot;type&quot;:&quot;table&quot;,&quot;properties&quot;:{&quot;columns&quot;:[{&quot;key&quot;:&quot;type&quot;},{&quot;key&quot;:&quot;title&quot;},{&quot;key&quot;:&quot;space&quot;,&quot;width&quot;:243},{&quot;key&quot;:&quot;description&quot;},{&quot;key&quot;:&quot;ownedBy&quot;},{&quot;key&quot;:&quot;updatedAt&quot;}]}}]}">https://knpkv-team.atlassian.net/wiki/search?text=Getting+started</a></p>
+<h3>Panels</h3>
+<ac:structured-macro ac:name="info" ac:schema-version="1" ac:macro-id="5dccc7f1-ede2-43e6-926c-9c36fc4144ce"><ac:rich-text-body><p>Info panel</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="note" ac:schema-version="1" ac:macro-id="5884da9b-d738-45b3-9821-e8dc832e6601"><ac:rich-text-body><p>Note panel</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="warning" ac:schema-version="1" ac:macro-id="c1c28329-228c-42b7-8456-f2530f56f2c0"><ac:rich-text-body><p>Error panel</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="panel" ac:schema-version="1" ac:macro-id="fe489f67-fe69-4a52-bd26-9cc23eea815c"><ac:rich-text-body><p>Custom panel</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="tip" ac:schema-version="1" ac:macro-id="77ad7dce-d489-42a1-995d-0a1db3a9ef83"><ac:rich-text-body><p>Success panel</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="note" ac:schema-version="1" ac:macro-id="e5c6352e-cf6e-47cb-a423-a912838dcec4"><ac:rich-text-body><p>Warning panel</p></ac:rich-text-body></ac:structured-macro>
+<h3>Other</h3>
+<p>Hello 3</p></ac:layout-cell></ac:layout-section></ac:layout>

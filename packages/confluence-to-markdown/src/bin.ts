@@ -109,16 +109,29 @@ const dryRunOption = Options.boolean("dry-run").pipe(
   Options.withDescription("Show changes without applying")
 )
 
-const pushCommand = Command.make("push", { dryRun: dryRunOption }, ({ dryRun }) =>
-  Effect.gen(function*() {
-    const engine = yield* SyncEngine
-    yield* Console.log(dryRun ? "Dry run - showing changes..." : "Pushing changes to Confluence...")
-    const result = yield* engine.push({ dryRun })
-    yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Skipped: ${result.skipped}`)
-    if (result.errors.length > 0) {
-      yield* Console.error("Errors:", result.errors.join("\n"))
-    }
-  })).pipe(Command.withDescription("Upload local markdown changes to Confluence"))
+const messageOption = Options.text("message").pipe(
+  Options.withAlias("m"),
+  Options.withDescription("Revision comment message"),
+  Options.optional
+)
+
+const pushCommand = Command.make(
+  "push",
+  { dryRun: dryRunOption, message: messageOption },
+  ({ dryRun, message }) =>
+    Effect.gen(function*() {
+      const engine = yield* SyncEngine
+      yield* Console.log(dryRun ? "Dry run - showing changes..." : "Pushing changes to Confluence...")
+      const pushOptions = Option.isSome(message)
+        ? { dryRun, message: message.value }
+        : { dryRun }
+      const result = yield* engine.push(pushOptions)
+      yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Skipped: ${result.skipped}`)
+      if (result.errors.length > 0) {
+        yield* Console.error("Errors:", result.errors.join("\n"))
+      }
+    })
+).pipe(Command.withDescription("Upload local markdown changes to Confluence"))
 
 // === Sync command ===
 const syncCommand = Command.make("sync", {}, () =>
@@ -173,7 +186,8 @@ const DummyConfigLayer = ConfluenceConfigLayerFromValues({
   rootPageId: "dummy" as PageId,
   baseUrl: "https://dummy.atlassian.net",
   docsPath: ".docs/confluence",
-  excludePatterns: []
+  excludePatterns: [],
+  saveSource: false
 })
 
 // Dummy client layer for help/init (will fail if actually used)
@@ -194,7 +208,8 @@ const DummySyncEngineLayer = Layer.succeed(
   SyncEngine,
   SyncEngine.of({
     pull: () => Effect.dieMessage("Not configured - run 'confluence init' first"),
-    push: () => Effect.dieMessage("Not configured - run 'confluence init' first"),
+    push: (_options: { dryRun: boolean; message?: string }) =>
+      Effect.dieMessage("Not configured - run 'confluence init' first"),
     sync: () => Effect.dieMessage("Not configured - run 'confluence init' first"),
     status: () => Effect.dieMessage("Not configured - run 'confluence init' first")
   })

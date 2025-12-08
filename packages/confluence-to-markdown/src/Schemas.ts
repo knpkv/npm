@@ -34,7 +34,9 @@ export const ConfluenceConfigFileSchema = Schema.Struct({
   /** Local docs path (default: .docs/confluence) */
   docsPath: Schema.optionalWith(Schema.String, { default: () => ".docs/confluence" }),
   /** Glob patterns to exclude from sync */
-  excludePatterns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] })
+  excludePatterns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  /** Save original Confluence HTML alongside markdown (default: false) */
+  saveSource: Schema.optionalWith(Schema.Boolean, { default: () => false })
 })
 
 /**

@@ -59,7 +59,7 @@ export class ConfigError extends Data.TaggedError("ConfigError")<{
  *   // ... operation that needs auth
  * }).pipe(
  *   Effect.catchTag("AuthMissingError", () =>
- *     Effect.sync(() => console.error("Set CONFLUENCE_API_KEY or run: confluence auth login"))
+ *     Effect.sync(() => console.error("Set CONFLUENCE_API_KEY and CONFLUENCE_EMAIL"))
  *   )
  * )
  * ```
@@ -70,7 +70,7 @@ export class AuthMissingError extends Data.TaggedError("AuthMissingError")<{
   readonly message: string
 }> {
   constructor() {
-    super({ message: "CONFLUENCE_API_KEY env var or OAuth2 credentials required" })
+    super({ message: "CONFLUENCE_API_KEY and CONFLUENCE_EMAIL env vars required" })
   }
 }
 
