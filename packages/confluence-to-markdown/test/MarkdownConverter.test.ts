@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { layer as MarkdownConverterLayer, MarkdownConverter } from "../src/MarkdownConverter.js"
+import { layer as MarkdownConverterLayer, MarkdownConverter, schemaBasedLayer } from "../src/MarkdownConverter.js"
 
 describe("MarkdownConverter", () => {
   describe("htmlToMarkdown", () => {
@@ -27,8 +27,9 @@ describe("MarkdownConverter", () => {
         const converter = yield* MarkdownConverter
         const html = "<ul><li>Item 1</li><li>Item 2</li></ul>"
         const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("* Item 1")
-        expect(markdown).toContain("* Item 2")
+        // AST-based serializer uses - for unordered lists
+        expect(markdown).toContain("- Item 1")
+        expect(markdown).toContain("- Item 2")
       }).pipe(Effect.provide(MarkdownConverterLayer)))
 
     it.effect("converts links", () =>
@@ -104,5 +105,38 @@ describe("MarkdownConverter", () => {
         const html = yield* converter.markdownToHtml(markdown)
         expect(html).toContain("checkbox")
       }).pipe(Effect.provide(MarkdownConverterLayer)))
+  })
+
+  describe("schemaBasedLayer", () => {
+    it.effect("htmlToMarkdown converts basic HTML", () =>
+      Effect.gen(function*() {
+        const converter = yield* MarkdownConverter
+        const html = "<h1>Title</h1><p>Hello world</p>"
+        const markdown = yield* converter.htmlToMarkdown(html)
+        expect(markdown).toContain("# Title")
+        expect(markdown).toContain("Hello world")
+      }).pipe(Effect.provide(schemaBasedLayer)))
+
+    it.effect("htmlToAst parses HTML to Document", () =>
+      Effect.gen(function*() {
+        const converter = yield* MarkdownConverter
+        const html = "<h1>Title</h1><p>Content</p>"
+        const doc = yield* converter.htmlToAst(html)
+        expect(doc.version).toBe(1)
+        expect(doc.children.length).toBe(2)
+        expect(doc.children[0]?._tag).toBe("Heading")
+        expect(doc.children[1]?._tag).toBe("Paragraph")
+      }).pipe(Effect.provide(schemaBasedLayer)))
+
+    it.effect("markdownToAst parses Markdown to Document", () =>
+      Effect.gen(function*() {
+        const converter = yield* MarkdownConverter
+        const md = "# Title\n\nContent"
+        const doc = yield* converter.markdownToAst(md)
+        expect(doc.version).toBe(1)
+        expect(doc.children.length).toBe(2)
+        expect(doc.children[0]?._tag).toBe("Heading")
+        expect(doc.children[1]?._tag).toBe("Paragraph")
+      }).pipe(Effect.provide(schemaBasedLayer)))
   })
 })

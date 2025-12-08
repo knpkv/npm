@@ -115,7 +115,7 @@ export class SyncEngine extends Context.Tag(
     /**
      * Push local markdown changes to Confluence.
      */
-    readonly push: (options: { dryRun: boolean }) => Effect.Effect<PushResult, SyncError>
+    readonly push: (options: { dryRun: boolean; message?: string }) => Effect.Effect<PushResult, SyncError>
 
     /**
      * Bidirectional sync with conflict detection.
@@ -168,7 +168,9 @@ export const layer: Layer.Layer<
         // Get page content
         const fullPage = yield* client.getPage(page.id as PageId)
         const htmlContent = fullPage.body?.storage?.value ?? ""
-        let markdown = yield* converter.htmlToMarkdown(htmlContent)
+        let markdown = yield* converter.htmlToMarkdown(htmlContent, {
+          includeRawSource: config.saveSource
+        })
 
         // Add child page links for index pages
         if (hasChildren && config.spaceKey) {
@@ -221,6 +223,12 @@ export const layer: Layer.Layer<
 
         yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
 
+        // Save source HTML if configured
+        if (config.saveSource && htmlContent) {
+          const sourceFilePath = filePath.replace(/\.md$/, ".html")
+          yield* localFs.writeFile(sourceFilePath, htmlContent)
+        }
+
         // Pull children
         let count = 1
         for (const child of children) {
@@ -244,13 +252,14 @@ export const layer: Layer.Layer<
         }
       })
 
-    const push = (options: { dryRun: boolean }): Effect.Effect<PushResult, SyncError> =>
+    const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
       Effect.gen(function*() {
         const files = yield* localFs.listMarkdownFiles(docsPath)
         let pushed = 0
         let created = 0
         let skipped = 0
         const errors: Array<string> = []
+        const revisionMessage = options.message ?? "Updated via confluence-to-markdown"
 
         for (const filePath of files) {
           yield* Effect.gen(function*() {
@@ -286,7 +295,7 @@ export const layer: Layer.Layer<
                 status: "current",
                 version: {
                   number: remotePage.version.number + 1,
-                  message: "Updated via confluence-to-markdown"
+                  message: revisionMessage
                 },
                 body: {
                   representation: "storage",

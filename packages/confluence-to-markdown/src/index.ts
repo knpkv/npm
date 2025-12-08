@@ -33,3 +33,21 @@ export {
   type SyncResult,
   type SyncStatus
 } from "./SyncEngine.js"
+
+// AST types
+export * from "./ast/index.js"
+
+// Parsers
+export { parseConfluenceHtml } from "./parsers/ConfluenceParser.js"
+export { parseMarkdown } from "./parsers/MarkdownParser.js"
+
+// Serializers
+export { serializeToConfluence } from "./serializers/ConfluenceSerializer.js"
+export { serializeToMarkdown } from "./serializers/MarkdownSerializer.js"
+
+// Bi-directional schemas
+export { DocumentFromConfluence } from "./schemas/ConfluenceSchema.js"
+export { DocumentFromMarkdown } from "./schemas/MarkdownSchema.js"
+
+// Schema converter errors
+export { MigrationError, ParseError, SerializeError } from "./SchemaConverterError.js"
