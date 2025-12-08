@@ -179,27 +179,47 @@ const processStructuredMacros = (html: string): string => {
     const macroStart = result.indexOf("<ac:structured-macro")
     if (macroStart === -1) break
 
-    // Find matching closing tag with depth tracking
-    let depth = 1
-    let pos = macroStart + 20
-    let endPos = -1
+    // First, find the end of the opening tag to check if self-closing
+    const openingTagEnd = result.indexOf(">", macroStart)
+    if (openingTagEnd === -1) break
 
-    while (pos < result.length && depth > 0) {
-      if (result.slice(pos, pos + 20) === "<ac:structured-macro") {
-        depth++
-        pos += 20
-      } else if (result.slice(pos, pos + 21) === "</ac:structured-macro") {
-        depth--
-        if (depth === 0) {
-          endPos = result.indexOf(">", pos) + 1
+    // Check if self-closing (ends with />)
+    const isSelfClosing = result[openingTagEnd - 1] === "/"
+
+    let endPos: number
+    if (isSelfClosing) {
+      // Self-closing macro: <ac:structured-macro ... />
+      endPos = openingTagEnd + 1
+    } else {
+      // Regular macro with body: find matching closing tag
+      let depth = 1
+      let pos = openingTagEnd + 1
+      endPos = -1
+
+      while (pos < result.length && depth > 0) {
+        if (result.slice(pos, pos + 20) === "<ac:structured-macro") {
+          // Check if this nested opening is also self-closing
+          const nestedEnd = result.indexOf(">", pos)
+          if (nestedEnd !== -1 && result[nestedEnd - 1] === "/") {
+            // Self-closing nested macro - don't change depth
+            pos = nestedEnd + 1
+          } else {
+            depth++
+            pos += 20
+          }
+        } else if (result.slice(pos, pos + 21) === "</ac:structured-macro") {
+          depth--
+          if (depth === 0) {
+            endPos = result.indexOf(">", pos) + 1
+          }
+          pos += 21
+        } else {
+          pos++
         }
-        pos += 21
-      } else {
-        pos++
       }
-    }
 
-    if (endPos === -1) break
+      if (endPos === -1) break
+    }
 
     const macroContent = result.slice(macroStart, endPos)
     const replacement = processSingleMacro(macroContent)
