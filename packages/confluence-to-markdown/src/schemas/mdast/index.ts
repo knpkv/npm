@@ -56,3 +56,4 @@ export {
 } from "./MdastSchema.js"
 
 export { MdastFromMarkdown } from "./MdastFromMarkdown.js"
+export { mdastToString } from "./mdastToString.js"

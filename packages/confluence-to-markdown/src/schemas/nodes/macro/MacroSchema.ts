@@ -30,7 +30,7 @@ import {
 import type { HastElement, HastNode } from "../../hast/index.js"
 import { getTextContent, isHastElement, makeHastElement, makeHastText } from "../../hast/index.js"
 import type { MdastBlockContent } from "../../mdast/index.js"
-import { makeMdastCode, makeMdastParagraph, makeMdastText } from "../../mdast/index.js"
+import { makeMdastCode, makeMdastParagraph, makeMdastText, mdastToString } from "../../mdast/index.js"
 import { blockNodeToHast, blockNodeToMdast } from "../block/index.js"
 
 type SimpleBlock = Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock
@@ -222,32 +222,5 @@ export const macroNodeToMdast = (node: MacroNode): MdastBlockContent => {
     case "StatusMacro":
       // Render as badge-like text
       return makeMdastParagraph([makeMdastText(`[${node.text}]`)])
-  }
-}
-
-/**
- * Convert MDAST to string (simple implementation).
- */
-const mdastToString = (node: MdastBlockContent): string => {
-  switch (node.type) {
-    case "paragraph":
-      return node.children.map((c) => {
-        if (c.type === "text") return c.value
-        if (c.type === "inlineCode") return `\`${c.value}\``
-        return ""
-      }).join("")
-    case "heading":
-      return "#".repeat(node.depth) + " " + node.children.map((c) => {
-        if (c.type === "text") return c.value
-        return ""
-      }).join("")
-    case "code":
-      return "```" + (node.lang ?? "") + "\n" + node.value + "\n```"
-    case "thematicBreak":
-      return "---"
-    case "html":
-      return node.value
-    default:
-      return ""
   }
 }

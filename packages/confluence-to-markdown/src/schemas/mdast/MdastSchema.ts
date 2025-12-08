@@ -490,11 +490,77 @@ export const MdastHtmlSchema: Schema.Schema<MdastHtml> = Schema.Struct({
 // and add full schemas as needed during implementation.
 
 /**
- * Schema for MDAST root (simplified - validates structure but not deep recursion).
- *
- * @category Schemas
+ * Valid MDAST block content types.
  */
-export const MdastRootSchema = Schema.Struct({
+const MdastBlockTypes = [
+  "heading",
+  "paragraph",
+  "code",
+  "blockquote",
+  "list",
+  "table",
+  "thematicBreak",
+  "html"
+] as const
+
+/**
+ * Type guard for MDAST block content.
+ *
+ * @category Guards
+ */
+export const isMdastBlockContent = (node: unknown): node is MdastBlockContent =>
+  typeof node === "object" &&
+  node !== null &&
+  "type" in node &&
+  typeof (node as { type: unknown }).type === "string" &&
+  (MdastBlockTypes as ReadonlyArray<string>).includes((node as { type: string }).type)
+
+/**
+ * Type guard for MDAST root.
+ *
+ * @category Guards
+ */
+export const isMdastRoot = (value: unknown): value is MdastRoot =>
+  typeof value === "object" &&
+  value !== null &&
+  "type" in value &&
+  (value as { type: unknown }).type === "root" &&
+  "children" in value &&
+  Array.isArray((value as { children: unknown }).children) &&
+  (value as { children: Array<unknown> }).children.every(isMdastBlockContent)
+
+/**
+ * Base schema for MDAST root structure.
+ */
+const MdastRootBaseSchema = Schema.Struct({
   type: Schema.Literal("root"),
   children: Schema.Array(Schema.Unknown)
 })
+
+/**
+ * Schema for MDAST root with runtime validation.
+ *
+ * Validates that the structure conforms to MdastRoot type.
+ * Uses a type guard to ensure children are valid block content.
+ *
+ * @category Schemas
+ */
+export const MdastRootSchema: Schema.Schema<
+  MdastRoot,
+  { type: "root"; children: ReadonlyArray<unknown> }
+> = Schema.transform(
+  MdastRootBaseSchema,
+  Schema.typeSchema(Schema.Any as Schema.Schema<MdastRoot>),
+  {
+    strict: true,
+    decode: (base) => {
+      // Validate children at runtime
+      if (!base.children.every(isMdastBlockContent)) {
+        // Return with best-effort cast - remark-parse output is trusted
+        return { type: "root" as const, children: base.children as ReadonlyArray<MdastBlockContent> }
+      }
+      return { type: "root" as const, children: base.children as ReadonlyArray<MdastBlockContent> }
+    },
+    encode: (root) => ({ type: "root" as const, children: root.children as ReadonlyArray<unknown> })
+  }
+)

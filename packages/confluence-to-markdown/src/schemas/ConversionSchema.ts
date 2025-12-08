@@ -14,7 +14,7 @@ import type { MacroNode } from "../ast/MacroNode.js"
 import type { HastElement, HastNode, HastRoot } from "./hast/index.js"
 import { HastFromHtml, isHastElement } from "./hast/index.js"
 import type { MdastBlockContent, MdastRoot } from "./mdast/index.js"
-import { MdastFromMarkdown } from "./mdast/index.js"
+import { MdastFromMarkdown, mdastToString } from "./mdast/index.js"
 import { blockNodeFromHastElement, blockNodeFromMdast, blockNodeToMdast } from "./nodes/index.js"
 import { macroNodeFromHastElement, macroNodeToMdast } from "./nodes/macro/index.js"
 import { PreprocessedHtmlFromConfluence } from "./preprocessing/index.js"
@@ -111,63 +111,6 @@ const documentToMarkdown = (doc: Document): string => {
 }
 
 /**
- * Convert MDAST block content to string.
- */
-const mdastToString = (node: MdastBlockContent): string => {
-  switch (node.type) {
-    case "paragraph":
-      return node.children.map((c) => {
-        if (c.type === "text") return c.value
-        if (c.type === "inlineCode") return `\`${c.value}\``
-        if (c.type === "strong") return `**${c.children.map((t) => (t as { value: string }).value).join("")}**`
-        if (c.type === "emphasis") return `_${c.children.map((t) => (t as { value: string }).value).join("")}_`
-        if (c.type === "link") return `[${c.children.map((t) => (t as { value: string }).value).join("")}](${c.url})`
-        if (c.type === "delete") return `~~${c.children.map((t) => (t as { value: string }).value).join("")}~~`
-        if (c.type === "break") return "  \n"
-        return ""
-      }).join("")
-    case "heading":
-      return "#".repeat(node.depth) + " " + node.children.map((c) => {
-        if (c.type === "text") return c.value
-        return ""
-      }).join("")
-    case "code":
-      return "```" + (node.lang ?? "") + "\n" + node.value + "\n```"
-    case "thematicBreak":
-      return "---"
-    case "html":
-      return node.value
-    case "blockquote":
-      return node.children.map((c) => "> " + mdastToString(c as MdastBlockContent)).join("\n")
-    case "list":
-      return node.children.map((item, i) => {
-        const prefix = node.ordered ? `${(node.start ?? 1) + i}. ` : "- "
-        const content = (item as { children: ReadonlyArray<MdastBlockContent> }).children
-          .map((c) => mdastToString(c)).join("\n")
-        return prefix + content
-      }).join("\n")
-    case "table": {
-      if (!node.children.length) return ""
-      const headerRow = node.children[0]
-      if (!headerRow) return ""
-      const headerCells =
-        (headerRow as { children: ReadonlyArray<{ children: ReadonlyArray<MdastBlockContent> }> }).children
-      const header = "| " + headerCells.map((cell) => cell.children.map((c) => mdastToString(c)).join("")).join(" | ") +
-        " |"
-      const separator = "| " + headerCells.map(() => "---").join(" | ") + " |"
-      const rows = node.children.slice(1).map((row) => {
-        const cells = (row as { children: ReadonlyArray<{ children: ReadonlyArray<MdastBlockContent> }> }).children
-        return "| " + cells.map((cell) => cell.children.map((c) => mdastToString(c)).join("")).join(" | ") +
-          " |"
-      })
-      return [header, separator, ...rows].join("\n")
-    }
-    default:
-      return ""
-  }
-}
-
-/**
  * Schema for transforming preprocessed Confluence HTML to Document AST.
  */
 export const DocumentFromHast: Schema.Schema<
@@ -260,8 +203,7 @@ export const ConfluenceToMarkdown: Schema.Schema<
       Schema.decode(MdastFromMarkdown)(md).pipe(
         Effect.mapError((e) => new ParseResult.Type(ast, md, `MDAST parsing failed: ${e.message}`)),
         Effect.map((mdast) => {
-          // Convert to Document (Schema uses unknown[] for children; runtime matches MdastRoot)
-          const doc = documentFromMdastRoot(mdast as unknown as MdastRoot)
+          const doc = documentFromMdastRoot(mdast)
 
           // Note: Full HTML serialization is complex; return basic HTML
           // For full fidelity, use the existing ConfluenceSerializer

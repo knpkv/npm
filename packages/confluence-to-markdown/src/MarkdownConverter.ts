@@ -14,7 +14,7 @@ import { parseMarkdown } from "./parsers/MarkdownParser.js"
 import { ParseError, type SerializeError } from "./SchemaConverterError.js"
 import { ConfluenceToMarkdown, DocumentFromHast, DocumentFromMdast } from "./schemas/ConversionSchema.js"
 import { HastFromHtml } from "./schemas/hast/index.js"
-import { MdastFromMarkdown, type MdastRoot } from "./schemas/mdast/index.js"
+import { MdastFromMarkdown } from "./schemas/mdast/index.js"
 import { PreprocessedHtmlFromConfluence } from "./schemas/preprocessing/index.js"
 import { serializeToConfluence } from "./serializers/ConfluenceSerializer.js"
 import { type SerializeOptions, serializeToMarkdown } from "./serializers/MarkdownSerializer.js"
@@ -178,8 +178,7 @@ export const schemaBasedLayer: Layer.Layer<MarkdownConverter> = Layer.succeed(
     markdownToAst: (markdown) =>
       Effect.gen(function*() {
         const mdast = yield* Schema.decode(MdastFromMarkdown)(markdown)
-        // Schema uses unknown[] for children; runtime type matches MdastRoot
-        return yield* Schema.decode(DocumentFromMdast)(mdast as unknown as MdastRoot)
+        return yield* Schema.decode(DocumentFromMdast)(mdast)
       }).pipe(
         Effect.mapError((e) => new ParseError({ source: "markdown", message: e.message }))
       ),
