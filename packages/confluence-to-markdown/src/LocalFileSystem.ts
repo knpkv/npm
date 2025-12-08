@@ -97,6 +97,11 @@ export class LocalFileSystem extends Context.Tag(
      * Get the directory path for a page's children.
      */
     readonly getPageDir: (title: string, parentPath: string) => string
+
+    /**
+     * Write a raw file (e.g., source HTML).
+     */
+    readonly writeFile: (filePath: string, content: string) => Effect.Effect<void, FileSystemError>
   }
 >() {}
 
@@ -211,6 +216,26 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         Effect.mapError((cause) => new FileSystemError({ operation: "read", path: filePath, cause }))
       )
 
+    const writeFile = (
+      filePath: string,
+      content: string
+    ): Effect.Effect<void, FileSystemError> =>
+      Effect.gen(function*() {
+        const dir = pathService.dirname(filePath)
+        yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+          Effect.catchAll(() => Effect.void)
+        )
+
+        // Atomic write: write to temp file, then rename
+        const tempPath = `${filePath}.tmp.${Date.now()}`
+        yield* fs.writeFileString(tempPath, content).pipe(
+          Effect.mapError((cause) => new FileSystemError({ operation: "write", path: filePath, cause }))
+        )
+        yield* fs.rename(tempPath, filePath).pipe(
+          Effect.mapError((cause) => new FileSystemError({ operation: "rename", path: filePath, cause }))
+        )
+      })
+
     return LocalFileSystem.of({
       readMarkdownFile,
       writeMarkdownFile,
@@ -219,7 +244,8 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
       deleteFile,
       exists,
       getPagePath: pageToPath,
-      getPageDir: pageToDir
+      getPageDir: pageToDir,
+      writeFile
     })
   })
 )

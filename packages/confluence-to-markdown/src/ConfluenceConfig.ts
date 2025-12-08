@@ -46,6 +46,8 @@ export class ConfluenceConfig extends Context.Tag(
     readonly docsPath: string
     /** Glob patterns to exclude */
     readonly excludePatterns: ReadonlyArray<string>
+    /** Save original Confluence HTML alongside markdown */
+    readonly saveSource: boolean
   }
 >() {}
 
@@ -123,7 +125,8 @@ export const layer = (
         baseUrl: config.baseUrl,
         ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
         docsPath: config.docsPath,
-        excludePatterns: config.excludePatterns
+        excludePatterns: config.excludePatterns,
+        saveSource: config.saveSource
       })
     })
   )
@@ -143,7 +146,8 @@ export const layerFromValues = (
       baseUrl: config.baseUrl,
       ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
       docsPath: config.docsPath,
-      excludePatterns: config.excludePatterns
+      excludePatterns: config.excludePatterns,
+      saveSource: config.saveSource
     })
   )
 
@@ -167,7 +171,8 @@ export const createConfigFile = (
       rootPageId: rootPageId as PageId,
       baseUrl,
       docsPath: ".docs/confluence",
-      excludePatterns: []
+      excludePatterns: [],
+      saveSource: false
     }
 
     // Validate the config
