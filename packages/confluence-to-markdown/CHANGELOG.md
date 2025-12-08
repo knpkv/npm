@@ -1,5 +1,15 @@
 # @knpkv/confluence-to-markdown
 
+## 0.2.1
+
+### Patch Changes
+
+- [#17](https://github.com/knpkv/npm/pull/17) [`879af56`](https://github.com/knpkv/npm/commit/879af56383230d852e1434efb67e6f5cdffd3507) Thanks @konopkov! - Improve type safety and code organization:
+  - Add MdastRootSchema with runtime validation
+  - Extract preprocessing to separate module
+  - Consolidate duplicate mdastToString utility
+  - Use exhaustive switch statements
+
 ## 0.2.0
 
 ### Minor Changes
