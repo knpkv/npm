@@ -9,6 +9,7 @@
 import * as Effect from "effect/Effect"
 import type * as ParseResult from "effect/ParseResult"
 import type {
+  BlockNode,
   CodeBlock,
   Heading,
   Image,
@@ -41,7 +42,7 @@ export const macroNodeFromHastElement = (
   element: HastElement,
   parseBlockChildren: (
     children: ReadonlyArray<HastNode>
-  ) => Effect.Effect<ReadonlyArray<SimpleBlock>, ParseResult.ParseError>
+  ) => Effect.Effect<ReadonlyArray<BlockNode>, ParseResult.ParseError>
 ): Effect.Effect<MacroNode | null, ParseResult.ParseError> =>
   Effect.gen(function*() {
     const tagName = element.tagName.toLowerCase()
@@ -51,12 +52,13 @@ export const macroNodeFromHastElement = (
       const macro = element.properties["dataMacro"] as string
       if ((PanelTypes as ReadonlyArray<string>).includes(macro)) {
         const children = yield* parseBlockChildren(element.children)
+        // Cast to SimpleBlock[] - at runtime only simple blocks are parsed for panel children
         return {
           _tag: "InfoPanel" as const,
           version: 1,
           panelType: macro as (typeof PanelTypes)[number],
           title: (element.properties["dataTitle"] as string) || undefined,
-          children
+          children: children as ReadonlyArray<SimpleBlock>
         } satisfies InfoPanel
       }
     }
@@ -71,11 +73,12 @@ export const macroNodeFromHastElement = (
         (c) => !(isHastElement(c) && c.tagName === "summary")
       )
       const children = yield* parseBlockChildren(contentChildren)
+      // Cast to SimpleBlock[] - at runtime only simple blocks are parsed for expand children
       return {
         _tag: "ExpandMacro" as const,
         version: 1,
         title,
-        children
+        children: children as ReadonlyArray<SimpleBlock>
       } satisfies ExpandMacro
     }
 

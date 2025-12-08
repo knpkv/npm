@@ -23,18 +23,17 @@ type DocumentNode = BlockNode | MacroNode
 
 /**
  * Parse HAST children to simple block nodes.
+ * Note: Returns BlockNode which is broader than SimpleBlock used by macros,
+ * but at runtime only simple blocks are returned from single-level parsing.
  */
 const parseBlockChildren = (
   children: ReadonlyArray<HastNode>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Effect.Effect<ReadonlyArray<any>, ParseResult.ParseError> =>
+): Effect.Effect<ReadonlyArray<BlockNode>, ParseResult.ParseError> =>
   Effect.forEach(
     children.filter(isHastElement),
     (el) =>
       blockNodeFromHastElement(el).pipe(
-        Effect.map((node) => node as BlockNode | null),
-        Effect.map((node) => (node !== null ? [node] : [])),
-        Effect.map((arr) => arr as ReadonlyArray<BlockNode>)
+        Effect.map((node): ReadonlyArray<BlockNode> => (node !== null ? [node] : []))
       )
   ).pipe(Effect.map((arrays) => arrays.flat()))
 
@@ -261,9 +260,8 @@ export const ConfluenceToMarkdown: Schema.Schema<
       Schema.decode(MdastFromMarkdown)(md).pipe(
         Effect.mapError((e) => new ParseResult.Type(ast, md, `MDAST parsing failed: ${e.message}`)),
         Effect.map((mdast) => {
-          // Convert to Document
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const doc = documentFromMdastRoot(mdast as any)
+          // Convert to Document (Schema uses unknown[] for children; runtime matches MdastRoot)
+          const doc = documentFromMdastRoot(mdast as unknown as MdastRoot)
 
           // Note: Full HTML serialization is complex; return basic HTML
           // For full fidelity, use the existing ConfluenceSerializer

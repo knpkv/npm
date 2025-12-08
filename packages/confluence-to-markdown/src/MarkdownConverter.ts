@@ -14,7 +14,7 @@ import { parseMarkdown } from "./parsers/MarkdownParser.js"
 import { ParseError, type SerializeError } from "./SchemaConverterError.js"
 import { ConfluenceToMarkdown, DocumentFromHast, DocumentFromMdast } from "./schemas/ConversionSchema.js"
 import { HastFromHtml } from "./schemas/hast/index.js"
-import { MdastFromMarkdown } from "./schemas/mdast/index.js"
+import { MdastFromMarkdown, type MdastRoot } from "./schemas/mdast/index.js"
 import { PreprocessedHtmlFromConfluence } from "./schemas/preprocessing/index.js"
 import { serializeToConfluence } from "./serializers/ConfluenceSerializer.js"
 import { type SerializeOptions, serializeToMarkdown } from "./serializers/MarkdownSerializer.js"
@@ -151,8 +151,13 @@ export const schemaBasedLayer: Layer.Layer<MarkdownConverter> = Layer.succeed(
   MarkdownConverter,
   MarkdownConverter.of({
     // Note: Schema-based layer doesn't support includeRawSource option yet
-    htmlToMarkdown: (html, _options) =>
-      Schema.decode(ConfluenceToMarkdown)(html).pipe(
+    htmlToMarkdown: (html, options) =>
+      Effect.gen(function*() {
+        if (options?.includeRawSource !== undefined) {
+          yield* Effect.logWarning("schemaBasedLayer: includeRawSource option is not supported, use default layer")
+        }
+        return yield* Schema.decode(ConfluenceToMarkdown)(html)
+      }).pipe(
         Effect.mapError((e) => new ConversionError({ direction: "htmlToMarkdown", cause: e.message }))
       ),
 
@@ -173,8 +178,8 @@ export const schemaBasedLayer: Layer.Layer<MarkdownConverter> = Layer.succeed(
     markdownToAst: (markdown) =>
       Effect.gen(function*() {
         const mdast = yield* Schema.decode(MdastFromMarkdown)(markdown)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return yield* Schema.decode(DocumentFromMdast)(mdast as any)
+        // Schema uses unknown[] for children; runtime type matches MdastRoot
+        return yield* Schema.decode(DocumentFromMdast)(mdast as unknown as MdastRoot)
       }).pipe(
         Effect.mapError((e) => new ParseError({ source: "markdown", message: e.message }))
       ),
