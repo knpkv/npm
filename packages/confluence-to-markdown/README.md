@@ -61,6 +61,13 @@ export CONFLUENCE_API_KEY=your-api-token
 export CONFLUENCE_EMAIL=your-email@example.com
 ```
 
+### Security Notes
+
+- OAuth client credentials are stored in `~/.confluence/config.json` with restricted permissions (0600)
+- Treat this file as sensitive - do not share or commit it
+- Create separate OAuth apps per developer for team projects
+- Tokens are auto-refreshed; if refresh fails, re-run `confluence auth login`
+
 ## Configuration
 
 Create `.confluence.json` in your project root:

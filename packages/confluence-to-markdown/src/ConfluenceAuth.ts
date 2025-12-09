@@ -14,7 +14,6 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Random from "effect/Random"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type { FileSystemError } from "./ConfluenceError.js"
@@ -39,31 +38,24 @@ const TokenStorageLive = Layer.mergeAll(
 )
 
 /**
- * Generate a UUID-like random string using Effect's Random.
+ * Generate a cryptographically secure UUID v4.
+ * Uses Web Crypto API (available in all modern runtimes).
  * Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
  */
 const generateUUID = (): Effect.Effect<string> =>
-  Effect.gen(function*() {
-    const hex = "0123456789abcdef"
-    const segments = [8, 4, 4, 4, 12]
+  Effect.sync(() => {
+    const bytes = new Uint8Array(16)
+    globalThis.crypto.getRandomValues(bytes)
 
-    const parts: Array<string> = []
-    for (const len of segments) {
-      let segment = ""
-      for (let i = 0; i < len; i++) {
-        const idx = yield* Random.nextIntBetween(0, 16)
-        segment += hex.charAt(idx)
-      }
-      parts.push(segment)
-    }
+    // Set version (4) and variant bits per RFC 4122
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40 // version 4
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80 // variant 10xx
 
-    // Set version (4) and variant bits
-    const p2 = "4" + parts[2]!.slice(1)
-    const variantIdx = 8 + (yield* Random.nextIntBetween(0, 4))
-    const variantChar = hex.charAt(variantIdx)
-    const p3 = variantChar + parts[3]!.slice(1)
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
 
-    return `${parts[0]}-${parts[1]}-${p2}-${p3}-${parts[4]}`
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
   })
 
 const OAUTH_SCOPES = [
@@ -502,7 +494,22 @@ const make = Effect.gen(function*() {
       const result = yield* refreshToken(token, config).pipe(
         Effect.tap((refreshed) => Deferred.succeed(deferred, refreshed)),
         Effect.tapError((error) => Deferred.fail(deferred, error)),
-        Effect.ensuring(Ref.set(refreshLock, Option.none()))
+        Effect.ensuring(Ref.set(refreshLock, Option.none())),
+        Effect.catchTag("OAuthError", (error) => {
+          // If refresh fails (e.g., refresh token expired), clear tokens and prompt re-login
+          if (error.step === "refresh") {
+            return Effect.gen(function*() {
+              yield* deleteTokenOp()
+              return yield* Effect.fail(
+                new OAuthError({
+                  step: "refresh",
+                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate."
+                })
+              )
+            })
+          }
+          return Effect.fail(error)
+        })
       )
 
       return result.access_token
