@@ -1,5 +1,18 @@
 # @knpkv/confluence-to-markdown
 
+## 0.3.0
+
+### Minor Changes
+
+- [#19](https://github.com/knpkv/npm/pull/19) [`15b1ff7`](https://github.com/knpkv/npm/commit/15b1ff70e9e7a406ddbc4ce8bcd0673965464421) Thanks @konopkov! - Add OAuth authentication for Confluence Cloud
+  - `confluence auth create` - opens Atlassian Developer Console to create OAuth app
+  - `confluence auth configure` - save client ID/secret
+  - `confluence auth login` - browser-based OAuth flow
+  - `confluence auth logout` - remove stored token
+  - Show login status in `confluence status`
+  - Auto-refresh tokens when expired
+  - Use granular scopes for API v2: read:page:confluence, write:page:confluence
+
 ## 0.2.1
 
 ### Patch Changes
