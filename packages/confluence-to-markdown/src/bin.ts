@@ -256,10 +256,18 @@ const authConfigureCommand = Command.make(
 ).pipe(Command.withDescription("Configure OAuth client credentials"))
 
 // === Auth login command ===
-const authLoginCommand = Command.make("login", {}, () =>
+const siteOption = Options.text("site").pipe(
+  Options.withDescription("Confluence site URL to use (for accounts with multiple sites)"),
+  Options.optional
+)
+
+const authLoginCommand = Command.make("login", { site: siteOption }, ({ site }) =>
   Effect.gen(function*() {
     const auth = yield* ConfluenceAuth
-    yield* auth.login()
+    const result = yield* auth.login(Option.isSome(site) ? { siteUrl: site.value } : undefined)
+    if (Array.isArray(result) && result.length > 0) {
+      yield* Console.log("\nRe-run with --site to select a specific site.")
+    }
   })).pipe(Command.withDescription("Authenticate with Atlassian via OAuth"))
 
 // === Auth logout command ===

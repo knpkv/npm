@@ -3,17 +3,81 @@
  *
  * @module
  */
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as Path from "@effect/platform/Path"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as fs from "node:fs"
-import * as os from "node:os"
-import * as path from "node:path"
 import { FileSystemError } from "../ConfluenceError.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "../Schemas.js"
 
-const TOKEN_DIR = path.join(os.homedir(), ".confluence")
-const TOKEN_PATH = path.join(TOKEN_DIR, "auth.json")
-const CONFIG_PATH = path.join(TOKEN_DIR, "config.json")
+const TOKEN_DIR_NAME = ".confluence"
+const TOKEN_FILE_NAME = "auth.json"
+const CONFIG_FILE_NAME = "config.json"
+
+/**
+ * Service for getting the home directory.
+ * This allows mocking in tests.
+ *
+ * @category Services
+ */
+export interface HomeDirectory {
+  readonly get: () => Effect.Effect<string>
+}
+
+/**
+ * Tag for the HomeDirectory service.
+ *
+ * @category Services
+ */
+export class HomeDirectoryTag extends Context.Tag("@knpkv/confluence-to-markdown/HomeDirectory")<
+  HomeDirectoryTag,
+  HomeDirectory
+>() {}
+
+/**
+ * Default implementation using process.env.HOME.
+ *
+ * @category Layers
+ */
+export const HomeDirectoryLive: Layer.Layer<HomeDirectoryTag> = Layer.succeed(
+  HomeDirectoryTag,
+  {
+    get: () => Effect.sync(() => process.env.HOME ?? process.env.USERPROFILE ?? "/")
+  }
+)
+
+/**
+ * Get the token directory path.
+ */
+const getTokenDir = (): Effect.Effect<string, never, HomeDirectoryTag | Path.Path> =>
+  Effect.gen(function*() {
+    const homeDir = yield* HomeDirectoryTag
+    const path = yield* Path.Path
+    const home = yield* homeDir.get()
+    return path.join(home, TOKEN_DIR_NAME)
+  })
+
+/**
+ * Get the token file path.
+ */
+const getTokenPath = (): Effect.Effect<string, never, HomeDirectoryTag | Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const tokenDir = yield* getTokenDir()
+    return path.join(tokenDir, TOKEN_FILE_NAME)
+  })
+
+/**
+ * Get the config file path.
+ */
+const getConfigPath = (): Effect.Effect<string, never, HomeDirectoryTag | Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const tokenDir = yield* getTokenDir()
+    return path.join(tokenDir, CONFIG_FILE_NAME)
+  })
 
 /**
  * Load stored OAuth token from disk.
@@ -22,17 +86,25 @@ const CONFIG_PATH = path.join(TOKEN_DIR, "config.json")
  *
  * @category Token Storage
  */
-export const loadToken = (): Effect.Effect<OAuthToken | null, FileSystemError> =>
+export const loadToken = (): Effect.Effect<
+  OAuthToken | null,
+  FileSystemError,
+  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
+> =>
   Effect.gen(function*() {
-    const exists = fs.existsSync(TOKEN_PATH)
+    const fs = yield* FileSystem.FileSystem
+    const tokenPath = yield* getTokenPath()
+
+    const exists = yield* fs.exists(tokenPath).pipe(
+      Effect.catchAll(() => Effect.succeed(false))
+    )
     if (!exists) {
       return null
     }
 
-    const content = yield* Effect.tryPromise({
-      try: () => fs.promises.readFile(TOKEN_PATH, "utf-8"),
-      catch: (cause) => new FileSystemError({ operation: "read", path: TOKEN_PATH, cause })
-    })
+    const content = yield* fs.readFileString(tokenPath).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "read", path: tokenPath, cause }))
+    )
 
     let parsed: unknown
     try {
@@ -55,17 +127,26 @@ export const loadToken = (): Effect.Effect<OAuthToken | null, FileSystemError> =
  *
  * @category Token Storage
  */
-export const saveToken = (token: OAuthToken): Effect.Effect<void, FileSystemError> =>
+export const saveToken = (
+  token: OAuthToken
+): Effect.Effect<void, FileSystemError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
   Effect.gen(function*() {
-    yield* Effect.tryPromise({
-      try: () => fs.promises.mkdir(TOKEN_DIR, { recursive: true, mode: 0o700 }),
-      catch: (cause) => new FileSystemError({ operation: "mkdir", path: TOKEN_DIR, cause })
-    })
+    const fs = yield* FileSystem.FileSystem
+    const tokenDir = yield* getTokenDir()
+    const tokenPath = yield* getTokenPath()
 
-    yield* Effect.tryPromise({
-      try: () => fs.promises.writeFile(TOKEN_PATH, JSON.stringify(token, null, 2), { mode: 0o600 }),
-      catch: (cause) => new FileSystemError({ operation: "write", path: TOKEN_PATH, cause })
-    })
+    yield* fs.makeDirectory(tokenDir, { recursive: true }).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "mkdir", path: tokenDir, cause }))
+    )
+
+    yield* fs.writeFileString(tokenPath, JSON.stringify(token, null, 2)).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "write", path: tokenPath, cause }))
+    )
+
+    // Set secure permissions (owner only)
+    yield* fs.chmod(tokenPath, 0o600).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "write", path: tokenPath, cause }))
+    )
   })
 
 /**
@@ -73,10 +154,19 @@ export const saveToken = (token: OAuthToken): Effect.Effect<void, FileSystemErro
  *
  * @category Token Storage
  */
-export const deleteToken = (): Effect.Effect<void, FileSystemError> =>
-  Effect.tryPromise({
-    try: () => fs.promises.unlink(TOKEN_PATH).catch(() => undefined),
-    catch: (cause) => new FileSystemError({ operation: "delete", path: TOKEN_PATH, cause })
+export const deleteToken = (): Effect.Effect<
+  void,
+  FileSystemError,
+  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
+> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const tokenPath = yield* getTokenPath()
+
+    yield* fs.remove(tokenPath).pipe(
+      Effect.catchAll(() => Effect.void),
+      Effect.mapError((cause) => new FileSystemError({ operation: "delete", path: tokenPath, cause }))
+    )
   })
 
 /**
@@ -86,17 +176,25 @@ export const deleteToken = (): Effect.Effect<void, FileSystemError> =>
  *
  * @category OAuth Config
  */
-export const loadOAuthConfig = (): Effect.Effect<OAuthConfig | null, FileSystemError> =>
+export const loadOAuthConfig = (): Effect.Effect<
+  OAuthConfig | null,
+  FileSystemError,
+  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
+> =>
   Effect.gen(function*() {
-    const exists = fs.existsSync(CONFIG_PATH)
+    const fs = yield* FileSystem.FileSystem
+    const configPath = yield* getConfigPath()
+
+    const exists = yield* fs.exists(configPath).pipe(
+      Effect.catchAll(() => Effect.succeed(false))
+    )
     if (!exists) {
       return null
     }
 
-    const content = yield* Effect.tryPromise({
-      try: () => fs.promises.readFile(CONFIG_PATH, "utf-8"),
-      catch: (cause) => new FileSystemError({ operation: "read", path: CONFIG_PATH, cause })
-    })
+    const content = yield* fs.readFileString(configPath).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "read", path: configPath, cause }))
+    )
 
     let parsed: unknown
     try {
@@ -119,15 +217,24 @@ export const loadOAuthConfig = (): Effect.Effect<OAuthConfig | null, FileSystemE
  *
  * @category OAuth Config
  */
-export const saveOAuthConfig = (config: OAuthConfig): Effect.Effect<void, FileSystemError> =>
+export const saveOAuthConfig = (
+  config: OAuthConfig
+): Effect.Effect<void, FileSystemError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
   Effect.gen(function*() {
-    yield* Effect.tryPromise({
-      try: () => fs.promises.mkdir(TOKEN_DIR, { recursive: true, mode: 0o700 }),
-      catch: (cause) => new FileSystemError({ operation: "mkdir", path: TOKEN_DIR, cause })
-    })
+    const fs = yield* FileSystem.FileSystem
+    const tokenDir = yield* getTokenDir()
+    const configPath = yield* getConfigPath()
 
-    yield* Effect.tryPromise({
-      try: () => fs.promises.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 }),
-      catch: (cause) => new FileSystemError({ operation: "write", path: CONFIG_PATH, cause })
-    })
+    yield* fs.makeDirectory(tokenDir, { recursive: true }).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "mkdir", path: tokenDir, cause }))
+    )
+
+    yield* fs.writeFileString(configPath, JSON.stringify(config, null, 2)).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "write", path: configPath, cause }))
+    )
+
+    // Set secure permissions (owner only)
+    yield* fs.chmod(configPath, 0o600).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "write", path: configPath, cause }))
+    )
   })

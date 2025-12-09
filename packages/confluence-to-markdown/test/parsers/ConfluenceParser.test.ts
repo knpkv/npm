@@ -1,13 +1,29 @@
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
+import * as FileSystem from "@effect/platform/FileSystem"
+import * as Path from "@effect/platform/Path"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as fs from "node:fs"
-import * as path from "node:path"
+import * as Layer from "effect/Layer"
 import { parseConfluenceHtml } from "../../src/parsers/ConfluenceParser.js"
 import { parseMarkdown } from "../../src/parsers/MarkdownParser.js"
 import { serializeToConfluence } from "../../src/serializers/ConfluenceSerializer.js"
 import { serializeToMarkdown } from "../../src/serializers/MarkdownSerializer.js"
 
-const fixturesDir = path.join(import.meta.dirname, "../fixtures")
+const PlatformLive = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
+
+const getFixturesDir = Effect.gen(function*() {
+  const path = yield* Path.Path
+  return path.join(import.meta.dirname, "../fixtures")
+})
+
+const readFixture = (filename: string) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const fixturesDir = yield* getFixturesDir
+    return yield* fs.readFileString(path.join(fixturesDir, filename))
+  }).pipe(Effect.provide(PlatformLive))
 
 describe("ConfluenceParser", () => {
   describe("parseConfluenceHtml", () => {
@@ -205,7 +221,7 @@ describe("ConfluenceParser", () => {
   describe("integration test fixture", () => {
     it.effect("parses and serializes integration test fixture", () =>
       Effect.gen(function*() {
-        const html = fs.readFileSync(path.join(fixturesDir, "integration-test.html.fixture"), "utf-8")
+        const html = yield* readFixture("integration-test.html.fixture")
         const doc = yield* parseConfluenceHtml(html)
 
         // Doc should have children - layout markers plus actual content
@@ -237,7 +253,7 @@ describe("ConfluenceParser", () => {
   describe("roundtrip HTML -> MD -> HTML", () => {
     it.effect("roundtrips integration-test.html with 1-to-1 preservation", () =>
       Effect.gen(function*() {
-        const originalHtml = fs.readFileSync(path.join(fixturesDir, "integration-test.html.fixture"), "utf-8")
+        const originalHtml = yield* readFixture("integration-test.html.fixture")
         const doc1 = yield* parseConfluenceHtml(originalHtml)
         const md = yield* serializeToMarkdown(doc1)
         const doc2 = yield* parseMarkdown(md)

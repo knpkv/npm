@@ -137,7 +137,7 @@ export class FileSystemError extends Data.TaggedError("FileSystemError")<{
  * @category Errors
  */
 export class OAuthError extends Data.TaggedError("OAuthError")<{
-  readonly step: "authorize" | "token" | "refresh"
+  readonly step: "authorize" | "token" | "refresh" | "revoke"
   readonly cause: unknown
 }> {}
 

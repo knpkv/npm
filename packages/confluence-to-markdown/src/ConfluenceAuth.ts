@@ -3,21 +3,69 @@
  *
  * @module
  */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
+import * as Command from "@effect/platform/Command"
+import * as CommandExecutor from "@effect/platform/CommandExecutor"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Context from "effect/Context"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Random from "effect/Random"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import { exec } from "node:child_process"
-import * as crypto from "node:crypto"
 import type { FileSystemError } from "./ConfluenceError.js"
 import { AuthMissingError, OAuthError } from "./ConfluenceError.js"
+import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
 import { startCallbackServer } from "./internal/oauthServer.js"
-import { deleteToken, loadOAuthConfig, loadToken, saveOAuthConfig, saveToken } from "./internal/tokenStorage.js"
+import {
+  deleteToken,
+  HomeDirectoryLive,
+  loadOAuthConfig,
+  loadToken,
+  saveOAuthConfig,
+  saveToken
+} from "./internal/tokenStorage.js"
 import type { OAuthConfig, OAuthToken, OAuthUser } from "./Schemas.js"
 
-const OAUTH_REDIRECT_URI = "http://localhost:8585/callback"
+// Layer for token storage operations (FileSystem + Path + HomeDirectory)
+const TokenStorageLive = Layer.mergeAll(
+  NodeFileSystem.layer,
+  NodePath.layer,
+  HomeDirectoryLive
+)
+
+/**
+ * Generate a UUID-like random string using Effect's Random.
+ * Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+ */
+const generateUUID = (): Effect.Effect<string> =>
+  Effect.gen(function*() {
+    const hex = "0123456789abcdef"
+    const segments = [8, 4, 4, 4, 12]
+
+    const parts: Array<string> = []
+    for (const len of segments) {
+      let segment = ""
+      for (let i = 0; i < len; i++) {
+        const idx = yield* Random.nextIntBetween(0, 16)
+        segment += hex.charAt(idx)
+      }
+      parts.push(segment)
+    }
+
+    // Set version (4) and variant bits
+    const p2 = "4" + parts[2]!.slice(1)
+    const variantIdx = 8 + (yield* Random.nextIntBetween(0, 4))
+    const variantChar = hex.charAt(variantIdx)
+    const p3 = variantChar + parts[3]!.slice(1)
+
+    return `${parts[0]}-${parts[1]}-${p2}-${p3}-${parts[4]}`
+  })
+
 const OAUTH_SCOPES = [
   "read:page:confluence",
   "write:page:confluence",
@@ -28,6 +76,7 @@ const OAUTH_SCOPES = [
 // API endpoints
 const AUTH_URL = "https://auth.atlassian.com/authorize"
 const TOKEN_URL = "https://auth.atlassian.com/oauth/token"
+const REVOKE_URL = "https://auth.atlassian.com/oauth/revoke"
 const RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 const ME_URL = "https://api.atlassian.com/me"
 
@@ -54,6 +103,23 @@ const UserInfoSchema = Schema.Struct({
 })
 
 /**
+ * Options for the login method.
+ */
+export interface LoginOptions {
+  /** Site URL to select (for accounts with multiple sites) */
+  readonly siteUrl?: string
+}
+
+/**
+ * Information about an accessible Confluence site.
+ */
+export interface AccessibleSite {
+  readonly id: string
+  readonly name: string
+  readonly url: string
+}
+
+/**
  * ConfluenceAuth service interface.
  *
  * @category Services
@@ -63,10 +129,12 @@ export interface ConfluenceAuthService {
   readonly configure: (config: OAuthConfig) => Effect.Effect<void, FileSystemError>
   /** Check if OAuth is configured */
   readonly isConfigured: () => Effect.Effect<boolean, FileSystemError>
-  /** Start OAuth login flow */
-  readonly login: () => Effect.Effect<void, OAuthError | FileSystemError>
+  /** Start OAuth login flow. Returns list of sites if multiple are available. */
+  readonly login: (
+    options?: LoginOptions
+  ) => Effect.Effect<ReadonlyArray<AccessibleSite> | void, OAuthError | FileSystemError>
   /** Remove stored authentication */
-  readonly logout: () => Effect.Effect<void, FileSystemError>
+  readonly logout: () => Effect.Effect<void, OAuthError | FileSystemError>
   /** Get access token, refreshing if needed */
   readonly getAccessToken: () => Effect.Effect<string, AuthMissingError | OAuthError | FileSystemError>
   /** Get cloud ID from stored token */
@@ -101,26 +169,12 @@ export class ConfluenceAuth extends Context.Tag("@knpkv/confluence-to-markdown/C
   ConfluenceAuthService
 >() {}
 
-const openBrowser = (url: string): Effect.Effect<void, OAuthError> =>
-  Effect.async<void, OAuthError>((resume) => {
-    const platform = process.platform
-    const command = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open"
-
-    exec(`${command} "${url}"`, (error) => {
-      if (error) {
-        resume(Effect.fail(new OAuthError({ step: "authorize", cause: error })))
-      } else {
-        resume(Effect.succeed(undefined))
-      }
-    })
-  })
-
-const buildAuthUrl = (clientId: string, state: string): string => {
+const buildAuthUrl = (clientId: string, state: string, port: number): string => {
   const params = new URLSearchParams({
     audience: "api.atlassian.com",
     client_id: clientId,
     scope: OAUTH_SCOPES,
-    redirect_uri: OAUTH_REDIRECT_URI,
+    redirect_uri: `http://localhost:${port}/callback`,
     state,
     response_type: "code",
     prompt: "consent"
@@ -128,12 +182,45 @@ const buildAuthUrl = (clientId: string, state: string): string => {
   return `${AUTH_URL}?${params.toString()}`
 }
 
+// Wrap token storage operations with their required layers
+const loadTokenOp = () => loadToken().pipe(Effect.provide(TokenStorageLive))
+const saveTokenOp = (token: OAuthToken) => saveToken(token).pipe(Effect.provide(TokenStorageLive))
+const deleteTokenOp = () => deleteToken().pipe(Effect.provide(TokenStorageLive))
+const loadOAuthConfigOp = () => loadOAuthConfig().pipe(Effect.provide(TokenStorageLive))
+const saveOAuthConfigOp = (config: OAuthConfig) => saveOAuthConfig(config).pipe(Effect.provide(TokenStorageLive))
+
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
+  const commandExecutor = yield* CommandExecutor.CommandExecutor
+
+  // Ref to track ongoing refresh operation to prevent concurrent refreshes
+  const refreshLock = yield* Ref.make<Option.Option<Deferred.Deferred<OAuthToken, OAuthError | FileSystemError>>>(
+    Option.none()
+  )
+
+  const openBrowserImpl = (url: string): Effect.Effect<void, OAuthError> =>
+    Effect.gen(function*() {
+      const platform = process.platform
+      let command: Command.Command
+
+      if (platform === "darwin") {
+        command = Command.make("open", url)
+      } else if (platform === "win32") {
+        command = Command.make("cmd", "/c", "start", "", url)
+      } else {
+        command = Command.make("xdg-open", url)
+      }
+
+      yield* Command.exitCode(command).pipe(
+        Effect.provide(Layer.succeed(CommandExecutor.CommandExecutor, commandExecutor))
+      )
+    }).pipe(
+      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+    )
 
   const getConfig = (): Effect.Effect<OAuthConfig, OAuthError | FileSystemError> =>
     Effect.gen(function*() {
-      const config = yield* loadOAuthConfig()
+      const config = yield* loadOAuthConfigOp()
       if (config === null) {
         return yield* Effect.fail(
           new OAuthError({
@@ -147,7 +234,8 @@ const make = Effect.gen(function*() {
 
   const exchangeCodeForTokens = (
     code: string,
-    config: OAuthConfig
+    config: OAuthConfig,
+    port: number
   ): Effect.Effect<Schema.Schema.Type<typeof TokenResponseSchema>, OAuthError> =>
     Effect.gen(function*() {
       const request = yield* HttpClientRequest.post(TOKEN_URL).pipe(
@@ -157,7 +245,7 @@ const make = Effect.gen(function*() {
           client_id: config.clientId,
           client_secret: config.clientSecret,
           code,
-          redirect_uri: OAUTH_REDIRECT_URI
+          redirect_uri: `http://localhost:${port}/callback`
         })
       )
 
@@ -237,28 +325,53 @@ const make = Effect.gen(function*() {
         scope: tokenResponse.scope
       }
 
-      yield* saveToken(updated)
+      yield* saveTokenOp(updated)
       return updated
     })
 
-  const configure: ConfluenceAuthService["configure"] = (config) => saveOAuthConfig(config)
+  const revokeToken = (
+    token: OAuthToken,
+    config: OAuthConfig
+  ): Effect.Effect<void, OAuthError> =>
+    Effect.gen(function*() {
+      // Revoke refresh token (this also invalidates access token)
+      const request = yield* HttpClientRequest.post(REVOKE_URL).pipe(
+        HttpClientRequest.setHeader("Content-Type", "application/json"),
+        HttpClientRequest.bodyJson({
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          token: token.refresh_token
+        }),
+        Effect.mapError((cause) => new OAuthError({ step: "revoke", cause }))
+      )
+
+      yield* httpClient.execute(request).pipe(
+        Effect.mapError((cause) => new OAuthError({ step: "revoke", cause }))
+      )
+    })
+
+  const configure: ConfluenceAuthService["configure"] = (config) => saveOAuthConfigOp(config)
 
   const isConfigured: ConfluenceAuthService["isConfigured"] = () =>
     Effect.gen(function*() {
-      const config = yield* loadOAuthConfig()
+      const config = yield* loadOAuthConfigOp()
       return config !== null
     })
 
-  const login: ConfluenceAuthService["login"] = () =>
+  const login: ConfluenceAuthService["login"] = (options) =>
     Effect.gen(function*() {
       const config = yield* getConfig()
-      const state = crypto.randomUUID()
-      const authUrl = buildAuthUrl(config.clientId, state)
+      const state = yield* generateUUID()
 
-      const { codePromise, shutdown } = yield* startCallbackServer(state)
+      yield* Effect.log(`Using clientId: ${config.clientId}`)
 
-      yield* Effect.log("Opening browser for Atlassian login...")
-      yield* openBrowser(authUrl)
+      const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
+        Effect.provide(HttpServerFactoryLive)
+      )
+      const authUrl = buildAuthUrl(config.clientId, state, port)
+
+      yield* Effect.log(`Opening browser for Atlassian login (callback on port ${port})...`)
+      yield* openBrowserImpl(authUrl)
       yield* Effect.log("Waiting for authorization (press Ctrl+C to cancel)...")
 
       const code = yield* codePromise.pipe(
@@ -270,7 +383,7 @@ const make = Effect.gen(function*() {
       yield* shutdown
 
       yield* Effect.log("Exchanging code for tokens...")
-      const tokens = yield* exchangeCodeForTokens(code, config)
+      const tokens = yield* exchangeCodeForTokens(code, config, port)
 
       yield* Effect.log("Fetching accessible sites...")
       const sites = yield* getAccessibleResources(tokens.access_token)
@@ -284,19 +397,36 @@ const make = Effect.gen(function*() {
         )
       }
 
-      if (sites.length > 1) {
-        const siteList = sites.map((s) =>
-          `  - ${s.name}: ${s.url}`
-        ).join("\n")
-        return yield* Effect.fail(
-          new OAuthError({
-            step: "authorize",
-            cause: `Multiple Confluence sites found. Use API token auth instead:\n${siteList}`
-          })
-        )
-      }
+      let site: Schema.Schema.Type<typeof AccessibleResourceSchema>
 
-      const site = sites[0]!
+      if (sites.length > 1) {
+        // If siteUrl provided, try to match it
+        if (options?.siteUrl) {
+          const matched = sites.find((s) =>
+            s.url === options.siteUrl
+          )
+          if (!matched) {
+            const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
+            return yield* Effect.fail(
+              new OAuthError({
+                step: "authorize",
+                cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
+              })
+            )
+          }
+          site = matched
+        } else {
+          // Return sites list for user to choose
+          yield* Effect.log("Multiple Confluence sites found. Please select one:")
+          for (const s of sites) {
+            yield* Effect.log(`  - ${s.name}: ${s.url}`)
+          }
+          yield* Effect.log("\nRun 'confluence auth login --site <url>' to select a site")
+          return sites.map((s) => ({ id: s.id, name: s.name, url: s.url }))
+        }
+      } else {
+        site = sites[0]!
+      }
 
       yield* Effect.log("Fetching user info...")
       const user = yield* getUserInfo(tokens.access_token)
@@ -315,23 +445,34 @@ const make = Effect.gen(function*() {
         }
       }
 
-      yield* saveToken(tokenData)
+      yield* saveTokenOp(tokenData)
       yield* Effect.log(`Logged in as ${user.name} (${user.email})`)
+      return undefined
     })
 
   const logout: ConfluenceAuthService["logout"] = () =>
     Effect.gen(function*() {
-      const token = yield* loadToken()
+      const token = yield* loadTokenOp()
       if (token === null) {
         yield* Effect.log("Not logged in")
         return
       }
-      yield* deleteToken()
+
+      // Try to revoke the token with Atlassian (best effort)
+      const config = yield* loadOAuthConfigOp()
+      if (config !== null) {
+        yield* revokeToken(token, config).pipe(
+          Effect.tap(() => Effect.log("Token revoked with Atlassian")),
+          Effect.catchAll((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
+        )
+      }
+
+      yield* deleteTokenOp()
     })
 
   const getAccessToken: ConfluenceAuthService["getAccessToken"] = () =>
     Effect.gen(function*() {
-      const token = yield* loadToken()
+      const token = yield* loadTokenOp()
       if (token === null) {
         return yield* Effect.fail(new AuthMissingError())
       }
@@ -343,15 +484,33 @@ const make = Effect.gen(function*() {
         return token.access_token
       }
 
+      // Check if refresh is already in progress
+      const existing = yield* Ref.get(refreshLock)
+      if (Option.isSome(existing)) {
+        // Wait for existing refresh to complete
+        const refreshed = yield* Deferred.await(existing.value)
+        return refreshed.access_token
+      }
+
+      // Start new refresh operation
+      const deferred = yield* Deferred.make<OAuthToken, OAuthError | FileSystemError>()
+      yield* Ref.set(refreshLock, Option.some(deferred))
+
       const config = yield* getConfig()
       yield* Effect.log("Token expired, refreshing...")
-      const refreshed = yield* refreshToken(token, config)
-      return refreshed.access_token
+
+      const result = yield* refreshToken(token, config).pipe(
+        Effect.tap((refreshed) => Deferred.succeed(deferred, refreshed)),
+        Effect.tapError((error) => Deferred.fail(deferred, error)),
+        Effect.ensuring(Ref.set(refreshLock, Option.none()))
+      )
+
+      return result.access_token
     })
 
   const getCloudId: ConfluenceAuthService["getCloudId"] = () =>
     Effect.gen(function*() {
-      const token = yield* loadToken()
+      const token = yield* loadTokenOp()
       if (token === null) {
         return yield* Effect.fail(new AuthMissingError())
       }
@@ -360,13 +519,13 @@ const make = Effect.gen(function*() {
 
   const getCurrentUser: ConfluenceAuthService["getCurrentUser"] = () =>
     Effect.gen(function*() {
-      const token = yield* loadToken()
+      const token = yield* loadTokenOp()
       return token?.user ?? null
     })
 
   const isLoggedIn: ConfluenceAuthService["isLoggedIn"] = () =>
     Effect.gen(function*() {
-      const token = yield* loadToken()
+      const token = yield* loadTokenOp()
       return token !== null
     })
 
@@ -387,7 +546,8 @@ const make = Effect.gen(function*() {
  *
  * @category Layers
  */
-export const layer: Layer.Layer<ConfluenceAuth, never, HttpClient.HttpClient> = Layer.effect(
+export const layer: Layer.Layer<
   ConfluenceAuth,
-  make
-)
+  never,
+  HttpClient.HttpClient | CommandExecutor.CommandExecutor
+> = Layer.effect(ConfluenceAuth, make)
