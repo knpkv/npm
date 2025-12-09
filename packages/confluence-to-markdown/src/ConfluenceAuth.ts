@@ -337,9 +337,19 @@ const make = Effect.gen(function*() {
         Effect.mapError((cause) => new OAuthError({ step: "revoke", cause }))
       )
 
-      yield* httpClient.execute(request).pipe(
+      const response = yield* httpClient.execute(request).pipe(
         Effect.mapError((cause) => new OAuthError({ step: "revoke", cause }))
       )
+
+      // Validate response status
+      if (response.status >= 400) {
+        return yield* Effect.fail(
+          new OAuthError({
+            step: "revoke",
+            cause: `Token revocation failed with status ${response.status}`
+          })
+        )
+      }
     })
 
   const configure: ConfluenceAuthService["configure"] = (config) => saveOAuthConfigOp(config)
@@ -354,8 +364,6 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const config = yield* getConfig()
       const state = yield* generateUUID()
-
-      yield* Effect.log(`Using clientId: ${config.clientId}`)
 
       const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
         Effect.provide(HttpServerFactoryLive)

@@ -219,8 +219,14 @@ Creating OAuth app in Atlassian Developer Console...
     yield* Effect.promise(() =>
       import("node:child_process").then((cp) =>
         new Promise<void>((resolve, reject) => {
-          const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
-          cp.exec(`${cmd} "${url}"`, (err) => err ? reject(err) : resolve())
+          const platform = process.platform
+          if (platform === "darwin") {
+            cp.execFile("open", [url], (err) => err ? reject(err) : resolve())
+          } else if (platform === "win32") {
+            cp.execFile("cmd", ["/c", "start", "", url], (err) => err ? reject(err) : resolve())
+          } else {
+            cp.execFile("xdg-open", [url], (err) => err ? reject(err) : resolve())
+          }
         })
       )
     )
