@@ -7,6 +7,7 @@
  */
 
 export * from "./Brand.js"
+export { ConfluenceAuth, type ConfluenceAuthService, layer as ConfluenceAuthLayer } from "./ConfluenceAuth.js"
 export {
   ConfluenceClient,
   type ConfluenceClientConfig,

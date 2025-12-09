@@ -117,6 +117,7 @@ export interface ConfluenceClientConfig {
   } | {
     readonly type: "oauth2"
     readonly accessToken: string
+    readonly cloudId: string
   }
 }
 
@@ -142,7 +143,12 @@ const make = (
       ? `Basic ${Buffer.from(`${config.auth.email}:${config.auth.token}`).toString("base64")}`
       : `Bearer ${config.auth.accessToken}`
 
-    const baseRequest = HttpClientRequest.get(`${config.baseUrl}/wiki/api/v2`).pipe(
+    // OAuth uses different API base URL with cloud_id
+    const apiBaseUrl = config.auth.type === "oauth2"
+      ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/api/v2`
+      : `${config.baseUrl}/wiki/api/v2`
+
+    const baseRequest = HttpClientRequest.get(apiBaseUrl).pipe(
       HttpClientRequest.setHeader("Authorization", authHeader),
       HttpClientRequest.setHeader("Accept", "application/json"),
       HttpClientRequest.setHeader("Content-Type", "application/json")
@@ -160,7 +166,7 @@ const make = (
       Effect.gen(function*() {
         let req = baseRequest.pipe(
           HttpClientRequest.setMethod(method),
-          HttpClientRequest.setUrl(`${config.baseUrl}/wiki/api/v2${path}`)
+          HttpClientRequest.setUrl(`${apiBaseUrl}${path}`)
         )
 
         if (body !== undefined) {
@@ -194,10 +200,11 @@ const make = (
           const text = yield* response.text.pipe(
             Effect.catchAll(() => Effect.succeed(""))
           )
+          const fullUrl = `${apiBaseUrl}${path}`
           return yield* Effect.fail(
             new ApiError({
               status: response.status,
-              message: text || `HTTP ${response.status}`,
+              message: `${text || `HTTP ${response.status}`} [${method} ${fullUrl}]`,
               endpoint: path
             })
           )

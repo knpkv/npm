@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import pkg from "../package.json" with { type: "json" }
 import type { PageId } from "./Brand.js"
+import { ConfluenceAuth, layer as ConfluenceAuthLayer } from "./ConfluenceAuth.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "./ConfluenceClient.js"
 import {
   ConfluenceConfig,
@@ -21,7 +22,7 @@ import {
   layer as ConfluenceConfigLayer,
   layerFromValues as ConfluenceConfigLayerFromValues
 } from "./ConfluenceConfig.js"
-import { AuthMissingError, ConfigError } from "./ConfluenceError.js"
+import { ConfigError } from "./ConfluenceError.js"
 import { layer as LocalFileSystemLayer } from "./LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "./MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "./SyncEngine.js"
@@ -32,11 +33,25 @@ const AuthConfig = Config.all({
   email: Config.string("CONFLUENCE_EMAIL")
 })
 
-const getAuth = (): Effect.Effect<ConfluenceClientConfig["auth"], AuthMissingError> =>
-  AuthConfig.pipe(
-    Effect.map(({ apiKey, email }) => ({ type: "token" as const, email, token: apiKey })),
-    Effect.mapError(() => new AuthMissingError())
-  )
+const getAuth = () =>
+  Effect.gen(function*() {
+    // 1. Try env vars first (backwards compat)
+    const envAuth = yield* AuthConfig.pipe(
+      Effect.map(({ apiKey, email }) => ({ type: "token" as const, email, token: apiKey })),
+      Effect.option
+    )
+
+    if (Option.isSome(envAuth)) {
+      return envAuth.value
+    }
+
+    // 2. Try OAuth token
+    const auth = yield* ConfluenceAuth
+    const accessToken = yield* auth.getAccessToken()
+    const cloudId = yield* auth.getCloudId()
+
+    return { type: "oauth2" as const, accessToken, cloudId }
+  })
 
 // === Init command ===
 const rootPageIdOption = Options.text("root-page-id").pipe(
@@ -152,6 +167,16 @@ const syncCommand = Command.make("sync", {}, () =>
 const statusCommand = Command.make("status", {}, () =>
   Effect.gen(function*() {
     const engine = yield* SyncEngine
+    const auth = yield* ConfluenceAuth
+    const user = yield* auth.getCurrentUser()
+
+    // Show auth status first
+    if (user) {
+      yield* Console.log(`Logged in as: ${user.name} (${user.email})`)
+    } else {
+      yield* Console.log("Not logged in. Use 'confluence login' to authenticate.")
+    }
+
     const result = yield* engine.status()
     yield* Console.log(`
 Sync Status:
@@ -174,10 +199,94 @@ Sync Status:
     }
   })).pipe(Command.withDescription("Show sync status"))
 
+// === Auth create command ===
+const authCreateCommand = Command.make("create", {}, () =>
+  Effect.gen(function*() {
+    yield* Console.log(`
+Creating OAuth app in Atlassian Developer Console...
+
+1. Browser will open to create a new OAuth 2.0 (3LO) app
+2. Enter app name (e.g., "Confluence CLI")
+3. After creation, go to "Permissions" and add:
+   - Confluence API (granular): read:page:confluence, write:page:confluence
+   - User Identity API: read:me
+4. Go to "Authorization" and set callback URL:
+   http://localhost:8585/callback
+5. Go to "Settings" and copy Client ID and Secret
+6. Run: confluence auth configure --client-id <ID> --client-secret <SECRET>
+`)
+    const url = "https://developer.atlassian.com/console/myapps/create-3lo-app/"
+    yield* Effect.promise(() =>
+      import("node:child_process").then((cp) =>
+        new Promise<void>((resolve, reject) => {
+          const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
+          cp.exec(`${cmd} "${url}"`, (err) => err ? reject(err) : resolve())
+        })
+      )
+    )
+  })).pipe(Command.withDescription("Create OAuth app in Atlassian Developer Console"))
+
+// === Auth configure command ===
+const clientIdOption = Options.text("client-id").pipe(
+  Options.withDescription("OAuth client ID from Atlassian Developer Console"),
+  Options.optional
+)
+const clientSecretOption = Options.text("client-secret").pipe(
+  Options.withDescription("OAuth client secret"),
+  Options.optional
+)
+
+const authConfigureCommand = Command.make(
+  "configure",
+  { clientId: clientIdOption, clientSecret: clientSecretOption },
+  ({ clientId, clientSecret }) =>
+    Effect.gen(function*() {
+      const auth = yield* ConfluenceAuth
+
+      const rawClientId = Option.isSome(clientId)
+        ? clientId.value
+        : yield* Prompt.text({ message: "Enter OAuth client ID:" })
+      const rawClientSecret = Option.isSome(clientSecret)
+        ? clientSecret.value
+        : yield* Prompt.text({ message: "Enter OAuth client secret:" })
+
+      yield* auth.configure({ clientId: rawClientId, clientSecret: rawClientSecret })
+      yield* Console.log("OAuth configured. Run 'confluence auth login' to authenticate.")
+    })
+).pipe(Command.withDescription("Configure OAuth client credentials"))
+
+// === Auth login command ===
+const authLoginCommand = Command.make("login", {}, () =>
+  Effect.gen(function*() {
+    const auth = yield* ConfluenceAuth
+    yield* auth.login()
+  })).pipe(Command.withDescription("Authenticate with Atlassian via OAuth"))
+
+// === Auth logout command ===
+const authLogoutCommand = Command.make("logout", {}, () =>
+  Effect.gen(function*() {
+    const auth = yield* ConfluenceAuth
+    yield* auth.logout()
+    yield* Console.log("Logged out")
+  })).pipe(Command.withDescription("Remove stored authentication"))
+
+// === Auth command group ===
+const authCommand = Command.make("auth").pipe(
+  Command.withDescription("Manage OAuth authentication"),
+  Command.withSubcommands([authCreateCommand, authConfigureCommand, authLoginCommand, authLogoutCommand])
+)
+
 // === Main command ===
 const confluence = Command.make("confluence").pipe(
   Command.withDescription("Sync Confluence pages to local markdown"),
-  Command.withSubcommands([initCommand, pullCommand, pushCommand, syncCommand, statusCommand])
+  Command.withSubcommands([
+    initCommand,
+    authCommand,
+    pullCommand,
+    pushCommand,
+    syncCommand,
+    statusCommand
+  ])
 )
 
 // === Build app layer ===
@@ -230,19 +339,50 @@ const ConfluenceClientLive = Layer.unwrapEffect(
   })
 )
 
+// Auth layer with HTTP client
+const AuthLive = ConfluenceAuthLayer.pipe(Layer.provide(NodeHttpClient.layer))
+
 // Full app layer with all services
 const AppLayer = SyncEngineLayer.pipe(
   Layer.provideMerge(ConfluenceClientLive),
   Layer.provideMerge(MarkdownConverterLayer),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(ConfluenceConfigLayer()),
+  Layer.provideMerge(AuthLive),
   Layer.provideMerge(NodeHttpClient.layer),
   Layer.provideMerge(NodeContext.layer)
+)
+
+// Auth-only layer for login/logout commands
+const AuthOnlyLayer = DummySyncEngineLayer.pipe(
+  Layer.provideMerge(DummyConfluenceClientLayer),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(DummyConfigLayer),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
+// Dummy auth layer for init/help
+const DummyConfluenceAuthLayer = Layer.succeed(
+  ConfluenceAuth,
+  ConfluenceAuth.of({
+    configure: () => Effect.dieMessage("Not configured"),
+    isConfigured: () => Effect.succeed(false),
+    login: () => Effect.dieMessage("Not configured"),
+    logout: () => Effect.dieMessage("Not configured"),
+    getAccessToken: () => Effect.dieMessage("Not configured"),
+    getCloudId: () => Effect.dieMessage("Not configured"),
+    getCurrentUser: () => Effect.succeed(null),
+    isLoggedIn: () => Effect.succeed(false)
+  })
 )
 
 // Minimal layer for init/help (dummy services, won't be invoked)
 const MinimalLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(DummyConfluenceClientLayer),
+  Layer.provideMerge(DummyConfluenceAuthLayer),
   Layer.provideMerge(MarkdownConverterLayer),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
@@ -256,22 +396,33 @@ const cli = Command.run(confluence, {
   version: pkg.version
 })
 
-// Check if we need the full layer based on command
-const needsFullLayer = () => {
-  const args = process.argv
-  const cmd = args[2]
+// Check what layer we need based on command
+const getLayerType = (): "full" | "auth" | "minimal" => {
+  const cmd = process.argv[2]
+  // auth commands need auth layer only
+  if (cmd === "auth") {
+    return "auth"
+  }
   // init, --help, -h, --version don't need config
   if (!cmd || cmd === "init" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
-    return false
+    return "minimal"
   }
-  return true
+  return "full"
 }
 
 const main = Effect.suspend(() => cli(process.argv))
 
-if (needsFullLayer()) {
+const layerType = getLayerType()
+
+if (layerType === "full") {
   main.pipe(
     Effect.provide(AppLayer),
+    Effect.tapErrorCause(Effect.logError),
+    NodeRuntime.runMain
+  )
+} else if (layerType === "auth") {
+  main.pipe(
+    Effect.provide(AuthOnlyLayer),
     Effect.tapErrorCause(Effect.logError),
     NodeRuntime.runMain
   )
