@@ -54,7 +54,7 @@ confluence status
 confluence auth logout
 ```
 
-### API Token (legacy)
+### API Token
 
 ```bash
 export CONFLUENCE_API_KEY=your-api-token
