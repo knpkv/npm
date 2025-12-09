@@ -4,6 +4,8 @@
  */
 import { Command } from "@effect/cli"
 import * as Effect from "effect/Effect"
+import * as Logger from "effect/Logger"
+import * as LogLevel from "effect/LogLevel"
 import pkg from "../package.json" with { type: "json" }
 import { handleError } from "./commands/errorHandler.js"
 import {
@@ -48,8 +50,13 @@ const layer = layerType === "full"
   ? CloneLayer
   : MinimalLayer
 
+// Suppress verbose Effect logs (e.g. token refresh messages)
+const SilentLogger = Logger.replace(Logger.defaultLogger, Logger.none)
+
 Effect.suspend(() => cli(process.argv)).pipe(
   Effect.provide(layer),
+  Effect.provide(SilentLogger),
+  Logger.withMinimumLogLevel(LogLevel.None),
   Effect.runPromiseExit
 ).then((exit) => {
   if (exit._tag === "Failure") {

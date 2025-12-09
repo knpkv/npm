@@ -64,12 +64,25 @@ export const pushCommand = Command.make(
   ({ dryRun, message }) =>
     Effect.gen(function*() {
       const engine = yield* SyncEngine
+      const git = yield* GitService
+
+      // Check for uncommitted changes
+      const gitStatus = yield* git.status()
+      if (gitStatus.hasChanges) {
+        yield* Console.log("Uncommitted changes detected. Run 'confluence commit' first.")
+        return
+      }
+
       yield* Console.log(dryRun ? "Dry run - showing changes..." : "Pushing changes to Confluence...")
       const pushOptions = Option.isSome(message)
         ? { dryRun, message: message.value }
         : { dryRun }
       const result = yield* engine.push(pushOptions)
-      yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Skipped: ${result.skipped}`)
+      if (result.pushed === 0 && result.created === 0) {
+        yield* Console.log("Nothing to push")
+      } else {
+        yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Skipped: ${result.skipped}`)
+      }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
       }
