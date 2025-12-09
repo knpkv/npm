@@ -18,7 +18,7 @@ import type {
   FrontMatterError,
   RateLimitError
 } from "./ConfluenceError.js"
-import { computeHash } from "./internal/hashUtils.js"
+import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { LocalFileSystem } from "./LocalFileSystem.js"
 import { MarkdownConverter } from "./MarkdownConverter.js"
 import type { PageFrontMatter, PageListItem, PageResponse } from "./Schemas.js"
@@ -162,8 +162,8 @@ export const layer: Layer.Layer<
         const children = yield* client.getAllChildren(page.id as PageId)
         const hasChildren = children.length > 0
 
-        const filePath = localFs.getPagePath(page.title, hasChildren, parentPath)
-        const dirPath = hasChildren ? localFs.getPageDir(page.title, parentPath) : parentPath
+        const filePath = yield* localFs.getPagePath(page.title, hasChildren, parentPath)
+        const dirPath = hasChildren ? yield* localFs.getPageDir(page.title, parentPath) : parentPath
 
         // Get page content
         const fullPage = yield* client.getPage(page.id as PageId)
@@ -183,7 +183,7 @@ export const layer: Layer.Layer<
           markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
         }
 
-        const contentHash = computeHash(markdown)
+        const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
 
         // Check if we need to update
         if (!force) {
@@ -278,7 +278,7 @@ export const layer: Layer.Layer<
             }
 
             const fm = localFile.frontMatter
-            const currentHash = computeHash(localFile.content)
+            const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
 
             if (currentHash === fm.contentHash) {
               skipped++
@@ -381,7 +381,7 @@ export const layer: Layer.Layer<
           }
 
           const fm = localFile.frontMatter
-          const currentHash = computeHash(localFile.content)
+          const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
 
           // Fetch remote page
           const remotePage = yield* Effect.either(client.getPage(fm.pageId))

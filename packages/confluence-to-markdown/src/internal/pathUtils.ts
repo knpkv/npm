@@ -4,7 +4,8 @@
  * @module
  * @internal
  */
-import * as path from "node:path"
+import * as Path from "@effect/platform/Path"
+import * as Effect from "effect/Effect"
 
 /**
  * Convert a page title to a URL-safe slug.
@@ -42,12 +43,14 @@ export const pageToPath = (
   title: string,
   hasChildren: boolean,
   parentPath: string
-): string => {
-  const slug = slugify(title)
-  return hasChildren
-    ? path.join(parentPath, slug, "index.md")
-    : path.join(parentPath, `${slug}.md`)
-}
+): Effect.Effect<string, never, Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const slug = slugify(title)
+    return hasChildren
+      ? path.join(parentPath, slug, "index.md")
+      : path.join(parentPath, `${slug}.md`)
+  })
 
 /**
  * Get the directory path for a page (used when creating children).
@@ -58,10 +61,15 @@ export const pageToPath = (
  *
  * @internal
  */
-export const pageToDir = (title: string, parentPath: string): string => {
-  const slug = slugify(title)
-  return path.join(parentPath, slug)
-}
+export const pageToDir = (
+  title: string,
+  parentPath: string
+): Effect.Effect<string, never, Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const slug = slugify(title)
+    return path.join(parentPath, slug)
+  })
 
 /**
  * Extract page slug from a file path.
@@ -71,7 +79,9 @@ export const pageToDir = (title: string, parentPath: string): string => {
  *
  * @internal
  */
-export const pathToSlug = (filePath: string): string => {
-  const basename = path.basename(filePath, ".md")
-  return basename === "index" ? path.basename(path.dirname(filePath)) : basename
-}
+export const pathToSlug = (filePath: string): Effect.Effect<string, never, Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const basename = path.basename(filePath, ".md")
+    return basename === "index" ? path.basename(path.dirname(filePath)) : basename
+  })

@@ -21,3 +21,4 @@ scratchpad/**/*.ts
 .claude
 .patterns
 .specs/*
+.context/

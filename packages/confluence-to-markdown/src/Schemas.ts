@@ -235,3 +235,87 @@ export const PageChildrenResponseSchema = Schema.Struct({
  * @category Types
  */
 export type PageChildrenResponse = Schema.Schema.Type<typeof PageChildrenResponseSchema>
+
+/**
+ * Schema for OAuth user info.
+ *
+ * @category Schema
+ */
+export const OAuthUserSchema = Schema.Struct({
+  /** Atlassian account ID */
+  account_id: Schema.String,
+  /** Display name */
+  name: Schema.String,
+  /** Email address */
+  email: Schema.String
+})
+
+/**
+ * Type for OAuth user info.
+ *
+ * @category Types
+ */
+export type OAuthUser = Schema.Schema.Type<typeof OAuthUserSchema>
+
+/**
+ * Schema for stored OAuth token.
+ *
+ * @example
+ * ```typescript
+ * import { OAuthTokenSchema } from "@knpkv/confluence-to-markdown/Schemas"
+ * import * as Schema from "effect/Schema"
+ *
+ * const token = Schema.decodeUnknownSync(OAuthTokenSchema)({
+ *   access_token: "eyJ...",
+ *   refresh_token: "eyJ...",
+ *   expires_at: Date.now() + 3600000,
+ *   scope: "read:confluence-content.all",
+ *   cloud_id: "abc123",
+ *   site_url: "https://mysite.atlassian.net"
+ * })
+ * ```
+ *
+ * @category Schema
+ */
+export const OAuthTokenSchema = Schema.Struct({
+  /** OAuth access token */
+  access_token: Schema.String,
+  /** OAuth refresh token */
+  refresh_token: Schema.String,
+  /** Token expiration timestamp (Unix ms) */
+  expires_at: Schema.Number,
+  /** Granted scopes */
+  scope: Schema.String,
+  /** Atlassian Cloud site ID */
+  cloud_id: Schema.String,
+  /** Confluence site URL */
+  site_url: Schema.String,
+  /** Cached user info */
+  user: Schema.optional(OAuthUserSchema)
+})
+
+/**
+ * Type for stored OAuth token.
+ *
+ * @category Types
+ */
+export type OAuthToken = Schema.Schema.Type<typeof OAuthTokenSchema>
+
+/**
+ * Schema for OAuth client configuration.
+ *
+ * @category Schema
+ */
+export const OAuthConfigSchema = Schema.Struct({
+  /** OAuth client ID from Atlassian Developer Console */
+  clientId: Schema.String,
+  /** OAuth client secret */
+  clientSecret: Schema.String
+})
+
+/**
+ * Type for OAuth client configuration.
+ *
+ * @category Types
+ */
+export type OAuthConfig = Schema.Schema.Type<typeof OAuthConfigSchema>

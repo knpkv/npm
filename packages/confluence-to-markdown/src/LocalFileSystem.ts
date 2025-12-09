@@ -13,7 +13,7 @@ import type { FrontMatterError } from "./ConfluenceError.js"
 import { FileSystemError } from "./ConfluenceError.js"
 import type { ParsedMarkdown } from "./internal/frontmatter.js"
 import { parseMarkdown, serializeMarkdown } from "./internal/frontmatter.js"
-import { computeHash } from "./internal/hashUtils.js"
+import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { pageToDir, pageToPath } from "./internal/pathUtils.js"
 import type { PageFrontMatter } from "./Schemas.js"
 
@@ -91,12 +91,12 @@ export class LocalFileSystem extends Context.Tag(
       title: string,
       hasChildren: boolean,
       parentPath: string
-    ) => string
+    ) => Effect.Effect<string>
 
     /**
      * Get the directory path for a page's children.
      */
-    readonly getPageDir: (title: string, parentPath: string) => string
+    readonly getPageDir: (title: string, parentPath: string) => Effect.Effect<string>
 
     /**
      * Write a raw file (e.g., source HTML).
@@ -125,7 +125,9 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         )
 
         const parsed: ParsedMarkdown = yield* parseMarkdown(filePath, content)
-        const contentHash = computeHash(parsed.content)
+        const contentHash = yield* computeHash(parsed.content).pipe(
+          Effect.provide(HashServiceLive)
+        )
 
         return {
           path: filePath,
@@ -236,6 +238,17 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         )
       })
 
+    // Wrap path functions to provide Path service
+    const getPagePath = (title: string, hasChildren: boolean, parentPath: string) =>
+      pageToPath(title, hasChildren, parentPath).pipe(
+        Effect.provide(Layer.succeed(Path.Path, pathService))
+      )
+
+    const getPageDir = (title: string, parentPath: string) =>
+      pageToDir(title, parentPath).pipe(
+        Effect.provide(Layer.succeed(Path.Path, pathService))
+      )
+
     return LocalFileSystem.of({
       readMarkdownFile,
       writeMarkdownFile,
@@ -243,8 +256,8 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
       ensureDir,
       deleteFile,
       exists,
-      getPagePath: pageToPath,
-      getPageDir: pageToDir,
+      getPagePath,
+      getPageDir,
       writeFile
     })
   })

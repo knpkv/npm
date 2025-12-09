@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Either from "effect/Either"
 import * as Schema from "effect/Schema"
 import type { ContentHash, PageId } from "../src/Brand.js"
-import { ConfluenceConfigFileSchema, PageFrontMatterSchema } from "../src/Schemas.js"
+import {
+  ConfluenceConfigFileSchema,
+  OAuthConfigSchema,
+  OAuthTokenSchema,
+  OAuthUserSchema,
+  PageFrontMatterSchema
+} from "../src/Schemas.js"
 
 describe("Schemas", () => {
   describe("ConfluenceConfigFileSchema", () => {
@@ -93,6 +99,95 @@ describe("Schemas", () => {
         contentHash: validHash
       }
       const result = Schema.decodeUnknownEither(PageFrontMatterSchema)(fm)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  })
+
+  describe("OAuthTokenSchema", () => {
+    it("decodes valid token", () => {
+      const token = {
+        access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        refresh_token: "refresh_token_value",
+        expires_at: Date.now() + 3600000,
+        scope: "read:confluence-content.all",
+        cloud_id: "abc123",
+        site_url: "https://mysite.atlassian.net"
+      }
+      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
+      expect(Either.isRight(result)).toBe(true)
+    })
+
+    it("decodes token with user info", () => {
+      const token = {
+        access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        refresh_token: "refresh_token_value",
+        expires_at: Date.now() + 3600000,
+        scope: "read:confluence-content.all",
+        cloud_id: "abc123",
+        site_url: "https://mysite.atlassian.net",
+        user: {
+          account_id: "user123",
+          name: "Test User",
+          email: "test@example.com"
+        }
+      }
+      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
+      expect(Either.isRight(result)).toBe(true)
+      if (Either.isRight(result)) {
+        expect(result.right.user?.name).toBe("Test User")
+      }
+    })
+
+    it("rejects missing required fields", () => {
+      const token = {
+        access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        // missing refresh_token
+        expires_at: Date.now() + 3600000,
+        scope: "read:confluence-content.all",
+        cloud_id: "abc123",
+        site_url: "https://mysite.atlassian.net"
+      }
+      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  })
+
+  describe("OAuthConfigSchema", () => {
+    it("decodes valid config", () => {
+      const config = {
+        clientId: "client_id_value",
+        clientSecret: "client_secret_value"
+      }
+      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
+      expect(Either.isRight(result)).toBe(true)
+    })
+
+    it("rejects missing clientSecret", () => {
+      const config = {
+        clientId: "client_id_value"
+      }
+      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  })
+
+  describe("OAuthUserSchema", () => {
+    it("decodes valid user info", () => {
+      const user = {
+        account_id: "user123",
+        name: "Test User",
+        email: "test@example.com"
+      }
+      const result = Schema.decodeUnknownEither(OAuthUserSchema)(user)
+      expect(Either.isRight(result)).toBe(true)
+    })
+
+    it("rejects missing email", () => {
+      const user = {
+        account_id: "user123",
+        name: "Test User"
+      }
+      const result = Schema.decodeUnknownEither(OAuthUserSchema)(user)
       expect(Either.isLeft(result)).toBe(true)
     })
   })
