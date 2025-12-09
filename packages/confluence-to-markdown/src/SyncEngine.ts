@@ -10,18 +10,14 @@ import * as Layer from "effect/Layer"
 import type { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
-import type {
-  ApiError,
-  ConflictError,
-  ConversionError,
-  FileSystemError,
-  FrontMatterError,
-  RateLimitError
-} from "./ConfluenceError.js"
+import type { ApiError, ConversionError, FileSystemError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
+import type { GitServiceError } from "./GitService.js"
+import { GitService } from "./GitService.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
+import { UserCache } from "./internal/userCache.js"
 import { LocalFileSystem } from "./LocalFileSystem.js"
 import { MarkdownConverter } from "./MarkdownConverter.js"
-import type { PageFrontMatter, PageListItem, PageResponse } from "./Schemas.js"
+import type { AtlassianUser, PageFrontMatter, PageListItem, PageResponse, PageVersionContent } from "./Schemas.js"
 
 /**
  * Sync status for a single page.
@@ -41,11 +37,33 @@ export type SyncStatus =
   }
 
 /**
+ * Progress callback for version replay.
+ */
+export type ProgressCallback = (current: number, total: number, message: string) => void
+
+/**
+ * Options for pull operation.
+ */
+export interface PullOptions {
+  readonly force: boolean
+  /**
+   * Replay version history as individual git commits.
+   * Only applies when git is initialized.
+   */
+  readonly replayHistory?: boolean
+  /**
+   * Progress callback for version replay.
+   */
+  readonly onProgress?: ProgressCallback
+}
+
+/**
  * Result of a pull operation.
  */
 export interface PullResult {
   readonly pulled: number
   readonly skipped: number
+  readonly commits: number
   readonly errors: ReadonlyArray<string>
 }
 
@@ -56,17 +74,6 @@ export interface PushResult {
   readonly pushed: number
   readonly created: number
   readonly skipped: number
-  readonly errors: ReadonlyArray<string>
-}
-
-/**
- * Result of a sync operation.
- */
-export interface SyncResult {
-  readonly pulled: number
-  readonly pushed: number
-  readonly created: number
-  readonly conflicts: number
   readonly errors: ReadonlyArray<string>
 }
 
@@ -83,7 +90,7 @@ export interface StatusResult {
   readonly files: ReadonlyArray<SyncStatus>
 }
 
-type SyncError = ApiError | RateLimitError | ConversionError | FileSystemError | FrontMatterError
+type SyncError = ApiError | RateLimitError | ConversionError | FileSystemError | FrontMatterError | GitServiceError
 
 /**
  * Sync engine service for Confluence <-> Markdown operations.
@@ -110,17 +117,12 @@ export class SyncEngine extends Context.Tag(
     /**
      * Pull pages from Confluence to local markdown.
      */
-    readonly pull: (options: { force: boolean }) => Effect.Effect<PullResult, SyncError>
+    readonly pull: (options: PullOptions) => Effect.Effect<PullResult, SyncError>
 
     /**
      * Push local markdown changes to Confluence.
      */
     readonly push: (options: { dryRun: boolean; message?: string }) => Effect.Effect<PushResult, SyncError>
-
-    /**
-     * Bidirectional sync with conflict detection.
-     */
-    readonly sync: () => Effect.Effect<SyncResult, SyncError | ConflictError>
 
     /**
      * Get sync status for all files.
@@ -137,7 +139,7 @@ export class SyncEngine extends Context.Tag(
 export const layer: Layer.Layer<
   SyncEngine,
   never,
-  ConfluenceClient | ConfluenceConfig | MarkdownConverter | LocalFileSystem | Path.Path
+  ConfluenceClient | ConfluenceConfig | MarkdownConverter | LocalFileSystem | Path.Path | GitService | UserCache
 > = Layer.effect(
   SyncEngine,
   Effect.gen(function*() {
@@ -146,61 +148,96 @@ export const layer: Layer.Layer<
     const converter = yield* MarkdownConverter
     const localFs = yield* LocalFileSystem
     const pathService = yield* Path.Path
+    const git = yield* GitService
+    const userCache = yield* UserCache
 
     const docsPath = pathService.join(process.cwd(), config.docsPath)
 
     /**
+     * Get user info with caching.
+     */
+    const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
+      userCache.getOrFetch(accountId, client.getUser).pipe(
+        Effect.catchAll(() => Effect.succeed(undefined))
+      )
+
+    /**
+     * Convert version content to markdown and front-matter.
+     */
+    const versionToMarkdown = (
+      pageId: PageId,
+      version: PageVersionContent,
+      title: string,
+      parentId?: string,
+      position?: number
+    ): Effect.Effect<{ markdown: string; frontMatter: PageFrontMatter }, SyncError> =>
+      Effect.gen(function*() {
+        const htmlContent = version.body?.storage?.value ?? ""
+        const markdown = yield* converter.htmlToMarkdown(htmlContent, {
+          includeRawSource: config.saveSource
+        })
+        const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+
+        // Get author info
+        const author = version.authorId ? yield* getUser(version.authorId) : undefined
+
+        const frontMatter: PageFrontMatter = {
+          pageId,
+          version: version.number,
+          title,
+          updated: new Date(version.createdAt),
+          ...(parentId ? { parentId: parentId as PageId } : {}),
+          ...(position !== undefined ? { position } : {}),
+          contentHash,
+          ...(version.message ? { versionMessage: version.message } : {}),
+          ...(author?.displayName ? { authorName: author.displayName } : {}),
+          ...(author?.email ? { authorEmail: author.email } : {})
+        }
+
+        return { markdown, frontMatter }
+      })
+
+    /**
      * Pull a single page and its children recursively.
+     * Returns { pulled, commits } count.
      */
     const pullPage = (
       page: PageListItem | PageResponse,
       parentPath: string,
-      force: boolean
-    ): Effect.Effect<number, SyncError> =>
+      options: PullOptions,
+      gitInitialized: boolean
+    ): Effect.Effect<{ pulled: number; commits: number }, SyncError> =>
       Effect.gen(function*() {
+        const pageId = page.id as PageId
         // Get children to determine if this is a folder
-        const children = yield* client.getAllChildren(page.id as PageId)
+        const children = yield* client.getAllChildren(pageId)
         const hasChildren = children.length > 0
 
         const filePath = yield* localFs.getPagePath(page.title, hasChildren, parentPath)
         const dirPath = hasChildren ? yield* localFs.getPageDir(page.title, parentPath) : parentPath
 
         // Get page content
-        const fullPage = yield* client.getPage(page.id as PageId)
-        const htmlContent = fullPage.body?.storage?.value ?? ""
-        let markdown = yield* converter.htmlToMarkdown(htmlContent, {
-          includeRawSource: config.saveSource
-        })
+        const fullPage = yield* client.getPage(pageId)
 
-        // Add child page links for index pages
-        if (hasChildren && config.spaceKey) {
-          const childLinks = children
-            .map((child) => {
-              const pageUrl = `${config.baseUrl}/wiki/spaces/${config.spaceKey}/pages/${child.id}`
-              return `- [${child.title}](${pageUrl})`
-            })
-            .join("\n")
-          markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
-        }
-
-        const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
-
-        // Check if we need to update
-        if (!force) {
+        // Check existing local version
+        let localVersion = 0
+        if (!options.force) {
           const exists = yield* localFs.exists(filePath)
           if (exists) {
             const localFile = yield* localFs.readMarkdownFile(filePath)
-            if (
-              localFile.frontMatter &&
-              localFile.frontMatter.version === fullPage.version.number &&
-              localFile.frontMatter.contentHash === contentHash
-            ) {
-              // Skip - already in sync
-              let count = 0
-              for (const child of children) {
-                count += yield* pullPage(child, dirPath, force)
+            if (localFile.frontMatter) {
+              localVersion = localFile.frontMatter.version
+              // If local is already at remote version, skip
+              if (localVersion >= fullPage.version.number) {
+                let childPulled = 0
+                let childCommits = 0
+                for (const child of children) {
+                  const result = yield* pullPage(child, dirPath, options, gitInitialized)
+                  childPulled += result.pulled
+                  childCommits += result.commits
+                }
+                return { pulled: childPulled, commits: childCommits }
               }
-              return count
             }
           }
         }
@@ -210,44 +247,171 @@ export const layer: Layer.Layer<
           yield* localFs.ensureDir(dirPath)
         }
 
-        // Write file
-        const frontMatter: PageFrontMatter = {
-          pageId: page.id as PageId,
-          version: fullPage.version.number,
-          title: fullPage.title,
-          updated: fullPage.version.createdAt ? new Date(fullPage.version.createdAt) : new Date(),
-          ...(page.parentId ? { parentId: page.parentId as PageId } : {}),
-          ...(page.position !== undefined ? { position: page.position } : {}),
-          contentHash
+        let totalCommits = 0
+
+        // If history replay is enabled and git is initialized, replay versions
+        let historyReplayFailed = false
+        if (options.replayHistory && gitInitialized && localVersion < fullPage.version.number) {
+          // Fetch versions with body content since localVersion
+          const versions = yield* client.getPageVersions(pageId, { since: localVersion, includeBody: true })
+          // Sort by version number (oldest first)
+          const sortedVersions = [...versions].sort((a, b) => a.number - b.number)
+          const totalVersions = sortedVersions.length
+
+          let versionIdx = 0
+          for (const versionInfo of sortedVersions) {
+            versionIdx++
+            // Report progress
+            if (options.onProgress) {
+              options.onProgress(versionIdx, totalVersions, `${fullPage.title} v${versionInfo.number}`)
+            }
+
+            // Check if body content is available from the versions list
+            const bodyContent = versionInfo.page?.body?.storage?.value
+            if (!bodyContent) {
+              // No body content available - history replay not supported
+              historyReplayFailed = true
+              break
+            }
+
+            // Build version content from the list response
+            const versionContent = {
+              number: versionInfo.number,
+              authorId: versionInfo.authorId,
+              createdAt: versionInfo.createdAt,
+              message: versionInfo.message,
+              body: {
+                storage: {
+                  value: bodyContent,
+                  representation: "storage" as const
+                }
+              }
+            }
+            const { frontMatter, markdown } = yield* versionToMarkdown(
+              pageId,
+              versionContent,
+              versionInfo.page?.title ?? fullPage.title,
+              page.parentId,
+              page.position
+            )
+
+            // Write file
+            yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
+
+            // Save source HTML if configured
+            if (config.saveSource && versionContent.body?.storage?.value) {
+              const sourceFilePath = filePath.replace(/\.md$/, ".html")
+              yield* localFs.writeFile(sourceFilePath, versionContent.body.storage.value)
+            }
+
+            // Commit this version
+            const author = versionInfo.authorId ? yield* getUser(versionInfo.authorId) : undefined
+            const commitMessage = versionInfo.message || `Update ${fullPage.title} (v${versionInfo.number})`
+
+            yield* git.addAll()
+            const commitOptions = author
+              ? {
+                message: commitMessage,
+                author: { name: author.displayName, email: author.email ?? "unknown@atlassian.com" },
+                date: new Date(versionInfo.createdAt)
+              }
+              : { message: commitMessage, date: new Date(versionInfo.createdAt) }
+            yield* git.commit(commitOptions).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
+
+            totalCommits++
+          }
         }
 
-        yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
+        // Simple pull - either history replay is disabled, not initialized, or body not available
+        const needsSimplePull = historyReplayFailed || !options.replayHistory || !gitInitialized ||
+          localVersion >= fullPage.version.number
 
-        // Save source HTML if configured
-        if (config.saveSource && htmlContent) {
-          const sourceFilePath = filePath.replace(/\.md$/, ".html")
-          yield* localFs.writeFile(sourceFilePath, htmlContent)
+        if (needsSimplePull) {
+          if (historyReplayFailed) {
+            yield* Effect.logWarning(
+              "History replay not available. Confluence Cloud API does not return body content for historical versions. Falling back to simple pull."
+            )
+          }
+
+          // Simple pull without history replay
+          const htmlContent = fullPage.body?.storage?.value ?? ""
+          let markdown = yield* converter.htmlToMarkdown(htmlContent, {
+            includeRawSource: config.saveSource
+          })
+
+          // Add child page links for index pages
+          if (hasChildren && config.spaceKey) {
+            const childLinks = children
+              .map((child) => {
+                const pageUrl = `${config.baseUrl}/wiki/spaces/${config.spaceKey}/pages/${child.id}`
+                return `- [${child.title}](${pageUrl})`
+              })
+              .join("\n")
+            markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
+          }
+
+          const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+
+          // Get author info
+          const author = fullPage.version.authorId ? yield* getUser(fullPage.version.authorId) : undefined
+
+          // Write file
+          const frontMatter: PageFrontMatter = {
+            pageId,
+            version: fullPage.version.number,
+            title: fullPage.title,
+            updated: fullPage.version.createdAt ? new Date(fullPage.version.createdAt) : new Date(),
+            ...(page.parentId ? { parentId: page.parentId as PageId } : {}),
+            ...(page.position !== undefined ? { position: page.position } : {}),
+            contentHash,
+            ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
+            ...(author?.displayName ? { authorName: author.displayName } : {}),
+            ...(author?.email ? { authorEmail: author.email } : {})
+          }
+
+          yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
+
+          // Save source HTML if configured
+          if (config.saveSource && htmlContent) {
+            const sourceFilePath = filePath.replace(/\.md$/, ".html")
+            yield* localFs.writeFile(sourceFilePath, htmlContent)
+          }
         }
 
         // Pull children
-        let count = 1
+        let childPulled = 0
+        let childCommits = 0
         for (const child of children) {
-          count += yield* pullPage(child, dirPath, force)
+          const result = yield* pullPage(child, dirPath, options, gitInitialized)
+          childPulled += result.pulled
+          childCommits += result.commits
         }
 
-        return count
+        return { pulled: 1 + childPulled, commits: totalCommits + childCommits }
       })
 
-    const pull = (options: { force: boolean }): Effect.Effect<PullResult, SyncError> =>
+    const pull = (options: PullOptions): Effect.Effect<PullResult, SyncError> =>
       Effect.gen(function*() {
         yield* localFs.ensureDir(docsPath)
 
+        // Check if git is initialized
+        const gitInitialized = yield* git.isInitialized()
+
         const rootPage = yield* client.getPage(config.rootPageId)
-        const pulled = yield* pullPage(rootPage, docsPath, options.force)
+        const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
+
+        // If git is initialized and we have changes but didn't replay history, auto-commit
+        if (gitInitialized && !options.replayHistory && result.pulled > 0) {
+          yield* git.addAll()
+          yield* git.commit({
+            message: `Pull from Confluence (${result.pulled} page${result.pulled !== 1 ? "s" : ""})`
+          }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
+        }
 
         return {
-          pulled,
+          pulled: result.pulled,
           skipped: 0,
+          commits: result.commits,
           errors: [] as ReadonlyArray<string>
         }
       })
@@ -325,38 +489,18 @@ export const layer: Layer.Layer<
           )
         }
 
-        return { pushed, created, skipped, errors: errors as ReadonlyArray<string> }
-      })
-
-    const sync = (): Effect.Effect<SyncResult, SyncError | ConflictError> =>
-      Effect.gen(function*() {
-        // First, check for conflicts
-        const statusResult = yield* status()
-        const conflictErrors: Array<string> = []
-
-        if (statusResult.conflicts > 0) {
-          for (const file of statusResult.files) {
-            if (file._tag === "Conflict") {
-              conflictErrors.push(
-                `Conflict in ${file.path}: local v${file.localVersion} vs remote v${file.remoteVersion}`
-              )
-            }
+        // Auto-commit after successful push if git is initialized
+        if (!options.dryRun && pushed > 0) {
+          const gitInitialized = yield* git.isInitialized()
+          if (gitInitialized) {
+            yield* git.addAll()
+            yield* git.commit({
+              message: options.message ?? `Push to Confluence (${pushed} page${pushed !== 1 ? "s" : ""})`
+            }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
           }
         }
 
-        // Pull remote changes
-        const pullResult = yield* pull({ force: false })
-
-        // Push local changes
-        const pushResult = yield* push({ dryRun: false })
-
-        return {
-          pulled: pullResult.pulled,
-          pushed: pushResult.pushed,
-          created: pushResult.created,
-          conflicts: statusResult.conflicts,
-          errors: [...conflictErrors, ...pullResult.errors, ...pushResult.errors] as ReadonlyArray<string>
-        }
+        return { pushed, created, skipped, errors: errors as ReadonlyArray<string> }
       })
 
     const status = (): Effect.Effect<StatusResult, SyncError> =>
@@ -431,7 +575,6 @@ export const layer: Layer.Layer<
     return SyncEngine.of({
       pull,
       push,
-      sync,
       status
     })
   })

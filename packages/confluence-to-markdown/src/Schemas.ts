@@ -36,7 +36,9 @@ export const ConfluenceConfigFileSchema = Schema.Struct({
   /** Glob patterns to exclude from sync */
   excludePatterns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   /** Save original Confluence HTML alongside markdown (default: false) */
-  saveSource: Schema.optionalWith(Schema.Boolean, { default: () => false })
+  saveSource: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** Glob patterns for files to track in git */
+  trackedPaths: Schema.optionalWith(Schema.Array(Schema.String), { default: () => ["**/*.md"] })
 })
 
 /**
@@ -79,7 +81,13 @@ export const PageFrontMatterSchema = Schema.Struct({
   /** Position among siblings (optional) */
   position: Schema.optional(Schema.Number),
   /** SHA256 hash of content for change detection */
-  contentHash: ContentHashSchema
+  contentHash: ContentHashSchema,
+  /** Version message from Confluence (used as git commit message) */
+  versionMessage: Schema.optional(Schema.String),
+  /** Author display name */
+  authorName: Schema.optional(Schema.String),
+  /** Author email */
+  authorEmail: Schema.optional(Schema.String)
 })
 
 /**
@@ -148,7 +156,9 @@ export const PageResponseSchema = Schema.Struct({
   status: Schema.optional(Schema.String),
   version: Schema.Struct({
     number: Schema.Number,
-    createdAt: Schema.optional(Schema.String)
+    createdAt: Schema.optional(Schema.String),
+    message: Schema.optional(Schema.String),
+    authorId: Schema.optional(Schema.String)
   }),
   body: Schema.optional(
     Schema.Struct({
@@ -187,7 +197,9 @@ export const PageListItemSchema = Schema.Struct({
   status: Schema.optional(Schema.String),
   version: Schema.optional(Schema.Struct({
     number: Schema.Number,
-    createdAt: Schema.optional(Schema.String)
+    createdAt: Schema.optional(Schema.String),
+    message: Schema.optional(Schema.String),
+    authorId: Schema.optional(Schema.String)
   })),
   body: Schema.optional(
     Schema.Struct({
@@ -319,3 +331,121 @@ export const OAuthConfigSchema = Schema.Struct({
  * @category Types
  */
 export type OAuthConfig = Schema.Schema.Type<typeof OAuthConfigSchema>
+
+/**
+ * Schema for Atlassian user info.
+ *
+ * @category Schema
+ */
+export const AtlassianUserSchema = Schema.Struct({
+  /** Atlassian account ID */
+  accountId: Schema.String,
+  /** Display name */
+  displayName: Schema.String,
+  /** Email address (may be empty for privacy settings) */
+  email: Schema.optional(Schema.String),
+  /** Public name */
+  publicName: Schema.optional(Schema.String)
+})
+
+/**
+ * Type for Atlassian user info.
+ *
+ * @category Types
+ */
+export type AtlassianUser = Schema.Schema.Type<typeof AtlassianUserSchema>
+
+/**
+ * Schema for page version info (from versions list).
+ *
+ * @category Schema
+ */
+export const PageVersionSchema = Schema.Struct({
+  /** Version number */
+  number: Schema.Number,
+  /** Author account ID */
+  authorId: Schema.optional(Schema.String),
+  /** Creation timestamp */
+  createdAt: Schema.String,
+  /** Version message/comment */
+  message: Schema.optional(Schema.String),
+  /** Page info with title and body (when body-format is requested) */
+  page: Schema.optional(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      title: Schema.optional(Schema.String),
+      body: Schema.optional(
+        Schema.Struct({
+          storage: Schema.optional(
+            Schema.Struct({
+              value: Schema.String,
+              representation: Schema.optional(Schema.String)
+            })
+          )
+        })
+      )
+    })
+  )
+})
+
+/**
+ * Type for page version info.
+ *
+ * @category Types
+ */
+export type PageVersion = Schema.Schema.Type<typeof PageVersionSchema>
+
+/**
+ * Schema for page version with content.
+ *
+ * @category Schema
+ */
+export const PageVersionContentSchema = Schema.Struct({
+  /** Version number */
+  number: Schema.Number,
+  /** Author account ID */
+  authorId: Schema.optional(Schema.String),
+  /** Creation timestamp */
+  createdAt: Schema.String,
+  /** Version message/comment */
+  message: Schema.optional(Schema.String),
+  /** Page content */
+  body: Schema.optional(
+    Schema.Struct({
+      storage: Schema.optional(
+        Schema.Struct({
+          value: Schema.String,
+          representation: Schema.optional(Schema.String)
+        })
+      )
+    })
+  )
+})
+
+/**
+ * Type for page version with content.
+ *
+ * @category Types
+ */
+export type PageVersionContent = Schema.Schema.Type<typeof PageVersionContentSchema>
+
+/**
+ * Schema for page versions API response.
+ *
+ * @category Schema
+ */
+export const PageVersionsResponseSchema = Schema.Struct({
+  results: Schema.Array(PageVersionSchema),
+  _links: Schema.optional(
+    Schema.Struct({
+      next: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for page versions response.
+ *
+ * @category Types
+ */
+export type PageVersionsResponse = Schema.Schema.Type<typeof PageVersionsResponseSchema>
