@@ -70,16 +70,13 @@ export CONFLUENCE_EMAIL=your-email@example.com
 
 ## Configuration
 
-Create `.confluence.json` in your project root:
+Initialize configuration with `confluence init`:
 
-```json
-{
-  "rootPageId": "123456",
-  "baseUrl": "https://yoursite.atlassian.net",
-  "spaceKey": "DEV",
-  "docsPath": ".docs/confluence"
-}
+```bash
+confluence init --root-page-id 123456 --base-url https://yoursite.atlassian.net
 ```
+
+This creates `.confluence.json` in your project root.
 
 ## Known Limitations
 
