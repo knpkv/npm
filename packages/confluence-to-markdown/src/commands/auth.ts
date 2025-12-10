@@ -16,7 +16,7 @@ Creating OAuth app in Atlassian Developer Console...
 1. Browser will open to create a new OAuth 2.0 (3LO) app
 2. Enter app name (e.g., "Confluence CLI")
 3. After creation, go to "Permissions" and add:
-   - Confluence API (granular): read:page:confluence, write:page:confluence
+   - Confluence API (granular): read:page:confluence, write:page:confluence, delete:page:confluence
    - User Identity API: read:me
 4. Go to "Authorization" and set callback URL:
    http://localhost:8585/callback

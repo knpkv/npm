@@ -29,6 +29,9 @@ confluence push
 confluence push -n, --dry-run         # preview changes without applying
 confluence push -m, --message "msg"   # with revision comment
 
+# Delete a page from Confluence
+confluence delete <pageId> -f         # permanently delete (requires delete:page scope)
+
 # Check sync status
 confluence status
 ```
@@ -51,6 +54,19 @@ confluence auth status
 
 # Logout
 confluence auth logout
+```
+
+### Page Creation
+
+```bash
+# Create a new page (interactive parent selector)
+confluence new
+
+# Workflow:
+# 1. Create new page: confluence new
+# 2. Edit the file
+# 3. Commit: confluence commit -m "Add new page"
+# 4. Push to Confluence: confluence push
 ```
 
 ### Git Commands
@@ -162,6 +178,7 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
    - Add **Confluence API** with scopes:
      - `read:page:confluence` - read pages
      - `write:page:confluence` - push changes
+     - `delete:page:confluence` - delete pages (optional)
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
@@ -241,16 +258,62 @@ project/
 │   ├── .git/            # Git repository for version tracking
 │   └── docs/            # Synced markdown files
 │       ├── page1.md
+│       ├── page1/       # Children of page1
+│       │   └── child.md
 │       └── subdir/
 │           └── page2.md
 └── ...
 ```
 
+### Page Hierarchy Rules
+
+Directory structure determines Confluence page hierarchy:
+
+- Files in `docs/` root → children of root page
+- `foo.md` → page "foo"
+- `foo/` directory → contains children of "foo.md"
+- `foo/bar.md` → child page of "foo.md"
+
+Example structure:
+
+```
+docs/
+├── guide.md           # Child of root
+├── guide/             # Children of guide.md
+│   ├── getting-started.md
+│   └── advanced.md
+└── reference.md       # Child of root
+```
+
+### New Page Front-matter
+
+New pages require only a `title` in front-matter:
+
+```yaml
+---
+title: "My New Page"
+---
+Page content here...
+```
+
+After pushing, the file is updated with full metadata:
+
+```yaml
+---
+pageId: "123456"
+version: 1
+title: "My New Page"
+updated: 2024-01-15T10:30:00.000Z
+parentId: "789012"
+contentHash: "7a8b9c..."
+---
+```
+
 ## Known Limitations
 
-- **Page creation**: Creating new pages from local markdown is not yet implemented
 - **Attachments**: Image and file attachments are not synced
 - **Comments**: Page comments are not preserved
+- **Page deletion**: Deleting local files does not delete pages on Confluence
 
 ## License
 

@@ -218,6 +218,31 @@ export class FrontMatterError extends Data.TaggedError("FrontMatterError")<{
 }
 
 /**
+ * Error thrown when directory structure is inconsistent.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import { StructureError } from "@knpkv/confluence-to-markdown/ConfluenceError"
+ *
+ * Effect.gen(function* () {
+ *   // ... validate structure
+ * }).pipe(
+ *   Effect.catchTag("StructureError", (error) =>
+ *     Effect.sync(() => console.error(`${error.message}\nAdvice: ${error.advice}`))
+ *   )
+ * )
+ * ```
+ *
+ * @category Errors
+ */
+export class StructureError extends Data.TaggedError("StructureError")<{
+  readonly path: string
+  readonly advice: string
+  readonly message: string
+}> {}
+
+/**
  * Union of all Confluence errors.
  *
  * @category Errors
@@ -234,6 +259,7 @@ export type ConfluenceError =
   | FileSystemError
   | OAuthError
   | FrontMatterError
+  | StructureError
 
 /**
  * Type guard to check if error is a ConfluenceError.
@@ -258,5 +284,6 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "ConflictError",
     "FileSystemError",
     "OAuthError",
-    "FrontMatterError"
+    "FrontMatterError",
+    "StructureError"
   ].includes((error as { _tag: string })._tag)

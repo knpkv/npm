@@ -214,6 +214,19 @@ export interface GitServiceShape {
     branch: string,
     options?: { noCommit?: boolean; message?: string }
   ) => Effect.Effect<void, GitServiceError>
+
+  /** Get deleted files between two refs (files in `from` but not in `to`). */
+  readonly getDeletedFiles: (
+    from: string,
+    to: string,
+    pathPrefix?: string
+  ) => Effect.Effect<ReadonlyArray<string>, GitServiceError>
+
+  /** Get file content at a specific ref. */
+  readonly getFileContentAt: (
+    ref: string,
+    filePath: string
+  ) => Effect.Effect<string, GitServiceError>
 }
 
 /**
@@ -770,6 +783,29 @@ const make = Effect.gen(function*() {
       })
     )
 
+  const getDeletedFiles = (from: string, to: string, pathPrefix?: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        // git diff --name-only --diff-filter=D from..to -- pathPrefix
+        const args = ["diff", "--name-only", "--diff-filter=D", `${from}..${to}`]
+        if (pathPrefix) {
+          args.push("--", pathPrefix)
+        }
+        const output = yield* runGitAllowEmpty(args, confluenceDir)
+        return output.trim().split("\n").filter((line) => line.length > 0)
+      })
+    )
+
+  const getFileContentAt = (ref: string, filePath: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        // git show ref:filePath
+        return yield* runGit(["show", `${ref}:${filePath}`], confluenceDir)
+      })
+    )
+
   return GitService.of({
     validateGit,
     isInitialized,
@@ -797,7 +833,9 @@ const make = Effect.gen(function*() {
     logRange,
     branchExists,
     updateBranch,
-    merge
+    merge,
+    getDeletedFiles,
+    getFileContentAt
   })
 })
 

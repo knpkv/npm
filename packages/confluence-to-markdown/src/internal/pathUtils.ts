@@ -32,8 +32,17 @@ export const slugify = (title: string): string => {
 /**
  * Convert a page to a local file path.
  *
+ * Pages are always stored as `slug.md`. If a page has children,
+ * the children are stored in a `slug/` directory alongside the parent file.
+ *
+ * Example structure:
+ * - guide.md           (page with children)
+ * - guide/             (directory for children)
+ *   - getting-started.md
+ *   - advanced.md
+ *
  * @param title - The page title
- * @param hasChildren - Whether the page has child pages
+ * @param _hasChildren - Whether the page has child pages (unused, kept for API compat)
  * @param parentPath - The parent directory path
  * @returns The local file path for the page
  *
@@ -41,15 +50,14 @@ export const slugify = (title: string): string => {
  */
 export const pageToPath = (
   title: string,
-  hasChildren: boolean,
+  _hasChildren: boolean,
   parentPath: string
 ): Effect.Effect<string, never, Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const slug = slugify(title)
-    return hasChildren
-      ? path.join(parentPath, slug, "index.md")
-      : path.join(parentPath, `${slug}.md`)
+    // Always use slug.md, children go in slug/ directory
+    return path.join(parentPath, `${slug}.md`)
   })
 
 /**
@@ -82,6 +90,5 @@ export const pageToDir = (
 export const pathToSlug = (filePath: string): Effect.Effect<string, never, Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
-    const basename = path.basename(filePath, ".md")
-    return basename === "index" ? path.basename(path.dirname(filePath)) : basename
+    return path.basename(filePath, ".md")
   })

@@ -7,10 +7,11 @@ import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { PageId } from "./Brand.js"
+import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
-import type { ApiError, ConversionError, FileSystemError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
+import type { ApiError, ConversionError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
+import { FileSystemError, StructureError } from "./ConfluenceError.js"
 import type { GitServiceError } from "./GitService.js"
 import { GitService } from "./GitService.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
@@ -73,6 +74,7 @@ export interface PullResult {
 export interface PushResult {
   readonly pushed: number
   readonly created: number
+  readonly deleted: number
   readonly skipped: number
   readonly errors: ReadonlyArray<string>
 }
@@ -90,7 +92,14 @@ export interface StatusResult {
   readonly files: ReadonlyArray<SyncStatus>
 }
 
-type SyncError = ApiError | RateLimitError | ConversionError | FileSystemError | FrontMatterError | GitServiceError
+type SyncError =
+  | ApiError
+  | RateLimitError
+  | ConversionError
+  | FileSystemError
+  | FrontMatterError
+  | GitServiceError
+  | StructureError
 
 /**
  * Sync engine service for Confluence <-> Markdown operations.
@@ -154,6 +163,159 @@ export const layer: Layer.Layer<
     const docsPath = pathService.join(process.cwd(), config.docsPath)
 
     /**
+     * Build a map of relative path (without .md) to pageId for resolving parents.
+     * e.g., "guide" -> pageId, "guide/getting-started" -> pageId
+     */
+    const buildPageIdMap = (): Effect.Effect<Map<string, string>, SyncError> =>
+      Effect.gen(function*() {
+        const files = yield* localFs.listMarkdownFiles(docsPath)
+        const map = new Map<string, string>()
+
+        for (const filePath of files) {
+          const localFile = yield* localFs.readMarkdownFile(filePath)
+          const relativePath = pathService.relative(docsPath, filePath)
+          const key = relativePath.replace(/\.md$/, "")
+
+          if (localFile.frontMatter?.pageId) {
+            map.set(key, localFile.frontMatter.pageId)
+          }
+        }
+
+        return map
+      })
+
+    /**
+     * Resolve parent page ID from directory structure.
+     * Rule: foo/ contains children of foo.md
+     */
+    const resolveParent = (
+      filePath: string,
+      pageIdMap: Map<string, string>
+    ): Effect.Effect<string, StructureError | FileSystemError> =>
+      Effect.gen(function*() {
+        const relativePath = pathService.relative(docsPath, filePath)
+        const dirPath = pathService.dirname(relativePath)
+
+        // Root level files -> parent is rootPageId
+        if (dirPath === ".") {
+          return config.rootPageId
+        }
+
+        // Files in subdir -> parent is the directory's parent page
+        // e.g., "foo/bar.md" -> parent is "foo.md"
+        const parentKey = dirPath
+        const parentPageId = pageIdMap.get(parentKey)
+
+        if (!parentPageId) {
+          // Check if the parent .md file exists
+          const parentMdPath = pathService.join(docsPath, `${parentKey}.md`)
+          const parentExists = yield* localFs.exists(parentMdPath)
+
+          if (!parentExists) {
+            return yield* Effect.fail(
+              new StructureError({
+                path: filePath,
+                message: `Directory '${dirPath}/' has no parent page`,
+                advice: `Create '${parentKey}.md' first`
+              })
+            )
+          }
+
+          // Parent file exists but has no pageId (not pushed yet)
+          return yield* Effect.fail(
+            new StructureError({
+              path: filePath,
+              message: `Parent page '${parentKey}.md' not yet pushed`,
+              advice: `Push parent before creating children`
+            })
+          )
+        }
+
+        return parentPageId
+      })
+
+    /**
+     * Validate directory structure consistency.
+     * - Every directory foo/ must have a corresponding foo.md with pageId
+     */
+    const validateStructure = (): Effect.Effect<void, SyncError> =>
+      Effect.gen(function*() {
+        const files = yield* localFs.listMarkdownFiles(docsPath)
+        const pageIdMap = yield* buildPageIdMap()
+
+        // Build set of directories that contain files
+        const dirsWithFiles = new Set<string>()
+        for (const filePath of files) {
+          const relativePath = pathService.relative(docsPath, filePath)
+          const dirPath = pathService.dirname(relativePath)
+          if (dirPath !== ".") {
+            dirsWithFiles.add(dirPath)
+          }
+        }
+
+        // Check each directory has a parent .md with pageId
+        // Rule: foo/ directory must have foo.md as parent
+        for (const dir of dirsWithFiles) {
+          const parentPageId = pageIdMap.get(dir)
+          if (!parentPageId) {
+            const parentMdPath = pathService.join(docsPath, `${dir}.md`)
+            const parentExists = yield* localFs.exists(parentMdPath)
+
+            if (!parentExists) {
+              return yield* Effect.fail(
+                new StructureError({
+                  path: dir,
+                  message: `Directory '${dir}/' has no parent page`,
+                  advice: `Create '${dir}.md' first`
+                })
+              )
+            }
+
+            // Parent exists but not pushed - this is OK during push,
+            // as long as we push in order (parent before child)
+          }
+        }
+
+        // Check parentId in front-matter matches directory structure
+        // Only validate new pages or pages where we can determine expected parent
+        for (const filePath of files) {
+          const localFile = yield* localFs.readMarkdownFile(filePath)
+          if (localFile.frontMatter?.parentId) {
+            const relativePath = pathService.relative(docsPath, filePath)
+            const dirPath = pathService.dirname(relativePath)
+
+            // Determine expected parent based on directory
+            // foo/bar.md -> parent should be foo.md (pageIdMap key: "foo")
+            let expectedParentId: string | null = null
+            if (dirPath === ".") {
+              // Root level - parent should be rootPageId
+              // But if the parentId points elsewhere, it might be correct Confluence hierarchy
+              // Only validate if it's a new page (no pageId yet)
+              if (!localFile.frontMatter.pageId) {
+                expectedParentId = config.rootPageId
+              }
+            } else {
+              const parentPageId = pageIdMap.get(dirPath)
+              if (parentPageId) {
+                expectedParentId = parentPageId
+              }
+              // If parent not in map, skip validation (parent might be outside our tree)
+            }
+
+            if (expectedParentId !== null && localFile.frontMatter.parentId !== expectedParentId) {
+              return yield* Effect.fail(
+                new StructureError({
+                  path: filePath,
+                  message: `Page parentId '${localFile.frontMatter.parentId}' does not match directory location`,
+                  advice: `Move file to correct directory or update parentId to '${expectedParentId}'`
+                })
+              )
+            }
+          }
+        }
+      })
+
+    /**
      * Get user info with caching.
      */
     const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
@@ -205,7 +367,8 @@ export const layer: Layer.Layer<
       page: PageListItem | PageResponse,
       parentPath: string,
       options: PullOptions,
-      gitInitialized: boolean
+      gitInitialized: boolean,
+      knownParentId?: string
     ): Effect.Effect<{ pulled: number; commits: number }, SyncError> =>
       Effect.gen(function*() {
         const pageId = page.id as PageId
@@ -218,6 +381,9 @@ export const layer: Layer.Layer<
 
         // Get page content
         const fullPage = yield* client.getPage(pageId)
+
+        // Determine parentId: use API response, fall back to known parent
+        const effectiveParentId = page.parentId ?? knownParentId
 
         // Check existing local version
         let localVersion = 0
@@ -232,7 +398,8 @@ export const layer: Layer.Layer<
                 let childPulled = 0
                 let childCommits = 0
                 for (const child of children) {
-                  const result = yield* pullPage(child, dirPath, options, gitInitialized)
+                  // Pass current page's ID as parent for children
+                  const result = yield* pullPage(child, dirPath, options, gitInitialized, pageId)
                   childPulled += result.pulled
                   childCommits += result.commits
                 }
@@ -291,7 +458,7 @@ export const layer: Layer.Layer<
               pageId,
               versionContent,
               versionInfo.page?.title ?? fullPage.title,
-              page.parentId,
+              effectiveParentId,
               page.position
             )
 
@@ -361,7 +528,7 @@ export const layer: Layer.Layer<
             version: fullPage.version.number,
             title: fullPage.title,
             updated: fullPage.version.createdAt ? new Date(fullPage.version.createdAt) : new Date(),
-            ...(page.parentId ? { parentId: page.parentId as PageId } : {}),
+            ...(effectiveParentId ? { parentId: effectiveParentId as PageId } : {}),
             ...(page.position !== undefined ? { position: page.position } : {}),
             contentHash,
             ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
@@ -382,7 +549,8 @@ export const layer: Layer.Layer<
         let childPulled = 0
         let childCommits = 0
         for (const child of children) {
-          const result = yield* pullPage(child, dirPath, options, gitInitialized)
+          // Pass current page's ID as parent for children
+          const result = yield* pullPage(child, dirPath, options, gitInitialized, pageId)
           childPulled += result.pulled
           childCommits += result.commits
         }
@@ -441,16 +609,84 @@ export const layer: Layer.Layer<
      */
     const pushFile = (
       filePath: string,
-      revisionMessage: string
+      revisionMessage: string,
+      spaceId: string,
+      pageIdMap: Map<string, string>
     ): Effect.Effect<
-      { pushed: boolean; created: boolean; error?: string },
+      { pushed: boolean; created: boolean; newPageId?: string; error?: string },
       SyncError
     > =>
       Effect.gen(function*() {
         const localFile = yield* localFs.readMarkdownFile(filePath)
 
+        // Handle new page creation
         if (localFile.isNew || !localFile.frontMatter) {
-          return { pushed: false, created: true, error: `Page creation not yet supported: ${filePath}` }
+          // Get title from front-matter or filename
+          const relativePath = pathService.relative(docsPath, filePath)
+          const baseName = pathService.basename(filePath, ".md")
+
+          // For new pages, re-parse front-matter to get title
+          // The localFile only has the content (body), not the original front-matter
+          const title = yield* Effect.tryPromise({
+            try: async () => {
+              const fs = await import("node:fs/promises")
+              const matter = await import("gray-matter")
+              const rawFile = await fs.readFile(filePath, "utf-8")
+              const parsed = matter.default(rawFile)
+              return (parsed.data as { title?: string }).title ?? baseName
+            },
+            catch: (cause) => new FileSystemError({ operation: "read", path: filePath, cause })
+          })
+
+          // Resolve parent from directory structure
+          const parentId = yield* resolveParent(filePath, pageIdMap)
+
+          // Convert markdown to HTML
+          const html = yield* converter.markdownToHtml(localFile.content)
+
+          // Create the page
+          const createdPage = yield* client.createPage({
+            spaceId,
+            parentId,
+            title,
+            body: {
+              representation: "storage",
+              value: html
+            }
+          })
+
+          // Set editor version to v2 (new editor)
+          yield* client.setEditorVersion(createdPage.id as PageId, "v2").pipe(
+            Effect.catchAll((error) => {
+              // Log warning but don't fail the push
+              return Effect.logWarning(`Failed to set editor v2 for page ${createdPage.id}: ${error.message}`)
+            })
+          )
+
+          // Fetch canonical content back from Confluence
+          const canonicalPage = yield* client.getPage(createdPage.id as PageId)
+          const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
+          const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
+            includeRawSource: config.saveSource
+          })
+          const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+
+          // Write canonical content with full front-matter
+          const newFrontMatter: PageFrontMatter = {
+            pageId: createdPage.id as PageId,
+            version: createdPage.version.number,
+            title,
+            updated: new Date(canonicalPage.version.createdAt ?? new Date().toISOString()),
+            parentId: parentId as PageId,
+            contentHash: canonicalHash
+          }
+          yield* localFs.writeMarkdownFile(filePath, newFrontMatter, canonicalMarkdown)
+
+          // Update pageIdMap with new page
+          const key = relativePath.replace(/\.md$/, "")
+          pageIdMap.set(key, createdPage.id)
+
+          return { pushed: false, created: true, newPageId: createdPage.id }
         }
 
         const fm = localFile.frontMatter
@@ -555,21 +791,42 @@ export const layer: Layer.Layer<
 
     const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
       Effect.gen(function*() {
+        // Validate structure before push
+        yield* validateStructure()
+
+        // Get spaceId from root page
+        const spaceId = yield* client.getSpaceId(config.rootPageId)
+
+        // Build pageId map for parent resolution
+        const pageIdMap = yield* buildPageIdMap()
+
         const gitInitialized = yield* git.isInitialized()
+
+        // Get files and sort by depth (parent before child)
+        const files = yield* localFs.listMarkdownFiles(docsPath)
+        const sortedFiles = [...files].sort((a, b) => {
+          const depthA = pathService.relative(docsPath, a).split(pathService.sep).length
+          const depthB = pathService.relative(docsPath, b).split(pathService.sep).length
+          return depthA - depthB
+        })
 
         if (!gitInitialized) {
           // Non-git mode: just push current content
-          const files = yield* localFs.listMarkdownFiles(docsPath)
           let pushed = 0
           let created = 0
           const errors: Array<string> = []
 
-          for (const filePath of files) {
+          for (const filePath of sortedFiles) {
             if (options.dryRun) {
               pushed++
               continue
             }
-            const result = yield* pushFile(filePath, options.message ?? "Updated via confluence-to-markdown").pipe(
+            const result = yield* pushFile(
+              filePath,
+              options.message ?? "Updated via confluence-to-markdown",
+              spaceId,
+              pageIdMap
+            ).pipe(
               Effect.catchAll((error) =>
                 Effect.succeed({
                   pushed: false,
@@ -583,20 +840,21 @@ export const layer: Layer.Layer<
             if (result.created) created++
           }
 
-          return { pushed, created, skipped: 0, errors: errors as ReadonlyArray<string> }
+          return { pushed, created, deleted: 0, skipped: 0, errors: errors as ReadonlyArray<string> }
         }
 
         // Git mode: push current HEAD state to Confluence
         // For simplicity, we push the final state as a single Confluence version
         // with the most recent commit message
-        const files = yield* localFs.listMarkdownFiles(docsPath)
         const errors: Array<string> = []
         let pushed = 0
+        let created = 0
+        let deleted = 0
 
         // Get the most recent unpushed commit message for the revision
         const unpushedCommits = yield* findUnpushedCommits()
         if (unpushedCommits.length === 0) {
-          return { pushed: 0, created: 0, skipped: 0, errors: [] as ReadonlyArray<string> }
+          return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] as ReadonlyArray<string> }
         }
 
         if (options.dryRun) {
@@ -604,6 +862,7 @@ export const layer: Layer.Layer<
             pushed: unpushedCommits.length,
             created: 0,
             skipped: 0,
+            deleted: 0,
             errors: [] as ReadonlyArray<string>
           }
         }
@@ -612,8 +871,42 @@ export const layer: Layer.Layer<
         const lastCommit = unpushedCommits[unpushedCommits.length - 1]!
         const revisionMessage = options.message ?? lastCommit.message
 
-        for (const filePath of files) {
-          const result = yield* pushFile(filePath, revisionMessage).pipe(
+        // Find deleted files by comparing origin/confluence with current HEAD
+        // Note: Git repo is inside .confluence/, so paths are relative to that
+        // (e.g., "docs/page.md" not ".confluence/docs/page.md")
+        const hasRemoteBranch = yield* git.branchExists("origin/confluence")
+        if (hasRemoteBranch) {
+          const deletedFiles = yield* git.getDeletedFiles("origin/confluence", "HEAD", "docs")
+
+          // Delete pages from Confluence
+          for (const deletedPath of deletedFiles) {
+            // Read the file from origin/confluence to get pageId
+            // deletedPath is already relative to git root (e.g., "docs/page.md")
+            const pageIdFromOrigin = yield* git.getFileContentAt(
+              "origin/confluence",
+              deletedPath
+            ).pipe(
+              Effect.map((content) => {
+                const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
+                return match ? match[1] : null
+              }),
+              Effect.catchAll(() => Effect.succeed(null))
+            )
+
+            if (pageIdFromOrigin) {
+              yield* client.deletePage(PageId(pageIdFromOrigin)).pipe(
+                Effect.tap(() => Effect.sync(() => deleted++)),
+                Effect.catchAll((error) => {
+                  errors.push(`Failed to delete page ${pageIdFromOrigin}: ${error.message}`)
+                  return Effect.void
+                })
+              )
+            }
+          }
+        }
+
+        for (const filePath of sortedFiles) {
+          const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap).pipe(
             Effect.catchAll((error) =>
               Effect.succeed({
                 pushed: false,
@@ -624,6 +917,7 @@ export const layer: Layer.Layer<
           )
           if (result.error) errors.push(result.error)
           if (result.pushed) pushed++
+          if (result.created) created++
         }
 
         // Amend the last commit with canonical content
@@ -633,12 +927,11 @@ export const layer: Layer.Layer<
         )
 
         // Two-branch model: update origin/confluence to match HEAD
-        const hasRemoteBranch = yield* git.branchExists("origin/confluence")
         if (hasRemoteBranch) {
           yield* git.updateBranch("origin/confluence", "HEAD")
         }
 
-        return { pushed, created: 0, skipped: 0, errors: errors as ReadonlyArray<string> }
+        return { pushed, created, skipped: 0, deleted, errors: errors as ReadonlyArray<string> }
       })
 
     const status = (): Effect.Effect<StatusResult, SyncError> =>

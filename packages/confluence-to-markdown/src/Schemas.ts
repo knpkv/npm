@@ -153,6 +153,7 @@ export type SyncState = Schema.Schema.Type<typeof SyncStateSchema>
 export const PageResponseSchema = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
+  spaceId: Schema.optional(Schema.String),
   status: Schema.optional(Schema.String),
   version: Schema.Struct({
     number: Schema.Number,

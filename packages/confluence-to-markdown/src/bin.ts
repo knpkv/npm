@@ -12,8 +12,10 @@ import {
   authCommand,
   cloneCommand,
   commitCommand,
+  deleteCommand,
   diffCommand,
   logCommand,
+  newCommand,
   pullCommand,
   pushCommand,
   statusCommand
@@ -31,7 +33,9 @@ const confluence = Command.make("confluence").pipe(
     statusCommand,
     commitCommand,
     logCommand,
-    diffCommand
+    diffCommand,
+    newCommand,
+    deleteCommand
   ])
 )
 

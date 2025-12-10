@@ -42,7 +42,9 @@ const DummyConfluenceClientLayer = Layer.succeed(
     updatePage: () => Effect.dieMessage("Not configured"),
     deletePage: () => Effect.dieMessage("Not configured"),
     getPageVersions: () => Effect.dieMessage("Not configured"),
-    getUser: () => Effect.dieMessage("Not configured")
+    getUser: () => Effect.dieMessage("Not configured"),
+    getSpaceId: () => Effect.dieMessage("Not configured"),
+    setEditorVersion: () => Effect.dieMessage("Not configured")
   })
 )
 
@@ -88,7 +90,9 @@ const DummyGitServiceLayer = Layer.succeed(
     logRange: notConfigured,
     branchExists: notConfigured,
     updateBranch: notConfigured,
-    merge: notConfigured
+    merge: notConfigured,
+    getDeletedFiles: notConfigured,
+    getFileContentAt: notConfigured
   })
 )
 

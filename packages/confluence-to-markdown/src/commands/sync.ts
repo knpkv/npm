@@ -78,10 +78,10 @@ export const pushCommand = Command.make(
         ? { dryRun, message: message.value }
         : { dryRun }
       const result = yield* engine.push(pushOptions)
-      if (result.pushed === 0 && result.created === 0) {
+      if (result.pushed === 0 && result.created === 0 && result.deleted === 0) {
         yield* Console.log("Nothing to push")
       } else {
-        yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Skipped: ${result.skipped}`)
+        yield* Console.log(`Pushed: ${result.pushed}, Created: ${result.created}, Deleted: ${result.deleted}`)
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))

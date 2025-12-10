@@ -118,6 +118,17 @@ export class ConfluenceClient extends Context.Tag(
      * Get user info by account ID.
      */
     readonly getUser: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>
+
+    /**
+     * Get space ID for a page.
+     */
+    readonly getSpaceId: (pageId: PageId) => Effect.Effect<string, ApiError | RateLimitError>
+
+    /**
+     * Set editor version for a page (v1 or v2).
+     * Uses V1 API to set page property.
+     */
+    readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
   }
 >() {}
 
@@ -478,6 +489,91 @@ const make = (
         )
       })
 
+    const getSpaceId = (pageId: PageId): Effect.Effect<string, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        const page = yield* getPage(pageId)
+        if (!page.spaceId) {
+          return yield* Effect.fail(
+            new ApiError({
+              status: 0,
+              message: `Page ${pageId} does not have spaceId`,
+              endpoint: `/pages/${pageId}`,
+              pageId
+            })
+          )
+        }
+        return page.spaceId
+      })
+
+    // V1 API base URL for setting editor property
+    const apiV1BaseUrl = config.auth.type === "oauth2"
+      ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
+      : `${config.baseUrl}/wiki/rest/api`
+
+    const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        // First, get current property version (if exists)
+        const getPropertyReq = baseRequest.pipe(
+          HttpClientRequest.setMethod("GET"),
+          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
+        )
+
+        const getResponse = yield* httpClient.execute(getPropertyReq).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+
+        let propertyVersion = 1
+        if (getResponse && getResponse.status === 200) {
+          const json = yield* getResponse.json.pipe(Effect.catchAll(() => Effect.succeed(null)))
+          if (json && typeof json === "object" && "version" in json) {
+            const versionObj = json.version as { number?: number }
+            propertyVersion = (versionObj.number ?? 0) + 1
+          }
+        }
+
+        // Set or update the editor property
+        const body = {
+          key: "editor",
+          value: version,
+          version: { number: propertyVersion }
+        }
+
+        let req = baseRequest.pipe(
+          HttpClientRequest.setMethod(getResponse?.status === 200 ? "PUT" : "POST"),
+          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
+        )
+
+        req = HttpClientRequest.bodyJson(req, body).pipe(
+          Effect.catchAll(() => Effect.succeed(req)),
+          Effect.runSync
+        )
+
+        const response = yield* httpClient.execute(req).pipe(
+          Effect.mapError((error) =>
+            new ApiError({
+              status: 0,
+              message: `Failed to set editor version: ${error.message}`,
+              endpoint: `/content/${pageId}/property/editor`,
+              pageId
+            })
+          )
+        )
+
+        if (response.status >= 400) {
+          const text = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
+          return yield* Effect.fail(
+            new ApiError({
+              status: response.status,
+              message: `${text} [${
+                response.status === 200 ? "PUT" : "POST"
+              } ${apiV1BaseUrl}/content/${pageId}/property/editor]`,
+              endpoint: `/content/${pageId}/property/editor`,
+              pageId
+            })
+          )
+        }
+      })
+
     return ConfluenceClient.of({
       getPage,
       getChildren,
@@ -486,7 +582,9 @@ const make = (
       updatePage,
       deletePage,
       getPageVersions,
-      getUser
+      getUser,
+      getSpaceId,
+      setEditorVersion
     })
   })
 
