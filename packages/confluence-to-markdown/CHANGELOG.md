@@ -1,5 +1,18 @@
 # @knpkv/confluence-to-markdown
 
+## 0.4.0
+
+### Minor Changes
+
+- [#21](https://github.com/knpkv/npm/pull/21) [`f696d00`](https://github.com/knpkv/npm/commit/f696d0056de28f2871a48a0caac88b696c86ba68) Thanks @konopkov! - Add git version tracking and CLI improvements
+  - Add GitService for git operations with version history replay
+  - Add clone command that pulls pages with full version history
+  - Flatten git commands: confluence commit/log/diff (was: confluence git ...)
+  - Add auth status subcommand
+  - Reorganize bin.ts into separate command files
+  - Add nice error messages without stack traces
+  - Clone fails if already cloned
+
 ## 0.3.0
 
 ### Minor Changes
