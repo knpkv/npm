@@ -6,7 +6,7 @@
  * Requires:
  * - CONFLUENCE_BASE_URL: Confluence base URL
  * - CONFLUENCE_ROOT_PAGE_ID: Test page ID
- * - OAuth tokens in ~/.confluence/ (from `confluence auth login`)
+ * - OAuth tokens in ~/.confluence/ or CONFLUENCE_API_KEY + CONFLUENCE_EMAIL env vars
  */
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
