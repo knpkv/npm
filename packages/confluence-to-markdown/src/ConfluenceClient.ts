@@ -442,7 +442,11 @@ const make = (
           ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
           : `${config.baseUrl}/wiki/rest/api`
 
-        const req = HttpClientRequest.get(`${userApiBaseUrl}/user?accountId=${accountId}`).pipe(
+        // Use URL constructor for proper encoding of accountId
+        const url = new URL(`${userApiBaseUrl}/user`)
+        url.searchParams.set("accountId", accountId)
+
+        const req = HttpClientRequest.get(url.toString()).pipe(
           HttpClientRequest.setHeader("Authorization", authHeader),
           HttpClientRequest.setHeader("Accept", "application/json")
         )

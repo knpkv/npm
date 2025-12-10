@@ -31,8 +31,8 @@ export const ConfluenceConfigFileSchema = Schema.Struct({
   ),
   /** Optional space key */
   spaceKey: Schema.optional(SpaceKeySchema),
-  /** Local docs path (default: .docs/confluence) */
-  docsPath: Schema.optionalWith(Schema.String, { default: () => ".docs/confluence" }),
+  /** Local docs path (default: .confluence/docs) */
+  docsPath: Schema.optionalWith(Schema.String, { default: () => ".confluence/docs" }),
   /** Glob patterns to exclude from sync */
   excludePatterns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   /** Save original Confluence HTML alongside markdown (default: false) */

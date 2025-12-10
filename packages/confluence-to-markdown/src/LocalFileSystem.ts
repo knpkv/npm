@@ -52,7 +52,7 @@ export interface PageTreeNode {
  *
  * const program = Effect.gen(function* () {
  *   const fs = yield* LocalFileSystem
- *   const files = yield* fs.listMarkdownFiles(".docs/confluence")
+ *   const files = yield* fs.listMarkdownFiles(".confluence/docs")
  *   console.log(files)
  * })
  * ```

@@ -20,7 +20,7 @@ describe("Schemas", () => {
       const result = Schema.decodeUnknownEither(ConfluenceConfigFileSchema)(config)
       expect(Either.isRight(result)).toBe(true)
       if (Either.isRight(result)) {
-        expect(result.right.docsPath).toBe(".docs/confluence")
+        expect(result.right.docsPath).toBe(".confluence/docs")
         expect(result.right.excludePatterns).toEqual([])
       }
     })
