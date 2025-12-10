@@ -1,24 +1,26 @@
 /**
  * Confluence REST API v2 client service.
  *
+ * Wraps @knpkv/confluence-api-client with rate limit retry logic and pagination helpers.
+ *
  * @module
  */
 import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
+import {
+  ConfluenceApiClient,
+  ConfluenceApiConfig,
+  type V1ApiError,
+  type V2ApiError
+} from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
-import * as Schema from "effect/Schema"
 import type { PageId } from "./Brand.js"
-import { ApiError, RateLimitError } from "./ConfluenceError.js"
+import type { RateLimitError } from "./ConfluenceError.js"
+import { ApiError } from "./ConfluenceError.js"
 import type { AtlassianUser, PageChildrenResponse, PageListItem, PageResponse, PageVersion } from "./Schemas.js"
-import {
-  AtlassianUserSchema,
-  PageChildrenResponseSchema,
-  PageResponseSchema,
-  PageVersionsResponseSchema
-} from "./Schemas.js"
 
 /**
  * Request to create a new page.
@@ -160,146 +162,57 @@ const rateLimitSchedule = Schedule.exponential("1 second").pipe(
 )
 
 /**
+ * Map API client errors to domain errors.
+ */
+const mapApiError = (error: V1ApiError | V2ApiError, endpoint: string, pageId?: string): ApiError =>
+  new ApiError({
+    status: error.status,
+    message: error.message,
+    endpoint,
+    ...(pageId !== undefined && { pageId })
+  })
+
+/**
  * Create the Confluence client service.
  */
 const make = (
   config: ConfluenceClientConfig
 ): Effect.Effect<Context.Tag.Service<typeof ConfluenceClient>, never, HttpClient.HttpClient> =>
   Effect.gen(function*() {
+    // Create underlying API client
+    const apiConfigLayer = Layer.succeed(ConfluenceApiConfig, {
+      baseUrl: config.baseUrl,
+      auth: config.auth.type === "token"
+        ? { type: "basic", email: config.auth.email, apiToken: Redacted.make(config.auth.token) }
+        : { type: "oauth2", accessToken: Redacted.make(config.auth.accessToken), cloudId: config.auth.cloudId }
+    })
+
     const httpClient = yield* HttpClient.HttpClient
 
-    const authHeader = config.auth.type === "token"
-      ? `Basic ${Buffer.from(`${config.auth.email}:${config.auth.token}`).toString("base64")}`
-      : `Bearer ${config.auth.accessToken}`
-
-    // OAuth uses different API base URL with cloud_id
-    const apiBaseUrl = config.auth.type === "oauth2"
-      ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/api/v2`
-      : `${config.baseUrl}/wiki/api/v2`
-
-    const baseRequest = HttpClientRequest.get(apiBaseUrl).pipe(
-      HttpClientRequest.setHeader("Authorization", authHeader),
-      HttpClientRequest.setHeader("Accept", "application/json"),
-      HttpClientRequest.setHeader("Content-Type", "application/json")
+    const apiClient = yield* ConfluenceApiClient.pipe(
+      Effect.provide(ConfluenceApiClient.layer),
+      Effect.provide(apiConfigLayer),
+      Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
     )
 
-    /**
-     * Make an HTTP request to the Confluence API.
-     * Returns raw JSON - callers must validate with Schema.decodeUnknown.
-     */
-    const request = (
-      method: "GET" | "POST" | "PUT" | "DELETE",
-      path: string,
-      body?: unknown
-    ): Effect.Effect<unknown, ApiError | RateLimitError, never> =>
-      Effect.gen(function*() {
-        let req = baseRequest.pipe(
-          HttpClientRequest.setMethod(method),
-          HttpClientRequest.setUrl(`${apiBaseUrl}${path}`)
-        )
-
-        if (body !== undefined) {
-          req = HttpClientRequest.bodyJson(req, body).pipe(
-            Effect.catchAll(() => Effect.succeed(req)),
-            Effect.runSync
-          )
-        }
-
-        const response = yield* httpClient.execute(req).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Request failed: ${error.message}`,
-              endpoint: path
-            })
-          )
-        )
-
-        if (response.status === 429) {
-          const retryAfterHeader = response.headers["retry-after"]
-          const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined
-          return yield* Effect.fail(
-            retryAfter !== undefined
-              ? new RateLimitError({ retryAfter })
-              : new RateLimitError({})
-          )
-        }
-
-        if (response.status >= 400) {
-          const text = yield* response.text.pipe(
-            Effect.catchAll(() => Effect.succeed(""))
-          )
-          const fullUrl = `${apiBaseUrl}${path}`
-          return yield* Effect.fail(
-            new ApiError({
-              status: response.status,
-              message: `${text || `HTTP ${response.status}`} [${method} ${fullUrl}]`,
-              endpoint: path
-            })
-          )
-        }
-
-        if (method === "DELETE" && response.status === 204) {
-          return undefined
-        }
-
-        const json = yield* response.json.pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: response.status,
-              message: `Failed to parse response: ${error}`,
-              endpoint: path
-            })
-          )
-        )
-
-        return json
-      }).pipe(
-        Effect.retry(rateLimitSchedule)
-      )
-
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      Effect.gen(function*() {
-        const raw = yield* request(
-          "GET",
-          `/pages/${id}?body-format=storage`
-        )
-        return yield* Schema.decodeUnknown(PageResponseSchema)(raw).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Invalid response schema: ${error.message}`,
-              endpoint: `/pages/${id}`,
-              pageId: id
-            })
-          )
-        )
-      })
+      apiClient.v2.getPageById(id, { bodyFormat: "storage" }).pipe(
+        Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
-      Effect.gen(function*() {
-        const raw = yield* request(
-          "GET",
-          `/pages/${id}/children?body-format=storage`
-        )
-        return yield* Schema.decodeUnknown(PageChildrenResponseSchema)(raw).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Invalid response schema: ${error.message}`,
-              endpoint: `/pages/${id}/children`,
-              pageId: id
-            })
-          )
-        )
-      })
+      apiClient.v2.getPageChildren(id, { bodyFormat: "storage" }).pipe(
+        Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<PageChildrenResponse, ApiError | RateLimitError>
 
     const getAllChildren = (id: PageId): Effect.Effect<ReadonlyArray<PageListItem>, ApiError | RateLimitError> =>
       Effect.gen(function*() {
         const allChildren: Array<PageListItem> = []
         let cursor: string | undefined
         let iterations = 0
-        const maxIterations = 100 // Prevent unbounded pagination
+        const maxIterations = 100
 
         do {
           if (iterations >= maxIterations) {
@@ -313,27 +226,18 @@ const make = (
             )
           }
 
-          const path = cursor
-            ? `/pages/${id}/children?body-format=storage&cursor=${cursor}`
-            : `/pages/${id}/children?body-format=storage`
-
-          const raw = yield* request("GET", path)
-          const response = yield* Schema.decodeUnknown(PageChildrenResponseSchema)(raw).pipe(
-            Effect.mapError((error) =>
-              new ApiError({
-                status: 0,
-                message: `Invalid response schema: ${error.message}`,
-                endpoint: path,
-                pageId: id
-              })
-            )
+          const response = yield* apiClient.v2.getPageChildren(id, {
+            bodyFormat: "storage",
+            cursor
+          }).pipe(
+            Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
+            Effect.retry(rateLimitSchedule)
           )
 
           for (const child of response.results) {
-            allChildren.push(child)
+            allChildren.push(child as PageListItem)
           }
 
-          // Extract cursor from next link if present
           cursor = response._links?.next
             ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
             : undefined
@@ -345,36 +249,22 @@ const make = (
       })
 
     const createPage = (req: CreatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      Effect.gen(function*() {
-        const raw = yield* request("POST", "/pages", req)
-        return yield* Schema.decodeUnknown(PageResponseSchema)(raw).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Invalid response schema: ${error.message}`,
-              endpoint: "/pages"
-            })
-          )
-        )
-      })
+      apiClient.v2.createPage(req).pipe(
+        Effect.mapError((e) => mapApiError(e, "/pages")),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      Effect.gen(function*() {
-        const raw = yield* request("PUT", `/pages/${req.id}`, req)
-        return yield* Schema.decodeUnknown(PageResponseSchema)(raw).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Invalid response schema: ${error.message}`,
-              endpoint: `/pages/${req.id}`,
-              pageId: req.id
-            })
-          )
-        )
-      })
+      apiClient.v2.updatePage(req.id, req).pipe(
+        Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
-      request("DELETE", `/pages/${id}`).pipe(Effect.asVoid)
+      apiClient.v2.deletePage(id).pipe(
+        Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
+        Effect.retry(rateLimitSchedule)
+      )
 
     const getPageVersions = (
       id: PageId,
@@ -398,30 +288,18 @@ const make = (
             )
           }
 
-          let path = `/pages/${id}/versions?limit=50`
-          if (options?.includeBody) {
-            path += `&body-format=storage`
-          }
-          if (cursor) {
-            path += `&cursor=${cursor}`
-          }
-
-          const raw = yield* request("GET", path)
-          const response = yield* Schema.decodeUnknown(PageVersionsResponseSchema)(raw).pipe(
-            Effect.mapError((error) =>
-              new ApiError({
-                status: 0,
-                message: `Invalid response schema: ${error.message}`,
-                endpoint: path,
-                pageId: id
-              })
-            )
+          const response = yield* apiClient.v2.getPageVersions(id, {
+            bodyFormat: options?.includeBody ? "storage" : undefined,
+            cursor,
+            limit: 50
+          }).pipe(
+            Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
+            Effect.retry(rateLimitSchedule)
           )
 
           for (const version of response.results) {
-            // Filter by since if provided
-            if (options?.since === undefined || version.number > options.since) {
-              allVersions.push(version)
+            if (options?.since === undefined || (version.number ?? 0) > options.since) {
+              allVersions.push(version as PageVersion)
             }
           }
 
@@ -436,62 +314,10 @@ const make = (
       })
 
     const getUser = (accountId: string): Effect.Effect<AtlassianUser, ApiError | RateLimitError> =>
-      Effect.gen(function*() {
-        // User API is at /wiki/rest/api (v1), not v2
-        const userApiBaseUrl = config.auth.type === "oauth2"
-          ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
-          : `${config.baseUrl}/wiki/rest/api`
-
-        // Use URL constructor for proper encoding of accountId
-        const url = new URL(`${userApiBaseUrl}/user`)
-        url.searchParams.set("accountId", accountId)
-
-        const req = HttpClientRequest.get(url.toString()).pipe(
-          HttpClientRequest.setHeader("Authorization", authHeader),
-          HttpClientRequest.setHeader("Accept", "application/json")
-        )
-
-        const response = yield* httpClient.execute(req).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Request failed: ${error.message}`,
-              endpoint: `/user?accountId=${accountId}`
-            })
-          )
-        )
-
-        if (response.status >= 400) {
-          const text = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
-          return yield* Effect.fail(
-            new ApiError({
-              status: response.status,
-              message: text || `HTTP ${response.status}`,
-              endpoint: `/user?accountId=${accountId}`
-            })
-          )
-        }
-
-        const json = yield* response.json.pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: response.status,
-              message: `Failed to parse response: ${error}`,
-              endpoint: `/user?accountId=${accountId}`
-            })
-          )
-        )
-
-        return yield* Schema.decodeUnknown(AtlassianUserSchema)(json).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Invalid response schema: ${error.message}`,
-              endpoint: `/user?accountId=${accountId}`
-            })
-          )
-        )
-      })
+      apiClient.v1.getUser({ accountId }).pipe(
+        Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<AtlassianUser, ApiError | RateLimitError>
 
     const getSpaceId = (pageId: PageId): Effect.Effect<string, ApiError | RateLimitError> =>
       Effect.gen(function*() {
@@ -509,74 +335,32 @@ const make = (
         return page.spaceId
       })
 
-    // V1 API base URL for setting editor property
-    const apiV1BaseUrl = config.auth.type === "oauth2"
-      ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
-      : `${config.baseUrl}/wiki/rest/api`
-
     const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        // First, get current property version (if exists)
-        const getPropertyReq = baseRequest.pipe(
-          HttpClientRequest.setMethod("GET"),
-          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
-        )
-
-        const getResponse = yield* httpClient.execute(getPropertyReq).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-
+        // First try to get current property version
         let propertyVersion = 1
-        if (getResponse && getResponse.status === 200) {
-          const json = yield* getResponse.json.pipe(Effect.catchAll(() => Effect.succeed(null)))
-          if (json && typeof json === "object" && "version" in json) {
-            const versionObj = json.version as { number?: number }
-            propertyVersion = (versionObj.number ?? 0) + 1
-          }
-        }
+        const existingProp = yield* apiClient.v1.getContentProperty(pageId, "editor").pipe(
+          Effect.map((prop) => prop.version.number + 1),
+          Effect.catchAll(() => Effect.succeed(1))
+        )
+        propertyVersion = existingProp
 
-        // Set or update the editor property
-        const body = {
+        const payload = {
           key: "editor",
           value: version,
           version: { number: propertyVersion }
         }
 
-        let req = baseRequest.pipe(
-          HttpClientRequest.setMethod(getResponse?.status === 200 ? "PUT" : "POST"),
-          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
-        )
-
-        req = HttpClientRequest.bodyJson(req, body).pipe(
-          Effect.catchAll(() => Effect.succeed(req)),
-          Effect.runSync
-        )
-
-        const response = yield* httpClient.execute(req).pipe(
-          Effect.mapError((error) =>
-            new ApiError({
-              status: 0,
-              message: `Failed to set editor version: ${error.message}`,
-              endpoint: `/content/${pageId}/property/editor`,
-              pageId
-            })
+        if (propertyVersion === 1) {
+          yield* apiClient.v1.createContentProperty(pageId, { payload }).pipe(
+            Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
           )
-        )
-
-        if (response.status >= 400) {
-          const text = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
-          return yield* Effect.fail(
-            new ApiError({
-              status: response.status,
-              message: `${text} [${
-                response.status === 200 ? "PUT" : "POST"
-              } ${apiV1BaseUrl}/content/${pageId}/property/editor]`,
-              endpoint: `/content/${pageId}/property/editor`,
-              pageId
-            })
+        } else {
+          yield* apiClient.v1.updateContentProperty(pageId, "editor", { payload }).pipe(
+            Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
           )
         }
-      })
+      }).pipe(Effect.retry(rateLimitSchedule))
 
     return ConfluenceClient.of({
       getPage,
