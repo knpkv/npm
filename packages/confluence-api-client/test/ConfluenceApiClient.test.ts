@@ -229,5 +229,57 @@ describe("ConfluenceApiClient", () => {
         expect(prop.key).toBe("prop1")
         expect(capturedRequests[0]!.url).toContain("/content/123/property/prop1")
       }))
+
+    it.effect("createContentProperty", () =>
+      Effect.gen(function*() {
+        const { capturedRequests, mockClient } = createMockHttpClient([
+          { status: 200, body: { key: "editor", value: "v2", version: { number: 1 } } }
+        ])
+
+        const configLayer = Layer.succeed(ConfluenceApiConfig, {
+          baseUrl: "https://test.atlassian.net",
+          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
+        })
+        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
+
+        const client = yield* ConfluenceApiClient.pipe(
+          Effect.provide(ConfluenceApiClient.layer),
+          Effect.provide(configLayer),
+          Effect.provide(httpLayer)
+        )
+
+        yield* client.v1.createContentProperty("123", {
+          payload: { key: "editor", value: "v2", version: { number: 1 } }
+        })
+
+        expect(capturedRequests[0]!.url).toContain("/content/123/property")
+        expect(capturedRequests[0]!.method).toBe("POST")
+      }))
+
+    it.effect("updateContentProperty", () =>
+      Effect.gen(function*() {
+        const { capturedRequests, mockClient } = createMockHttpClient([
+          { status: 200, body: { key: "editor", value: "v2", version: { number: 2 } } }
+        ])
+
+        const configLayer = Layer.succeed(ConfluenceApiConfig, {
+          baseUrl: "https://test.atlassian.net",
+          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
+        })
+        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
+
+        const client = yield* ConfluenceApiClient.pipe(
+          Effect.provide(ConfluenceApiClient.layer),
+          Effect.provide(configLayer),
+          Effect.provide(httpLayer)
+        )
+
+        yield* client.v1.updateContentProperty("123", "editor", {
+          payload: { key: "editor", value: "v2", version: { number: 2 } }
+        })
+
+        expect(capturedRequests[0]!.url).toContain("/content/123/property/editor")
+        expect(capturedRequests[0]!.method).toBe("PUT")
+      }))
   })
 })

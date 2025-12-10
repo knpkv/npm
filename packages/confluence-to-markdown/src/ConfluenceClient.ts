@@ -152,6 +152,12 @@ export interface ConfluenceClientConfig {
   }
 }
 
+/** Maximum pagination iterations to prevent infinite loops */
+const MAX_PAGINATION_ITERATIONS = 100
+
+/** Default page size for version fetching */
+const VERSIONS_PAGE_SIZE = 50
+
 /**
  * Rate limit retry schedule with exponential backoff.
  */
@@ -212,14 +218,13 @@ const make = (
         const allChildren: Array<PageListItem> = []
         let cursor: string | undefined
         let iterations = 0
-        const maxIterations = 100
 
         do {
-          if (iterations >= maxIterations) {
+          if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* Effect.fail(
               new ApiError({
                 status: 0,
-                message: `Pagination limit exceeded: more than ${maxIterations} pages of children`,
+                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
                 endpoint: `/pages/${id}/children`,
                 pageId: id
               })
@@ -274,14 +279,13 @@ const make = (
         const allVersions: Array<PageVersion> = []
         let cursor: string | undefined
         let iterations = 0
-        const maxIterations = 100
 
         do {
-          if (iterations >= maxIterations) {
+          if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* Effect.fail(
               new ApiError({
                 status: 0,
-                message: `Pagination limit exceeded: more than ${maxIterations} pages of versions`,
+                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of versions`,
                 endpoint: `/pages/${id}/versions`,
                 pageId: id
               })
@@ -291,7 +295,7 @@ const make = (
           const response = yield* apiClient.v2.getPageVersions(id, {
             bodyFormat: options?.includeBody ? "storage" : undefined,
             cursor,
-            limit: 50
+            limit: VERSIONS_PAGE_SIZE
           }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
             Effect.retry(rateLimitSchedule)
@@ -337,13 +341,15 @@ const make = (
 
     const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        // First try to get current property version
-        let propertyVersion = 1
-        const existingProp = yield* apiClient.v1.getContentProperty(pageId, "editor").pipe(
+        // Try to get current property version, only treat 404 as "not exists"
+        const propertyVersion = yield* apiClient.v1.getContentProperty(pageId, "editor").pipe(
           Effect.map((prop) => prop.version.number + 1),
-          Effect.catchAll(() => Effect.succeed(1))
+          Effect.catchIf(
+            (e) => e.status === 404,
+            () => Effect.succeed(1)
+          ),
+          Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
         )
-        propertyVersion = existingProp
 
         const payload = {
           key: "editor",
