@@ -12,8 +12,13 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type { PageId } from "./Brand.js"
 import { ApiError, RateLimitError } from "./ConfluenceError.js"
-import type { PageChildrenResponse, PageListItem, PageResponse } from "./Schemas.js"
-import { PageChildrenResponseSchema, PageResponseSchema } from "./Schemas.js"
+import type { AtlassianUser, PageChildrenResponse, PageListItem, PageResponse, PageVersion } from "./Schemas.js"
+import {
+  AtlassianUserSchema,
+  PageChildrenResponseSchema,
+  PageResponseSchema,
+  PageVersionsResponseSchema
+} from "./Schemas.js"
 
 /**
  * Request to create a new page.
@@ -100,6 +105,30 @@ export class ConfluenceClient extends Context.Tag(
      * Delete a page.
      */
     readonly deletePage: (id: PageId) => Effect.Effect<void, ApiError | RateLimitError>
+
+    /**
+     * Get version history for a page.
+     */
+    readonly getPageVersions: (
+      id: PageId,
+      options?: { since?: number; includeBody?: boolean }
+    ) => Effect.Effect<ReadonlyArray<PageVersion>, ApiError | RateLimitError>
+
+    /**
+     * Get user info by account ID.
+     */
+    readonly getUser: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>
+
+    /**
+     * Get space ID for a page.
+     */
+    readonly getSpaceId: (pageId: PageId) => Effect.Effect<string, ApiError | RateLimitError>
+
+    /**
+     * Set editor version for a page (v1 or v2).
+     * Uses V1 API to set page property.
+     */
+    readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
   }
 >() {}
 
@@ -347,13 +376,219 @@ const make = (
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
       request("DELETE", `/pages/${id}`).pipe(Effect.asVoid)
 
+    const getPageVersions = (
+      id: PageId,
+      options?: { since?: number; includeBody?: boolean }
+    ): Effect.Effect<ReadonlyArray<PageVersion>, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        const allVersions: Array<PageVersion> = []
+        let cursor: string | undefined
+        let iterations = 0
+        const maxIterations = 100
+
+        do {
+          if (iterations >= maxIterations) {
+            return yield* Effect.fail(
+              new ApiError({
+                status: 0,
+                message: `Pagination limit exceeded: more than ${maxIterations} pages of versions`,
+                endpoint: `/pages/${id}/versions`,
+                pageId: id
+              })
+            )
+          }
+
+          let path = `/pages/${id}/versions?limit=50`
+          if (options?.includeBody) {
+            path += `&body-format=storage`
+          }
+          if (cursor) {
+            path += `&cursor=${cursor}`
+          }
+
+          const raw = yield* request("GET", path)
+          const response = yield* Schema.decodeUnknown(PageVersionsResponseSchema)(raw).pipe(
+            Effect.mapError((error) =>
+              new ApiError({
+                status: 0,
+                message: `Invalid response schema: ${error.message}`,
+                endpoint: path,
+                pageId: id
+              })
+            )
+          )
+
+          for (const version of response.results) {
+            // Filter by since if provided
+            if (options?.since === undefined || version.number > options.since) {
+              allVersions.push(version)
+            }
+          }
+
+          cursor = response._links?.next
+            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
+            : undefined
+
+          iterations++
+        } while (cursor)
+
+        return allVersions
+      })
+
+    const getUser = (accountId: string): Effect.Effect<AtlassianUser, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        // User API is at /wiki/rest/api (v1), not v2
+        const userApiBaseUrl = config.auth.type === "oauth2"
+          ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
+          : `${config.baseUrl}/wiki/rest/api`
+
+        // Use URL constructor for proper encoding of accountId
+        const url = new URL(`${userApiBaseUrl}/user`)
+        url.searchParams.set("accountId", accountId)
+
+        const req = HttpClientRequest.get(url.toString()).pipe(
+          HttpClientRequest.setHeader("Authorization", authHeader),
+          HttpClientRequest.setHeader("Accept", "application/json")
+        )
+
+        const response = yield* httpClient.execute(req).pipe(
+          Effect.mapError((error) =>
+            new ApiError({
+              status: 0,
+              message: `Request failed: ${error.message}`,
+              endpoint: `/user?accountId=${accountId}`
+            })
+          )
+        )
+
+        if (response.status >= 400) {
+          const text = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
+          return yield* Effect.fail(
+            new ApiError({
+              status: response.status,
+              message: text || `HTTP ${response.status}`,
+              endpoint: `/user?accountId=${accountId}`
+            })
+          )
+        }
+
+        const json = yield* response.json.pipe(
+          Effect.mapError((error) =>
+            new ApiError({
+              status: response.status,
+              message: `Failed to parse response: ${error}`,
+              endpoint: `/user?accountId=${accountId}`
+            })
+          )
+        )
+
+        return yield* Schema.decodeUnknown(AtlassianUserSchema)(json).pipe(
+          Effect.mapError((error) =>
+            new ApiError({
+              status: 0,
+              message: `Invalid response schema: ${error.message}`,
+              endpoint: `/user?accountId=${accountId}`
+            })
+          )
+        )
+      })
+
+    const getSpaceId = (pageId: PageId): Effect.Effect<string, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        const page = yield* getPage(pageId)
+        if (!page.spaceId) {
+          return yield* Effect.fail(
+            new ApiError({
+              status: 0,
+              message: `Page ${pageId} does not have spaceId`,
+              endpoint: `/pages/${pageId}`,
+              pageId
+            })
+          )
+        }
+        return page.spaceId
+      })
+
+    // V1 API base URL for setting editor property
+    const apiV1BaseUrl = config.auth.type === "oauth2"
+      ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/rest/api`
+      : `${config.baseUrl}/wiki/rest/api`
+
+    const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        // First, get current property version (if exists)
+        const getPropertyReq = baseRequest.pipe(
+          HttpClientRequest.setMethod("GET"),
+          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
+        )
+
+        const getResponse = yield* httpClient.execute(getPropertyReq).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+
+        let propertyVersion = 1
+        if (getResponse && getResponse.status === 200) {
+          const json = yield* getResponse.json.pipe(Effect.catchAll(() => Effect.succeed(null)))
+          if (json && typeof json === "object" && "version" in json) {
+            const versionObj = json.version as { number?: number }
+            propertyVersion = (versionObj.number ?? 0) + 1
+          }
+        }
+
+        // Set or update the editor property
+        const body = {
+          key: "editor",
+          value: version,
+          version: { number: propertyVersion }
+        }
+
+        let req = baseRequest.pipe(
+          HttpClientRequest.setMethod(getResponse?.status === 200 ? "PUT" : "POST"),
+          HttpClientRequest.setUrl(`${apiV1BaseUrl}/content/${pageId}/property/editor`)
+        )
+
+        req = HttpClientRequest.bodyJson(req, body).pipe(
+          Effect.catchAll(() => Effect.succeed(req)),
+          Effect.runSync
+        )
+
+        const response = yield* httpClient.execute(req).pipe(
+          Effect.mapError((error) =>
+            new ApiError({
+              status: 0,
+              message: `Failed to set editor version: ${error.message}`,
+              endpoint: `/content/${pageId}/property/editor`,
+              pageId
+            })
+          )
+        )
+
+        if (response.status >= 400) {
+          const text = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
+          return yield* Effect.fail(
+            new ApiError({
+              status: response.status,
+              message: `${text} [${
+                response.status === 200 ? "PUT" : "POST"
+              } ${apiV1BaseUrl}/content/${pageId}/property/editor]`,
+              endpoint: `/content/${pageId}/property/editor`,
+              pageId
+            })
+          )
+        }
+      })
+
     return ConfluenceClient.of({
       getPage,
       getChildren,
       getAllChildren,
       createPage,
       updatePage,
-      deletePage
+      deletePage,
+      getPageVersions,
+      getUser,
+      getSpaceId,
+      setEditorVersion
     })
   })
 

@@ -22,3 +22,6 @@ scratchpad/**/*.ts
 .patterns
 .specs/*
 .context/
+
+# Local environment variables
+.envrc.local

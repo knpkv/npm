@@ -59,8 +59,11 @@ const generateUUID = (): Effect.Effect<string> =>
   })
 
 const OAUTH_SCOPES = [
+  // Granular scopes (v2 API)
   "read:page:confluence",
   "write:page:confluence",
+  "delete:page:confluence",
+  // User identity
   "read:me",
   "offline_access"
 ].join(" ")

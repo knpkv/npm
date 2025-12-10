@@ -27,11 +27,12 @@ export { layer as MarkdownConverterLayer, MarkdownConverter } from "./MarkdownCo
 export * from "./Schemas.js"
 export {
   layer as SyncEngineLayer,
+  type ProgressCallback,
+  type PullOptions,
   type PullResult,
   type PushResult,
   type StatusResult,
   SyncEngine,
-  type SyncResult,
   type SyncStatus
 } from "./SyncEngine.js"
 

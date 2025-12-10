@@ -26,7 +26,15 @@ import * as Data from "effect/Data"
  */
 export class ConfigNotFoundError extends Data.TaggedError("ConfigNotFoundError")<{
   readonly path: string
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { path: string }) {
+    super({
+      path: params.path,
+      message: `Config not found: ${params.path}\nRun 'confluence clone' to initialize.`
+    })
+  }
+}
 
 /**
  * Error thrown when .confluence.json parsing fails.
@@ -36,7 +44,16 @@ export class ConfigNotFoundError extends Data.TaggedError("ConfigNotFoundError")
 export class ConfigParseError extends Data.TaggedError("ConfigParseError")<{
   readonly path: string
   readonly cause: unknown
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { path: string; cause: unknown }) {
+    super({
+      path: params.path,
+      cause: params.cause,
+      message: `Invalid config file: ${params.path}`
+    })
+  }
+}
 
 /**
  * Error thrown when configuration validation fails.
@@ -95,8 +112,16 @@ export class ApiError extends Data.TaggedError("ApiError")<{
  * @category Errors
  */
 export class RateLimitError extends Data.TaggedError("RateLimitError")<{
-  readonly retryAfter?: number
-}> {}
+  readonly retryAfter?: number | undefined
+  readonly message: string
+}> {
+  constructor(params?: { retryAfter?: number }) {
+    const message = params?.retryAfter
+      ? `Rate limited. Retry after ${params.retryAfter}s.`
+      : "Rate limited. Please wait and try again."
+    super({ retryAfter: params?.retryAfter, message })
+  }
+}
 
 /**
  * Error thrown when HTML/Markdown conversion fails.
@@ -106,7 +131,16 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
 export class ConversionError extends Data.TaggedError("ConversionError")<{
   readonly direction: "htmlToMarkdown" | "markdownToHtml"
   readonly cause: unknown
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { direction: "htmlToMarkdown" | "markdownToHtml"; cause: unknown }) {
+    super({
+      direction: params.direction,
+      cause: params.cause,
+      message: `Conversion failed (${params.direction}): ${params.cause}`
+    })
+  }
+}
 
 /**
  * Error thrown when sync conflict is detected.
@@ -118,7 +152,15 @@ export class ConflictError extends Data.TaggedError("ConflictError")<{
   readonly localVersion: number
   readonly remoteVersion: number
   readonly path: string
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { pageId: string; localVersion: number; remoteVersion: number; path: string }) {
+    super({
+      ...params,
+      message: `Conflict: ${params.path} (local v${params.localVersion} vs remote v${params.remoteVersion})`
+    })
+  }
+}
 
 /**
  * Error thrown when file system operation fails.
@@ -129,7 +171,15 @@ export class FileSystemError extends Data.TaggedError("FileSystemError")<{
   readonly operation: "read" | "write" | "delete" | "mkdir" | "rename"
   readonly path: string
   readonly cause: unknown
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { operation: "read" | "write" | "delete" | "mkdir" | "rename"; path: string; cause: unknown }) {
+    super({
+      ...params,
+      message: `File ${params.operation} failed: ${params.path}`
+    })
+  }
+}
 
 /**
  * Error thrown when OAuth2 flow fails.
@@ -139,7 +189,15 @@ export class FileSystemError extends Data.TaggedError("FileSystemError")<{
 export class OAuthError extends Data.TaggedError("OAuthError")<{
   readonly step: "authorize" | "token" | "refresh" | "revoke"
   readonly cause: unknown
-}> {}
+  readonly message: string
+}> {
+  constructor(params: { step: "authorize" | "token" | "refresh" | "revoke"; cause: unknown }) {
+    super({
+      ...params,
+      message: `OAuth ${params.step} failed: ${params.cause}`
+    })
+  }
+}
 
 /**
  * Error thrown when front-matter parsing fails.
@@ -149,6 +207,39 @@ export class OAuthError extends Data.TaggedError("OAuthError")<{
 export class FrontMatterError extends Data.TaggedError("FrontMatterError")<{
   readonly path: string
   readonly cause: unknown
+  readonly message: string
+}> {
+  constructor(params: { path: string; cause: unknown }) {
+    super({
+      ...params,
+      message: `Invalid front-matter in: ${params.path}`
+    })
+  }
+}
+
+/**
+ * Error thrown when directory structure is inconsistent.
+ *
+ * @example
+ * ```typescript
+ * import { Effect } from "effect"
+ * import { StructureError } from "@knpkv/confluence-to-markdown/ConfluenceError"
+ *
+ * Effect.gen(function* () {
+ *   // ... validate structure
+ * }).pipe(
+ *   Effect.catchTag("StructureError", (error) =>
+ *     Effect.sync(() => console.error(`${error.message}\nAdvice: ${error.advice}`))
+ *   )
+ * )
+ * ```
+ *
+ * @category Errors
+ */
+export class StructureError extends Data.TaggedError("StructureError")<{
+  readonly path: string
+  readonly advice: string
+  readonly message: string
 }> {}
 
 /**
@@ -168,6 +259,7 @@ export type ConfluenceError =
   | FileSystemError
   | OAuthError
   | FrontMatterError
+  | StructureError
 
 /**
  * Type guard to check if error is a ConfluenceError.
@@ -192,5 +284,6 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "ConflictError",
     "FileSystemError",
     "OAuthError",
-    "FrontMatterError"
+    "FrontMatterError",
+    "StructureError"
   ].includes((error as { _tag: string })._tag)

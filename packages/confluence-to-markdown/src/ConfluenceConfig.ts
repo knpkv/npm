@@ -48,13 +48,20 @@ export class ConfluenceConfig extends Context.Tag(
     readonly excludePatterns: ReadonlyArray<string>
     /** Save original Confluence HTML alongside markdown */
     readonly saveSource: boolean
+    /** Glob patterns for files to track in git */
+    readonly trackedPaths: ReadonlyArray<string>
   }
 >() {}
 
 /**
+ * Default config directory.
+ */
+const CONFIG_DIR = ".confluence"
+
+/**
  * Default config file name.
  */
-const CONFIG_FILE_NAME = ".confluence.json"
+const CONFIG_FILE_NAME = "config.json"
 
 /**
  * Load configuration from a file.
@@ -110,6 +117,35 @@ const loadConfig = (
  *
  * @category Layers
  */
+/**
+ * Validate docsPath configuration.
+ * docsPath must be either:
+ * - ".confluence/docs" (default, files in git repo)
+ * - A path outside ".confluence/" (external docs directory)
+ * NOT: ".confluence/other" which would cause confusion
+ */
+const validateDocsPath = (
+  docsPath: string,
+  configPath: string
+): Effect.Effect<void, ConfigParseError> => {
+  const isDefault = docsPath === ".confluence/docs"
+  const isInsideConfluence = docsPath.startsWith(".confluence/") || docsPath.startsWith(".confluence\\")
+  const isOutside = !isInsideConfluence
+
+  if (isDefault || isOutside) {
+    return Effect.void
+  }
+
+  // docsPath is inside .confluence/ but not the default - this is invalid
+  return Effect.fail(
+    new ConfigParseError({
+      path: configPath,
+      cause:
+        `Invalid docsPath "${docsPath}". Must be either ".confluence/docs" (default) or a path outside ".confluence/" (e.g., "docs" for external docs).`
+    })
+  )
+}
+
 export const layer = (
   configPath?: string
 ): Layer.Layer<ConfluenceConfig, ConfigNotFoundError | ConfigParseError, FileSystem.FileSystem | Path.Path> =>
@@ -117,8 +153,11 @@ export const layer = (
     ConfluenceConfig,
     Effect.gen(function*() {
       const path = yield* Path.Path
-      const resolvedPath = configPath ?? path.join(process.cwd(), CONFIG_FILE_NAME)
+      const resolvedPath = configPath ?? path.join(process.cwd(), CONFIG_DIR, CONFIG_FILE_NAME)
       const config = yield* loadConfig(resolvedPath)
+
+      // Validate docsPath
+      yield* validateDocsPath(config.docsPath, resolvedPath)
 
       return ConfluenceConfig.of({
         rootPageId: config.rootPageId,
@@ -126,7 +165,8 @@ export const layer = (
         ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
         docsPath: config.docsPath,
         excludePatterns: config.excludePatterns,
-        saveSource: config.saveSource
+        saveSource: config.saveSource,
+        trackedPaths: config.trackedPaths
       })
     })
   )
@@ -147,7 +187,8 @@ export const layerFromValues = (
       ...(config.spaceKey !== undefined ? { spaceKey: config.spaceKey } : {}),
       docsPath: config.docsPath,
       excludePatterns: config.excludePatterns,
-      saveSource: config.saveSource
+      saveSource: config.saveSource,
+      trackedPaths: config.trackedPaths
     })
   )
 
@@ -165,20 +206,30 @@ export const createConfigFile = (
     const fs = yield* FileSystem.FileSystem
     const pathService = yield* Path.Path
 
-    const resolvedPath = configPath ?? pathService.join(process.cwd(), CONFIG_FILE_NAME)
+    const configDir = pathService.join(process.cwd(), CONFIG_DIR)
+    const resolvedPath = configPath ?? pathService.join(configDir, CONFIG_FILE_NAME)
 
     const config: ConfluenceConfigFile = {
       rootPageId: rootPageId as PageId,
       baseUrl,
-      docsPath: ".docs/confluence",
+      docsPath: ".confluence/docs",
       excludePatterns: [],
-      saveSource: false
+      saveSource: false,
+      trackedPaths: ["**/*.md"]
     }
 
     // Validate the config
     yield* Schema.decodeUnknown(ConfluenceConfigFileSchema)(config).pipe(
       Effect.mapError((cause) => new ConfigParseError({ path: resolvedPath, cause }))
     )
+
+    // Create .confluence directory if it doesn't exist
+    const dirExists = yield* fs.exists(configDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
+    if (!dirExists) {
+      yield* fs.makeDirectory(configDir, { recursive: true }).pipe(
+        Effect.mapError((cause) => new ConfigParseError({ path: configDir, cause }))
+      )
+    }
 
     const content = JSON.stringify(config, null, 2)
     yield* fs.writeFileString(resolvedPath, content).pipe(

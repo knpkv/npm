@@ -96,3 +96,24 @@ export const serializeMarkdown = (
 
   return matter.stringify(content, fm)
 }
+
+/**
+ * Serialize a new page markdown with minimal front-matter.
+ *
+ * @param frontMatter - The new page front-matter (title only)
+ * @param content - The markdown content
+ * @returns The serialized markdown file content
+ *
+ * @internal
+ */
+export const serializeNewPageMarkdown = (
+  frontMatter: NewPageFrontMatter,
+  content: string
+): string => {
+  const fm = {
+    title: frontMatter.title,
+    ...(frontMatter.parentId !== undefined ? { parentId: frontMatter.parentId } : {})
+  }
+
+  return matter.stringify(content, fm)
+}
