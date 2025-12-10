@@ -5,8 +5,5 @@
   "compilerOptions": {
     "stripInternal": true
   },
-  "references": [
-    { "path": "packages/hello/tsconfig.build.json" },
-    { "path": "packages/confluence-api-client/tsconfig.build.json" }
-  ]
+  "references": [{ "path": "packages/hello/tsconfig.build.json" }]
 }
