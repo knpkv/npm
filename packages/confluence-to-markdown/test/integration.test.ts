@@ -5,7 +5,7 @@
  *
  * Requires:
  * - CONFLUENCE_BASE_URL: Confluence base URL
- * - CONFLUENCE_ROOT_PAGE_ID: Test page ID (default: 24641561)
+ * - CONFLUENCE_ROOT_PAGE_ID: Test page ID
  * - OAuth tokens in ~/.confluence/ (from `confluence auth login`)
  */
 import { execFileSync } from "node:child_process"
