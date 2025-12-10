@@ -15,8 +15,8 @@ import * as path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 const CLI_PATH = path.resolve(__dirname, "../dist/bin.js")
-const BASE_URL = process.env.CONFLUENCE_BASE_URL ?? "https://anthropic-se.atlassian.net"
-const ROOT_PAGE_ID = process.env.CONFLUENCE_ROOT_PAGE_ID ?? "24641561"
+const BASE_URL = process.env.CONFLUENCE_BASE_URL
+const ROOT_PAGE_ID = process.env.CONFLUENCE_ROOT_PAGE_ID
 
 // Test state
 interface TestState {
@@ -177,12 +177,11 @@ const modifyPage = (filePath: string, marker: string): void => {
 }
 
 /**
- * Delete page from Confluence via API.
+ * Delete a local file.
  */
-const deletePageFromConfluence = (pageId: string): string => {
-  const output = runCli(["delete", "-f", pageId], { timeout: 60000 })
-  expect(output).toContain(`Deleted page ${pageId}`)
-  return output
+const deleteLocalFile = (filePath: string): void => {
+  fs.unlinkSync(filePath)
+  expect(fs.existsSync(filePath)).toBe(false)
 }
 
 // === Tests ===
@@ -253,8 +252,12 @@ describe("CLI Integration - Page Creation Flow", () => {
     const contentAfterReclone = fs.readFileSync(reclonedFile!, "utf-8")
     expect(contentAfterReclone).toBe(contentBeforeReclone)
 
-    // 7. Delete page from Confluence
-    deletePageFromConfluence(pageId!)
+    // 7. Delete page via git workflow
+    deleteLocalFile(reclonedFile!)
+    commitChanges("Delete integration test page")
+
+    const pushResult3 = pushChanges()
+    expect(pushResult3.deleted).toBe(1)
 
     // 8. Verify deletion - re-clone should not include the page
     removeConfluenceDir()

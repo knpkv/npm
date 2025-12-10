@@ -4,7 +4,6 @@
 import { Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import { GitService } from "../GitService.js"
 import { SyncEngine } from "../SyncEngine.js"
 
@@ -52,16 +51,10 @@ const dryRunOption = Options.boolean("dry-run").pipe(
   Options.withDescription("Show changes without applying")
 )
 
-const messageOption = Options.text("message").pipe(
-  Options.withAlias("m"),
-  Options.withDescription("Revision comment message"),
-  Options.optional
-)
-
 export const pushCommand = Command.make(
   "push",
-  { dryRun: dryRunOption, message: messageOption },
-  ({ dryRun, message }) =>
+  { dryRun: dryRunOption },
+  ({ dryRun }) =>
     Effect.gen(function*() {
       const engine = yield* SyncEngine
       const git = yield* GitService
@@ -74,10 +67,7 @@ export const pushCommand = Command.make(
       }
 
       yield* Console.log(dryRun ? "Dry run - showing changes..." : "Pushing changes to Confluence...")
-      const pushOptions = Option.isSome(message)
-        ? { dryRun, message: message.value }
-        : { dryRun }
-      const result = yield* engine.push(pushOptions)
+      const result = yield* engine.push({ dryRun })
       if (result.pushed === 0 && result.created === 0 && result.deleted === 0) {
         yield* Console.log("Nothing to push")
       } else {

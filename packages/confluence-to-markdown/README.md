@@ -27,11 +27,9 @@ confluence pull --replay-history      # replay each version as separate git comm
 # Push local changes to Confluence
 confluence push
 confluence push -n, --dry-run         # preview changes without applying
-confluence push -m, --message "msg"   # with revision comment
 
-# Delete a page
-confluence delete                     # interactive: select page, delete local file
-confluence delete <pageId> -f         # direct API delete (requires delete:page scope)
+# Delete a page (interactive selector, deletes local file)
+confluence delete
 
 # Check sync status
 confluence status
@@ -73,16 +71,13 @@ confluence new
 ### Page Deletion
 
 ```bash
-# Delete a page (git-based workflow)
-confluence delete                     # interactive selector, deletes local file
+# Delete a page (interactive selector)
+confluence delete
 
 # Workflow:
 # 1. Delete page: confluence delete (or rm <file>)
 # 2. Commit: confluence commit -m "Delete page"
 # 3. Push to Confluence: confluence push  # deletes from Confluence
-
-# Direct API deletion (bypasses git)
-confluence delete <pageId> -f         # permanently deletes from Confluence
 ```
 
 ### Git Commands
@@ -194,7 +189,7 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
    - Add **Confluence API** with scopes:
      - `read:page:confluence` - read pages
      - `write:page:confluence` - push changes
-     - `delete:page:confluence` - delete pages (optional)
+     - `delete:page:confluence` - delete pages
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
