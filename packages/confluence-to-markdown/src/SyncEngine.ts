@@ -397,6 +397,17 @@ export const layer: Layer.Layer<
         // Check if git is initialized
         const gitInitialized = yield* git.isInitialized()
 
+        // Two-branch model: if origin/confluence exists, work on that branch first
+        const hasRemoteBranch = gitInitialized
+          ? yield* git.branchExists("origin/confluence")
+          : false
+        const originalBranch = gitInitialized ? yield* git.getCurrentBranch() : ""
+
+        if (hasRemoteBranch) {
+          // Switch to origin/confluence to pull updates there
+          yield* git.checkout("origin/confluence")
+        }
+
         const rootPage = yield* client.getPage(config.rootPageId)
         const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
 
@@ -408,6 +419,14 @@ export const layer: Layer.Layer<
           }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
         }
 
+        // Two-branch model: merge origin/confluence into current branch
+        if (hasRemoteBranch && originalBranch && originalBranch !== "origin/confluence") {
+          yield* git.checkout(originalBranch)
+          yield* git.merge("origin/confluence", {
+            message: `Merge remote changes from Confluence`
+          }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
+        }
+
         return {
           pulled: result.pulled,
           skipped: 0,
@@ -416,91 +435,210 @@ export const layer: Layer.Layer<
         }
       })
 
-    const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
+    /**
+     * Push a single file's content to Confluence.
+     * Returns the canonical content after push.
+     */
+    const pushFile = (
+      filePath: string,
+      revisionMessage: string
+    ): Effect.Effect<
+      { pushed: boolean; created: boolean; error?: string },
+      SyncError
+    > =>
       Effect.gen(function*() {
-        const files = yield* localFs.listMarkdownFiles(docsPath)
-        let pushed = 0
-        let created = 0
-        let skipped = 0
-        const errors: Array<string> = []
-        const revisionMessage = options.message ?? "Updated via confluence-to-markdown"
+        const localFile = yield* localFs.readMarkdownFile(filePath)
 
-        for (const filePath of files) {
-          yield* Effect.gen(function*() {
-            const localFile = yield* localFs.readMarkdownFile(filePath)
-
-            if (localFile.isNew || !localFile.frontMatter) {
-              // New file - create page
-              if (!options.dryRun) {
-                // For now, skip page creation - need space ID in config
-                errors.push(
-                  `Page creation requires space ID in config (not yet supported): ${filePath}`
-                )
-              }
-              created++
-              return
-            }
-
-            const fm = localFile.frontMatter
-            const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
-
-            if (currentHash === fm.contentHash) {
-              skipped++
-              return
-            }
-
-            if (!options.dryRun) {
-              // Fetch current version to avoid conflicts
-              const remotePage = yield* client.getPage(fm.pageId)
-              const html = yield* converter.markdownToHtml(localFile.content)
-              const updatedPage = yield* client.updatePage({
-                id: fm.pageId,
-                title: fm.title,
-                status: "current",
-                version: {
-                  number: remotePage.version.number + 1,
-                  message: revisionMessage
-                },
-                body: {
-                  representation: "storage",
-                  value: html
-                }
-              })
-
-              // Update front-matter with new version
-              const newFrontMatter: PageFrontMatter = {
-                ...fm,
-                version: updatedPage.version.number,
-                updated: new Date(),
-                contentHash: currentHash
-              }
-              yield* localFs.writeMarkdownFile(filePath, newFrontMatter, localFile.content)
-            }
-
-            pushed++
-          }).pipe(
-            Effect.catchAll((error) =>
-              Effect.sync(() => {
-                errors.push(
-                  `Failed to push ${filePath}: ${error._tag === "ApiError" ? error.message : error._tag}`
-                )
-              })
-            )
-          )
+        if (localFile.isNew || !localFile.frontMatter) {
+          return { pushed: false, created: true, error: `Page creation not yet supported: ${filePath}` }
         }
 
-        // Auto-commit after successful push if git is initialized
-        if (!options.dryRun && pushed > 0) {
-          const gitInitialized = yield* git.isInitialized()
-          if (gitInitialized) {
-            yield* git.addAll()
-            yield* git.commit({
-              message: options.message ?? `Push to Confluence (${pushed} page${pushed !== 1 ? "s" : ""})`
-            }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
+        const fm = localFile.frontMatter
+        const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+
+        if (currentHash === fm.contentHash) {
+          return { pushed: false, created: false }
+        }
+
+        // Fetch current version to avoid conflicts
+        const remotePage = yield* client.getPage(fm.pageId)
+        const html = yield* converter.markdownToHtml(localFile.content)
+        const updatedPage = yield* client.updatePage({
+          id: fm.pageId,
+          title: fm.title,
+          status: "current",
+          version: {
+            number: remotePage.version.number + 1,
+            message: revisionMessage
+          },
+          body: {
+            representation: "storage",
+            value: html
+          }
+        })
+
+        // Fetch canonical content back from Confluence
+        const canonicalPage = yield* client.getPage(fm.pageId)
+        const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
+        const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
+          includeRawSource: config.saveSource
+        })
+        const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+
+        // Write canonical content with updated front-matter
+        const newFrontMatter: PageFrontMatter = {
+          ...fm,
+          version: updatedPage.version.number,
+          updated: new Date(canonicalPage.version.createdAt ?? new Date().toISOString()),
+          contentHash: canonicalHash
+        }
+        yield* localFs.writeMarkdownFile(filePath, newFrontMatter, canonicalMarkdown)
+
+        return { pushed: true, created: false }
+      })
+
+    /**
+     * Find commits that have unpushed changes.
+     * Uses two-branch model: finds commits in current branch not in origin/confluence.
+     * Returns commits from oldest to newest.
+     */
+    const findUnpushedCommits = (): Effect.Effect<
+      ReadonlyArray<{ hash: string; message: string }>,
+      SyncError
+    > =>
+      Effect.gen(function*() {
+        // Two-branch model: find commits in current branch not in origin/confluence
+        const hasRemoteBranch = yield* git.branchExists("origin/confluence")
+
+        if (hasRemoteBranch) {
+          // Use logRange to find commits not in origin/confluence
+          const commits = yield* git.logRange("origin/confluence", "HEAD")
+          return commits.map((c) => ({ hash: c.hash, message: c.message }))
+        }
+
+        // Fallback: no origin/confluence branch yet, use content hash comparison
+        const files = yield* localFs.listMarkdownFiles(docsPath)
+        if (files.length === 0) return []
+
+        const allCommits = yield* git.log({ n: 100 })
+        if (allCommits.length === 0) return []
+
+        const unpushed: Array<{ hash: string; message: string }> = []
+
+        for (const commit of allCommits) {
+          yield* git.checkout(commit.hash)
+
+          let hasChanges = false
+          for (const filePath of files) {
+            const exists = yield* localFs.exists(filePath)
+            if (!exists) continue
+
+            const localFile = yield* localFs.readMarkdownFile(filePath)
+            if (!localFile.frontMatter) {
+              hasChanges = true
+              break
+            }
+
+            const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+            if (currentHash !== localFile.frontMatter.contentHash) {
+              hasChanges = true
+              break
+            }
+          }
+
+          if (!hasChanges) break
+          unpushed.push({ hash: commit.hash, message: commit.message })
+        }
+
+        return unpushed.reverse()
+      })
+
+    const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
+      Effect.gen(function*() {
+        const gitInitialized = yield* git.isInitialized()
+
+        if (!gitInitialized) {
+          // Non-git mode: just push current content
+          const files = yield* localFs.listMarkdownFiles(docsPath)
+          let pushed = 0
+          let created = 0
+          const errors: Array<string> = []
+
+          for (const filePath of files) {
+            if (options.dryRun) {
+              pushed++
+              continue
+            }
+            const result = yield* pushFile(filePath, options.message ?? "Updated via confluence-to-markdown").pipe(
+              Effect.catchAll((error) =>
+                Effect.succeed({
+                  pushed: false,
+                  created: false,
+                  error: `Failed: ${error._tag}`
+                })
+              )
+            )
+            if (result.error) errors.push(result.error)
+            if (result.pushed) pushed++
+            if (result.created) created++
+          }
+
+          return { pushed, created, skipped: 0, errors: errors as ReadonlyArray<string> }
+        }
+
+        // Git mode: push current HEAD state to Confluence
+        // For simplicity, we push the final state as a single Confluence version
+        // with the most recent commit message
+        const files = yield* localFs.listMarkdownFiles(docsPath)
+        const errors: Array<string> = []
+        let pushed = 0
+
+        // Get the most recent unpushed commit message for the revision
+        const unpushedCommits = yield* findUnpushedCommits()
+        if (unpushedCommits.length === 0) {
+          return { pushed: 0, created: 0, skipped: 0, errors: [] as ReadonlyArray<string> }
+        }
+
+        if (options.dryRun) {
+          return {
+            pushed: unpushedCommits.length,
+            created: 0,
+            skipped: 0,
+            errors: [] as ReadonlyArray<string>
           }
         }
 
-        return { pushed, created, skipped, errors: errors as ReadonlyArray<string> }
+        // Use the last commit's message as the revision message
+        const lastCommit = unpushedCommits[unpushedCommits.length - 1]!
+        const revisionMessage = options.message ?? lastCommit.message
+
+        for (const filePath of files) {
+          const result = yield* pushFile(filePath, revisionMessage).pipe(
+            Effect.catchAll((error) =>
+              Effect.succeed({
+                pushed: false,
+                created: false,
+                error: `Failed to push ${filePath}: ${error._tag}`
+              })
+            )
+          )
+          if (result.error) errors.push(result.error)
+          if (result.pushed) pushed++
+        }
+
+        // Amend the last commit with canonical content
+        yield* git.addAll()
+        yield* git.amend({ noEdit: true }).pipe(
+          Effect.catchAll(() => Effect.void)
+        )
+
+        // Two-branch model: update origin/confluence to match HEAD
+        const hasRemoteBranch = yield* git.branchExists("origin/confluence")
+        if (hasRemoteBranch) {
+          yield* git.updateBranch("origin/confluence", "HEAD")
+        }
+
+        return { pushed, created: 0, skipped: 0, errors: errors as ReadonlyArray<string> }
       })
 
     const status = (): Effect.Effect<StatusResult, SyncError> =>

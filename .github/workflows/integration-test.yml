@@ -16,6 +16,8 @@ on:
       - "packages/effect-ai-claude-agent-sdk/package.json"
       - "packages/effect-ai-claude-code-cli/src/**"
       - "packages/effect-ai-claude-code-cli/package.json"
+      - "packages/confluence-to-markdown/src/**"
+      - "packages/confluence-to-markdown/package.json"
       - ".github/workflows/integration-test.yml"
 
 jobs:
@@ -57,3 +59,35 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm --filter @knpkv/effect-ai-claude-agent-sdk test:integration
+
+  test-confluence:
+    name: Confluence CLI Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build package
+        run: pnpm --filter @knpkv/confluence-to-markdown build
+
+      - name: Run integration tests
+        env:
+          CONFLUENCE_BASE_URL: ${{ vars.CONFLUENCE_BASE_URL }}
+          CONFLUENCE_ROOT_PAGE_ID: ${{ vars.CONFLUENCE_ROOT_PAGE_ID }}
+          CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
+          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+        run: pnpm --filter @knpkv/confluence-to-markdown test:integration

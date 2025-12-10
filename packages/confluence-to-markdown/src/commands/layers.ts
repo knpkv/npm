@@ -58,21 +58,37 @@ const DummySyncEngineLayer = Layer.succeed(
 )
 
 // Dummy git layer for auth/minimal
+const notConfigured = () => Effect.dieMessage("Not configured - run 'confluence clone' first")
 const DummyGitServiceLayer = Layer.succeed(
   GitService,
   GitService.of({
-    validateGit: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    init: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
+    validateGit: notConfigured,
+    init: notConfigured,
     isInitialized: () => Effect.succeed(false),
-    status: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    commit: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    log: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    diff: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    addAll: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
+    status: notConfigured,
+    commit: notConfigured,
+    log: notConfigured,
+    diff: notConfigured,
+    addAll: notConfigured,
     hasConflicts: () => Effect.succeed(false),
-    mergeContinue: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    syncFromDocs: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    syncToDocs: () => Effect.dieMessage("Not configured - run 'confluence clone' first")
+    mergeContinue: notConfigured,
+    syncFromDocs: notConfigured,
+    syncToDocs: notConfigured,
+    getHead: notConfigured,
+    getCurrentBranch: notConfigured,
+    createBranch: notConfigured,
+    checkout: notConfigured,
+    reset: notConfigured,
+    deleteBranch: notConfigured,
+    getParent: notConfigured,
+    cherryPick: (_ref: string, _options?: { strategy?: "ours" | "theirs" }) => notConfigured(),
+    getChangedFiles: notConfigured,
+    showFile: notConfigured,
+    amend: notConfigured,
+    logRange: notConfigured,
+    branchExists: notConfigured,
+    updateBranch: notConfigured,
+    merge: notConfigured
   })
 )
 

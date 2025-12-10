@@ -80,6 +80,75 @@ confluence diff --commit HEAD~1   # compare with commit
 4. Version messages from Confluence are preserved in markdown front-matter
 5. Use standard git commands in `.confluence/` for advanced operations
 
+## Git Implementation
+
+### Two-Branch Model
+
+The CLI uses a two-branch model to track sync state:
+
+- **`local`** (current branch): Your working branch for edits
+- **`origin/confluence`**: Tracks the remote Confluence state
+
+```
+Clone:
+  Confluence ──pull──> local + origin/confluence (both at same commit)
+
+Pull:
+  Confluence ──pull──> origin/confluence ──merge──> local
+
+Push:
+  local ──push──> Confluence
+    │
+    └──> origin/confluence (updated to HEAD)
+```
+
+### Commit Behavior
+
+When you commit:
+
+1. **Sync external docs** (if configured): Copies files from external `docsPath` to `.confluence/`
+2. **Stage all changes**: Runs `git add -A`
+3. **Create commit**: Records changes with your message
+
+Note: Front-matter (`contentHash`, `version`) is **not** updated at commit time. Changes are detected by comparing actual content hash vs stored hash.
+
+### Push Behavior
+
+When you push:
+
+1. **Detect changes**: Compares content hash vs stored `contentHash` in front-matter
+2. **Push to Confluence**: Uploads markdown converted to Confluence storage format
+3. **Fetch canonical content**: Downloads what Confluence actually stored (may differ slightly)
+4. **Amend commit**: Updates local file with canonical content so future clones match exactly
+5. **Update tracking branch**: Moves `origin/confluence` to HEAD
+
+Multiple local commits combine into a single Confluence version (uses last commit's message).
+
+### Content Hash Tracking
+
+Each markdown file has front-matter with a `contentHash` field:
+
+```yaml
+---
+pageId: "123456"
+version: 42
+title: My Page
+contentHash: 7a8b9c... # SHA-256 of markdown content
+---
+```
+
+- After clone/pull: `contentHash` matches the actual content
+- After local edit: content differs from `contentHash` → detected as "needs push"
+- After push: `contentHash` updated to match canonical Confluence content
+
+### Why Canonical Content?
+
+Confluence may transform your content (normalize whitespace, reorder attributes, etc.). By fetching and storing the canonical content after push:
+
+- `clone` on another machine produces **identical** files
+- Git history shows exactly what Confluence has
+- No false "modified" status from round-trip differences
+
 ## Authentication
 
 ### OAuth (recommended)

@@ -117,6 +117,35 @@ const loadConfig = (
  *
  * @category Layers
  */
+/**
+ * Validate docsPath configuration.
+ * docsPath must be either:
+ * - ".confluence/docs" (default, files in git repo)
+ * - A path outside ".confluence/" (external docs directory)
+ * NOT: ".confluence/other" which would cause confusion
+ */
+const validateDocsPath = (
+  docsPath: string,
+  configPath: string
+): Effect.Effect<void, ConfigParseError> => {
+  const isDefault = docsPath === ".confluence/docs"
+  const isInsideConfluence = docsPath.startsWith(".confluence/") || docsPath.startsWith(".confluence\\")
+  const isOutside = !isInsideConfluence
+
+  if (isDefault || isOutside) {
+    return Effect.void
+  }
+
+  // docsPath is inside .confluence/ but not the default - this is invalid
+  return Effect.fail(
+    new ConfigParseError({
+      path: configPath,
+      cause:
+        `Invalid docsPath "${docsPath}". Must be either ".confluence/docs" (default) or a path outside ".confluence/" (e.g., "docs" for external docs).`
+    })
+  )
+}
+
 export const layer = (
   configPath?: string
 ): Layer.Layer<ConfluenceConfig, ConfigNotFoundError | ConfigParseError, FileSystem.FileSystem | Path.Path> =>
@@ -126,6 +155,9 @@ export const layer = (
       const path = yield* Path.Path
       const resolvedPath = configPath ?? path.join(process.cwd(), CONFIG_DIR, CONFIG_FILE_NAME)
       const config = yield* loadConfig(resolvedPath)
+
+      // Validate docsPath
+      yield* validateDocsPath(config.docsPath, resolvedPath)
 
       return ConfluenceConfig.of({
         rootPageId: config.rootPageId,

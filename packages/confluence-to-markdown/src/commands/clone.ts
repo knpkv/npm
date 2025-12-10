@@ -123,13 +123,19 @@ export const cloneCommand = Command.make(
 
       const result = yield* Effect.gen(function*() {
         const engine = yield* SyncEngine
-        return yield* engine.pull({
+        const gitService = yield* GitService
+        const pullResult = yield* engine.pull({
           force: true,
           replayHistory: true,
           onProgress: (current, total, message) => {
             process.stdout.write(`\r  Replaying history: ${current}/${total} - ${message}`)
           }
         })
+
+        // Create origin/confluence branch at HEAD to track remote state
+        yield* gitService.createBranch("origin/confluence")
+
+        return pullResult
       }).pipe(Effect.provide(cloneLayer))
 
       // Clear progress line and print final result

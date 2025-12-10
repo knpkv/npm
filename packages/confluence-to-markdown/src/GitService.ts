@@ -71,6 +71,25 @@ export interface GitDiffOptions {
 }
 
 /**
+ * Options for git commit --amend.
+ *
+ * @category Types
+ */
+export interface GitAmendOptions {
+  readonly noEdit?: boolean
+  readonly message?: string
+}
+
+/**
+ * Options for git reset.
+ *
+ * @category Types
+ */
+export interface GitResetOptions {
+  readonly hard?: boolean
+}
+
+/**
  * Git status result.
  *
  * @category Types
@@ -140,6 +159,60 @@ export interface GitServiceShape {
   readonly syncToDocs: (
     docsPath: string,
     trackedPaths: ReadonlyArray<string>
+  ) => Effect.Effect<void, GitServiceError>
+
+  /** Get current HEAD commit hash. */
+  readonly getHead: () => Effect.Effect<string, GitServiceError>
+
+  /** Get current branch name. */
+  readonly getCurrentBranch: () => Effect.Effect<string, GitServiceError>
+
+  /** Create a new branch at current HEAD. */
+  readonly createBranch: (name: string) => Effect.Effect<void, GitServiceError>
+
+  /** Checkout a branch or commit. */
+  readonly checkout: (ref: string) => Effect.Effect<void, GitServiceError>
+
+  /** Reset to a commit. */
+  readonly reset: (ref: string, options?: GitResetOptions) => Effect.Effect<void, GitServiceError>
+
+  /** Delete a branch. */
+  readonly deleteBranch: (name: string) => Effect.Effect<void, GitServiceError>
+
+  /** Get parent commit hash. */
+  readonly getParent: (ref: string) => Effect.Effect<string, GitServiceError>
+
+  /** Cherry-pick a commit. */
+  readonly cherryPick: (
+    ref: string,
+    options?: { strategy?: "ours" | "theirs" }
+  ) => Effect.Effect<void, GitServiceError>
+
+  /** Get files changed in a commit. */
+  readonly getChangedFiles: (ref: string) => Effect.Effect<ReadonlyArray<string>, GitServiceError>
+
+  /** Get file content at a specific ref. */
+  readonly showFile: (ref: string, filePath: string) => Effect.Effect<string, GitServiceError>
+
+  /** Amend the current commit. */
+  readonly amend: (options?: GitAmendOptions) => Effect.Effect<void, GitServiceError>
+
+  /** Get commits between two refs (exclusive..inclusive). */
+  readonly logRange: (
+    from: string,
+    to: string
+  ) => Effect.Effect<ReadonlyArray<GitLogEntry>, GitServiceError>
+
+  /** Check if a branch exists. */
+  readonly branchExists: (name: string) => Effect.Effect<boolean, GitServiceError>
+
+  /** Update a branch to point to a commit (without checkout). */
+  readonly updateBranch: (name: string, ref: string) => Effect.Effect<void, GitServiceError>
+
+  /** Merge a branch into current. */
+  readonly merge: (
+    branch: string,
+    options?: { noCommit?: boolean; message?: string }
   ) => Effect.Effect<void, GitServiceError>
 }
 
@@ -478,6 +551,12 @@ const make = Effect.gen(function*() {
           ? docsPath
           : pathService.join(cwd, docsPath)
 
+        // Skip if docsPath is inside .confluence/ - config validation ensures
+        // only ".confluence/docs" is allowed inside, which means no sync needed
+        if (absoluteDocsPath.startsWith(confluenceDir)) {
+          return
+        }
+
         // For each tracked path pattern, copy matching files
         for (const pattern of trackedPaths) {
           // Simple glob handling - for now just support **/*.md
@@ -533,6 +612,164 @@ const make = Effect.gen(function*() {
       })
     )
 
+  const getHead = () =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGit(["rev-parse", "HEAD"], confluenceDir)
+        return output.trim()
+      })
+    )
+
+  const getCurrentBranch = () =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGit(["rev-parse", "--abbrev-ref", "HEAD"], confluenceDir)
+        return output.trim()
+      })
+    )
+
+  const createBranch = (name: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        yield* runGit(["branch", name], confluenceDir)
+      })
+    )
+
+  const checkout = (ref: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        yield* runGit(["checkout", ref], confluenceDir)
+      })
+    )
+
+  const reset = (ref: string, options?: GitResetOptions) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const args = ["reset"]
+        if (options?.hard) args.push("--hard")
+        args.push(ref)
+        yield* runGit(args, confluenceDir)
+      })
+    )
+
+  const deleteBranch = (name: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        yield* runGit(["branch", "-D", name], confluenceDir)
+      })
+    )
+
+  const getParent = (ref: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGit(["rev-parse", `${ref}^`], confluenceDir)
+        return output.trim()
+      })
+    )
+
+  const cherryPick = (ref: string, options?: { strategy?: "ours" | "theirs" }) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const args = ["cherry-pick"]
+        if (options?.strategy) {
+          args.push("-X", options.strategy)
+        }
+        args.push(ref)
+        yield* runGit(args, confluenceDir)
+      })
+    )
+
+  const getChangedFiles = (ref: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGitAllowEmpty(
+          ["diff-tree", "--no-commit-id", "--name-only", "-r", ref],
+          confluenceDir
+        )
+        return output.trim().split("\n").filter(Boolean)
+      })
+    )
+
+  const showFile = (ref: string, filePath: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGit(["show", `${ref}:${filePath}`], confluenceDir)
+        return output
+      })
+    )
+
+  const amend = (options?: GitAmendOptions) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const args = ["commit", "--amend"]
+        if (options?.noEdit) {
+          args.push("--no-edit")
+        }
+        if (options?.message) {
+          args.push("-m", options.message)
+        }
+        yield* runGit(args, confluenceDir)
+      })
+    )
+
+  const logRange = (from: string, to: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGitAllowEmpty(
+          ["log", `--format=${GIT_LOG_FORMAT}`, `${from}..${to}`],
+          confluenceDir
+        )
+        return parseGitLog(output)
+      })
+    )
+
+  const branchExists = (name: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const output = yield* runGitAllowEmpty(
+          ["branch", "--list", name],
+          confluenceDir
+        )
+        return output.trim().length > 0
+      })
+    )
+
+  const updateBranch = (name: string, ref: string) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        yield* runGit(["branch", "-f", name, ref], confluenceDir)
+      })
+    )
+
+  const merge = (branch: string, options?: { noCommit?: boolean; message?: string }) =>
+    provideDeps(
+      Effect.gen(function*() {
+        yield* ensureInitialized
+        const args = ["merge", branch]
+        if (options?.noCommit) {
+          args.push("--no-commit")
+        }
+        if (options?.message) {
+          args.push("-m", options.message)
+        }
+        yield* runGit(args, confluenceDir)
+      })
+    )
+
   return GitService.of({
     validateGit,
     isInitialized,
@@ -545,7 +782,22 @@ const make = Effect.gen(function*() {
     hasConflicts,
     mergeContinue,
     syncFromDocs,
-    syncToDocs
+    syncToDocs,
+    getHead,
+    getCurrentBranch,
+    createBranch,
+    checkout,
+    reset,
+    deleteBranch,
+    getParent,
+    cherryPick,
+    getChangedFiles,
+    showFile,
+    amend,
+    logRange,
+    branchExists,
+    updateBranch,
+    merge
   })
 })
 

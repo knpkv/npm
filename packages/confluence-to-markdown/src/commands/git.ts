@@ -23,10 +23,8 @@ export const commitCommand = Command.make(
       const git = yield* GitService
       const config = yield* ConfluenceConfig
 
-      // Sync from external docs path to .confluence/ if configured
-      if (config.docsPath !== "docs") {
-        yield* git.syncFromDocs(config.docsPath, config.trackedPaths)
-      }
+      // Sync from external docs path to .confluence/ (skips if docsPath is inside .confluence/)
+      yield* git.syncFromDocs(config.docsPath, config.trackedPaths)
 
       yield* git.addAll()
       const msg = Option.isSome(message) ? message.value : "Manual commit"
