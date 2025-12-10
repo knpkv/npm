@@ -29,8 +29,9 @@ confluence push
 confluence push -n, --dry-run         # preview changes without applying
 confluence push -m, --message "msg"   # with revision comment
 
-# Delete a page from Confluence
-confluence delete <pageId> -f         # permanently delete (requires delete:page scope)
+# Delete a page
+confluence delete                     # interactive: select page, delete local file
+confluence delete <pageId> -f         # direct API delete (requires delete:page scope)
 
 # Check sync status
 confluence status
@@ -67,6 +68,21 @@ confluence new
 # 2. Edit the file
 # 3. Commit: confluence commit -m "Add new page"
 # 4. Push to Confluence: confluence push
+```
+
+### Page Deletion
+
+```bash
+# Delete a page (git-based workflow)
+confluence delete                     # interactive selector, deletes local file
+
+# Workflow:
+# 1. Delete page: confluence delete (or rm <file>)
+# 2. Commit: confluence commit -m "Delete page"
+# 3. Push to Confluence: confluence push  # deletes from Confluence
+
+# Direct API deletion (bypasses git)
+confluence delete <pageId> -f         # permanently deletes from Confluence
 ```
 
 ### Git Commands
@@ -313,7 +329,6 @@ contentHash: "7a8b9c..."
 
 - **Attachments**: Image and file attachments are not synced
 - **Comments**: Page comments are not preserved
-- **Page deletion**: Deleting local files does not delete pages on Confluence
 
 ## License
 
