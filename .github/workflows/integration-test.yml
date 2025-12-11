@@ -81,8 +81,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build package
-        run: pnpm --filter @knpkv/confluence-to-markdown build
+      - name: Build packages
+        run: pnpm --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
 
       - name: Run integration tests
         env:
