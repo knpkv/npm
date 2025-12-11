@@ -5,7 +5,7 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
-    "build": "tspc -b tsconfig.build.json && pnpm --recursive --parallel --filter \"./packages/**/*\" run build",
+    "build": "tspc -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
     "test": "vitest",
     "coverage": "vitest --coverage",
     "check": "pnpm --recursive --filter \"./packages/**/*\" run check",
