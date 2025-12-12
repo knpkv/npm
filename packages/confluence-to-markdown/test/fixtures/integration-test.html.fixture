@@ -53,23 +53,24 @@
 <p><span style="background-color: rgb(223,216,253);">Purple highlight</span></p>
 <h2>Lists</h2>
 <h3>Bullet Lists</h3>
-<ul><li><p>Bullet list 1</p><ul local-id="bed75a55-f8b9-45fb-9346-7531dd9ea338"><li local-id="30852041-2521-40ed-acbb-1a8469be3c30"><p local-id="5b0cccdf-3a87-4b32-b618-910a94529992">Bullet list 1.1</p><ul local-id="453de478-a2d7-4b2f-9b93-91732877c960"><li local-id="cc32bd38-0927-42f2-b2bc-8f480ea97762"><p local-id="308bc2ca-c9b5-4734-a0ff-dea8e319184d">Bullet list 1.1.1</p></li></ul></li></ul></li><li><p>Bullet list 2</p></li></ul>
+<ul><li><p>Bullet list 1</p><ul><li><p>Bullet list 1.1</p><ul><li><p>Bullet list 1.1.1</p></li></ul></li></ul></li><li><p>Bullet list 2</p></li></ul>
 <h3>Numbered Lists</h3>
-<ol><li><p>Numbered list 1</p><ol start="1" local-id="d40d0651-9647-4012-aa44-22dea36dca0f"><li local-id="16340895-0a02-4369-a4f2-7fe3f7c56112"><p local-id="d5ad263d-afe0-4ca3-8299-929fbc1c7cd0">Numbered list a</p><ol start="1" local-id="897771c4-1ff1-4b72-832b-c8d6cc79f57b"><li local-id="25120a69-d5ff-41e0-9192-35e036d752f0"><p local-id="6bd35901-285f-4f58-872f-51e4152e296b">Numbered list i</p></li></ol></li></ol></li><li><p>Numbered list 2</p></li></ol>
+<ol><li><p>Numbered list 1</p><ol start="1"><li><p>Numbered list a</p><ol start="1"><li><p>Numbered list i</p></li></ol></li></ol></li><li><p>Numbered list 2</p></li></ol>
 <h3>Indentation</h3>
 <p style="margin-left: 30.0px;">Indent tab 1</p>
 <p style="margin-left: 60.0px;">Indent tab 2</p>
 <p style="margin-left: 90.0px;">Indent tab 3</p>
 <h3>Action Items</h3>
 <ac:task-list>
-<ac:task><ac:task-id>43</ac:task-id><ac:task-uuid>b94e5334-74dc-4b95-bd6f-a030c1df7068</ac:task-uuid><ac:task-status>incomplete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action Item unchecked</span></ac:task-body></ac:task>
-<ac:task><ac:task-id>44</ac:task-id><ac:task-uuid>f7f340e1-72cf-465b-a17a-44048f53b4f5</ac:task-uuid><ac:task-status>complete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action item checked</span></ac:task-body></ac:task>
+<ac:task><ac:task-id>11</ac:task-id><ac:task-uuid>bce1bc39-6cba-44f9-b1b3-6adf0634475a</ac:task-uuid><ac:task-status>incomplete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action Item unchecked</span></ac:task-body></ac:task>
+<ac:task><ac:task-id>12</ac:task-id><ac:task-uuid>49c6a48e-cb41-4d98-ba45-64c1ecf96702</ac:task-uuid><ac:task-status>complete</ac:task-status><ac:task-body><span class="placeholder-inline-tasks">Action item checked</span></ac:task-body></ac:task>
 </ac:task-list>
 <h2>Links &amp; Media</h2>
 <h3>Links</h3>
-<p><a href="http://example.com">Link</a></p>
+<p><a href="http://example.com">External link</a></p>
+<p><ac:link><ac:link-body>Confluence link</ac:link-body></ac:link></p>
 <h3>Images</h3>
-<ac:image ac:align="center" ac:width="250" ac:alt="Atlassian_Confluence_2017_logo.svg"><ri:attachment ri:filename="Atlassian_Confluence_2017_logo.svg" ri:version-at-save="1" /></ac:image>
+<ac:image ac:align="center" ac:width="238" ac:alt="Atlassian_Confluence_2017_logo.svg"><ri:attachment ri:filename="Atlassian_Confluence_2017_logo.svg" ri:version-at-save="1" /></ac:image>
 <h3>User Mentions</h3>
 <p><ac:link><ri:user ri:account-id="557058:76c20100-e45a-495d-9cb2-4d7c809e6a9b" /></ac:link></p>
 <h3>Emoticons</h3>
@@ -99,5 +100,4 @@
 <ac:structured-macro ac:name="panel" ac:schema-version="1" ac:macro-id="fe489f67-fe69-4a52-bd26-9cc23eea815c"><ac:rich-text-body><p>Custom panel</p></ac:rich-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="tip" ac:schema-version="1" ac:macro-id="77ad7dce-d489-42a1-995d-0a1db3a9ef83"><ac:rich-text-body><p>Success panel</p></ac:rich-text-body></ac:structured-macro>
 <ac:structured-macro ac:name="note" ac:schema-version="1" ac:macro-id="e5c6352e-cf6e-47cb-a423-a912838dcec4"><ac:rich-text-body><p>Warning panel</p></ac:rich-text-body></ac:structured-macro>
-<h3>Other</h3>
-<p>Hello 3</p></ac:layout-cell></ac:layout-section></ac:layout>
+</ac:layout-cell></ac:layout-section></ac:layout>

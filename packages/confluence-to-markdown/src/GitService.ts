@@ -418,6 +418,9 @@ const make = Effect.gen(function*() {
         const gitExists = yield* fs.exists(gitDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
         if (!gitExists) {
           yield* runGit(["init"], confluenceDir)
+          // Configure local git user for commits (needed in CI environments)
+          yield* runGit(["config", "user.name", "Confluence Sync"], confluenceDir)
+          yield* runGit(["config", "user.email", "confluence-sync@local"], confluenceDir)
         }
       })
     )

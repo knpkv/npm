@@ -4,6 +4,7 @@
  * @module
  */
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import rehypeParse from "rehype-parse"
 import { unified } from "unified"
 import {
@@ -41,7 +42,7 @@ import {
 } from "../ast/InlineNode.js"
 import { type ExpandMacro, type InfoPanel, PanelTypes, type TocMacro } from "../ast/MacroNode.js"
 import { ParseError } from "../SchemaConverterError.js"
-import { preprocessConfluenceMacros } from "./preprocessing/index.js"
+import { PreprocessedHtmlFromConfluence } from "../schemas/preprocessing/index.js"
 
 // Hast types (inline to avoid dependency)
 interface HastText {
@@ -63,9 +64,6 @@ interface HastRoot {
 
 type HastNode = HastText | HastElement | HastRoot | { type: string }
 
-/** Maximum HTML input size (1MB) to prevent ReDoS attacks */
-const MAX_HTML_SIZE = 1024 * 1024
-
 /**
  * Parse Confluence storage format HTML to Document AST.
  *
@@ -84,17 +82,16 @@ const MAX_HTML_SIZE = 1024 * 1024
  */
 export const parseConfluenceHtml = (html: string): Effect.Effect<Document, ParseError> =>
   Effect.gen(function*() {
-    if (html.length > MAX_HTML_SIZE) {
-      return yield* Effect.fail(
+    // Pre-process Confluence macros (includes size validation)
+    const preprocessed = yield* Schema.decode(PreprocessedHtmlFromConfluence)(html).pipe(
+      Effect.mapError((error) =>
         new ParseError({
           source: "confluence",
-          message: `HTML input too large: ${html.length} bytes (max ${MAX_HTML_SIZE})`
+          message: `Preprocessing error: ${error.message}`,
+          rawContent: html.slice(0, 200)
         })
       )
-    }
-
-    // Pre-process Confluence macros
-    const preprocessed = yield* preprocessConfluenceMacros(html)
+    )
 
     // Parse HTML to hast
     const hast = yield* Effect.try({
@@ -513,6 +510,15 @@ const hastElementToInline = (element: HastElement): Effect.Effect<InlineNode | n
     if (tagName === "span" && element.properties?.["dataUserMention"]) {
       const accountId = (element.properties["dataUserMention"] as string) || ""
       return new UserMention({ accountId })
+    }
+
+    // Confluence link with link-body (preprocessed from ac:link > ac:link-body)
+    if (tagName === "span" && element.properties?.["dataConfluenceLink"] !== undefined) {
+      const linkText = getTextContent(element)
+      return new UnsupportedInline({
+        raw: `<!--cf:link:${encodeURIComponent(linkText)}-->`,
+        source: "confluence"
+      })
     }
 
     // Status macro (inline) - use comment encoding for roundtrip
