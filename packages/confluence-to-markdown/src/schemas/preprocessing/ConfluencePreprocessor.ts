@@ -8,6 +8,7 @@
  */
 import type * as Brand from "effect/Brand"
 import * as Effect from "effect/Effect"
+import { pipe } from "effect/Function"
 import * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
 import { PanelTypes } from "../../ast/MacroNode.js"
@@ -60,6 +61,8 @@ export const PreprocessedHtmlSchema = Schema.String.pipe(
  *
  * @category Schemas
  */
+const makePreprocessedHtml = Schema.decodeSync(PreprocessedHtmlSchema)
+
 export const PreprocessedHtmlFromConfluence = Schema.transformOrFail(
   Schema.String,
   PreprocessedHtmlSchema,
@@ -76,11 +79,11 @@ export const PreprocessedHtmlFromConfluence = Schema.transformOrFail(
             )
           )
         }
-        return preprocessConfluenceHtml(html) as PreprocessedHtml
+        return pipe(html, preprocessConfluenceHtml, makePreprocessedHtml)
       }),
-    encode: (preprocessed, _options, _ast) =>
-      // Identity - we can't reverse preprocessing
-      Effect.succeed(preprocessed as string)
+    encode: (preprocessed) =>
+      // Identity - branded string is already a string
+      Effect.succeed(preprocessed)
   }
 )
 
@@ -108,10 +111,13 @@ const preprocessConfluenceHtml = (html: string): string => {
   // 6. Process user mentions
   result = preprocessUserMentions(result)
 
-  // 7. Process ADF extensions (decision lists)
+  // 7. Process Confluence links with link-body
+  result = preprocessConfluenceLinks(result)
+
+  // 8. Process ADF extensions (decision lists)
   result = preprocessAdfExtensions(result)
 
-  // 8. Strip remaining ac/ri namespace tags
+  // 9. Strip remaining ac/ri namespace tags
   result = stripNamespaces(result)
 
   return result
@@ -358,6 +364,20 @@ const preprocessUserMentions = (html: string): string => {
     (_, attrs) => {
       const accountId = attrs.match(/ri:account-id="([^"]*)"/)?.[1] ?? ""
       return `<span data-user-mention="${escapeHtml(accountId)}"></span>`
+    }
+  )
+}
+
+/**
+ * Preprocess Confluence links with link-body.
+ * <ac:link><ac:link-body>Link text</ac:link-body></ac:link>
+ * -> <span data-confluence-link>Link text</span>
+ */
+const preprocessConfluenceLinks = (html: string): string => {
+  return html.replace(
+    /<ac:link>\s*<ac:link-body>([\s\S]*?)<\/ac:link-body>\s*<\/ac:link>/gi,
+    (_, linkText) => {
+      return `<span data-confluence-link>${linkText}</span>`
     }
   )
 }

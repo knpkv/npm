@@ -126,6 +126,15 @@ export const inlineNodeFromHastElement = (
       return new UserMention({ accountId })
     }
 
+    // Confluence link with link-body (preprocessed from ac:link > ac:link-body)
+    if (tagName === "span" && element.properties?.["dataConfluenceLink"] !== undefined) {
+      const linkText = getTextContent(element)
+      return new UnsupportedInline({
+        raw: `<!--cf:link:${encodeURIComponent(linkText)}-->`,
+        source: "confluence"
+      })
+    }
+
     // Colored text (span with color style)
     if (tagName === "span") {
       const style = element.properties?.style as string | undefined

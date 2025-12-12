@@ -137,17 +137,19 @@ Default
 
 ### Action Items
 
-<!--cf:tasklist:43|b94e5334-74dc-4b95-bd6f-a030c1df7068|incomplete|Action%20Item%20unchecked;44|f7f340e1-72cf-465b-a17a-44048f53b4f5|complete|Action%20item%20checked-->
+<!--cf:tasklist:11|bce1bc39-6cba-44f9-b1b3-6adf0634475a|incomplete|Action%20Item%20unchecked;12|49c6a48e-cb41-4d98-ba45-64c1ecf96702|complete|Action%20item%20checked-->
 
 ## Links & Media
 
 ### Links
 
-[Link](http://example.com)
+[External link](http://example.com)
+
+<!--cf:link:Confluence%20link-->
 
 ### Images
 
-<!--cf:image:f=Atlassian_Confluence_2017_logo.svg|a=Atlassian_Confluence_2017_logo.svg|al=center|w=250-->
+<!--cf:image:f=Atlassian_Confluence_2017_logo.svg|a=Atlassian_Confluence_2017_logo.svg|al=center|w=238-->
 
 ### User Mentions
 
