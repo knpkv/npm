@@ -9,6 +9,7 @@ import * as Command from "@effect/platform/Command"
 import * as CommandExecutor from "@effect/platform/CommandExecutor"
 import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
+import * as Console from "effect/Console"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -373,9 +374,10 @@ const make = Effect.gen(function*() {
       )
       const authUrl = buildAuthUrl(config.clientId, state, port)
 
-      yield* Effect.log(`Opening browser for Atlassian login (callback on port ${port})...`)
+      yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
+      yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
       yield* openBrowserImpl(authUrl)
-      yield* Effect.log("Waiting for authorization (press Ctrl+C to cancel)...")
+      yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
 
       const code = yield* codePromise.pipe(
         Effect.timeout("5 minutes"),
@@ -385,10 +387,10 @@ const make = Effect.gen(function*() {
 
       yield* shutdown
 
-      yield* Effect.log("Exchanging code for tokens...")
+      yield* Console.log("Exchanging code for tokens...")
       const tokens = yield* exchangeCodeForTokens(code, config, port)
 
-      yield* Effect.log("Fetching accessible sites...")
+      yield* Console.log("Fetching accessible sites...")
       const sites = yield* getAccessibleResources(tokens.access_token)
 
       if (sites.length === 0) {
@@ -420,18 +422,18 @@ const make = Effect.gen(function*() {
           site = matched
         } else {
           // Return sites list for user to choose
-          yield* Effect.log("Multiple Confluence sites found. Please select one:")
+          yield* Console.log("Multiple Confluence sites found. Please select one:")
           for (const s of sites) {
-            yield* Effect.log(`  - ${s.name}: ${s.url}`)
+            yield* Console.log(`  - ${s.name}: ${s.url}`)
           }
-          yield* Effect.log("\nRun 'confluence auth login --site <url>' to select a site")
+          yield* Console.log("\nRun 'confluence auth login --site <url>' to select a site")
           return sites.map((s) => ({ id: s.id, name: s.name, url: s.url }))
         }
       } else {
         site = sites[0]!
       }
 
-      yield* Effect.log("Fetching user info...")
+      yield* Console.log("Fetching user info...")
       const user = yield* getUserInfo(tokens.access_token)
 
       const tokenData: OAuthToken = {
@@ -449,7 +451,7 @@ const make = Effect.gen(function*() {
       }
 
       yield* saveTokenOp(tokenData)
-      yield* Effect.log(`Logged in as ${user.name} (${user.email})`)
+      yield* Console.log(`Logged in as ${user.name} (${user.email})`)
       return undefined
     })
 
@@ -457,7 +459,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
-        yield* Effect.log("Not logged in")
+        yield* Console.log("Not logged in")
         return
       }
 
@@ -500,7 +502,7 @@ const make = Effect.gen(function*() {
       yield* Ref.set(refreshLock, Option.some(deferred))
 
       const config = yield* getConfig()
-      yield* Effect.log("Token expired, refreshing...")
+      yield* Console.log("Token expired, refreshing...")
 
       const result = yield* refreshToken(token, config).pipe(
         Effect.tap((refreshed) => Deferred.succeed(deferred, refreshed)),

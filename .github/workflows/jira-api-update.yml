@@ -1,0 +1,71 @@
+name: Jira API Spec Check
+
+on:
+  # Daily at 6 AM UTC (offset by 30 min from Confluence check)
+  schedule:
+    - cron: "30 6 * * *"
+
+  # Manual trigger
+  workflow_dispatch:
+
+jobs:
+  check-spec:
+    name: Check Jira API Spec Updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Check for spec updates
+        id: check
+        run: |
+          if pnpm --filter @knpkv/jira-api-client regenerate:check; then
+            echo "updated=false" >> $GITHUB_OUTPUT
+          else
+            echo "updated=true" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Regenerate specs
+        if: steps.check.outputs.updated == 'true'
+        run: pnpm --filter @knpkv/jira-api-client regenerate
+
+      - name: Build package
+        if: steps.check.outputs.updated == 'true'
+        run: pnpm --filter @knpkv/jira-api-client build
+
+      - name: Run tests
+        if: steps.check.outputs.updated == 'true'
+        run: pnpm --filter @knpkv/jira-api-client test
+
+      - name: Create Pull Request
+        if: steps.check.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(jira-api-client): update OpenAPI specs"
+          title: "chore(jira-api-client): update OpenAPI specs"
+          body: |
+            Automated update of Jira API OpenAPI specs.
+
+            Review the spec changes and update the manual client files if needed:
+            - `src/generated/v3/Client.ts`
+          branch: chore/jira-api-spec-update
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
