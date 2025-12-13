@@ -39,9 +39,7 @@ export const browseCommand = Command.make("browse", {}, () =>
     const syncEngine = yield* SyncEngine
 
     // Get root page info
-    const rootPage = yield* client.getPage(config.rootPageId).pipe(
-      Effect.mapError(mapError)
-    )
+    const rootPage = yield* client.getPage(config.rootPageId).pipe(Effect.mapError(mapError))
 
     const rootItem: BrowseItem = {
       id: config.rootPageId,
@@ -102,21 +100,9 @@ export const browseCommand = Command.make("browse", {}, () =>
 
     const millerConfig: Components.MillerColumnsConfig<BrowseItem> = {
       columns: [
-        {
-          id: "root",
-          renderItem: (item: BrowseItem) => item.title,
-          getChildren
-        },
-        {
-          id: "children",
-          renderItem: (item: BrowseItem) => item.title,
-          getChildren
-        },
-        {
-          id: "grandchildren",
-          renderItem: (item: BrowseItem) => item.title,
-          getChildren
-        }
+        { id: "root", renderItem: (item: BrowseItem) => item.title, getChildren },
+        { id: "children", renderItem: (item: BrowseItem) => item.title, getChildren },
+        { id: "grandchildren", renderItem: (item: BrowseItem) => item.title, getChildren }
       ],
       initialItems: Effect.succeed([rootItem]),
       preview: getPreview,
@@ -128,6 +114,4 @@ export const browseCommand = Command.make("browse", {}, () =>
       Effect.provide(RendererLive),
       Effect.catchAll((e: RendererError) => Console.error(`Error: ${e.reason}`))
     )
-  })).pipe(
-    Command.withDescription("Browse Confluence pages interactively (TUI)")
-  )
+  })).pipe(Command.withDescription("Browse Confluence pages interactively (TUI)"))
