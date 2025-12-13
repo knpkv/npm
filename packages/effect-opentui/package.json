@@ -1,0 +1,76 @@
+{
+  "name": "@knpkv/effect-opentui",
+  "version": "0.1.0",
+  "description": "Effect-TS wrapper for OpenTUI terminal UI library",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/effect-opentui"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/effect-opentui#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./Renderer": {
+      "import": "./dist/Renderer.js",
+      "types": "./dist/Renderer.d.ts"
+    },
+    "./RendererError": {
+      "import": "./dist/RendererError.js",
+      "types": "./dist/RendererError.d.ts"
+    },
+    "./components": {
+      "import": "./dist/components/index.js",
+      "types": "./dist/components/index.d.ts"
+    },
+    "./input": {
+      "import": "./dist/input/index.js",
+      "types": "./dist/input/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.src.json",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.60"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^22.15.21",
+    "effect": "^3.19.3",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "opentui",
+    "tui",
+    "terminal",
+    "cli",
+    "ui"
+  ]
+}

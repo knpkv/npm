@@ -10,6 +10,7 @@ import pkg from "../package.json" with { type: "json" }
 import { handleError } from "./commands/errorHandler.js"
 import {
   authCommand,
+  browseCommand,
   cloneCommand,
   commitCommand,
   deleteCommand,
@@ -35,7 +36,8 @@ const confluence = Command.make("confluence").pipe(
     logCommand,
     diffCommand,
     newCommand,
-    deleteCommand
+    deleteCommand,
+    browseCommand
   ])
 )
 
