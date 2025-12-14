@@ -18,6 +18,17 @@ export function ThemeSelector({ currentTheme, selectedIndex, theme, width, heigh
   const left = Math.floor((width - modalWidth) / 2)
   const top = Math.floor((height - modalHeight) / 2)
 
+  // Calculate visible items (header=3 lines, footer=2 lines, border=2)
+  const listHeight = modalHeight - 7
+  const visibleCount = Math.max(1, listHeight)
+
+  // Calculate scroll offset to keep selected item visible
+  let scrollOffset = 0
+  if (selectedIndex >= visibleCount) {
+    scrollOffset = selectedIndex - visibleCount + 1
+  }
+  const visibleThemes = themeNames.slice(scrollOffset, scrollOffset + visibleCount)
+
   return (
     <box
       position="absolute"
@@ -34,6 +45,7 @@ export function ThemeSelector({ currentTheme, selectedIndex, theme, width, heigh
       <box paddingLeft={1} paddingTop={1} paddingBottom={1}>
         <text fg={theme.accent.primary}>{"◐ "}</text>
         <text fg={theme.text.primary}>{"Select Theme"}</text>
+        <text fg={theme.text.muted}>{` (${selectedIndex + 1}/${themeNames.length})`}</text>
       </box>
 
       {/* Divider */}
@@ -42,9 +54,10 @@ export function ThemeSelector({ currentTheme, selectedIndex, theme, width, heigh
       </box>
 
       {/* Theme list */}
-      <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-        {themeNames.map((name, idx) => {
+      <box flexDirection="column" paddingLeft={1} paddingRight={1} height={visibleCount}>
+        {visibleThemes.map((name) => {
           const t = themes[name]
+          const idx = themeNames.indexOf(name)
           const isSelected = idx === selectedIndex
           const isCurrent = name === currentTheme
 

@@ -149,9 +149,9 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
       if (key.name === "escape" || key.name === "q") {
         setState((s) => ({ ...s, showThemeSelector: false }))
       } else if (key.name === "j" || key.name === "down") {
-        setState((s) => ({ ...s, themeIndex: Math.min(s.themeIndex + 1, themeNames.length - 1) }))
+        setState((s) => ({ ...s, themeIndex: (s.themeIndex + 1) % themeNames.length }))
       } else if (key.name === "k" || key.name === "up") {
-        setState((s) => ({ ...s, themeIndex: Math.max(s.themeIndex - 1, 0) }))
+        setState((s) => ({ ...s, themeIndex: (s.themeIndex - 1 + themeNames.length) % themeNames.length }))
       } else if (key.name === "return") {
         applyTheme(themeNames[themeIndex]!)
       }
