@@ -1,14 +1,16 @@
 /**
  * Effect service for browse data operations.
  */
+import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import type { PageId } from "../../Brand.js"
+import type { ContentHash, PageId } from "../../Brand.js"
 import { ConfluenceClient } from "../../ConfluenceClient.js"
 import { ConfluenceConfig } from "../../ConfluenceConfig.js"
-import type { ApiError, ConversionError, RateLimitError } from "../../ConfluenceError.js"
+import type { ApiError, ConversionError, FileSystemError, RateLimitError } from "../../ConfluenceError.js"
+import { LocalFileSystem } from "../../LocalFileSystem.js"
 import { MarkdownConverter } from "../../MarkdownConverter.js"
 import { SyncEngine } from "../../SyncEngine.js"
 import type { BrowseItem, ParentResult } from "./BrowseItem.js"
@@ -16,7 +18,7 @@ import type { BrowseItem, ParentResult } from "./BrowseItem.js"
 /**
  * Errors that can occur during browse operations.
  */
-export type BrowseError = ApiError | RateLimitError | ConversionError
+export type BrowseError = ApiError | RateLimitError | ConversionError | FileSystemError
 
 /**
  * Service interface for browse operations.
@@ -26,7 +28,10 @@ export interface BrowseService {
   readonly getParentAndSiblings: (item: BrowseItem) => Effect.Effect<Option.Option<ParentResult>, BrowseError>
   readonly getPreview: (item: BrowseItem) => Effect.Effect<string, BrowseError>
   readonly openInBrowser: (item: BrowseItem) => Effect.Effect<void>
+  readonly getStatus: Effect.Effect<string>
   readonly getRootItem: Effect.Effect<BrowseItem, BrowseError>
+  readonly pullPage: (item: BrowseItem) => Effect.Effect<string, BrowseError>
+  readonly createNewPage: (parentId: PageId, title: string) => Effect.Effect<string, BrowseError>
   readonly siteName: string
 }
 
@@ -35,6 +40,15 @@ export const BrowseService = Context.GenericTag<BrowseService>("@knpkv/confluenc
 /**
  * Live implementation of BrowseService.
  */
+/** Slugify a title for use as filename */
+const slugify = (title: string): string =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+
 export const BrowseServiceLive = Layer.effect(
   BrowseService,
   Effect.gen(function*() {
@@ -42,6 +56,10 @@ export const BrowseServiceLive = Layer.effect(
     const config = yield* ConfluenceConfig
     const converter = yield* MarkdownConverter
     const syncEngine = yield* SyncEngine
+    const localFs = yield* LocalFileSystem
+    const pathService = yield* Path.Path
+
+    const docsPath = pathService.join(process.cwd(), config.docsPath)
 
     // Get sync status to determine which pages are synced
     const statusResult = yield* syncEngine.status().pipe(
@@ -131,6 +149,85 @@ export const BrowseServiceLive = Layer.effect(
         Effect.sync(() => {
           const url = `${config.baseUrl}/wiki/spaces/${config.spaceKey}/pages/${item.id}`
           import("child_process").then(({ exec }) => exec(`open "${url}"`))
+        }),
+
+      getStatus: Effect.gen(function*() {
+        const result = yield* syncEngine.status()
+        const lines = [
+          `Synced:          ${result.synced}`,
+          `Local Modified:  ${result.localModified}`,
+          `Remote Modified: ${result.remoteModified}`,
+          `Conflicts:       ${result.conflicts}`,
+          `Local Only:      ${result.localOnly}`,
+          `Remote Only:     ${result.remoteOnly}`
+        ]
+        if (result.files.length > 0 && result.synced < result.files.length) {
+          lines.push("", "Changed files:")
+          for (const file of result.files) {
+            if (file._tag !== "Synced" && file._tag !== "RemoteOnly") {
+              lines.push(`  [${file._tag}] ${file.path}`)
+            } else if (file._tag === "RemoteOnly") {
+              lines.push(`  [${file._tag}] ${file.page.title}`)
+            }
+          }
+        }
+        return lines.join("\n")
+      }).pipe(Effect.catchAll(() => Effect.succeed("Error getting status"))),
+
+      pullPage: (item) =>
+        Effect.gen(function*() {
+          const page = yield* client.getPage(item.id)
+          const html = page.body?.storage?.value ?? ""
+          const markdown = yield* converter.htmlToMarkdown(html)
+
+          // Determine file path - check if page has children
+          const children = yield* client.getChildren(item.id)
+          const hasChildren = children.results.length > 0
+
+          const filename = `${slugify(page.title)}.md`
+          const filePath = hasChildren
+            ? pathService.join(docsPath, slugify(page.title), filename)
+            : pathService.join(docsPath, filename)
+
+          // Ensure parent directory exists
+          const dir = pathService.dirname(filePath)
+          yield* localFs.ensureDir(dir)
+
+          // Write markdown file with front-matter
+          yield* localFs.writeMarkdownFile(filePath, {
+            pageId: item.id,
+            version: page.version.number,
+            title: page.title,
+            updated: page.version.createdAt ? new Date(page.version.createdAt) : new Date(),
+            ...(page.parentId ? { parentId: page.parentId as PageId } : {}),
+            contentHash: "" as unknown as ContentHash
+          }, markdown)
+
+          return `Pulled: ${page.title}`
+        }),
+
+      createNewPage: (parentId, title) =>
+        Effect.gen(function*() {
+          // Find parent page path
+          const parentPage = yield* client.getPage(parentId)
+          const parentSlug = slugify(parentPage.title)
+
+          // Create file in parent's directory
+          const filename = `${slugify(title)}.md`
+          const filePath = pathService.join(docsPath, parentSlug, filename)
+
+          // Ensure directory exists
+          const dir = pathService.dirname(filePath)
+          yield* localFs.ensureDir(dir)
+
+          // Write new page file
+          yield* localFs.writeNewPageFile(
+            filePath,
+            { title, parentId },
+            "\n<!-- Write your page content here -->\n"
+          )
+
+          return `Created: ${title}`
         })
     })
   })

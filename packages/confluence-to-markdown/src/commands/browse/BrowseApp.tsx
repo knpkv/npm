@@ -5,13 +5,14 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { useEffect, useState } from "react"
+import type { PageId } from "../../Brand.js"
 import type { BrowseItem, ColumnState } from "./BrowseItem.js"
 import type { BrowseService } from "./BrowseService.js"
 import { ActionsPanel, SELECTION_ACTIONS, TOTAL_ACTIONS } from "./components/ActionsPanel.js"
 import { Column } from "./components/Column.js"
 import { StatusBar } from "./components/StatusBar.js"
 import { ThemeSelector } from "./components/ThemeSelector.js"
-import { defaultTheme, themes, themeNames, type Theme, type ThemeName } from "./themes/index.js"
+import { type ThemeName, themeNames, themes } from "./themes/index.js"
 
 interface BrowseAppProps {
   readonly service: BrowseService
@@ -32,11 +33,15 @@ interface BrowseState {
   readonly selectedAction: number
   readonly showPreview: boolean
   readonly showThemeSelector: boolean
+  readonly showNewPagePrompt: boolean
+  readonly newPageTitle: string
+  readonly newPageParentId: PageId | null
   readonly previewContent: string
   readonly previewScroll: number
   readonly loading: boolean
   readonly themeName: ThemeName
   readonly themeIndex: number
+  readonly statusMessage: string | null
 }
 
 const initialState = (item: BrowseItem, themeName: ThemeName): BrowseState => ({
@@ -47,14 +52,18 @@ const initialState = (item: BrowseItem, themeName: ThemeName): BrowseState => ({
   selectedAction: 0,
   showPreview: false,
   showThemeSelector: false,
+  showNewPagePrompt: false,
+  newPageTitle: "",
+  newPageParentId: null,
   previewContent: "",
   previewScroll: 0,
   loading: false,
   themeName,
-  themeIndex: themeNames.indexOf(themeName)
+  themeIndex: themeNames.indexOf(themeName),
+  statusMessage: null
 })
 
-export function BrowseApp({ service, initialItem, userEmail, onQuit, initialTheme, onThemeChange }: BrowseAppProps) {
+export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, service, userEmail }: BrowseAppProps) {
   const dimensions = useTerminalDimensions()
   const [state, setState] = useState<BrowseState>(() => initialState(initialItem, initialTheme))
 
@@ -63,14 +72,18 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
     col1,
     focusedColumn,
     history,
-    selectedAction,
-    showPreview,
-    showThemeSelector,
+    loading,
+    newPageParentId,
+    newPageTitle,
     previewContent,
     previewScroll,
-    loading,
-    themeName,
-    themeIndex
+    selectedAction,
+    showNewPagePrompt,
+    showPreview,
+    showThemeSelector,
+    statusMessage,
+    themeIndex,
+    themeName
   } = state
   const theme = themes[themeName]
 
@@ -113,8 +126,10 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
     if (selectedAction < SELECTION_ACTIONS.length) {
       if (!item) return
       if (selectedAction === 0) {
+        // Open in browser
         Effect.runPromise(service.openInBrowser(item))
       } else if (selectedAction === 1) {
+        // Preview
         runEffect(service.getPreview(item), (content) => {
           setState((s) => ({
             ...s,
@@ -123,6 +138,20 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
             showPreview: true
           }))
         })
+      } else if (selectedAction === 2) {
+        // Add/sync selected page
+        runEffect(service.pullPage(item), (result) => {
+          setState((s) => ({ ...s, statusMessage: result }))
+          setTimeout(() => setState((s) => ({ ...s, statusMessage: null })), 3000)
+        })
+      } else if (selectedAction === 3) {
+        // New page under selected item
+        setState((s) => ({
+          ...s,
+          showNewPagePrompt: true,
+          newPageTitle: "",
+          newPageParentId: item.id
+        }))
       }
     } else {
       // System actions
@@ -130,8 +159,41 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
       if (systemIdx === 0) {
         // Theme
         setState((s) => ({ ...s, showThemeSelector: true }))
+      } else if (systemIdx === 1) {
+        // Sync status
+        runEffect(service.getStatus, (status) => {
+          setState((s) => ({
+            ...s,
+            previewContent: `Sync Status:\n\n${status}`,
+            previewScroll: 0,
+            showPreview: true
+          }))
+        })
+      } else if (systemIdx === 2) {
+        // Add page under root
+        setState((s) => ({
+          ...s,
+          showNewPagePrompt: true,
+          newPageTitle: "",
+          newPageParentId: initialItem.id
+        }))
       }
     }
+  }
+
+  // Create new page
+  const createNewPage = () => {
+    if (!newPageParentId || !newPageTitle.trim()) return
+    runEffect(service.createNewPage(newPageParentId, newPageTitle.trim()), (result) => {
+      setState((s) => ({
+        ...s,
+        showNewPagePrompt: false,
+        newPageTitle: "",
+        newPageParentId: null,
+        statusMessage: result
+      }))
+      setTimeout(() => setState((s) => ({ ...s, statusMessage: null })), 3000)
+    })
   }
 
   // Apply theme and save
@@ -143,6 +205,20 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
   // Keyboard navigation
   useKeyboard((key) => {
     const currentItem = getSelectedItem()
+
+    // New page prompt mode
+    if (showNewPagePrompt) {
+      if (key.name === "escape") {
+        setState((s) => ({ ...s, showNewPagePrompt: false, newPageTitle: "", newPageParentId: null }))
+      } else if (key.name === "return") {
+        createNewPage()
+      } else if (key.name === "backspace") {
+        setState((s) => ({ ...s, newPageTitle: s.newPageTitle.slice(0, -1) }))
+      } else if (key.sequence && key.sequence.length === 1 && key.sequence.match(/[\w\s\-_.]/)) {
+        setState((s) => ({ ...s, newPageTitle: s.newPageTitle + key.sequence }))
+      }
+      return
+    }
 
     // Theme selector mode
     if (showThemeSelector) {
@@ -357,6 +433,7 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
         inActionsPanel={focusedColumn === 2}
         theme={theme}
         themeName={theme.name}
+        statusMessage={statusMessage}
       />
 
       {/* Theme selector modal */}
@@ -368,6 +445,37 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
           width={dimensions.width}
           height={dimensions.height}
         />
+      ) : null}
+
+      {/* New page prompt modal */}
+      {showNewPagePrompt ? (
+        <box
+          position="absolute"
+          left={Math.floor((dimensions.width - 50) / 2)}
+          top={Math.floor((dimensions.height - 7) / 2)}
+          width={50}
+          height={7}
+          backgroundColor={theme.bg.secondary}
+          border={true}
+          borderColor={theme.accent.primary}
+          flexDirection="column"
+        >
+          <box paddingLeft={1} paddingTop={1}>
+            <text fg={theme.accent.primary}>{"◈ "}</text>
+            <text fg={theme.text.primary}>{"New Page"}</text>
+          </box>
+          <box paddingLeft={1} paddingTop={1}>
+            <text fg={theme.text.muted}>{"Title: "}</text>
+            <text fg={theme.text.primary}>{newPageTitle}</text>
+            <text fg={theme.accent.primary}>{"█"}</text>
+          </box>
+          <box flexGrow={1} />
+          <box paddingLeft={1} paddingBottom={1} flexDirection="row">
+            <text fg={theme.text.muted}>{"⏎ create"}</text>
+            <text fg={theme.text.muted}>{" │ "}</text>
+            <text fg={theme.text.muted}>{"esc cancel"}</text>
+          </box>
+        </box>
       ) : null}
     </box>
   )

@@ -5,7 +5,9 @@
     "outDir": "dist",
     "rootDir": "src",
     "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react"
+    "jsxImportSource": "@opentui/react",
+    "moduleResolution": "bundler",
+    "module": "ESNext"
   },
   "include": ["src"],
   "exclude": []

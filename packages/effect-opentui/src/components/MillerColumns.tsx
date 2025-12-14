@@ -1,8 +1,11 @@
 /**
  * MillerColumns React component for Finder-style column navigation.
  */
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import type { KeyEvent } from "@opentui/core"
+import * as OpenTuiReact from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
+
+const { useKeyboard, useTerminalDimensions } = OpenTuiReact
 
 /**
  * Configuration for a column in MillerColumns.
@@ -90,7 +93,7 @@ export function MillerColumns<T>(props: MillerColumnsConfig<T>) {
   }, [state.focusedColumn, state.selectedIndices, getSelectedItem, props])
 
   // Keyboard navigation
-  useKeyboard((key) => {
+  useKeyboard((key: KeyEvent) => {
     const col = state.focusedColumn
     const items = state.columnData[col] ?? []
     const idx = state.selectedIndices[col] ?? 0
@@ -178,7 +181,11 @@ export function MillerColumns<T>(props: MillerColumnsConfig<T>) {
                     return (
                       <box
                         key={itemIdx}
-                        backgroundColor={isSelected && isFocused ? "#3b82f6" : isSelected ? "#333333" : undefined}
+                        {...(isSelected && isFocused
+                          ? { backgroundColor: "#3b82f6" }
+                          : isSelected
+                            ? { backgroundColor: "#333333" }
+                            : {})}
                         paddingLeft={1}
                         paddingRight={1}
                       >

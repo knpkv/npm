@@ -1,11 +1,15 @@
 /**
  * Renderer service for OpenTUI React.
  */
-import { type CliRenderer, createCliRenderer } from "@opentui/core"
-import { createRoot, type Root } from "@opentui/react"
+import * as OpenTuiCore from "@opentui/core"
+import * as OpenTuiReact from "@opentui/react"
 import { Context, Effect, Layer } from "effect"
 import type { ReactNode } from "react"
+
 import { RendererError } from "./RendererError.ts"
+
+type CliRenderer = OpenTuiCore.CliRenderer
+type Root = OpenTuiReact.Root
 
 /**
  * Renderer service for terminal UI.
@@ -43,14 +47,14 @@ export const makeRendererLayer = (config: RendererConfig = {}): Layer.Layer<Rend
   Layer.scoped(
     Renderer,
     Effect.acquireRelease(
-      Effect.try({
-        try: () => {
-          const cli = createCliRenderer({
+      Effect.tryPromise({
+        try: async () => {
+          const cli = await OpenTuiCore.createCliRenderer({
             targetFps: config.targetFps !== undefined ? config.targetFps : 60,
             exitOnCtrlC: config.exitOnCtrlC !== undefined ? config.exitOnCtrlC : false,
             useKittyKeyboard: config.useKittyKeyboard !== undefined ? config.useKittyKeyboard : {}
           })
-          const root = createRoot(cli)
+          const root = OpenTuiReact.createRoot(cli)
 
           return {
             cli,

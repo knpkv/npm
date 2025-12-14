@@ -2,7 +2,7 @@
  * Theme selector modal component.
  */
 import type { Theme, ThemeName } from "../themes/index.js"
-import { themes, themeNames } from "../themes/index.js"
+import { themeNames, themes } from "../themes/index.js"
 
 interface ThemeSelectorProps {
   readonly currentTheme: ThemeName
@@ -12,7 +12,7 @@ interface ThemeSelectorProps {
   readonly height: number
 }
 
-export function ThemeSelector({ currentTheme, selectedIndex, theme, width, height }: ThemeSelectorProps) {
+export function ThemeSelector({ currentTheme, height, selectedIndex, theme, width }: ThemeSelectorProps) {
   const modalWidth = Math.min(50, width - 10)
   const modalHeight = Math.min(themeNames.length + 6, height - 4)
   const left = Math.floor((width - modalWidth) / 2)
@@ -71,7 +71,7 @@ export function ThemeSelector({ currentTheme, selectedIndex, theme, width, heigh
               <text fg={isSelected ? theme.text.inverse : theme.accent.tertiary}>{isCurrent ? "● " : "○ "}</text>
               <text fg={isSelected ? theme.text.inverse : theme.text.primary}>{t.name}</text>
               {/* Color preview dots */}
-              <text fg={theme.text.muted}> </text>
+              <text fg={theme.text.muted}></text>
               <text fg={t.accent.primary}>{"●"}</text>
               <text fg={t.accent.secondary}>{"●"}</text>
               <text fg={t.accent.tertiary}>{"●"}</text>

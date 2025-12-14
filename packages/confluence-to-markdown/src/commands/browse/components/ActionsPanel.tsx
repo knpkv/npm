@@ -6,10 +6,16 @@ import type { Theme } from "../themes/index.js"
 
 export const SELECTION_ACTIONS = [
   { label: "Open in browser", icon: "⌘" },
-  { label: "Preview", icon: "◎" }
+  { label: "Preview", icon: "◎" },
+  { label: "Add", icon: "+" },
+  { label: "New page", icon: "◈" }
 ] as const
 
-export const SYSTEM_ACTIONS = [{ label: "Theme", icon: "◐" }] as const
+export const SYSTEM_ACTIONS = [
+  { label: "Theme", icon: "◐" },
+  { label: "Status", icon: "⎇" },
+  { label: "Add page", icon: "+" }
+] as const
 
 export type SelectionActionType = (typeof SELECTION_ACTIONS)[number]["label"]
 export type SystemActionType = (typeof SYSTEM_ACTIONS)[number]["label"]
@@ -30,16 +36,16 @@ interface ActionsPanelProps {
 }
 
 export function ActionsPanel({
-  selectedItem,
+  height,
   isFocused,
-  selectedAction,
-  showPreview,
+  loading,
   previewContent,
   previewScroll,
-  loading,
-  width,
-  height,
-  theme
+  selectedAction,
+  selectedItem,
+  showPreview,
+  theme,
+  width
 }: ActionsPanelProps) {
   const borderColor = isFocused ? theme.border.focused : theme.border.unfocused
   const previewLines = previewContent.split("\n")

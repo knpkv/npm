@@ -12,7 +12,7 @@ interface ColumnProps {
   readonly theme: Theme
 }
 
-export function Column({ state, isFocused, width, height, theme }: ColumnProps) {
+export function Column({ height, isFocused, state, theme, width }: ColumnProps) {
   const borderColor = isFocused ? theme.border.focused : theme.border.unfocused
 
   return (
