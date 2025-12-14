@@ -1,8 +1,8 @@
 /**
  * Column component for Miller columns navigation.
  */
-import type { BrowseItem, ColumnState } from "../BrowseItem.js"
 import type { Theme } from "../themes/index.js"
+import type { ColumnState, TuiItem } from "../TuiItem.js"
 
 interface ColumnProps {
   readonly state: ColumnState
@@ -13,11 +13,20 @@ interface ColumnProps {
 }
 
 /** Check if item is synced (only pages can be synced) */
-const isSynced = (item: BrowseItem): boolean => item.type === "page" && item.synced
+const isSynced = (item: TuiItem): boolean => item.type === "page" && item.synced
 
 /** Get icon for item type */
-const getIcon = (item: BrowseItem, theme: Theme, synced: boolean): string =>
-  item.type === "space" ? theme.icons.folder : synced ? theme.icons.synced : theme.icons.unsynced
+const getIcon = (item: TuiItem, theme: Theme, synced: boolean): string => {
+  if (item.type === "auth-menu") return item.icon
+  if (item.type === "space") return theme.icons.folder
+  return synced ? theme.icons.synced : theme.icons.unsynced
+}
+
+/** Get unique key for item */
+const getKey = (item: TuiItem): string => {
+  if (item.type === "auth-menu") return item.id
+  return item.id
+}
 
 export function Column({ height, isFocused, state, theme, width }: ColumnProps) {
   const borderColor = isFocused ? theme.border.focused : theme.border.unfocused
@@ -30,7 +39,7 @@ export function Column({ height, isFocused, state, theme, width }: ColumnProps) 
             {"—"}
           </text>
         ) : (
-          state.items.map((item: BrowseItem, idx: number) => {
+          state.items.map((item: TuiItem, idx: number) => {
             const isSelected = idx === state.selectedIndex
             const synced = isSynced(item)
             const icon = getIcon(item, theme, synced)
@@ -47,16 +56,28 @@ export function Column({ height, isFocused, state, theme, width }: ColumnProps) 
               bgColor = theme.selection.inactive
               textColor = theme.text.primary
               iconColor =
-                item.type === "space" ? theme.accent.secondary : synced ? theme.status.synced : theme.text.muted
+                item.type === "auth-menu"
+                  ? theme.accent.primary
+                  : item.type === "space"
+                    ? theme.accent.secondary
+                    : synced
+                      ? theme.status.synced
+                      : theme.text.muted
             } else {
               bgColor = theme.bg.primary
               textColor = theme.text.primary
               iconColor =
-                item.type === "space" ? theme.accent.secondary : synced ? theme.status.synced : theme.text.muted
+                item.type === "auth-menu"
+                  ? theme.accent.primary
+                  : item.type === "space"
+                    ? theme.accent.secondary
+                    : synced
+                      ? theme.status.synced
+                      : theme.text.muted
             }
 
             return (
-              <box key={item.id} backgroundColor={bgColor} paddingLeft={1} flexDirection="row">
+              <box key={getKey(item)} backgroundColor={bgColor} paddingLeft={1} flexDirection="row">
                 <text fg={iconColor}>{`${icon} `}</text>
                 <text fg={textColor}>{item.title}</text>
               </box>

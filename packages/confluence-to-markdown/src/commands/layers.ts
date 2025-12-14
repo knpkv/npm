@@ -20,6 +20,7 @@ import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
 import { getAuth } from "./shared.js"
+import { TuiServiceAuthenticated, TuiServiceConfigured, TuiServiceUnauthenticated } from "./tui/TuiService.js"
 
 // Dummy config layer for help/init
 const DummyConfigLayer = ConfluenceConfigLayerFromValues({
@@ -211,16 +212,38 @@ const ConfluenceClientFromAuth = Layer.unwrapEffect(
 )
 
 /**
- * Browse spaces layer - auth + client but no config.
+ * TUI layer - unauthenticated mode.
  */
-export const BrowseSpacesLayer = DummySyncEngineLayer.pipe(
-  Layer.provideMerge(UserCacheLayer),
-  Layer.provideMerge(DummyGitServiceLayer),
+export const TuiUnauthenticatedLayer = TuiServiceUnauthenticated.pipe(
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
+/**
+ * TUI layer - authenticated mode (no config).
+ */
+export const TuiAuthenticatedLayer = TuiServiceAuthenticated.pipe(
   Layer.provideMerge(ConfluenceClientFromAuth),
   Layer.provideMerge(AuthLive),
   Layer.provideMerge(MarkdownConverterLayer),
   Layer.provideMerge(LocalFileSystemLayer),
-  Layer.provideMerge(DummyConfigLayer),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
+/**
+ * TUI layer - configured mode (full functionality).
+ */
+export const TuiConfiguredLayer = TuiServiceConfigured.pipe(
+  Layer.provideMerge(SyncEngineLayer),
+  Layer.provideMerge(UserCacheLayer),
+  Layer.provideMerge(GitServiceLayer),
+  Layer.provideMerge(ConfluenceClientLive),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(ConfluenceConfigLayer()),
   Layer.provideMerge(NodeHttpClient.layer),
   Layer.provideMerge(NodeContext.layer)
 )
@@ -228,7 +251,7 @@ export const BrowseSpacesLayer = DummySyncEngineLayer.pipe(
 /**
  * Determine which layer to use based on command.
  */
-export const getLayerType = (): "full" | "auth" | "clone" | "minimal" | "browse-spaces" => {
+export const getLayerType = (): "full" | "auth" | "clone" | "minimal" | "tui" => {
   const cmd = process.argv[2]
   // auth commands need auth layer only
   if (cmd === "auth") {
@@ -238,9 +261,9 @@ export const getLayerType = (): "full" | "auth" | "clone" | "minimal" | "browse-
   if (cmd === "clone") {
     return "clone"
   }
-  // browse-spaces needs auth + client but not config
-  if (cmd === "browse-spaces") {
-    return "browse-spaces"
+  // tui uses mode detection internally
+  if (cmd === "tui") {
+    return "tui"
   }
   // --help, -h, --version don't need config
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {

@@ -1,13 +1,11 @@
 /**
- * Main browse application component with reducer-based state machine.
+ * Main TUI application component with mode-aware state machine.
  */
 import type { KeyEvent } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { useEffect, useReducer, useRef } from "react"
-import type { BrowseItem } from "./BrowseItem.js"
-import type { BrowseService } from "./BrowseService.js"
 import { ActionsPanel } from "./components/ActionsPanel.js"
 import { Column } from "./components/Column.js"
 import { NewPageModal } from "./components/NewPageModal.js"
@@ -15,18 +13,31 @@ import { StatusBar } from "./components/StatusBar.js"
 import { ThemeSelector } from "./components/ThemeSelector.js"
 import { getSelectedItem, reducer } from "./reducer.js"
 import { type ThemeName, themeNames, themes } from "./themes/index.js"
-import type { Action, BrowseState, SideEffect } from "./types.js"
+import type { AuthMenuItem, PageTuiItem, TuiItem } from "./TuiItem.js"
+import type { TuiService } from "./TuiService.js"
+import type { Action, SideEffect, TuiState } from "./types.js"
 
-interface BrowseAppProps {
-  readonly service: BrowseService
-  readonly initialItems: ReadonlyArray<BrowseItem>
+/**
+ * Auth menu items for unauthenticated mode.
+ */
+const AUTH_MENU_ITEMS: ReadonlyArray<AuthMenuItem> = [
+  { type: "auth-menu", id: "create-oauth", title: "Create OAuth Client", icon: "⚙" },
+  { type: "auth-menu", id: "login", title: "Login", icon: "→" },
+  { type: "auth-menu", id: "quit", title: "Quit", icon: "⎋" }
+]
+
+interface TuiAppProps {
+  readonly service: TuiService
+  readonly initialItems: ReadonlyArray<TuiItem>
   readonly userEmail: string | null
   readonly onQuit: () => void
   readonly initialTheme: ThemeName
   readonly onThemeChange: (theme: ThemeName) => void
+  readonly onModeChange: () => void
 }
 
-const initialState = (items: ReadonlyArray<BrowseItem>, themeName: ThemeName): BrowseState => ({
+const initialState = (items: ReadonlyArray<TuiItem>, themeName: ThemeName, service: TuiService): TuiState => ({
+  mode: service.mode,
   focus: { type: "column", index: 0 },
   col0: { items, selectedIndex: 0 },
   col1: { items: [], selectedIndex: 0 },
@@ -43,7 +54,13 @@ const initialState = (items: ReadonlyArray<BrowseItem>, themeName: ThemeName): B
 /**
  * Convert key event to action.
  */
-function keyToAction(key: KeyEvent, state: BrowseState): Action | null {
+function keyToAction(key: KeyEvent, state: TuiState): Action | null {
+  // Quit shortcuts - always work (check various key formats)
+  if (key.ctrl && key.name === "c") return { type: "nav/quit" }
+  if (key.name === "q" || key.name === "Q" || key.sequence === "q" || key.sequence === "Q") {
+    return { type: "nav/quit" }
+  }
+
   // Modal-specific handling
   if (state.focus.type === "modal" && state.focus.kind === "newPage") {
     if (key.name === "escape") return { type: "nav/back" }
@@ -55,9 +72,6 @@ function keyToAction(key: KeyEvent, state: BrowseState): Action | null {
     return null
   }
 
-  // Ctrl+C always quits
-  if (key.ctrl && key.name === "c") return { type: "nav/back" }
-
   // Standard navigation
   if (key.name === "j" || key.name === "down") return { type: "nav/down" }
   if (key.name === "k" || key.name === "up") return { type: "nav/up" }
@@ -65,20 +79,24 @@ function keyToAction(key: KeyEvent, state: BrowseState): Action | null {
   if (key.name === "l" || key.name === "right") return { type: "nav/right" }
   if (key.name === "space") return { type: "nav/select" }
   if (key.name === "return") return { type: "nav/enter" }
-  if (key.name === "escape" || key.name === "q") return { type: "nav/back" }
-
-  // Shortcuts
-  if (key.name === "o") return { type: "nav/enter" } // treated as open in actions context
-  if (key.name === "v") return { type: "nav/enter" } // treated as preview in actions context
+  if (key.name === "escape") return { type: "nav/back" }
 
   return null
 }
 
-export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, service, userEmail }: BrowseAppProps) {
+export function TuiApp({
+  initialItems,
+  initialTheme,
+  onModeChange,
+  onQuit,
+  onThemeChange,
+  service,
+  userEmail
+}: TuiAppProps) {
   const dimensions = useTerminalDimensions()
   const [state, dispatch] = useReducer(
-    (s: BrowseState, a: Action) => reducer(s, a).state,
-    initialState(initialItems, initialTheme)
+    (s: TuiState, a: Action) => reducer(s, a).state,
+    initialState(initialItems, initialTheme, service)
   )
 
   // Track pending effects
@@ -92,6 +110,7 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
     col0,
     col1,
     focus,
+    mode,
     newPageTitle,
     previewContent,
     previewScroll,
@@ -130,16 +149,16 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
   // Execute side effects
   useEffect(() => {
     const effect = pendingEffect.current
-    // eslint-disable-next-line no-console
-    if (effect) console.log("EFFECT HANDLER RUNNING:", effect.type)
     if (!effect) return
     pendingEffect.current = undefined
 
     switch (effect.type) {
       case "loadChildren":
-        runEffect("Loading...", service.getChildren(effect.item), (children) => {
-          dispatch({ type: "data/setCol1", items: children })
-        })
+        if (effect.item.type !== "auth-menu") {
+          runEffect("Loading...", service.getChildren(effect.item), (children) => {
+            dispatch({ type: "data/setCol1", items: children })
+          })
+        }
         break
 
       case "loadPreview":
@@ -152,11 +171,11 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
         runEffect("Loading...", service.getParentAndSiblings(effect.item), (result) => {
           if (Option.isSome(result)) {
             const { siblings } = result.value
-            const currentIds = new Set(col0.items.map((i) => i.id))
-            const siblingIds = new Set(siblings.map((s) => s.id))
+            const currentIds = new Set(col0.items.filter((i) => i.type !== "auth-menu").map((i) => i.id))
+            const siblingIds = new Set(siblings.filter((s) => s.type !== "auth-menu").map((s) => s.id))
             const sameContent = currentIds.size === siblingIds.size && [...currentIds].every((id) => siblingIds.has(id))
-            if (!sameContent) {
-              const idx = siblings.findIndex((s) => s.id === effect.item.id)
+            if (!sameContent && effect.item.type === "page") {
+              const idx = siblings.findIndex((s) => s.type === "page" && s.id === effect.item.id)
               dispatch({ type: "data/goBack", siblings, idx: idx >= 0 ? idx : 0 })
             }
           }
@@ -176,6 +195,17 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
         )
         break
 
+      case "clonePage":
+        if (effect.item.type === "page") {
+          runEffect(
+            "Cloning...",
+            service.clonePage(effect.item as PageTuiItem),
+            () => {},
+            (result) => result
+          )
+        }
+        break
+
       case "createPage":
         runEffect(
           "Creating page...",
@@ -191,10 +221,35 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
         })
         break
 
+      case "createOAuth":
+        Effect.runPromise(service.createOAuthClient)
+        dispatch({ type: "ui/setStatus", status: { type: "info", message: "Opening browser..." } })
+        setTimeout(() => dispatch({ type: "ui/setStatus", status: null }), 2000)
+        break
+
+      case "login":
+        dispatch({ type: "ui/setStatus", status: { type: "loading", message: "Starting login..." } })
+        Effect.runPromise(Effect.either(service.login)).then((result) => {
+          if (result._tag === "Right") {
+            dispatch({ type: "ui/setStatus", status: { type: "success", message: "Logged in!" } })
+            // Trigger mode change to reload with new auth state
+            setTimeout(() => onModeChange(), 1000)
+          } else {
+            dispatch({ type: "ui/setStatus", status: { type: "error", message: "Login failed" } })
+          }
+        })
+        break
+
+      case "logout":
+        Effect.runPromise(service.logout)
+        dispatch({ type: "ui/setStatus", status: { type: "info", message: "Logged out" } })
+        setTimeout(() => onModeChange(), 1000)
+        break
+
       case "quit":
-        // eslint-disable-next-line no-console
-        console.log("QUIT EFFECT EXECUTING")
         onQuit()
+        // Fallback: force exit after short delay if onQuit doesn't work
+        setTimeout(() => process.exit(0), 100)
         break
 
       case "applyTheme":
@@ -202,22 +257,26 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
         break
 
       case "checkChildrenAndDrill":
-        runEffect("Loading...", service.getChildren(effect.item), (children) => {
-          if (children.length > 0) {
-            dispatch({ type: "data/drill", children })
-          } else {
-            // No children - go to actions
-            dispatch({ type: "nav/select" })
-          }
-        })
+        if (effect.item.type !== "auth-menu") {
+          runEffect("Loading...", service.getChildren(effect.item), (children) => {
+            if (children.length > 0) {
+              dispatch({ type: "data/drill", children })
+            } else {
+              // No children - go to actions panel and show info
+              dispatch({ type: "nav/select" })
+              dispatch({ type: "ui/setStatus", status: { type: "info", message: "No child pages" } })
+              setTimeout(() => dispatch({ type: "ui/setStatus", status: null }), 2000)
+            }
+          })
+        }
         break
     }
   })
 
-  // Load initial children
+  // Load initial children (only if first item is not auth-menu)
   useEffect(() => {
     const item = col0.items[col0.selectedIndex]
-    if (item) {
+    if (item && item.type !== "auth-menu") {
       runEffect("Loading...", service.getChildren(item), (children) => {
         dispatch({ type: "data/setCol1", items: children })
       })
@@ -227,17 +286,10 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
   // Keyboard handler - use stateRef to avoid stale closure
   useKeyboard((key) => {
     const currentState = stateRef.current
-    // eslint-disable-next-line no-console
-    console.log("KEY:", key.name, "focus:", currentState.focus.type)
     const action = keyToAction(key, currentState)
     if (action) {
-      // eslint-disable-next-line no-console
-      console.log("ACTION:", action.type)
-      // Re-calculate with latest state for effect
       const result = reducer(currentState, action)
       pendingEffect.current = result.effect
-      // eslint-disable-next-line no-console
-      if (result.effect) console.log("EFFECT SET:", result.effect.type)
       dispatch(action)
     }
   })
@@ -255,13 +307,21 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
   const actionsWidth = hasCol1 ? dimensions.width - colWidth * 2 : dimensions.width - colWidth
   const contentHeight = dimensions.height - 3
 
+  // Header text based on mode
+  const headerText =
+    mode.type === "unauthenticated"
+      ? "Authentication"
+      : mode.type === "authenticated"
+        ? "Confluence Spaces"
+        : service.siteName
+
   return (
     <box width={dimensions.width} height={dimensions.height} flexDirection="column" backgroundColor={theme.bg.primary}>
       {/* Header */}
       <box height={1} backgroundColor={theme.bg.header} paddingLeft={1} flexDirection="row">
         <text fg={theme.accent.primary}>{"◈ "}</text>
-        <text fg={theme.text.primary}>{service.siteName}</text>
-        {selectedItem ? (
+        <text fg={theme.text.primary}>{headerText}</text>
+        {selectedItem && selectedItem.type !== "auth-menu" ? (
           <box flexDirection="row">
             <text fg={theme.text.muted}>{" › "}</text>
             <text fg={theme.accent.secondary}>{selectedItem.title}</text>
@@ -276,6 +336,7 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
           <Column state={col1} isFocused={focusedColumn === 1} width={colWidth} height={contentHeight} theme={theme} />
         ) : null}
         <ActionsPanel
+          mode={mode}
           selectedItem={selectedItem}
           isFocused={inActionsPanel}
           selectedAction={selectedAction}
@@ -315,3 +376,5 @@ export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, s
     </box>
   )
 }
+
+export { AUTH_MENU_ITEMS }

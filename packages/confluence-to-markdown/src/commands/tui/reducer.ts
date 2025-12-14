@@ -1,15 +1,15 @@
 /**
- * Reducer for browse navigation state machine.
+ * Reducer for TUI navigation state machine.
  */
-import type { BrowseItem } from "./BrowseItem.js"
-import { SELECTION_ACTIONS, TOTAL_ACTIONS } from "./components/ActionsPanel.js"
+import { getActions } from "./components/ActionsPanel.js"
 import { themeNames } from "./themes/index.js"
-import type { Action, BrowseState, Focus, ReducerResult } from "./types.js"
+import type { TuiItem } from "./TuiItem.js"
+import type { Action, Focus, ReducerResult, TuiState } from "./types.js"
 
 /**
  * Get the currently selected item based on focus state.
  */
-export function getSelectedItem(state: BrowseState): BrowseItem | undefined {
+export function getSelectedItem(state: TuiState): TuiItem | undefined {
   const col = state.focus.type === "actions"
     ? state.focus.selectedFrom === 0
       ? state.col0
@@ -25,10 +25,23 @@ export function getSelectedItem(state: BrowseState): BrowseItem | undefined {
 /**
  * Main reducer function.
  */
-export function reducer(state: BrowseState, action: Action): ReducerResult {
+export function reducer(state: TuiState, action: Action): ReducerResult {
+  // Handle mode transitions
+  if (action.type === "mode/set") {
+    return { state: { ...state, mode: action.mode } }
+  }
+
+  // Quit always works regardless of focus state
+  if (action.type === "nav/quit") {
+    return { state, effect: { type: "quit" } }
+  }
+
   // Handle status updates first
   if (action.type === "ui/setStatus") {
     return { state: { ...state, status: action.status } }
+  }
+  if (action.type === "data/setCol0") {
+    return { state: { ...state, col0: { items: action.items, selectedIndex: 0 } } }
   }
   if (action.type === "data/setCol1") {
     return { state: { ...state, col1: { items: action.items, selectedIndex: 0 } } }
@@ -54,9 +67,9 @@ export function reducer(state: BrowseState, action: Action): ReducerResult {
 }
 
 /**
- * Handle modal focus state (theme selector or new page prompt).
+ * Handle modal focus state (theme selector, new page prompt, or login).
  */
-function handleModal(state: BrowseState, action: Action): ReducerResult {
+function handleModal(state: TuiState, action: Action): ReducerResult {
   const modal = state.focus as Extract<Focus, { type: "modal" }>
 
   if (modal.kind === "theme") {
@@ -108,13 +121,21 @@ function handleModal(state: BrowseState, action: Action): ReducerResult {
     return { state }
   }
 
+  // Login modal (shows status during OAuth flow)
+  if (modal.kind === "login") {
+    if (action.type === "nav/back" || action.type === "ui/closeModal") {
+      return { state: { ...state, focus: { type: "column", index: 0 } } }
+    }
+    return { state }
+  }
+
   return { state }
 }
 
 /**
  * Handle preview focus state.
  */
-function handlePreview(state: BrowseState, action: Action): ReducerResult {
+function handlePreview(state: TuiState, action: Action): ReducerResult {
   const previewLines = state.previewContent.split("\n")
 
   if (
@@ -141,9 +162,10 @@ function handlePreview(state: BrowseState, action: Action): ReducerResult {
 /**
  * Handle actions panel focus state.
  */
-function handleActions(state: BrowseState, action: Action): ReducerResult {
+function handleActions(state: TuiState, action: Action): ReducerResult {
   const actionsFocus = state.focus as Extract<Focus, { type: "actions" }>
   const item = getSelectedItem(state)
+  const { totalActions } = getActions(state.mode)
 
   if (action.type === "nav/back" || action.type === "nav/left") {
     // Go back to column
@@ -151,7 +173,7 @@ function handleActions(state: BrowseState, action: Action): ReducerResult {
     return { state: { ...state, focus: { type: "column", index: targetCol as 0 | 1 } } }
   }
   if (action.type === "nav/down") {
-    if (state.selectedAction < TOTAL_ACTIONS - 1) {
+    if (state.selectedAction < totalActions - 1) {
       return { state: { ...state, selectedAction: state.selectedAction + 1 } }
     }
     return { state }
@@ -178,56 +200,80 @@ function handleActions(state: BrowseState, action: Action): ReducerResult {
       state: { ...state, focus: { type: "modal", kind: "newPage", parentId: action.parentId }, newPageTitle: "" }
     }
   }
+  if (action.type === "ui/showLogin") {
+    return { state: { ...state, focus: { type: "modal", kind: "login" } } }
+  }
 
   return { state }
 }
 
 /**
- * Execute the currently selected action.
+ * Execute the currently selected action based on mode.
  */
-function executeAction(state: BrowseState, item: BrowseItem | undefined, _selectedFrom: 0 | 1): ReducerResult {
+function executeAction(state: TuiState, item: TuiItem | undefined, _selectedFrom: 0 | 1): ReducerResult {
   const idx = state.selectedAction
+  const { selectionActions, systemActions } = getActions(state.mode)
 
-  // Selection actions (require item)
-  if (idx < SELECTION_ACTIONS.length) {
+  // Selection actions (require item for most)
+  if (idx < selectionActions.length) {
+    const actionId = selectionActions[idx]?.id
+
+    // Auth menu items handle themselves
+    if (item?.type === "auth-menu") {
+      if (item.id === "create-oauth") {
+        return { state, effect: { type: "createOAuth" } }
+      }
+      if (item.id === "login") {
+        return { state, effect: { type: "login" } }
+      }
+      if (item.id === "quit") {
+        return { state, effect: { type: "quit" } }
+      }
+    }
+
     if (!item) return { state }
 
-    if (idx === 0) {
-      // Open in browser
+    if (actionId === "open") {
       return { state, effect: { type: "openBrowser", item } }
     }
-    if (idx === 1) {
-      // Preview
+    if (actionId === "preview") {
       return { state, effect: { type: "loadPreview", item } }
     }
-    if (idx === 2) {
-      // Add/sync
+    if (actionId === "pull") {
       return { state, effect: { type: "pullPage", item } }
     }
-    if (idx === 3) {
-      // New page under selected (only for pages, not spaces)
-      if (item.type === "page") {
-        return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: item.id }, newPageTitle: "" } }
-      }
-      return { state }
+    if (actionId === "clone") {
+      return { state, effect: { type: "clonePage", item } }
+    }
+    if (actionId === "new-page" && item.type === "page") {
+      return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: item.id }, newPageTitle: "" } }
     }
   }
 
   // System actions
-  const systemIdx = idx - SELECTION_ACTIONS.length
-  if (systemIdx === 0) {
-    // Theme
-    return { state: { ...state, focus: { type: "modal", kind: "theme" } } }
-  }
-  if (systemIdx === 1) {
-    // Status
-    return { state, effect: { type: "getStatus" } }
-  }
-  if (systemIdx === 2) {
-    // Add page under root - need initialItem, use col0[0] (only for pages)
-    const rootItem = state.col0.items[0]
-    if (rootItem?.type === "page") {
-      return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: rootItem.id }, newPageTitle: "" } }
+  const systemIdx = idx - selectionActions.length
+  if (systemIdx >= 0 && systemIdx < systemActions.length) {
+    const actionId = systemActions[systemIdx]?.id
+
+    if (actionId === "theme") {
+      return { state: { ...state, focus: { type: "modal", kind: "theme" } } }
+    }
+    if (actionId === "status") {
+      return { state, effect: { type: "getStatus" } }
+    }
+    if (actionId === "new-root-page") {
+      const rootItem = state.col0.items[0]
+      if (rootItem?.type === "page") {
+        return {
+          state: { ...state, focus: { type: "modal", kind: "newPage", parentId: rootItem.id }, newPageTitle: "" }
+        }
+      }
+    }
+    if (actionId === "logout") {
+      return { state, effect: { type: "logout" } }
+    }
+    if (actionId === "quit") {
+      return { state, effect: { type: "quit" } }
     }
   }
 
@@ -237,10 +283,23 @@ function executeAction(state: BrowseState, item: BrowseItem | undefined, _select
 /**
  * Handle column focus state (col0 or col1).
  */
-function handleColumn(state: BrowseState, action: Action): ReducerResult {
+function handleColumn(state: TuiState, action: Action): ReducerResult {
   const colFocus = state.focus as Extract<Focus, { type: "column" }>
   const col = colFocus.index === 0 ? state.col0 : state.col1
   const item = col.items[col.selectedIndex]
+
+  // In unauthenticated mode, Enter on auth menu items triggers action
+  if (action.type === "nav/enter" && item?.type === "auth-menu") {
+    if (item.id === "create-oauth") {
+      return { state, effect: { type: "createOAuth" } }
+    }
+    if (item.id === "login") {
+      return { state, effect: { type: "login" } }
+    }
+    if (item.id === "quit") {
+      return { state, effect: { type: "quit" } }
+    }
+  }
 
   if (action.type === "nav/back") {
     return { state, effect: { type: "quit" } }
@@ -255,6 +314,11 @@ function handleColumn(state: BrowseState, action: Action): ReducerResult {
     if (col.selectedIndex > 0) {
       const newIdx = col.selectedIndex - 1
       if (colFocus.index === 0) {
+        // Don't load children for auth menu items
+        const newItem = state.col0.items[newIdx]
+        if (newItem?.type === "auth-menu") {
+          return { state: { ...state, col0: { ...state.col0, selectedIndex: newIdx } } }
+        }
         return {
           state: { ...state, col0: { ...state.col0, selectedIndex: newIdx } },
           effect: { type: "loadChildren", item: state.col0.items[newIdx]! }
@@ -269,6 +333,11 @@ function handleColumn(state: BrowseState, action: Action): ReducerResult {
     if (col.selectedIndex < col.items.length - 1) {
       const newIdx = col.selectedIndex + 1
       if (colFocus.index === 0) {
+        // Don't load children for auth menu items
+        const newItem = state.col0.items[newIdx]
+        if (newItem?.type === "auth-menu") {
+          return { state: { ...state, col0: { ...state.col0, selectedIndex: newIdx } } }
+        }
         return {
           state: { ...state, col0: { ...state.col0, selectedIndex: newIdx } },
           effect: { type: "loadChildren", item: state.col0.items[newIdx]! }
@@ -297,8 +366,8 @@ function handleColumn(state: BrowseState, action: Action): ReducerResult {
           }
         }
       }
-      // No history, try to load parent siblings
-      if (item) {
+      // No history, try to load parent siblings (not for auth menu)
+      if (item && item.type !== "auth-menu") {
         return { state, effect: { type: "loadParentSiblings", item } }
       }
     }
@@ -306,6 +375,11 @@ function handleColumn(state: BrowseState, action: Action): ReducerResult {
   }
 
   if (action.type === "nav/right") {
+    // Auth menu items don't have children
+    if (item?.type === "auth-menu") {
+      return { state }
+    }
+
     if (colFocus.index === 0) {
       if (state.col1.items.length > 0) {
         // Has children, move to col1

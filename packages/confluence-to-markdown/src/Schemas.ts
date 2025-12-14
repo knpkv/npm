@@ -257,8 +257,8 @@ export type PageChildrenResponse = Schema.Schema.Type<typeof PageChildrenRespons
 export const OAuthUserSchema = Schema.Struct({
   /** Atlassian account ID */
   account_id: Schema.String,
-  /** Display name */
-  name: Schema.String,
+  /** Display name (may be empty) */
+  name: Schema.optional(Schema.String),
   /** Email address */
   email: Schema.String
 })
