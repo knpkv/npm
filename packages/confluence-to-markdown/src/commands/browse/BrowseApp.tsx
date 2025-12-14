@@ -234,12 +234,20 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
           runEffect(service.getParentAndSiblings(item), (result) => {
             if (Option.isSome(result)) {
               const { siblings } = result.value
-              const idx = siblings.findIndex((s) => s.id === item.id)
-              setState((s) => ({
-                ...s,
-                col1: s.col0,
-                col0: { items: siblings, selectedIndex: idx >= 0 ? idx : 0 }
-              }))
+              // Only go back if siblings are different from current col0
+              // (prevents duplication when already at sibling level)
+              const currentIds = new Set(col0.items.map((i) => i.id))
+              const siblingIds = new Set(siblings.map((s) => s.id))
+              const sameContent =
+                currentIds.size === siblingIds.size && [...currentIds].every((id) => siblingIds.has(id))
+              if (!sameContent) {
+                const idx = siblings.findIndex((s) => s.id === item.id)
+                setState((s) => ({
+                  ...s,
+                  col1: s.col0,
+                  col0: { items: siblings, selectedIndex: idx >= 0 ? idx : 0 }
+                }))
+              }
             }
           })
         }
