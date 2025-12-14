@@ -3,6 +3,8 @@
  */
 
 export * as Components from "./components/index.ts"
-export * as Input from "./input/index.ts"
 export * from "./Renderer.ts"
 export * from "./RendererError.ts"
+
+// Re-export useful hooks from @opentui/react
+export { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"

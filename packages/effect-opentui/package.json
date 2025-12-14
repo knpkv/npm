@@ -33,10 +33,6 @@
     "./components": {
       "import": "./dist/components/index.js",
       "types": "./dist/components/index.d.ts"
-    },
-    "./input": {
-      "import": "./dist/input/index.js",
-      "types": "./dist/input/index.d.ts"
     }
   },
   "publishConfig": {
@@ -55,11 +51,14 @@
     "effect": "^3.19.3"
   },
   "dependencies": {
-    "@opentui/core": "^0.1.60"
+    "@opentui/core": "^0.1.60",
+    "@opentui/react": "^0.1.60",
+    "react": "^19.1.0"
   },
   "devDependencies": {
     "@effect/vitest": "^0.27.0",
     "@types/node": "^22.15.21",
+    "@types/react": "^19.1.6",
     "effect": "^3.19.3",
     "typescript": "~5.9.0",
     "vitest": "^4.0.13"

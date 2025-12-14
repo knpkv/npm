@@ -1,12 +1,5 @@
 /**
- * Component wrappers for OpenTUI renderables.
+ * React components for OpenTUI.
  */
 
-export * from "./Box.ts"
-export * from "./Column.ts"
-export * from "./ColumnState.ts"
-export * from "./KeyboardNavigation.ts"
-export * from "./MillerColumns.ts"
-export * from "./ScrollBox.ts"
-export * from "./Select.ts"
-export * from "./Text.ts"
+export * from "./MillerColumns.tsx"
