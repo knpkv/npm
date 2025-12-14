@@ -331,7 +331,17 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
       return
     }
 
-    // Enter
+    // Space - select item (focus actions panel)
+    if (key.name === "space") {
+      if (showPreview) {
+        setState((s) => ({ ...s, showPreview: false }))
+      } else if (focusedColumn !== 2) {
+        setState((s) => ({ ...s, focusedColumn: 2, selectedAction: 0 }))
+      }
+      return
+    }
+
+    // Enter - execute action or drill into page
     if (key.name === "return") {
       if (showPreview) {
         setState((s) => ({ ...s, showPreview: false }))

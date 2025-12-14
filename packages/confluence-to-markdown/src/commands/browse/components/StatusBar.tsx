@@ -21,7 +21,7 @@ interface KeyHint {
 const hints: ReadonlyArray<KeyHint> = [
   { key: "↑↓", label: "nav" },
   { key: "←→", label: "move" },
-  { key: "⏎", label: "select" },
+  { key: "␣", label: "select" },
   { key: "q", label: "quit" }
 ]
 
