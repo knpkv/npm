@@ -7,7 +7,7 @@ import * as Option from "effect/Option"
 import { useEffect, useState } from "react"
 import type { BrowseItem, ColumnState } from "./BrowseItem.js"
 import type { BrowseService } from "./BrowseService.js"
-import { ActionsPanel, ACTIONS } from "./components/ActionsPanel.js"
+import { ActionsPanel, SELECTION_ACTIONS, TOTAL_ACTIONS } from "./components/ActionsPanel.js"
 import { Column } from "./components/Column.js"
 import { StatusBar } from "./components/StatusBar.js"
 import { ThemeSelector } from "./components/ThemeSelector.js"
@@ -108,21 +108,29 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
   const previewLines = previewContent.split("\n")
 
   // Execute action
-  const executeAction = (item: BrowseItem) => {
-    if (selectedAction === 0) {
-      Effect.runPromise(service.openInBrowser(item))
-    } else if (selectedAction === 1) {
-      runEffect(service.getPreview(item), (content) => {
-        setState((s) => ({
-          ...s,
-          previewContent: content,
-          previewScroll: 0,
-          showPreview: true
-        }))
-      })
-    } else if (selectedAction === 2) {
-      // Open theme selector
-      setState((s) => ({ ...s, showThemeSelector: true }))
+  const executeAction = (item: BrowseItem | undefined) => {
+    // Selection actions (require item)
+    if (selectedAction < SELECTION_ACTIONS.length) {
+      if (!item) return
+      if (selectedAction === 0) {
+        Effect.runPromise(service.openInBrowser(item))
+      } else if (selectedAction === 1) {
+        runEffect(service.getPreview(item), (content) => {
+          setState((s) => ({
+            ...s,
+            previewContent: content,
+            previewScroll: 0,
+            showPreview: true
+          }))
+        })
+      }
+    } else {
+      // System actions
+      const systemIdx = selectedAction - SELECTION_ACTIONS.length
+      if (systemIdx === 0) {
+        // Theme
+        setState((s) => ({ ...s, showThemeSelector: true }))
+      }
     }
   }
 
@@ -169,7 +177,7 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
           setState((s) => ({ ...s, previewScroll: s.previewScroll + 1 }))
         }
       } else if (focusedColumn === 2) {
-        if (selectedAction < ACTIONS.length - 1) {
+        if (selectedAction < TOTAL_ACTIONS - 1) {
           setState((s) => ({ ...s, selectedAction: s.selectedAction + 1 }))
         }
       } else if (focusedColumn === 0 && col0.selectedIndex < col0.items.length - 1) {
@@ -243,7 +251,7 @@ export function BrowseApp({ service, initialItem, userEmail, onQuit, initialThem
     if (key.name === "return") {
       if (showPreview) {
         setState((s) => ({ ...s, showPreview: false }))
-      } else if (focusedColumn === 2 && currentItem) {
+      } else if (focusedColumn === 2) {
         executeAction(currentItem)
       } else if (focusedColumn === 0 && col1.items.length > 0) {
         setState((s) => ({ ...s, focusedColumn: 1 }))

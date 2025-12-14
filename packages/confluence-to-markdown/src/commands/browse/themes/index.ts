@@ -9,6 +9,7 @@ import { monokai } from "./monokai.js"
 import { nord } from "./nord.js"
 import { picklePortal } from "./pickle-portal.js"
 import { planetExpress } from "./planet-express.js"
+import { solarized } from "./solarized.js"
 import { tokyoNight } from "./tokyo-night.js"
 import { treeFort } from "./tree-fort.js"
 
@@ -22,6 +23,7 @@ export { monokai } from "./monokai.js"
 export { nord } from "./nord.js"
 export { picklePortal } from "./pickle-portal.js"
 export { planetExpress } from "./planet-express.js"
+export { solarized } from "./solarized.js"
 export { tokyoNight } from "./tokyo-night.js"
 export { treeFort } from "./tree-fort.js"
 
@@ -31,6 +33,7 @@ export const themes = {
   nord,
   monokai,
   gruvbox,
+  solarized,
   tokyoNight,
   planetExpress,
   treeFort,

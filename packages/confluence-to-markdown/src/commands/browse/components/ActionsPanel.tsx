@@ -4,13 +4,17 @@
 import type { BrowseItem } from "../BrowseItem.js"
 import type { Theme } from "../themes/index.js"
 
-export const ACTIONS = [
+export const SELECTION_ACTIONS = [
   { label: "Open in browser", icon: "⌘" },
-  { label: "Preview", icon: "◎" },
-  { label: "Theme", icon: "◐" }
+  { label: "Preview", icon: "◎" }
 ] as const
 
-export type ActionType = (typeof ACTIONS)[number]["label"]
+export const SYSTEM_ACTIONS = [{ label: "Theme", icon: "◐" }] as const
+
+export type SelectionActionType = (typeof SELECTION_ACTIONS)[number]["label"]
+export type SystemActionType = (typeof SYSTEM_ACTIONS)[number]["label"]
+
+export const TOTAL_ACTIONS = SELECTION_ACTIONS.length + SYSTEM_ACTIONS.length
 
 interface ActionsPanelProps {
   readonly selectedItem: BrowseItem | undefined
@@ -87,13 +91,36 @@ export function ActionsPanel({
                 <text fg={theme.text.muted}>{"─".repeat(Math.max(0, width - 4))}</text>
               </box>
 
-              {/* Actions list */}
+              {/* Selection actions */}
               <box flexDirection="column" paddingTop={1}>
                 <text fg={theme.text.muted} paddingBottom={1}>
-                  {"ACTIONS"}
+                  {"SELECTION"}
                 </text>
-                {ACTIONS.map((action, idx) => {
+                {SELECTION_ACTIONS.map((action, idx) => {
                   const isSelected = idx === selectedAction && isFocused
+                  return (
+                    <box
+                      key={idx}
+                      flexDirection="row"
+                      backgroundColor={isSelected ? theme.selection.active : theme.bg.primary}
+                      paddingLeft={1}
+                      paddingRight={1}
+                    >
+                      <text fg={isSelected ? theme.text.inverse : theme.accent.tertiary}>{`${action.icon} `}</text>
+                      <text fg={isSelected ? theme.text.inverse : theme.text.primary}>{action.label}</text>
+                    </box>
+                  )
+                })}
+              </box>
+
+              {/* System actions */}
+              <box flexDirection="column" paddingTop={1}>
+                <text fg={theme.text.muted} paddingBottom={1}>
+                  {"SYSTEM"}
+                </text>
+                {SYSTEM_ACTIONS.map((action, idx) => {
+                  const globalIdx = SELECTION_ACTIONS.length + idx
+                  const isSelected = globalIdx === selectedAction && isFocused
                   return (
                     <box
                       key={idx}
