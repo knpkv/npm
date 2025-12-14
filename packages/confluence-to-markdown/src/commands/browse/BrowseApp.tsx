@@ -29,6 +29,7 @@ interface BrowseState {
   readonly col0: ColumnState
   readonly col1: ColumnState
   readonly focusedColumn: FocusedColumn
+  readonly lastItemColumn: 0 | 1 // Track which column's item is selected for actions
   readonly history: ReadonlyArray<ColumnState>
   readonly selectedAction: number
   readonly showPreview: boolean
@@ -48,6 +49,7 @@ const initialState = (item: BrowseItem, themeName: ThemeName): BrowseState => ({
   col0: { items: [item], selectedIndex: 0 },
   col1: { items: [], selectedIndex: 0 },
   focusedColumn: 0,
+  lastItemColumn: 0,
   history: [],
   selectedAction: 0,
   showPreview: false,
@@ -72,6 +74,7 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
     col1,
     focusedColumn,
     history,
+    lastItemColumn,
     loading,
     newPageParentId,
     newPageTitle,
@@ -111,9 +114,9 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
     if (item) loadChildren(item)
   }, [])
 
-  // Get selected item from focused column
+  // Get selected item - when in actions panel, use lastItemColumn
   const getSelectedItem = (): BrowseItem | undefined => {
-    const col = focusedColumn === 0 ? col0 : col1
+    const col = focusedColumn === 2 ? (lastItemColumn === 0 ? col0 : col1) : focusedColumn === 0 ? col0 : col1
     return col.items[col.selectedIndex]
   }
 
@@ -331,12 +334,12 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
       return
     }
 
-    // Space - select item (focus actions panel)
+    // Space - select item (focus actions panel, preserve action selection)
     if (key.name === "space") {
       if (showPreview) {
         setState((s) => ({ ...s, showPreview: false }))
       } else if (focusedColumn !== 2) {
-        setState((s) => ({ ...s, focusedColumn: 2, selectedAction: 0 }))
+        setState((s) => ({ ...s, focusedColumn: 2, lastItemColumn: focusedColumn as 0 | 1 }))
       }
       return
     }
@@ -366,16 +369,37 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
       return
     }
 
-    // Right / l
+    // Right / l - expand if has children, else select (focus actions)
     if (key.name === "l" || key.name === "right") {
       if (showPreview) return
       if (focusedColumn === 2) return
       if (focusedColumn === 0 && col1.items.length > 0) {
-        setState((s) => ({ ...s, focusedColumn: 1 }))
+        // col0 has children in col1, move to col1
+        setState((s) => ({ ...s, focusedColumn: 1, lastItemColumn: 1 }))
       } else if (focusedColumn === 0 && col1.items.length === 0) {
-        setState((s) => ({ ...s, focusedColumn: 2, selectedAction: 0 }))
+        // col0 item has no children, go to actions
+        setState((s) => ({ ...s, focusedColumn: 2, lastItemColumn: 0 }))
       } else if (focusedColumn === 1) {
-        setState((s) => ({ ...s, focusedColumn: 2, selectedAction: 0 }))
+        // Check if selected col1 item has children - drill or select
+        const item = col1.items[col1.selectedIndex]
+        if (item) {
+          runEffect(service.getChildren(item), (children) => {
+            if (children.length > 0) {
+              // Has children - drill into
+              setState((s) => ({
+                ...s,
+                history: [...s.history, s.col0],
+                col0: s.col1,
+                col1: { items: children, selectedIndex: 0 },
+                focusedColumn: 0,
+                lastItemColumn: 0
+              }))
+            } else {
+              // No children - go to actions panel
+              setState((s) => ({ ...s, focusedColumn: 2, lastItemColumn: 1 }))
+            }
+          })
+        }
       }
       return
     }
