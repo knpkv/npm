@@ -42,6 +42,40 @@ export const PageIdSchema = Schema.String.pipe(
 )
 
 /**
+ * Branded type for Confluence space IDs.
+ *
+ * @example
+ * ```typescript
+ * import { SpaceId } from "@knpkv/confluence-to-markdown/Brand"
+ *
+ * const id = SpaceId("12345") // Valid
+ * ```
+ *
+ * @category Brand
+ */
+export type SpaceId = string & Brand.Brand<"SpaceId">
+
+/**
+ * Refined brand constructor for SpaceId.
+ *
+ * @category Brand
+ */
+export const SpaceId = Brand.refined<SpaceId>(
+  (s): s is SpaceId => typeof s === "string" && s.length > 0,
+  (s) => Brand.error(`Invalid space ID: "${s}" (must be non-empty string)`)
+)
+
+/**
+ * Schema for SpaceId validation.
+ *
+ * @category Schema
+ */
+export const SpaceIdSchema = Schema.String.pipe(
+  Schema.nonEmptyString(),
+  Schema.brand("SpaceId")
+)
+
+/**
  * Branded type for Confluence space keys.
  *
  * @example

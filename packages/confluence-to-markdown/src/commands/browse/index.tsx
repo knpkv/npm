@@ -9,7 +9,8 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { ConfluenceAuth } from "../../ConfluenceAuth.js"
 import { BrowseApp } from "./BrowseApp.js"
-import { BrowseService, BrowseServiceLive } from "./BrowseService.js"
+import type { BrowseItem } from "./BrowseItem.js"
+import { BrowseService, BrowseServiceLive, BrowseServiceSpacesLive } from "./BrowseService.js"
 import { BrowseSettings, BrowseSettingsLive } from "./BrowseSettings.js"
 import type { ThemeName } from "./themes/index.js"
 
@@ -22,12 +23,19 @@ export const browseCommand = Command.make("browse", {}, () =>
     const auth = yield* ConfluenceAuth
     const settings = yield* BrowseSettings
 
-    // Get current user, root item, and settings
-    const [user, rootItem, currentSettings] = yield* Effect.all([
-      auth.getCurrentUser(),
-      service.getRootItem,
-      settings.get
-    ])
+    // Get current user and settings
+    const [user, currentSettings] = yield* Effect.all([auth.getCurrentUser(), settings.get])
+
+    // Get initial items based on mode
+    let initialItems: ReadonlyArray<BrowseItem>
+    if (service.mode === "spaces") {
+      // Spaces mode - get all spaces
+      initialItems = yield* service.getSpaces
+    } else {
+      // Configured mode - get root item
+      const rootItem = yield* service.getRootItem
+      initialItems = [rootItem]
+    }
 
     // Theme change handler
     let currentTheme = currentSettings.theme
@@ -59,7 +67,7 @@ export const browseCommand = Command.make("browse", {}, () =>
       root.render(
         <BrowseApp
           service={service}
-          initialItem={rootItem}
+          initialItems={initialItems}
           userEmail={user?.email ?? null}
           onQuit={() => resume(Effect.void)}
           initialTheme={currentTheme}
@@ -73,3 +81,62 @@ export const browseCommand = Command.make("browse", {}, () =>
     yield* Console.log("\nGoodbye!")
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(BrowseServiceLive, BrowseSettingsLive)))
 ).pipe(Command.withDescription("Browse Confluence pages interactively (TUI)"))
+
+/**
+ * Browse spaces command - no config needed, just auth.
+ */
+export const browseSpacesCommand = Command.make("browse-spaces", {}, () =>
+  Effect.gen(function* () {
+    const service = yield* BrowseService
+    const auth = yield* ConfluenceAuth
+    const settings = yield* BrowseSettings
+
+    yield* Console.log("Loading spaces...")
+    const [user, currentSettings, initialItems] = yield* Effect.all([
+      auth.getCurrentUser(),
+      settings.get,
+      service.getSpaces.pipe(Effect.tapError((e) => Console.error(`Error loading spaces: ${e}`)))
+    ])
+    yield* Console.log(`Loaded ${initialItems.length} spaces`)
+
+    let currentTheme = currentSettings.theme
+    const onThemeChange = (theme: ThemeName) => {
+      currentTheme = theme
+      Effect.runPromise(settings.setTheme(theme))
+    }
+
+    const renderer = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        createCliRenderer({
+          targetFps: 60,
+          exitOnCtrlC: false,
+          useKittyKeyboard: {}
+        })
+      ),
+      (r) =>
+        Effect.sync(() => {
+          r.stop()
+          r.destroy()
+        })
+    )
+
+    const root = createRoot(renderer)
+
+    yield* Effect.async<void>((resume) => {
+      root.render(
+        <BrowseApp
+          service={service}
+          initialItems={initialItems}
+          userEmail={user?.email ?? null}
+          onQuit={() => resume(Effect.void)}
+          initialTheme={currentTheme}
+          onThemeChange={onThemeChange}
+        />
+      )
+      renderer.start()
+    })
+
+    root.unmount()
+    yield* Console.log("\nGoodbye!")
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(BrowseServiceSpacesLive, BrowseSettingsLive)))
+).pipe(Command.withDescription("Browse all Confluence spaces (no config needed)"))

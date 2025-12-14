@@ -11,6 +11,7 @@ import { handleError } from "./commands/errorHandler.js"
 import {
   authCommand,
   browseCommand,
+  browseSpacesCommand,
   cloneCommand,
   commitCommand,
   deleteCommand,
@@ -21,7 +22,14 @@ import {
   pushCommand,
   statusCommand
 } from "./commands/index.js"
-import { AppLayer, AuthOnlyLayer, CloneLayer, getLayerType, MinimalLayer } from "./commands/layers.js"
+import {
+  AppLayer,
+  AuthOnlyLayer,
+  BrowseSpacesLayer,
+  CloneLayer,
+  getLayerType,
+  MinimalLayer
+} from "./commands/layers.js"
 
 // === Main command ===
 const confluence = Command.make("confluence").pipe(
@@ -37,7 +45,8 @@ const confluence = Command.make("confluence").pipe(
     diffCommand,
     newCommand,
     deleteCommand,
-    browseCommand
+    browseCommand,
+    browseSpacesCommand
   ])
 )
 
@@ -54,6 +63,8 @@ const layer = layerType === "full"
   ? AuthOnlyLayer
   : layerType === "clone"
   ? CloneLayer
+  : layerType === "browse-spaces"
+  ? BrowseSpacesLayer
   : MinimalLayer
 
 // Suppress verbose Effect logs (e.g. token refresh messages)

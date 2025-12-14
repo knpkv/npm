@@ -3,7 +3,10 @@
  */
 import type { PageId } from "../../Brand.js"
 import type { BrowseItem, ColumnState } from "./BrowseItem.js"
+import type { StatusInfo } from "./components/StatusBar.js"
 import type { ThemeName } from "./themes/index.js"
+
+export type { StatusInfo, StatusType } from "./components/StatusBar.js"
 
 /**
  * Focus state discriminated union.
@@ -37,8 +40,7 @@ export type Action =
   | { readonly type: "ui/showTheme" }
   | { readonly type: "ui/showNewPage"; readonly parentId: PageId }
   | { readonly type: "ui/closeModal" }
-  | { readonly type: "ui/setLoading"; readonly loading: boolean }
-  | { readonly type: "ui/setStatus"; readonly msg: string | null }
+  | { readonly type: "ui/setStatus"; readonly status: StatusInfo | null }
   // Theme
   | { readonly type: "theme/select"; readonly name: ThemeName }
   | { readonly type: "theme/navigate"; readonly direction: "up" | "down" }
@@ -64,10 +66,9 @@ export interface BrowseState {
   // New page modal
   readonly newPageTitle: string
   // UI
-  readonly loading: boolean
   readonly themeName: ThemeName
   readonly themeIndex: number
-  readonly statusMessage: string | null
+  readonly status: StatusInfo | null
 }
 
 /**

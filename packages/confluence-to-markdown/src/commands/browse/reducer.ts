@@ -26,12 +26,9 @@ export function getSelectedItem(state: BrowseState): BrowseItem | undefined {
  * Main reducer function.
  */
 export function reducer(state: BrowseState, action: Action): ReducerResult {
-  // Handle loading state updates first
-  if (action.type === "ui/setLoading") {
-    return { state: { ...state, loading: action.loading } }
-  }
+  // Handle status updates first
   if (action.type === "ui/setStatus") {
-    return { state: { ...state, statusMessage: action.msg } }
+    return { state: { ...state, status: action.status } }
   }
   if (action.type === "data/setCol1") {
     return { state: { ...state, col1: { items: action.items, selectedIndex: 0 } } }
@@ -208,8 +205,11 @@ function executeAction(state: BrowseState, item: BrowseItem | undefined, _select
       return { state, effect: { type: "pullPage", item } }
     }
     if (idx === 3) {
-      // New page under selected
-      return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: item.id }, newPageTitle: "" } }
+      // New page under selected (only for pages, not spaces)
+      if (item.type === "page") {
+        return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: item.id }, newPageTitle: "" } }
+      }
+      return { state }
     }
   }
 
@@ -224,9 +224,9 @@ function executeAction(state: BrowseState, item: BrowseItem | undefined, _select
     return { state, effect: { type: "getStatus" } }
   }
   if (systemIdx === 2) {
-    // Add page under root - need initialItem, use col0[0]
+    // Add page under root - need initialItem, use col0[0] (only for pages)
     const rootItem = state.col0.items[0]
-    if (rootItem) {
+    if (rootItem?.type === "page") {
       return { state: { ...state, focus: { type: "modal", kind: "newPage", parentId: rootItem.id }, newPageTitle: "" } }
     }
   }

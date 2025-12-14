@@ -450,3 +450,50 @@ export const PageVersionsResponseSchema = Schema.Struct({
  * @category Types
  */
 export type PageVersionsResponse = Schema.Schema.Type<typeof PageVersionsResponseSchema>
+
+/**
+ * Schema for Confluence space.
+ *
+ * @category Schema
+ */
+export const SpaceSchema = Schema.Struct({
+  id: Schema.String,
+  key: Schema.String,
+  name: Schema.String,
+  type: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+  homepageId: Schema.optional(Schema.String),
+  _links: Schema.optional(
+    Schema.Struct({
+      webui: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for Confluence space.
+ *
+ * @category Types
+ */
+export type Space = Schema.Schema.Type<typeof SpaceSchema>
+
+/**
+ * Schema for spaces API response.
+ *
+ * @category Schema
+ */
+export const SpacesResponseSchema = Schema.Struct({
+  results: Schema.Array(SpaceSchema),
+  _links: Schema.optional(
+    Schema.Struct({
+      next: Schema.optional(Schema.String)
+    })
+  )
+})
+
+/**
+ * Type for spaces response.
+ *
+ * @category Types
+ */
+export type SpacesResponse = Schema.Schema.Type<typeof SpacesResponseSchema>

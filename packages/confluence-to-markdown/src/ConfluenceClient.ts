@@ -17,10 +17,17 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
-import type { PageId } from "./Brand.js"
+import type { PageId, SpaceId } from "./Brand.js"
 import type { RateLimitError } from "./ConfluenceError.js"
 import { ApiError } from "./ConfluenceError.js"
-import type { AtlassianUser, PageChildrenResponse, PageListItem, PageResponse, PageVersion } from "./Schemas.js"
+import type {
+  AtlassianUser,
+  PageChildrenResponse,
+  PageListItem,
+  PageResponse,
+  PageVersion,
+  SpacesResponse
+} from "./Schemas.js"
 
 /**
  * Request to create a new page.
@@ -131,6 +138,20 @@ export class ConfluenceClient extends Context.Tag(
      * Uses V1 API to set page property.
      */
     readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
+
+    /**
+     * Get all spaces the user has access to.
+     */
+    readonly getSpaces: (options?: {
+      type?: "global" | "collaboration" | "knowledge_base" | "personal"
+    }) => Effect.Effect<SpacesResponse, ApiError | RateLimitError>
+
+    /**
+     * Get root pages in a space.
+     */
+    readonly getRootPagesInSpace: (
+      spaceId: SpaceId
+    ) => Effect.Effect<ReadonlyArray<PageListItem>, ApiError | RateLimitError>
   }
 >() {}
 
@@ -368,6 +389,30 @@ const make = (
         }
       }).pipe(Effect.retry(rateLimitSchedule))
 
+    const getSpaces = (
+      options?: { type?: "global" | "collaboration" | "knowledge_base" | "personal" }
+    ): Effect.Effect<SpacesResponse, ApiError | RateLimitError> =>
+      apiClient.v2.getSpaces({
+        type: options?.type,
+        status: "current",
+        limit: 250
+      }).pipe(
+        Effect.mapError((e) => mapApiError(e, "/spaces")),
+        Effect.retry(rateLimitSchedule)
+      ) as Effect.Effect<SpacesResponse, ApiError | RateLimitError>
+
+    const getRootPagesInSpace = (
+      spaceId: SpaceId
+    ): Effect.Effect<ReadonlyArray<PageListItem>, ApiError | RateLimitError> =>
+      apiClient.v2.getPagesInSpace(spaceId, {
+        depth: "root",
+        limit: 250
+      }).pipe(
+        Effect.map((r) => r.results as ReadonlyArray<PageListItem>),
+        Effect.mapError((e) => mapApiError(e, `/spaces/${spaceId}/pages`)),
+        Effect.retry(rateLimitSchedule)
+      )
+
     return ConfluenceClient.of({
       getPage,
       getChildren,
@@ -378,7 +423,9 @@ const make = (
       getPageVersions,
       getUser,
       getSpaceId,
-      setEditorVersion
+      setEditorVersion,
+      getSpaces,
+      getRootPagesInSpace
     })
   })
 

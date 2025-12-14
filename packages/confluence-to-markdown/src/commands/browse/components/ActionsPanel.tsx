@@ -29,7 +29,6 @@ interface ActionsPanelProps {
   readonly showPreview: boolean
   readonly previewContent: string
   readonly previewScroll: number
-  readonly loading: boolean
   readonly width: number
   readonly height: number
   readonly theme: Theme
@@ -38,7 +37,6 @@ interface ActionsPanelProps {
 export function ActionsPanel({
   height,
   isFocused,
-  loading,
   previewContent,
   previewScroll,
   selectedAction,
@@ -78,19 +76,28 @@ export function ActionsPanel({
             <box flexDirection="column">
               {/* Item title with icon */}
               <box flexDirection="row">
-                <text fg={theme.accent.primary}>{`${theme.icons.synced} `}</text>
+                <text fg={theme.accent.primary}>
+                  {`${selectedItem.type === "space" ? theme.icons.folder : theme.icons.synced} `}
+                </text>
                 <text fg={theme.text.primary}>{selectedItem.title}</text>
               </box>
 
-              {/* Sync status badge */}
-              <box flexDirection="row" paddingTop={1}>
-                <text fg={selectedItem.synced ? theme.status.synced : theme.status.unsynced}>
-                  {selectedItem.synced ? `${theme.icons.check} ` : `${theme.icons.cross} `}
-                </text>
-                <text fg={selectedItem.synced ? theme.status.synced : theme.status.unsynced}>
-                  {selectedItem.synced ? "Synced" : "Not synced"}
-                </text>
-              </box>
+              {/* Sync status badge (only for pages) */}
+              {selectedItem.type === "page" ? (
+                <box flexDirection="row" paddingTop={1}>
+                  <text fg={selectedItem.synced ? theme.status.synced : theme.status.unsynced}>
+                    {selectedItem.synced ? `${theme.icons.check} ` : `${theme.icons.cross} `}
+                  </text>
+                  <text fg={selectedItem.synced ? theme.status.synced : theme.status.unsynced}>
+                    {selectedItem.synced ? "Synced" : "Not synced"}
+                  </text>
+                </box>
+              ) : (
+                <box flexDirection="row" paddingTop={1}>
+                  <text fg={theme.accent.secondary}>{`${theme.icons.bullet} `}</text>
+                  <text fg={theme.text.secondary}>{`Space: ${selectedItem.key}`}</text>
+                </box>
+              )}
 
               {/* Divider */}
               <box height={1} paddingTop={1}>
@@ -149,13 +156,6 @@ export function ActionsPanel({
           )}
         </box>
       )}
-
-      {/* Loading indicator */}
-      {loading ? (
-        <box paddingLeft={1} paddingTop={1}>
-          <text fg={theme.status.loading}>{`${theme.icons.loading} Loading...`}</text>
-        </box>
-      ) : null}
     </box>
   )
 }

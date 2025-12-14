@@ -12,6 +12,13 @@ interface ColumnProps {
   readonly theme: Theme
 }
 
+/** Check if item is synced (only pages can be synced) */
+const isSynced = (item: BrowseItem): boolean => item.type === "page" && item.synced
+
+/** Get icon for item type */
+const getIcon = (item: BrowseItem, theme: Theme, synced: boolean): string =>
+  item.type === "space" ? theme.icons.folder : synced ? theme.icons.synced : theme.icons.unsynced
+
 export function Column({ height, isFocused, state, theme, width }: ColumnProps) {
   const borderColor = isFocused ? theme.border.focused : theme.border.unfocused
 
@@ -25,6 +32,8 @@ export function Column({ height, isFocused, state, theme, width }: ColumnProps) 
         ) : (
           state.items.map((item: BrowseItem, idx: number) => {
             const isSelected = idx === state.selectedIndex
+            const synced = isSynced(item)
+            const icon = getIcon(item, theme, synced)
 
             let bgColor: string
             let textColor: string
@@ -37,16 +46,18 @@ export function Column({ height, isFocused, state, theme, width }: ColumnProps) 
             } else if (isSelected) {
               bgColor = theme.selection.inactive
               textColor = theme.text.primary
-              iconColor = item.synced ? theme.status.synced : theme.text.muted
+              iconColor =
+                item.type === "space" ? theme.accent.secondary : synced ? theme.status.synced : theme.text.muted
             } else {
               bgColor = theme.bg.primary
               textColor = theme.text.primary
-              iconColor = item.synced ? theme.status.synced : theme.text.muted
+              iconColor =
+                item.type === "space" ? theme.accent.secondary : synced ? theme.status.synced : theme.text.muted
             }
 
             return (
               <box key={item.id} backgroundColor={bgColor} paddingLeft={1} flexDirection="row">
-                <text fg={iconColor}>{item.synced ? `${theme.icons.synced} ` : `${theme.icons.unsynced} `}</text>
+                <text fg={iconColor}>{`${icon} `}</text>
                 <text fg={textColor}>{item.title}</text>
               </box>
             )

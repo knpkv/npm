@@ -44,7 +44,9 @@ const DummyConfluenceClientLayer = Layer.succeed(
     getPageVersions: () => Effect.dieMessage("Not configured"),
     getUser: () => Effect.dieMessage("Not configured"),
     getSpaceId: () => Effect.dieMessage("Not configured"),
-    setEditorVersion: () => Effect.dieMessage("Not configured")
+    setEditorVersion: () => Effect.dieMessage("Not configured"),
+    getSpaces: () => Effect.dieMessage("Not configured"),
+    getRootPagesInSpace: () => Effect.dieMessage("Not configured")
   })
 )
 
@@ -190,10 +192,43 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(NodeContext.layer)
 )
 
+// Build client layer dynamically from auth (no config needed)
+const ConfluenceClientFromAuth = Layer.unwrapEffect(
+  Effect.gen(function*() {
+    const auth = yield* getAuth()
+
+    // Get cloudId to construct baseUrl
+    const authService = yield* ConfluenceAuth
+    const cloudId = yield* authService.getCloudId()
+
+    const clientConfig: ConfluenceClientConfig = {
+      baseUrl: `https://api.atlassian.com/ex/confluence/${cloudId}`,
+      auth
+    }
+
+    return ConfluenceClientLayer(clientConfig)
+  })
+)
+
+/**
+ * Browse spaces layer - auth + client but no config.
+ */
+export const BrowseSpacesLayer = DummySyncEngineLayer.pipe(
+  Layer.provideMerge(UserCacheLayer),
+  Layer.provideMerge(DummyGitServiceLayer),
+  Layer.provideMerge(ConfluenceClientFromAuth),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(DummyConfigLayer),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
 /**
  * Determine which layer to use based on command.
  */
-export const getLayerType = (): "full" | "auth" | "clone" | "minimal" => {
+export const getLayerType = (): "full" | "auth" | "clone" | "minimal" | "browse-spaces" => {
   const cmd = process.argv[2]
   // auth commands need auth layer only
   if (cmd === "auth") {
@@ -202,6 +237,10 @@ export const getLayerType = (): "full" | "auth" | "clone" | "minimal" => {
   // clone needs auth + git but not config-dependent services
   if (cmd === "clone") {
     return "clone"
+  }
+  // browse-spaces needs auth + client but not config
+  if (cmd === "browse-spaces") {
+    return "browse-spaces"
   }
   // --help, -h, --version don't need config
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {

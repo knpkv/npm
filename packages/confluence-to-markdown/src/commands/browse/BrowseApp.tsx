@@ -19,26 +19,25 @@ import type { Action, BrowseState, SideEffect } from "./types.js"
 
 interface BrowseAppProps {
   readonly service: BrowseService
-  readonly initialItem: BrowseItem
+  readonly initialItems: ReadonlyArray<BrowseItem>
   readonly userEmail: string | null
   readonly onQuit: () => void
   readonly initialTheme: ThemeName
   readonly onThemeChange: (theme: ThemeName) => void
 }
 
-const initialState = (item: BrowseItem, themeName: ThemeName): BrowseState => ({
+const initialState = (items: ReadonlyArray<BrowseItem>, themeName: ThemeName): BrowseState => ({
   focus: { type: "column", index: 0 },
-  col0: { items: [item], selectedIndex: 0 },
+  col0: { items, selectedIndex: 0 },
   col1: { items: [], selectedIndex: 0 },
   history: [],
   selectedAction: 0,
   previewContent: "",
   previewScroll: 0,
   newPageTitle: "",
-  loading: false,
   themeName,
   themeIndex: themeNames.indexOf(themeName),
-  statusMessage: null
+  status: null
 })
 
 /**
@@ -56,6 +55,9 @@ function keyToAction(key: KeyEvent, state: BrowseState): Action | null {
     return null
   }
 
+  // Ctrl+C always quits
+  if (key.ctrl && key.name === "c") return { type: "nav/back" }
+
   // Standard navigation
   if (key.name === "j" || key.name === "down") return { type: "nav/down" }
   if (key.name === "k" || key.name === "up") return { type: "nav/up" }
@@ -72,71 +74,82 @@ function keyToAction(key: KeyEvent, state: BrowseState): Action | null {
   return null
 }
 
-export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, service, userEmail }: BrowseAppProps) {
+export function BrowseApp({ initialItems, initialTheme, onQuit, onThemeChange, service, userEmail }: BrowseAppProps) {
   const dimensions = useTerminalDimensions()
   const [state, dispatch] = useReducer(
     (s: BrowseState, a: Action) => reducer(s, a).state,
-    initialState(initialItem, initialTheme)
+    initialState(initialItems, initialTheme)
   )
 
   // Track pending effects
   const pendingEffect = useRef<SideEffect | undefined>(undefined)
 
-  // Custom dispatch that captures side effects
-  const dispatchWithEffect = (action: Action) => {
-    const result = reducer(state, action)
-    pendingEffect.current = result.effect
-    dispatch(action)
-  }
+  // Track latest state for keyboard handler (avoids stale closure)
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   const {
     col0,
     col1,
     focus,
-    loading,
     newPageTitle,
     previewContent,
     previewScroll,
     selectedAction,
-    statusMessage,
+    status,
     themeIndex,
     themeName
   } = state
   const theme = themes[themeName]
   const selectedItem = getSelectedItem(state)
 
-  // Helper to run Effect
-  const runEffect = <A, E>(effect: Effect.Effect<A, E>, onSuccess: (a: A) => void) => {
-    dispatch({ type: "ui/setLoading", loading: true })
+  // Helper to run Effect with status updates
+  const runEffect = <A, E>(
+    loadingMsg: string,
+    effect: Effect.Effect<A, E>,
+    onSuccess: (a: A) => void,
+    successMsg?: string | ((a: A) => string)
+  ) => {
+    dispatch({ type: "ui/setStatus", status: { type: "loading", message: loadingMsg } })
     Effect.runPromise(Effect.either(effect)).then((either) => {
       if (either._tag === "Right") {
         onSuccess(either.right)
+        if (successMsg) {
+          const msg = typeof successMsg === "function" ? successMsg(either.right) : successMsg
+          dispatch({ type: "ui/setStatus", status: { type: "success", message: msg } })
+          setTimeout(() => dispatch({ type: "ui/setStatus", status: null }), 3000)
+        } else {
+          dispatch({ type: "ui/setStatus", status: null })
+        }
+      } else {
+        dispatch({ type: "ui/setStatus", status: { type: "error", message: String(either.left) } })
       }
-      dispatch({ type: "ui/setLoading", loading: false })
     })
   }
 
   // Execute side effects
   useEffect(() => {
     const effect = pendingEffect.current
+    // eslint-disable-next-line no-console
+    if (effect) console.log("EFFECT HANDLER RUNNING:", effect.type)
     if (!effect) return
     pendingEffect.current = undefined
 
     switch (effect.type) {
       case "loadChildren":
-        runEffect(service.getChildren(effect.item), (children) => {
+        runEffect("Loading...", service.getChildren(effect.item), (children) => {
           dispatch({ type: "data/setCol1", items: children })
         })
         break
 
       case "loadPreview":
-        runEffect(service.getPreview(effect.item), (content) => {
+        runEffect("Loading preview...", service.getPreview(effect.item), (content) => {
           dispatch({ type: "ui/showPreview", content })
         })
         break
 
       case "loadParentSiblings":
-        runEffect(service.getParentAndSiblings(effect.item), (result) => {
+        runEffect("Loading...", service.getParentAndSiblings(effect.item), (result) => {
           if (Option.isSome(result)) {
             const { siblings } = result.value
             const currentIds = new Set(col0.items.map((i) => i.id))
@@ -155,26 +168,32 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
         break
 
       case "pullPage":
-        runEffect(service.pullPage(effect.item), (result) => {
-          dispatch({ type: "ui/setStatus", msg: result })
-          setTimeout(() => dispatch({ type: "ui/setStatus", msg: null }), 3000)
-        })
+        runEffect(
+          "Pulling page...",
+          service.pullPage(effect.item),
+          () => {},
+          (result) => result
+        )
         break
 
       case "createPage":
-        runEffect(service.createNewPage(effect.parentId, effect.title), (result) => {
-          dispatch({ type: "ui/setStatus", msg: result })
-          setTimeout(() => dispatch({ type: "ui/setStatus", msg: null }), 3000)
-        })
+        runEffect(
+          "Creating page...",
+          service.createNewPage(effect.parentId, effect.title),
+          () => {},
+          (result) => result
+        )
         break
 
       case "getStatus":
-        runEffect(service.getStatus, (status) => {
-          dispatch({ type: "ui/showPreview", content: `Sync Status:\n\n${status}` })
+        runEffect("Loading status...", service.getStatus, (syncStatus) => {
+          dispatch({ type: "ui/showPreview", content: `Sync Status:\n\n${syncStatus}` })
         })
         break
 
       case "quit":
+        // eslint-disable-next-line no-console
+        console.log("QUIT EFFECT EXECUTING")
         onQuit()
         break
 
@@ -183,7 +202,7 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
         break
 
       case "checkChildrenAndDrill":
-        runEffect(service.getChildren(effect.item), (children) => {
+        runEffect("Loading...", service.getChildren(effect.item), (children) => {
           if (children.length > 0) {
             dispatch({ type: "data/drill", children })
           } else {
@@ -199,17 +218,27 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
   useEffect(() => {
     const item = col0.items[col0.selectedIndex]
     if (item) {
-      runEffect(service.getChildren(item), (children) => {
+      runEffect("Loading...", service.getChildren(item), (children) => {
         dispatch({ type: "data/setCol1", items: children })
       })
     }
   }, [])
 
-  // Keyboard handler
+  // Keyboard handler - use stateRef to avoid stale closure
   useKeyboard((key) => {
-    const action = keyToAction(key, state)
+    const currentState = stateRef.current
+    // eslint-disable-next-line no-console
+    console.log("KEY:", key.name, "focus:", currentState.focus.type)
+    const action = keyToAction(key, currentState)
     if (action) {
-      dispatchWithEffect(action)
+      // eslint-disable-next-line no-console
+      console.log("ACTION:", action.type)
+      // Re-calculate with latest state for effect
+      const result = reducer(currentState, action)
+      pendingEffect.current = result.effect
+      // eslint-disable-next-line no-console
+      if (result.effect) console.log("EFFECT SET:", result.effect.type)
+      dispatch(action)
     }
   })
 
@@ -253,7 +282,6 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
           showPreview={showPreview}
           previewContent={previewContent}
           previewScroll={previewScroll}
-          loading={loading}
           width={actionsWidth}
           height={contentHeight}
           theme={theme}
@@ -264,11 +292,9 @@ export function BrowseApp({ initialItem, initialTheme, onQuit, onThemeChange, se
       <StatusBar
         width={dimensions.width}
         userEmail={userEmail}
-        loading={loading}
         inActionsPanel={inActionsPanel}
         theme={theme}
-        themeName={theme.name}
-        statusMessage={statusMessage}
+        status={status}
       />
 
       {/* Theme selector modal */}
