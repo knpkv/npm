@@ -20,6 +20,7 @@ import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
 import { getAuth } from "./shared.js"
+import { TuiServiceAuthenticated, TuiServiceConfigured, TuiServiceUnauthenticated } from "./tui/TuiService.js"
 
 // Dummy config layer for help/init
 const DummyConfigLayer = ConfluenceConfigLayerFromValues({
@@ -44,7 +45,9 @@ const DummyConfluenceClientLayer = Layer.succeed(
     getPageVersions: () => Effect.dieMessage("Not configured"),
     getUser: () => Effect.dieMessage("Not configured"),
     getSpaceId: () => Effect.dieMessage("Not configured"),
-    setEditorVersion: () => Effect.dieMessage("Not configured")
+    setEditorVersion: () => Effect.dieMessage("Not configured"),
+    getSpaces: () => Effect.dieMessage("Not configured"),
+    getRootPagesInSpace: () => Effect.dieMessage("Not configured")
   })
 )
 
@@ -190,10 +193,65 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(NodeContext.layer)
 )
 
+// Build client layer dynamically from auth (no config needed)
+const ConfluenceClientFromAuth = Layer.unwrapEffect(
+  Effect.gen(function*() {
+    const auth = yield* getAuth()
+
+    // Get cloudId to construct baseUrl
+    const authService = yield* ConfluenceAuth
+    const cloudId = yield* authService.getCloudId()
+
+    const clientConfig: ConfluenceClientConfig = {
+      baseUrl: `https://api.atlassian.com/ex/confluence/${cloudId}`,
+      auth
+    }
+
+    return ConfluenceClientLayer(clientConfig)
+  })
+)
+
+/**
+ * TUI layer - unauthenticated mode.
+ */
+export const TuiUnauthenticatedLayer = TuiServiceUnauthenticated.pipe(
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
+/**
+ * TUI layer - authenticated mode (no config).
+ */
+export const TuiAuthenticatedLayer = TuiServiceAuthenticated.pipe(
+  Layer.provideMerge(ConfluenceClientFromAuth),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
+/**
+ * TUI layer - configured mode (full functionality).
+ */
+export const TuiConfiguredLayer = TuiServiceConfigured.pipe(
+  Layer.provideMerge(SyncEngineLayer),
+  Layer.provideMerge(UserCacheLayer),
+  Layer.provideMerge(GitServiceLayer),
+  Layer.provideMerge(ConfluenceClientLive),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(ConfluenceConfigLayer()),
+  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeContext.layer)
+)
+
 /**
  * Determine which layer to use based on command.
  */
-export const getLayerType = (): "full" | "auth" | "clone" | "minimal" => {
+export const getLayerType = (): "full" | "auth" | "clone" | "minimal" | "tui" => {
   const cmd = process.argv[2]
   // auth commands need auth layer only
   if (cmd === "auth") {
@@ -202,6 +260,10 @@ export const getLayerType = (): "full" | "auth" | "clone" | "minimal" => {
   // clone needs auth + git but not config-dependent services
   if (cmd === "clone") {
     return "clone"
+  }
+  // tui uses mode detection internally
+  if (cmd === "tui") {
+    return "tui"
   }
   // --help, -h, --version don't need config
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {

@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "moduleResolution": "bundler",
+    "module": "ESNext"
+  },
+  "include": ["src"],
+  "exclude": []
+}

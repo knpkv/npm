@@ -116,6 +116,40 @@ export interface GetVersionsParams {
   readonly limit?: number | undefined
 }
 
+export interface GetSpacesParams {
+  readonly type?: "global" | "collaboration" | "knowledge_base" | "personal" | undefined
+  readonly status?: "current" | "archived" | undefined
+  readonly cursor?: string | undefined
+  readonly limit?: number | undefined
+}
+
+export interface GetPagesInSpaceParams {
+  readonly depth?: "all" | "root" | undefined
+  readonly bodyFormat?: "storage" | "atlas_doc_format" | "view" | undefined
+  readonly cursor?: string | undefined
+  readonly limit?: number | undefined
+}
+
+export interface Space {
+  readonly id: string
+  readonly key: string
+  readonly name: string
+  readonly type?: string | undefined
+  readonly status?: string | undefined
+  readonly homepageId?: string | undefined
+  readonly _links?: PageLinks | undefined
+}
+
+export interface SpacesResponse {
+  readonly results: ReadonlyArray<Space>
+  readonly _links?: PageLinks | undefined
+}
+
+export interface PagesInSpaceResponse {
+  readonly results: ReadonlyArray<PageListItem>
+  readonly _links?: PageLinks | undefined
+}
+
 /**
  * API error response.
  */
@@ -164,6 +198,15 @@ export interface ConfluenceV2Client {
   readonly deletePage: (
     id: string
   ) => Effect.Effect<void, ApiError>
+
+  readonly getSpaces: (
+    params?: GetSpacesParams
+  ) => Effect.Effect<SpacesResponse, ApiError>
+
+  readonly getPagesInSpace: (
+    spaceId: string,
+    params?: GetPagesInSpaceParams
+  ) => Effect.Effect<PagesInSpaceResponse, ApiError>
 }
 
 /**
@@ -275,6 +318,32 @@ export const make = (
       execute<void>(
         HttpClientRequest.del(`/pages/${id}`),
         `/pages/${id}`
+      ),
+
+    getSpaces: (params = {}) =>
+      execute<SpacesResponse>(
+        HttpClientRequest.get("/spaces").pipe(
+          HttpClientRequest.setUrlParams(buildUrlParams({
+            type: params.type,
+            status: params.status,
+            cursor: params.cursor,
+            limit: params.limit
+          }))
+        ),
+        "/spaces"
+      ),
+
+    getPagesInSpace: (spaceId, params = {}) =>
+      execute<PagesInSpaceResponse>(
+        HttpClientRequest.get(`/spaces/${spaceId}/pages`).pipe(
+          HttpClientRequest.setUrlParams(buildUrlParams({
+            depth: params.depth,
+            "body-format": params.bodyFormat,
+            cursor: params.cursor,
+            limit: params.limit
+          }))
+        ),
+        `/spaces/${spaceId}/pages`
       )
   }
 }
