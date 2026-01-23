@@ -100,6 +100,9 @@ pnpm format:fix          # Fix formatting
 # Versioning
 pnpm changeset           # Create a changeset
 pnpm changeset version   # Update versions (CI only)
+
+# Agent Management
+npx @iannuttall/dotagents  # Sync agent commands
 ```
 
 ## Resources
