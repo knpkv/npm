@@ -90,6 +90,13 @@ This project adheres to a strict set of development standards to ensure code qua
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
+### Agent Management
+
+- **Sync Agent Commands**:
+  ```bash
+  npx @iannuttall/dotagents
+  ```
+
 ### Contribution Guidelines
 
 1.  Create changes with proper documentation and tests.
