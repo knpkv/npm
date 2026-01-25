@@ -1,5 +1,5 @@
 import { Atom } from "@effect-atom/atom-react"
-import type { PullRequest } from "../@knpkv/codecommit-core/Domain"
+import type { PullRequest } from "@knpkv/codecommit-core"
 
 /**
  * TUI view type

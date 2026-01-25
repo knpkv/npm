@@ -1,7 +1,7 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { type ScrollBoxRenderable } from "@opentui/core"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { PullRequest } from "../@knpkv/codecommit-core/Domain"
+import type { PullRequest } from "@knpkv/codecommit-core"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
 import {
   currentPRAtom,
@@ -16,7 +16,7 @@ import {
 } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { useListNavigation } from "../hooks/useListNavigation.js"
-import { type ListItem, buildListItems } from "../ListBuilder.js"
+import { buildListItems } from "../ListBuilder.js"
 import { NotificationsTable } from "./NotificationsTable.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { SettingsTable } from "./SettingsTable.js"

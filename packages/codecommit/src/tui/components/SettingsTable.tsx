@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect-atom/atom-react"
 import { useMemo } from "react"
 import { isSettingsFilteringAtom, settingsFilterAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
-import type { ListItem } from "@knpkv/codecommit-core/ListBuilder"
+import type { ListItem } from "../ListBuilder.js"
 import { Badge } from "./Badge.js"
 import { type Column, Table } from "./Table.js"
 

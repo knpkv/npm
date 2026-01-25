@@ -23,7 +23,7 @@ const web = Command.make("web", {
     yield* Effect.promise(() => open(`http://${hostname}:${port}`))
 
     // Run server with configured port/hostname
-    yield* Layer.launch(makeServer({ port, hostname }))
+    return yield* Layer.launch(makeServer({ port, hostname }))
   })
 )
 

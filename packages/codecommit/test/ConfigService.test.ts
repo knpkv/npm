@@ -1,7 +1,7 @@
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
-import { ConfigService, ConfigServiceLive } from "../src/ConfigService.js"
+import { ConfigService, ConfigServiceLive } from "@knpkv/codecommit-core"
 
 const MockPath = Path.layer
 

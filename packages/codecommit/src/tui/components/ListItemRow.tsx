@@ -1,6 +1,6 @@
 import { parseColor } from "@opentui/core"
 import { useTheme } from "../context/theme.js"
-import type { ListItem } from "@knpkv/codecommit-core/ListBuilder"
+import type { ListItem } from "../ListBuilder.js"
 import { formatDate } from "../utils/date.js"
 import { Badge } from "./Badge.js"
 

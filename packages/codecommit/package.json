@@ -11,7 +11,7 @@
   "scripts": {
     "start": "bun src/bin.ts",
     "start:web": "bun src/bin.ts web",
-    "build": "effect-build",
+    "build": "tsc -b",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",

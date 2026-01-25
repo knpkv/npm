@@ -4,7 +4,7 @@ import { useKeyboard } from "@opentui/react"
 import { useEffect } from "react"
 import { selectedIndexAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
-import type { ListItem } from "@knpkv/codecommit-core/ListBuilder"
+import type { ListItem } from "../ListBuilder.js"
 
 function isSelectable(item: ListItem | undefined): boolean {
   if (!item) return false
