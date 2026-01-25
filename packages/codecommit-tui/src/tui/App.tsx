@@ -43,7 +43,6 @@ function AppContent({ onQuit }: AppProps) {
   return (
     <box style={{ flexDirection: "column", height: "100%", width: "100%" }}>
       <Header />
-      {view === "prs" && <QuickFilters />}
 
       <box style={{ flexGrow: 1, width: "100%" }}>
         <MainList />
@@ -54,6 +53,7 @@ function AppContent({ onQuit }: AppProps) {
         )}
       </box>
 
+      {view === "prs" && <QuickFilters />}
       <Footer />
 
       {/* Overlay layer for dialogs */}
