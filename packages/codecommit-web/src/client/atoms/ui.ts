@@ -35,3 +35,26 @@ export const selectedPrAtom = Atom.make<PullRequest | null>(null).pipe(Atom.keep
  * Theme ID
  */
 export const themeAtom = Atom.make("dark").pipe(Atom.keepAlive)
+
+/**
+ * Quick filter type
+ */
+export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "repo" | "status"
+
+/**
+ * Quick filter state
+ */
+export interface QuickFilter {
+  type: QuickFilterType
+  value?: string
+}
+
+/**
+ * Current quick filter
+ */
+export const quickFilterAtom = Atom.make<QuickFilter>({ type: "all" }).pipe(Atom.keepAlive)
+
+/**
+ * Command palette open state
+ */
+export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)

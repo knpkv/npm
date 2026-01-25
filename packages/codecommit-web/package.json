@@ -28,7 +28,9 @@
     "@effect/platform-bun": "latest",
     "@effect/platform-node": "latest",
     "@knpkv/codecommit-core": "workspace:*",
+    "@types/marked": "^6.0.0",
     "effect": "latest",
+    "marked": "^17.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

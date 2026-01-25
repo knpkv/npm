@@ -12,7 +12,7 @@ export type ListItem =
 interface ListItemRowProps {
   readonly item: ListItem
   readonly selected: boolean
-  readonly onClick?: () => void
+  readonly onClick?: (() => void) | undefined
 }
 
 export function ListItemRow({ item, selected, onClick }: ListItemRowProps) {
@@ -68,6 +68,7 @@ export function ListItemRow({ item, selected, onClick }: ListItemRowProps) {
     return (
       <div
         className={`${styles.pr} ${selected ? styles.selected : ""}`}
+        data-selected={selected}
         style={{
           borderLeftColor: theme.primary,
           backgroundColor: selected ? theme.selectedBackground : undefined

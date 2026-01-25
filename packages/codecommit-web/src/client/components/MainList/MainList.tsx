@@ -1,27 +1,24 @@
 import { Result, useAtomValue, useAtomSet } from "@effect-atom/atom-react"
 import { Chunk } from "effect"
-import { useMemo, useRef, useEffect, useCallback } from "react"
+import { useMemo } from "react"
 import type { PullRequest } from "@knpkv/codecommit-core"
 import { prsQueryAtom, configQueryAtom } from "../../atoms/app.js"
-import { filterTextAtom, selectedIndexAtom, selectedPrAtom } from "../../atoms/ui.js"
+import { filterTextAtom, selectedPrAtom, viewAtom, quickFilterAtom } from "../../atoms/ui.js"
 import { useTheme } from "../../theme/index.js"
+import { extractScope } from "../../utils/extractScope.js"
 import { ListItemRow, type ListItem } from "../ListItemRow/index.js"
 import styles from "./MainList.module.css"
 
-interface MainListProps {
-  readonly onSelectPR?: (pr: PullRequest) => void
-}
-
-export function MainList({ onSelectPR }: MainListProps) {
+export function MainList() {
   const { theme } = useTheme()
   const prsResult = useAtomValue(prsQueryAtom)
   const configResult = useAtomValue(configQueryAtom)
   const filterText = useAtomValue(filterTextAtom)
-  const selectedIndex = useAtomValue(selectedIndexAtom)
-  const setSelectedIndex = useAtomSet(selectedIndexAtom)
+  const quickFilter = useAtomValue(quickFilterAtom)
   const setSelectedPr = useAtomSet(selectedPrAtom)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const setView = useAtomSet(viewAtom)
 
+  const isLoading = Result.isInitial(prsResult) || Result.isWaiting(prsResult)
   const prs = Result.getOrElse(prsResult, () => Chunk.empty())
   const config = Result.getOrElse(configResult, () => ({ accounts: [] }))
 
@@ -49,7 +46,7 @@ export function MainList({ onSelectPR }: MainListProps) {
 
     // Filter by text
     const filterLower = filterText.toLowerCase()
-    const filterPR = (pr: PullRequest) => {
+    const filterByText = (pr: PullRequest) => {
       if (!filterText) return true
       return (
         pr.repositoryName.toLowerCase().includes(filterLower) ||
@@ -59,6 +56,45 @@ export function MainList({ onSelectPR }: MainListProps) {
         (pr.description?.toLowerCase().includes(filterLower) ?? false)
       )
     }
+
+    // Filter by quick filter
+    const filterByQuick = (pr: PullRequest) => {
+      if (quickFilter.type === "all") return true
+      if (quickFilter.type === "mine") {
+        // TODO: Need current user info
+        return true
+      }
+      if (quickFilter.type === "account") {
+        return pr.account?.id === quickFilter.value
+      }
+      if (quickFilter.type === "author") {
+        return pr.author === quickFilter.value
+      }
+      if (quickFilter.type === "scope") {
+        return extractScope(pr.title) === quickFilter.value
+      }
+      if (quickFilter.type === "repo") {
+        return pr.repositoryName === quickFilter.value
+      }
+      if (quickFilter.type === "status") {
+        switch (quickFilter.value) {
+          case "approved":
+            return pr.isApproved
+          case "pending":
+            return !pr.isApproved
+          case "mergeable":
+            return pr.isMergeable
+          case "conflicts":
+            return !pr.isMergeable
+          default:
+            return true
+        }
+      }
+      return true
+    }
+
+    // Combined filter
+    const filterPR = (pr: PullRequest) => filterByText(pr) && filterByQuick(pr)
 
     // Build items for each account
     for (const [accountId, accountPrs] of prsByAccount) {
@@ -74,111 +110,35 @@ export function MainList({ onSelectPR }: MainListProps) {
     }
 
     return result
-  }, [prs, config, filterText])
+  }, [prs, config, filterText, quickFilter])
 
-  // Find next/prev PR index
-  const findNextPrIndex = useCallback((from: number, direction: 1 | -1): number => {
-    let idx = from + direction
-    while (idx >= 0 && idx < items.length) {
-      if (items[idx]?.type === "pr") return idx
-      idx += direction
-    }
-    return from // stay at current if no PR found
-  }, [items])
+  const handlePRClick = (pr: PullRequest) => {
+    setSelectedPr(pr)
+    setView("details")
+  }
 
-  // Find first PR index
-  const firstPrIndex = useMemo(() => {
-    return items.findIndex((item) => item.type === "pr")
-  }, [items])
-
-  // Initialize selection to first PR
-  useEffect(() => {
-    if (firstPrIndex >= 0 && selectedIndex === 0 && items[0]?.type !== "pr") {
-      setSelectedIndex(firstPrIndex)
-    }
-  }, [firstPrIndex, selectedIndex, items, setSelectedIndex])
-
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return
-      }
-
-      if (e.key === "ArrowDown" || e.key === "j") {
-        e.preventDefault()
-        const next = findNextPrIndex(selectedIndex, 1)
-        setSelectedIndex(next)
-      } else if (e.key === "ArrowUp" || e.key === "k") {
-        e.preventDefault()
-        const prev = findNextPrIndex(selectedIndex, -1)
-        setSelectedIndex(prev)
-      } else if (e.key === "Enter") {
-        const item = items[selectedIndex]
-        if (item?.type === "pr" && onSelectPR) {
-          onSelectPR(item.pr)
-        }
-      } else if (e.key === "o") {
-        // Open PR in browser
-        const item = items[selectedIndex]
-        if (item?.type === "pr" && item.pr.link) {
-          window.open(item.pr.link, "_blank")
-        }
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [items, selectedIndex, setSelectedIndex, onSelectPR, findNextPrIndex])
-
-  // Update selected PR atom when selection changes
-  useEffect(() => {
-    const item = items[selectedIndex]
-    if (item?.type === "pr") {
-      setSelectedPr(item.pr)
-    }
-  }, [items, selectedIndex, setSelectedPr])
-
-  // Scroll selected item into view
-  useEffect(() => {
-    if (!scrollRef.current) return
-    const selected = scrollRef.current.querySelector(`.${styles.selected}`)
-    if (selected) {
-      selected.scrollIntoView({ block: "nearest", behavior: "smooth" })
-    }
-  }, [selectedIndex])
-
-  if (items.length === 0) {
+  if (items.length === 0 && !isLoading) {
     return (
-      <div
-        className={styles.empty}
-        style={{ backgroundColor: theme.backgroundPanel, color: theme.textMuted }}
-      >
-        No items to display
+      <div className={styles.container} style={{ backgroundColor: theme.backgroundPanel }}>
+        <div className={styles.empty} style={{ color: theme.textMuted }}>
+          <p>No pull requests found</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div
-      ref={scrollRef}
-      className={styles.list}
-      style={{ backgroundColor: theme.backgroundPanel }}
-    >
-      {items.map((item, i) => (
-        <ListItemRow
-          key={i}
-          item={item}
-          selected={i === selectedIndex}
-          onClick={() => {
-            if (item.type === "pr") {
-              setSelectedIndex(i)
-              if (onSelectPR) onSelectPR(item.pr)
-            }
-          }}
-        />
-      ))}
+    <div className={styles.container} style={{ backgroundColor: theme.backgroundPanel }}>
+      <div className={styles.list}>
+        {items.map((item, i) => (
+          <ListItemRow
+            key={i}
+            item={item}
+            selected={false}
+            onClick={item.type === "pr" ? () => handlePRClick(item.pr) : undefined}
+          />
+        ))}
+      </div>
     </div>
   )
 }

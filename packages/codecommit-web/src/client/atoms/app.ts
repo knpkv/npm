@@ -48,9 +48,9 @@ export const accountsQueryAtom = ApiClient.query("accounts", "list", {
 })
 
 /**
- * Manual refresh trigger
+ * Trigger server-side refresh
  */
-export const refreshTriggerAtom = Atom.make(0).pipe(Atom.keepAlive)
+export const refreshAtom = ApiClient.mutation("prs", "refresh")
 
 /**
  * Derived app state atom that combines queries
