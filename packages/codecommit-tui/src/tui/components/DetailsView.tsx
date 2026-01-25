@@ -101,30 +101,26 @@ export function DetailsView() {
       >
         <box flexDirection="column">
           <StatusRow label="Merge:">
-            {!pr.isMergeable ?
-              (
-                <Badge variant="error" minWidth={14}>
-                  CONFLICT
-                </Badge>
-              ) :
-              (
-                <Badge variant="success" minWidth={14}>
-                  MERGEABLE
-                </Badge>
-              )}
+            {!pr.isMergeable ? (
+              <Badge variant="error" minWidth={14}>
+                CONFLICT
+              </Badge>
+            ) : (
+              <Badge variant="success" minWidth={14}>
+                MERGEABLE
+              </Badge>
+            )}
           </StatusRow>
           <StatusRow label="Approval:">
-            {pr.isApproved ?
-              (
-                <Badge variant="success" minWidth={14}>
-                  APPROVED
-                </Badge>
-              ) :
-              (
-                <Badge variant="neutral" minWidth={14}>
-                  PENDING
-                </Badge>
-              )}
+            {pr.isApproved ? (
+              <Badge variant="success" minWidth={14}>
+                APPROVED
+              </Badge>
+            ) : (
+              <Badge variant="neutral" minWidth={14}>
+                PENDING
+              </Badge>
+            )}
           </StatusRow>
           <StatusRow label="State:">
             <text fg={theme.text}>{pr.status.toUpperCase()}</text>
