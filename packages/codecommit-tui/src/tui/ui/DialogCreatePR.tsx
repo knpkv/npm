@@ -11,7 +11,7 @@ import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { getCurrentBranch, scanPRTemplates, type PRTemplate } from "../utils/prTemplates.js"
 
-type Step = "repo" | "source" | "dest" | "template" | "details"
+type Step = "repo" | "source" | "dest" | "template" | "details" | "preview"
 
 interface RepoOption {
   readonly name: string
@@ -158,8 +158,11 @@ export function DialogCreatePR() {
       } else if (step === "template") {
         setStep("dest")
         setSelectedIndex(0)
-      } else {
+      } else if (step === "details") {
         setStep("template")
+        setSelectedIndex(0)
+      } else if (step === "preview") {
+        setStep("details")
         setSelectedIndex(0)
       }
       return
@@ -290,8 +293,8 @@ export function DialogCreatePR() {
       } else if (key.name === "return" && !key.shift) {
         if (focusedField === "title" && title.trim()) {
           setFocusedField("desc")
-        } else if (focusedField === "desc") {
-          handleSubmit()
+        } else if (focusedField === "desc" && title.trim()) {
+          setStep("preview")
         }
       } else if (key.name === "backspace") {
         if (focusedField === "title") {
@@ -309,6 +312,14 @@ export function DialogCreatePR() {
           }
         }
       }
+      return
+    }
+
+    // Step: Preview
+    if (step === "preview") {
+      if (key.name === "return") {
+        handleSubmit()
+      }
     }
   })
 
@@ -317,10 +328,11 @@ export function DialogCreatePR() {
     source: "Select Source Branch",
     dest: "Select Destination Branch",
     template: "Select Template",
-    details: "Enter Details"
+    details: "Enter Details",
+    preview: "Confirm"
   }
 
-  const stepNumber = { repo: 1, source: 2, dest: 3, template: 4, details: 5 }[step]
+  const stepNumber = { repo: 1, source: 2, dest: 3, template: 4, details: 5, preview: 6 }[step]
 
   // Pre-select current git branch in source list
   useEffect(() => {
@@ -332,7 +344,7 @@ export function DialogCreatePR() {
     }
   }, [step, filteredBranches, currentGitBranch, branchFilter])
 
-  const listHeight = step === "details" ? 12 : Math.min(
+  const listHeight = step === "details" ? 12 : step === "preview" ? 14 : Math.min(
     step === "repo" ? filteredRepos.length + 5 :
     step === "source" || step === "dest" ? filteredBranches.length + 6 :
     templates.length + 5,
@@ -362,7 +374,7 @@ export function DialogCreatePR() {
           backgroundColor: theme.backgroundHeader
         }}
       >
-        <text fg={theme.primary}>{`CREATE PR - Step ${stepNumber}/5: ${stepTitles[step]}`}</text>
+        <text fg={theme.primary}>{`CREATE PR - Step ${stepNumber}/6: ${stepTitles[step]}`}</text>
       </box>
 
       {step === "repo" && (
@@ -510,7 +522,41 @@ export function DialogCreatePR() {
             </text>
           </box>
           <box style={{ height: 1, marginTop: 1 }}>
-            <text fg={theme.textMuted}>[Tab] Switch  [Enter] Submit</text>
+            <text fg={theme.textMuted}>[Tab] Switch  [Enter] Next</text>
+          </box>
+        </box>
+      )}
+
+      {step === "preview" && (
+        <box style={{ flexDirection: "column", padding: 1 }}>
+          <box style={{ height: 1, flexDirection: "row" }}>
+            <text fg={theme.textMuted}>{"Repository: "}</text>
+            <text fg={theme.text}>{selectedRepo?.name ?? ""}</text>
+          </box>
+          <box style={{ height: 1, flexDirection: "row" }}>
+            <text fg={theme.textMuted}>{"Account:    "}</text>
+            <text fg={theme.text}>{selectedRepo?.account.id ?? ""}</text>
+          </box>
+          <box style={{ height: 1, flexDirection: "row" }}>
+            <text fg={theme.textMuted}>{"Source:     "}</text>
+            <text fg={theme.primary}>{sourceBranch}</text>
+          </box>
+          <box style={{ height: 1, flexDirection: "row" }}>
+            <text fg={theme.textMuted}>{"Dest:       "}</text>
+            <text fg={theme.primary}>{destBranch}</text>
+          </box>
+          <box style={{ height: 1, flexDirection: "row", marginTop: 1 }}>
+            <text fg={theme.textMuted}>{"Title:      "}</text>
+            <text fg={theme.text}>{title}</text>
+          </box>
+          <box style={{ height: 1, flexDirection: "row" }}>
+            <text fg={theme.textMuted}>{"Description:"}</text>
+          </box>
+          <box style={{ height: 3 }}>
+            <text fg={theme.text}>{description || "(empty)"}</text>
+          </box>
+          <box style={{ height: 1, marginTop: 1 }}>
+            <text fg={theme.textMuted}>[Enter] Create PR  [Esc] Back</text>
           </box>
         </box>
       )}
