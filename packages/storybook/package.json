@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@effect-atom/atom-react": "^0.4.6",
-    "@knpkv/codecommit-tui": "workspace:*",
+    "@knpkv/codecommit": "workspace:*",
     "@opentui/core": "https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e",
     "@opentui/react": "https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e",
     "effect": "^3.19.15",
