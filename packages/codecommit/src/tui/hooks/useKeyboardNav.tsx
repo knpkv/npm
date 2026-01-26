@@ -83,25 +83,32 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
 
   // Extract unique authors, accounts, scopes, and repos
-  const { authors, accounts, scopes, repos } = useMemo(() => {
+  const { authors, accounts, scopes, myScopes, repos } = useMemo(() => {
     const authorSet = new Set<string>()
     const accountSet = new Set<string>()
     const scopeSet = new Set<string>()
+    const myScopeSet = new Set<string>()
     const repoSet = new Set<string>()
     for (const pr of appState.pullRequests) {
       authorSet.add(pr.author)
       accountSet.add(pr.account.id)
       repoSet.add(pr.repositoryName)
       const scope = extractScope(pr.title)
-      if (scope) scopeSet.add(scope)
+      if (scope) {
+        scopeSet.add(scope)
+        if (currentUser && pr.author === currentUser) {
+          myScopeSet.add(scope)
+        }
+      }
     }
     return {
       authors: Array.from(authorSet).sort(),
       accounts: Array.from(accountSet).sort(),
       scopes: Array.from(scopeSet).sort(),
+      myScopes: Array.from(myScopeSet).sort(),
       repos: Array.from(repoSet).sort()
     }
-  }, [appState.pullRequests])
+  }, [appState.pullRequests, currentUser])
 
   // Sync currentUser from appState (set via STS getCallerIdentity)
   useMemo(() => {
@@ -323,7 +330,12 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         if (view === "prs") setQuickFilterType("all")
         break
       case "2":
-        if (view === "prs") setQuickFilterType("mine")
+        if (view === "prs") {
+          setQuickFilterType("mine")
+          if (!quickFilterValues.mine && myScopes.length > 0) {
+            setQuickFilterValues({ ...quickFilterValues, mine: myScopes[0]! })
+          }
+        }
         break
       case "3":
         if (view === "prs") {
@@ -387,19 +399,22 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
             const nextIdx = idx <= 0 ? statusValues.length - 1 : idx - 1
             setQuickFilterValues({ ...quickFilterValues, status: statusValues[nextIdx]! })
           } else if (
+            quickFilterType === "mine" ||
             quickFilterType === "account" ||
             quickFilterType === "author" ||
             quickFilterType === "scope" ||
             quickFilterType === "repo"
           ) {
             const list =
-              quickFilterType === "account"
-                ? accounts
-                : quickFilterType === "author"
-                  ? authors
-                  : quickFilterType === "repo"
-                    ? repos
-                    : scopes
+              quickFilterType === "mine"
+                ? myScopes
+                : quickFilterType === "account"
+                  ? accounts
+                  : quickFilterType === "author"
+                    ? authors
+                    : quickFilterType === "repo"
+                      ? repos
+                      : scopes
             const currentVal = quickFilterValues[quickFilterType]
             if (list.length > 0) {
               const idx = list.indexOf(currentVal)
@@ -424,19 +439,22 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
             const nextIdx = idx >= statusValues.length - 1 ? 0 : idx + 1
             setQuickFilterValues({ ...quickFilterValues, status: statusValues[nextIdx]! })
           } else if (
+            quickFilterType === "mine" ||
             quickFilterType === "account" ||
             quickFilterType === "author" ||
             quickFilterType === "scope" ||
             quickFilterType === "repo"
           ) {
             const list =
-              quickFilterType === "account"
-                ? accounts
-                : quickFilterType === "author"
-                  ? authors
-                  : quickFilterType === "repo"
-                    ? repos
-                    : scopes
+              quickFilterType === "mine"
+                ? myScopes
+                : quickFilterType === "account"
+                  ? accounts
+                  : quickFilterType === "author"
+                    ? authors
+                    : quickFilterType === "repo"
+                      ? repos
+                      : scopes
             const currentVal = quickFilterValues[quickFilterType]
             if (list.length > 0) {
               const idx = list.indexOf(currentVal)

@@ -20,7 +20,7 @@ export function MainList() {
 
   const isLoading = Result.isInitial(prsResult) || Result.isWaiting(prsResult)
   const prs = Result.getOrElse(prsResult, () => Chunk.empty())
-  const config = Result.getOrElse(configResult, () => ({ accounts: [] }))
+  const config = Result.getOrElse(configResult, () => ({ accounts: [], currentUser: undefined as string | undefined }))
 
   // Build list items grouped by account
   const items = useMemo(() => {
@@ -61,8 +61,10 @@ export function MainList() {
     const filterByQuick = (pr: PullRequest) => {
       if (quickFilter.type === "all") return true
       if (quickFilter.type === "mine") {
-        // TODO: Need current user info
-        return true
+        // Filter by current user AND selected scope
+        const currentUser = config.currentUser
+        if (currentUser && pr.author !== currentUser) return false
+        return extractScope(pr.title) === quickFilter.value
       }
       if (quickFilter.type === "account") {
         return pr.account?.id === quickFilter.value

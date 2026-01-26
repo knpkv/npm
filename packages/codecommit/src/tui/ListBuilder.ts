@@ -57,6 +57,22 @@ export interface QuickFilter {
   readonly currentUser: string
 }
 
+const applyTextFilter = (prs: ReadonlyArray<PullRequest>, filterText: string): Array<PullRequest> => {
+  if (!filterText) return [...prs]
+  const search = filterText.toLowerCase()
+  return prs.filter((pr) =>
+    pr.repositoryName.toLowerCase().includes(search) ||
+    pr.title.toLowerCase().includes(search) ||
+    pr.author.toLowerCase().includes(search) ||
+    pr.sourceBranch.toLowerCase().includes(search) ||
+    pr.destinationBranch.toLowerCase().includes(search) ||
+    pr.id.toLowerCase().includes(search) ||
+    (pr.description?.toLowerCase().includes(search) ?? false) ||
+    pr.account.id.toLowerCase().includes(search) ||
+    pr.account.region.toLowerCase().includes(search)
+  )
+}
+
 export const buildListItems = (
   state: AppState,
   view: TuiView,
@@ -83,7 +99,9 @@ export const buildListItems = (
         filteredPRs = filteredPRs.filter((pr) => {
           switch (quickFilter.type) {
             case "mine":
-              return pr.author === quickFilter.currentUser
+              // Filter by current user AND selected scope
+              if (pr.author !== quickFilter.currentUser) return false
+              return extractScope(pr.title) === quickFilter.value
             case "account":
               return pr.account.id === quickFilter.value
             case "author":
@@ -114,20 +132,7 @@ export const buildListItems = (
       }
 
       // Apply text filter
-      if (filterText) {
-        const search = filterText.toLowerCase()
-        filteredPRs = filteredPRs.filter((pr) =>
-          pr.repositoryName.toLowerCase().includes(search) ||
-          pr.title.toLowerCase().includes(search) ||
-          pr.author.toLowerCase().includes(search) ||
-          pr.sourceBranch.toLowerCase().includes(search) ||
-          pr.destinationBranch.toLowerCase().includes(search) ||
-          pr.id.toLowerCase().includes(search) ||
-          (pr.description?.toLowerCase().includes(search) ?? false) ||
-          pr.account.id.toLowerCase().includes(search) ||
-          pr.account.region.toLowerCase().includes(search)
-        )
-      }
+      filteredPRs = applyTextFilter(filteredPRs, filterText)
 
       return { ...group, prs: filteredPRs }
     })

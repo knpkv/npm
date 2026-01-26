@@ -36,7 +36,8 @@ const ConfigResponse = Schema.Struct({
       enabled: Schema.Boolean
     })
   ),
-  autoDetect: Schema.Boolean
+  autoDetect: Schema.Boolean,
+  currentUser: Schema.optional(Schema.String)
 })
 
 export class ConfigGroup extends HttpApiGroup.make("config")

@@ -1,6 +1,6 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { notificationsAtom } from "../atoms/app.js"
-import { currentUserAtom, quickFilterTypeAtom, quickFilterValuesAtom } from "../atoms/ui.js"
+import { quickFilterTypeAtom, quickFilterValuesAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 
 /**
@@ -12,7 +12,6 @@ export function QuickFilters() {
   const filterType = useAtomValue(quickFilterTypeAtom)
   const filterValues = useAtomValue(quickFilterValuesAtom)
   const filterValue = filterValues[filterType]
-  const currentUser = useAtomValue(currentUserAtom)
   const notificationsResult = useAtomValue(notificationsAtom)
   const notifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
 
@@ -48,7 +47,7 @@ export function QuickFilters() {
           }}
         >
           <text fg={filterType === "mine" ? theme.selectedText : theme.textMuted}>
-            [2] Mine{filterType === "mine" && currentUser ? ` (${currentUser})` : ""}
+            [2] Mine{filterType === "mine" && filterValue ? `: ${filterValue}` : ""}
           </text>
         </box>
         <box
@@ -120,7 +119,8 @@ export function QuickFilters() {
             [8] Status{filterType === "status" && filterValue ? `: ${filterValue}` : ""}
           </text>
         </box>
-        {(filterType === "account" ||
+        {(filterType === "mine" ||
+          filterType === "account" ||
           filterType === "author" ||
           filterType === "scope" ||
           filterType === "date" ||

@@ -1,7 +1,7 @@
-import { useAtomValue, useAtomSet } from "@effect-atom/atom-react"
+import { useAtomValue, useAtomSet, Result } from "@effect-atom/atom-react"
 import { useMemo } from "react"
 import { Chunk } from "effect"
-import { prsQueryAtom } from "../../atoms/app.js"
+import { prsQueryAtom, configQueryAtom } from "../../atoms/app.js"
 import { filterTextAtom, quickFilterAtom, type QuickFilterType } from "../../atoms/ui.js"
 import { useTheme } from "../../theme/index.js"
 import { extractScope } from "../../utils/extractScope.js"
@@ -20,6 +20,7 @@ const QUICK_FILTERS: { key: QuickFilterType; label: string; shortcut: string }[]
 export function FilterBar() {
   const { theme } = useTheme()
   const prsResult = useAtomValue(prsQueryAtom)
+  const configResult = useAtomValue(configQueryAtom)
   const quickFilter = useAtomValue(quickFilterAtom)
   const setQuickFilter = useAtomSet(quickFilterAtom)
   const filterText = useAtomValue(filterTextAtom)
@@ -32,11 +33,14 @@ export function FilterBar() {
     return []
   }, [prsResult])
 
+  const currentUser = Result.getOrElse(configResult, () => ({ currentUser: undefined })).currentUser
+
   // Extract unique values for dropdown filters
   const filterOptions = useMemo(() => {
     const authors = new Set<string>()
     const accounts = new Set<string>()
     const scopes = new Set<string>()
+    const myScopes = new Set<string>()
     const repos = new Set<string>()
 
     for (const pr of prs) {
@@ -44,16 +48,22 @@ export function FilterBar() {
       accounts.add(pr.account?.id ?? "unknown")
       repos.add(pr.repositoryName)
       const scope = extractScope(pr.title)
-      if (scope) scopes.add(scope)
+      if (scope) {
+        scopes.add(scope)
+        if (currentUser && pr.author === currentUser) {
+          myScopes.add(scope)
+        }
+      }
     }
 
     return {
       authors: Array.from(authors).sort(),
       accounts: Array.from(accounts).sort(),
       scopes: Array.from(scopes).sort(),
+      myScopes: Array.from(myScopes).sort(),
       repos: Array.from(repos).sort(),
     }
-  }, [prs])
+  }, [prs, currentUser])
 
   const handleFilterClick = (key: QuickFilterType) => {
     if (key === "all") {
@@ -63,7 +73,8 @@ export function FilterBar() {
       setQuickFilter({ type: "all" })
     } else {
       // For filters that need a value, show first option
-      const options = key === "author" ? filterOptions.authors
+      const options = key === "mine" ? filterOptions.myScopes
+        : key === "author" ? filterOptions.authors
         : key === "account" ? filterOptions.accounts
         : key === "scope" ? filterOptions.scopes
         : key === "repo" ? filterOptions.repos
@@ -77,12 +88,13 @@ export function FilterBar() {
   }
 
   const handleValueChange = (value: string) => {
-    if (quickFilter.type !== "all" && quickFilter.type !== "mine") {
+    if (quickFilter.type !== "all") {
       setQuickFilter({ type: quickFilter.type, value })
     }
   }
 
-  const currentOptions = quickFilter.type === "author" ? filterOptions.authors
+  const currentOptions = quickFilter.type === "mine" ? filterOptions.myScopes
+    : quickFilter.type === "author" ? filterOptions.authors
     : quickFilter.type === "account" ? filterOptions.accounts
     : quickFilter.type === "scope" ? filterOptions.scopes
     : quickFilter.type === "repo" ? filterOptions.repos
