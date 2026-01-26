@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/dts/index.d.ts",
+  "bin": {
+    "codecommit": "dist/src/bin.js"
+  },
   "files": [
     "dist"
   ],

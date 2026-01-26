@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { Command, Options } from "@effect/cli"
 import { BunContext, BunRuntime } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
