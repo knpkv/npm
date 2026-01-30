@@ -1,0 +1,78 @@
+{
+  "name": "@knpkv/jira-api-client",
+  "version": "0.1.0",
+  "description": "Effect-based Jira Cloud REST API v3 client",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/jira-api-client"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/jira-api-client#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./JiraApiClient": {
+      "import": "./dist/JiraApiClient.js",
+      "types": "./dist/JiraApiClient.d.ts"
+    },
+    "./JiraApiConfig": {
+      "import": "./dist/JiraApiConfig.js",
+      "types": "./dist/JiraApiConfig.d.ts"
+    },
+    "./v3": {
+      "import": "./dist/generated/v3/index.js",
+      "types": "./dist/generated/v3/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "check": "tsc --noEmit",
+    "regenerate": "tsx scripts/regenerate.ts",
+    "regenerate:check": "tsx scripts/regenerate.ts --check",
+    "openapi-gen": "openapi-gen"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.61.0",
+    "@effect/platform": "^0.93.0"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "^0.87.0",
+    "@effect/vitest": "^0.27.0",
+    "@tim-smart/openapi-gen": "^0.4.13",
+    "@types/node": "^22.15.21",
+    "effect": "^3.19.3",
+    "tsx": "^4.19.4",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "jira",
+    "atlassian",
+    "api-client",
+    "openapi"
+  ]
+}

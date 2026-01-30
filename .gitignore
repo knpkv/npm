@@ -25,3 +25,4 @@ scratchpad/**/*.ts
 
 # Local environment variables
 .envrc.local
+.confluence/

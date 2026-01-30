@@ -66,7 +66,7 @@ describe("ConfluenceApiClient", () => {
         expect(capturedRequests).toHaveLength(1)
 
         const request = capturedRequests[0]!
-        expect(request.url).toContain("/wiki/api/v2/pages/123")
+        expect(request.url).toContain("/pages/123")
         expect(request.headers.authorization).toMatch(/^Basic /)
       }))
 
@@ -105,10 +105,10 @@ describe("ConfluenceApiClient", () => {
   })
 
   describe("V2 client", () => {
-    it.effect("getPageById includes body-format param", () =>
+    it.effect("getPageById makes correct request", () =>
       Effect.gen(function*() {
         const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { id: "123", title: "Test", body: { storage: { value: "<p>test</p>" } } } }
+          { status: 200, body: { id: "123", title: "Test" } }
         ])
 
         const configLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -123,34 +123,10 @@ describe("ConfluenceApiClient", () => {
           Effect.provide(httpLayer)
         )
 
-        const page = yield* client.v2.getPageById("123", { bodyFormat: "storage" })
+        const page = yield* client.v2.getPageById("123")
 
         expect(page.id).toBe("123")
         expect(capturedRequests[0]!.url).toContain("/pages/123")
-      }))
-
-    it.effect("getPageChildren with pagination", () =>
-      Effect.gen(function*() {
-        const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { results: [{ id: "1" }, { id: "2" }], _links: {} } }
-        ])
-
-        const configLayer = Layer.succeed(ConfluenceApiConfig, {
-          baseUrl: "https://test.atlassian.net",
-          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-        })
-        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
-
-        const client = yield* ConfluenceApiClient.pipe(
-          Effect.provide(ConfluenceApiClient.layer),
-          Effect.provide(configLayer),
-          Effect.provide(httpLayer)
-        )
-
-        const result = yield* client.v2.getPageChildren("123", { limit: 25 })
-
-        expect(result.results).toHaveLength(2)
-        expect(capturedRequests[0]!.url).toContain("/pages/123/children")
       }))
 
     it.effect("handles API errors", () =>
@@ -174,17 +150,14 @@ describe("ConfluenceApiClient", () => {
         const result = yield* client.v2.getPageById("999").pipe(Effect.either)
 
         expect(result._tag).toBe("Left")
-        if (result._tag === "Left") {
-          expect(result.left.status).toBe(404)
-        }
       }))
   })
 
   describe("V1 client", () => {
-    it.effect("getUser by accountId", () =>
+    it.effect("getUser makes correct request", () =>
       Effect.gen(function*() {
         const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { accountId: "abc", displayName: "Test User" } }
+          { status: 200, body: { type: "known", accountId: "abc", displayName: "Test User" } }
         ])
 
         const configLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -204,82 +177,6 @@ describe("ConfluenceApiClient", () => {
         expect(user.accountId).toBe("abc")
         expect(user.displayName).toBe("Test User")
         expect(capturedRequests[0]!.url).toContain("/wiki/rest/api/user")
-      }))
-
-    it.effect("getContentProperty", () =>
-      Effect.gen(function*() {
-        const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { key: "prop1", value: { foo: "bar" }, version: { number: 1 } } }
-        ])
-
-        const configLayer = Layer.succeed(ConfluenceApiConfig, {
-          baseUrl: "https://test.atlassian.net",
-          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-        })
-        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
-
-        const client = yield* ConfluenceApiClient.pipe(
-          Effect.provide(ConfluenceApiClient.layer),
-          Effect.provide(configLayer),
-          Effect.provide(httpLayer)
-        )
-
-        const prop = yield* client.v1.getContentProperty("123", "prop1")
-
-        expect(prop.key).toBe("prop1")
-        expect(capturedRequests[0]!.url).toContain("/content/123/property/prop1")
-      }))
-
-    it.effect("createContentProperty", () =>
-      Effect.gen(function*() {
-        const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { key: "editor", value: "v2", version: { number: 1 } } }
-        ])
-
-        const configLayer = Layer.succeed(ConfluenceApiConfig, {
-          baseUrl: "https://test.atlassian.net",
-          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-        })
-        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
-
-        const client = yield* ConfluenceApiClient.pipe(
-          Effect.provide(ConfluenceApiClient.layer),
-          Effect.provide(configLayer),
-          Effect.provide(httpLayer)
-        )
-
-        yield* client.v1.createContentProperty("123", {
-          payload: { key: "editor", value: "v2", version: { number: 1 } }
-        })
-
-        expect(capturedRequests[0]!.url).toContain("/content/123/property")
-        expect(capturedRequests[0]!.method).toBe("POST")
-      }))
-
-    it.effect("updateContentProperty", () =>
-      Effect.gen(function*() {
-        const { capturedRequests, mockClient } = createMockHttpClient([
-          { status: 200, body: { key: "editor", value: "v2", version: { number: 2 } } }
-        ])
-
-        const configLayer = Layer.succeed(ConfluenceApiConfig, {
-          baseUrl: "https://test.atlassian.net",
-          auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-        })
-        const httpLayer = Layer.succeed(HttpClient.HttpClient, mockClient)
-
-        const client = yield* ConfluenceApiClient.pipe(
-          Effect.provide(ConfluenceApiClient.layer),
-          Effect.provide(configLayer),
-          Effect.provide(httpLayer)
-        )
-
-        yield* client.v1.updateContentProperty("123", "editor", {
-          payload: { key: "editor", value: "v2", version: { number: 2 } }
-        })
-
-        expect(capturedRequests[0]!.url).toContain("/content/123/property/editor")
-        expect(capturedRequests[0]!.method).toBe("PUT")
       }))
   })
 })

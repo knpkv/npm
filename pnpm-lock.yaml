@@ -98,6 +98,43 @@ importers:
         specifier: ^4.0.13
         version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@24.8.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/atlassian-common:
+    dependencies:
+      '@effect/platform':
+        specifier: ^0.93.0
+        version: 0.93.5(effect@3.19.8)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
+      remark-stringify:
+        specifier: ^11.0.0
+        version: 11.0.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
+    devDependencies:
+      '@effect/platform-node':
+        specifier: ^0.87.0
+        version: 0.87.0(@effect/cluster@0.40.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/workflow@0.3.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.8)(vitest@4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.19.1
+      effect:
+        specifier: ^3.19.3
+        version: 3.19.8
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.13
+        version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
   packages/confluence-api-client:
     dependencies:
       '@effect/cli':
@@ -113,6 +150,9 @@ importers:
       '@effect/vitest':
         specifier: ^0.27.0
         version: 0.27.0(effect@3.19.8)(vitest@4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tim-smart/openapi-gen':
+        specifier: ^0.4.13
+        version: 0.4.13
       '@types/node':
         specifier: ^22.15.21
         version: 22.19.1
@@ -256,6 +296,77 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1
     publishDirectory: dist
+
+  packages/jira-api-client:
+    dependencies:
+      '@effect/cli':
+        specifier: ^0.61.0
+        version: 0.61.8(@effect/platform@0.93.5(effect@3.19.8))(@effect/printer-ansi@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(@effect/printer@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@effect/platform':
+        specifier: ^0.93.0
+        version: 0.93.5(effect@3.19.8)
+    devDependencies:
+      '@effect/platform-node':
+        specifier: ^0.87.0
+        version: 0.87.0(@effect/cluster@0.40.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/workflow@0.3.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.8)(vitest@4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tim-smart/openapi-gen':
+        specifier: ^0.4.13
+        version: 0.4.13
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.19.1
+      effect:
+        specifier: ^3.19.3
+        version: 3.19.8
+      tsx:
+        specifier: ^4.19.4
+        version: 4.20.6
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.13
+        version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/jira-cli:
+    dependencies:
+      '@effect/cli':
+        specifier: ^0.61.0
+        version: 0.61.8(@effect/platform@0.93.5(effect@3.19.8))(@effect/printer-ansi@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(@effect/printer@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@effect/platform':
+        specifier: ^0.93.0
+        version: 0.93.5(effect@3.19.8)
+      '@effect/platform-node':
+        specifier: ^0.87.0
+        version: 0.87.0(@effect/cluster@0.40.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/workflow@0.3.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@knpkv/atlassian-common':
+        specifier: workspace:*
+        version: link:../atlassian-common
+      '@knpkv/jira-api-client':
+        specifier: workspace:*
+        version: link:../jira-api-client
+      gray-matter:
+        specifier: ^4.0.3
+        version: 4.0.3
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.8)(vitest@4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.19.1
+      effect:
+        specifier: ^3.19.3
+        version: 3.19.8
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.13
+        version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
   scratchpad: {}
 
@@ -1392,6 +1503,10 @@ packages:
 
   '@standard-schema/spec@1.0.0':
     resolution: {integrity: sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA==}
+
+  '@tim-smart/openapi-gen@0.4.13':
+    resolution: {integrity: sha512-yn/4Tp6Or5JA2/VNPLKtm9ib17PZxmJGyEq+vtcmAch5qG2PAJLvuzuoAwYRBMN9GR8Cb/W5qO6eIHg0AdYL0Q==}
+    hasBin: true
 
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
@@ -4266,6 +4381,10 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.0.0': {}
+
+  '@tim-smart/openapi-gen@0.4.13':
+    dependencies:
+      yaml: 2.8.1
 
   '@tybys/wasm-util@0.10.1':
     dependencies:

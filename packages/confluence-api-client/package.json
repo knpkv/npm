@@ -51,7 +51,8 @@
     "lint:fix": "eslint src --fix",
     "check": "tsc --noEmit",
     "regenerate": "tsx scripts/regenerate.ts",
-    "regenerate:check": "tsx scripts/regenerate.ts --check"
+    "regenerate:check": "tsx scripts/regenerate.ts --check",
+    "openapi-gen": "openapi-gen"
   },
   "peerDependencies": {
     "effect": "^3.19.3"
@@ -63,6 +64,7 @@
   "devDependencies": {
     "@effect/platform-node": "^0.87.0",
     "@effect/vitest": "^0.27.0",
+    "@tim-smart/openapi-gen": "^0.4.13",
     "@types/node": "^22.15.21",
     "effect": "^3.19.3",
     "tsx": "^4.19.4",

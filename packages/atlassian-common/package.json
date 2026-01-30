@@ -1,0 +1,85 @@
+{
+  "name": "@knpkv/atlassian-common",
+  "version": "0.1.0",
+  "description": "Shared utilities for Atlassian tools (AST, serializers, auth, config)",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/atlassian-common"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/atlassian-common#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./ast": {
+      "import": "./dist/ast/index.js",
+      "types": "./dist/ast/index.d.ts"
+    },
+    "./serializers": {
+      "import": "./dist/serializers/index.js",
+      "types": "./dist/serializers/index.d.ts"
+    },
+    "./parsers": {
+      "import": "./dist/parsers/index.js",
+      "types": "./dist/parsers/index.d.ts"
+    },
+    "./auth": {
+      "import": "./dist/auth/index.js",
+      "types": "./dist/auth/index.d.ts"
+    },
+    "./config": {
+      "import": "./dist/config/index.js",
+      "types": "./dist/config/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.93.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "^0.87.0",
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^22.15.21",
+    "effect": "^3.19.3",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "atlassian",
+    "confluence",
+    "jira",
+    "ast",
+    "markdown"
+  ]
+}
