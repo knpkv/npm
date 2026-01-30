@@ -68,7 +68,7 @@ jira search --by-version "1.0.0" --project PROJ
 | --------------- | ----- | ---------------------------------------- | ---------------- |
 | `--by-version`  | `-v`  | Search by fix version                    | -                |
 | `--project`     | `-p`  | Filter by project key                    | -                |
-| `--output-dir`  | `-o`  | Output directory                         | `./jira-tickets` |
+| `--output-dir`  | `-o`  | Output directory                         | `.jira` |
 | `--format`      | `-f`  | `multi` (one file per issue) or `single` | `multi`          |
 | `--max-results` | `-m`  | Max results to fetch                     | `100`            |
 
@@ -77,7 +77,7 @@ jira search --by-version "1.0.0" --project PROJ
 **Multi (default):** One markdown file per issue with YAML front-matter.
 
 ```
-./jira-tickets/
+.jira/
 ├── PROJ-123.md
 ├── PROJ-124.md
 └── PROJ-125.md
@@ -86,7 +86,7 @@ jira search --by-version "1.0.0" --project PROJ
 **Single:** All issues in one combined file.
 
 ```
-./jira-tickets/
+.jira/
 └── jira-export.md
 ```
 

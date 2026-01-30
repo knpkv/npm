@@ -32,7 +32,7 @@ const projectOption = Options.text("project").pipe(
 const outputDirOption = Options.directory("output-dir").pipe(
   Options.withAlias("o"),
   Options.withDescription("Output directory for markdown files"),
-  Options.withDefault("./jira-tickets")
+  Options.withDefault(".jira")
 )
 
 const formatOption = Options.choice("format", ["multi", "single"]).pipe(

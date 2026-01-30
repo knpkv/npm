@@ -16,7 +16,7 @@ const keyArg = Args.text({ name: "key" }).pipe(
 const outputDirOption = Options.directory("output-dir").pipe(
   Options.withAlias("o"),
   Options.withDescription("Output directory for markdown file"),
-  Options.withDefault("./jira-tickets")
+  Options.withDefault(".jira")
 )
 
 export const getCommand = Command.make(
