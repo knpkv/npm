@@ -25,10 +25,12 @@ jira auth create
 Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 
 **Permissions:**
+
 - Jira API: `read:jira-work`, `read:jira-user`
 - User Identity API: `read:me`
 
 **Callback URL:**
+
 ```
 http://localhost:8585/callback
 ```
@@ -62,13 +64,13 @@ jira search --by-version "1.0.0" --project PROJ
 
 ### Options
 
-| Option | Alias | Description | Default |
-|--------|-------|-------------|---------|
-| `--by-version` | `-v` | Search by fix version | - |
-| `--project` | `-p` | Filter by project key | - |
-| `--output-dir` | `-o` | Output directory | `./jira-tickets` |
-| `--format` | `-f` | `multi` (one file per issue) or `single` | `multi` |
-| `--max-results` | `-m` | Max results to fetch | `100` |
+| Option          | Alias | Description                              | Default          |
+| --------------- | ----- | ---------------------------------------- | ---------------- |
+| `--by-version`  | `-v`  | Search by fix version                    | -                |
+| `--project`     | `-p`  | Filter by project key                    | -                |
+| `--output-dir`  | `-o`  | Output directory                         | `./jira-tickets` |
+| `--format`      | `-f`  | `multi` (one file per issue) or `single` | `multi`          |
+| `--max-results` | `-m`  | Max results to fetch                     | `100`            |
 
 ### Output Formats
 

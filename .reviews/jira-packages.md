@@ -23,6 +23,7 @@ Adds `@knpkv/jira-api-client`, `@knpkv/atlassian-common`, `@knpkv/jira-cli` pack
 **Details:** Basic auth encoding uses `Buffer.from(...).toString("base64")` but `Buffer` is a Node.js global. Breaks in non-Node environments and violates Effect Platform abstraction principles.
 **Recommendation:** Use `@effect/platform` Encoding module for platform-independent base64
 **Code Example:**
+
 ```typescript
 // Before
 const authHeader = config.auth.type === "basic"
@@ -47,18 +48,16 @@ const authHeader = config.auth.type === "basic"
 **Details:** Both `ensureConfigDir` (L106,110) and `writeSecureFile` (L129-130,134-135) use `.catchAll(() => Effect.void)` to swallow all errors including permission failures. Token files could remain world-readable without warning.
 **Recommendation:** Log warning or propagate error when secure permissions cannot be set
 **Code Example:**
+
 ```typescript
 // Before
-yield* fs.chmod(configDir, 0o700).pipe(
-  Effect.catchAll(() => Effect.void)
-)
+yield * fs.chmod(configDir, 0o700).pipe(Effect.catchAll(() => Effect.void))
 
 // After
-yield* fs.chmod(configDir, 0o700).pipe(
-  Effect.catchAll((err) =>
-    Effect.logWarning(`Failed to set secure permissions on ${configDir}: ${err}`)
-  )
-)
+yield *
+  fs
+    .chmod(configDir, 0o700)
+    .pipe(Effect.catchAll((err) => Effect.logWarning(`Failed to set secure permissions on ${configDir}: ${err}`)))
 ```
 
 ### Issue 3: Invalid Date created from empty strings
@@ -69,6 +68,7 @@ yield* fs.chmod(configDir, 0o700).pipe(
 **Details:** Comment and issue date fields use `new Date(String(field ?? ""))`. When field is null/undefined, creates `new Date("")` which returns Invalid Date. Downstream code may fail silently or produce "Invalid Date" in output.
 **Recommendation:** Validate date string before construction or use fallback
 **Code Example:**
+
 ```typescript
 // Before
 created: new Date(String(c["created"] ?? ""))
@@ -90,6 +90,7 @@ created: parseDate(c["created"])
 **Details:** Maps `commentList` with index `i` to access `renderedComments[i]`. If Jira API returns different lengths (e.g., permissions hide some rendered comments), produces incorrect data mapping with no error.
 **Recommendation:** Match by comment ID instead of array index
 **Code Example:**
+
 ```typescript
 // Before
 const comments: Array<Comment> = commentList.map((c, i) => {
@@ -112,6 +113,7 @@ const comments: Array<Comment> = commentList.map((c) => {
 **Details:** While loop continues until `result.isLast` or no `nextPageToken`. If Jira API has bug returning same token repeatedly, loops forever without termination.
 **Recommendation:** Add max iteration guard
 **Code Example:**
+
 ```typescript
 // Before
 while (!result.isLast && result.nextPageToken) {
@@ -126,6 +128,7 @@ while (!result.isLast && result.nextPageToken && pageCount++ < MAX_PAGES) {
 
 **Severity:** P2 (High)
 **Files:**
+
 - [packages/atlassian-common/src/config/ConfigPaths.ts#L40](../packages/atlassian-common/src/config/ConfigPaths.ts#L40)
 - [packages/atlassian-common/src/config/ConfigPaths.ts#L59](../packages/atlassian-common/src/config/ConfigPaths.ts#L59)
 - [packages/jira-cli/src/JiraAuth.ts#L172](../packages/jira-cli/src/JiraAuth.ts#L172)
@@ -133,12 +136,14 @@ while (!result.isLast && result.nextPageToken && pageCount++ < MAX_PAGES) {
 
 **Summary:** Uses `process.env` and `process.platform` directly instead of Effect Platform
 **Details:** Multiple files access Node.js globals directly:
+
 - `process.env.HOME`, `process.env.USERPROFILE`, `process.env.XDG_CONFIG_HOME` for paths
 - `process.platform` for OS detection
 
 This breaks Effect's dependency injection, makes testing harder, and couples code to Node.js runtime.
 **Recommendation:** Use `@effect/platform` abstractions for environment and platform detection
 **Code Example:**
+
 ```typescript
 // Before (ConfigPaths.ts)
 get: () => Effect.sync(() => process.env.HOME ?? process.env.USERPROFILE ?? "/")
@@ -157,7 +162,7 @@ const platform = process.platform
 
 // After
 import * as Platform from "@effect/platform/Platform"
-const platform = yield* Platform.Platform
+const platform = yield * Platform.Platform
 const os = platform.os // "darwin" | "linux" | "windows"
 ```
 
@@ -177,16 +182,18 @@ const os = platform.os // "darwin" | "linux" | "windows"
 **Details:** If neither HOME nor USERPROFILE exists, falls back to "/". Config would be written to `/.config/atlassian/` which is either inaccessible or system-wide. Not acceptable.
 **Recommendation:** Fail with error when home directory cannot be determined
 **Code Example:**
+
 ```typescript
 // Before
 get: () => Effect.sync(() => process.env.HOME ?? process.env.USERPROFILE ?? "/")
 
 // After
-get: () => Effect.sync(() => {
-  const home = process.env.HOME ?? process.env.USERPROFILE
-  if (!home) throw new Error("Cannot determine home directory: HOME/USERPROFILE not set")
-  return home
-})
+get: () =>
+  Effect.sync(() => {
+    const home = process.env.HOME ?? process.env.USERPROFILE
+    if (!home) throw new Error("Cannot determine home directory: HOME/USERPROFILE not set")
+    return home
+  })
 ```
 
 ## Medium Priority (P3)
@@ -199,6 +206,7 @@ get: () => Effect.sync(() => {
 **Details:** Lines 265, 305, 315 use `bean as unknown as Record<string, unknown>` pattern. If API response shape changes, runtime errors occur instead of type errors.
 **Recommendation:** Use Effect Schema to validate API response structure
 **Code Example:**
+
 ```typescript
 // Before
 mappedIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
@@ -216,18 +224,14 @@ const decoded = Schema.decodeUnknownSync(IssueBean)(bean)
 **Details:** `escapeJqlValue` handles `"` and `\` but not newlines or other control characters. A version string with `\n` could inject additional JQL clauses.
 **Recommendation:** Also escape newlines and carriage returns
 **Code Example:**
+
 ```typescript
 // Before
-export const escapeJqlValue = (value: string): string =>
-  value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+export const escapeJqlValue = (value: string): string => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
 
 // After
 export const escapeJqlValue = (value: string): string =>
-  value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, "\\\"")
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
+  value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r")
 ```
 
 ## Low Priority (P4)

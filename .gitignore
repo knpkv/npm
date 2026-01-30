@@ -26,3 +26,4 @@ scratchpad/**/*.ts
 # Local environment variables
 .envrc.local
 .confluence/
+packages/storybook/storybook-static/

@@ -1,0 +1,47 @@
+{
+  "name": "@knpkv/codecommit-web",
+  "version": "0.0.0",
+  "description": "Web server and frontend for CodeCommit PR browser",
+  "type": "module",
+  "main": "src/index.ts",
+  "publishConfig": {
+    "main": "dist/index.js",
+    "types": "dist/dts/index.d.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "test:e2e": "playwright test",
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
+    "docgen": "docgen"
+  },
+  "dependencies": {
+    "@effect-atom/atom": "latest",
+    "@effect-atom/atom-react": "latest",
+    "@effect/platform": "latest",
+    "@effect/platform-bun": "latest",
+    "@effect/platform-node": "latest",
+    "@knpkv/codecommit-core": "workspace:*",
+    "@types/marked": "^6.0.0",
+    "effect": "latest",
+    "marked": "^17.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "latest",
+    "@playwright/test": "^1.58.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.0.0",
+    "vitest": "latest"
+  }
+}

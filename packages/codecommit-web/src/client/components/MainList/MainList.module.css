@@ -1,0 +1,64 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--text-muted, #666);
+}
+
+.refreshButton {
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.refreshButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.refreshButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-muted, #666) var(--background, #171923);
+}
+
+.list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.list::-webkit-scrollbar-track {
+  background: var(--background, #171923);
+}
+
+.list::-webkit-scrollbar-thumb {
+  background: var(--text-muted, #666);
+  border-radius: 4px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-style: italic;
+}

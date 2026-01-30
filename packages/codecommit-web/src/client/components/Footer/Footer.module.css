@@ -1,0 +1,26 @@
+.footer {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  min-height: 36px;
+  font-size: 12px;
+}
+
+.filterLabel {
+  padding: 2px 6px;
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+.cursor {
+  width: 2px;
+  height: 14px;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}

@@ -1,0 +1,67 @@
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--text-muted, #666);
+}
+
+.headerLabel {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.headerCount {
+  font-size: 12px;
+}
+
+.empty {
+  padding: 8px 16px;
+  border-left: 2px solid;
+  font-style: italic;
+}
+
+.pr {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-left: 2px solid;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pr:hover {
+  background-color: var(--background-element, #333);
+}
+
+.selected {
+  background-color: var(--selected-background, #2d3748) !important;
+}
+
+.prHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.prMeta {
+  font-size: 12px;
+}
+
+.prTitle {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.prDescription {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 60px;
+}

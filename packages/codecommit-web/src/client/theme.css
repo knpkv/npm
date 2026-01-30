@@ -1,0 +1,39 @@
+:root {
+  --background: #171923;
+  --background-panel: #1a202c;
+  --background-element: #2d3748;
+  --background-header: #1a365d;
+  --border-color: #333;
+  --text: #ffffff;
+  --text-muted: #a0aec0;
+  --text-accent: #63b3ed;
+  --text-error: #fc8181;
+  --text-warning: #f6e05e;
+  --text-success: #68d391;
+  --primary: #1e3a5f;
+  --error: #880000;
+  --warning: #885500;
+  --success: #276749;
+  --selected-background: #2d3748;
+  --selected-text: #ffffff;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--background);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#root {
+  min-height: 100vh;
+}

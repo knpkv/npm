@@ -1,0 +1,20 @@
+.scrollBox {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-muted) var(--background);
+}
+
+.scrollBox::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollBox::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+.scrollBox::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 4px;
+}

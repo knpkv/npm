@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@knpkv/codecommit-tui/*": ["../../codecommit-tui/src/*"]
+    }
+  },
+  "include": ["src/**/*", ".storybook/**/*", "../../packages/codecommit-tui/src/**/*"],
+  "exclude": ["node_modules"]
+}
