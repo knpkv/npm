@@ -7,7 +7,7 @@ import * as FileSystem from "@effect/platform/FileSystem"
 import type * as Path from "@effect/platform/Path"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import type { HomeDirectoryTag } from "./ConfigPaths.js"
+import { type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js"
 import { ensureConfigDir, getAuthPath, getOAuthConfigPath, writeSecureFile } from "./ConfigPaths.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
 
@@ -40,7 +40,7 @@ export const loadToken = (
   toolName: string
 ): Effect.Effect<
   OAuthToken | null,
-  FileSystemError,
+  FileSystemError | HomeDirectoryError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {
@@ -83,7 +83,7 @@ export const loadToken = (
 export const saveToken = (
   toolName: string,
   token: OAuthToken
-): Effect.Effect<void, FileSystemError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
+): Effect.Effect<void, FileSystemError | HomeDirectoryError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* ensureConfigDir(toolName)
@@ -103,7 +103,7 @@ export const saveToken = (
  */
 export const deleteToken = (
   toolName: string
-): Effect.Effect<void, FileSystemError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
+): Effect.Effect<void, FileSystemError | HomeDirectoryError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const tokenPath = yield* getAuthPath(toolName)
@@ -125,7 +125,7 @@ export const loadOAuthConfig = (
   toolName: string
 ): Effect.Effect<
   OAuthConfig | null,
-  FileSystemError,
+  FileSystemError | HomeDirectoryError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {
@@ -168,7 +168,7 @@ export const loadOAuthConfig = (
 export const saveOAuthConfig = (
   toolName: string,
   config: OAuthConfig
-): Effect.Effect<void, FileSystemError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
+): Effect.Effect<void, FileSystemError | HomeDirectoryError, FileSystem.FileSystem | Path.Path | HomeDirectoryTag> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* ensureConfigDir(toolName)

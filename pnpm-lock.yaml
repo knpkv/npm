@@ -331,6 +331,43 @@ importers:
         specifier: ^4.0.13
         version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/jira-cli:
+    dependencies:
+      '@effect/cli':
+        specifier: ^0.61.0
+        version: 0.61.8(@effect/platform@0.93.5(effect@3.19.8))(@effect/printer-ansi@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(@effect/printer@0.47.0(@effect/typeclass@0.38.0(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@effect/platform':
+        specifier: ^0.93.0
+        version: 0.93.5(effect@3.19.8)
+      '@effect/platform-node':
+        specifier: ^0.87.0
+        version: 0.87.0(@effect/cluster@0.40.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/workflow@0.3.0(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(@effect/rpc@0.72.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/sql@0.39.0(@effect/experimental@0.57.1(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(@effect/platform@0.93.5(effect@3.19.8))(effect@3.19.8))(effect@3.19.8)
+      '@knpkv/atlassian-common':
+        specifier: workspace:*
+        version: link:../atlassian-common
+      '@knpkv/jira-api-client':
+        specifier: workspace:*
+        version: link:../jira-api-client
+      gray-matter:
+        specifier: ^4.0.3
+        version: 4.0.3
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.8)(vitest@4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.19.1
+      effect:
+        specifier: ^3.19.3
+        version: 3.19.8
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.13
+        version: 4.0.13(@edge-runtime/vm@5.0.0)(@types/debug@4.1.12)(@types/node@22.19.1)(happy-dom@20.0.4)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
   scratchpad: {}
 
   scripts:

@@ -11,6 +11,7 @@ export {
   getConfigDir,
   getOAuthConfigPath,
   type HomeDirectory,
+  HomeDirectoryError,
   HomeDirectoryLive,
   HomeDirectoryTag,
   writeSecureFile

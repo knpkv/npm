@@ -1,0 +1,85 @@
+{
+  "name": "@knpkv/jira-cli",
+  "version": "0.1.0",
+  "description": "CLI tool to fetch Jira tickets and export to markdown",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/jira-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/knpkv/npm/issues"
+  },
+  "homepage": "https://github.com/knpkv/npm/tree/main/packages/jira-cli#readme",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jira": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./JiraAuth": {
+      "import": "./dist/JiraAuth.js",
+      "types": "./dist/JiraAuth.d.ts"
+    },
+    "./IssueService": {
+      "import": "./dist/IssueService.js",
+      "types": "./dist/IssueService.d.ts"
+    },
+    "./MarkdownWriter": {
+      "import": "./dist/MarkdownWriter.js",
+      "types": "./dist/MarkdownWriter.d.ts"
+    },
+    "./JiraCliError": {
+      "import": "./dist/JiraCliError.js",
+      "types": "./dist/JiraCliError.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist dist-test .tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.61.0",
+    "@effect/platform": "^0.93.0",
+    "@effect/platform-node": "^0.87.0",
+    "@knpkv/jira-api-client": "workspace:*",
+    "@knpkv/atlassian-common": "workspace:*",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^22.15.21",
+    "effect": "^3.19.3",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "jira",
+    "markdown",
+    "cli",
+    "atlassian",
+    "tickets",
+    "export"
+  ]
+}
