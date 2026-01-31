@@ -159,7 +159,7 @@ export const PRServiceLive = Layer.effect(
 
       const streams = enabledAccounts.flatMap((account) =>
         (account.regions ?? ["us-east-1"]).map((region) =>
-          awsClient.getOpenPullRequests({ profile: account.profile, region })
+          awsClient.getPullRequests({ profile: account.profile, region })
             .pipe(
               Stream.catchAllCause((cause) => {
                 // Get first line of pretty error (skip stack trace)

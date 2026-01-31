@@ -26,6 +26,76 @@ codecommit web [--port 3000] [--hostname 127.0.0.1]
 
 ### Pull Request Commands
 
+#### List PRs
+
+List pull requests.
+
+```bash
+codecommit pr list [options]
+```
+
+| Option     | Alias | Description            | Default     |
+| ---------- | ----- | ---------------------- | ----------- |
+| `--profile`| `-p`  | AWS profile            | `default`   |
+| `--region` | `-r`  | AWS region             | `us-east-1` |
+| `--status` | `-s`  | PR status (OPEN/CLOSED)| `OPEN`      |
+| `--all`    | `-a`  | Show all PRs           | `false`     |
+| `--repo`   |       | Filter by repository   | -           |
+| `--author` |       | Filter by author       | -           |
+| `--json`   |       | Output as JSON         | `false`     |
+
+Example:
+
+```bash
+# List open PRs (default)
+codecommit pr list
+
+# List closed PRs
+codecommit pr list --status CLOSED
+
+# List all PRs (open and closed)
+codecommit pr list --all
+
+# Filter by repo
+codecommit pr list --repo my-repo
+
+# Filter by author
+codecommit pr list --author andrey
+
+# JSON output
+codecommit pr list --json
+```
+
+Output:
+
+```
+Found 3 open PR(s):
+
+123  my-repo
+    Add feature X
+    feature/x → main
+    by alice  ✓approved ✓mergeable
+
+124  my-repo
+    Fix bug Y
+    fix/y → main
+    by bob  ✗conflicts
+```
+
+With `--all`:
+
+```
+Found 5 all PR(s):
+
+123  [OPEN] my-repo
+    Add feature X
+    ...
+
+120  [CLOSED] my-repo
+    Old feature
+    ...
+```
+
 #### Create PR
 
 ```bash

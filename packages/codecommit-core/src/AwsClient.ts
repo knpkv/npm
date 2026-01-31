@@ -40,8 +40,9 @@ const withThrottleRetry = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effe
 export class AwsClient extends Context.Tag("AwsClient")<
   AwsClient,
   {
-    readonly getOpenPullRequests: (
-      account: { profile: string; region: string }
+    readonly getPullRequests: (
+      account: { profile: string; region: string },
+      options?: { status?: "OPEN" | "CLOSED" }
     ) => Stream.Stream<PullRequest, unknown, HttpClient.HttpClient>
     readonly getCallerIdentity: (
       account: { profile: string; region: string }
@@ -103,15 +104,17 @@ const normalizeAuthor = (arn: string): string => {
 export const AwsClientLive = Layer.effect(
   AwsClient,
   Effect.gen(function*() {
-    const getOpenPullRequests = (
-      account: { profile: string; region: string }
+    const getPullRequests = (
+      account: { profile: string; region: string },
+      options?: { status?: "OPEN" | "CLOSED" }
     ): Stream.Stream<PullRequest, unknown, HttpClient.HttpClient> => {
+      const status = options?.status ?? "OPEN"
       const stream = codecommit.listRepositories.pages({}).pipe(
         Stream.flatMap((page) => Stream.fromIterable(page.repositories ?? [])),
         Stream.map((repo) => repo.repositoryName!),
         Stream.flatMap(
           (repoName) =>
-            codecommit.listPullRequests.pages({ repositoryName: repoName, pullRequestStatus: "OPEN" })
+            codecommit.listPullRequests.pages({ repositoryName: repoName, pullRequestStatus: status })
               .pipe(
                 Stream.flatMap((page) => Stream.fromIterable(page.pullRequestIds ?? [])),
                 Stream.map((id) => ({ id, repoName }))
@@ -488,6 +491,6 @@ export const AwsClientLive = Layer.effect(
       )
     }
 
-    return { getOpenPullRequests, getCallerIdentity, createPullRequest, listBranches, getCommentsForPullRequest, updatePullRequestTitle, updatePullRequestDescription, getPullRequest }
+    return { getPullRequests, getCallerIdentity, createPullRequest, listBranches, getCommentsForPullRequest, updatePullRequestTitle, updatePullRequestDescription, getPullRequest }
   })
 )

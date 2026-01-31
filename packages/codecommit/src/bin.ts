@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
+import pkg from "../package.json"
 import { Args, Command, Options } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
 import { BunContext, BunRuntime } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
-import { Console, Effect, Layer } from "effect"
+import { Console, Effect, Layer, Stream } from "effect"
 import open from "open"
 import { makeServer } from "@knpkv/codecommit-web"
 import { AwsClient, AwsClientLive, type CommentThread, type PRCommentLocation } from "@knpkv/codecommit-core"
@@ -79,6 +80,99 @@ const prCreate = Command.make("create", {
     Effect.provide(Layer.merge(AwsClientLive, NodeHttpClient.layer))
   )
 ).pipe(Command.withDescription("Create a pull request"))
+
+// PR List Command
+const prList = Command.make("list", {
+  profile: Options.text("profile").pipe(
+    Options.withAlias("p"),
+    Options.withDescription("AWS profile"),
+    Options.withDefault("default")
+  ),
+  region: Options.text("region").pipe(
+    Options.withAlias("r"),
+    Options.withDescription("AWS region"),
+    Options.withDefault("us-east-1")
+  ),
+  status: Options.choice("status", ["OPEN", "CLOSED"]).pipe(
+    Options.withAlias("s"),
+    Options.withDescription("Filter by PR status"),
+    Options.withDefault("OPEN" as const)
+  ),
+  all: Options.boolean("all").pipe(
+    Options.withAlias("a"),
+    Options.withDescription("Show all PRs (both OPEN and CLOSED)"),
+    Options.withDefault(false)
+  ),
+  repo: Options.text("repo").pipe(
+    Options.withDescription("Filter by repository name"),
+    Options.optional
+  ),
+  author: Options.text("author").pipe(
+    Options.withDescription("Filter by author"),
+    Options.optional
+  ),
+  json: Options.boolean("json").pipe(
+    Options.withDescription("Output as JSON"),
+    Options.withDefault(false)
+  )
+}, ({ profile, region, status, all, repo, author, json }) =>
+  Effect.gen(function* () {
+    const aws = yield* AwsClient
+    const account = { profile, region }
+
+    const statusLabel = all ? "all" : status.toLowerCase()
+    yield* Console.log(`Fetching ${statusLabel} PRs...`)
+
+    const filterPRs = <A, E, R>(prStream: Stream.Stream<A, E, R>) =>
+      prStream.pipe(
+        Stream.filter((pr: any) => {
+          if (repo._tag === "Some" && pr.repositoryName !== repo.value) return false
+          if (author._tag === "Some" && pr.author !== author.value) return false
+          return true
+        }),
+        Stream.runCollect,
+        Effect.map((chunk) => Array.from(chunk) as A[])
+      )
+
+    let prs: any[]
+    if (all) {
+      const [openPrs, closedPrs] = yield* Effect.all([
+        filterPRs(aws.getPullRequests(account, { status: "OPEN" })),
+        filterPRs(aws.getPullRequests(account, { status: "CLOSED" }))
+      ])
+      prs = [...openPrs, ...closedPrs].sort((a, b) =>
+        b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime()
+      )
+    } else {
+      prs = yield* filterPRs(aws.getPullRequests(account, { status }))
+    }
+
+    if (prs.length === 0) {
+      yield* Console.log(`No ${statusLabel} PRs found.`)
+      return
+    }
+
+    if (json) {
+      yield* Console.log(JSON.stringify(prs, null, 2))
+    } else {
+      yield* Console.log(`\nFound ${prs.length} ${statusLabel} PR(s):\n`)
+      for (const pr of prs) {
+        const prStatus = all ? `[${pr.status}] ` : ""
+        const flags = [
+          pr.isApproved ? "✓approved" : "",
+          pr.isMergeable ? "✓mergeable" : "✗conflicts"
+        ].filter(Boolean).join(" ")
+        yield* Console.log(`${pr.id}  ${prStatus}${pr.repositoryName}`)
+        yield* Console.log(`    ${pr.title}`)
+        yield* Console.log(`    ${pr.sourceBranch} → ${pr.destinationBranch}`)
+        yield* Console.log(`    by ${pr.author}  ${flags}`)
+        yield* Console.log("")
+      }
+    }
+  }).pipe(
+    Effect.provide(Layer.merge(AwsClientLive, NodeHttpClient.layer))
+  )
+).pipe(Command.withDescription("List open pull requests"))
 
 // Helper to render comment threads as markdown
 const renderThread = (thread: CommentThread, indent: number = 0): string => {
@@ -225,7 +319,7 @@ const prUpdate = Command.make("update", {
 const pr = Command.make("pr", {}, () =>
   Console.log("Usage: codecommit pr <command>")
 ).pipe(
-  Command.withSubcommands([prCreate, prExport, prUpdate]),
+  Command.withSubcommands([prList, prCreate, prExport, prUpdate]),
   Command.withDescription("Pull request commands")
 )
 
@@ -237,8 +331,8 @@ const command = Command.make("codecommit", {}, () =>
 )
 
 const cli = Command.run(command, {
-  name: "codecommit",
-  version: "0.0.1"
+  name: pkg.name,
+  version: pkg.version
 })
 
 Effect.suspend(() => cli(process.argv)).pipe(
