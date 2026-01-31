@@ -25,3 +25,28 @@ export const PullRequest = Schema.Struct({
 })
 
 export type PullRequest = Schema.Schema.Type<typeof PullRequest>
+
+export const PRComment = Schema.Struct({
+  id: Schema.String,
+  content: Schema.String,
+  author: Schema.String,
+  creationDate: Schema.Date,
+  inReplyTo: Schema.optional(Schema.String),
+  deleted: Schema.Boolean,
+  filePath: Schema.optional(Schema.String),
+  lineNumber: Schema.optional(Schema.Number)
+})
+
+export type PRComment = Schema.Schema.Type<typeof PRComment>
+
+export interface CommentThread {
+  readonly root: PRComment
+  readonly replies: ReadonlyArray<CommentThread>
+}
+
+export interface PRCommentLocation {
+  readonly filePath?: string
+  readonly beforeCommitId?: string
+  readonly afterCommitId?: string
+  readonly comments: ReadonlyArray<CommentThread>
+}

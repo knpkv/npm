@@ -4,7 +4,7 @@ import { Credentials, Region } from "distilled-aws"
 import * as codecommit from "distilled-aws/codecommit"
 import * as sts from "distilled-aws/sts"
 import { Cause, Context, Effect, Layer, Schedule, Stream } from "effect"
-import type { Account, PullRequest } from "./Domain.js"
+import type { Account, CommentThread, PRComment, PRCommentLocation, PullRequest } from "./Domain.js"
 
 /**
  * Check if error is a throttling exception
@@ -58,6 +58,34 @@ export class AwsClient extends Context.Tag("AwsClient")<
       account: { profile: string; region: string }
       repositoryName: string
     }) => Effect.Effect<string[], unknown, HttpClient.HttpClient>
+    readonly getCommentsForPullRequest: (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      repositoryName: string
+    }) => Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient>
+    readonly updatePullRequestTitle: (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      title: string
+    }) => Effect.Effect<void, unknown, HttpClient.HttpClient>
+    readonly updatePullRequestDescription: (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      description: string
+    }) => Effect.Effect<void, unknown, HttpClient.HttpClient>
+    readonly getPullRequest: (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+    }) => Effect.Effect<{
+      title: string
+      description?: string
+      author: string
+      status: string
+      repositoryName: string
+      sourceBranch: string
+      destinationBranch: string
+      creationDate: Date
+    }, unknown, HttpClient.HttpClient>
   }
 >() {}
 
@@ -284,6 +312,182 @@ export const AwsClientLive = Layer.effect(
       )
     }
 
-    return { getOpenPullRequests, getCallerIdentity, createPullRequest, listBranches }
+    const getCommentsForPullRequest = (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      repositoryName: string
+    }): Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient> => {
+      const credentialsEffect = Effect.tryPromise({
+        try: () => {
+          const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
+          return fromNodeProviderChain(options)()
+        },
+        catch: (e) => new Error(e instanceof Error ? e.message : String(e))
+      }).pipe(
+        Effect.map(Credentials.fromAwsCredentialIdentity),
+        Effect.mapError((e) => new Error(`Auth failed for ${params.account.profile}: ${e.message}`)),
+        Effect.timeout("5 seconds")
+      )
+
+      const buildThreads = (comments: PRComment[]): CommentThread[] => {
+        const rootComments = comments.filter((c) => !c.inReplyTo)
+        const repliesTo = (id: string): CommentThread[] =>
+          comments
+            .filter((c) => c.inReplyTo === id)
+            .sort((a, b) => a.creationDate.getTime() - b.creationDate.getTime())
+            .map((c) => ({ root: c, replies: repliesTo(c.id) }))
+
+        return rootComments
+          .sort((a, b) => a.creationDate.getTime() - b.creationDate.getTime())
+          .map((c) => ({ root: c, replies: repliesTo(c.id) }))
+      }
+
+      const fetchPage = (nextToken?: string): Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient> =>
+        codecommit.getCommentsForPullRequest({
+          pullRequestId: params.pullRequestId,
+          repositoryName: params.repositoryName,
+          ...(nextToken && { nextToken })
+        }).pipe(
+          Effect.flatMap((resp) => {
+            const locations = (resp.commentsForPullRequestData ?? []).map((data) => {
+              const comments: PRComment[] = (data.comments ?? []).map((c) => ({
+                id: c.commentId ?? "",
+                content: c.content ?? "",
+                author: c.authorArn ? normalizeAuthor(c.authorArn) : "unknown",
+                creationDate: c.creationDate ?? new Date(),
+                inReplyTo: c.inReplyTo,
+                deleted: c.deleted ?? false,
+                filePath: data.location?.filePath,
+                lineNumber: data.location?.filePosition
+              }))
+
+              return {
+                filePath: data.location?.filePath,
+                beforeCommitId: data.beforeCommitId,
+                afterCommitId: data.afterCommitId,
+                comments: buildThreads(comments)
+              } as PRCommentLocation
+            })
+
+            if (resp.nextToken) {
+              return fetchPage(resp.nextToken).pipe(
+                Effect.map((more) => [...locations, ...more])
+              )
+            }
+            return Effect.succeed(locations)
+          }),
+          Effect.provideService(Region.Region, params.account.region as any),
+          Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect)
+        )
+
+      return fetchPage().pipe(
+        withThrottleRetry,
+        Effect.timeout("60 seconds")
+      )
+    }
+
+    const updatePullRequestTitle = (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      title: string
+    }): Effect.Effect<void, unknown, HttpClient.HttpClient> => {
+      const credentialsEffect = Effect.tryPromise({
+        try: () => {
+          const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
+          return fromNodeProviderChain(options)()
+        },
+        catch: (e) => new Error(e instanceof Error ? e.message : String(e))
+      }).pipe(
+        Effect.map(Credentials.fromAwsCredentialIdentity),
+        Effect.mapError((e) => new Error(`Auth failed for ${params.account.profile}: ${e.message}`)),
+        Effect.timeout("5 seconds")
+      )
+
+      return codecommit.updatePullRequestTitle({
+        pullRequestId: params.pullRequestId,
+        title: params.title
+      }).pipe(
+        Effect.asVoid,
+        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
+        Effect.timeout("30 seconds")
+      )
+    }
+
+    const updatePullRequestDescription = (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+      description: string
+    }): Effect.Effect<void, unknown, HttpClient.HttpClient> => {
+      const credentialsEffect = Effect.tryPromise({
+        try: () => {
+          const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
+          return fromNodeProviderChain(options)()
+        },
+        catch: (e) => new Error(e instanceof Error ? e.message : String(e))
+      }).pipe(
+        Effect.map(Credentials.fromAwsCredentialIdentity),
+        Effect.mapError((e) => new Error(`Auth failed for ${params.account.profile}: ${e.message}`)),
+        Effect.timeout("5 seconds")
+      )
+
+      return codecommit.updatePullRequestDescription({
+        pullRequestId: params.pullRequestId,
+        description: params.description
+      }).pipe(
+        Effect.asVoid,
+        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
+        Effect.timeout("30 seconds")
+      )
+    }
+
+    const getPullRequest = (params: {
+      account: { profile: string; region: string }
+      pullRequestId: string
+    }): Effect.Effect<{
+      title: string
+      description?: string
+      author: string
+      status: string
+      repositoryName: string
+      sourceBranch: string
+      destinationBranch: string
+      creationDate: Date
+    }, unknown, HttpClient.HttpClient> => {
+      const credentialsEffect = Effect.tryPromise({
+        try: () => {
+          const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
+          return fromNodeProviderChain(options)()
+        },
+        catch: (e) => new Error(e instanceof Error ? e.message : String(e))
+      }).pipe(
+        Effect.map(Credentials.fromAwsCredentialIdentity),
+        Effect.mapError((e) => new Error(`Auth failed for ${params.account.profile}: ${e.message}`)),
+        Effect.timeout("5 seconds")
+      )
+
+      return codecommit.getPullRequest({ pullRequestId: params.pullRequestId }).pipe(
+        Effect.map((resp) => {
+          const pr = resp.pullRequest!
+          const target = pr.pullRequestTargets?.[0]
+          return {
+            title: pr.title ?? "",
+            ...(pr.description && { description: pr.description }),
+            author: pr.authorArn ? normalizeAuthor(pr.authorArn) : "unknown",
+            status: pr.pullRequestStatus ?? "UNKNOWN",
+            repositoryName: target?.repositoryName ?? "",
+            sourceBranch: target?.sourceReference ?? "",
+            destinationBranch: target?.destinationReference ?? "",
+            creationDate: pr.creationDate ?? new Date()
+          }
+        }),
+        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
+        Effect.timeout("30 seconds")
+      )
+    }
+
+    return { getOpenPullRequests, getCallerIdentity, createPullRequest, listBranches, getCommentsForPullRequest, updatePullRequestTitle, updatePullRequestDescription, getPullRequest }
   })
 )
