@@ -119,7 +119,7 @@ export const AwsClientLive = Layer.effect(
                 Stream.flatMap((page) => Stream.fromIterable(page.pullRequestIds ?? [])),
                 Stream.map((id) => ({ id, repoName }))
               ),
-          { concurrency: 5 }
+          { concurrency: 2 }
         ),
         Stream.mapEffect(({ id, repoName }) =>
           withThrottleRetry(
@@ -159,7 +159,7 @@ export const AwsClientLive = Layer.effect(
                 isMergeable: mergeEval
               }
             })
-          ), { concurrency: 10 }),
+          ), { concurrency: 3 }),
         Stream.map((pr) => {
           const accountModel: Account = {
             id: account.profile,
