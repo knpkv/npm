@@ -64,13 +64,13 @@ jira search --by-version "1.0.0" --project PROJ
 
 ### Options
 
-| Option          | Alias | Description                              | Default          |
-| --------------- | ----- | ---------------------------------------- | ---------------- |
-| `--by-version`  | `-v`  | Search by fix version                    | -                |
-| `--project`     | `-p`  | Filter by project key                    | -                |
+| Option          | Alias | Description                              | Default |
+| --------------- | ----- | ---------------------------------------- | ------- |
+| `--by-version`  | `-v`  | Search by fix version                    | -       |
+| `--project`     | `-p`  | Filter by project key                    | -       |
 | `--output-dir`  | `-o`  | Output directory                         | `.jira` |
-| `--format`      | `-f`  | `multi` (one file per issue) or `single` | `multi`          |
-| `--max-results` | `-m`  | Max results to fetch                     | `100`            |
+| `--format`      | `-f`  | `multi` (one file per issue) or `single` | `multi` |
+| `--max-results` | `-m`  | Max results to fetch                     | `100`   |
 
 ### Output Formats
 

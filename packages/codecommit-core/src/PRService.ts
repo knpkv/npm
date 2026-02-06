@@ -3,73 +3,7 @@ import { Cause, Context, Effect, Layer, Ref, Stream, SubscriptionRef } from "eff
 import { AwsClient } from "./AwsClient.js"
 import { ConfigService } from "./ConfigService.js"
 import type { PullRequest } from "./Domain.js"
-import { NotificationsService, type NotificationItem } from "./NotificationsService.js"
-
-/**
- * Extract a meaningful error message from various error types
- */
-const extractErrorMessage = (err: unknown): string => {
-  // Handle null/undefined
-  if (err == null) return "Unknown error"
-
-  // Handle string
-  if (typeof err === "string") return err
-
-  // Handle Error instances
-  if (err instanceof Error) {
-    return err.message || err.name || "Error"
-  }
-
-  // Handle objects
-  if (typeof err === "object") {
-    const obj = err as Record<string, unknown>
-
-    // Effect errors often have _tag
-    if (obj._tag && typeof obj._tag === "string") {
-      const tag = obj._tag
-      if (obj.message && typeof obj.message === "string") {
-        return `${tag}: ${obj.message}`
-      }
-      if (obj.error) {
-        return `${tag}: ${extractErrorMessage(obj.error)}`
-      }
-      return tag
-    }
-
-    // AWS SDK errors
-    if (obj.message && typeof obj.message === "string") return obj.message
-    if (obj.name && typeof obj.name === "string") return obj.name
-    if (obj.Code && typeof obj.Code === "string") return obj.Code
-    if (obj.code && typeof obj.code === "string") return obj.code
-
-    // Check for nested error
-    if (obj.error) return extractErrorMessage(obj.error)
-    if (obj.cause) return extractErrorMessage(obj.cause)
-
-    // Try JSON stringify but handle circular refs
-    try {
-      const seen = new WeakSet()
-      const str = JSON.stringify(err, (key, value) => {
-        if (typeof value === "object" && value !== null) {
-          if (seen.has(value)) return "[Circular]"
-          seen.add(value)
-        }
-        return value
-      })
-      if (str && str !== "{}" && str !== "null") {
-        return str.length > 200 ? str.slice(0, 200) + "..." : str
-      }
-    } catch {
-      // ignore stringify errors
-    }
-
-    // Last resort: toString
-    const str = String(err)
-    if (str !== "[object Object]") return str
-  }
-
-  return "Unknown error"
-}
+import { type NotificationItem, NotificationsService } from "./NotificationsService.js"
 
 export interface AppState {
   readonly pullRequests: ReadonlyArray<PullRequest>
@@ -79,6 +13,7 @@ export interface AppState {
     readonly enabled: boolean
   }>
   readonly status: "idle" | "loading" | "error"
+  readonly statusDetail?: string | undefined
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
@@ -90,7 +25,10 @@ export class PRService extends Context.Tag("PRService")<
     readonly state: SubscriptionRef.SubscriptionRef<AppState>
     readonly refresh: Effect.Effect<void, never, HttpClient.HttpClient>
     readonly toggleAccount: (profile: string) => Effect.Effect<void, never, HttpClient.HttpClient>
-    readonly setAllAccounts: (enabled: boolean, profiles?: string[]) => Effect.Effect<void, never, HttpClient.HttpClient>
+    readonly setAllAccounts: (
+      enabled: boolean,
+      profiles?: Array<string>
+    ) => Effect.Effect<void, never, HttpClient.HttpClient>
     readonly clearNotifications: Effect.Effect<void>
     readonly addNotification: (item: Omit<NotificationItem, "timestamp">) => Effect.Effect<void>
   }
@@ -115,12 +53,12 @@ export const PRServiceLive = Layer.effect(
         status: "loading" as const,
         error: undefined
       }))
-      
+
       yield* notificationsService.clear // Clear notifications on refresh? Or keep history?
       // User said "implements notifications count". Usually we clear on refresh or allow manual clear.
       // But if errors happen during refresh, we add them.
       // I'll clear them for now to match old behavior.
-      
+
       const config = yield* configService.load.pipe(
         Effect.catchAll((e) => Effect.fail(new Error(`Config load failed: ${e.message}`)))
       )
@@ -158,26 +96,28 @@ export const PRServiceLive = Layer.effect(
       )
 
       const streams = enabledAccounts.flatMap((account) =>
-        (account.regions ?? ["us-east-1"]).map((region) =>
-          awsClient.getPullRequests({ profile: account.profile, region })
-            .pipe(
-              Stream.catchAllCause((cause) => {
-                // Get first line of pretty error (skip stack trace)
-                const errorStr = Cause.pretty(cause).split("\n")[0] ?? "Unknown error"
-                return Stream.fromEffect(
-                  notificationsService.add({
-                    type: "error",
-                    title: `${account.profile} (${region})`,
-                    message: errorStr
-                  })
-                ).pipe(Stream.flatMap(() => Stream.empty))
-              })
-            )
-        )
+        (account.regions ?? ["us-east-1"]).map((region) => {
+          const label = `${account.profile} (${region})`
+          return Stream.fromEffect(
+            SubscriptionRef.update(state, (s) => ({ ...s, statusDetail: label }))
+          ).pipe(
+            Stream.flatMap(() => awsClient.getPullRequests({ profile: account.profile, region })),
+            Stream.catchAllCause((cause) => {
+              const errorStr = Cause.pretty(cause).split("\n")[0] ?? "Unknown error"
+              return Stream.fromEffect(
+                notificationsService.add({
+                  type: "error",
+                  title: label,
+                  message: errorStr
+                })
+              ).pipe(Stream.flatMap(() => Stream.empty))
+            })
+          )
+        })
       )
 
       // Collect new PRs, keeping old ones visible during fetch
-      const newPRsRef = yield* Ref.make<PullRequest[]>([])
+      const newPRsRef = yield* Ref.make<Array<PullRequest>>([])
       yield* Stream.mergeAll(streams, { concurrency: "unbounded" }).pipe(
         Stream.runForEach((pr) =>
           Ref.update(newPRsRef, (prs) => {
@@ -199,6 +139,7 @@ export const PRServiceLive = Layer.effect(
         ...s,
         pullRequests: newPRs,
         status: "idle" as const,
+        statusDetail: undefined,
         lastUpdated: new Date()
       }))
     }).pipe(
@@ -234,7 +175,10 @@ export const PRServiceLive = Layer.effect(
         yield* refresh
       })
 
-    const setAllAccounts = (enabled: boolean, profiles?: string[]): Effect.Effect<void, never, HttpClient.HttpClient> =>
+    const setAllAccounts = (
+      enabled: boolean,
+      profiles?: Array<string>
+    ): Effect.Effect<void, never, HttpClient.HttpClient> =>
       Effect.gen(function*() {
         const config = yield* configService.load.pipe(Effect.orDie)
         const detected = yield* configService.detectProfiles.pipe(Effect.orDie)

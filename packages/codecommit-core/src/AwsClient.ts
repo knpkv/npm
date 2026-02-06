@@ -41,14 +41,14 @@ export class AwsClient extends Context.Tag("AwsClient")<
   AwsClient,
   {
     readonly getPullRequests: (
-      account: { profile: string; region: string },
+      account: { profile: string; region: Region.RegionName },
       options?: { status?: "OPEN" | "CLOSED" }
     ) => Stream.Stream<PullRequest, unknown, HttpClient.HttpClient>
     readonly getCallerIdentity: (
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
     ) => Effect.Effect<string, unknown, HttpClient.HttpClient>
     readonly createPullRequest: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       repositoryName: string
       title: string
       description?: string
@@ -56,37 +56,41 @@ export class AwsClient extends Context.Tag("AwsClient")<
       destinationReference: string
     }) => Effect.Effect<string, unknown, HttpClient.HttpClient>
     readonly listBranches: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       repositoryName: string
-    }) => Effect.Effect<string[], unknown, HttpClient.HttpClient>
+    }) => Effect.Effect<Array<string>, unknown, HttpClient.HttpClient>
     readonly getCommentsForPullRequest: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       repositoryName: string
-    }) => Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient>
+    }) => Effect.Effect<Array<PRCommentLocation>, unknown, HttpClient.HttpClient>
     readonly updatePullRequestTitle: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       title: string
     }) => Effect.Effect<void, unknown, HttpClient.HttpClient>
     readonly updatePullRequestDescription: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       description: string
     }) => Effect.Effect<void, unknown, HttpClient.HttpClient>
     readonly getPullRequest: (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
-    }) => Effect.Effect<{
-      title: string
-      description?: string
-      author: string
-      status: string
-      repositoryName: string
-      sourceBranch: string
-      destinationBranch: string
-      creationDate: Date
-    }, unknown, HttpClient.HttpClient>
+    }) => Effect.Effect<
+      {
+        title: string
+        description?: string
+        author: string
+        status: string
+        repositoryName: string
+        sourceBranch: string
+        destinationBranch: string
+        creationDate: Date
+      },
+      unknown,
+      HttpClient.HttpClient
+    >
   }
 >() {}
 
@@ -105,7 +109,7 @@ export const AwsClientLive = Layer.effect(
   AwsClient,
   Effect.gen(function*() {
     const getPullRequests = (
-      account: { profile: string; region: string },
+      account: { profile: string; region: Region.RegionName },
       options?: { status?: "OPEN" | "CLOSED" }
     ): Stream.Stream<PullRequest, unknown, HttpClient.HttpClient> => {
       const status = options?.status ?? "OPEN"
@@ -207,7 +211,7 @@ export const AwsClientLive = Layer.effect(
       )
 
       // Ensure region is correctly typed for distilled-aws
-      const streamWithRegion = Stream.provideService(stream, Region.Region, account.region as any)
+      const streamWithRegion = Stream.provideService(stream, Region.Region, account.region)
 
       return streamWithRegion.pipe(
         Stream.provideServiceEffect(Credentials.Credentials, credentialsEffect),
@@ -216,7 +220,7 @@ export const AwsClientLive = Layer.effect(
     }
 
     const getCallerIdentity = (
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
     ): Effect.Effect<string, unknown, HttpClient.HttpClient> => {
       const credentialsEffect = Effect.tryPromise({
         try: () => {
@@ -232,14 +236,14 @@ export const AwsClientLive = Layer.effect(
 
       return sts.getCallerIdentity({}).pipe(
         Effect.map((resp) => normalizeAuthor(resp.Arn ?? "")),
-        Effect.provideService(Region.Region, account.region as any),
+        Effect.provideService(Region.Region, account.region),
         Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
         Effect.timeout("10 seconds")
       )
     }
 
     const createPullRequest = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       repositoryName: string
       title: string
       description?: string
@@ -268,16 +272,16 @@ export const AwsClientLive = Layer.effect(
         }]
       }).pipe(
         Effect.map((resp) => resp.pullRequest?.pullRequestId ?? ""),
-        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideService(Region.Region, params.account.region),
         Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
         Effect.timeout("30 seconds")
       )
     }
 
     const listBranches = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       repositoryName: string
-    }): Effect.Effect<string[], unknown, HttpClient.HttpClient> => {
+    }): Effect.Effect<Array<string>, unknown, HttpClient.HttpClient> => {
       const credentialsEffect = Effect.tryPromise({
         try: () => {
           const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
@@ -291,7 +295,7 @@ export const AwsClientLive = Layer.effect(
       )
 
       // Paginate through all branches
-      const fetchPage = (nextToken?: string): Effect.Effect<string[], unknown, HttpClient.HttpClient> =>
+      const fetchPage = (nextToken?: string): Effect.Effect<Array<string>, unknown, HttpClient.HttpClient> =>
         codecommit.listBranches({
           repositoryName: params.repositoryName,
           ...(nextToken && { nextToken })
@@ -305,7 +309,7 @@ export const AwsClientLive = Layer.effect(
             }
             return Effect.succeed(branches)
           }),
-          Effect.provideService(Region.Region, params.account.region as any),
+          Effect.provideService(Region.Region, params.account.region),
           Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect)
         )
 
@@ -316,10 +320,10 @@ export const AwsClientLive = Layer.effect(
     }
 
     const getCommentsForPullRequest = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       repositoryName: string
-    }): Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient> => {
+    }): Effect.Effect<Array<PRCommentLocation>, unknown, HttpClient.HttpClient> => {
       const credentialsEffect = Effect.tryPromise({
         try: () => {
           const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
@@ -332,9 +336,9 @@ export const AwsClientLive = Layer.effect(
         Effect.timeout("5 seconds")
       )
 
-      const buildThreads = (comments: PRComment[]): CommentThread[] => {
+      const buildThreads = (comments: Array<PRComment>): Array<CommentThread> => {
         const rootComments = comments.filter((c) => !c.inReplyTo)
-        const repliesTo = (id: string): CommentThread[] =>
+        const repliesTo = (id: string): Array<CommentThread> =>
           comments
             .filter((c) => c.inReplyTo === id)
             .sort((a, b) => a.creationDate.getTime() - b.creationDate.getTime())
@@ -345,7 +349,7 @@ export const AwsClientLive = Layer.effect(
           .map((c) => ({ root: c, replies: repliesTo(c.id) }))
       }
 
-      const fetchPage = (nextToken?: string): Effect.Effect<PRCommentLocation[], unknown, HttpClient.HttpClient> =>
+      const fetchPage = (nextToken?: string): Effect.Effect<Array<PRCommentLocation>, unknown, HttpClient.HttpClient> =>
         codecommit.getCommentsForPullRequest({
           pullRequestId: params.pullRequestId,
           repositoryName: params.repositoryName,
@@ -353,7 +357,7 @@ export const AwsClientLive = Layer.effect(
         }).pipe(
           Effect.flatMap((resp) => {
             const locations = (resp.commentsForPullRequestData ?? []).map((data) => {
-              const comments: PRComment[] = (data.comments ?? []).map((c) => ({
+              const comments: Array<PRComment> = (data.comments ?? []).map((c) => ({
                 id: c.commentId ?? "",
                 content: c.content ?? "",
                 author: c.authorArn ? normalizeAuthor(c.authorArn) : "unknown",
@@ -379,7 +383,7 @@ export const AwsClientLive = Layer.effect(
             }
             return Effect.succeed(locations)
           }),
-          Effect.provideService(Region.Region, params.account.region as any),
+          Effect.provideService(Region.Region, params.account.region),
           Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect)
         )
 
@@ -390,7 +394,7 @@ export const AwsClientLive = Layer.effect(
     }
 
     const updatePullRequestTitle = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       title: string
     }): Effect.Effect<void, unknown, HttpClient.HttpClient> => {
@@ -411,14 +415,14 @@ export const AwsClientLive = Layer.effect(
         title: params.title
       }).pipe(
         Effect.asVoid,
-        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideService(Region.Region, params.account.region),
         Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
         Effect.timeout("30 seconds")
       )
     }
 
     const updatePullRequestDescription = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
       description: string
     }): Effect.Effect<void, unknown, HttpClient.HttpClient> => {
@@ -439,25 +443,29 @@ export const AwsClientLive = Layer.effect(
         description: params.description
       }).pipe(
         Effect.asVoid,
-        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideService(Region.Region, params.account.region),
         Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
         Effect.timeout("30 seconds")
       )
     }
 
     const getPullRequest = (params: {
-      account: { profile: string; region: string }
+      account: { profile: string; region: Region.RegionName }
       pullRequestId: string
-    }): Effect.Effect<{
-      title: string
-      description?: string
-      author: string
-      status: string
-      repositoryName: string
-      sourceBranch: string
-      destinationBranch: string
-      creationDate: Date
-    }, unknown, HttpClient.HttpClient> => {
+    }): Effect.Effect<
+      {
+        title: string
+        description?: string
+        author: string
+        status: string
+        repositoryName: string
+        sourceBranch: string
+        destinationBranch: string
+        creationDate: Date
+      },
+      unknown,
+      HttpClient.HttpClient
+    > => {
       const credentialsEffect = Effect.tryPromise({
         try: () => {
           const options = params.account.profile === "default" ? {} : { profile: params.account.profile }
@@ -485,12 +493,21 @@ export const AwsClientLive = Layer.effect(
             creationDate: pr.creationDate ?? new Date()
           }
         }),
-        Effect.provideService(Region.Region, params.account.region as any),
+        Effect.provideService(Region.Region, params.account.region),
         Effect.provideServiceEffect(Credentials.Credentials, credentialsEffect),
         Effect.timeout("30 seconds")
       )
     }
 
-    return { getPullRequests, getCallerIdentity, createPullRequest, listBranches, getCommentsForPullRequest, updatePullRequestTitle, updatePullRequestDescription, getPullRequest }
+    return {
+      getPullRequests,
+      getCallerIdentity,
+      createPullRequest,
+      listBranches,
+      getCommentsForPullRequest,
+      updatePullRequestTitle,
+      updatePullRequestDescription,
+      getPullRequest
+    }
   })
 )

@@ -51,7 +51,7 @@ export function Header() {
   const lastUpdateStr = creatingPr
     ? `  [+] Creating: ${creatingPr} ${SPINNER_FRAMES[spinnerFrame]}`
     : state.status === "loading"
-      ? `  [@] Updating... ${SPINNER_FRAMES[spinnerFrame]}`
+      ? `  [@] Fetching ${state.statusDetail ?? "..."}  ${SPINNER_FRAMES[spinnerFrame]}`
       : state.lastUpdated
         ? `  [@] ${formatRelativeTime(state.lastUpdated)}`
         : ""

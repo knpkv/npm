@@ -34,15 +34,15 @@ List pull requests.
 codecommit pr list [options]
 ```
 
-| Option     | Alias | Description            | Default     |
-| ---------- | ----- | ---------------------- | ----------- |
-| `--profile`| `-p`  | AWS profile            | `default`   |
-| `--region` | `-r`  | AWS region             | `us-east-1` |
-| `--status` | `-s`  | PR status (OPEN/CLOSED)| `OPEN`      |
-| `--all`    | `-a`  | Show all PRs           | `false`     |
-| `--repo`   |       | Filter by repository   | -           |
-| `--author` |       | Filter by author       | -           |
-| `--json`   |       | Output as JSON         | `false`     |
+| Option      | Alias | Description             | Default     |
+| ----------- | ----- | ----------------------- | ----------- |
+| `--profile` | `-p`  | AWS profile             | `default`   |
+| `--region`  | `-r`  | AWS region              | `us-east-1` |
+| `--status`  | `-s`  | PR status (OPEN/CLOSED) | `OPEN`      |
+| `--all`     | `-a`  | Show all PRs            | `false`     |
+| `--repo`    |       | Filter by repository    | -           |
+| `--author`  |       | Filter by author        | -           |
+| `--json`    |       | Output as JSON          | `false`     |
 
 Example:
 
