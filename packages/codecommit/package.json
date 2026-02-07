@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TUI for browsing AWS CodeCommit PRs",
   "type": "module",
   "main": "dist/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/confluence-api-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Effect-based Confluence Cloud REST API client (v1 + v2)",
   "license": "MIT",
   "author": "knpkv",

@@ -1,5 +1,29 @@
 # @knpkv/confluence-to-markdown
 
+## 0.4.1
+
+### Patch Changes
+
+- [#23](https://github.com/knpkv/npm/pull/23) [`bd5bbf4`](https://github.com/knpkv/npm/commit/bd5bbf4679ae1d41b33182fcca70adf0960f0839) Thanks @konopkov! - feat(confluence-api-client): new package for Confluence Cloud REST API
+
+  New `@knpkv/confluence-api-client` package with Effect-based Confluence Cloud REST API client:
+  - V1 API: `/user`, `/content/{id}/property/{key}` endpoints
+  - V2 API: Pages CRUD with pagination support
+  - Basic auth (email + API token) and OAuth2 (access token + cloud ID)
+  - Effect Layer wrapper with config service
+  - Daily CI workflow for spec updates
+
+  Migrated `confluence-to-markdown` to use new API client package.
+
+- [#24](https://github.com/knpkv/npm/pull/24) [`cbbe42f`](https://github.com/knpkv/npm/commit/cbbe42f8747af8955aacfa64a7e3868035cffec5) Thanks @konopkov! - Fix Confluence link handling and consolidate preprocessing modules
+  - Handle `<ac:link><ac:link-body>` pattern that was being lost during conversion
+  - Consolidate duplicate preprocessing code (deleted `parsers/preprocessing/`)
+  - Remove type assertion casts in favor of Schema.decodeSync
+  - Fix CI: configure git user.name/email in init for fresh repos
+
+- Updated dependencies [[`bd5bbf4`](https://github.com/knpkv/npm/commit/bd5bbf4679ae1d41b33182fcca70adf0960f0839)]:
+  - @knpkv/confluence-api-client@0.2.0
+
 ## 0.4.0
 
 ### Minor Changes
