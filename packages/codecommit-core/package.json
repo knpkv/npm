@@ -31,7 +31,8 @@
     "@effect/platform": "latest",
     "@effect/schema": "latest",
     "distilled-aws": "latest",
-    "effect": "latest"
+    "effect": "latest",
+    "fast-xml-parser": "^5.3.4"
   },
   "devDependencies": {}
 }
