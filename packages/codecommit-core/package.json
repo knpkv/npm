@@ -30,7 +30,7 @@
     "@effect/experimental": "latest",
     "@effect/platform": "latest",
     "@effect/schema": "latest",
-    "distilled-aws": "latest",
+    "distilled-aws": "0.0.21",
     "effect": "latest"
   },
   "devDependencies": {}
