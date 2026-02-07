@@ -17,6 +17,7 @@
     "dist"
   ],
   "scripts": {
+    "prepack": "tsc",
     "build": "tsc",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
