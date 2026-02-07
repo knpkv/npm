@@ -1,0 +1,45 @@
+import { Atom } from "@effect-atom/atom-react"
+import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+
+/**
+ * View type
+ */
+export type ViewType = "prs" | "details"
+
+/**
+ * Current active view
+ */
+export const viewAtom = Atom.make<ViewType>("prs").pipe(Atom.keepAlive)
+
+/**
+ * Filter text for PR list
+ */
+export const filterTextAtom = Atom.make("").pipe(Atom.keepAlive)
+
+/**
+ * Currently selected PR for details view
+ */
+export const selectedPrAtom = Atom.make<Domain.PullRequest | null>(null).pipe(Atom.keepAlive)
+
+/**
+ * Quick filter type
+ */
+export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "repo" | "status"
+
+/**
+ * Quick filter state
+ */
+export interface QuickFilter {
+  type: QuickFilterType
+  value?: string
+}
+
+/**
+ * Current quick filter
+ */
+export const quickFilterAtom = Atom.make<QuickFilter>({ type: "all" }).pipe(Atom.keepAlive)
+
+/**
+ * Command palette open state
+ */
+export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
