@@ -13,7 +13,7 @@
     "lint:fix": "pnpm lint --fix",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "changeset:version": "changeset version",
     "changeset:publish": "pnpm build && changeset publish",
     "prepare": "ts-patch install -s && husky",
     "effect-solutions": "effect-solutions"

@@ -41,3 +41,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
           NPM_TOKEN: ${{ secrets.TOKEN_NPM }}
+          HUSKY: 0
