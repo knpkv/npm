@@ -181,8 +181,8 @@ importers:
         specifier: latest
         version: 0.75.5(effect@3.19.16)
       distilled-aws:
-        specifier: latest
-        version: 0.0.23(@effect/platform@0.94.3(effect@3.19.16))(effect@3.19.16)
+        specifier: 0.0.21
+        version: 0.0.21(@effect/platform@0.94.3(effect@3.19.16))(effect@3.19.16)
       effect:
         specifier: latest
         version: 3.19.16
@@ -3562,11 +3562,11 @@ packages:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
     engines: {node: '>=8'}
 
-  distilled-aws@0.0.23:
-    resolution: {integrity: sha512-bqesHfLRvlpn6hIeqvSjNP1wG7PdD4DwXryasMtlnGF+pKo1sSLmQ6SH5SdzGpGTBPFPNZ1POMDV93vEk9vhxg==}
+  distilled-aws@0.0.21:
+    resolution: {integrity: sha512-9yn2LxpazhNDawtAOdiPSzUA9C/BBeuE2AG6DFc+ZCJGO7kmD3fML+etUechXDNmvRMAAR2GqoiAAfckfcOhFg==}
     peerDependencies:
-      '@effect/platform': '*'
-      effect: '*'
+      '@effect/platform': latest
+      effect: latest
 
   dotenv@8.6.0:
     resolution: {integrity: sha512-IrPdXQsk2BbzvCBGBOTmmSH5SodmqZNt4ERAZDmW4CT+tL8VtvinqywuANaFu4bOMWki16nqf0e4oC0QIaDr/g==}
@@ -9346,7 +9346,7 @@ snapshots:
     dependencies:
       path-type: 4.0.0
 
-  distilled-aws@0.0.23(@effect/platform@0.94.3(effect@3.19.16))(effect@3.19.16):
+  distilled-aws@0.0.21(@effect/platform@0.94.3(effect@3.19.16))(effect@3.19.16):
     dependencies:
       '@aws-crypto/crc32': 5.2.0
       '@aws-sdk/credential-providers': 3.985.0

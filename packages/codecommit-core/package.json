@@ -11,12 +11,17 @@
   },
   "publishConfig": {
     "main": "dist/index.js",
-    "types": "dist/dts/index.d.ts"
+    "types": "dist/dts/index.d.ts",
+    "exports": {
+      ".": "./dist/index.js",
+      "./*.js": "./dist/*.js"
+    }
   },
   "files": [
     "dist"
   ],
   "scripts": {
+    "prepack": "tsc",
     "build": "tsc",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
@@ -29,7 +34,7 @@
     "@effect/experimental": "latest",
     "@effect/platform": "latest",
     "@effect/schema": "latest",
-    "distilled-aws": "latest",
+    "distilled-aws": "0.0.21",
     "effect": "latest"
   },
   "devDependencies": {}
