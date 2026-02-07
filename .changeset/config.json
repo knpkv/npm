@@ -3,7 +3,7 @@
   "changelog": ["@changesets/changelog-github", { "repo": "knpkv/npm" }],
   "commit": false,
   "linked": [],
-  "access": "restricted",
+  "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": ["scratchpad"],
