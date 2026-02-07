@@ -14,6 +14,7 @@
   "scripts": {
     "start": "bun run src/main.ts",
     "dev": "vite",
+    "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
