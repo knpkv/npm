@@ -4,13 +4,19 @@ CLI and TUI for AWS CodeCommit pull requests.
 
 ## Prerequisites
 
-- AWS credentials configured (`~/.aws/credentials` or env vars)
+- AWS SSO configured (`~/.aws/config`)
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest` — list/view
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update
   - `codecommit:GetCommentsForPullRequest` — export
   - `codecommit:ListBranches` — branch listing
+
+## Quick Start
+
+```bash
+pnpx @knpkv/codecommit
+```
 
 ## Installation
 
@@ -135,11 +141,15 @@ codecommit pr update 123 -t "New title" -d "New description"
 
 ## AWS Configuration
 
-Uses standard AWS credential chain. Configure via:
+Uses AWS SSO. Configure profiles in `~/.aws/config`:
 
-- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-- AWS credentials file (`~/.aws/credentials`)
-- IAM role (when running on AWS)
+```ini
+[profile my-profile]
+sso_session = my-sso
+sso_account_id = 123456789012
+sso_role_name = MyRole
+region = us-east-1
+```
 
 Specify profile with `--profile` or `AWS_PROFILE` env var.
 

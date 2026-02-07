@@ -5,5 +5,5 @@
   "compilerOptions": {
     "stripInternal": true
   },
-  "references": [{ "path": "packages/hello/tsconfig.build.json" }]
+  "references": []
 }
