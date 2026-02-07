@@ -8,6 +8,9 @@
   "bin": {
     "codecommit": "dist/src/bin.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
