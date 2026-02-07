@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "types": ["vitest/globals"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/client/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["dist", "node_modules"]
+}

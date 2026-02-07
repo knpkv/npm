@@ -1,0 +1,333 @@
+#!/usr/bin/env bun
+import { Args, Command, Options } from "@effect/cli"
+import { FileSystem } from "@effect/platform"
+import { BunContext, BunRuntime } from "@effect/platform-bun"
+import { NodeHttpClient } from "@effect/platform-node"
+import { AwsClient, AwsClientConfig, type Domain } from "@knpkv/codecommit-core"
+import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { makeServer } from "@knpkv/codecommit-web"
+import { Console, Effect, Layer, Stream } from "effect"
+import open from "open"
+import pkg from "../package.json"
+
+// TUI Command
+const tui = Command.make("tui", {}, () =>
+  Effect.gen(function*() {
+    yield* Effect.promise(() => import("./main.js"))
+  }))
+
+// Web Command
+const web = Command.make("web", {
+  port: Options.integer("port").pipe(Options.withDefault(3000)),
+  hostname: Options.text("hostname").pipe(Options.withDefault("127.0.0.1"))
+}, ({ hostname, port }) =>
+  Effect.gen(function*() {
+    yield* Effect.logInfo(`Starting web server at http://${hostname}:${port}`)
+
+    // Open browser
+    yield* Effect.promise(() => open(`http://${hostname}:${port}`))
+
+    // Run server with configured port/hostname
+    return yield* Layer.launch(makeServer({ port, hostname }))
+  }))
+
+// PR Create Command
+const prCreate = Command.make("create", {
+  repo: Args.text({ name: "repository" }).pipe(Args.withDescription("Repository name")),
+  title: Args.text({ name: "title" }).pipe(Args.withDescription("PR title")),
+  source: Options.text("source").pipe(
+    Options.withAlias("s"),
+    Options.withDescription("Source branch")
+  ),
+  destination: Options.text("destination").pipe(
+    Options.withAlias("d"),
+    Options.withDescription("Destination branch"),
+    Options.withDefault("main")
+  ),
+  description: Options.text("description").pipe(
+    Options.withDescription("PR description"),
+    Options.optional
+  ),
+  profile: Options.text("profile").pipe(
+    Options.withAlias("p"),
+    Options.withDescription("AWS profile"),
+    Options.withDefault("default")
+  ),
+  region: Options.text("region").pipe(
+    Options.withAlias("r"),
+    Options.withDescription("AWS region"),
+    Options.withDefault("us-east-1")
+  )
+}, ({ description, destination, profile, region, repo, source, title }) =>
+  Effect.gen(function*() {
+    const aws = yield* AwsClient.AwsClient
+    yield* Console.log(`Creating PR: ${source} -> ${destination} in ${repo}`)
+
+    const prId = yield* aws.createPullRequest({
+      account: { profile: profile as AwsProfileName, region: region as AwsRegion },
+      repositoryName: repo,
+      title,
+      ...(description._tag === "Some" && { description: description.value }),
+      sourceReference: source,
+      destinationReference: destination
+    })
+
+    const link =
+      `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
+    yield* Console.log(`Created PR: ${prId}`)
+    yield* Console.log(link)
+  }).pipe(
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+  )).pipe(Command.withDescription("Create a pull request"))
+
+// PR List Command
+const prList = Command.make("list", {
+  profile: Options.text("profile").pipe(
+    Options.withAlias("p"),
+    Options.withDescription("AWS profile"),
+    Options.withDefault("default")
+  ),
+  region: Options.text("region").pipe(
+    Options.withAlias("r"),
+    Options.withDescription("AWS region"),
+    Options.withDefault("us-east-1")
+  ),
+  status: Options.choice("status", ["OPEN", "CLOSED"]).pipe(
+    Options.withAlias("s"),
+    Options.withDescription("Filter by PR status"),
+    Options.withDefault("OPEN" as const)
+  ),
+  all: Options.boolean("all").pipe(
+    Options.withAlias("a"),
+    Options.withDescription("Show all PRs (both OPEN and CLOSED)"),
+    Options.withDefault(false)
+  ),
+  repo: Options.text("repo").pipe(
+    Options.withDescription("Filter by repository name"),
+    Options.optional
+  ),
+  author: Options.text("author").pipe(
+    Options.withDescription("Filter by author"),
+    Options.optional
+  ),
+  json: Options.boolean("json").pipe(
+    Options.withDescription("Output as JSON"),
+    Options.withDefault(false)
+  )
+}, ({ all, author, json, profile, region, repo, status }) =>
+  Effect.gen(function*() {
+    const aws = yield* AwsClient.AwsClient
+    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+
+    const statusLabel = all ? "all" : status.toLowerCase()
+    yield* Console.log(`Fetching ${statusLabel} PRs...`)
+
+    const filterPRs = (prStream: Stream.Stream<Domain.PullRequest, AwsClient.AwsClientError>) =>
+      prStream.pipe(
+        Stream.filter((pr) => {
+          if (repo._tag === "Some" && pr.repositoryName !== repo.value) return false
+          if (author._tag === "Some" && pr.author !== author.value) return false
+          return true
+        }),
+        Stream.runCollect,
+        Effect.map((chunk) => Array.from(chunk))
+      )
+
+    let prs: Array<Domain.PullRequest>
+    if (all) {
+      const [openPrs, closedPrs] = yield* Effect.all([
+        filterPRs(aws.getPullRequests(account, { status: "OPEN" })),
+        filterPRs(aws.getPullRequests(account, { status: "CLOSED" }))
+      ])
+      prs = [...openPrs, ...closedPrs].sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
+    } else {
+      prs = yield* filterPRs(aws.getPullRequests(account, { status }))
+    }
+
+    if (prs.length === 0) {
+      yield* Console.log(`No ${statusLabel} PRs found.`)
+      return
+    }
+
+    if (json) {
+      yield* Console.log(JSON.stringify(prs, null, 2))
+    } else {
+      yield* Console.log(`\nFound ${prs.length} ${statusLabel} PR(s):\n`)
+      for (const pr of prs) {
+        const prStatus = all ? `[${pr.status}] ` : ""
+        const flags = [
+          pr.isApproved ? "approved" : "",
+          pr.isMergeable ? "mergeable" : "conflicts"
+        ].filter(Boolean).join(" ")
+        yield* Console.log(`${pr.id}  ${prStatus}${pr.repositoryName}`)
+        yield* Console.log(`    ${pr.title}`)
+        yield* Console.log(`    ${pr.sourceBranch} -> ${pr.destinationBranch}`)
+        yield* Console.log(`    by ${pr.author}  ${flags}`)
+        yield* Console.log("")
+      }
+    }
+  }).pipe(
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+  )).pipe(Command.withDescription("List open pull requests"))
+
+// Helper to render comment threads as markdown
+const renderThread = (thread: Domain.CommentThread, indent: number = 0): string => {
+  const prefix = "  ".repeat(indent)
+  const c = thread.root
+  const header = c.deleted
+    ? `${prefix}- ~~[deleted]~~ _${c.author}_ (${c.creationDate.toISOString()})`
+    : `${prefix}- **${c.author}** (${c.creationDate.toISOString()})`
+  const content = c.deleted ? "" : `\n${prefix}  ${c.content.replace(/\n/g, `\n${prefix}  `)}`
+  const replies = thread.replies.map((r) => renderThread(r, indent + 1)).join("\n")
+  return `${header}${content}${replies ? `\n${replies}` : ""}`
+}
+
+const renderLocation = (loc: Domain.PRCommentLocation): string => {
+  const header = loc.filePath ? `### ${loc.filePath}\n` : "### General comments\n"
+  const threads = loc.comments.map((t) => renderThread(t)).join("\n\n")
+  return `${header}\n${threads}`
+}
+
+// PR Export Command
+const prExport = Command.make("export", {
+  prId: Args.text({ name: "pr-id" }).pipe(Args.withDescription("Pull request ID")),
+  repo: Args.text({ name: "repository" }).pipe(Args.withDescription("Repository name")),
+  output: Options.file("output").pipe(
+    Options.withAlias("o"),
+    Options.withDescription("Output file path"),
+    Options.optional
+  ),
+  profile: Options.text("profile").pipe(
+    Options.withAlias("p"),
+    Options.withDescription("AWS profile"),
+    Options.withDefault("default")
+  ),
+  region: Options.text("region").pipe(
+    Options.withAlias("r"),
+    Options.withDescription("AWS region"),
+    Options.withDefault("us-east-1")
+  )
+}, ({ output, prId, profile, region, repo }) =>
+  Effect.gen(function*() {
+    const aws = yield* AwsClient.AwsClient
+    const fs = yield* FileSystem.FileSystem
+    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+
+    yield* Console.log(`Fetching PR ${prId}...`)
+
+    const pr = yield* aws.getPullRequest({ account, pullRequestId: prId })
+
+    yield* Console.log(`Fetching comments...`)
+
+    const locations = yield* aws.getCommentsForPullRequest({
+      account,
+      pullRequestId: prId,
+      repositoryName: repo
+    })
+
+    const totalComments = locations.reduce((sum, loc) => {
+      const countThreads = (threads: ReadonlyArray<Domain.CommentThread>): number =>
+        threads.reduce((s, t) => s + 1 + countThreads(t.replies), 0)
+      return sum + countThreads(loc.comments)
+    }, 0)
+
+    yield* Console.log(`Found ${totalComments} comment(s) in ${locations.length} location(s)`)
+
+    const link =
+      `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
+    const markdown = [
+      `# ${pr.title}`,
+      "",
+      `**Repository:** ${repo}`,
+      `**Branch:** ${pr.sourceBranch} -> ${pr.destinationBranch}`,
+      `**Author:** ${pr.author}`,
+      `**Status:** ${pr.status}`,
+      `**AWS Account:** ${profile}`,
+      `**Link:** ${link}`,
+      "",
+      ...(pr.description ? ["## Description", "", pr.description, ""] : []),
+      "## Comments",
+      "",
+      ...(locations.length > 0 ? locations.map(renderLocation) : ["_No comments_"])
+    ].join("\n")
+
+    if (output._tag === "Some") {
+      yield* fs.writeFileString(output.value, markdown)
+      yield* Console.log(`Saved to ${output.value}`)
+    } else {
+      yield* Console.log("")
+      yield* Console.log(markdown)
+    }
+  }).pipe(
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+  )).pipe(Command.withDescription("Export PR comments as markdown"))
+
+// PR Update Command
+const prUpdate = Command.make("update", {
+  prId: Args.text({ name: "pr-id" }).pipe(Args.withDescription("Pull request ID")),
+  title: Options.text("title").pipe(
+    Options.withAlias("t"),
+    Options.withDescription("New PR title"),
+    Options.optional
+  ),
+  description: Options.text("description").pipe(
+    Options.withAlias("d"),
+    Options.withDescription("New PR description"),
+    Options.optional
+  ),
+  profile: Options.text("profile").pipe(
+    Options.withAlias("p"),
+    Options.withDescription("AWS profile"),
+    Options.withDefault("default")
+  ),
+  region: Options.text("region").pipe(
+    Options.withAlias("r"),
+    Options.withDescription("AWS region"),
+    Options.withDefault("us-east-1")
+  )
+}, ({ description, prId, profile, region, title }) =>
+  Effect.gen(function*() {
+    const aws = yield* AwsClient.AwsClient
+    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+
+    if (title._tag === "None" && description._tag === "None") {
+      yield* Console.log("Error: At least one of --title or --description must be provided")
+      return
+    }
+
+    if (title._tag === "Some") {
+      yield* Console.log(`Updating title...`)
+      yield* aws.updatePullRequestTitle({ account, pullRequestId: prId, title: title.value })
+    }
+
+    if (description._tag === "Some") {
+      yield* Console.log(`Updating description...`)
+      yield* aws.updatePullRequestDescription({ account, pullRequestId: prId, description: description.value })
+    }
+
+    yield* Console.log(`Updated PR ${prId}`)
+  }).pipe(
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+  )).pipe(Command.withDescription("Update PR title or description"))
+
+// PR Command (parent)
+const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <command>")).pipe(
+  Command.withSubcommands([prList, prCreate, prExport, prUpdate]),
+  Command.withDescription("Pull request commands")
+)
+
+const command = Command.make("codecommit", {}, () =>
+  // Default to TUI if no subcommand
+  Effect.promise(() => import("./main.js"))).pipe(
+    Command.withSubcommands([tui, web, pr])
+  )
+
+const cli = Command.run(command, {
+  name: pkg.name,
+  version: pkg.version
+})
+
+Effect.suspend(() => cli(process.argv)).pipe(
+  Effect.provide(Layer.mergeAll(BunContext.layer, NodeHttpClient.layer, AwsClientConfig.Default)),
+  BunRuntime.runMain
+)

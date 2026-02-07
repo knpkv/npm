@@ -51,6 +51,10 @@
     "patchedDependencies": {
       "@changesets/get-github-info@0.6.0": "patches/@changesets__get-github-info@0.6.0.patch",
       "@changesets/assemble-release-plan": "patches/@changesets__assemble-release-plan.patch"
+    },
+    "overrides": {
+      "distilled-aws>fast-xml-parser": "^5.3.4",
+      "vitest": "$vitest"
     }
   }
 }

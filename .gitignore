@@ -12,6 +12,8 @@ node_modules/
 
 coverage/
 docs/
+playwright-report/
+test-results/
 
 .DS_Store
 tmp
@@ -22,6 +24,7 @@ scratchpad/**/*.ts
 .patterns
 .specs/*
 .context/
+.reference/
 
 # Local environment variables
 .envrc.local
