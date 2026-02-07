@@ -1,5 +1,19 @@
 # @knpkv/codecommit
 
+## 0.1.1
+
+### Patch Changes
+
+- [#33](https://github.com/knpkv/npm/pull/33) [`5da23ba`](https://github.com/knpkv/npm/commit/5da23ba57f670de8c0c5aa308992450072be3ede) Thanks @konopkov! - fix: packaging fixes for npm publish
+  - Set publishConfig.access to public
+  - Add publishConfig.exports to codecommit-core
+  - Add prepack scripts
+  - Pin distilled-aws to 0.0.21
+
+- Updated dependencies [[`5da23ba`](https://github.com/knpkv/npm/commit/5da23ba57f670de8c0c5aa308992450072be3ede)]:
+  - @knpkv/codecommit-core@0.1.1
+  - @knpkv/codecommit-web@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
