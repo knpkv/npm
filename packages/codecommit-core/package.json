@@ -1,0 +1,36 @@
+{
+  "name": "@knpkv/codecommit-core",
+  "version": "0.0.0",
+  "description": "Core logic for CodeCommit PR browser",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./Domain.js": "./src/Domain.ts",
+    "./*.js": "./src/*.ts"
+  },
+  "publishConfig": {
+    "main": "dist/index.js",
+    "types": "dist/dts/index.d.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "docgen": "docgen"
+  },
+  "dependencies": {
+    "@aws-sdk/credential-providers": "^3.974.0",
+    "@effect-atom/atom": "latest",
+    "@effect/experimental": "latest",
+    "@effect/platform": "latest",
+    "@effect/schema": "latest",
+    "distilled-aws": "latest",
+    "effect": "latest"
+  },
+  "devDependencies": {}
+}
