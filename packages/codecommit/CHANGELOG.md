@@ -1,5 +1,15 @@
 # @knpkv/codecommit
 
+## 0.1.2
+
+### Patch Changes
+
+- [#35](https://github.com/knpkv/npm/pull/35) [`c0ba0c5`](https://github.com/knpkv/npm/commit/c0ba0c51c49cc30ab6a5a9d7633c0f5cfa036d9c) Thanks @konopkov! - fix: use workspace:^ for proper version resolution on publish
+
+- Updated dependencies [[`c0ba0c5`](https://github.com/knpkv/npm/commit/c0ba0c51c49cc30ab6a5a9d7633c0f5cfa036d9c)]:
+  - @knpkv/codecommit-core@0.1.2
+  - @knpkv/codecommit-web@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
