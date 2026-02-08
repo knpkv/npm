@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.2.0
+
+### Minor Changes
+
+- [`f3cd927`](https://github.com/knpkv/npm/commit/f3cd9274fb70f9428e2bc27d4c3d601a985a7adf) Thanks @konopkov! - feat: PR health score with comments and hot filter
+
+### Patch Changes
+
+- Updated dependencies [[`f3cd927`](https://github.com/knpkv/npm/commit/f3cd9274fb70f9428e2bc27d4c3d601a985a7adf)]:
+  - @knpkv/codecommit-core@0.2.0
+
 ## 0.1.2
 
 ### Patch Changes
