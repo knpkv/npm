@@ -1,5 +1,5 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
-import { Account, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { Account, PRCommentLocationJson, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 // API error returned to clients for AWS failures
@@ -35,6 +35,18 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         })
       )
       .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("comments", "/comments")
+      .setPayload(
+        Schema.Struct({
+          pullRequestId: Schema.String,
+          repositoryName: Schema.String,
+          account: Account
+        })
+      )
+      .addSuccess(Schema.Array(PRCommentLocationJson))
       .addError(ApiError)
   )
   .prefix("/api/prs")

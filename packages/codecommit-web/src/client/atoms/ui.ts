@@ -1,5 +1,4 @@
 import { Atom } from "@effect-atom/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 
 /**
  * View type
@@ -17,14 +16,15 @@ export const viewAtom = Atom.make<ViewType>("prs").pipe(Atom.keepAlive)
 export const filterTextAtom = Atom.make("").pipe(Atom.keepAlive)
 
 /**
- * Currently selected PR for details view
+ * Currently selected PR ID for details view — stores ID so detail view
+ * can derive live PR from appStateAtom (receives SSE updates).
  */
-export const selectedPrAtom = Atom.make<Domain.PullRequest | null>(null).pipe(Atom.keepAlive)
+export const selectedPrIdAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)
 
 /**
  * Quick filter type
  */
-export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "repo" | "status"
+export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "repo" | "status" | "hot"
 
 /**
  * Quick filter state

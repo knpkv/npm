@@ -1,5 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { SearchIcon, XIcon } from "lucide-react"
+import { FlameIcon, SearchIcon, XIcon } from "lucide-react"
 import { useMemo } from "react"
 import { appStateAtom } from "../atoms/app.js"
 import { filterTextAtom, quickFilterAtom, type QuickFilterType } from "../atoms/ui.js"
@@ -9,8 +9,9 @@ import { Input } from "./ui/input.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.js"
 
-const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string }> = [
+const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string; icon?: true }> = [
   { key: "all", label: "All" },
+  { key: "hot", label: "Hot", icon: true },
   { key: "mine", label: "Mine" },
   { key: "account", label: "Account" },
   { key: "author", label: "Author" },
@@ -62,6 +63,10 @@ export function FilterBar() {
     const key = value as QuickFilterType
     if (!key || key === "all") {
       setQuickFilter({ type: "all" })
+      return
+    }
+    if (key === "hot") {
+      setQuickFilter({ type: "hot" })
       return
     }
     const options =
@@ -116,13 +121,14 @@ export function FilterBar() {
           onValueChange={handleFilterClick}
         >
           {QUICK_FILTERS.map((f) => (
-            <ToggleGroupItem key={f.key} value={f.key}>
+            <ToggleGroupItem key={f.key} value={f.key} className={f.icon ? "gap-1" : undefined}>
+              {f.icon && <FlameIcon className="size-3.5" />}
               {f.label}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
 
-        {currentOptions.length > 0 && quickFilter.type !== "all" && quickFilter.value && (
+        {currentOptions.length > 0 && quickFilter.type !== "all" && quickFilter.type !== "hot" && quickFilter.value && (
           <Select value={quickFilter.value} onValueChange={handleValueChange}>
             <SelectTrigger size="sm" className="w-[180px]">
               <SelectValue />

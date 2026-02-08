@@ -18,7 +18,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
-        <span className="text-sm font-semibold tracking-tight">CodeCommit</span>
+        <span className="text-sm font-semibold tracking-tight">codecommit</span>
         <Separator orientation="vertical" className="h-4" />
         <span className="text-sm text-muted-foreground">{state.pullRequests.length} PRs</span>
         {hasError && <span className="text-sm text-destructive">{state.error ?? "Error loading PRs"}</span>}

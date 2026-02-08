@@ -1,5 +1,6 @@
 import { Command, HttpApiBuilder } from "@effect/platform"
 import { AwsClient, PRService } from "@knpkv/codecommit-core"
+import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Stream, SubscriptionRef } from "effect"
 import { platform } from "node:os"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -40,6 +41,15 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
+      .handle("comments", ({ payload }) =>
+        awsClient.getCommentsForPullRequest({
+          account: { profile: payload.account.id, region: payload.account.region },
+          pullRequestId: payload.pullRequestId,
+          repositoryName: payload.repositoryName
+        }).pipe(
+          Effect.map(encodeCommentLocations),
+          Effect.mapError((e) => new ApiError({ message: e.message }))
+        ))
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
           yield* copyToClipboard(payload.link).pipe(
@@ -49,10 +59,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           yield* prService.addNotification({
             type: "info",
             title: "Assume",
-            message: `URL copied. Running assume -c ${payload.profile}...`
+            message: `Opening ${payload.profile} → PR console...`
           })
 
-          const cmd = Command.make("assume", "-c", payload.profile).pipe(
+          // -c: console login, -d: open URL in default browser
+          const cmd = Command.make("assume", "-cd", payload.link, payload.profile).pipe(
             Command.stdout("inherit"),
             Command.stderr("inherit"),
             Command.env({ GRANTED_ALIAS_CONFIGURED: "true" })

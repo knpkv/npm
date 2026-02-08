@@ -15,7 +15,7 @@ export {
   type QuickFilter,
   quickFilterAtom,
   type QuickFilterType,
-  selectedPrAtom,
+  selectedPrIdAtom,
   viewAtom,
   type ViewType
 } from "./ui.js"
