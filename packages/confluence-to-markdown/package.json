@@ -91,7 +91,7 @@
     "@effect/cli": "^0.61.0",
     "@effect/platform": "^0.93.0",
     "@effect/platform-node": "^0.87.0",
-    "@knpkv/confluence-api-client": "workspace:*",
+    "@knpkv/confluence-api-client": "workspace:^",
     "gray-matter": "^4.0.3",
     "rehype-parse": "^9.0.1",
     "rehype-remark": "^10.0.1",
