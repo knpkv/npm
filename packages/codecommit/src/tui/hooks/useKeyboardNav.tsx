@@ -21,6 +21,7 @@ import {
   quickFilterValuesAtom,
   selectedIndexAtom,
   settingsFilterAtom,
+  showDetailsCommentsAtom,
   viewAtom
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
@@ -80,6 +81,8 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const isSettingsFiltering = useAtomValue(isSettingsFilteringAtom)
   const setIsSettingsFiltering = useAtomSet(isSettingsFilteringAtom)
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
+  const showDetailsComments = useAtomValue(showDetailsCommentsAtom)
+  const setShowDetailsComments = useAtomSet(showDetailsCommentsAtom)
 
   // Extract unique authors, accounts, scopes, and repos
   const { accounts, authors, myScopes, repos, scopes } = useMemo(() => {
@@ -242,6 +245,12 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         setView("prs")
       } else if (key.name === "return" && currentPR && onOpenInBrowser) {
         onOpenInBrowser(currentPR)
+      } else if (key.char === "c" || key.name === "c") {
+        setShowDetailsComments(!showDetailsComments)
+      } else if (key.name === "1") {
+        setShowDetailsComments(false)
+      } else if (key.name === "2") {
+        setShowDetailsComments(true)
       }
       return
     }
@@ -319,11 +328,14 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         }
         break
 
-      // Quick filter shortcuts (1-4)
+      // Quick filter shortcuts (1-9)
       case "1":
         if (view === "prs") setQuickFilterType("all")
         break
       case "2":
+        if (view === "prs") setQuickFilterType("hot")
+        break
+      case "3":
         if (view === "prs") {
           setQuickFilterType("mine")
           if (!quickFilterValues.mine && myScopes.length > 0) {
@@ -331,16 +343,15 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           }
         }
         break
-      case "3":
+      case "4":
         if (view === "prs") {
           setQuickFilterType("account")
-          // Initialize value for this type if empty
           if (!quickFilterValues.account && accounts.length > 0) {
             setQuickFilterValues({ ...quickFilterValues, account: accounts[0]! })
           }
         }
         break
-      case "4":
+      case "5":
         if (view === "prs") {
           setQuickFilterType("author")
           if (!quickFilterValues.author && authors.length > 0) {
@@ -348,7 +359,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           }
         }
         break
-      case "5":
+      case "6":
         if (view === "prs") {
           setQuickFilterType("scope")
           if (!quickFilterValues.scope && scopes.length > 0) {
@@ -356,13 +367,12 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           }
         }
         break
-      case "6":
+      case "7":
         if (view === "prs") {
           setQuickFilterType("date")
-          // date already has default "today"
         }
         break
-      case "7":
+      case "8":
         if (view === "prs") {
           setQuickFilterType("repo")
           if (!quickFilterValues.repo && repos.length > 0) {
@@ -370,10 +380,9 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           }
         }
         break
-      case "8":
+      case "9":
         if (view === "prs") {
           setQuickFilterType("status")
-          // status already has default "approved"
         }
         break
 

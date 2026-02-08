@@ -109,6 +109,7 @@ export interface ListBranchesParams {
 export interface GetCommentsForPullRequestParams {
   readonly account: AccountParams
   readonly pullRequestId: string
+  /** @deprecated Currently unused — passing repositoryName without commit IDs triggers CommitIdRequiredException. Kept for API compatibility. */
   readonly repositoryName: string
 }
 

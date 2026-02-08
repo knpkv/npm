@@ -122,13 +122,14 @@ const decodeCommentLocation = Schema.decodeSync(RawToCommentLocation) as (
   raw: Schema.Schema.Encoded<typeof RawCommentLocation>
 ) => PRCommentLocation
 
-const fetchCommentPages = (pullRequestId: string, repositoryName: string) =>
+// NOTE: repositoryName is intentionally omitted — passing it without
+// beforeCommitId/afterCommitId triggers CommitIdRequiredException.
+const fetchCommentPages = (pullRequestId: string) =>
   Stream.paginateEffect(
     undefined as string | undefined,
     (nextToken) =>
       codecommit.getCommentsForPullRequest({
         pullRequestId,
-        repositoryName,
         ...(nextToken && { nextToken })
       }).pipe(
         Effect.map((resp) =>
@@ -142,6 +143,8 @@ const fetchCommentPages = (pullRequestId: string, repositoryName: string) =>
     Stream.flatMap(Stream.fromIterable)
   )
 
+const runCommentPages = (pullRequestId: string) => fetchCommentPages(pullRequestId).pipe(Stream.runCollect)
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -154,18 +157,19 @@ export const getCommentsForPullRequest = (
     const httpClient = yield* HttpClient.HttpClient
     const credentials = yield* acquireCredentials(params.account.profile, params.account.region)
 
+    const layer = Layer.mergeAll(
+      Layer.succeed(HttpClient.HttpClient, httpClient),
+      Layer.succeed(Region.Region, params.account.region),
+      Layer.succeed(Credentials.Credentials, credentials)
+    )
+
     return yield* Effect.provide(
-      fetchCommentPages(params.pullRequestId, params.repositoryName).pipe(
-        Stream.mapError((cause) =>
+      runCommentPages(params.pullRequestId).pipe(
+        Effect.mapError((cause) =>
           makeApiError("getCommentsForPullRequest", params.account.profile, params.account.region, cause)
-        ),
-        Stream.runCollect
+        )
       ),
-      Layer.mergeAll(
-        Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(Region.Region, params.account.region),
-        Layer.succeed(Credentials.Credentials, credentials)
-      )
+      layer
     ).pipe(
       throttleRetry,
       Effect.map((chunk) => Array.from(chunk)),

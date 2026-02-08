@@ -17,7 +17,8 @@ const PullRequestWire = Schema.Struct({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
-  isApproved: Schema.Boolean
+  isApproved: Schema.Boolean,
+  commentCount: Schema.optional(Schema.Number)
 })
 
 const SsePayload = Schema.Struct({

@@ -51,9 +51,14 @@ export const accountsQueryAtom = ApiClient.query("accounts", "list", {
 export const refreshAtom = ApiClient.mutation("prs", "refresh")
 
 /**
- * Open PR — runs assume -c on server and returns link
+ * Open PR — runs assume -cd (console + open URL) on server
  */
 export const openPrAtom = ApiClient.mutation("prs", "open")
+
+/**
+ * Fetch comments for a PR
+ */
+export const commentsAtom = ApiClient.mutation("prs", "comments")
 
 /**
  * Derived app state atom that combines queries

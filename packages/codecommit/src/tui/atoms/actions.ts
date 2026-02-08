@@ -124,10 +124,10 @@ export const openPrAtom = runtimeAtom.fn(
     yield* service.addNotification({
       type: "info",
       title: "Assume",
-      message: `URL copied. Running assume -c ${profile}...`
+      message: `Opening ${profile} → PR console...`
     })
 
-    const cmd = Command.make("assume", "-c", profile).pipe(
+    const cmd = Command.make("assume", "-cd", pr.link, profile).pipe(
       Command.stdout("inherit"),
       Command.stderr("inherit"),
       Command.env({ GRANTED_ALIAS_CONFIGURED: "true" })
@@ -229,6 +229,28 @@ export const createPrAtom = runtimeAtom.fn(
     }
 
     return prId
+  })
+)
+
+/**
+ * Fetch comments for a specific PR and return them
+ * @category atoms
+ */
+export const fetchPrCommentsAtom = runtimeAtom.fn(
+  Effect.fnUntraced(function*(pr: Domain.PullRequest) {
+    const awsClient = yield* AwsClient.AwsClient
+
+    return yield* awsClient.getCommentsForPullRequest({
+      account: { profile: pr.account.id, region: pr.account.region },
+      pullRequestId: pr.id,
+      repositoryName: pr.repositoryName
+    }).pipe(
+      Effect.tapError((e) => notifyError("Fetch Comments Failed", e)),
+      Effect.catchTag("AwsApiError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
+      Effect.catchTag("AwsCredentialError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
+      Effect.catchTag("AwsThrottleError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
+      Effect.withSpan("fetchPrComments", { attributes: { prId: pr.id } })
+    )
   })
 )
 

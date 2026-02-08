@@ -1,4 +1,6 @@
 import type { Domain } from "@knpkv/codecommit-core"
+import { calculateHealthScore } from "@knpkv/codecommit-core/HealthScore.js"
+import { Option } from "effect"
 import type { QuickFilterType } from "./atoms/ui.js"
 
 export type TuiView = "prs" | "settings" | "notifications" | "details"
@@ -93,13 +95,13 @@ export const buildListItems = (
       let filteredPRs = group.prs
 
       // Apply quick filter first
-      if (quickFilter && quickFilter.type !== "all") {
+      if (quickFilter && quickFilter.type !== "all" && quickFilter.type !== "hot") {
         filteredPRs = filteredPRs.filter((pr) => {
           switch (quickFilter.type) {
             case "mine":
-              // Filter by current user AND selected scope
+              // Filter by current user, optionally by selected scope
               if (pr.author !== quickFilter.currentUser) return false
-              return extractScope(pr.title) === quickFilter.value
+              return !quickFilter.value || extractScope(pr.title) === quickFilter.value
             case "account":
               return pr.account.id === quickFilter.value
             case "author":
@@ -142,19 +144,33 @@ export const buildListItems = (
       return a.acc.profile.localeCompare(b.acc.profile)
     })
 
+    const now = new Date()
+    const isHot = quickFilter?.type === "hot"
     const items: Array<ListItem> = []
+
+    const scoreOf = (pr: Domain.PullRequest): number =>
+      Option.getOrElse(calculateHealthScore(pr, now).pipe(Option.map((s) => s.total)), () => -1)
+
     for (const group of sortedGroups) {
+      let prs: ReadonlyArray<Domain.PullRequest>
+      if (isHot) {
+        const withScores = group.prs.map((pr) => ({ pr, score: scoreOf(pr) }))
+        prs = withScores.filter((x) => x.score >= 7).sort((a, b) => b.score - a.score).map((x) => x.pr)
+      } else {
+        prs = group.prs
+      }
+
       items.push({
         type: "header",
         label: group.acc.profile,
-        count: group.prs.length
+        count: prs.length
       })
 
-      if (group.prs.length === 0) {
+      if (prs.length === 0) {
         items.push({ type: "empty" })
       }
 
-      for (const pr of group.prs) {
+      for (const pr of prs) {
         items.push({ type: "pr", pr })
       }
     }

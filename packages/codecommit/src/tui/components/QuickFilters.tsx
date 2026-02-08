@@ -18,6 +18,25 @@ export function QuickFilters() {
   const errorCount = notifications.items.filter((n) => n.type === "error").length
   const totalCount = notifications.items.length
 
+  const pill = (key: string, label: string, type: string, value?: string) => (
+    <box
+      key={key}
+      style={{
+        ...(filterType === type && { backgroundColor: type === "hot" ? theme.warning : theme.primary }),
+        paddingLeft: 1,
+        paddingRight: 1
+      }}
+    >
+      <text fg={filterType === type ? theme.selectedText : theme.textMuted}>
+        {label}
+        {filterType === type && value ? `: ${value}` : ""}
+      </text>
+    </box>
+  )
+
+  const dateLabel =
+    filterValue === "today" ? "24h" : filterValue === "week" ? "7d" : filterValue === "month" ? "30d" : "30d+"
+
   return (
     <box
       style={{
@@ -30,103 +49,15 @@ export function QuickFilters() {
       }}
     >
       <box style={{ flexDirection: "row" }}>
-        <box
-          style={{
-            ...(filterType === "all" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "all" ? theme.selectedText : theme.textMuted}>[1] All</text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "mine" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "mine" ? theme.selectedText : theme.textMuted}>
-            [2] Mine{filterType === "mine" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "account" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "account" ? theme.selectedText : theme.textMuted}>
-            [3] Acct{filterType === "account" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "author" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "author" ? theme.selectedText : theme.textMuted}>
-            [4] Auth{filterType === "author" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "scope" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "scope" ? theme.selectedText : theme.textMuted}>
-            [5] Scope{filterType === "scope" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "date" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "date" ? theme.selectedText : theme.textMuted}>
-            [6] Age
-            {filterType === "date" && filterValue
-              ? `: ${
-                  filterValue === "today"
-                    ? "24h"
-                    : filterValue === "week"
-                      ? "7d"
-                      : filterValue === "month"
-                        ? "30d"
-                        : "30d+"
-                }`
-              : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "repo" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "repo" ? theme.selectedText : theme.textMuted}>
-            [7] Repo{filterType === "repo" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
-        <box
-          style={{
-            ...(filterType === "status" && { backgroundColor: theme.primary }),
-            paddingLeft: 1,
-            paddingRight: 1
-          }}
-        >
-          <text fg={filterType === "status" ? theme.selectedText : theme.textMuted}>
-            [8] Status{filterType === "status" && filterValue ? `: ${filterValue}` : ""}
-          </text>
-        </box>
+        {pill("all", "[1] All", "all")}
+        {pill("hot", "[2] Hot", "hot")}
+        {pill("mine", "[3] Mine", "mine", filterType === "mine" ? filterValue : undefined)}
+        {pill("account", "[4] Acct", "account", filterType === "account" ? filterValue : undefined)}
+        {pill("author", "[5] Auth", "author", filterType === "author" ? filterValue : undefined)}
+        {pill("scope", "[6] Scope", "scope", filterType === "scope" ? filterValue : undefined)}
+        {pill("date", "[7] Age", "date", filterType === "date" ? dateLabel : undefined)}
+        {pill("repo", "[8] Repo", "repo", filterType === "repo" ? filterValue : undefined)}
+        {pill("status", "[9] Status", "status", filterType === "status" ? filterValue : undefined)}
         {(filterType === "mine" ||
           filterType === "account" ||
           filterType === "author" ||

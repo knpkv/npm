@@ -14,7 +14,8 @@ const startServer = (port: number): Effect.Effect<never> =>
   )
 
 const program = startServer(3000).pipe(
-  Effect.catchAllCause((cause) => Effect.logError("Server error", cause))
+  Effect.catchAllCause((cause) => Effect.logError("Server error", cause)),
+  Effect.asVoid
 )
 
 Effect.runPromise(program)
