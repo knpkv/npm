@@ -8,8 +8,7 @@ export const VIEW_TITLES: Record<string, string> = {
 }
 
 export const HINTS: Record<string, string> = {
-  prs:
-    "Enter: Details | o: Open | f: Filter | 1-4: Quick Filter | r: Refresh | s: Settings | n: Notifications | q: Quit",
+  prs: "Enter: Details | o: Open | f: Filter | 1-9: Quick Filter | r: Refresh | s: Settings | n: Notif | q: Quit",
   settings: "Space: Toggle | Enter: Save & Return | r: Refresh | s: PRs | t: Theme | n: Notifications | q: Quit",
   notifications: "Enter: Action | r: Refresh | s: Settings | t: Theme | c: Clear | n: PRs | q: Quit",
   details: "Esc: Back | Enter: Open/Copy"
@@ -23,7 +22,7 @@ export const COMMON_HELP = "  r       - Refresh everything\n" +
 
 export const HELP_CONTENT = {
   prs: "  f       - Filter PRs\n" +
-    "  1-4     - Quick filters (All/Mine/Account/Author)\n" +
+    "  1-9     - Quick filters (All/Hot/Mine/Acct/Auth/Scope/Age/Repo/Status)\n" +
     "  ←→      - Cycle filter values\n" +
     "  Enter   - PR Details\n" +
     "  o       - Open PR in browser\n" +

@@ -77,7 +77,7 @@ export const creatingPrAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive
  * Quick filter type
  * @category types
  */
-export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "date" | "repo" | "status"
+export type QuickFilterType = "all" | "hot" | "mine" | "account" | "author" | "scope" | "date" | "repo" | "status"
 
 /**
  * Date filter values
@@ -96,6 +96,7 @@ export const quickFilterTypeAtom = Atom.make<QuickFilterType>("all").pipe(Atom.k
  */
 export const quickFilterValuesAtom = Atom.make<Record<QuickFilterType, string>>({
   all: "",
+  hot: "",
   mine: "",
   account: "",
   author: "",
@@ -122,6 +123,8 @@ export const currentUserAtom = Atom.make<string>("").pipe(Atom.keepAlive)
  * Settings filter text
  * @category atoms
  */
+export const showDetailsCommentsAtom = Atom.make(false).pipe(Atom.keepAlive)
+
 export const settingsFilterAtom = Atom.make<string>("").pipe(Atom.keepAlive)
 
 /**
