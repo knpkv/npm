@@ -5,9 +5,18 @@
 import { Cause, Clock, DateTime, Effect, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { ConfigService } from "../ConfigService/index.js"
-import type { AwsRegion } from "../Domain.js"
+import { type AwsRegion, type CommentThread, type PRCommentLocation, PullRequest } from "../Domain.js"
 import { NotificationsService } from "../NotificationsService.js"
 import type { PRState } from "./internal.js"
+
+const countThreadComments = (thread: CommentThread): number =>
+  1 + thread.replies.reduce((sum, r) => sum + countThreadComments(r), 0)
+
+const countAllComments = (locations: ReadonlyArray<PRCommentLocation>): number =>
+  locations.reduce(
+    (sum, loc) => sum + loc.comments.reduce((s, t) => s + countThreadComments(t), 0),
+    0
+  )
 
 export const makeRefresh = (
   state: PRState
@@ -108,6 +117,40 @@ export const makeRefresh = (
       statusDetail: undefined,
       lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
     }))
+
+    const currentState = yield* SubscriptionRef.get(state)
+    const enrichments = yield* Effect.forEach(
+      currentState.pullRequests,
+      (pr) =>
+        awsClient.getCommentsForPullRequest({
+          account: { profile: pr.account.id, region: pr.account.region },
+          pullRequestId: pr.id,
+          repositoryName: pr.repositoryName
+        }).pipe(
+          Effect.map((locs) => ({ id: pr.id, accountId: pr.account.id, commentCount: countAllComments(locs) })),
+          Effect.catchAll((e) =>
+            Effect.logWarning(`Comment enrichment failed for PR ${pr.id}: ${e}`).pipe(
+              Effect.as(undefined)
+            )
+          )
+        ),
+      { concurrency: 3 }
+    )
+
+    const counts = new Map<string, number>()
+    for (const r of enrichments) {
+      if (r !== undefined) counts.set(`${r.accountId}:${r.id}`, r.commentCount)
+    }
+    if (counts.size > 0) {
+      yield* SubscriptionRef.update(state, (s) => ({
+        ...s,
+        pullRequests: s.pullRequests.map((p) => {
+          const key = `${p.account.id}:${p.id}`
+          const cc = counts.get(key)
+          return cc !== undefined ? new PullRequest({ ...p, commentCount: cc }) : p
+        })
+      }))
+    }
   }).pipe(
     Effect.withSpan("PRService.refresh"),
     Effect.timeout("120 seconds"),
