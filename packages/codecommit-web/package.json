@@ -31,7 +31,7 @@
     "@effect/platform-node": "latest",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
-    "@knpkv/codecommit-core": "workspace:*",
+    "@knpkv/codecommit-core": "workspace:^",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "class-variance-authority": "^0.7.1",
