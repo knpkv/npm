@@ -115,7 +115,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
-  isApproved: Schema.Boolean
+  isApproved: Schema.Boolean,
+  commentCount: Schema.optional(Schema.Number)
 }) {
   /**
    * AWS Console URL for this pull request.
@@ -162,6 +163,75 @@ export interface PRCommentLocation {
   readonly afterCommitId?: string
   readonly comments: ReadonlyArray<CommentThread>
 }
+
+// ---------------------------------------------------------------------------
+// JSON-safe comment schemas (for HTTP API wire format)
+// ---------------------------------------------------------------------------
+
+const PRCommentJson = Schema.Struct({
+  id: Schema.String,
+  content: Schema.String,
+  author: Schema.String,
+  creationDate: Schema.String,
+  inReplyTo: Schema.optional(Schema.String),
+  deleted: Schema.Boolean,
+  filePath: Schema.optional(Schema.String),
+  lineNumber: Schema.optional(Schema.Number)
+})
+
+export interface CommentThreadJsonEncoded {
+  readonly root: typeof PRCommentJson.Type
+  readonly replies: ReadonlyArray<CommentThreadJsonEncoded>
+}
+
+const CommentThreadJson: Schema.Schema<CommentThreadJsonEncoded> = Schema.Struct({
+  root: PRCommentJson,
+  replies: Schema.Array(Schema.suspend((): Schema.Schema<CommentThreadJsonEncoded> => CommentThreadJson))
+})
+
+/**
+ * JSON-safe schema for comment locations (HTTP wire format).
+ * Dates are ISO strings, no branded types.
+ *
+ * @category Domain
+ */
+export const PRCommentLocationJson = Schema.Struct({
+  filePath: Schema.optional(Schema.String),
+  beforeCommitId: Schema.optional(Schema.String),
+  afterCommitId: Schema.optional(Schema.String),
+  comments: Schema.Array(CommentThreadJson)
+})
+
+// NOTE: replies of deleted root comments are omitted — matches UI behavior
+// (deleted comments hide their subtree).
+const serializeThread = (t: CommentThread): CommentThreadJsonEncoded => ({
+  root: {
+    id: t.root.id,
+    content: t.root.content,
+    author: t.root.author,
+    creationDate: t.root.creationDate.toISOString(),
+    ...(t.root.inReplyTo != null ? { inReplyTo: t.root.inReplyTo } : {}),
+    deleted: t.root.deleted,
+    ...(t.root.filePath != null ? { filePath: t.root.filePath } : {}),
+    ...(t.root.lineNumber != null ? { lineNumber: t.root.lineNumber } : {})
+  },
+  replies: t.root.deleted ? [] : t.replies.map(serializeThread)
+})
+
+/**
+ * Encode PRCommentLocations to JSON-safe format for HTTP responses.
+ *
+ * @category Domain
+ */
+export const encodeCommentLocations = (
+  locations: ReadonlyArray<PRCommentLocation>
+): ReadonlyArray<typeof PRCommentLocationJson.Type> =>
+  locations.map((loc) => ({
+    ...(loc.filePath != null ? { filePath: loc.filePath } : {}),
+    ...(loc.beforeCommitId != null ? { beforeCommitId: loc.beforeCommitId } : {}),
+    ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
+    comments: loc.comments.map(serializeThread)
+  }))
 
 // ---------------------------------------------------------------------------
 // State Models
