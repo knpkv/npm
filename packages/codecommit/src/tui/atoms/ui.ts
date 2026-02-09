@@ -120,10 +120,29 @@ export const quickFilterValueAtom = Atom.make<string>("").pipe(Atom.keepAlive)
 export const currentUserAtom = Atom.make<string>("").pipe(Atom.keepAlive)
 
 /**
- * Settings filter text
+ * Settings tab type
+ * @category types
+ */
+export type SettingsTab = "accounts" | "theme" | "config" | "about"
+export const SettingsTabs: ReadonlyArray<SettingsTab> = ["accounts", "theme", "config", "about"]
+
+/**
+ * Current active settings tab
+ * @category atoms
+ */
+export const settingsTabAtom = Atom.make<SettingsTab>("accounts").pipe(Atom.keepAlive)
+
+/**
+ * Show details comments
  * @category atoms
  */
 export const showDetailsCommentsAtom = Atom.make(false).pipe(Atom.keepAlive)
+
+/**
+ * Theme selection cursor index (for navigating theme list)
+ * @category atoms
+ */
+export const themeSelectionIndexAtom = Atom.make(0).pipe(Atom.keepAlive)
 
 export const settingsFilterAtom = Atom.make<string>("").pipe(Atom.keepAlive)
 

@@ -3,7 +3,7 @@ import { Atom } from "@effect-atom/atom-react"
 /**
  * View type
  */
-export type ViewType = "prs" | "details"
+export type ViewType = "prs" | "details" | "settings" | "notifications"
 
 /**
  * Current active view
@@ -43,3 +43,10 @@ export const quickFilterAtom = Atom.make<QuickFilter>({ type: "all" }).pipe(Atom
  * Command palette open state
  */
 export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
+
+/**
+ * Settings tab
+ */
+export type SettingsTab = "accounts" | "theme" | "config" | "about"
+export const SettingsTabs: ReadonlyArray<SettingsTab> = ["accounts", "theme", "config", "about"]
+export const settingsTabAtom = Atom.make<SettingsTab>("accounts").pipe(Atom.keepAlive)

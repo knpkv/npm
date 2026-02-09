@@ -1,7 +1,7 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import { useKeyboard } from "@opentui/react"
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { loginToAwsAtom } from "../atoms/actions.js"
 import {
   appStateAtom,
@@ -21,15 +21,17 @@ import {
   quickFilterValuesAtom,
   selectedIndexAtom,
   settingsFilterAtom,
+  SettingsTabs,
+  settingsTabAtom,
   showDetailsCommentsAtom,
+  themeAtom,
+  themeSelectionIndexAtom,
   viewAtom
 } from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { extractScope } from "../ListBuilder.js"
+import { themes } from "../theme/themes.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
-import { DialogCreatePR } from "../ui/DialogCreatePR.js"
-import { DialogHelp } from "../ui/DialogHelp.js"
-import { DialogTheme } from "../ui/DialogTheme.js"
 
 const defaultState: Domain.AppState = {
   status: "loading",
@@ -44,7 +46,6 @@ interface UseKeyboardNavOptions {
 
 /**
  * Keyboard navigation hook for the TUI
- * Handles global keybindings for view switching, filtering, help, etc.
  * @category hooks
  */
 export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOptions) {
@@ -65,6 +66,13 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setExitPending = useAtomSet(exitPendingAtom)
   const exitTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  useEffect(
+    () => () => {
+      if (exitTimeoutRef.current) clearTimeout(exitTimeoutRef.current)
+    },
+    []
+  )
+
   // Quick filter state
   const quickFilterType = useAtomValue(quickFilterTypeAtom)
   const setQuickFilterType = useAtomSet(quickFilterTypeAtom)
@@ -75,7 +83,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const appStateResult = useAtomValue(appStateAtom)
   const appState = Result.getOrElse(appStateResult, () => defaultState)
 
-  // Settings filter state
+  // Settings state
   const settingsFilter = useAtomValue(settingsFilterAtom)
   const setSettingsFilter = useAtomSet(settingsFilterAtom)
   const isSettingsFiltering = useAtomValue(isSettingsFilteringAtom)
@@ -83,6 +91,12 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
   const showDetailsComments = useAtomValue(showDetailsCommentsAtom)
   const setShowDetailsComments = useAtomSet(showDetailsCommentsAtom)
+  const settingsTab = useAtomValue(settingsTabAtom)
+  const setSettingsTab = useAtomSet(settingsTabAtom)
+  const themeSelectionIndex = useAtomValue(themeSelectionIndexAtom)
+  const setThemeSelectionIndex = useAtomSet(themeSelectionIndexAtom)
+  const setThemeId = useAtomSet(themeAtom)
+  const themeNames = useMemo(() => Object.keys(themes).sort(), [])
 
   // Extract unique authors, accounts, scopes, and repos
   const { accounts, authors, myScopes, repos, scopes } = useMemo(() => {
@@ -112,8 +126,8 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     }
   }, [appState.pullRequests, currentUser])
 
-  // Sync currentUser from appState (set via STS getCallerIdentity)
-  useMemo(() => {
+  // Sync currentUser from appState
+  useEffect(() => {
     if (appState.currentUser && appState.currentUser !== currentUser) {
       setCurrentUser(appState.currentUser)
     }
@@ -122,18 +136,18 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const dialog = useDialog()
 
   useKeyboard((key: { name: string; ctrl?: boolean; meta?: boolean; char?: string }) => {
-    // If a dialog is open, don't process global keys (except command palette trigger)
+    // If a dialog is open, don't process global keys
     if (dialog.current) {
       return
     }
 
-    // Handle Ctrl+P, Cmd+P, or ":" for command palette
+    // Command palette: Ctrl+P, Cmd+P, ":"
     if ((key.name === "p" && (key.meta || key.ctrl)) || key.char === ":" || key.name === ":") {
       dialog.show(() => <DialogCommand />)
       return
     }
 
-    // Handle Ctrl+C (Double press to exit)
+    // Ctrl+C double-press to exit
     if (key.name === "c" && key.ctrl) {
       if (exitPending) {
         onQuit()
@@ -147,7 +161,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       return
     }
 
-    // Handle filter mode input (PRs)
+    // Filter mode input (PRs)
     if (isFiltering) {
       if (key.name === "escape") {
         setIsFiltering(false)
@@ -157,7 +171,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       } else if (key.name === "backspace") {
         setFilterText(filterText.slice(0, -1))
       } else {
-        // Try key.char first, fallback to key.name for single printable chars
         const char = key.char || (key.name?.length === 1 ? key.name : null)
         if (char && char.length === 1) {
           setFilterText(filterText + char)
@@ -166,7 +179,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       return
     }
 
-    // Handle settings filter mode input
+    // Settings filter mode input
     if (isSettingsFiltering) {
       if (key.name === "escape") {
         setIsSettingsFiltering(false)
@@ -176,7 +189,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       } else if (key.name === "backspace") {
         setSettingsFilter(settingsFilter.slice(0, -1))
       } else if (key.name === "left" || key.name === "right") {
-        // Cycle through filter modes: "" <-> "on:" <-> "off:"
         const modes = ["", "on:", "off:"] as const
         const currentPrefix = settingsFilter.startsWith("on:") ? "on:" : settingsFilter.startsWith("off:") ? "off:" : ""
         const nameFilter = currentPrefix ? settingsFilter.slice(currentPrefix.length) : settingsFilter
@@ -194,52 +206,105 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       return
     }
 
-    // Handle "/" or "f" filter shortcut
+    // "/" or "f" filter shortcut
     if (key.name === "/" || key.char === "/" || key.name === "f") {
-      if (view === "settings") {
+      if (view === "settings" && settingsTab === "accounts") {
         setIsSettingsFiltering(true)
-      } else {
+      } else if (view !== "settings") {
         setIsFiltering(true)
         setView("prs")
       }
       return
     }
 
-    // Handle settings view shortcuts
+    // Settings view keybindings
     if (view === "settings") {
-      if (key.name === "a") {
-        // Get filtered profiles if filter is active
-        const profiles = settingsFilter
-          ? appState.accounts
-              .filter((a) => a.profile.toLowerCase().includes(settingsFilter.toLowerCase()))
-              .map((a) => a.profile)
-          : null
-        setAllAccounts({ enabled: true, ...(profiles && { profiles }) })
+      // Tab: cycle settings tabs
+      if (key.name === "tab") {
+        const idx = SettingsTabs.indexOf(settingsTab)
+        const next = SettingsTabs[(idx + 1) % SettingsTabs.length]!
+        setSettingsTab(next)
         return
       }
-      if (key.name === "d") {
-        const profiles = settingsFilter
-          ? appState.accounts
-              .filter((a) => a.profile.toLowerCase().includes(settingsFilter.toLowerCase()))
-              .map((a) => a.profile)
-          : null
-        setAllAccounts({ enabled: false, ...(profiles && { profiles }) })
+
+      // 1-4: jump to settings tab
+      if (key.name === "1") {
+        setSettingsTab("accounts")
         return
       }
-      // Cycle filter modes with arrows (even when not in filter input mode)
-      if (key.name === "left" || key.name === "right") {
-        const modes = ["", "on:", "off:"] as const
-        const currentPrefix = settingsFilter.startsWith("on:") ? "on:" : settingsFilter.startsWith("off:") ? "off:" : ""
-        const nameFilter = currentPrefix ? settingsFilter.slice(currentPrefix.length) : settingsFilter
-        const idx = modes.indexOf(currentPrefix)
-        const nextIdx = key.name === "right" ? (idx + 1) % modes.length : (idx - 1 + modes.length) % modes.length
-        const nextMode = modes[nextIdx] ?? ""
-        setSettingsFilter(nextMode + nameFilter)
+      if (key.name === "2") {
+        setSettingsTab("theme")
+        return
+      }
+      if (key.name === "3") {
+        setSettingsTab("config")
+        return
+      }
+      if (key.name === "4") {
+        setSettingsTab("about")
+        return
+      }
+
+      // Theme tab: up/down to navigate, enter to select
+      if (settingsTab === "theme") {
+        if (key.name === "up") {
+          setThemeSelectionIndex(Math.max(0, themeSelectionIndex - 1))
+          return
+        }
+        if (key.name === "down") {
+          setThemeSelectionIndex(Math.min(themeNames.length - 1, themeSelectionIndex + 1))
+          return
+        }
+        if (key.name === "return") {
+          const selected = themeNames[themeSelectionIndex]
+          if (selected) setThemeId(selected)
+          return
+        }
+      }
+
+      // Accounts tab specific
+      if (settingsTab === "accounts") {
+        if (key.name === "a") {
+          const profiles = settingsFilter
+            ? appState.accounts
+                .filter((a) => a.profile.toLowerCase().includes(settingsFilter.toLowerCase()))
+                .map((a) => a.profile)
+            : null
+          setAllAccounts({ enabled: true, ...(profiles && { profiles }) })
+          return
+        }
+        if (key.name === "d") {
+          const profiles = settingsFilter
+            ? appState.accounts
+                .filter((a) => a.profile.toLowerCase().includes(settingsFilter.toLowerCase()))
+                .map((a) => a.profile)
+            : null
+          setAllAccounts({ enabled: false, ...(profiles && { profiles }) })
+          return
+        }
+        if (key.name === "left" || key.name === "right") {
+          const modes = ["", "on:", "off:"] as const
+          const currentPrefix = settingsFilter.startsWith("on:")
+            ? "on:"
+            : settingsFilter.startsWith("off:")
+              ? "off:"
+              : ""
+          const nameFilter = currentPrefix ? settingsFilter.slice(currentPrefix.length) : settingsFilter
+          const idx = modes.indexOf(currentPrefix)
+          const nextIdx = key.name === "right" ? (idx + 1) % modes.length : (idx - 1 + modes.length) % modes.length
+          const nextMode = modes[nextIdx] ?? ""
+          setSettingsFilter(nextMode + nameFilter)
+          return
+        }
+      }
+
+      if (key.name === "escape") {
+        setView("prs")
         return
       }
     }
 
-    // Handle details view
+    // Details view
     if (view === "details") {
       if (key.name === "escape") {
         setView("prs")
@@ -255,41 +320,14 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       return
     }
 
-    // Global keybindings
+    // Global keybindings (prs + notifications views)
     switch (key.name) {
       case "q":
         onQuit()
         break
 
-      case "h":
-        dialog.show(() => <DialogHelp />)
-        break
-
       case "r":
         refresh()
-        break
-
-      case "l": {
-        const authError = notifications.items.find((e) =>
-          /ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials/i.test(e.message)
-        )
-        if (authError) {
-          const profile = authError.title.replace(/\s*\(.*$/, "")
-          if (profile) loginToAws(profile as Domain.AwsProfileName)
-        }
-        break
-      }
-
-      case "c":
-        if (view === "notifications") {
-          clearNotifications()
-        } else if (view === "prs") {
-          dialog.show(() => <DialogCreatePR />)
-        }
-        break
-
-      case "t":
-        dialog.show(() => <DialogTheme />)
         break
 
       case "escape":
@@ -298,14 +336,6 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         } else if (view !== "prs") {
           setView("prs")
         }
-        break
-
-      case "s":
-        setView(view === "settings" ? "prs" : "settings")
-        break
-
-      case "n":
-        setView(view === "notifications" ? "prs" : "notifications")
         break
 
       case "return":
@@ -328,7 +358,17 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
         }
         break
 
-      // Quick filter shortcuts (1-9)
+      case "n":
+        setView(view === "notifications" ? "prs" : "notifications")
+        break
+
+      case "c":
+        if (view === "notifications") {
+          clearNotifications()
+        }
+        break
+
+      // Quick filter shortcuts (1-9) — only in prs view
       case "1":
         if (view === "prs") setQuickFilterType("all")
         break
