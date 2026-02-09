@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useState } from "react"
+import { StorageKeys } from "../storage-keys.js"
 
 type Theme = "dark" | "light" | "system"
 
@@ -12,8 +13,18 @@ const ThemeContext = createContext<ThemeContextValue>({
   setTheme: () => {}
 })
 
+const readStoredTheme = (): Theme => {
+  const stored = localStorage.getItem(StorageKeys.theme)
+  return stored === "dark" || stored === "light" || stored === "system" ? stored : "system"
+}
+
 export function ThemeProvider({ children }: { readonly children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("system")
+  const [theme, setThemeState] = useState<Theme>(readStoredTheme)
+
+  const setTheme = useCallback((t: Theme) => {
+    localStorage.setItem(StorageKeys.theme, t)
+    setThemeState(t)
+  }, [])
 
   useEffect(() => {
     const root = document.documentElement

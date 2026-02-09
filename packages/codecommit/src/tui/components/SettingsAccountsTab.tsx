@@ -6,21 +6,16 @@ import type { ListItem } from "../ListBuilder.js"
 import { Badge } from "./Badge.js"
 import { type Column, Table } from "./Table.js"
 
-interface SettingsTableProps {
+interface SettingsAccountsTabProps {
   readonly items: ReadonlyArray<ListItem>
   readonly selectedIndex: number
 }
 
-/**
- * Table for settings view
- * @category components
- */
-export function SettingsTable({ items, selectedIndex }: SettingsTableProps) {
+export function SettingsAccountsTab({ items, selectedIndex }: SettingsAccountsTabProps) {
   const { theme } = useTheme()
   const settingsFilter = useAtomValue(settingsFilterAtom)
   const isFiltering = useAtomValue(isSettingsFilteringAtom)
 
-  // Count enabled/total (items are already filtered by MainList)
   const { enabledCount, totalCount } = useMemo(() => {
     let enabled = 0
     let total = 0
@@ -39,17 +34,13 @@ export function SettingsTable({ items, selectedIndex }: SettingsTableProps) {
       width: 8,
       render: (item) => {
         if (item.type !== "account") return null
-        const acc = item.account
-        if (!acc.enabled) {
-          return (
-            <Badge variant="neutral" minWidth={5}>
-              OFF
-            </Badge>
-          )
-        }
-        return (
+        return item.account.enabled ? (
           <Badge variant="success" minWidth={5}>
             ON
+          </Badge>
+        ) : (
+          <Badge variant="neutral" minWidth={5}>
+            OFF
           </Badge>
         )
       }
@@ -59,8 +50,7 @@ export function SettingsTable({ items, selectedIndex }: SettingsTableProps) {
       width: "auto",
       render: (item, selected) => {
         if (item.type !== "account") return null
-        const fg = selected ? theme.selectedText : theme.text
-        return <text fg={fg}>{item.account.profile}</text>
+        return <text fg={selected ? theme.selectedText : theme.text}>{item.account.profile}</text>
       }
     }
   ]
@@ -73,7 +63,6 @@ export function SettingsTable({ items, selectedIndex }: SettingsTableProps) {
         selectedIndex={selectedIndex}
         keyExtractor={(i) => (i.type === "account" ? i.account.profile : "")}
       />
-      {/* Filter bar at bottom */}
       <box
         style={{
           height: 1,

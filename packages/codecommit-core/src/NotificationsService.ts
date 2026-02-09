@@ -37,6 +37,7 @@ export class NotificationsService extends Context.Tag("@knpkv/codecommit-core/No
       readonly type: NotificationType
       readonly title: string
       readonly message: string
+      readonly profile?: string
     }) => Effect.Effect<void>
     readonly clear: Effect.Effect<void>
   }
@@ -62,6 +63,7 @@ export const NotificationsServiceLive = Layer.effect(
       readonly type: NotificationType
       readonly title: string
       readonly message: string
+      readonly profile?: string
     }): Effect.Effect<void> =>
       Effect.gen(function*() {
         const now = yield* Clock.currentTimeMillis
@@ -71,7 +73,7 @@ export const NotificationsServiceLive = Layer.effect(
           timestamp
         }
         yield* SubscriptionRef.update(state, (s) => ({
-          items: [...s.items, notification]
+          items: [...s.items, notification].slice(-100)
         }))
       }).pipe(Effect.withSpan("NotificationsService.add"))
 

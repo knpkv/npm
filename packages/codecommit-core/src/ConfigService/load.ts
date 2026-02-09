@@ -33,7 +33,7 @@ export const makeLoad = (
           accounts: detected.map((p) => ({
             profile: p.name,
             regions: p.region ? [p.region] : [],
-            enabled: true
+            enabled: false
           })),
           autoDetect: true
         }
@@ -59,7 +59,7 @@ export const makeLoad = (
           accounts: detected.map((p) => ({
             profile: p.name,
             regions: p.region ? [p.region] : [],
-            enabled: true
+            enabled: false
           }))
         }
       }

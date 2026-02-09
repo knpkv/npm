@@ -11,7 +11,7 @@ import { AwsClient, AwsClientConfig, ConfigService, NotificationsService, PRServ
 import { Effect, Layer } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
-import { AccountsLive, ConfigLive, EventsLive, PrsLive } from "./handlers/index.js"
+import { AccountsLive, ConfigLive, EventsLive, NotificationsLive, PrsLive } from "./handlers/index.js"
 
 // MIME types for common files
 const mimeTypes: Record<string, string> = {
@@ -78,7 +78,7 @@ const serveStatic = Effect.gen(function*() {
 })
 
 // API handlers layer
-const HandlersLive = Layer.mergeAll(PrsLive, ConfigLive, AccountsLive, EventsLive)
+const HandlersLive = Layer.mergeAll(PrsLive, ConfigLive, AccountsLive, EventsLive, NotificationsLive)
 
 // Platform dependencies
 const PlatformLive = Layer.mergeAll(
@@ -90,18 +90,21 @@ const PlatformLive = Layer.mergeAll(
 // Base services - ConfigService needs Platform
 const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(Layer.provide(PlatformLive))
 
+// NotificationsService — single shared instance
+const NotificationsLive_ = NotificationsService.NotificationsServiceLive
+
 // PRService dependencies
 const PRServiceDeps = Layer.mergeAll(
-  AwsClient.AwsClientLive,
-  NotificationsService.NotificationsServiceLive
+  AwsClient.AwsClientLive
 ).pipe(
   Layer.provideMerge(ConfigLive_),
+  Layer.provideMerge(NotificationsLive_),
   Layer.provide(AwsClientConfig.Default),
   Layer.provide(PlatformLive)
 )
 
-// PRService with all dependencies
-const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provide(PRServiceDeps))
+// PRService with all dependencies — provideMerge so NotificationsService flows to AllServicesLive
+const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRServiceDeps))
 
 // AwsClient for handlers that call AWS directly (e.g., createPR)
 const AwsClientLive_ = AwsClient.AwsClientLive.pipe(
@@ -109,7 +112,7 @@ const AwsClientLive_ = AwsClient.AwsClientLive.pipe(
   Layer.provide(AwsClientConfig.Default)
 )
 
-// All services needed by handlers
+// All services needed by handlers — NotificationsService flows through PRServiceDeps via provideMerge
 const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
@@ -146,8 +149,7 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
     HttpLayerRouter.cors({
       allowedOrigins: ["*"],
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-      credentials: true
+      allowedHeaders: ["Content-Type", "Authorization"]
     })
   )
 )

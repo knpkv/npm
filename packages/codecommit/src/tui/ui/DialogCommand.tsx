@@ -3,12 +3,17 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { clearNotificationsAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
-import { filterTextAtom, isFilteringAtom, isSettingsFilteringAtom, quickFilterTypeAtom, viewAtom } from "../atoms/ui.js"
+import {
+  filterTextAtom,
+  isFilteringAtom,
+  isSettingsFilteringAtom,
+  quickFilterTypeAtom,
+  settingsTabAtom,
+  viewAtom
+} from "../atoms/ui.js"
 import { useDialog } from "../context/dialog.js"
 import { useTheme } from "../context/theme.js"
 import { DialogCreatePR } from "./DialogCreatePR.js"
-import { DialogHelp } from "./DialogHelp.js"
-import { DialogTheme } from "./DialogTheme.js"
 
 interface Command {
   readonly id: string
@@ -24,7 +29,7 @@ export function DialogCommand() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [scrollOffset, setScrollOffset] = useState(0)
   const scrollRef = useRef<ScrollBoxRenderable>(null)
-  const visibleHeight = 11 // 15 max height - 3 for border/header - 1 for padding
+  const visibleHeight = 11
 
   const refresh = useAtomSet(refreshAtom)
   const setView = useAtomSet(viewAtom)
@@ -34,13 +39,48 @@ export function DialogCommand() {
   const clearNotifications = useAtomSet(clearNotificationsAtom)
   const setQuickFilterType = useAtomSet(quickFilterTypeAtom)
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
+  const setSettingsTab = useAtomSet(settingsTabAtom)
 
   const commands: Array<Command> = useMemo(
     () => [
+      // Settings
+      { id: "settings", label: "Open Settings", action: () => setView("settings") },
+      {
+        id: "settings-accounts",
+        label: "Settings: Accounts",
+        action: () => {
+          setView("settings")
+          setSettingsTab("accounts")
+        }
+      },
+      {
+        id: "settings-theme",
+        label: "Settings: Theme",
+        action: () => {
+          setView("settings")
+          setSettingsTab("theme")
+        }
+      },
+      {
+        id: "settings-config",
+        label: "Settings: Config",
+        action: () => {
+          setView("settings")
+          setSettingsTab("config")
+        }
+      },
+      {
+        id: "settings-about",
+        label: "Settings: About / Help",
+        action: () => {
+          setView("settings")
+          setSettingsTab("about")
+        }
+      },
+      // Actions
       {
         id: "create-pr",
         label: "Create Pull Request",
-        shortcut: "c",
         action: () => dialog.show(() => <DialogCreatePR />)
       },
       { id: "refresh", label: "Refresh PRs", shortcut: "r", action: () => refresh() },
@@ -61,9 +101,10 @@ export function DialogCommand() {
           setQuickFilterType("all")
         }
       },
+      // Views
       { id: "view-prs", label: "View: Pull Requests", shortcut: "Esc", action: () => setView("prs") },
-      { id: "view-settings", label: "View: Settings", shortcut: "s", action: () => setView("settings") },
       { id: "view-notifications", label: "View: Notifications", shortcut: "n", action: () => setView("notifications") },
+      // Filters
       { id: "filter-all", label: "Filter: All PRs", shortcut: "1", action: () => setQuickFilterType("all") },
       { id: "filter-mine", label: "Filter: My PRs", shortcut: "2", action: () => setQuickFilterType("mine") },
       { id: "filter-account", label: "Filter: By Account", shortcut: "3", action: () => setQuickFilterType("account") },
@@ -72,30 +113,19 @@ export function DialogCommand() {
       { id: "filter-date", label: "Filter: By Age", shortcut: "6", action: () => setQuickFilterType("date") },
       { id: "filter-repo", label: "Filter: By Repo", shortcut: "7", action: () => setQuickFilterType("repo") },
       { id: "filter-status", label: "Filter: By Status", shortcut: "8", action: () => setQuickFilterType("status") },
+      // Settings actions
       {
         id: "settings-filter",
         label: "Settings: Filter Accounts",
-        shortcut: "/",
         action: () => {
           setView("settings")
+          setSettingsTab("accounts")
           setIsSettingsFiltering(true)
         }
       },
-      {
-        id: "settings-all-on",
-        label: "Settings: Enable All",
-        shortcut: "a",
-        action: () => setAllAccounts({ enabled: true })
-      },
-      {
-        id: "settings-all-off",
-        label: "Settings: Disable All",
-        shortcut: "d",
-        action: () => setAllAccounts({ enabled: false })
-      },
-      { id: "clear-notifications", label: "Clear Notifications", shortcut: "c", action: () => clearNotifications() },
-      { id: "theme", label: "Change Theme", shortcut: "t", action: () => dialog.show(() => <DialogTheme />) },
-      { id: "help", label: "Show Help", shortcut: "h", action: () => dialog.show(() => <DialogHelp />) }
+      { id: "settings-all-on", label: "Settings: Enable All", action: () => setAllAccounts({ enabled: true }) },
+      { id: "settings-all-off", label: "Settings: Disable All", action: () => setAllAccounts({ enabled: false }) },
+      { id: "clear-notifications", label: "Clear Notifications", action: () => clearNotifications() }
     ],
     [
       refresh,
@@ -106,6 +136,7 @@ export function DialogCommand() {
       clearNotifications,
       setQuickFilterType,
       setAllAccounts,
+      setSettingsTab,
       dialog
     ]
   )
@@ -116,15 +147,12 @@ export function DialogCommand() {
     return commands.filter((cmd) => cmd.label.toLowerCase().includes(s) || cmd.id.includes(s))
   }, [commands, search])
 
-  // Scroll to keep selected item visible with 1-item margin
   useEffect(() => {
     if (!scrollRef.current) return
     let newOffset = scrollOffset
-    // If selection is above visible area (with 1-item margin)
     if (selectedIndex < scrollOffset + 1) {
       newOffset = Math.max(0, selectedIndex - 1)
-    } // If selection is below visible area (with 1-item margin)
-    else if (selectedIndex > scrollOffset + visibleHeight - 2) {
+    } else if (selectedIndex > scrollOffset + visibleHeight - 2) {
       newOffset = selectedIndex - visibleHeight + 2
     }
     if (newOffset !== scrollOffset) {

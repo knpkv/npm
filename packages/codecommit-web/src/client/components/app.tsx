@@ -5,8 +5,10 @@ import { useSSE } from "../hooks/useSSE.js"
 import { CommandPalette } from "./command-palette.js"
 import { FilterBar } from "./filter-bar.js"
 import { Header } from "./header.js"
+import { NotificationsPage } from "./notifications-page.js"
 import { PRDetail } from "./pr-detail.js"
 import { PRList } from "./pr-list.js"
+import { SettingsPage } from "./settings-page.js"
 import { ThemeProvider } from "./theme-provider.js"
 
 function AppLayout() {
@@ -21,6 +23,8 @@ function AppLayout() {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
         {view === "prs" && <PRList />}
         {view === "details" && <PRDetail />}
+        {view === "settings" && <SettingsPage />}
+        {view === "notifications" && <NotificationsPage />}
       </main>
       <CommandPalette />
     </div>
