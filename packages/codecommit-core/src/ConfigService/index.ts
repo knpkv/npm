@@ -8,13 +8,18 @@ import type { FileSystem, Path } from "@effect/platform"
 import { Config, Context, Effect, Layer } from "effect"
 import { ConfigError, ProfileDetectionError } from "../Errors.js"
 import type { ConfigParseError } from "../Errors.js"
+import { backup } from "./backup.js"
 import { detectProfiles } from "./detectProfiles.js"
 import type { DetectedProfile, TuiConfig } from "./internal.js"
 import { ConfigPaths } from "./internal.js"
 import { makeLoad } from "./load.js"
+import { makeReset } from "./reset.js"
 import { save } from "./save.js"
+import type { ConfigValidationResult } from "./validate.js"
+import { validate } from "./validate.js"
 
 export { AccountConfig, DetectedProfile, TuiConfig } from "./internal.js"
+export { ConfigValidationResult } from "./validate.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -26,6 +31,10 @@ export class ConfigService extends Context.Tag("@knpkv/codecommit-core/ConfigSer
     readonly load: Effect.Effect<TuiConfig, ConfigError | ConfigParseError>
     readonly save: (config: TuiConfig) => Effect.Effect<void, ConfigError>
     readonly detectProfiles: Effect.Effect<ReadonlyArray<DetectedProfile>, ProfileDetectionError>
+    readonly getConfigPath: Effect.Effect<string, ConfigError>
+    readonly backup: Effect.Effect<string, ConfigError>
+    readonly reset: Effect.Effect<TuiConfig, ConfigError | ProfileDetectionError>
+    readonly validate: Effect.Effect<ConfigValidationResult, ConfigError>
   }
 >() {}
 
@@ -72,11 +81,16 @@ export const ConfigServiceLive = Layer.effect(
       Effect.provide(effect, ctx)
 
     const load = makeLoad(detectProfiles)
+    const reset = makeReset(detectProfiles)
 
     return {
       load: provide(load),
       save: (config) => provide(save(config)),
-      detectProfiles: provide(detectProfiles)
+      detectProfiles: provide(detectProfiles),
+      getConfigPath: provide(ConfigPaths.pipe(Effect.flatMap((p) => p.configPath))),
+      backup: provide(backup),
+      reset: provide(reset),
+      validate: provide(validate)
     }
   })
 ).pipe(Layer.provide(ConfigPathsLive))
