@@ -21,6 +21,14 @@ const PullRequestWire = Schema.Struct({
   commentCount: Schema.optional(Schema.Number)
 })
 
+const NotificationItemWire = Schema.Struct({
+  type: Schema.Literal("error", "info", "warning", "success"),
+  title: Schema.String,
+  message: Schema.String,
+  timestamp: Schema.String,
+  profile: Schema.optional(Schema.String)
+})
+
 const SsePayload = Schema.Struct({
   pullRequests: Schema.Array(PullRequestWire),
   accounts: Schema.Array(Schema.Struct({
@@ -32,7 +40,8 @@ const SsePayload = Schema.Struct({
   statusDetail: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
-  currentUser: Schema.optional(Schema.String)
+  currentUser: Schema.optional(Schema.String),
+  notifications: Schema.optional(Schema.Array(NotificationItemWire))
 })
 
 const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))
@@ -46,7 +55,9 @@ export function useSSE(onState: (state: AppState) => void) {
     es.onmessage = (event) => {
       try {
         callbackRef.current(decode(event.data) as AppState)
-      } catch { /* ignore parse/decode errors */ }
+      } catch {
+        // decode errors are non-fatal — SSE will retry
+      }
     }
     return () => es.close()
   }, [])

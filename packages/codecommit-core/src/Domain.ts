@@ -246,7 +246,8 @@ export class NotificationItem extends Schema.Class<NotificationItem>("Notificati
   type: NotificationType,
   title: Schema.String,
   message: Schema.String,
-  timestamp: Schema.DateFromSelf
+  timestamp: Schema.DateFromSelf,
+  profile: Schema.optionalWith(Schema.String, { exact: true })
 }) {}
 
 /**

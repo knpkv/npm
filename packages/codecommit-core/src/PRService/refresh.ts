@@ -87,7 +87,8 @@ export const makeRefresh = (
               notificationsService.add({
                 type: "error" as const,
                 title: label,
-                message: errorStr
+                message: errorStr,
+                profile: account.profile
               })
             ).pipe(Stream.flatMap(() => Stream.empty))
           })

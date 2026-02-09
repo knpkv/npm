@@ -1,5 +1,5 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
-import { Account, PRCommentLocationJson, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { Account, AwsProfileName, PRCommentLocationJson, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 // API error returned to clients for AWS failures
@@ -71,8 +71,39 @@ const ConfigResponse = Schema.Struct({
   currentUser: Schema.optional(Schema.String)
 })
 
+const ConfigPathResponse = Schema.Struct({
+  path: Schema.String,
+  exists: Schema.Boolean
+})
+
+const ConfigValidationResponse = Schema.Struct({
+  status: Schema.Literal("valid", "missing", "corrupted"),
+  path: Schema.String,
+  errors: Schema.Array(Schema.String)
+})
+
+const ConfigSavePayload = Schema.Struct({
+  accounts: Schema.Array(
+    Schema.Struct({
+      profile: Schema.String,
+      regions: Schema.Array(Schema.String),
+      enabled: Schema.Boolean
+    })
+  ),
+  autoDetect: Schema.Boolean
+})
+
+const ConfigResetResponse = Schema.Struct({
+  backupPath: Schema.optional(Schema.String),
+  config: ConfigResponse
+})
+
 export class ConfigGroup extends HttpApiGroup.make("config")
   .add(HttpApiEndpoint.get("list", "/").addSuccess(ConfigResponse))
+  .add(HttpApiEndpoint.get("path", "/path").addSuccess(ConfigPathResponse).addError(ApiError))
+  .add(HttpApiEndpoint.get("validate", "/validate").addSuccess(ConfigValidationResponse).addError(ApiError))
+  .add(HttpApiEndpoint.post("save", "/save").setPayload(ConfigSavePayload).addSuccess(Schema.String).addError(ApiError))
+  .add(HttpApiEndpoint.post("reset", "/reset").addSuccess(ConfigResetResponse).addError(ApiError))
   .prefix("/api/config")
 {}
 
@@ -82,10 +113,38 @@ export class AccountsGroup extends HttpApiGroup.make("accounts")
   .prefix("/api/accounts")
 {}
 
+// Notifications endpoints
+export const NotificationItemResponse = Schema.Struct({
+  type: Schema.Literal("error", "info", "warning", "success"),
+  title: Schema.String,
+  message: Schema.String,
+  timestamp: Schema.String,
+  profile: Schema.optional(Schema.String)
+})
+
+export class NotificationsGroup extends HttpApiGroup.make("notifications")
+  .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Array(NotificationItemResponse)))
+  .add(HttpApiEndpoint.post("clear", "/clear").addSuccess(Schema.String))
+  .add(
+    HttpApiEndpoint.post("ssoLogin", "/sso-login")
+      .setPayload(Schema.Struct({ profile: AwsProfileName }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("ssoLogout", "/sso-logout")
+      .setPayload(Schema.Struct({ profile: Schema.String }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .prefix("/api/notifications")
+{}
+
 // Combined API
 export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(PrsGroup)
   .add(EventsGroup)
   .add(ConfigGroup)
   .add(AccountsGroup)
+  .add(NotificationsGroup)
 {}
