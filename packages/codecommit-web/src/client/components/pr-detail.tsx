@@ -4,8 +4,8 @@ import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
-  getScoreTier,
   type CategoryStatus,
+  getScoreTier,
   type HealthScore,
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
@@ -82,7 +82,9 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
         <span className="text-xs text-muted-foreground">/ 10</span>
         <div className="ml-2 h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full rounded-full ${tier === "green" ? "bg-green-500" : tier === "yellow" ? "bg-yellow-500" : "bg-red-500"}`}
+            className={`h-full rounded-full ${
+              tier === "green" ? "bg-green-500" : tier === "yellow" ? "bg-yellow-500" : "bg-red-500"
+            }`}
             style={{ width: `${score.total * 10}%` }}
           />
         </div>
@@ -91,7 +93,13 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
         {score.categories.map((cat: HealthScoreCategory) => (
           <div key={cat.label} className="flex items-start gap-3 rounded border px-3 py-2">
             <span
-              className={`w-8 text-right text-xs font-semibold tabular-nums ${cat.value > 0 ? "text-green-600 dark:text-green-400" : cat.value < 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}
+              className={`w-8 text-right text-xs font-semibold tabular-nums ${
+                cat.value > 0
+                  ? "text-green-600 dark:text-green-400"
+                  : cat.value < 0
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+              }`}
             >
               {cat.value > 0 ? `+${cat.value}` : cat.value}
             </span>
@@ -114,7 +122,7 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
   )
 }
 
-function CommentThread({ thread, depth }: { readonly thread: CommentThreadJsonEncoded; readonly depth: number }) {
+function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEncoded; readonly depth: number }) {
   if (thread.root.deleted) return null
 
   return (
@@ -197,9 +205,9 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
 }
 
 function CollapsibleSection({
-  title,
+  children,
   count,
-  children
+  title
 }: {
   readonly title: string
   readonly count?: number

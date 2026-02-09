@@ -20,7 +20,7 @@ import { type ListItem, type TuiView, buildListItems } from "../ListBuilder.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { applySettingsFilter, computeItemPositions, findGroupHeader, findStableIndex } from "./mainlist-utils.js"
 import { NotificationsTable } from "./NotificationsTable.js"
-import { SettingsTable } from "./SettingsTable.js"
+import { SettingsView } from "./SettingsView.js"
 
 // ── Hooks ───────────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ export function MainList({ onSelectPR }: MainListProps) {
     )
   }
 
-  if (view === "settings") return <SettingsTable items={items} selectedIndex={stableIndex} />
+  if (view === "settings") return <SettingsView items={items} selectedIndex={stableIndex} />
   if (view === "notifications") return <NotificationsTable items={items} selectedIndex={stableIndex} />
 
   return (

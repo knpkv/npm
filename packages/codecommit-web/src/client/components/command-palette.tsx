@@ -1,8 +1,15 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { FilterIcon, RefreshCwIcon } from "lucide-react"
+import { BellIcon, FilterIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
 import { useEffect } from "react"
 import { refreshAtom } from "../atoms/app.js"
-import { commandPaletteAtom, quickFilterAtom, type QuickFilterType, viewAtom } from "../atoms/ui.js"
+import {
+  commandPaletteAtom,
+  quickFilterAtom,
+  type QuickFilterType,
+  type SettingsTab,
+  settingsTabAtom,
+  viewAtom
+} from "../atoms/ui.js"
 import {
   CommandDialog,
   CommandEmpty,
@@ -30,6 +37,13 @@ export function CommandPalette() {
   const setView = useAtomSet(viewAtom)
   const setQuickFilter = useAtomSet(quickFilterAtom)
   const refresh = useAtomSet(refreshAtom)
+  const setSettingsTab = useAtomSet(settingsTabAtom)
+
+  const openSettings = (tab?: SettingsTab) => {
+    setView("settings")
+    if (tab) setSettingsTab(tab)
+    setIsOpen(false)
+  }
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -66,6 +80,39 @@ export function CommandPalette() {
           >
             <FilterIcon />
             View: PR List
+          </CommandItem>
+          <CommandItem
+            onSelect={() => {
+              setView("notifications")
+              setIsOpen(false)
+            }}
+          >
+            <BellIcon />
+            View: Notifications
+            <CommandShortcut>N</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Settings">
+          <CommandItem onSelect={() => openSettings()}>
+            <SettingsIcon />
+            Open Settings
+          </CommandItem>
+          <CommandItem onSelect={() => openSettings("accounts")}>
+            <SettingsIcon />
+            Settings: Accounts
+          </CommandItem>
+          <CommandItem onSelect={() => openSettings("theme")}>
+            <SettingsIcon />
+            Settings: Theme
+          </CommandItem>
+          <CommandItem onSelect={() => openSettings("config")}>
+            <SettingsIcon />
+            Settings: Config
+          </CommandItem>
+          <CommandItem onSelect={() => openSettings("about")}>
+            <SettingsIcon />
+            Settings: About
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />
