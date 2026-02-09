@@ -1,5 +1,24 @@
 # @knpkv/codecommit-web
 
+## 0.3.0
+
+### Minor Changes
+
+- [#39](https://github.com/knpkv/npm/pull/39) [`70bc0e8`](https://github.com/knpkv/npm/commit/70bc0e8deda4e2bc97c6eb7afcabb7274608c629) Thanks @konopkov! - feat: settings page with notifications and config management
+  - Add settings page (accounts, theme, config, about) to web and TUI
+  - Add notification profile field to NotificationItem domain model
+  - Add config backup/reset/validate with atomic backup (tmp+rename)
+  - Add SSO login/logout endpoints with semaphore and timeout
+  - Add notifications page with auth-error detection and inline SSO actions
+  - Persist theme to localStorage, debounce account toggle saves
+  - Add ARIA roles to web settings tabs
+  - Fix useMemo side-effect, exit timeout cleanup, CORS credentials
+
+### Patch Changes
+
+- Updated dependencies [[`70bc0e8`](https://github.com/knpkv/npm/commit/70bc0e8deda4e2bc97c6eb7afcabb7274608c629)]:
+  - @knpkv/codecommit-core@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
