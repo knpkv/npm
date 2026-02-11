@@ -107,7 +107,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     const repoSet = new Set<string>()
     for (const pr of appState.pullRequests) {
       authorSet.add(pr.author)
-      accountSet.add(pr.account.id)
+      accountSet.add(pr.account.profile)
       repoSet.add(pr.repositoryName)
       const scope = extractScope(pr.title)
       if (scope) {

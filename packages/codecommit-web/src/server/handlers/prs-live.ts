@@ -30,9 +30,19 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.forkDaemon,
           Effect.map(() => "ok")
         ))
+      .handle("search", ({ urlParams }) =>
+        prService.searchPullRequests(urlParams.q).pipe(
+          Effect.mapError((e) => new ApiError({ message: String(e) }))
+        ))
+      .handle("refreshSingle", ({ path }) =>
+        prService.refreshSinglePR(path.awsAccountId, path.prId).pipe(
+          Effect.forkDaemon,
+          Effect.map(() => "ok"),
+          Effect.mapError((e) => new ApiError({ message: String(e) }))
+        ))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({
-          account: { profile: payload.account.id, region: payload.account.region },
+          account: { profile: payload.account.profile, region: payload.account.region },
           repositoryName: payload.repositoryName,
           title: payload.title,
           ...(payload.description && { description: payload.description }),
@@ -43,7 +53,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("comments", ({ payload }) =>
         awsClient.getCommentsForPullRequest({
-          account: { profile: payload.account.id, region: payload.account.region },
+          account: { profile: payload.account.profile, region: payload.account.region },
           pullRequestId: payload.pullRequestId,
           repositoryName: payload.repositoryName
         }).pipe(

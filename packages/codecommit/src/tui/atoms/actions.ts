@@ -117,7 +117,7 @@ export const loginToAwsAtom = runtimeAtom.fn(
 export const openPrAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*(pr: Domain.PullRequest) {
     const service = yield* PRService.PRService
-    const profile = pr.account.id
+    const profile = pr.account.profile
 
     yield* copyToClipboard(pr.link)
 
@@ -201,7 +201,7 @@ export const createPrAtom = runtimeAtom.fn(
     })
 
     const prId = yield* awsClient.createPullRequest({
-      account: { profile: input.account.id, region: input.account.region },
+      account: { profile: input.account.profile, region: input.account.region },
       repositoryName: input.repositoryName,
       title: input.title,
       ...(input.description && { description: input.description }),
@@ -241,7 +241,7 @@ export const fetchPrCommentsAtom = runtimeAtom.fn(
     const awsClient = yield* AwsClient.AwsClient
 
     return yield* awsClient.getCommentsForPullRequest({
-      account: { profile: pr.account.id, region: pr.account.region },
+      account: { profile: pr.account.profile, region: pr.account.region },
       pullRequestId: pr.id,
       repositoryName: pr.repositoryName
     }).pipe(
@@ -263,7 +263,7 @@ export const listBranchesAtom = runtimeAtom.fn(
     const awsClient = yield* AwsClient.AwsClient
 
     const branches: Array<string> = yield* awsClient.listBranches({
-      account: { profile: input.account.id, region: input.account.region },
+      account: { profile: input.account.profile, region: input.account.region },
       repositoryName: input.repositoryName
     }).pipe(
       Effect.tapError((e) => notifyError("List Branches Failed", e)),

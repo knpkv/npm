@@ -15,6 +15,7 @@
  */
 export * as AwsClient from "./AwsClient/index.js"
 export * as AwsClientConfig from "./AwsClientConfig.js"
+export * as CacheService from "./CacheService/index.js"
 export * as ConfigService from "./ConfigService/index.js"
 export * as DateUtils from "./DateUtils.js"
 export * as Domain from "./Domain.js"

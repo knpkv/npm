@@ -1,11 +1,12 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect-atom/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
 import { LoaderIcon } from "lucide-react"
 import { useMemo } from "react"
+import { useNavigate } from "react-router"
 import { appStateAtom } from "../atoms/app.js"
-import { filterTextAtom, quickFilterAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { filterTextAtom, quickFilterAtom } from "../atoms/ui.js"
 import { extractScope } from "../utils/extractScope.js"
 import { PRRow } from "./pr-row.js"
 import { Badge } from "./ui/badge.js"
@@ -16,8 +17,7 @@ export function PRList() {
   const state = useAtomValue(appStateAtom)
   const filterText = useAtomValue(filterTextAtom)
   const quickFilter = useAtomValue(quickFilterAtom)
-  const setSelectedPrId = useAtomSet(selectedPrIdAtom)
-  const setView = useAtomSet(viewAtom)
+  const navigate = useNavigate()
 
   const isLoading = state.status === "loading"
   const prs = state.pullRequests
@@ -49,7 +49,7 @@ export function PRList() {
         if (currentUser && pr.author !== currentUser) return false
         return extractScope(pr.title) === quickFilter.value
       }
-      if (quickFilter.type === "account") return pr.account?.id === quickFilter.value
+      if (quickFilter.type === "account") return pr.account?.profile === quickFilter.value
       if (quickFilter.type === "author") return pr.author === quickFilter.value
       if (quickFilter.type === "scope") return extractScope(pr.title) === quickFilter.value
       if (quickFilter.type === "repo") return pr.repositoryName === quickFilter.value
@@ -74,7 +74,7 @@ export function PRList() {
 
     const byAccount = new Map<string, Array<PullRequest>>()
     for (const pr of prs) {
-      const accountId = pr.account?.id ?? "unknown"
+      const accountId = pr.account?.profile ?? "unknown"
       if (!byAccount.has(accountId)) {
         byAccount.set(accountId, [])
       }
@@ -104,8 +104,8 @@ export function PRList() {
   }, [prs, currentUser, filterText, quickFilter])
 
   const handlePRClick = (pr: PullRequest) => {
-    setSelectedPrId(pr.id)
-    setView("details")
+    const accountKey = pr.account.awsAccountId ?? pr.account.profile
+    navigate(`/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`)
   }
 
   const enrichedCount = prs.filter((p) => p.commentCount !== undefined).length

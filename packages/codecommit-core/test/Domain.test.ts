@@ -7,8 +7,8 @@ describe("Domain", () => {
     // Schema.Class decode must enforce branded AwsProfileName on id field
     it.effect("decodes valid account", () =>
       Effect.gen(function*() {
-        const account = yield* Schema.decode(Account)({ id: "dev", region: "us-east-1" })
-        expect(account.id).toBe("dev")
+        const account = yield* Schema.decode(Account)({ profile: "dev", region: "us-east-1" })
+        expect(account.profile).toBe("dev")
         expect(account.region).toBe("us-east-1")
       }))
   })
@@ -22,7 +22,7 @@ describe("Domain", () => {
       creationDate: new Date("2024-01-15"),
       lastModifiedDate: new Date("2024-01-16"),
       link: "https://console.aws.amazon.com",
-      account: { id: "dev", region: "us-east-1" },
+      account: { profile: "dev", region: "us-east-1" },
       status: "OPEN" as const,
       sourceBranch: "feature/x",
       destinationBranch: "main",

@@ -92,8 +92,9 @@ export type AppStatus = typeof AppStatus.Type
  * @category Domain
  */
 export class Account extends Schema.Class<Account>("Account")({
-  id: AwsProfileName,
-  region: AwsRegion
+  profile: AwsProfileName,
+  region: AwsRegion,
+  awsAccountId: Schema.optional(Schema.String)
 }) {}
 
 /**
@@ -232,6 +233,40 @@ export const encodeCommentLocations = (
     ...(loc.afterCommitId != null ? { afterCommitId: loc.afterCommitId } : {}),
     comments: loc.comments.map(serializeThread)
   }))
+
+// ---------------------------------------------------------------------------
+// Persistent Notification Types
+// ---------------------------------------------------------------------------
+
+export const PersistentNotificationType = Schema.Literal(
+  "new_comment",
+  "comment_edited",
+  "comment_deleted",
+  "approval_changed",
+  "merge_changed",
+  "title_changed",
+  "description_changed",
+  "pr_merged",
+  "pr_closed",
+  "pr_reopened"
+)
+export type PersistentNotificationType = typeof PersistentNotificationType.Type
+
+export class PersistentNotification extends Schema.Class<PersistentNotification>("PersistentNotification")({
+  id: Schema.Number,
+  pullRequestId: PullRequestId,
+  awsAccountId: Schema.String,
+  type: PersistentNotificationType,
+  message: Schema.String,
+  createdAt: Schema.DateFromSelf,
+  read: Schema.Boolean
+}) {}
+
+export type PRSyncStatus =
+  | { readonly _tag: "cached"; readonly fetchedAt: Date }
+  | { readonly _tag: "syncing"; readonly fetchedAt: Date }
+  | { readonly _tag: "upToDate"; readonly fetchedAt: Date }
+  | { readonly _tag: "failed"; readonly fetchedAt: Date; readonly error: string }
 
 // ---------------------------------------------------------------------------
 // State Models

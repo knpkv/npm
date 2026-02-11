@@ -1,14 +1,14 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { BellIcon, FilterIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
 import { useEffect } from "react"
+import { useNavigate } from "react-router"
 import { refreshAtom } from "../atoms/app.js"
 import {
   commandPaletteAtom,
   quickFilterAtom,
   type QuickFilterType,
   type SettingsTab,
-  settingsTabAtom,
-  viewAtom
+  settingsTabAtom
 } from "../atoms/ui.js"
 import {
   CommandDialog,
@@ -34,14 +34,14 @@ const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string; shortcut: stri
 export function CommandPalette() {
   const isOpen = useAtomValue(commandPaletteAtom)
   const setIsOpen = useAtomSet(commandPaletteAtom)
-  const setView = useAtomSet(viewAtom)
+  const navigate = useNavigate()
   const setQuickFilter = useAtomSet(quickFilterAtom)
   const refresh = useAtomSet(refreshAtom)
   const setSettingsTab = useAtomSet(settingsTabAtom)
 
   const openSettings = (tab?: SettingsTab) => {
-    setView("settings")
     if (tab) setSettingsTab(tab)
+    navigate("/settings")
     setIsOpen(false)
   }
 
@@ -74,7 +74,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             onSelect={() => {
-              setView("prs")
+              navigate("/")
               setIsOpen(false)
             }}
           >
@@ -83,7 +83,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             onSelect={() => {
-              setView("notifications")
+              navigate("/notifications")
               setIsOpen(false)
             }}
           >
@@ -126,6 +126,7 @@ export function CommandPalette() {
                 } else {
                   setQuickFilter({ type: f.key })
                 }
+                navigate("/")
                 setIsOpen(false)
               }}
             >

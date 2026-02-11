@@ -1,8 +1,8 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import { BellIcon, MoonIcon, RefreshCwIcon, SettingsIcon, SunIcon } from "lucide-react"
+import { useNavigate } from "react-router"
 import { appStateAtom, refreshAtom } from "../atoms/app.js"
-import { viewAtom } from "../atoms/ui.js"
 import { cn } from "../lib/utils.js"
 import { useTheme } from "./theme-provider.js"
 import { Button } from "./ui/button.js"
@@ -12,18 +12,20 @@ import { Separator } from "./ui/separator.js"
 export function Header() {
   const state = useAtomValue(appStateAtom)
   const refresh = useAtomSet(refreshAtom)
-  const setView = useAtomSet(viewAtom)
+  const navigate = useNavigate()
   const { setTheme, theme } = useTheme()
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
-  const notifCount = state.notifications?.length ?? 0
+  const systemCount = state.notifications?.length ?? 0
+  const persistentCount = state.unreadNotificationCount ?? 0
+  const notifCount = systemCount + persistentCount
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
         <button
           className="text-sm font-semibold tracking-tight hover:text-foreground/80"
-          onClick={() => setView("prs")}
+          onClick={() => navigate("/")}
         >
           codecommit
         </button>
@@ -39,7 +41,7 @@ export function Header() {
           <Button variant="ghost" size="icon-sm" onClick={() => refresh({})} disabled={isLoading}>
             <RefreshCwIcon className={cn("size-4", isLoading && "animate-spin")} />
           </Button>
-          <Button variant="ghost" size="icon-sm" className="relative" onClick={() => setView("notifications")}>
+          <Button variant="ghost" size="icon-sm" className="relative" onClick={() => navigate("/notifications")}>
             <BellIcon className="size-4" />
             {notifCount > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
@@ -48,7 +50,7 @@ export function Header() {
             )}
             <span className="sr-only">Notifications</span>
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setView("settings")}>
+          <Button variant="ghost" size="icon-sm" onClick={() => navigate("/settings")}>
             <SettingsIcon className="size-4" />
             <span className="sr-only">Settings</span>
           </Button>

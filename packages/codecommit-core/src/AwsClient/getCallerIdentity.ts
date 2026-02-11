@@ -8,9 +8,17 @@ import { Effect, Layer } from "effect"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
 
+export interface CallerIdentity {
+  readonly username: string
+  readonly accountId: string
+}
+
 const callGetCallerIdentity = (account: AccountParams) =>
   sts.getCallerIdentity({}).pipe(
-    Effect.map((resp) => normalizeAuthor(resp.Arn ?? "")),
+    Effect.map((resp): CallerIdentity => ({
+      username: normalizeAuthor(resp.Arn ?? ""),
+      accountId: resp.Account ?? ""
+    })),
     Effect.mapError((cause) => makeApiError("getCallerIdentity", account.profile, account.region, cause))
   )
 

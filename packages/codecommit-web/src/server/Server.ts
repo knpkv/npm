@@ -7,11 +7,26 @@ import {
   Path
 } from "@effect/platform"
 import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
-import { AwsClient, AwsClientConfig, ConfigService, NotificationsService, PRService } from "@knpkv/codecommit-core"
-import { Effect, Layer } from "effect"
+import {
+  AwsClient,
+  AwsClientConfig,
+  CacheService,
+  ConfigService,
+  NotificationsService,
+  PRService
+} from "@knpkv/codecommit-core"
+import { Duration, Effect, Layer } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
-import { AccountsLive, ConfigLive, EventsLive, NotificationsLive, PrsLive } from "./handlers/index.js"
+import {
+  AccountsLive,
+  ConfigLive,
+  EventsLive,
+  NotificationsLive,
+  PersistentNotificationsLive,
+  PrsLive,
+  SubscriptionsLive
+} from "./handlers/index.js"
 
 // MIME types for common files
 const mimeTypes: Record<string, string> = {
@@ -78,7 +93,15 @@ const serveStatic = Effect.gen(function*() {
 })
 
 // API handlers layer
-const HandlersLive = Layer.mergeAll(PrsLive, ConfigLive, AccountsLive, EventsLive, NotificationsLive)
+const HandlersLive = Layer.mergeAll(
+  PrsLive,
+  ConfigLive,
+  AccountsLive,
+  EventsLive,
+  NotificationsLive,
+  SubscriptionsLive,
+  PersistentNotificationsLive
+)
 
 // Platform dependencies
 const PlatformLive = Layer.mergeAll(
@@ -93,9 +116,19 @@ const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(Layer.provide(PlatformL
 // NotificationsService — single shared instance
 const NotificationsLive_ = NotificationsService.NotificationsServiceLive
 
+// Cache repos — each auto-wires DatabaseLive via Effect.Service dependencies
+const ReposLive = Layer.mergeAll(
+  CacheService.PullRequestRepo.Default,
+  CacheService.CommentRepo.Default,
+  CacheService.NotificationRepo.Default,
+  CacheService.SubscriptionRepo.Default,
+  CacheService.SyncMetadataRepo.Default
+)
+
 // PRService dependencies
 const PRServiceDeps = Layer.mergeAll(
-  AwsClient.AwsClientLive
+  AwsClient.AwsClientLive,
+  ReposLive
 ).pipe(
   Layer.provideMerge(ConfigLive_),
   Layer.provideMerge(NotificationsLive_),
@@ -119,22 +152,40 @@ const AllServicesLive = Layer.mergeAll(
   AwsClientLive_
 )
 
-// Fork initial PR refresh when services are built
-const InitialRefresh = Layer.effectDiscard(
+// Fork auto-refresh loop: initial refresh + recurring based on config
+const AutoRefresh = Layer.effectDiscard(
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
+    const configService = yield* ConfigService.ConfigService
     yield* Effect.forkDaemon(
-      prService.refresh.pipe(
-        Effect.tap(() => Effect.logInfo("Initial PR refresh complete"))
-      )
+      Effect.gen(function*() {
+        yield* prService.refresh
+        yield* Effect.logInfo("Initial PR refresh complete")
+        return yield* Effect.forever(
+          Effect.gen(function*() {
+            const config = yield* configService.load.pipe(
+              Effect.catchAll(() =>
+                Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const)
+              )
+            )
+            if (config.autoRefresh) {
+              yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
+              yield* prService.refresh
+              yield* Effect.logInfo("Auto-refresh complete")
+            } else {
+              yield* Effect.sleep(Duration.seconds(30))
+            }
+          })
+        )
+      })
     )
   })
 )
 
-// API router with handlers — InitialRefresh shares AllServicesLive with handlers
+// API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.merge(
   HttpLayerRouter.addHttpApi(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
-  InitialRefresh
+  AutoRefresh
 ).pipe(
   Layer.provide(AllServicesLive),
   Layer.provide(FetchHttpClient.layer)
@@ -143,7 +194,7 @@ const ApiLive = Layer.merge(
 // Static file router - catches all non-API routes
 const StaticRouter = HttpLayerRouter.use((router) => router.add("GET", "/*", serveStatic))
 
-// Combined routes with CORS
+// Combined routes with CORS — orDie eliminates SQL/Migration errors from repo layers
 const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
   Layer.provide(
     HttpLayerRouter.cors({
@@ -151,12 +202,13 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"]
     })
-  )
+  ),
+  Layer.orDie
 )
 
 export const makeServer = (options: { port: number; hostname?: string }) =>
   HttpLayerRouter.serve(AllRoutes).pipe(
-    Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 255 })),
+    Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 0 })),
     Layer.provide(BunContext.layer)
   )
 

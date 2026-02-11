@@ -18,7 +18,8 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromSelf),
   currentUser: Schema.optional(Schema.String),
-  notifications: Schema.Array(NotificationItemResponse)
+  notifications: Schema.Array(NotificationItemResponse),
+  unreadNotificationCount: Schema.Number
 })
 
 const encode = Schema.encode(SsePayload)
@@ -45,10 +46,11 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
       Stream.mapEffect(() =>
         Effect.all({
           prState: SubscriptionRef.get(prService.state),
-          notifState: SubscriptionRef.get(notificationsService.state)
+          notifState: SubscriptionRef.get(notificationsService.state),
+          unreadCount: prService.getUnreadNotificationCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
         })
       ),
-      Stream.mapEffect(({ notifState, prState }) =>
+      Stream.mapEffect(({ notifState, prState, unreadCount }) =>
         encode({
           ...prState,
           notifications: notifState.items.map((item) => ({
@@ -57,7 +59,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
             message: item.message,
             timestamp: item.timestamp.toISOString(),
             ...(item.profile ? { profile: item.profile } : {})
-          }))
+          })),
+          unreadNotificationCount: unreadCount
         }).pipe(
           Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
           Effect.catchAll((e) =>

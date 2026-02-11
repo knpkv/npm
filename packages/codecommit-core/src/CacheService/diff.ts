@@ -1,0 +1,134 @@
+/**
+ * Diff logic for generating persistent notifications from state changes.
+ *
+ * @module
+ */
+import type { CommentThread, PersistentNotificationType, PRCommentLocation } from "../Domain.js"
+
+export interface NewNotification {
+  readonly pullRequestId: string
+  readonly awsAccountId: string
+  readonly type: PersistentNotificationType
+  readonly message: string
+}
+
+interface DiffablePR {
+  readonly id: string
+  readonly title: string
+  readonly description?: string | null | undefined
+  readonly status: string
+  readonly isApproved: boolean | number
+  readonly isMergeable: boolean | number
+  readonly commentCount?: number | null | undefined
+}
+
+export const diffPR = (
+  cached: DiffablePR,
+  fresh: DiffablePR,
+  awsAccountId: string
+): Array<NewNotification> => {
+  const base = { pullRequestId: fresh.id, awsAccountId }
+  const notifications: Array<NewNotification> = []
+
+  const freshComments = fresh.commentCount ?? 0
+  const cachedComments = cached.commentCount ?? 0
+  if (freshComments > cachedComments) {
+    notifications.push({ ...base, type: "new_comment", message: `New comments on #${fresh.id} ${fresh.title}` })
+  }
+
+  if (Boolean(fresh.isApproved) !== Boolean(cached.isApproved)) {
+    notifications.push({
+      ...base,
+      type: "approval_changed",
+      message: `Approval ${fresh.isApproved ? "granted" : "revoked"} on #${fresh.id}`
+    })
+  }
+
+  if (Boolean(fresh.isMergeable) !== Boolean(cached.isMergeable)) {
+    notifications.push({
+      ...base,
+      type: "merge_changed",
+      message: `#${fresh.id} is ${fresh.isMergeable ? "now mergeable" : "no longer mergeable"}`
+    })
+  }
+
+  if (fresh.title !== cached.title) {
+    notifications.push({ ...base, type: "title_changed", message: `Title changed on #${fresh.id}` })
+  }
+
+  if (fresh.description !== cached.description) {
+    notifications.push({ ...base, type: "description_changed", message: `Description updated on #${fresh.id}` })
+  }
+
+  if (fresh.status !== cached.status) {
+    if (fresh.status === "CLOSED" && !fresh.isMergeable) {
+      notifications.push({ ...base, type: "pr_merged", message: `#${fresh.id} ${fresh.title} was merged` })
+    } else if (fresh.status === "CLOSED") {
+      notifications.push({ ...base, type: "pr_closed", message: `#${fresh.id} ${fresh.title} was closed` })
+    } else if (fresh.status === "OPEN" && cached.status === "CLOSED") {
+      notifications.push({ ...base, type: "pr_reopened", message: `#${fresh.id} ${fresh.title} was reopened` })
+    }
+  }
+
+  return notifications
+}
+
+const flattenThreadComments = (thread: CommentThread): Array<{ id: string; content: string; deleted: boolean }> => {
+  const result: Array<{ id: string; content: string; deleted: boolean }> = [
+    { id: thread.root.id, content: thread.root.content, deleted: thread.root.deleted }
+  ]
+  for (const reply of thread.replies) {
+    for (const item of flattenThreadComments(reply)) {
+      result.push(item)
+    }
+  }
+  return result
+}
+
+const flattenLocations = (locations: ReadonlyArray<PRCommentLocation>) => {
+  const all: Array<{ id: string; content: string; deleted: boolean }> = []
+  for (const loc of locations) {
+    for (const thread of loc.comments) {
+      for (const item of flattenThreadComments(thread)) {
+        all.push(item)
+      }
+    }
+  }
+  return all
+}
+
+export const diffComments = (
+  cached: ReadonlyArray<PRCommentLocation>,
+  fresh: ReadonlyArray<PRCommentLocation>,
+  pullRequestId: string,
+  awsAccountId: string
+): Array<NewNotification> => {
+  const base = { pullRequestId, awsAccountId }
+  const cachedFlat = flattenLocations(cached)
+  const freshFlat = flattenLocations(fresh)
+  const cachedMap = new Map(cachedFlat.map((c) => [c.id, c]))
+  const cachedIds = new Set(cachedFlat.map((c) => c.id))
+  const notifications: Array<NewNotification> = []
+
+  let hasNew = false
+  let hasEdited = false
+  let hasDeleted = false
+
+  for (const f of freshFlat) {
+    if (!cachedIds.has(f.id) && !hasNew) {
+      notifications.push({ ...base, type: "new_comment", message: `New comment on #${pullRequestId}` })
+      hasNew = true
+    }
+    const old = cachedMap.get(f.id)
+    if (old && old.content !== f.content && !f.deleted && !hasEdited) {
+      notifications.push({ ...base, type: "comment_edited", message: `Comment edited on #${pullRequestId}` })
+      hasEdited = true
+    }
+    if (old && !old.deleted && f.deleted && !hasDeleted) {
+      notifications.push({ ...base, type: "comment_deleted", message: `Comment deleted on #${pullRequestId}` })
+      hasDeleted = true
+    }
+  }
+
+  return notifications
+}

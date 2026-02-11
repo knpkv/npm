@@ -1,6 +1,6 @@
 import { AppStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { AppState } from "../atoms/app.js"
 
 const PullRequestWire = Schema.Struct({
@@ -12,7 +12,7 @@ const PullRequestWire = Schema.Struct({
   creationDate: Schema.DateFromString,
   lastModifiedDate: Schema.DateFromString,
   link: Schema.String,
-  account: Schema.Struct({ id: Schema.String, region: Schema.String }),
+  account: Schema.Struct({ profile: Schema.String, region: Schema.String, awsAccountId: Schema.optional(Schema.String) }),
   status: Schema.Literal("OPEN", "CLOSED"),
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
@@ -41,24 +41,57 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
-  notifications: Schema.optional(Schema.Array(NotificationItemWire))
+  notifications: Schema.optional(Schema.Array(NotificationItemWire)),
+  unreadNotificationCount: Schema.optional(Schema.Number)
 })
 
 const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))
 
+export type ConnectionState = "connected" | "reconnecting" | "disconnected"
+
 export function useSSE(onState: (state: AppState) => void) {
   const callbackRef = useRef(onState)
   callbackRef.current = onState
+  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected")
 
   useEffect(() => {
-    const es = new EventSource("/api/events/")
-    es.onmessage = (event) => {
-      try {
-        callbackRef.current(decode(event.data) as AppState)
-      } catch {
-        // decode errors are non-fatal — SSE will retry
+    let es: EventSource | null = null
+    let retryCount = 0
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null
+
+    const connect = () => {
+      es = new EventSource("/api/events/")
+
+      es.onopen = () => {
+        retryCount = 0
+        setConnectionState("connected")
+      }
+
+      es.onmessage = (event) => {
+        try {
+          callbackRef.current(decode(event.data) as unknown as AppState)
+        } catch {
+          // decode errors are non-fatal
+        }
+      }
+
+      es.onerror = () => {
+        es?.close()
+        setConnectionState("reconnecting")
+        const delay = Math.min(1000 * 2 ** retryCount, 30000)
+        retryTimeout = setTimeout(() => {
+          retryCount++
+          connect()
+        }, delay)
       }
     }
-    return () => es.close()
+
+    connect()
+    return () => {
+      es?.close()
+      if (retryTimeout) clearTimeout(retryTimeout)
+    }
   }, [])
+
+  return connectionState
 }

@@ -1,5 +1,11 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
-import { Account, AwsProfileName, PRCommentLocationJson, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import {
+  Account,
+  AwsProfileName,
+  PRCommentLocationJson,
+  PullRequest,
+  PullRequestId
+} from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 // API error returned to clients for AWS failures
@@ -7,10 +13,55 @@ export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
   message: Schema.String
 }) {}
 
+// Cached PR schema (flat row from SQLite)
+export const CachedPullRequestResponse = Schema.Struct({
+  id: Schema.String,
+  awsAccountId: Schema.String,
+  accountProfile: Schema.String,
+  accountRegion: Schema.String,
+  title: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  author: Schema.String,
+  repositoryName: Schema.String,
+  creationDate: Schema.String,
+  lastModifiedDate: Schema.String,
+  status: Schema.String,
+  sourceBranch: Schema.String,
+  destinationBranch: Schema.String,
+  isMergeable: Schema.Number,
+  isApproved: Schema.Number,
+  commentCount: Schema.NullOr(Schema.Number),
+  link: Schema.String,
+  fetchedAt: Schema.String
+})
+
+// Persistent notification schema
+export const PersistentNotificationResponse = Schema.Struct({
+  id: Schema.Number,
+  pullRequestId: Schema.String,
+  awsAccountId: Schema.String,
+  type: Schema.String,
+  message: Schema.String,
+  createdAt: Schema.String,
+  read: Schema.Number
+})
+
 // PR endpoints
 export class PrsGroup extends HttpApiGroup.make("prs")
   .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Chunk(PullRequest)))
   .add(HttpApiEndpoint.post("refresh", "/refresh").addSuccess(Schema.String))
+  .add(
+    HttpApiEndpoint.get("search", "/search")
+      .setUrlParams(Schema.Struct({ q: Schema.String }))
+      .addSuccess(Schema.Array(CachedPullRequestResponse))
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh")
+      .setPath(Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
   .add(
     HttpApiEndpoint.post("create", "/")
       .setPayload(
@@ -68,6 +119,8 @@ const ConfigResponse = Schema.Struct({
     })
   ),
   autoDetect: Schema.Boolean,
+  autoRefresh: Schema.Boolean,
+  refreshIntervalSeconds: Schema.Number,
   currentUser: Schema.optional(Schema.String)
 })
 
@@ -90,7 +143,9 @@ const ConfigSavePayload = Schema.Struct({
       enabled: Schema.Boolean
     })
   ),
-  autoDetect: Schema.Boolean
+  autoDetect: Schema.Boolean,
+  autoRefresh: Schema.Boolean,
+  refreshIntervalSeconds: Schema.Number
 })
 
 const ConfigResetResponse = Schema.Struct({
@@ -122,6 +177,57 @@ export const NotificationItemResponse = Schema.Struct({
   profile: Schema.optional(Schema.String)
 })
 
+// Subscription endpoints
+const SubscriptionPayload = Schema.Struct({
+  awsAccountId: Schema.String,
+  pullRequestId: Schema.String
+})
+
+const SubscriptionResponse = Schema.Struct({
+  awsAccountId: Schema.String,
+  pullRequestId: Schema.String
+})
+
+export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
+  .add(
+    HttpApiEndpoint.post("subscribe", "/subscribe")
+      .setPayload(SubscriptionPayload)
+      .addSuccess(Schema.String)
+  )
+  .add(
+    HttpApiEndpoint.post("unsubscribe", "/unsubscribe")
+      .setPayload(SubscriptionPayload)
+      .addSuccess(Schema.String)
+  )
+  .add(
+    HttpApiEndpoint.get("list", "/")
+      .addSuccess(Schema.Array(SubscriptionResponse))
+  )
+  .prefix("/api/subscriptions")
+{}
+
+// Persistent notifications endpoints
+export class PersistentNotificationsGroup extends HttpApiGroup.make("persistentNotifications")
+  .add(
+    HttpApiEndpoint.get("list", "/")
+      .addSuccess(Schema.Array(PersistentNotificationResponse))
+  )
+  .add(
+    HttpApiEndpoint.get("count", "/count")
+      .addSuccess(Schema.Struct({ unread: Schema.Number }))
+  )
+  .add(
+    HttpApiEndpoint.post("markRead", "/read")
+      .setPayload(Schema.Struct({ id: Schema.Number }))
+      .addSuccess(Schema.String)
+  )
+  .add(
+    HttpApiEndpoint.post("markAllRead", "/read-all")
+      .addSuccess(Schema.String)
+  )
+  .prefix("/api/notifications/persistent")
+{}
+
 export class NotificationsGroup extends HttpApiGroup.make("notifications")
   .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Array(NotificationItemResponse)))
   .add(HttpApiEndpoint.post("clear", "/clear").addSuccess(Schema.String))
@@ -147,4 +253,6 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(ConfigGroup)
   .add(AccountsGroup)
   .add(NotificationsGroup)
+  .add(SubscriptionsGroup)
+  .add(PersistentNotificationsGroup)
 {}

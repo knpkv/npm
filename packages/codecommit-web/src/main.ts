@@ -3,7 +3,7 @@ import { makeCodeCommitServer } from "./server/Server.js"
 
 const startServer = (port: number): Effect.Effect<never> =>
   Effect.logInfo(`Starting CodeCommit Web on http://localhost:${port}`).pipe(
-    Effect.andThen(Effect.suspend(() => Layer.launch(makeCodeCommitServer(port)))),
+    Effect.andThen(Layer.launch(makeCodeCommitServer(port))),
     Effect.catchAllDefect((defect) =>
       defect instanceof Error && defect.message.includes("port") && port < 3010
         ? Effect.logWarning(`Port ${port} in use, trying ${port + 1}`).pipe(

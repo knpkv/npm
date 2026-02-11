@@ -13,7 +13,9 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
       .handle("list", () =>
         Effect.gen(function*() {
           const config = yield* configService.load.pipe(
-            Effect.catchAll(() => Effect.succeed({ accounts: [], autoDetect: true }))
+            Effect.catchAll(() =>
+              Effect.succeed({ accounts: [], autoDetect: true, autoRefresh: true, refreshIntervalSeconds: 300 })
+            )
           )
           const state = yield* SubscriptionRef.get(prService.state)
           return {
@@ -23,6 +25,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               enabled: a.enabled
             })),
             autoDetect: config.autoDetect,
+            autoRefresh: config.autoRefresh,
+            refreshIntervalSeconds: config.refreshIntervalSeconds,
             currentUser: state.currentUser
           }
         }))
@@ -52,7 +56,9 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               regions: a.regions.map((r) => decodeRegion(r)),
               enabled: a.enabled
             })),
-            autoDetect: payload.autoDetect
+            autoDetect: payload.autoDetect,
+            autoRefresh: payload.autoRefresh,
+            refreshIntervalSeconds: payload.refreshIntervalSeconds
           }).pipe(
             Effect.mapError((e) => new ApiError({ message: e.message }))
           )
@@ -79,6 +85,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
                 enabled: a.enabled
               })),
               autoDetect: config.autoDetect,
+              autoRefresh: config.autoRefresh,
+              refreshIntervalSeconds: config.refreshIntervalSeconds,
               currentUser: state.currentUser
             }
           }

@@ -8,6 +8,18 @@ import { Separator } from "./ui/separator.js"
 
 type StatusFilter = "all" | "on" | "off"
 
+interface ConfigData {
+  readonly accounts: ReadonlyArray<{
+    readonly profile: string
+    readonly regions: ReadonlyArray<string>
+    readonly enabled: boolean
+  }>
+  readonly autoDetect: boolean
+  readonly autoRefresh: boolean
+  readonly refreshIntervalSeconds: number
+  readonly currentUser?: string | undefined
+}
+
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
   const saveConfig = useAtomSet(configSaveAtom)
@@ -24,35 +36,42 @@ export function SettingsAccounts() {
     []
   )
 
+  const saveWithDebounce = useCallback(
+    (payload: {
+      accounts: Array<{ profile: string; regions: string[]; enabled: boolean }>
+      autoDetect: boolean
+      autoRefresh: boolean
+      refreshIntervalSeconds: number
+    }) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        saveConfig({ payload })
+      }, 500)
+    },
+    [saveConfig]
+  )
+
   const toggleAccount = useCallback(
     (
       profile: string,
-      accounts: ReadonlyArray<{
-        readonly profile: string
-        readonly regions: ReadonlyArray<string>
-        readonly enabled: boolean
-      }>,
-      autoDetect: boolean
+      data: ConfigData
     ) => {
-      const current = overrides[profile] ?? accounts.find((a) => a.profile === profile)?.enabled ?? true
+      const current = overrides[profile] ?? data.accounts.find((a) => a.profile === profile)?.enabled ?? true
       const next = !current
       const nextOverrides = { ...overrides, [profile]: next }
       setOverrides(nextOverrides)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        saveConfig({
-          payload: {
-            accounts: accounts.map((a) => ({
-              profile: a.profile,
-              regions: [...a.regions],
-              enabled: a.profile === profile ? next : (nextOverrides[a.profile] ?? a.enabled)
-            })),
-            autoDetect
-          }
-        })
-      }, 500)
+      saveWithDebounce({
+        accounts: data.accounts.map((a) => ({
+          profile: a.profile,
+          regions: [...a.regions],
+          enabled: a.profile === profile ? next : (nextOverrides[a.profile] ?? a.enabled)
+        })),
+        autoDetect: data.autoDetect,
+        autoRefresh: data.autoRefresh,
+        refreshIntervalSeconds: data.refreshIntervalSeconds
+      })
     },
-    [saveConfig, overrides]
+    [saveWithDebounce, overrides]
   )
 
   return (
@@ -93,29 +112,13 @@ function AccountsList({
   statusFilter,
   toggleAccount
 }: {
-  readonly data: {
-    readonly accounts: ReadonlyArray<{
-      readonly profile: string
-      readonly regions: ReadonlyArray<string>
-      readonly enabled: boolean
-    }>
-    readonly autoDetect: boolean
-    readonly currentUser?: string | undefined
-  }
+  readonly data: ConfigData
   readonly overrides: Record<string, boolean>
   readonly search: string
   readonly setSearch: (s: string) => void
   readonly statusFilter: StatusFilter
   readonly setStatusFilter: (f: StatusFilter) => void
-  readonly toggleAccount: (
-    profile: string,
-    accounts: ReadonlyArray<{
-      readonly profile: string
-      readonly regions: ReadonlyArray<string>
-      readonly enabled: boolean
-    }>,
-    autoDetect: boolean
-  ) => void
+  readonly toggleAccount: (profile: string, data: ConfigData) => void
   readonly onSsoLogout: (profile: string) => void
 }) {
   const accounts = useMemo(
@@ -201,7 +204,7 @@ function AccountsList({
                   variant={account.enabled ? "default" : "outline"}
                   size="sm"
                   className="ml-2 h-6 px-2 text-xs shrink-0"
-                  onClick={() => toggleAccount(account.profile, data.accounts, data.autoDetect)}
+                  onClick={() => toggleAccount(account.profile, data)}
                 >
                   {account.enabled ? "On" : "Off"}
                 </Button>

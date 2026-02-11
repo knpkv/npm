@@ -1,25 +1,9 @@
 import { Atom } from "@effect-atom/atom-react"
 
 /**
- * View type
- */
-export type ViewType = "prs" | "details" | "settings" | "notifications"
-
-/**
- * Current active view
- */
-export const viewAtom = Atom.make<ViewType>("prs").pipe(Atom.keepAlive)
-
-/**
  * Filter text for PR list
  */
 export const filterTextAtom = Atom.make("").pipe(Atom.keepAlive)
-
-/**
- * Currently selected PR ID for details view — stores ID so detail view
- * can derive live PR from appStateAtom (receives SSE updates).
- */
-export const selectedPrIdAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)
 
 /**
  * Quick filter type
@@ -47,6 +31,6 @@ export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
 /**
  * Settings tab
  */
-export type SettingsTab = "accounts" | "theme" | "config" | "about"
-export const SettingsTabs: ReadonlyArray<SettingsTab> = ["accounts", "theme", "config", "about"]
+export type SettingsTab = "accounts" | "refresh" | "theme" | "config" | "about"
+export const SettingsTabs: ReadonlyArray<SettingsTab> = ["accounts", "refresh", "theme", "config", "about"]
 export const settingsTabAtom = Atom.make<SettingsTab>("accounts").pipe(Atom.keepAlive)

@@ -35,6 +35,9 @@
     "@effect/experimental": "latest",
     "@effect/platform": "latest",
     "@effect/schema": "latest",
+    "@effect/sql": "latest",
+    "@effect/sql-libsql": "latest",
+    "@libsql/client": "^0.14.0",
     "distilled-aws": "0.0.21",
     "effect": "latest"
   },

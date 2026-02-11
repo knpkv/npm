@@ -35,10 +35,12 @@ export const makeLoad = (
             regions: p.region ? [p.region] : [],
             enabled: false
           })),
-          autoDetect: true
+          autoDetect: true,
+          autoRefresh: true,
+          refreshIntervalSeconds: 300
         }
       }
-      return { accounts: [], autoDetect: true }
+      return { accounts: [], autoDetect: true, autoRefresh: true, refreshIntervalSeconds: 300 }
     }
 
     const content = yield* fs.readFileString(configPath).pipe(

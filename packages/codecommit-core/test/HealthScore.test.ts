@@ -21,7 +21,7 @@ const makePR = (overrides: Partial<{
     creationDate: overrides.creationDate ?? new Date("2024-01-01"),
     lastModifiedDate: overrides.lastModifiedDate ?? new Date("2024-01-01"),
     link: "https://example.com",
-    account: { id: "dev", region: "us-east-1" },
+    account: { profile: "dev", region: "us-east-1" },
     status: "OPEN" as const,
     sourceBranch: "feature/x",
     destinationBranch: "main",

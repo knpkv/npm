@@ -41,7 +41,9 @@ export const makeReset = (
         regions: p.region ? [p.region] : [],
         enabled: false
       })),
-      autoDetect: true
+      autoDetect: true,
+      autoRefresh: true,
+      refreshIntervalSeconds: 300
     }
 
     yield* save(config)

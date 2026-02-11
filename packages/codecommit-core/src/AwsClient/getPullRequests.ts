@@ -104,7 +104,7 @@ const RawToPullRequest = Schema.transform(
         lastModifiedDate: raw.lastActivityDate!,
         link:
           `https://${raw.accountRegion}.console.aws.amazon.com/codesuite/codecommit/repositories/${raw.repoName}/pull-requests/${raw.pullRequestId}?region=${raw.accountRegion}`,
-        account: decodeAccount({ id: raw.accountProfile, region: raw.accountRegion }),
+        account: decodeAccount({ profile: raw.accountProfile, region: raw.accountRegion }),
         status: raw.pullRequestStatus === "OPEN" ? "OPEN" as const : "CLOSED" as const,
         sourceBranch,
         destinationBranch,
@@ -127,7 +127,7 @@ const RawToPullRequest = Schema.transform(
       repoName: pr.repositoryName,
       isApproved: pr.isApproved,
       isMergeable: pr.isMergeable,
-      accountProfile: pr.account.id,
+      accountProfile: pr.account.profile,
       accountRegion: pr.account.region
     })
   }

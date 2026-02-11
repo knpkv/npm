@@ -10,12 +10,12 @@ import {
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
-import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ExternalLinkIcon } from "lucide-react"
+import { ArrowLeftIcon, ArrowRightIcon, BellIcon, BellOffIcon, ChevronDownIcon, ExternalLinkIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
+import { useNavigate, useParams } from "react-router"
 import remarkGfm from "remark-gfm"
-import { appStateAtom, commentsAtom, openPrAtom } from "../atoms/app.js"
-import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { appStateAtom, commentsAtom, openPrAtom, subscribeAtom, subscriptionsQueryAtom, unsubscribeAtom } from "../atoms/app.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { StorageKeys } from "../storage-keys.js"
 import { Badge } from "./ui/badge.js"
@@ -156,10 +156,10 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
       payload: {
         pullRequestId: pr.id,
         repositoryName: pr.repositoryName,
-        account: { id: pr.account.id, region: pr.account.region }
+        account: { profile: pr.account.profile, region: pr.account.region }
       }
     })
-  }, [pr.id, pr.repositoryName, pr.account.id, pr.account.region, fetchComments])
+  }, [pr.id, pr.repositoryName, pr.account.profile, pr.account.region, fetchComments])
 
   return Result.builder(commentsResult)
     .onInitialOrWaiting(() => (
@@ -230,23 +230,55 @@ function CollapsibleSection({
 }
 
 export function PRDetail() {
-  const selectedPrId = useAtomValue(selectedPrIdAtom)
+  const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
   const pr = useMemo(
-    () => (selectedPrId ? (state.pullRequests.find((p) => p.id === selectedPrId) ?? null) : null),
-    [selectedPrId, state.pullRequests]
+    () =>
+      prId
+        ? (state.pullRequests.find(
+          (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
+        ) ?? null)
+        : null,
+    [accountId, prId, state.pullRequests]
   )
   const score: HealthScore | undefined = useMemo(
     () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
-  const setView = useAtomSet(viewAtom)
+  const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
 
+  // Subscriptions
+  const subscriptionsResult = useAtomValue(subscriptionsQueryAtom)
+  const subscribe = useAtomSet(subscribeAtom)
+  const unsubscribe = useAtomSet(unsubscribeAtom)
+  const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
+  const serverSubscribed = useMemo(
+    () =>
+      Result.isSuccess(subscriptionsResult) && accountKey
+        ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
+        : false,
+    [subscriptionsResult, accountKey, prId]
+  )
+  const [optimistic, setOptimistic] = useState<boolean | null>(null)
+  const isSubscribed = optimistic ?? serverSubscribed
+  // Sync optimistic back to server state
+  useEffect(() => { setOptimistic(null) }, [serverSubscribed])
+  const handleSubscriptionToggle = useCallback(() => {
+    if (!accountKey || !prId) return
+    const payload = { awsAccountId: accountKey, pullRequestId: prId }
+    setOptimistic(!isSubscribed)
+    if (isSubscribed) {
+      unsubscribe({ payload })
+    } else {
+      subscribe({ payload })
+    }
+  }, [accountKey, isSubscribed, prId, subscribe, unsubscribe])
+
   const proceedOpen = useCallback(() => {
     if (!pr) return
-    openPr({ payload: { profile: pr.account.id, link: pr.link } })
+    openPr({ payload: { profile: pr.account.profile, link: pr.link } })
   }, [openPr, pr])
 
   const handleOpen = useCallback(() => {
@@ -265,14 +297,14 @@ export function PRDetail() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault()
-        setView("prs")
+        navigate("/")
       } else if ((e.key === "Enter" || e.key === "o") && pr?.link) {
         handleOpen()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleOpen, pr, setView])
+  }, [handleOpen, navigate, pr])
 
   if (!pr) {
     return (
@@ -301,11 +333,15 @@ export function PRDetail() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => setView("prs")}>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
           <ArrowLeftIcon className="size-4" />
           Back
         </Button>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant={isSubscribed ? "secondary" : "outline"} size="sm" onClick={handleSubscriptionToggle}>
+            {isSubscribed ? <BellOffIcon className="size-4" /> : <BellIcon className="size-4" />}
+            {isSubscribed ? "Unsubscribe" : "Subscribe"}
+          </Button>
           <Button size="sm" onClick={handleOpen}>
             <ExternalLinkIcon className="size-4" />
             Open in Console

@@ -68,7 +68,7 @@ const applyTextFilter = (prs: ReadonlyArray<Domain.PullRequest>, filterText: str
     pr.destinationBranch.toLowerCase().includes(search) ||
     pr.id.toLowerCase().includes(search) ||
     (pr.description?.toLowerCase().includes(search) ?? false) ||
-    pr.account.id.toLowerCase().includes(search) ||
+    pr.account.profile.toLowerCase().includes(search) ||
     pr.account.region.toLowerCase().includes(search)
   )
 }
@@ -84,7 +84,7 @@ export const buildListItems = (
     const enabledAccounts = state.accounts.filter((a) => a.enabled)
 
     const prsByAccount = enabledAccounts.map((acc) => {
-      const prs = state.pullRequests.filter((pr) => pr.account.id === acc.profile)
+      const prs = state.pullRequests.filter((pr) => pr.account.profile === acc.profile)
       const mostRecent = prs.length > 0
         ? Math.max(...prs.map((p) => p.creationDate.getTime()))
         : 0
@@ -103,7 +103,7 @@ export const buildListItems = (
               if (pr.author !== quickFilter.currentUser) return false
               return !quickFilter.value || extractScope(pr.title) === quickFilter.value
             case "account":
-              return pr.account.id === quickFilter.value
+              return pr.account.profile === quickFilter.value
             case "author":
               return pr.author === quickFilter.value
             case "scope":

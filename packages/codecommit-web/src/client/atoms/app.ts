@@ -22,6 +22,7 @@ export interface AppState {
   readonly lastUpdated?: Date
   readonly currentUser?: string
   readonly notifications?: ReadonlyArray<NotificationItem>
+  readonly unreadNotificationCount?: number
 }
 
 const defaultState: AppState = {
@@ -43,7 +44,7 @@ export const prsQueryAtom = ApiClient.query("prs", "list", {
  */
 export const configQueryAtom = ApiClient.query("config", "list", {
   reactivityKeys: ["config"],
-  timeToLive: "60 seconds"
+  timeToLive: "3 seconds"
 })
 
 /**
@@ -117,6 +118,32 @@ export const notificationsSsoLoginAtom = ApiClient.mutation("notifications", "ss
  * SSO logout mutation
  */
 export const notificationsSsoLogoutAtom = ApiClient.mutation("notifications", "ssoLogout")
+
+// Subscriptions
+export const subscriptionsQueryAtom = ApiClient.query("subscriptions", "list", {
+  reactivityKeys: ["subscriptions"],
+  timeToLive: "5 seconds"
+})
+export const subscribeAtom = ApiClient.mutation("subscriptions", "subscribe")
+export const unsubscribeAtom = ApiClient.mutation("subscriptions", "unsubscribe")
+
+// Persistent notifications
+export const persistentNotificationsQueryAtom = ApiClient.query("persistentNotifications", "list", {
+  reactivityKeys: ["persistentNotifications"],
+  timeToLive: "10 seconds"
+})
+export const persistentNotificationsCountAtom = ApiClient.query("persistentNotifications", "count", {
+  reactivityKeys: ["persistentNotifications"],
+  timeToLive: "10 seconds"
+})
+export const markNotificationReadAtom = ApiClient.mutation("persistentNotifications", "markRead")
+export const markAllNotificationsReadAtom = ApiClient.mutation("persistentNotifications", "markAllRead")
+
+// FTS search
+export const searchPrsAtom = ApiClient.mutation("prs", "search")
+
+// Refresh single PR
+export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
 
 /**
  * Derived app state atom that combines queries

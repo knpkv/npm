@@ -39,7 +39,7 @@ export function FilterBar() {
 
     for (const pr of prs) {
       authors.add(pr.author)
-      accounts.add(pr.account?.id ?? "unknown")
+      accounts.add(pr.account?.profile ?? "unknown")
       repos.add(pr.repositoryName)
       const scope = extractScope(pr.title)
       if (scope) {
