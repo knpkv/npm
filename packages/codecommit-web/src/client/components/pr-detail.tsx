@@ -339,11 +339,11 @@ export function PRDetail() {
           Back
         </Button>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant={isSubscribed ? "secondary" : "outline"} size="sm" onClick={handleSubscriptionToggle}>
+          <Button variant="outline" className="min-w-[8rem]" onClick={handleSubscriptionToggle}>
             {isSubscribed ? <BellOffIcon className="size-4" /> : <BellIcon className="size-4" />}
             {isSubscribed ? "Unsubscribe" : "Subscribe"}
           </Button>
-          <Button size="sm" onClick={handleOpen}>
+          <Button className="min-w-[8rem]" onClick={handleOpen}>
             <ExternalLinkIcon className="size-4" />
             Open in Console
           </Button>
