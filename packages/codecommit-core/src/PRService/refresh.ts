@@ -203,14 +203,11 @@ export const makeRefresh = (
       lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
     }))
 
-    // --- Phase 4: Comment enrichment (subscribed PRs only) ---
+    // --- Phase 4: Comment enrichment (all PRs for counts, diff only subscribed) ---
+    // Use cached comment counts as fallback when API calls fail (throttling)
     const currentState = yield* SubscriptionRef.get(state)
-    const subscribedPRs = currentState.pullRequests.filter((p) => {
-      const aid = accountIdMap.get(p.account.profile) ?? ""
-      return aid && subscribedSet.has(`${aid}:${p.id}`)
-    })
     const enrichments = yield* Effect.forEach(
-      subscribedPRs,
+      currentState.pullRequests,
       (pr) => {
         const awsAccountId = accountIdMap.get(pr.account.profile) ?? ""
         return awsClient.getCommentsForPullRequest({
@@ -240,14 +237,21 @@ export const makeRefresh = (
             })
           }),
           Effect.map((locs) => ({ id: pr.id, accountId: pr.account.profile, commentCount: countAllComments(locs) })),
-          Effect.catchAll((e) =>
-            Effect.logWarning(`Comment enrichment failed for PR ${pr.id}: ${e}`).pipe(
-              Effect.as(undefined)
+          Effect.catchAll((e) => {
+            // Fallback: use cached comment count from DB
+            if (!awsAccountId) return Effect.succeed(undefined)
+            return commentRepo.find(awsAccountId, pr.id).pipe(
+              Effect.map(Option.match({
+                onNone: () => ({ id: pr.id, accountId: pr.account.profile, commentCount: 0 }),
+                onSome: (cached) => ({ id: pr.id, accountId: pr.account.profile, commentCount: countAllComments(cached) })
+              })),
+              Effect.tapError(() => Effect.logWarning(`Comment enrichment failed for PR ${pr.id}: ${e}`)),
+              Effect.catchAll(() => Effect.succeed(undefined))
             )
-          )
+          })
         )
       },
-      { concurrency: 3 }
+      { concurrency: 2 }
     )
 
     const counts = new Map<string, number>()
