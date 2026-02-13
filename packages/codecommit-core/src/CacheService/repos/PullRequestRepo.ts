@@ -118,8 +118,13 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
         findByAccountAndId({ awsAccountId, id }).pipe(Effect.orDie),
       upsert: flow(upsert, Effect.orDie),
       upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
-        Effect.forEach(prs, (pr) => upsert(pr), { discard: true }).pipe(Effect.orDie),
-      search: (query: string) => search({ query }).pipe(Effect.orDie),
+        sql.withTransaction(Effect.forEach(prs, (pr) => upsert(pr), { discard: true })).pipe(Effect.orDie),
+      search: (query: string) => {
+        const escaped = query.replace(/"/g, `""`)
+        return search({ query: `"${escaped}"` }).pipe(
+          Effect.catchAll(() => Effect.succeed([]))
+        )
+      },
       deleteStale: (olderThan: string) => deleteStale({ olderThan }).pipe(Effect.orDie)
     } as const
   })

@@ -71,15 +71,16 @@ export const NotificationsLive = HttpApiBuilder.group(
           }).pipe(
             Effect.mapError(() => new ApiError({ message: "Failed to start SSO login" }))
           ))
-        .handle("ssoLogout", () =>
+        .handle("ssoLogout", ({ payload }) =>
           Effect.gen(function*() {
             yield* notificationsService.add({
               type: "info",
-              title: "SSO Logout",
-              message: "Logging out all SSO sessions..."
+              title: payload.profile,
+              message: `Logging out SSO session for ${payload.profile}...`,
+              profile: payload.profile
             })
 
-            const cmd = Command.make("aws", "sso", "logout").pipe(
+            const cmd = Command.make("aws", "sso", "logout", "--profile", payload.profile).pipe(
               Command.stdout("inherit"),
               Command.stderr("inherit")
             )
@@ -90,15 +91,17 @@ export const NotificationsLive = HttpApiBuilder.group(
                   Effect.tap(() =>
                     notificationsService.add({
                       type: "success",
-                      title: "SSO Logout",
-                      message: "All SSO sessions logged out"
+                      title: payload.profile,
+                      message: `SSO logout successful for ${payload.profile}`,
+                      profile: payload.profile
                     })
                   ),
                   Effect.catchAll((e) =>
                     notificationsService.add({
                       type: "error",
                       title: "SSO Logout Failed",
-                      message: e instanceof Error ? e.message : String(e)
+                      message: e instanceof Error ? e.message : String(e),
+                      profile: payload.profile
                     })
                   )
                 )

@@ -26,10 +26,11 @@ export function SettingsRefresh() {
   const configRef = useRef<ConfigValue | null>(null)
   const [local, setLocal] = useState<Partial<RefreshConfig>>({})
 
-  // Update ref during render (not state, no extra render)
-  if (Result.isSuccess(config)) {
-    configRef.current = config.value
-  }
+  useEffect(() => {
+    if (Result.isSuccess(config)) {
+      configRef.current = config.value
+    }
+  }, [config])
 
   // BroadcastChannel — external system subscription
   useEffect(() => {

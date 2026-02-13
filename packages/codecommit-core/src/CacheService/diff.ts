@@ -12,7 +12,7 @@ export interface NewNotification {
   readonly message: string
 }
 
-interface DiffablePR {
+export interface DiffablePR {
   readonly id: string
   readonly title: string
   readonly description?: string | null | undefined
@@ -61,6 +61,7 @@ export const diffPR = (
   }
 
   if (fresh.status !== cached.status) {
+    // CodeCommit sets isMergeable=false after merge, so CLOSED+!isMergeable = merged
     if (fresh.status === "CLOSED" && !fresh.isMergeable) {
       notifications.push({ ...base, type: "pr_merged", message: `#${fresh.id} ${fresh.title} was merged` })
     } else if (fresh.status === "CLOSED") {

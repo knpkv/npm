@@ -266,15 +266,15 @@ export function PRDetail() {
   // Sync optimistic back to server state
   useEffect(() => { setOptimistic(null) }, [serverSubscribed])
   const handleSubscriptionToggle = useCallback(() => {
-    if (!accountKey || !prId) return
-    const payload = { awsAccountId: accountKey, pullRequestId: prId }
+    if (!accountKey || !pr) return
+    const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
     setOptimistic(!isSubscribed)
     if (isSubscribed) {
       unsubscribe({ payload })
     } else {
       subscribe({ payload })
     }
-  }, [accountKey, isSubscribed, prId, subscribe, unsubscribe])
+  }, [accountKey, isSubscribed, pr, subscribe, unsubscribe])
 
   const proceedOpen = useCallback(() => {
     if (!pr) return
@@ -295,6 +295,7 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")

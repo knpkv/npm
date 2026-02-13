@@ -1,6 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform"
 import { PRService } from "@knpkv/codecommit-core"
-import type { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import { Effect } from "effect"
 import { CodeCommitApi } from "../Api.js"
 
@@ -13,18 +12,13 @@ export const SubscriptionsLive = HttpApiBuilder.group(
 
       return handlers
         .handle("subscribe", ({ payload }) =>
-          prService.subscribe(payload.awsAccountId, payload.pullRequestId as PullRequestId).pipe(
-            Effect.map(() =>
-              "ok"
-            )
+          prService.subscribe(payload.awsAccountId, payload.pullRequestId).pipe(
+            Effect.map(() => "ok")
           ))
         .handle("unsubscribe", ({ payload }) =>
-          prService.unsubscribe(payload.awsAccountId, payload.pullRequestId as PullRequestId).pipe(
-            Effect.map(() =>
-              "ok"
-            )
+          prService.unsubscribe(payload.awsAccountId, payload.pullRequestId).pipe(
+            Effect.map(() => "ok")
           ))
-        .handle("list", () =>
-          prService.getSubscriptions())
+        .handle("list", () => prService.getSubscriptions())
     })
 )

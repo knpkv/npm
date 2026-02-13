@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router"
+import { createBrowserRouter, Navigate } from "react-router"
 import { AppLayout } from "./components/app.js"
 import { NotificationsPage } from "./components/notifications-page.js"
 import { PRDetail } from "./components/pr-detail.js"
@@ -12,7 +12,8 @@ export const router = createBrowserRouter([
       { index: true, element: <PRList /> },
       { path: "accounts/:accountId/prs/:prId", element: <PRDetail /> },
       { path: "settings", element: <SettingsPage /> },
-      { path: "notifications", element: <NotificationsPage /> }
+      { path: "notifications", element: <NotificationsPage /> },
+      { path: "*", element: <Navigate to="/" replace /> }
     ]
   }
 ])

@@ -43,6 +43,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const combined = Stream.merge(prChanges, notifChanges)
 
     const stateStream = combined.pipe(
+      Stream.debounce(Duration.millis(200)),
       Stream.mapEffect(() =>
         Effect.all({
           prState: SubscriptionRef.get(prService.state),

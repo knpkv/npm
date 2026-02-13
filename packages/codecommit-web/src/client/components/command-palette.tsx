@@ -17,18 +17,17 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
-  CommandShortcut
+  CommandSeparator
 } from "./ui/command.js"
 
-const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string; shortcut: string }> = [
-  { key: "all", label: "All", shortcut: "1" },
-  { key: "mine", label: "Mine", shortcut: "2" },
-  { key: "account", label: "Account", shortcut: "3" },
-  { key: "author", label: "Author", shortcut: "4" },
-  { key: "scope", label: "Scope", shortcut: "5" },
-  { key: "repo", label: "Repo", shortcut: "6" },
-  { key: "status", label: "Status", shortcut: "7" }
+const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "mine", label: "Mine" },
+  { key: "account", label: "Account" },
+  { key: "author", label: "Author" },
+  { key: "scope", label: "Scope" },
+  { key: "repo", label: "Repo" },
+  { key: "status", label: "Status" }
 ]
 
 export function CommandPalette() {
@@ -70,7 +69,6 @@ export function CommandPalette() {
           >
             <RefreshCwIcon />
             Refresh PRs
-            <CommandShortcut>R</CommandShortcut>
           </CommandItem>
           <CommandItem
             onSelect={() => {
@@ -89,7 +87,6 @@ export function CommandPalette() {
           >
             <BellIcon />
             View: Notifications
-            <CommandShortcut>N</CommandShortcut>
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />
@@ -132,7 +129,6 @@ export function CommandPalette() {
             >
               <FilterIcon />
               Filter: {f.label}
-              <CommandShortcut>{f.shortcut}</CommandShortcut>
             </CommandItem>
           ))}
         </CommandGroup>

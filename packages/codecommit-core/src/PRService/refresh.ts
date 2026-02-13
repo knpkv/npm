@@ -7,43 +7,13 @@ import { AwsClient } from "../AwsClient/index.js"
 import { diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
-import { Account, type AwsRegion, type CommentThread, type PRCommentLocation, PullRequest } from "../Domain.js"
+import { Account, type AwsRegion, PullRequest } from "../Domain.js"
 import { NotificationsService } from "../NotificationsService.js"
-import type { PRState } from "./internal.js"
-
-const countThreadComments = (thread: CommentThread): number =>
-  1 + thread.replies.reduce((sum, r) => sum + countThreadComments(r), 0)
-
-const countAllComments = (locations: ReadonlyArray<PRCommentLocation>): number =>
-  locations.reduce(
-    (sum, loc) => sum + loc.comments.reduce((s, t) => s + countThreadComments(t), 0),
-    0
-  )
-
-const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertInput => ({
-  id: pr.id,
-  awsAccountId,
-  accountProfile: pr.account.profile,
-  accountRegion: pr.account.region,
-  title: pr.title,
-  description: pr.description ?? null,
-  author: pr.author,
-  repositoryName: pr.repositoryName,
-  creationDate: pr.creationDate.toISOString(),
-  lastModifiedDate: pr.lastModifiedDate.toISOString(),
-  status: pr.status,
-  sourceBranch: pr.sourceBranch,
-  destinationBranch: pr.destinationBranch,
-  isMergeable: pr.isMergeable ? 1 : 0,
-  isApproved: pr.isApproved ? 1 : 0,
-  commentCount: pr.commentCount ?? null,
-  link: pr.link
-})
+import { countAllComments, type PRState, prToUpsertInput } from "./internal.js"
 
 export type RefreshDeps =
   | ConfigService
@@ -118,6 +88,7 @@ export const makeRefresh = (
         accountIdMap.set(firstAccount.profile, identity.accountId)
         return SubscriptionRef.update(state, (s) => ({ ...s, currentUser: identity.username }))
       }),
+      Effect.tapError((e) => Effect.logWarning(`getCallerIdentity failed for ${firstAccount.profile}`, e)),
       Effect.catchAll(() => Effect.void)
     )
 
@@ -128,6 +99,7 @@ export const makeRefresh = (
         const region = account.regions?.[0] ?? ("us-east-1" as AwsRegion)
         return awsClient.getCallerIdentity({ profile: account.profile, region }).pipe(
           Effect.tap((identity) => Effect.sync(() => accountIdMap.set(account.profile, identity.accountId))),
+          Effect.tapError((e) => Effect.logWarning(`getCallerIdentity failed for ${account.profile}`, e)),
           Effect.catchAll(() => Effect.void)
         )
       },
@@ -188,7 +160,10 @@ export const makeRefresh = (
 
           // Upsert to cache + auto-subscribe current user's PRs
           if (awsAccountId) {
-            yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(Effect.catchAll(() => Effect.void))
+            yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
+              Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
+              Effect.catchAll(() => Effect.void)
+            )
             if (currentUser && pr.author === currentUser) {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchAll(() => Effect.void))
               subscribedSet.add(`${awsAccountId}:${pr.id}`)
@@ -228,10 +203,14 @@ export const makeRefresh = (
       lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
     }))
 
-    // --- Phase 4: Comment enrichment ---
+    // --- Phase 4: Comment enrichment (subscribed PRs only) ---
     const currentState = yield* SubscriptionRef.get(state)
+    const subscribedPRs = currentState.pullRequests.filter((p) => {
+      const aid = accountIdMap.get(p.account.profile) ?? ""
+      return aid && subscribedSet.has(`${aid}:${p.id}`)
+    })
     const enrichments = yield* Effect.forEach(
-      currentState.pullRequests,
+      subscribedPRs,
       (pr) => {
         const awsAccountId = accountIdMap.get(pr.account.profile) ?? ""
         return awsClient.getCommentsForPullRequest({

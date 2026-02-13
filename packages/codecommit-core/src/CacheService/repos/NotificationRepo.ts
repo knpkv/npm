@@ -1,27 +1,22 @@
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Effect, Schema } from "effect"
-import type { PersistentNotificationType } from "../../Domain.js"
+import { PersistentNotificationType } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
+import type { NewNotification } from "../diff.js"
 
 const NotificationRow = Schema.Struct({
   id: Schema.Number,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
-  type: Schema.String,
+  type: PersistentNotificationType,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
 })
 
 export type NotificationRow = typeof NotificationRow.Type
-
-export interface NewNotification {
-  readonly pullRequestId: string
-  readonly awsAccountId: string
-  readonly type: PersistentNotificationType
-  readonly message: string
-}
+export type { NewNotification }
 
 export class NotificationRepo extends Effect.Service<NotificationRepo>()("NotificationRepo", {
   dependencies: [DatabaseLive],

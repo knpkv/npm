@@ -190,8 +190,12 @@ export function NotificationsPage() {
                         size="sm"
                         className="h-7 px-2.5 text-xs"
                         onClick={() => {
-                          const profile = Schema.decodeSync(AwsProfileName)(item.profile ?? item.title)
-                          ssoLogin({ payload: { profile } })
+                          try {
+                            const profile = Schema.decodeSync(AwsProfileName)(item.profile ?? item.title)
+                            ssoLogin({ payload: { profile } })
+                          } catch {
+                            // invalid profile name — ignore
+                          }
                         }}
                       >
                         Login

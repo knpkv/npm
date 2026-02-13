@@ -10,29 +10,9 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
-import type { AwsProfileName, AwsRegion, PullRequest, PullRequestId } from "../Domain.js"
-import type { PRState } from "./internal.js"
+import type { AwsProfileName, AwsRegion, PullRequestId } from "../Domain.js"
+import { countAllComments, type PRState } from "./internal.js"
 import type { RefreshDeps } from "./refresh.js"
-
-const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertInput => ({
-  id: pr.id,
-  awsAccountId,
-  accountProfile: pr.account.profile,
-  accountRegion: pr.account.region,
-  title: pr.title,
-  description: pr.description ?? null,
-  author: pr.author,
-  repositoryName: pr.repositoryName,
-  creationDate: pr.creationDate.toISOString(),
-  lastModifiedDate: pr.lastModifiedDate.toISOString(),
-  status: pr.status,
-  sourceBranch: pr.sourceBranch,
-  destinationBranch: pr.destinationBranch,
-  isMergeable: pr.isMergeable ? 1 : 0,
-  isApproved: pr.isApproved ? 1 : 0,
-  commentCount: pr.commentCount ?? null,
-  link: pr.link
-})
 
 export const makeRefreshSinglePR = (
   state: PRState
@@ -77,34 +57,34 @@ export const makeRefreshSinglePR = (
       repositoryName: detail.repositoryName
     }).pipe(Effect.catchAll(() => Effect.succeed([])))
 
+    // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
+    const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
+    const freshUpsert: UpsertInput = {
+      id: prId,
+      awsAccountId,
+      accountProfile: account.profile,
+      accountRegion: account.region,
+      title: detail.title,
+      description: detail.description ?? null,
+      author: detail.author,
+      repositoryName: detail.repositoryName,
+      creationDate: detail.creationDate.toISOString(),
+      lastModifiedDate: cached?.lastModifiedDate ?? new Date().toISOString(),
+      status: detail.status,
+      sourceBranch: detail.sourceBranch,
+      destinationBranch: detail.destinationBranch,
+      isMergeable: cached?.isMergeable ?? 0,
+      isApproved: cached?.isApproved ?? 0,
+      commentCount: countAllComments(locs),
+      link: cached?.link ?? pr?.link ?? ""
+    }
+
     // Diff for subscribed PRs
     const isSubscribed = yield* subscriptionRepo.isSubscribed(awsAccountId, prId).pipe(
       Effect.catchAll(() => Effect.succeed(false))
     )
 
     if (isSubscribed && Option.isSome(cachedPR)) {
-      // We have a fresh PR already (from detail) — but we need to build a UpsertInput-like object for diffing
-      // Use the detail + existing cached PR structure for comparison
-      const freshUpsert: UpsertInput = {
-        id: prId,
-        awsAccountId,
-        accountProfile: cachedPR.value.accountProfile,
-        accountRegion: cachedPR.value.accountRegion,
-        title: detail.title,
-        description: detail.description ?? null,
-        author: detail.author,
-        repositoryName: detail.repositoryName,
-        creationDate: detail.creationDate.toISOString(),
-        lastModifiedDate: cachedPR.value.lastModifiedDate,
-        status: detail.status,
-        sourceBranch: detail.sourceBranch,
-        destinationBranch: detail.destinationBranch,
-        isMergeable: cachedPR.value.isMergeable,
-        isApproved: cachedPR.value.isApproved,
-        commentCount: null,
-        link: cachedPR.value.link
-      }
-
       const prNotifications = diffPR(cachedPR.value, freshUpsert, awsAccountId)
       yield* Effect.forEach(prNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
         Effect.catchAll(() => Effect.void)
@@ -127,10 +107,8 @@ export const makeRefreshSinglePR = (
       Effect.catchAll(() => Effect.void)
     )
 
-    // If the PR exists in state, update it
-    if (pr) {
-      yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(Effect.catchAll(() => Effect.void))
-    }
+    // Always upsert fresh data to cache
+    yield* prRepo.upsert(freshUpsert).pipe(Effect.catchAll(() => Effect.void))
   }).pipe(
     Effect.withSpan("PRService.refreshSinglePR"),
     Effect.catchAllCause(() => Effect.void)

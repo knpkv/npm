@@ -180,7 +180,7 @@ export const NotificationItemResponse = Schema.Struct({
 // Subscription endpoints
 const SubscriptionPayload = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: Schema.String
+  pullRequestId: PullRequestId
 })
 
 const SubscriptionResponse = Schema.Struct({

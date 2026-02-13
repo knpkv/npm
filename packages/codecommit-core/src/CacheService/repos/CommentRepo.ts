@@ -26,7 +26,13 @@ export class CommentRepo extends Effect.Service<CommentRepo>()("CommentRepo", {
     return {
       find: (awsAccountId: string, prId: string) =>
         find({ awsAccountId, pullRequestId: prId }).pipe(
-          Effect.map(Option.map((r) => JSON.parse(r.locationsJson))),
+          Effect.map(Option.map((r) => {
+            try {
+              return JSON.parse(r.locationsJson)
+            } catch {
+              return []
+            }
+          })),
           Effect.orDie
         ),
       upsert: (awsAccountId: string, prId: string, locationsJson: string) =>

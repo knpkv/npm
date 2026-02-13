@@ -164,9 +164,7 @@ const AutoRefresh = Layer.effectDiscard(
         return yield* Effect.forever(
           Effect.gen(function*() {
             const config = yield* configService.load.pipe(
-              Effect.catchAll(() =>
-                Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const)
-              )
+              Effect.catchAll(() => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
             )
             if (config.autoRefresh) {
               yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
@@ -198,7 +196,7 @@ const StaticRouter = HttpLayerRouter.use((router) => router.add("GET", "/*", ser
 const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
   Layer.provide(
     HttpLayerRouter.cors({
-      allowedOrigins: ["*"],
+      allowedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"]
     })

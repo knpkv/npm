@@ -12,7 +12,11 @@ const PullRequestWire = Schema.Struct({
   creationDate: Schema.DateFromString,
   lastModifiedDate: Schema.DateFromString,
   link: Schema.String,
-  account: Schema.Struct({ profile: Schema.String, region: Schema.String, awsAccountId: Schema.optional(Schema.String) }),
+  account: Schema.Struct({
+    profile: Schema.String,
+    region: Schema.String,
+    awsAccountId: Schema.optional(Schema.String)
+  }),
   status: Schema.Literal("OPEN", "CLOSED"),
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
