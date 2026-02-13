@@ -47,6 +47,7 @@ export function PRList() {
       }
       if (quickFilter.type === "mine") {
         if (currentUser && pr.author !== currentUser) return false
+        if (quickFilter.value === undefined) return true
         return extractScope(pr.title) === quickFilter.value
       }
       if (quickFilter.type === "account") return pr.account?.profile === quickFilter.value

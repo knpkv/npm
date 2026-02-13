@@ -69,10 +69,13 @@ export function FilterBar() {
       setQuickFilter({ type: "hot" })
       return
     }
+    if (key === "mine") {
+      const scopes = filterOptions.myScopes
+      setQuickFilter(scopes.length > 0 && scopes[0] !== undefined ? { type: "mine", value: scopes[0] } : { type: "mine" })
+      return
+    }
     const options =
-      key === "mine"
-        ? filterOptions.myScopes
-        : key === "author"
+      key === "author"
           ? filterOptions.authors
           : key === "account"
             ? filterOptions.accounts
