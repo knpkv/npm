@@ -28,6 +28,7 @@ export const CachedPullRequest = Schema.Struct({
   isMergeable: BooleanFromNumber,
   isApproved: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
+  healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
   fetchedAt: Schema.String
 })
@@ -69,7 +70,8 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       last_modified_date AS "lastModifiedDate", status,
       source_branch AS "sourceBranch", destination_branch AS "destinationBranch",
       is_mergeable AS "isMergeable", is_approved AS "isApproved",
-      comment_count AS "commentCount", link, fetched_at AS "fetchedAt"
+      comment_count AS "commentCount", health_score AS "healthScore",
+      link, fetched_at AS "fetchedAt"
     `
 
     const findAll_ = SqlSchema.findAll({
@@ -124,6 +126,10 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       sql`UPDATE pull_requests SET comment_count = ${count}
           WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(Effect.asVoid)
 
+    const updateHealthScore_ = (awsAccountId: string, id: string, score: number) =>
+      sql`UPDATE pull_requests SET health_score = ${score}
+          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(Effect.asVoid)
+
     const upsertMany_ = (prs: ReadonlyArray<UpsertInput>) =>
       sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr), { discard: true }))
 
@@ -146,7 +152,9 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       deleteStale: (olderThan: string) =>
         deleteStale_({ olderThan }).pipe(Effect.tap(() => publish), Effect.orDie),
       updateCommentCount: (awsAccountId: string, id: string, count: number | null) =>
-        updateCommentCount_(awsAccountId, id, count).pipe(Effect.tap(() => publish), Effect.orDie)
+        updateCommentCount_(awsAccountId, id, count).pipe(Effect.tap(() => publish), Effect.orDie),
+      updateHealthScore: (awsAccountId: string, id: string, score: number) =>
+        updateHealthScore_(awsAccountId, id, score).pipe(Effect.orDie)
     } as const
   })
 }) {}

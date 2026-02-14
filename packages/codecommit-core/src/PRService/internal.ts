@@ -32,7 +32,8 @@ export const CachedPRToPullRequest = Schema.transform(
       destinationBranch: row.destinationBranch,
       isMergeable: row.isMergeable,
       isApproved: row.isApproved,
-      commentCount: row.commentCount ?? undefined
+      commentCount: row.commentCount ?? undefined,
+      healthScore: row.healthScore ?? undefined
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,
@@ -51,6 +52,7 @@ export const CachedPRToPullRequest = Schema.transform(
       isMergeable: pr.isMergeable,
       isApproved: pr.isApproved,
       commentCount: pr.commentCount ?? null,
+      healthScore: pr.healthScore ?? null,
       link: pr.link,
       fetchedAt: ""
     })
@@ -83,7 +85,8 @@ export const PullRequestToUpsertInput = Schema.transform(
       destinationBranch: row.destinationBranch,
       isMergeable: row.isMergeable === 1,
       isApproved: row.isApproved === 1,
-      commentCount: row.commentCount ?? undefined
+      commentCount: row.commentCount ?? undefined,
+      healthScore: undefined
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,

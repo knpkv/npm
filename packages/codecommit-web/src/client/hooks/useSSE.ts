@@ -22,7 +22,8 @@ const PullRequestWire = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
   isApproved: Schema.Boolean,
-  commentCount: Schema.optional(Schema.Number)
+  commentCount: Schema.optional(Schema.Number),
+  healthScore: Schema.optional(Schema.Number)
 })
 
 const NotificationItemWire = Schema.Struct({

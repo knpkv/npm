@@ -14,6 +14,7 @@ import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
 import { NotificationsService } from "../NotificationsService.js"
+import { scoreTotalOr } from "../HealthScore.js"
 import { countAllComments, decodeCachedPR, type PRState, prToUpsertInput } from "./internal.js"
 
 export type RefreshDeps =
@@ -301,6 +302,26 @@ export const makeRefresh = (
             )
           )
         )
+
+        // --- Phase 5: Calculate and store health scores ---
+        yield* SubscriptionRef.update(state, (s) => ({
+          ...s,
+          statusDetail: "calculating health scores"
+        }))
+
+        const scoredPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+        const scoreNow = new Date()
+        yield* Effect.forEach(
+          scoredPRs,
+          (row) => {
+            const pr = decodeCachedPR(row)
+            const score = scoreTotalOr(pr, scoreNow, 0)
+            return prRepo.updateHealthScore(row.awsAccountId, row.id, score).pipe(
+              Effect.catchAll(() => Effect.void)
+            )
+          },
+          { discard: true }
+        )
       })
     )
     // Batch ends here — accumulated change events flush atomically
@@ -314,7 +335,7 @@ export const makeRefresh = (
       lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
     }))
 
-    // --- Phase 5: Update sync metadata ---
+    // --- Phase 6: Update sync metadata ---
     yield* Effect.forEach(
       enabledAccounts,
       (account) => {

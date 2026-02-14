@@ -117,7 +117,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
   isApproved: Schema.Boolean,
-  commentCount: Schema.optional(Schema.Number)
+  commentCount: Schema.optional(Schema.Number),
+  healthScore: Schema.optional(Schema.Number)
 }) {
   /**
    * AWS Console URL for this pull request.
