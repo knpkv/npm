@@ -119,19 +119,22 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         )
       )
 
-    // Initial snapshot sent immediately on connection
-    const initial = Stream.fromEffect(buildPayload(true))
-
-    const stateStream = hub.subscribe.pipe(
-      Stream.map(classify),
-      Stream.debounce(Duration.millis(200)),
-      Stream.mapEffect((trigger) => buildPayload(trigger !== "state"))
-    )
-
     return handlers.handleRaw("stream", () =>
-      Effect.succeed(
-        HttpServerResponse.stream(
-          Stream.merge(Stream.concat(initial, stateStream), keepalive),
+      Effect.gen(function*() {
+        // Eagerly build initial snapshot before stream starts
+        const initialChunk = yield* buildPayload(true)
+
+        const changes = hub.subscribe.pipe(
+          Stream.map(classify),
+          Stream.debounce(Duration.millis(200)),
+          Stream.mapEffect((trigger) => buildPayload(trigger !== "state"))
+        )
+
+        return HttpServerResponse.stream(
+          Stream.merge(
+            Stream.concat(Stream.make(initialChunk), changes),
+            keepalive
+          ),
           {
             headers: {
               "content-type": "text/event-stream",
@@ -140,5 +143,5 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
             }
           }
         )
-      ))
+      }))
   }))
