@@ -81,13 +81,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         Effect.all({
           prState: SubscriptionRef.get(prService.state),
           notifState: SubscriptionRef.get(notificationsService.state),
-          // Read PRs from SQLite on repo changes; use SubscriptionRef on state-only changes
-          pullRequests: trigger === "repo"
-            ? prRepo.findAll().pipe(
-              Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-              Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
-            )
-            : SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)),
+          pullRequests: prRepo.findAll().pipe(
+            Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+            Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+          ),
           unreadCount: trigger === "repo" || trigger === "notif"
             ? notificationRepo.unreadCount().pipe(
               Effect.tap((c) => Ref.set(lastUnreadRef, c)),

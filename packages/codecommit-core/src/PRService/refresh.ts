@@ -199,6 +199,12 @@ export const makeRefresh = (
         // --- Phase 4: Comment enrichment ---
         const freshPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
         const subscribedSnapshot = yield* Ref.get(subscribedRef)
+        const enrichedRef = yield* Ref.make(0)
+
+        yield* SubscriptionRef.update(state, (s) => ({
+          ...s,
+          statusDetail: `fetching comments (0/${freshPRs.length})`
+        }))
 
         yield* Effect.forEach(
           freshPRs,
@@ -234,6 +240,16 @@ export const makeRefresh = (
                   )
                 })
               }),
+              Effect.tap(() =>
+                Ref.updateAndGet(enrichedRef, (n) => n + 1).pipe(
+                  Effect.flatMap((n) =>
+                    SubscriptionRef.update(state, (s) => ({
+                      ...s,
+                      statusDetail: `fetching comments (${n}/${freshPRs.length})`
+                    }))
+                  )
+                )
+              ),
               Effect.map((locs) => ({ awsAccountId, id: prId, commentCount: countAllComments(locs) })),
               Effect.catchAll(() => {
                 // Fallback: use cached comment count from DB

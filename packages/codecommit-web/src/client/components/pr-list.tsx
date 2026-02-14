@@ -109,8 +109,6 @@ export function PRList() {
     navigate(`/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`)
   }
 
-  const enrichedCount = prs.filter((p) => p.commentCount !== undefined).length
-
   if (groups.length === 0) {
     if (isLoading) {
       return (
@@ -141,18 +139,10 @@ export function PRList() {
 
   return (
     <div className="space-y-6">
-      {(isLoading || (enrichedCount < prs.length && prs.length > 0)) && (
+      {isLoading && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <LoaderIcon className="size-3 animate-spin" />
-          {isLoading ? (
-            <span>
-              Loading... {state.statusDetail && <span className="font-mono opacity-60">{state.statusDetail}</span>}
-            </span>
-          ) : (
-            <span>
-              Enriching details ({enrichedCount}/{prs.length})
-            </span>
-          )}
+          {state.statusDetail && <span className="font-mono opacity-60">{state.statusDetail}</span>}
         </div>
       )}
       {groups.map(([accountId, accountPrs]) => (
