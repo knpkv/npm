@@ -93,7 +93,16 @@ export const makeRefresh = (
           Effect.zipRight(SubscriptionRef.update(state, (s) => ({ ...s, currentUser: identity.username })))
         )
       ),
-      Effect.tapError((e) => Effect.logWarning(`getCallerIdentity failed for ${firstAccount.profile}`, e)),
+      Effect.tapError((e) =>
+        Effect.logWarning(`getCallerIdentity failed for ${firstAccount.profile}`, e).pipe(
+          Effect.zipRight(notificationsService.add({
+            type: "error" as const,
+            title: `${firstAccount.profile} (${firstRegion})`,
+            message: String(e),
+            profile: firstAccount.profile
+          }))
+        )
+      ),
       Effect.catchAll(() => Effect.void)
     )
 
@@ -106,7 +115,16 @@ export const makeRefresh = (
           Effect.tap((identity) =>
             Ref.update(accountIdRef, (m) => new Map(m).set(account.profile, identity.accountId))
           ),
-          Effect.tapError((e) => Effect.logWarning(`getCallerIdentity failed for ${account.profile}`, e)),
+          Effect.tapError((e) =>
+            Effect.logWarning(`getCallerIdentity failed for ${account.profile}`, e).pipe(
+              Effect.zipRight(notificationsService.add({
+                type: "error" as const,
+                title: `${account.profile} (${region})`,
+                message: String(e),
+                profile: account.profile
+              }))
+            )
+          ),
           Effect.catchAll(() => Effect.void)
         )
       },

@@ -74,59 +74,64 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     )
     const lastPersistentRef = yield* Ref.make(initialPersistent)
 
-    const stateStream = hub.subscribe.pipe(
-      Stream.map(classify),
-      Stream.debounce(Duration.millis(200)),
-      Stream.mapEffect((trigger) =>
-        Effect.all({
-          prState: SubscriptionRef.get(prService.state),
-          notifState: SubscriptionRef.get(notificationsService.state),
-          pullRequests: prRepo.findAll().pipe(
-            Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-            Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
-          ),
-          unreadCount: trigger === "repo" || trigger === "notif"
-            ? notificationRepo.unreadCount().pipe(
-              Effect.tap((c) => Ref.set(lastUnreadRef, c)),
-              Effect.catchAll(() => Ref.get(lastUnreadRef))
-            )
-            : Ref.get(lastUnreadRef),
-          persistentNotifications: trigger === "repo" || trigger === "notif"
-            ? notificationRepo.findAll({ limit: 20 }).pipe(
-              Effect.tap((p) => Ref.set(lastPersistentRef, p)),
-              Effect.catchAll(() => Ref.get(lastPersistentRef))
-            )
-            : Ref.get(lastPersistentRef)
-        })
-      ),
-      Stream.mapEffect(({ notifState, persistentNotifications, prState, pullRequests, unreadCount }) =>
-        encode({
-          ...prState,
-          pullRequests,
-          notifications: notifState.items.map((item) => ({
-            type: item.type,
-            title: item.title,
-            message: item.message,
-            timestamp: item.timestamp.toISOString(),
-            ...(item.profile ? { profile: item.profile } : {})
-          })),
-          unreadNotificationCount: unreadCount,
-          persistentNotifications
-        }).pipe(
-          Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
-          Effect.catchAll((e) =>
-            Effect.logWarning("SSE encode failed", e).pipe(
-              Effect.map(() => encoder.encode(":\n\n"))
-            )
+    // Build full SSE payload — reused for initial event + change events
+    const buildPayload = (refreshNotifs: boolean) =>
+      Effect.all({
+        prState: SubscriptionRef.get(prService.state),
+        notifState: SubscriptionRef.get(notificationsService.state),
+        pullRequests: prRepo.findAll().pipe(
+          Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+          Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+        ),
+        unreadCount: refreshNotifs
+          ? notificationRepo.unreadCount().pipe(
+            Effect.tap((c) => Ref.set(lastUnreadRef, c)),
+            Effect.catchAll(() => Ref.get(lastUnreadRef))
+          )
+          : Ref.get(lastUnreadRef),
+        persistentNotifications: refreshNotifs
+          ? notificationRepo.findAll({ limit: 20 }).pipe(
+            Effect.tap((p) => Ref.set(lastPersistentRef, p)),
+            Effect.catchAll(() => Ref.get(lastPersistentRef))
+          )
+          : Ref.get(lastPersistentRef)
+      }).pipe(
+        Effect.flatMap(({ notifState, persistentNotifications, prState, pullRequests, unreadCount }) =>
+          encode({
+            ...prState,
+            pullRequests,
+            notifications: notifState.items.map((item) => ({
+              type: item.type,
+              title: item.title,
+              message: item.message,
+              timestamp: item.timestamp.toISOString(),
+              ...(item.profile ? { profile: item.profile } : {})
+            })),
+            unreadNotificationCount: unreadCount,
+            persistentNotifications
+          })
+        ),
+        Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
+        Effect.catchAll((e) =>
+          Effect.logWarning("SSE encode failed", e).pipe(
+            Effect.map(() => encoder.encode(":\n\n"))
           )
         )
       )
+
+    // Initial snapshot sent immediately on connection
+    const initial = Stream.fromEffect(buildPayload(true))
+
+    const stateStream = hub.subscribe.pipe(
+      Stream.map(classify),
+      Stream.debounce(Duration.millis(200)),
+      Stream.mapEffect((trigger) => buildPayload(trigger !== "state"))
     )
 
     return handlers.handleRaw("stream", () =>
       Effect.succeed(
         HttpServerResponse.stream(
-          Stream.merge(stateStream, keepalive),
+          Stream.merge(Stream.concat(initial, stateStream), keepalive),
           {
             headers: {
               "content-type": "text/event-stream",
