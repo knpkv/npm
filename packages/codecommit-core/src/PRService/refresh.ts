@@ -13,8 +13,8 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
-import { NotificationsService } from "../NotificationsService.js"
 import { scoreTotalOr } from "../HealthScore.js"
+import { NotificationsService } from "../NotificationsService.js"
 import { countAllComments, decodeCachedPR, type PRState, prToUpsertInput } from "./internal.js"
 
 export type RefreshDeps =

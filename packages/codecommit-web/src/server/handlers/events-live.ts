@@ -60,9 +60,12 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     // Classify change tags into trigger categories
     const classify = (change: RepoChange): "repo" | "state" | "notif" => {
       switch (change._tag) {
-        case "AppState": return "state"
-        case "SystemNotifications": return "notif"
-        default: return "repo"
+        case "AppState":
+          return "state"
+        case "SystemNotifications":
+          return "notif"
+        default:
+          return "repo"
       }
     }
 
@@ -130,9 +133,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           Stream.mapEffect((trigger) => buildPayload(trigger !== "state"))
         )
 
+        // merge (not concat) so hub subscription starts immediately — no missed events
         return HttpServerResponse.stream(
           Stream.merge(
-            Stream.concat(Stream.make(initialChunk), changes),
+            Stream.merge(Stream.make(initialChunk), changes),
             keepalive
           ),
           {

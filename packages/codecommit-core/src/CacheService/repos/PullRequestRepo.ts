@@ -139,18 +139,15 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       findAll: () => findAll_(undefined as void).pipe(Effect.orDie),
       findByAccountAndId: (awsAccountId: string, id: string) =>
         findByAccountAndId_({ awsAccountId, id }).pipe(Effect.orDie),
-      upsert: (input: UpsertInput) =>
-        upsert_(input).pipe(Effect.tap(() => publish), Effect.orDie),
-      upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
-        upsertMany_(prs).pipe(Effect.tap(() => publish), Effect.orDie),
+      upsert: (input: UpsertInput) => upsert_(input).pipe(Effect.tap(() => publish), Effect.orDie),
+      upsertMany: (prs: ReadonlyArray<UpsertInput>) => upsertMany_(prs).pipe(Effect.tap(() => publish), Effect.orDie),
       search: (query: string) => {
         const escaped = query.replace(/"/g, `""`)
         return search_({ query: `"${escaped}"` }).pipe(
           Effect.catchAll(() => Effect.succeed([]))
         )
       },
-      deleteStale: (olderThan: string) =>
-        deleteStale_({ olderThan }).pipe(Effect.tap(() => publish), Effect.orDie),
+      deleteStale: (olderThan: string) => deleteStale_({ olderThan }).pipe(Effect.tap(() => publish), Effect.orDie),
       updateCommentCount: (awsAccountId: string, id: string, count: number | null) =>
         updateCommentCount_(awsAccountId, id, count).pipe(Effect.tap(() => publish), Effect.orDie),
       updateHealthScore: (awsAccountId: string, id: string, score: number) =>

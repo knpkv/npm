@@ -59,11 +59,9 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
       sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message)
           VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message})`.pipe(Effect.asVoid)
 
-    const markRead_ = (id: number) =>
-      sql`UPDATE notifications SET read = 1 WHERE id = ${id}`.pipe(Effect.asVoid)
+    const markRead_ = (id: number) => sql`UPDATE notifications SET read = 1 WHERE id = ${id}`.pipe(Effect.asVoid)
 
-    const markAllRead_ = () =>
-      sql`UPDATE notifications SET read = 1 WHERE read = 0`.pipe(Effect.asVoid)
+    const markAllRead_ = () => sql`UPDATE notifications SET read = 1 WHERE read = 0`.pipe(Effect.asVoid)
 
     const publish = hub.publish({ _tag: "Notifications" })
 
@@ -97,14 +95,11 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
         )
       },
 
-      add: (n: NewNotification) =>
-        add_(n).pipe(Effect.tap(() => publish), Effect.orDie),
+      add: (n: NewNotification) => add_(n).pipe(Effect.tap(() => publish), Effect.orDie),
 
-      markRead: (id: number) =>
-        markRead_(id).pipe(Effect.tap(() => publish), Effect.orDie),
+      markRead: (id: number) => markRead_(id).pipe(Effect.tap(() => publish), Effect.orDie),
 
-      markAllRead: () =>
-        markAllRead_().pipe(Effect.tap(() => publish), Effect.orDie),
+      markAllRead: () => markAllRead_().pipe(Effect.tap(() => publish), Effect.orDie),
 
       unreadCount: () =>
         sql<{ count: number }>`SELECT count(*) as count FROM notifications WHERE read = 0`.pipe(
