@@ -1,7 +1,7 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, NotificationsService, PRService } from "@knpkv/codecommit-core"
+import type { RepoChange } from "@knpkv/codecommit-core/CacheService/EventsHub.js"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import type { RepoChange } from "@knpkv/codecommit-core/CacheService/RepoChangeHub.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { CodeCommitApi, NotificationItemResponse, PersistentNotificationResponse } from "../Api.js"
 
@@ -43,7 +43,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const notificationsService = yield* NotificationsService.NotificationsService
     const prRepo = yield* CacheService.PullRequestRepo
     const notificationRepo = yield* CacheService.NotificationRepo
-    const hub = yield* CacheService.RepoChangeHub
+    const hub = yield* CacheService.EventsHub
 
     // Bridge SubscriptionRef changes → hub (runs for server lifetime)
     yield* Effect.forkDaemon(

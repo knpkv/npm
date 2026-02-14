@@ -5,8 +5,8 @@
  */
 export { DatabaseLive, LibsqlLive, MigrationsLive } from "./Database.js"
 export { diffComments, diffPR } from "./diff.js"
-export { RepoChangeHub } from "./RepoChangeHub.js"
-export type { RepoChange } from "./RepoChangeHub.js"
+export { EventsHub } from "./EventsHub.js"
+export type { RepoChange } from "./EventsHub.js"
 export { CommentRepo } from "./repos/CommentRepo.js"
 export { NotificationRepo } from "./repos/NotificationRepo.js"
 export { CachedPullRequest, PullRequestRepo } from "./repos/PullRequestRepo.js"

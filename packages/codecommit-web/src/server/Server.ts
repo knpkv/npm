@@ -110,17 +110,17 @@ const PlatformLive = Layer.mergeAll(
   FetchHttpClient.layer
 )
 
-// Base services - ConfigService needs Platform + RepoChangeHub
+// Base services - ConfigService needs Platform + EventsHub
 const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(
   Layer.provide(PlatformLive),
-  Layer.provide(CacheService.RepoChangeHub.Default)
+  Layer.provide(CacheService.EventsHub.Default)
 )
 
 // NotificationsService — single shared instance
 const NotificationsLive_ = NotificationsService.NotificationsServiceLive
 
-// Cache repos + RepoChangeHub — each auto-wires DatabaseLive via Effect.Service dependencies
-// RepoChangeHub.Default is shared across all repos via layer memoization
+// Cache repos + EventsHub — each auto-wires DatabaseLive via Effect.Service dependencies
+// EventsHub.Default is shared across all repos via layer memoization
 // orDie scoped to cache layers only: DB/migration errors become defects here
 const ReposLive = Layer.mergeAll(
   CacheService.PullRequestRepo.Default,
@@ -128,7 +128,7 @@ const ReposLive = Layer.mergeAll(
   CacheService.NotificationRepo.Default,
   CacheService.SubscriptionRepo.Default,
   CacheService.SyncMetadataRepo.Default,
-  CacheService.RepoChangeHub.Default
+  CacheService.EventsHub.Default
 ).pipe(Layer.orDie)
 
 // PRService dependencies

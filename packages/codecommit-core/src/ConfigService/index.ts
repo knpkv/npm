@@ -6,7 +6,7 @@
  */
 import type { FileSystem, Path } from "@effect/platform"
 import { Config, Context, Effect, Layer } from "effect"
-import { RepoChangeHub } from "../CacheService/RepoChangeHub.js"
+import { EventsHub } from "../CacheService/EventsHub.js"
 import { ConfigError, ProfileDetectionError } from "../Errors.js"
 import type { ConfigParseError } from "../Errors.js"
 import { backup } from "./backup.js"
@@ -77,7 +77,7 @@ export const ConfigServiceLive = Layer.effect(
   ConfigService,
   Effect.gen(function*() {
     const ctx = yield* Effect.context<FileSystem.FileSystem | Path.Path | ConfigPaths>()
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     const provide = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ConfigPaths>) =>
       Effect.provide(effect, ctx)

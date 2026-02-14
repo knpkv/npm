@@ -5,7 +5,7 @@
 import { Cause, Clock, DateTime, Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffComments, diffPR } from "../CacheService/diff.js"
-import { RepoChangeHub } from "../CacheService/RepoChangeHub.js"
+import { EventsHub } from "../CacheService/EventsHub.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
@@ -25,7 +25,7 @@ export type RefreshDeps =
   | NotificationRepo
   | SubscriptionRepo
   | SyncMetadataRepo
-  | RepoChangeHub
+  | EventsHub
 
 export const makeRefresh = (
   state: PRState
@@ -39,7 +39,7 @@ export const makeRefresh = (
     const notificationRepo = yield* NotificationRepo
     const subscriptionRepo = yield* SubscriptionRepo
     const syncMetadataRepo = yield* SyncMetadataRepo
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     // --- Phase 1: Load cached PRs immediately ---
     const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
@@ -184,7 +184,7 @@ export const makeRefresh = (
                 }
               }
 
-              // Update statusDetail only (PRs come from SQLite via RepoChangeHub)
+              // Update statusDetail only (PRs come from SQLite via EventsHub)
               yield* SubscriptionRef.update(state, (s) => ({
                 ...s,
                 statusDetail: `${label} #${pr.id} ${pr.repositoryName}`

@@ -4,7 +4,7 @@ import { Effect, Option, Schema } from "effect"
 import type { PRCommentLocation } from "../../Domain.js"
 import { PRCommentLocationJson } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
-import { RepoChangeHub } from "../RepoChangeHub.js"
+import { EventsHub } from "../EventsHub.js"
 
 const CommentRow = Schema.Struct({
   locationsJson: Schema.String
@@ -13,10 +13,10 @@ const CommentRow = Schema.Struct({
 const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
 
 export class CommentRepo extends Effect.Service<CommentRepo>()("CommentRepo", {
-  dependencies: [DatabaseLive, RepoChangeHub.Default],
+  dependencies: [DatabaseLive, EventsHub.Default],
   effect: Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     const find_ = SqlSchema.findOne({
       Result: CommentRow,

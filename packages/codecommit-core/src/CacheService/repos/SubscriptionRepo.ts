@@ -2,7 +2,7 @@ import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Effect, Schema } from "effect"
 import { DatabaseLive } from "../Database.js"
-import { RepoChangeHub } from "../RepoChangeHub.js"
+import { EventsHub } from "../EventsHub.js"
 
 const SubscriptionRow = Schema.Struct({
   awsAccountId: Schema.String,
@@ -10,10 +10,10 @@ const SubscriptionRow = Schema.Struct({
 })
 
 export class SubscriptionRepo extends Effect.Service<SubscriptionRepo>()("SubscriptionRepo", {
-  dependencies: [DatabaseLive, RepoChangeHub.Default],
+  dependencies: [DatabaseLive, EventsHub.Default],
   effect: Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     const RequestPair = Schema.Struct({ awsAccountId: Schema.String, prId: Schema.String })
 

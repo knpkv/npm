@@ -7,7 +7,7 @@
 import type { Option } from "effect"
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
-import { RepoChangeHub } from "../CacheService/RepoChangeHub.js"
+import type { EventsHub } from "../CacheService/EventsHub.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { PaginatedNotifications } from "../CacheService/repos/NotificationRepo.js"
@@ -89,7 +89,7 @@ export const PRServiceLive = Layer.effect(
       | NotificationRepo
       | SubscriptionRepo
       | SyncMetadataRepo
-      | RepoChangeHub
+      | EventsHub
     >()
 
     // Load cached PRs to show immediately

@@ -3,7 +3,7 @@ import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Effect, Schema } from "effect"
 import { AwsProfileName, AwsRegion, PullRequestId, PullRequestStatus, RepositoryName } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
-import { RepoChangeHub } from "../RepoChangeHub.js"
+import { EventsHub } from "../EventsHub.js"
 
 const BooleanFromNumber = Schema.transform(
   Schema.Number,
@@ -57,10 +57,10 @@ export const UpsertInput = Schema.Struct({
 export type UpsertInput = typeof UpsertInput.Type
 
 export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequestRepo", {
-  dependencies: [DatabaseLive, RepoChangeHub.Default],
+  dependencies: [DatabaseLive, EventsHub.Default],
   effect: Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     const selectCols = sql`
       id, aws_account_id AS "awsAccountId", account_profile AS "accountProfile",

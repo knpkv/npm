@@ -9,7 +9,7 @@ export type RepoChange =
   | { readonly _tag: "AppState" }
   | { readonly _tag: "SystemNotifications" }
 
-export class RepoChangeHub extends Effect.Service<RepoChangeHub>()("RepoChangeHub", {
+export class EventsHub extends Effect.Service<EventsHub>()("EventsHub", {
   effect: Effect.gen(function*() {
     const pubsub = yield* PubSub.unbounded<RepoChange>()
     const batchingRef = yield* Ref.make(false)

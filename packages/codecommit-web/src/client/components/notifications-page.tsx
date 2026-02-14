@@ -27,6 +27,7 @@ import { useOptimisticSet } from "../hooks/useOptimistic.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.js"
 
 const isAuthError = (message: string) => /ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials/i.test(message)
 
@@ -128,13 +129,12 @@ function PersistentNotificationsSection() {
   )
 }
 
-export function NotificationsPage() {
+function SystemNotificationsSection() {
   const state = useAtomValue(appStateAtom)
   const items = state.notifications ?? []
   const clearNotifications = useAtomSet(notificationsClearAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
-  const navigate = useNavigate()
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   const toggle = useCallback((i: number) => {
@@ -142,94 +142,117 @@ export function NotificationsPage() {
   }, [])
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">Notifications</h1>
-          <p className="text-sm text-muted-foreground">PR updates and system alerts</p>
+    <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        {items.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => clearNotifications({})}>
+            <Trash2Icon className="size-3.5 mr-1" />
+            Clear
+          </Button>
+        )}
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-4 text-center">No system notifications</p>
+      ) : (
+        <div className="divide-y rounded-md border">
+          {items.map((item, i) => {
+            const isOpen = expanded[i] ?? false
+            return (
+              <div key={i} className="px-3 py-2.5">
+                <button className="flex w-full items-start gap-3 text-left" onClick={() => toggle(i)}>
+                  {typeIcon(item.type)}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{item.title}</span>
+                      <span className="text-xs text-muted-foreground">{formatTime(item.timestamp)}</span>
+                    </div>
+                    <p
+                      className={`text-sm text-muted-foreground ${
+                        isOpen ? "whitespace-pre-wrap break-words" : "truncate"
+                      }`}
+                    >
+                      {item.message}
+                    </p>
+                  </div>
+                  <ChevronDownIcon
+                    className={`size-4 text-muted-foreground shrink-0 mt-0.5 transition-transform ${
+                      isOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+                {isOpen && isAuthError(item.message) && (
+                  <div className="flex gap-1 mt-2 ml-7">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => {
+                        try {
+                          const profile = Schema.decodeSync(AwsProfileName)(item.profile ?? item.title)
+                          ssoLogin({ payload: { profile } })
+                        } catch {
+                          // invalid profile name — ignore
+                        }
+                      }}
+                    >
+                      Login
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => {
+                        ssoLogout({ payload: { profile: item.profile ?? item.title } })
+                      }}
+                    >
+                      Logout
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
+      )}
+    </div>
+  )
+}
+
+export function NotificationsPage() {
+  const state = useAtomValue(appStateAtom)
+  const navigate = useNavigate()
+  const [tab, setTab] = useState<"updates" | "system">("updates")
+
+  const unreadCount = state.unreadNotificationCount ?? 0
+  const systemCount = (state.notifications ?? []).length
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold">Notifications</h1>
         <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
           Back
         </Button>
       </div>
       <Separator />
 
-      <PersistentNotificationsSection />
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        value={tab}
+        onValueChange={(v) => { if (v) setTab(v as "updates" | "system") }}
+      >
+        <ToggleGroupItem value="updates" className="gap-1.5">
+          PR Updates
+          {unreadCount > 0 && <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{unreadCount}</Badge>}
+        </ToggleGroupItem>
+        <ToggleGroupItem value="system" className="gap-1.5">
+          System
+          {systemCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{systemCount}</Badge>}
+        </ToggleGroupItem>
+      </ToggleGroup>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">System</h2>
-          {items.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => clearNotifications({})}>
-              <Trash2Icon className="size-3.5 mr-1" />
-              Clear
-            </Button>
-          )}
-        </div>
-        {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">No system notifications</p>
-        ) : (
-          <div className="divide-y rounded-md border">
-            {items.map((item, i) => {
-              const isOpen = expanded[i] ?? false
-              return (
-                <div key={i} className="px-3 py-2.5">
-                  <button className="flex w-full items-start gap-3 text-left" onClick={() => toggle(i)}>
-                    {typeIcon(item.type)}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{item.title}</span>
-                        <span className="text-xs text-muted-foreground">{formatTime(item.timestamp)}</span>
-                      </div>
-                      <p
-                        className={`text-sm text-muted-foreground ${
-                          isOpen ? "whitespace-pre-wrap break-words" : "truncate"
-                        }`}
-                      >
-                        {item.message}
-                      </p>
-                    </div>
-                    <ChevronDownIcon
-                      className={`size-4 text-muted-foreground shrink-0 mt-0.5 transition-transform ${
-                        isOpen ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-                  {isOpen && isAuthError(item.message) && (
-                    <div className="flex gap-1 mt-2 ml-7">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs"
-                        onClick={() => {
-                          try {
-                            const profile = Schema.decodeSync(AwsProfileName)(item.profile ?? item.title)
-                            ssoLogin({ payload: { profile } })
-                          } catch {
-                            // invalid profile name — ignore
-                          }
-                        }}
-                      >
-                        Login
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs"
-                        onClick={() => {
-                          ssoLogout({ payload: { profile: item.profile ?? item.title } })
-                        }}
-                      >
-                        Logout
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+      {tab === "updates" ? <PersistentNotificationsSection /> : <SystemNotificationsSection />}
     </div>
   )
 }

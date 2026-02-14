@@ -3,8 +3,8 @@ import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Array as Arr, Effect, Option, Schema } from "effect"
 import { PersistentNotificationType } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
-import { RepoChangeHub } from "../RepoChangeHub.js"
 import type { NewNotification } from "../diff.js"
+import { EventsHub } from "../EventsHub.js"
 
 const NotificationRow = Schema.Struct({
   id: Schema.Number,
@@ -36,10 +36,10 @@ const paginate = (rows: ReadonlyArray<NotificationRow>, limit: number): Paginate
 }
 
 export class NotificationRepo extends Effect.Service<NotificationRepo>()("NotificationRepo", {
-  dependencies: [DatabaseLive, RepoChangeHub.Default],
+  dependencies: [DatabaseLive, EventsHub.Default],
   effect: Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const hub = yield* RepoChangeHub
+    const hub = yield* EventsHub
 
     const selectCols = sql`
       id, pull_request_id AS "pullRequestId", aws_account_id AS "awsAccountId",
