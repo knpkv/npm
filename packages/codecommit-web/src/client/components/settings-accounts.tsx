@@ -94,7 +94,7 @@ export function SettingsAccounts() {
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
-            onSsoLogout={(profile) => ssoLogout({ payload: { profile } })}
+            onSsoLogout={() => ssoLogout({})}
           />
         ))
         .render()}
@@ -119,7 +119,7 @@ function AccountsList({
   readonly statusFilter: StatusFilter
   readonly setStatusFilter: (f: StatusFilter) => void
   readonly toggleAccount: (profile: string, data: ConfigData) => void
-  readonly onSsoLogout: (profile: string) => void
+  readonly onSsoLogout: () => void
 }) {
   const accounts = useMemo(
     () => data.accounts.map((a) => ({ ...a, enabled: overrides[a.profile] ?? a.enabled })),
@@ -150,7 +150,7 @@ function AccountsList({
             size="sm"
             className="h-6 px-1.5 text-xs"
             title="SSO Logout"
-            onClick={() => onSsoLogout(data.currentUser!)}
+            onClick={() => onSsoLogout()}
           >
             <LogOutIcon className="size-3" />
           </Button>

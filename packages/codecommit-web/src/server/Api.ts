@@ -248,7 +248,6 @@ export class NotificationsGroup extends HttpApiGroup.make("notifications")
   )
   .add(
     HttpApiEndpoint.post("ssoLogout", "/sso-logout")
-      .setPayload(Schema.Struct({ profile: Schema.String }))
       .addSuccess(Schema.String)
       .addError(ApiError)
   )

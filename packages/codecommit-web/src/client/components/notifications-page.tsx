@@ -202,7 +202,7 @@ function SystemNotificationsSection() {
                       size="sm"
                       className="h-7 px-2.5 text-xs"
                       onClick={() => {
-                        ssoLogout({ payload: { profile: item.profile ?? item.title } })
+                        ssoLogout({})
                       }}
                     >
                       Logout
