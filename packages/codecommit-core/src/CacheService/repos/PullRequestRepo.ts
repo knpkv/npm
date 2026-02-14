@@ -1,25 +1,32 @@
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Effect, Schema } from "effect"
-import { flow } from "effect/Function"
+import { AwsProfileName, AwsRegion, PullRequestId, PullRequestStatus, RepositoryName } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
+import { RepoChangeHub } from "../RepoChangeHub.js"
 
-const CachedPullRequest = Schema.Struct({
-  id: Schema.String,
+const BooleanFromNumber = Schema.transform(
+  Schema.Number,
+  Schema.Boolean,
+  { strict: true, decode: (n) => n === 1, encode: (b) => (b ? 1 : 0) }
+)
+
+export const CachedPullRequest = Schema.Struct({
+  id: PullRequestId,
   awsAccountId: Schema.String,
-  accountProfile: Schema.String,
-  accountRegion: Schema.String,
+  accountProfile: AwsProfileName,
+  accountRegion: AwsRegion,
   title: Schema.String,
   description: Schema.NullOr(Schema.String),
   author: Schema.String,
-  repositoryName: Schema.String,
-  creationDate: Schema.String,
-  lastModifiedDate: Schema.String,
-  status: Schema.String,
+  repositoryName: RepositoryName,
+  creationDate: Schema.DateFromString,
+  lastModifiedDate: Schema.DateFromString,
+  status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
-  isMergeable: Schema.Number,
-  isApproved: Schema.Number,
+  isMergeable: BooleanFromNumber,
+  isApproved: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   fetchedAt: Schema.String
@@ -27,7 +34,7 @@ const CachedPullRequest = Schema.Struct({
 
 export type CachedPullRequest = typeof CachedPullRequest.Type
 
-const UpsertInput = Schema.Struct({
+export const UpsertInput = Schema.Struct({
   id: Schema.String,
   awsAccountId: Schema.String,
   accountProfile: Schema.String,
@@ -50,9 +57,10 @@ const UpsertInput = Schema.Struct({
 export type UpsertInput = typeof UpsertInput.Type
 
 export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequestRepo", {
-  dependencies: [DatabaseLive],
+  dependencies: [DatabaseLive, RepoChangeHub.Default],
   effect: Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
+    const hub = yield* RepoChangeHub
 
     const selectCols = sql`
       id, aws_account_id AS "awsAccountId", account_profile AS "accountProfile",
@@ -64,13 +72,13 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       comment_count AS "commentCount", link, fetched_at AS "fetchedAt"
     `
 
-    const findAll = SqlSchema.findAll({
+    const findAll_ = SqlSchema.findAll({
       Result: CachedPullRequest,
       Request: Schema.Void,
       execute: () => sql`SELECT ${selectCols} FROM pull_requests ORDER BY creation_date DESC`
     })
 
-    const findByAccountAndId = SqlSchema.findOne({
+    const findByAccountAndId_ = SqlSchema.findOne({
       Result: CachedPullRequest,
       Request: Schema.Struct({ awsAccountId: Schema.String, id: Schema.String }),
       execute: (req) =>
@@ -80,7 +88,7 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       `
     })
 
-    const upsert = SqlSchema.void({
+    const upsert_ = SqlSchema.void({
       Request: UpsertInput,
       execute: (req) =>
         sql`INSERT OR REPLACE INTO pull_requests
@@ -95,7 +103,7 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
             ${req.commentCount}, ${req.link}, datetime('now'))`
     })
 
-    const search = SqlSchema.findAll({
+    const search_ = SqlSchema.findAll({
       Result: CachedPullRequest,
       Request: Schema.Struct({ query: Schema.String }),
       execute: (req) =>
@@ -107,25 +115,38 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       `
     })
 
-    const deleteStale = SqlSchema.void({
+    const deleteStale_ = SqlSchema.void({
       Request: Schema.Struct({ olderThan: Schema.String }),
       execute: (req) => sql`DELETE FROM pull_requests WHERE fetched_at < ${req.olderThan}`
     })
 
+    const updateCommentCount_ = (awsAccountId: string, id: string, count: number | null) =>
+      sql`UPDATE pull_requests SET comment_count = ${count}
+          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(Effect.asVoid)
+
+    const upsertMany_ = (prs: ReadonlyArray<UpsertInput>) =>
+      sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr), { discard: true }))
+
+    const publish = hub.publish({ _tag: "PullRequests" })
+
     return {
-      findAll: flow(findAll, Effect.orDie),
+      findAll: () => findAll_(undefined as void).pipe(Effect.orDie),
       findByAccountAndId: (awsAccountId: string, id: string) =>
-        findByAccountAndId({ awsAccountId, id }).pipe(Effect.orDie),
-      upsert: flow(upsert, Effect.orDie),
+        findByAccountAndId_({ awsAccountId, id }).pipe(Effect.orDie),
+      upsert: (input: UpsertInput) =>
+        upsert_(input).pipe(Effect.tap(() => publish), Effect.orDie),
       upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
-        sql.withTransaction(Effect.forEach(prs, (pr) => upsert(pr), { discard: true })).pipe(Effect.orDie),
+        upsertMany_(prs).pipe(Effect.tap(() => publish), Effect.orDie),
       search: (query: string) => {
         const escaped = query.replace(/"/g, `""`)
-        return search({ query: `"${escaped}"` }).pipe(
+        return search_({ query: `"${escaped}"` }).pipe(
           Effect.catchAll(() => Effect.succeed([]))
         )
       },
-      deleteStale: (olderThan: string) => deleteStale({ olderThan }).pipe(Effect.orDie)
+      deleteStale: (olderThan: string) =>
+        deleteStale_({ olderThan }).pipe(Effect.tap(() => publish), Effect.orDie),
+      updateCommentCount: (awsAccountId: string, id: string, count: number | null) =>
+        updateCommentCount_(awsAccountId, id, count).pipe(Effect.tap(() => publish), Effect.orDie)
     } as const
   })
 }) {}

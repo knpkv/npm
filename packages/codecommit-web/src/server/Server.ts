@@ -110,20 +110,26 @@ const PlatformLive = Layer.mergeAll(
   FetchHttpClient.layer
 )
 
-// Base services - ConfigService needs Platform
-const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(Layer.provide(PlatformLive))
+// Base services - ConfigService needs Platform + RepoChangeHub
+const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(
+  Layer.provide(PlatformLive),
+  Layer.provide(CacheService.RepoChangeHub.Default)
+)
 
 // NotificationsService — single shared instance
 const NotificationsLive_ = NotificationsService.NotificationsServiceLive
 
-// Cache repos — each auto-wires DatabaseLive via Effect.Service dependencies
+// Cache repos + RepoChangeHub — each auto-wires DatabaseLive via Effect.Service dependencies
+// RepoChangeHub.Default is shared across all repos via layer memoization
+// orDie scoped to cache layers only: DB/migration errors become defects here
 const ReposLive = Layer.mergeAll(
   CacheService.PullRequestRepo.Default,
   CacheService.CommentRepo.Default,
   CacheService.NotificationRepo.Default,
   CacheService.SubscriptionRepo.Default,
-  CacheService.SyncMetadataRepo.Default
-)
+  CacheService.SyncMetadataRepo.Default,
+  CacheService.RepoChangeHub.Default
+).pipe(Layer.orDie)
 
 // PRService dependencies
 const PRServiceDeps = Layer.mergeAll(
@@ -157,24 +163,31 @@ const AutoRefresh = Layer.effectDiscard(
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const configService = yield* ConfigService.ConfigService
+
+    const refreshIteration = Effect.gen(function*() {
+      const config = yield* configService.load.pipe(
+        Effect.catchAll(() => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
+      )
+      if (config.autoRefresh) {
+        yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
+        yield* prService.refresh
+        yield* Effect.logInfo("Auto-refresh complete")
+      } else {
+        yield* Effect.sleep(Duration.seconds(30))
+      }
+    }).pipe(
+      Effect.catchAllCause((cause) =>
+        Effect.logError("Auto-refresh failed", cause).pipe(
+          Effect.zipRight(Effect.sleep(Duration.seconds(10)))
+        )
+      )
+    )
+
     yield* Effect.forkDaemon(
       Effect.gen(function*() {
         yield* prService.refresh
         yield* Effect.logInfo("Initial PR refresh complete")
-        return yield* Effect.forever(
-          Effect.gen(function*() {
-            const config = yield* configService.load.pipe(
-              Effect.catchAll(() => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
-            )
-            if (config.autoRefresh) {
-              yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
-              yield* prService.refresh
-              yield* Effect.logInfo("Auto-refresh complete")
-            } else {
-              yield* Effect.sleep(Duration.seconds(30))
-            }
-          })
-        )
+        return yield* Effect.forever(refreshIteration)
       })
     )
   })
@@ -192,7 +205,7 @@ const ApiLive = Layer.merge(
 // Static file router - catches all non-API routes
 const StaticRouter = HttpLayerRouter.use((router) => router.add("GET", "/*", serveStatic))
 
-// Combined routes with CORS — orDie eliminates SQL/Migration errors from repo layers
+// Combined routes with CORS — orDie for remaining service construction errors
 const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
   Layer.provide(
     HttpLayerRouter.cors({
@@ -206,6 +219,7 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
 
 export const makeServer = (options: { port: number; hostname?: string }) =>
   HttpLayerRouter.serve(AllRoutes).pipe(
+    // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
     Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 0 })),
     Layer.provide(BunContext.layer)
   )

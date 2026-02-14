@@ -7,9 +7,10 @@
 import type { Option } from "effect"
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
+import { RepoChangeHub } from "../CacheService/RepoChangeHub.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { NotificationRow } from "../CacheService/repos/NotificationRepo.js"
+import type { PaginatedNotifications } from "../CacheService/repos/NotificationRepo.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
@@ -17,10 +18,13 @@ import type { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js
 import type { ConfigService } from "../ConfigService/index.js"
 import type { AppState, AwsProfileName, NotificationType, PRCommentLocation, PullRequestId } from "../Domain.js"
 import { NotificationsService } from "../NotificationsService.js"
+import { decodeCachedPR } from "./internal.js"
 import { makeRefresh } from "./refresh.js"
 import { makeRefreshSinglePR } from "./refreshSinglePR.js"
 import { makeSetAllAccounts } from "./setAllAccounts.js"
 import { makeToggleAccount } from "./toggleAccount.js"
+
+export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -50,8 +54,8 @@ export class PRService extends Context.Tag("@knpkv/codecommit-core/PRService")<
     readonly getSubscriptions: () => Effect.Effect<ReadonlyArray<{ awsAccountId: string; pullRequestId: string }>>
     readonly isSubscribed: (awsAccountId: string, prId: PullRequestId) => Effect.Effect<boolean>
     readonly getPersistentNotifications: (
-      opts?: { readonly unreadOnly?: boolean }
-    ) => Effect.Effect<ReadonlyArray<NotificationRow>>
+      opts?: { readonly unreadOnly?: boolean; readonly limit?: number; readonly cursor?: number }
+    ) => Effect.Effect<PaginatedNotifications>
     readonly markNotificationRead: (id: number) => Effect.Effect<void>
     readonly markAllNotificationsRead: () => Effect.Effect<void>
     readonly getUnreadNotificationCount: () => Effect.Effect<number>
@@ -85,10 +89,14 @@ export const PRServiceLive = Layer.effect(
       | NotificationRepo
       | SubscriptionRepo
       | SyncMetadataRepo
+      | RepoChangeHub
     >()
 
+    // Load cached PRs to show immediately
+    const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+
     const state = yield* SubscriptionRef.make<AppState>({
-      pullRequests: [],
+      pullRequests: cachedPRs.map(decodeCachedPR),
       accounts: [],
       status: "idle"
     })

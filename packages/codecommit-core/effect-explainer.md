@@ -8,22 +8,30 @@ Service architecture overview — why Effect services beat DI frameworks.
                     ┌─────────────────┐
                     │   PRService      │
                     │  (orchestrator)  │
-                    └──┬──┬──┬────────┘
-                       │  │  │
-          ┌────────────┘  │  └────────────┐
-          ▼               ▼               ▼
-  ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-  │  AwsClient   │ │ConfigService │ │NotificationsService│
-  │  (8 methods) │ │(load/save/   │ │  (add/clear/state) │
-  │              │ │ detect)      │ │                    │
-  └──────┬───────┘ └──────┬───────┘ └────────────────────┘
-         │                │
-         ▼                ▼
+                    └──┬──┬──┬──┬─────┘
+                       │  │  │  │
+          ┌────────────┘  │  │  └────────────┐
+          │      ┌────────┘  └──────┐        │
+          ▼      ▼                  ▼        ▼
+  ┌────────────┐ ┌──────────────┐ ┌────────────────────┐
+  │ AwsClient  │ │ConfigService │ │NotificationsService│
+  │ (8 methods)│ │(load/save/   │ │  (add/clear/state) │
+  │            │ │ detect)      │ │                    │
+  └──────┬─────┘ └──────┬───────┘ └────────────────────┘
+         │              │
+         ▼              ▼
   ┌──────────────┐ ┌──────────────┐
   │AwsClientConfig│ │  FileSystem  │
   │  (timeouts,  │ │  Path        │
   │   retries)   │ │  (platform)  │
   └──────────────┘ └──────────────┘
+
+  ┌───────────────────────────────────────────────┐
+  │  CacheService Repos (all deps of PRService)   │
+  │  PullRequestRepo, CommentRepo, NotificationRepo│
+  │  SubscriptionRepo, SyncMetadataRepo            │
+  │  (auto-wire DatabaseLive via Effect.Service)   │
+  └───────────────────────────────────────────────┘
 ```
 
 ## Why Effect Services > DI Frameworks
@@ -249,8 +257,9 @@ PRs stream incrementally to the UI via `SubscriptionRef`:
 yield *
   Stream.mergeAll(streams, { concurrency: 2 }).pipe(
     Stream.runForEach(({ label, pr }) =>
-      SubscriptionRef.update(deps.state, (s) => {
+      SubscriptionRef.update(state, (s) => {
         // insert PR sorted by creationDate — UI updates per-PR
+        const prs = s.pullRequests.filter((p) => !(p.id === pr.id && p.account.profile === pr.account.profile))
         const insertIdx = prs.findIndex((p) => p.creationDate.getTime() < pr.creationDate.getTime())
         const newPrs = insertIdx === -1 ? [...prs, pr] : [...prs.slice(0, insertIdx), pr, ...prs.slice(insertIdx)]
         return { ...s, pullRequests: newPrs, statusDetail: `${label} #${pr.id}` }

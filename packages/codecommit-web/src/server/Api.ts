@@ -207,10 +207,19 @@ export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
 {}
 
 // Persistent notifications endpoints
+const PaginatedPersistentNotifications = Schema.Struct({
+  items: Schema.Array(PersistentNotificationResponse),
+  nextCursor: Schema.optional(Schema.Number)
+})
+
 export class PersistentNotificationsGroup extends HttpApiGroup.make("persistentNotifications")
   .add(
     HttpApiEndpoint.get("list", "/")
-      .addSuccess(Schema.Array(PersistentNotificationResponse))
+      .setUrlParams(Schema.Struct({
+        limit: Schema.optional(Schema.NumberFromString),
+        cursor: Schema.optional(Schema.NumberFromString)
+      }))
+      .addSuccess(PaginatedPersistentNotifications)
   )
   .add(
     HttpApiEndpoint.get("count", "/count")

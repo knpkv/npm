@@ -1,7 +1,7 @@
 import { Command, HttpApiBuilder } from "@effect/platform"
-import { AwsClient, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Schema, Stream, SubscriptionRef } from "effect"
 import { platform } from "node:os"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
@@ -32,6 +32,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("search", ({ urlParams }) =>
         prService.searchPullRequests(urlParams.q).pipe(
+          Effect.map((rows) => rows.map((row) => Schema.encodeSync(CacheService.CachedPullRequest)(row))),
           Effect.mapError((e) => new ApiError({ message: String(e) }))
         ))
       .handle("refreshSingle", ({ path }) =>

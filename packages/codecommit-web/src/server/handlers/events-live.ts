@@ -1,8 +1,9 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
-import { NotificationsService, PRService } from "@knpkv/codecommit-core"
+import { CacheService, NotificationsService, PRService } from "@knpkv/codecommit-core"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import { Duration, Effect, Schedule, Schema, Stream, SubscriptionRef } from "effect"
-import { CodeCommitApi, NotificationItemResponse } from "../Api.js"
+import type { RepoChange } from "@knpkv/codecommit-core/CacheService/RepoChangeHub.js"
+import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
+import { CodeCommitApi, NotificationItemResponse, PersistentNotificationResponse } from "../Api.js"
 
 const AccountState = Schema.Struct({
   profile: Schema.String,
@@ -19,7 +20,11 @@ const SsePayload = Schema.Struct({
   lastUpdated: Schema.optional(Schema.DateFromSelf),
   currentUser: Schema.optional(Schema.String),
   notifications: Schema.Array(NotificationItemResponse),
-  unreadNotificationCount: Schema.Number
+  unreadNotificationCount: Schema.Number,
+  persistentNotifications: Schema.Struct({
+    items: Schema.Array(PersistentNotificationResponse),
+    nextCursor: Schema.optional(Schema.Number)
+  })
 })
 
 const encode = Schema.encode(SsePayload)
@@ -36,24 +41,71 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const notificationsService = yield* NotificationsService.NotificationsService
+    const prRepo = yield* CacheService.PullRequestRepo
+    const notificationRepo = yield* CacheService.NotificationRepo
+    const hub = yield* CacheService.RepoChangeHub
 
-    // Merge both change streams — emit combined state on either change
-    const prChanges = prService.state.changes.pipe(Stream.map(() => "pr" as const))
-    const notifChanges = notificationsService.state.changes.pipe(Stream.map(() => "notif" as const))
-    const combined = Stream.merge(prChanges, notifChanges)
+    // Bridge SubscriptionRef changes → hub (runs for server lifetime)
+    yield* Effect.forkDaemon(
+      prService.state.changes.pipe(
+        Stream.runForEach(() => hub.publish({ _tag: "AppState" }))
+      )
+    )
+    yield* Effect.forkDaemon(
+      notificationsService.state.changes.pipe(
+        Stream.runForEach(() => hub.publish({ _tag: "SystemNotifications" }))
+      )
+    )
 
-    const stateStream = combined.pipe(
+    // Classify change tags into trigger categories
+    const classify = (change: RepoChange): "repo" | "state" | "notif" => {
+      switch (change._tag) {
+        case "AppState": return "state"
+        case "SystemNotifications": return "notif"
+        default: return "repo"
+      }
+    }
+
+    // Cache unread count + persistent notifications — re-query on relevant triggers
+    const initialCount = yield* prService.getUnreadNotificationCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
+    const lastUnreadRef = yield* Ref.make(initialCount)
+    const initialPersistent = yield* prService.getPersistentNotifications({ limit: 20 }).pipe(
+      Effect.catchAll(() => Effect.succeed({ items: [] as ReadonlyArray<typeof PersistentNotificationResponse.Type> }))
+    )
+    const lastPersistentRef = yield* Ref.make(initialPersistent)
+
+    const stateStream = hub.subscribe.pipe(
+      Stream.map(classify),
       Stream.debounce(Duration.millis(200)),
-      Stream.mapEffect(() =>
+      Stream.mapEffect((trigger) =>
         Effect.all({
           prState: SubscriptionRef.get(prService.state),
           notifState: SubscriptionRef.get(notificationsService.state),
-          unreadCount: prService.getUnreadNotificationCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
+          // Read PRs from SQLite on repo changes; use SubscriptionRef on state-only changes
+          pullRequests: trigger === "repo"
+            ? prRepo.findAll().pipe(
+              Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+              Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+            )
+            : SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)),
+          unreadCount: trigger === "repo" || trigger === "notif"
+            ? notificationRepo.unreadCount().pipe(
+              Effect.tap((c) => Ref.set(lastUnreadRef, c)),
+              Effect.catchAll(() => Ref.get(lastUnreadRef))
+            )
+            : Ref.get(lastUnreadRef),
+          persistentNotifications: trigger === "repo" || trigger === "notif"
+            ? notificationRepo.findAll({ limit: 20 }).pipe(
+              Effect.tap((p) => Ref.set(lastPersistentRef, p)),
+              Effect.catchAll(() => Ref.get(lastPersistentRef))
+            )
+            : Ref.get(lastPersistentRef)
         })
       ),
-      Stream.mapEffect(({ notifState, prState, unreadCount }) =>
+      Stream.mapEffect(({ notifState, persistentNotifications, prState, pullRequests, unreadCount }) =>
         encode({
           ...prState,
+          pullRequests,
           notifications: notifState.items.map((item) => ({
             type: item.type,
             title: item.title,
@@ -61,7 +113,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
             timestamp: item.timestamp.toISOString(),
             ...(item.profile ? { profile: item.profile } : {})
           })),
-          unreadNotificationCount: unreadCount
+          unreadNotificationCount: unreadCount,
+          persistentNotifications
         }).pipe(
           Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
           Effect.catchAll((e) =>

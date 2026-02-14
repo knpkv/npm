@@ -10,7 +10,7 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
-import type { AwsProfileName, AwsRegion, PullRequestId } from "../Domain.js"
+import type { PullRequestId } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 import type { RefreshDeps } from "./refresh.js"
 
@@ -37,7 +37,7 @@ export const makeRefreshSinglePR = (
     const account = pr
       ? { profile: pr.account.profile, region: pr.account.region }
       : Option.isSome(cachedPR)
-      ? { profile: cachedPR.value.accountProfile as AwsProfileName, region: cachedPR.value.accountRegion as AwsRegion }
+      ? { profile: cachedPR.value.accountProfile, region: cachedPR.value.accountRegion }
       : undefined
 
     if (!account) return
@@ -69,12 +69,12 @@ export const makeRefreshSinglePR = (
       author: detail.author,
       repositoryName: detail.repositoryName,
       creationDate: detail.creationDate.toISOString(),
-      lastModifiedDate: cached?.lastModifiedDate ?? new Date().toISOString(),
+      lastModifiedDate: cached?.lastModifiedDate.toISOString() ?? new Date().toISOString(),
       status: detail.status,
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
-      isMergeable: cached?.isMergeable ?? 0,
-      isApproved: cached?.isApproved ?? 0,
+      isMergeable: cached ? (cached.isMergeable ? 1 : 0) : 0,
+      isApproved: cached ? (cached.isApproved ? 1 : 0) : 0,
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ?? ""
     }

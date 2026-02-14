@@ -11,7 +11,11 @@ export const PersistentNotificationsLive = HttpApiBuilder.group(
       const prService = yield* PRService.PRService
 
       return handlers
-        .handle("list", () => prService.getPersistentNotifications())
+        .handle("list", ({ urlParams }) =>
+          prService.getPersistentNotifications({
+            limit: urlParams.limit ?? 20,
+            ...(urlParams.cursor !== undefined ? { cursor: urlParams.cursor } : {})
+          }))
         .handle("count", () =>
           prService.getUnreadNotificationCount().pipe(
             Effect.map((unread) => ({ unread }))

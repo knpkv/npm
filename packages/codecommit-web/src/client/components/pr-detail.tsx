@@ -17,6 +17,7 @@ import { useNavigate, useParams } from "react-router"
 import remarkGfm from "remark-gfm"
 import { appStateAtom, commentsAtom, openPrAtom, subscribeAtom, subscriptionsQueryAtom, unsubscribeAtom } from "../atoms/app.js"
 import { useDismissable } from "../hooks/useDismissable.js"
+import { useOptimistic } from "../hooks/useOptimistic.js"
 import { StorageKeys } from "../storage-keys.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
@@ -261,10 +262,7 @@ export function PRDetail() {
         : false,
     [subscriptionsResult, accountKey, prId]
   )
-  const [optimistic, setOptimistic] = useState<boolean | null>(null)
-  const isSubscribed = optimistic ?? serverSubscribed
-  // Sync optimistic back to server state
-  useEffect(() => { setOptimistic(null) }, [serverSubscribed])
+  const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
   const handleSubscriptionToggle = useCallback(() => {
     if (!accountKey || !pr) return
     const payload = { awsAccountId: accountKey, pullRequestId: pr.id }

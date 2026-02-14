@@ -33,6 +33,16 @@ const NotificationItemWire = Schema.Struct({
   profile: Schema.optional(Schema.String)
 })
 
+const PersistentNotificationWire = Schema.Struct({
+  id: Schema.Number,
+  pullRequestId: Schema.String,
+  awsAccountId: Schema.String,
+  type: Schema.String,
+  message: Schema.String,
+  createdAt: Schema.String,
+  read: Schema.Number
+})
+
 const SsePayload = Schema.Struct({
   pullRequests: Schema.Array(PullRequestWire),
   accounts: Schema.Array(Schema.Struct({
@@ -46,7 +56,11 @@ const SsePayload = Schema.Struct({
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
   notifications: Schema.optional(Schema.Array(NotificationItemWire)),
-  unreadNotificationCount: Schema.optional(Schema.Number)
+  unreadNotificationCount: Schema.optional(Schema.Number),
+  persistentNotifications: Schema.optional(Schema.Struct({
+    items: Schema.Array(PersistentNotificationWire),
+    nextCursor: Schema.optional(Schema.Number)
+  }))
 })
 
 const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))

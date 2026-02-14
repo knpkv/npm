@@ -13,6 +13,16 @@ export interface NotificationItem {
   readonly profile?: string
 }
 
+export interface PersistentNotificationItem {
+  readonly id: number
+  readonly pullRequestId: string
+  readonly awsAccountId: string
+  readonly type: string
+  readonly message: string
+  readonly createdAt: string
+  readonly read: number
+}
+
 export interface AppState {
   readonly pullRequests: ReadonlyArray<Domain.PullRequest>
   readonly accounts: ReadonlyArray<Domain.AccountState>
@@ -23,6 +33,10 @@ export interface AppState {
   readonly currentUser?: string
   readonly notifications?: ReadonlyArray<NotificationItem>
   readonly unreadNotificationCount?: number
+  readonly persistentNotifications?: {
+    readonly items: ReadonlyArray<PersistentNotificationItem>
+    readonly nextCursor?: number
+  }
 }
 
 const defaultState: AppState = {
@@ -44,7 +58,7 @@ export const prsQueryAtom = ApiClient.query("prs", "list", {
  */
 export const configQueryAtom = ApiClient.query("config", "list", {
   reactivityKeys: ["config"],
-  timeToLive: "3 seconds"
+  timeToLive: "30 seconds"
 })
 
 /**
@@ -129,6 +143,7 @@ export const unsubscribeAtom = ApiClient.mutation("subscriptions", "unsubscribe"
 
 // Persistent notifications
 export const persistentNotificationsQueryAtom = ApiClient.query("persistentNotifications", "list", {
+  urlParams: {},
   reactivityKeys: ["persistentNotifications"],
   timeToLive: "10 seconds"
 })
@@ -136,6 +151,7 @@ export const persistentNotificationsCountAtom = ApiClient.query("persistentNotif
   reactivityKeys: ["persistentNotifications"],
   timeToLive: "10 seconds"
 })
+export const loadMoreNotificationsAtom = ApiClient.mutation("persistentNotifications", "list")
 export const markNotificationReadAtom = ApiClient.mutation("persistentNotifications", "markRead")
 export const markAllNotificationsReadAtom = ApiClient.mutation("persistentNotifications", "markAllRead")
 

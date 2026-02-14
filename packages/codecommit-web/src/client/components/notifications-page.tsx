@@ -1,10 +1,11 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import {
   AlertCircleIcon,
   CheckCircleIcon,
   CheckIcon,
   ChevronDownIcon,
   InfoIcon,
+  LoaderIcon,
   Trash2Icon,
   TriangleAlertIcon
 } from "lucide-react"
@@ -18,9 +19,11 @@ import {
   markNotificationReadAtom,
   notificationsClearAtom,
   notificationsSsoLoginAtom,
-  notificationsSsoLogoutAtom,
-  persistentNotificationsQueryAtom
+  notificationsSsoLogoutAtom
 } from "../atoms/app.js"
+import { useInfiniteNotifications } from "../hooks/use-infinite-notifications.js"
+import { useIntersectionObserver } from "../hooks/useIntersectionObserver.js"
+import { useOptimisticSet } from "../hooks/useOptimistic.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
@@ -51,21 +54,24 @@ const formatTime = (ts: string) => {
 }
 
 function PersistentNotificationsSection() {
-  const result = useAtomValue(persistentNotificationsQueryAtom)
+  const { items: rawItems, hasMore, isLoading, loadMore } = useInfiniteNotifications()
   const markRead = useAtomSet(markNotificationReadAtom)
   const markAllRead = useAtomSet(markAllNotificationsReadAtom)
   const navigate = useNavigate()
-  const [readIds, setReadIds] = useState<Set<number>>(new Set())
+  const [readIds, addReadId, setAllReadIds] = useOptimisticSet<number>(rawItems[0]?.id)
 
-  if (!Result.isSuccess(result)) return null
-  const items = result.value.map((n) => readIds.has(n.id) ? { ...n, read: 1 } : n)
+  const sentinelRef = useIntersectionObserver<HTMLDivElement>(() => {
+    if (hasMore && !isLoading) void loadMore()
+  })
+
+  const items = rawItems.map((n) => readIds.has(n.id) ? { ...n, read: 1 } : n)
   if (items.length === 0) return null
 
   const unread = items.filter((n) => n.read === 0)
 
   const goToPR = (item: (typeof items)[number]) => {
     if (item.read === 0) {
-      setReadIds((prev) => new Set(prev).add(item.id))
+      addReadId(item.id)
       markRead({ payload: { id: item.id } })
     }
     navigate(`/accounts/${encodeURIComponent(item.awsAccountId)}/prs/${item.pullRequestId}`)
@@ -80,7 +86,7 @@ function PersistentNotificationsSection() {
         </div>
         {unread.length > 0 && (
           <Button variant="ghost" size="sm" onClick={() => {
-            setReadIds(new Set(items.map((n) => n.id)))
+            setAllReadIds(items.map((n) => n.id))
             markAllRead({})
           }}>
             <CheckIcon className="size-3.5 mr-1" />
@@ -112,6 +118,12 @@ function PersistentNotificationsSection() {
           </button>
         ))}
       </div>
+      <div ref={sentinelRef} className="h-1" />
+      {isLoading && (
+        <div className="flex justify-center py-2">
+          <LoaderIcon className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
     </div>
   )
 }
