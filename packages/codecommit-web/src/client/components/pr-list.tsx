@@ -115,7 +115,6 @@ export function PRList() {
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
           <LoaderIcon className="size-8 animate-spin opacity-40" />
           <p className="text-sm font-medium">Loading pull requests...</p>
-          {state.statusDetail && <p className="font-mono text-xs opacity-60">{state.statusDetail}</p>}
           {prs.length > 0 && <p className="text-xs opacity-50">{prs.length} PRs fetched (filter hides all)</p>}
         </div>
       )
@@ -139,12 +138,6 @@ export function PRList() {
 
   return (
     <div className="space-y-6">
-      {isLoading && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderIcon className="size-3 animate-spin" />
-          {state.statusDetail && <span className="font-mono opacity-60">{state.statusDetail}</span>}
-        </div>
-      )}
       {groups.map(([accountId, accountPrs]) => (
         <section key={accountId}>
           <div className="mb-2 flex items-center gap-2">
