@@ -71,21 +71,23 @@ export function FilterBar() {
     }
     if (key === "mine") {
       const scopes = filterOptions.myScopes
-      setQuickFilter(scopes.length > 0 && scopes[0] !== undefined ? { type: "mine", value: scopes[0] } : { type: "mine" })
+      setQuickFilter(
+        scopes.length > 0 && scopes[0] !== undefined ? { type: "mine", value: scopes[0] } : { type: "mine" }
+      )
       return
     }
     const options =
       key === "author"
-          ? filterOptions.authors
-          : key === "account"
-            ? filterOptions.accounts
-            : key === "scope"
-              ? filterOptions.scopes
-              : key === "repo"
-                ? filterOptions.repos
-                : key === "status"
-                  ? ["approved", "pending", "mergeable", "conflicts"]
-                  : []
+        ? filterOptions.authors
+        : key === "account"
+          ? filterOptions.accounts
+          : key === "scope"
+            ? filterOptions.scopes
+            : key === "repo"
+              ? filterOptions.repos
+              : key === "status"
+                ? ["approved", "pending", "mergeable", "conflicts"]
+                : []
 
     if (options.length > 0 && options[0] !== undefined) {
       setQuickFilter({ type: key, value: options[0] })

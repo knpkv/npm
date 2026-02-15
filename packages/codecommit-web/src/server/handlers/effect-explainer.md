@@ -4,15 +4,15 @@ Handler patterns — Schema-encoded SSE via SubscriptionRef, typed error propaga
 
 ## Handler Map
 
-| File                              | Endpoint                       | Pattern                                                                        |
-| --------------------------------- | ------------------------------ | ------------------------------------------------------------------------------ |
-| `prs-live.ts`                     | `/api/prs/*`                   | Read SubscriptionRef, forkDaemon refresh, create PR, search FTS5, comments     |
-| `config-live.ts`                  | `/api/config/*`                | Load/save/validate/reset config, merge with runtime state                      |
-| `accounts-live.ts`                | `/api/accounts`                | Filter enabled accounts from state                                             |
-| `events-live.ts`                  | `/api/events/`                 | SSE — `handleRaw` + `HttpServerResponse.stream` from `SubscriptionRef.changes` |
-| `notifications-live.ts`           | `/api/notifications/*`         | List/clear notifications, SSO login/logout via `Command`                       |
-| `subscriptions-live.ts`           | `/api/subscriptions/*`         | Subscribe/unsubscribe PRs, list subscriptions                                  |
-| `persistent-notifications-live.ts`| `/api/notifications/persistent/*` | DB-backed notifications: list, count, mark read                             |
+| File                               | Endpoint                          | Pattern                                                                        |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
+| `prs-live.ts`                      | `/api/prs/*`                      | Read SubscriptionRef, forkDaemon refresh, create PR, search FTS5, comments     |
+| `config-live.ts`                   | `/api/config/*`                   | Load/save/validate/reset config, merge with runtime state                      |
+| `accounts-live.ts`                 | `/api/accounts`                   | Filter enabled accounts from state                                             |
+| `events-live.ts`                   | `/api/events/`                    | SSE — `handleRaw` + `HttpServerResponse.stream` from `SubscriptionRef.changes` |
+| `notifications-live.ts`            | `/api/notifications/*`            | List/clear notifications, SSO login/logout via `Command`                       |
+| `subscriptions-live.ts`            | `/api/subscriptions/*`            | Subscribe/unsubscribe PRs, list subscriptions                                  |
+| `persistent-notifications-live.ts` | `/api/notifications/persistent/*` | DB-backed notifications: list, count, mark read                                |
 
 ## Read-Only Handlers: SubscriptionRef Snapshot
 
@@ -21,7 +21,7 @@ Most handlers follow the same pattern — get a snapshot of current state:
 ```typescript
 // accounts-live.ts
 HttpApiBuilder.handle("list", () =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const state = yield* SubscriptionRef.get(prService.state)
     return Chunk.fromIterable(
       state.accounts.filter((a) => a.enabled).map((a) => new Domain.Account({ profile: a.profile, region: a.region }))
@@ -66,37 +66,42 @@ Error handling: `catchAll` provides a safe default if config fails to load.
 ```typescript
 // prs-live.ts — services resolved once in Effect.gen, handlers chained on returned value
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
 
-    return handlers
-      // Read: snapshot of current PRs (returns Chunk)
-      .handle("list", () =>
-        SubscriptionRef.get(prService.state).pipe(Effect.map((state) => Chunk.fromIterable(state.pullRequests)))
-      )
-      // Write: forkDaemon — returns immediately, refresh runs in background
-      .handle("refresh", () =>
-        prService.refresh.pipe(Effect.forkDaemon, Effect.map(() => "ok"))
-      )
-      // Search: FTS5 query against cached PRs
-      .handle("search", ({ urlParams }) =>
-        prService.searchPullRequests(urlParams.q).pipe(
-          Effect.mapError((e) => new ApiError({ message: String(e) }))
+    return (
+      handlers
+        // Read: snapshot of current PRs (returns Chunk)
+        .handle("list", () =>
+          SubscriptionRef.get(prService.state).pipe(Effect.map((state) => Chunk.fromIterable(state.pullRequests)))
         )
-      )
-      // Write: create PR, map errors to ApiError
-      .handle("create", ({ payload }) =>
-        awsClient.createPullRequest({
-          account: { profile: payload.account.profile, region: payload.account.region },
-          repositoryName: payload.repositoryName,
-          title: payload.title,
-          ...(payload.description && { description: payload.description }),
-          sourceReference: payload.sourceBranch,
-          destinationReference: payload.destinationBranch
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message })))
-      )
-      // + refreshSingle, comments, open
+        // Write: forkDaemon — returns immediately, refresh runs in background
+        .handle("refresh", () =>
+          prService.refresh.pipe(
+            Effect.forkDaemon,
+            Effect.map(() => "ok")
+          )
+        )
+        // Search: FTS5 query against cached PRs
+        .handle("search", ({ urlParams }) =>
+          prService.searchPullRequests(urlParams.q).pipe(Effect.mapError((e) => new ApiError({ message: String(e) })))
+        )
+        // Write: create PR, map errors to ApiError
+        .handle("create", ({ payload }) =>
+          awsClient
+            .createPullRequest({
+              account: { profile: payload.account.profile, region: payload.account.region },
+              repositoryName: payload.repositoryName,
+              title: payload.title,
+              ...(payload.description && { description: payload.description }),
+              sourceReference: payload.sourceBranch,
+              destinationReference: payload.destinationBranch
+            })
+            .pipe(Effect.mapError((e) => new ApiError({ message: e.message })))
+        )
+    )
+    // + refreshSingle, comments, open
   })
 )
 ```

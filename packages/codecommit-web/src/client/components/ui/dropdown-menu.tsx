@@ -33,10 +33,7 @@ function DropdownMenuContent({
   )
 }
 
-function DropdownMenuItem({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
+function DropdownMenuItem({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"

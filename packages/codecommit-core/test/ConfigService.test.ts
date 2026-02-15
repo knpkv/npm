@@ -2,6 +2,7 @@ import { FileSystem, Path } from "@effect/platform"
 import { SystemError } from "@effect/platform/Error"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
+import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { ConfigService, ConfigServiceLive } from "../src/ConfigService/index.js"
 
 const MockPath = Path.layer
@@ -51,7 +52,7 @@ const makeTestLayer = (files: Record<string, string>) => {
   return {
     store: mock.store,
     layer: ConfigServiceLive.pipe(
-      Layer.provide(Layer.merge(mock.layer, MockPath)),
+      Layer.provide(Layer.mergeAll(mock.layer, MockPath, EventsHub.Default)),
       Layer.provide(ConfigProviderLive)
     )
   }

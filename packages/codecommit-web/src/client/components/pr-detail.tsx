@@ -2,6 +2,7 @@ import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
+import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -10,12 +11,28 @@ import {
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
-import { ArrowLeftIcon, ArrowRightIcon, BellIcon, BellOffIcon, ChevronDownIcon, ExternalLinkIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BellIcon,
+  BellOffIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  LoaderIcon
+} from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { useNavigate, useParams } from "react-router"
 import remarkGfm from "remark-gfm"
-import { appStateAtom, commentsAtom, openPrAtom, subscribeAtom, subscriptionsQueryAtom, unsubscribeAtom } from "../atoms/app.js"
+import {
+  appStateAtom,
+  commentsAtom,
+  openPrAtom,
+  refreshSinglePrAtom,
+  subscribeAtom,
+  subscriptionsQueryAtom,
+  unsubscribeAtom
+} from "../atoms/app.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { StorageKeys } from "../storage-keys.js"
@@ -233,15 +250,27 @@ function CollapsibleSection({
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
+  const refreshSingle = useAtomSet(refreshSinglePrAtom)
+  const fetchedRef = useRef<string | null>(null)
   const pr = useMemo(
     () =>
       prId
         ? (state.pullRequests.find(
-          (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
-        ) ?? null)
+            (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
+          ) ?? null)
         : null,
     [accountId, prId, state.pullRequests]
   )
+
+  // Fetch from AWS when PR not in cache (e.g. merged/closed)
+  useEffect(() => {
+    if (pr || !accountId || !prId) return
+    const key = `${accountId}:${prId}`
+    if (fetchedRef.current === key) return
+    fetchedRef.current = key
+    refreshSingle({ path: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
+  }, [pr, accountId, prId, refreshSingle])
+
   const score: HealthScore | undefined = useMemo(
     () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
@@ -307,27 +336,34 @@ export function PRDetail() {
 
   if (!pr) {
     return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground">
-        <p className="text-sm">No PR selected</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
+        <LoaderIcon className="size-6 animate-spin opacity-40" />
+        <p className="text-sm">Loading pull request...</p>
       </div>
     )
   }
 
-  const mergeBadge = !pr.isMergeable ? (
-    <Badge variant="destructive">Conflict</Badge>
-  ) : (
-    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-      Mergeable
-    </Badge>
-  )
+  const isOpen = pr.status === "OPEN"
 
-  const approvalBadge = pr.isApproved ? (
-    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-      Approved
-    </Badge>
-  ) : (
-    <Badge variant="secondary">Pending</Badge>
-  )
+  const mergeBadge = isOpen ? (
+    !pr.isMergeable ? (
+      <Badge variant="destructive">Conflict</Badge>
+    ) : (
+      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+        Mergeable
+      </Badge>
+    )
+  ) : null
+
+  const approvalBadge = isOpen ? (
+    pr.isApproved ? (
+      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+        Approved
+      </Badge>
+    ) : (
+      <Badge variant="secondary">Pending</Badge>
+    )
+  ) : null
 
   return (
     <div className="space-y-6">

@@ -113,22 +113,21 @@ plus `AllRoutes` for remaining service construction errors.
 ### AutoRefresh — Daemon with Per-Iteration Error Recovery
 
 ```typescript
-const refreshIteration = Effect.gen(function*() {
+const refreshIteration = Effect.gen(function* () {
   // ...
 }).pipe(
   Effect.catchAllCause((cause) =>
-    Effect.logError("Auto-refresh failed", cause).pipe(
-      Effect.zipRight(Effect.sleep(Duration.seconds(10)))
-    )
+    Effect.logError("Auto-refresh failed", cause).pipe(Effect.zipRight(Effect.sleep(Duration.seconds(10))))
   )
 )
 
-yield* Effect.forkDaemon(
-  prService.refresh.pipe(
-    Effect.zipRight(Effect.logInfo("Initial PR refresh complete")),
-    Effect.zipRight(Effect.forever(refreshIteration))
+yield *
+  Effect.forkDaemon(
+    prService.refresh.pipe(
+      Effect.zipRight(Effect.logInfo("Initial PR refresh complete")),
+      Effect.zipRight(Effect.forever(refreshIteration))
+    )
   )
-)
 ```
 
 `catchAllCause` inside `Effect.forever` — each iteration recovers independently, loop never dies.
@@ -180,31 +179,34 @@ CORS is a Layer, not a middleware function. This means:
 ```typescript
 // handlers/prs-live.ts — services resolved in Effect.gen scope, handlers chained
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
 
     return handlers
       .handle("list", () =>
-        SubscriptionRef.get(prService.state).pipe(
-          Effect.map((state) => Chunk.fromIterable(state.pullRequests))
-        ))
+        SubscriptionRef.get(prService.state).pipe(Effect.map((state) => Chunk.fromIterable(state.pullRequests)))
+      )
       .handle("refresh", () =>
         prService.refresh.pipe(
-          Effect.forkDaemon,              // non-blocking — returns immediately
+          Effect.forkDaemon, // non-blocking — returns immediately
           Effect.map(() => "ok")
-        ))
+        )
+      )
       .handle("search", ({ urlParams }) =>
-        prService.searchPullRequests(urlParams.q).pipe(
-          Effect.mapError((e) => new ApiError({ message: String(e) }))
-        ))
+        prService.searchPullRequests(urlParams.q).pipe(Effect.mapError((e) => new ApiError({ message: String(e) })))
+      )
       .handle("create", ({ payload }) =>
-        awsClient.createPullRequest({
-          account: { profile: payload.account.profile, region: payload.account.region },
-          // ...
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
-      // + refreshSingle, comments, open handlers
-  }))
+        awsClient
+          .createPullRequest({
+            account: { profile: payload.account.profile, region: payload.account.region }
+            // ...
+          })
+          .pipe(Effect.mapError((e) => new ApiError({ message: e.message })))
+      )
+    // + refreshSingle, comments, open handlers
+  })
+)
 ```
 
 Key points:

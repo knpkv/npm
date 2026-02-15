@@ -1,4 +1,4 @@
-import { AppStatus } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, NotificationType, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import type { AppState } from "../atoms/app.js"
@@ -17,7 +17,7 @@ const PullRequestWire = Schema.Struct({
     region: Schema.String,
     awsAccountId: Schema.optional(Schema.String)
   }),
-  status: Schema.Literal("OPEN", "CLOSED"),
+  status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
@@ -27,7 +27,7 @@ const PullRequestWire = Schema.Struct({
 })
 
 const NotificationItemWire = Schema.Struct({
-  type: Schema.Literal("error", "info", "warning", "success"),
+  type: NotificationType,
   title: Schema.String,
   message: Schema.String,
   timestamp: Schema.String,

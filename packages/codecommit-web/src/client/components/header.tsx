@@ -1,6 +1,15 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { BellIcon, LoaderIcon, LogOutIcon, MoonIcon, RefreshCwIcon, SettingsIcon, SunIcon, UserIcon } from "lucide-react"
+import {
+  BellIcon,
+  LoaderIcon,
+  LogOutIcon,
+  MoonIcon,
+  RefreshCwIcon,
+  SettingsIcon,
+  SunIcon,
+  UserIcon
+} from "lucide-react"
 import { useNavigate } from "react-router"
 import { appStateAtom, notificationsSsoLogoutAtom, refreshAtom } from "../atoms/app.js"
 import { cn } from "../lib/utils.js"
@@ -25,10 +34,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
-        <button
-          className="text-sm font-semibold tracking-tight hover:text-foreground/80"
-          onClick={() => navigate("/")}
-        >
+        <button className="text-sm font-semibold tracking-tight hover:text-foreground/80" onClick={() => navigate("/")}>
           codecommit
         </button>
         <Separator orientation="vertical" className="h-4" />

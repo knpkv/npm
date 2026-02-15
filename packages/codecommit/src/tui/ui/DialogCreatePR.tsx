@@ -73,7 +73,9 @@ export function DialogCreatePR() {
   const filteredRepos = useMemo(() => {
     if (!repoFilter) return repos
     const filter = repoFilter.toLowerCase()
-    return repos.filter((r) => r.name.toLowerCase().includes(filter) || r.account.profile.toLowerCase().includes(filter))
+    return repos.filter(
+      (r) => r.name.toLowerCase().includes(filter) || r.account.profile.toLowerCase().includes(filter)
+    )
   }, [repos, repoFilter])
 
   // Filter branches by search text

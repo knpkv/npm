@@ -10,9 +10,29 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
+import { ConfigService } from "../ConfigService/index.js"
 import type { PullRequestId } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 import type { RefreshDeps } from "./refresh.js"
+
+/** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
+const resolveAccountFromCache = (prRepo: PullRequestRepo, awsAccountId: string) =>
+  Effect.gen(function*() {
+    // Check other cached PRs from the same AWS account
+    const allCached = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+    const sibling = allCached.find((p) => p.awsAccountId === awsAccountId)
+    if (sibling) return { profile: sibling.accountProfile, region: sibling.accountRegion }
+
+    // Fall back to config — match by profile name (awsAccountId might be the profile name from URL)
+    const configService = yield* ConfigService
+    const config = yield* configService.load.pipe(Effect.catchAll(() => Effect.succeed({ accounts: [] })))
+    const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
+    if (configAccount && configAccount.regions?.[0]) {
+      return { profile: configAccount.profile, region: configAccount.regions[0] }
+    }
+
+    return undefined
+  })
 
 export const makeRefreshSinglePR = (
   state: PRState
@@ -34,11 +54,12 @@ export const makeRefreshSinglePR = (
       Effect.catchAll(() => Effect.succeed(Option.none()))
     )
 
+    // Resolve account: from state PR → cached PR → any cached PR with same awsAccountId → config
     const account = pr
       ? { profile: pr.account.profile, region: pr.account.region }
       : Option.isSome(cachedPR)
       ? { profile: cachedPR.value.accountProfile, region: cachedPR.value.accountRegion }
-      : undefined
+      : yield* resolveAccountFromCache(prRepo, awsAccountId)
 
     if (!account) return
 
@@ -73,8 +94,8 @@ export const makeRefreshSinglePR = (
       status: detail.status,
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
-      isMergeable: cached ? (cached.isMergeable ? 1 : 0) : 0,
-      isApproved: cached ? (cached.isApproved ? 1 : 0) : 0,
+      isMergeable: cached ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
+      isApproved: cached ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ?? ""
     }

@@ -63,7 +63,7 @@ export type CommentId = typeof CommentId.Type
  *
  * @category Domain
  */
-export const PullRequestStatus = Schema.Literal("OPEN", "CLOSED")
+export const PullRequestStatus = Schema.Literal("OPEN", "CLOSED", "MERGED")
 export type PullRequestStatus = typeof PullRequestStatus.Type
 
 /**

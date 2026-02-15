@@ -27,7 +27,10 @@ const RawGetPullRequestResponse = Schema.Struct({
     pullRequestTargets: Schema.optional(Schema.Array(Schema.Struct({
       repositoryName: Schema.optional(Schema.String),
       sourceReference: Schema.optional(Schema.String),
-      destinationReference: Schema.optional(Schema.String)
+      destinationReference: Schema.optional(Schema.String),
+      mergeMetadata: Schema.optional(Schema.Struct({
+        isMerged: Schema.optional(Schema.Boolean)
+      }))
     }))),
     creationDate: Schema.optional(Schema.DateFromSelf)
   }))
@@ -51,11 +54,12 @@ const RawToPullRequestDetail = Schema.transform(
     decode: (raw) => {
       const pr = raw.pullRequest
       const target = pr?.pullRequestTargets?.[0]
+      const isMerged = target?.mergeMetadata?.isMerged === true
       return {
         title: pr?.title ?? "",
         description: pr?.description,
         author: pr?.authorArn ? normalizeAuthor(pr.authorArn) : "unknown",
-        status: pr?.pullRequestStatus ?? "UNKNOWN",
+        status: isMerged ? "MERGED" : (pr?.pullRequestStatus ?? "UNKNOWN"),
         repositoryName: target?.repositoryName ?? "",
         sourceBranch: target?.sourceReference ?? "",
         destinationBranch: target?.destinationReference ?? "",

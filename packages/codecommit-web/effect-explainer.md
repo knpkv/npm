@@ -104,7 +104,7 @@ Every handler gets its services through layers — no global state, no singleton
 Uses `@effect/platform FileSystem` (async, no sync `node:fs`):
 
 ```typescript
-const serveStatic = Effect.gen(function*() {
+const serveStatic = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -351,7 +351,7 @@ const startServer = (port: number): Effect.Effect<never> =>
 The auto-refresh daemon shares services with handlers via layer sibling merging:
 
 ```typescript
-const refreshIteration = Effect.gen(function*() {
+const refreshIteration = Effect.gen(function* () {
   const config = yield* configService.load.pipe(Effect.catchAll(() => Effect.succeed(defaults)))
   if (config.autoRefresh) {
     yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
@@ -361,14 +361,12 @@ const refreshIteration = Effect.gen(function*() {
   }
 }).pipe(
   Effect.catchAllCause((cause) =>
-    Effect.logError("Auto-refresh failed", cause).pipe(
-      Effect.zipRight(Effect.sleep(Duration.seconds(10)))
-    )
+    Effect.logError("Auto-refresh failed", cause).pipe(Effect.zipRight(Effect.sleep(Duration.seconds(10))))
   )
 )
 
 const AutoRefresh = Layer.effectDiscard(
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const prService = yield* PRService.PRService
     const configService = yield* ConfigService.ConfigService
     yield* Effect.forkDaemon(

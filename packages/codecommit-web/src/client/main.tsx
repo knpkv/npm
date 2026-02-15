@@ -8,10 +8,7 @@ import { RouterProvider } from "react-router"
 import { ThemeProvider } from "./components/theme-provider.js"
 import { router } from "./router.js"
 
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean }
-> {
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: { children: React.ReactNode }) {
     super(props)
     this.state = { hasError: false }

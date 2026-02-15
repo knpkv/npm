@@ -390,6 +390,7 @@ const accountIdMap = yield* Ref.get(accountIdRef)
 ```
 
 Three Refs in refresh:
+
 - `accountIdRef` — profile→awsAccountId mapping (populated once, then snapshotted read-only)
 - `subscribedRef` — subscribed PR keys (loaded from DB, grows during auto-subscribe)
 - `seenKeysRef` — tracks seen PRs in current refresh (for stale PR removal)
@@ -399,18 +400,19 @@ Three Refs in refresh:
 refresh.ts streams PRs incrementally into app state. Not batch-then-display — each PR appears as it arrives:
 
 ```typescript
-yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
-  Stream.runForEach(({ label, pr, awsAccountId }) =>
-    Effect.gen(function*() {
-      yield* Ref.update(seenKeysRef, (s) => new Set(s).add(`${pr.account.profile}:${pr.id}`))
-      const subscribed = yield* Ref.get(subscribedRef)
-      if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
-        // diff against cache for notifications
-      }
-      // upsert to cache, update SubscriptionRef state
-    })
+yield *
+  Stream.mergeAll(streams, { concurrency: 2 }).pipe(
+    Stream.runForEach(({ label, pr, awsAccountId }) =>
+      Effect.gen(function* () {
+        yield* Ref.update(seenKeysRef, (s) => new Set(s).add(`${pr.account.profile}:${pr.id}`))
+        const subscribed = yield* Ref.get(subscribedRef)
+        if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
+          // diff against cache for notifications
+        }
+        // upsert to cache, update SubscriptionRef state
+      })
+    )
   )
-)
 ```
 
 Key patterns:
@@ -477,14 +479,16 @@ const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
 
 find: (awsAccountId, prId) =>
   find_({ awsAccountId, pullRequestId: prId }).pipe(
-    Effect.flatMap(Option.match({
-      onNone: () => Effect.succeed(Option.none()),
-      onSome: (r) =>
-        Schema.decodeUnknown(LocationsFromJson)(r.locationsJson).pipe(
-          Effect.map((decoded) => Option.some(decoded)),
-          Effect.catchAll(() => Effect.succeed(Option.some([])))  // corrupt data → empty
-        )
-    })),
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(Option.none()),
+        onSome: (r) =>
+          Schema.decodeUnknown(LocationsFromJson)(r.locationsJson).pipe(
+            Effect.map((decoded) => Option.some(decoded)),
+            Effect.catchAll(() => Effect.succeed(Option.some([]))) // corrupt data → empty
+          )
+      })
+    ),
     Effect.orDie
   )
 ```

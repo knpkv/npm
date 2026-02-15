@@ -65,7 +65,7 @@ function PersistentNotificationsSection() {
     if (hasMore && !isLoading) void loadMore()
   })
 
-  const items = rawItems.map((n) => readIds.has(n.id) ? { ...n, read: 1 } : n)
+  const items = rawItems.map((n) => (readIds.has(n.id) ? { ...n, read: 1 } : n))
   if (items.length === 0) return null
 
   const unread = items.filter((n) => n.read === 0)
@@ -86,10 +86,14 @@ function PersistentNotificationsSection() {
           {unread.length > 0 && <Badge variant="destructive">{unread.length} unread</Badge>}
         </div>
         {unread.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => {
-            setAllReadIds(items.map((n) => n.id))
-            markAllRead({})
-          }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setAllReadIds(items.map((n) => n.id))
+              markAllRead({})
+            }}
+          >
             <CheckIcon className="size-3.5 mr-1" />
             Mark all read
           </Button>
@@ -108,14 +112,14 @@ function PersistentNotificationsSection() {
                 <span className={`text-sm ${item.read === 0 ? "font-medium" : "text-muted-foreground"}`}>
                   PR #{item.pullRequestId}
                 </span>
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0">{item.type}</Badge>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  {item.type}
+                </Badge>
                 <span className="text-xs text-muted-foreground">{formatTime(item.createdAt)}</span>
               </div>
               <p className="text-sm text-muted-foreground">{item.message}</p>
             </div>
-            {item.read === 0 && (
-              <span className="shrink-0 mt-0.5 size-2 rounded-full bg-blue-500" />
-            )}
+            {item.read === 0 && <span className="shrink-0 mt-0.5 size-2 rounded-full bg-blue-500" />}
           </button>
         ))}
       </div>
@@ -240,15 +244,25 @@ export function NotificationsPage() {
         type="single"
         variant="outline"
         value={tab}
-        onValueChange={(v) => { if (v) setTab(v as "updates" | "system") }}
+        onValueChange={(v) => {
+          if (v) setTab(v as "updates" | "system")
+        }}
       >
         <ToggleGroupItem value="updates" className="gap-1.5">
           PR Updates
-          {unreadCount > 0 && <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{unreadCount}</Badge>}
+          {unreadCount > 0 && (
+            <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">
+              {unreadCount}
+            </Badge>
+          )}
         </ToggleGroupItem>
         <ToggleGroupItem value="system" className="gap-1.5">
           System
-          {systemCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{systemCount}</Badge>}
+          {systemCount > 0 && (
+            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+              {systemCount}
+            </Badge>
+          )}
         </ToggleGroupItem>
       </ToggleGroup>
 

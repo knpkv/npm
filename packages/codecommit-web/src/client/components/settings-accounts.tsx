@@ -62,10 +62,7 @@ export function SettingsAccounts() {
   )
 
   const toggleAccount = useCallback(
-    (
-      profile: string,
-      data: ConfigData
-    ) => {
+    (profile: string, data: ConfigData) => {
       const current = overrides[profile] ?? data.accounts.find((a) => a.profile === profile)?.enabled ?? true
       const next = !current
       const nextOverrides = { ...overrides, [profile]: next }
@@ -108,7 +105,9 @@ export function SettingsAccounts() {
             onSsoLogin={(profile) => {
               try {
                 ssoLogin({ payload: { profile: Schema.decodeSync(AwsProfileName)(profile) } })
-              } catch { /* invalid profile */ }
+              } catch {
+                /* invalid profile */
+              }
             }}
             onSsoLogout={() => ssoLogout({})}
           />
@@ -163,26 +162,25 @@ function AccountsList({
     <>
       <div className="flex items-center gap-2 text-sm">
         <UserIcon className="size-4 text-muted-foreground" />
-        {currentUser
-          ? (
-            <>
-              <span className="text-muted-foreground">Current user:</span>
-              <span className="font-medium">{currentUser}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-xs"
-                title="SSO Logout"
-                onClick={() => onSsoLogout()}
-              >
-                <LogOutIcon className="size-3" />
-              </Button>
-            </>
-          )
-          : (
-            <>
-              <span className="text-muted-foreground">Not logged in</span>
-              {enabledAccounts[0] && (() => {
+        {currentUser ? (
+          <>
+            <span className="text-muted-foreground">Current user:</span>
+            <span className="font-medium">{currentUser}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-xs"
+              title="SSO Logout"
+              onClick={() => onSsoLogout()}
+            >
+              <LogOutIcon className="size-3" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="text-muted-foreground">Not logged in</span>
+            {enabledAccounts[0] &&
+              (() => {
                 const profile = enabledAccounts[0].profile
                 return (
                   <Button
@@ -196,8 +194,8 @@ function AccountsList({
                   </Button>
                 )
               })()}
-            </>
-          )}
+          </>
+        )}
       </div>
       {accounts.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
