@@ -24,7 +24,9 @@ describe("ConfigService", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default)))
+          ConfigService.ConfigServiceLive.pipe(
+            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
+          )
         )
       )
     )
@@ -56,7 +58,9 @@ describe("ConfigService", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default)))
+          ConfigService.ConfigServiceLive.pipe(
+            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
+          )
         )
       )
     )

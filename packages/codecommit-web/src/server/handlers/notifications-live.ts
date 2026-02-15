@@ -107,9 +107,7 @@ export const NotificationsLive = HttpApiBuilder.group(
               ssoSemaphore.withPermits(1)(
                 Command.exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
-                  Effect.tap(() =>
-                    SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)
-                  ),
+                  Effect.tap(() => SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)),
                   Effect.tap(() =>
                     notificationsService.add({
                       type: "success",

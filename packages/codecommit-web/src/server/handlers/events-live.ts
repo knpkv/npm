@@ -1,6 +1,5 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, NotificationsService, PRService } from "@knpkv/codecommit-core"
-import type { RepoChange } from "@knpkv/codecommit-core/CacheService/EventsHub.js"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { CodeCommitApi, NotificationItemResponse, PersistentNotificationResponse } from "../Api.js"
@@ -45,30 +44,6 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const notificationRepo = yield* CacheService.NotificationRepo
     const hub = yield* CacheService.EventsHub
 
-    // Bridge SubscriptionRef changes → hub (runs for server lifetime)
-    yield* Effect.forkDaemon(
-      prService.state.changes.pipe(
-        Stream.runForEach(() => hub.publish({ _tag: "AppState" }))
-      )
-    )
-    yield* Effect.forkDaemon(
-      notificationsService.state.changes.pipe(
-        Stream.runForEach(() => hub.publish({ _tag: "SystemNotifications" }))
-      )
-    )
-
-    // Classify change tags into trigger categories
-    const classify = (change: RepoChange): "repo" | "state" | "notif" => {
-      switch (change._tag) {
-        case "AppState":
-          return "state"
-        case "SystemNotifications":
-          return "notif"
-        default:
-          return "repo"
-      }
-    }
-
     // Cache unread count + persistent notifications — re-query on relevant triggers
     const initialCount = yield* prService.getUnreadNotificationCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
     const lastUnreadRef = yield* Ref.make(initialCount)
@@ -84,25 +59,30 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         notifState: SubscriptionRef.get(notificationsService.state),
         pullRequests: prRepo.findAll().pipe(
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-          Effect.catchAll(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+          Effect.catchAllCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
         ),
         unreadCount: refreshNotifs
           ? notificationRepo.unreadCount().pipe(
             Effect.tap((c) => Ref.set(lastUnreadRef, c)),
-            Effect.catchAll(() => Ref.get(lastUnreadRef))
+            Effect.catchAllCause(() => Ref.get(lastUnreadRef))
           )
           : Ref.get(lastUnreadRef),
         persistentNotifications: refreshNotifs
           ? notificationRepo.findAll({ limit: 20 }).pipe(
             Effect.tap((p) => Ref.set(lastPersistentRef, p)),
-            Effect.catchAll(() => Ref.get(lastPersistentRef))
+            Effect.catchAllCause(() => Ref.get(lastPersistentRef))
           )
           : Ref.get(lastPersistentRef)
       }).pipe(
         Effect.flatMap(({ notifState, persistentNotifications, prState, pullRequests, unreadCount }) =>
           encode({
-            ...prState,
+            accounts: prState.accounts,
+            status: prState.status,
             pullRequests,
+            ...(prState.statusDetail !== undefined ? { statusDetail: prState.statusDetail } : {}),
+            ...(prState.error !== undefined ? { error: prState.error } : {}),
+            ...(prState.lastUpdated !== undefined ? { lastUpdated: prState.lastUpdated } : {}),
+            ...(prState.currentUser !== undefined ? { currentUser: prState.currentUser } : {}),
             notifications: notifState.items.map((item) => ({
               type: item.type,
               title: item.title,
@@ -115,8 +95,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           })
         ),
         Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
-        Effect.catchAll((e) =>
-          Effect.logWarning("SSE encode failed", e).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logWarning("SSE payload failed", cause).pipe(
             Effect.map(() => encoder.encode(":\n\n"))
           )
         )
@@ -127,16 +107,27 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         // Eagerly build initial snapshot before stream starts
         const initialChunk = yield* buildPayload(true)
 
-        const changes = hub.subscribe.pipe(
-          Stream.map(classify),
-          Stream.debounce(Duration.millis(200)),
-          Stream.mapEffect((trigger) => buildPayload(trigger !== "state"))
+        // Watch SubscriptionRef changes directly (no bridge daemon)
+        const stateChanges = prService.state.changes.pipe(
+          Stream.map(() => false as boolean)
+        )
+        const notifChanges = notificationsService.state.changes.pipe(
+          Stream.map(() => false as boolean)
+        )
+        // Repo changes via hub (PR upserts, notification adds, etc.)
+        const repoChanges = hub.subscribe.pipe(
+          Stream.map(() => true as boolean)
         )
 
-        // merge (not concat) so hub subscription starts immediately — no missed events
+        const changes = Stream.mergeAll([stateChanges, notifChanges, repoChanges], { concurrency: 3 }).pipe(
+          Stream.debounce(Duration.millis(200)),
+          Stream.mapEffect((refreshNotifs) => buildPayload(refreshNotifs))
+        )
+
+        // merge (not concat) so subscriptions start immediately — no missed events
         return HttpServerResponse.stream(
           Stream.merge(
-            Stream.merge(Stream.make(initialChunk), changes),
+            Stream.concat(Stream.make(initialChunk), changes),
             keepalive
           ),
           {

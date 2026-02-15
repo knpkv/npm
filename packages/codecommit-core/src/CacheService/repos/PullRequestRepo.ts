@@ -151,7 +151,7 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
       updateCommentCount: (awsAccountId: string, id: string, count: number | null) =>
         updateCommentCount_(awsAccountId, id, count).pipe(Effect.tap(() => publish), Effect.orDie),
       updateHealthScore: (awsAccountId: string, id: string, score: number) =>
-        updateHealthScore_(awsAccountId, id, score).pipe(Effect.orDie)
+        updateHealthScore_(awsAccountId, id, score).pipe(Effect.tap(() => publish), Effect.orDie)
     } as const
   })
 }) {}

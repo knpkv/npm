@@ -64,12 +64,11 @@ export const resolveAccounts = (state: PRState) =>
     // --- Phase 1: Load cached PRs immediately ---
     const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
 
-    yield* SubscriptionRef.update(state, (s) => ({
+    yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
       ...s,
       pullRequests: cachedPRs.map(decodeCachedPR),
       status: "loading" as const,
-      statusDetail: cachedPRs.length > 0 ? "loading from cache..." : undefined,
-      error: undefined
+      ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
     }))
 
     yield* notificationsService.clear

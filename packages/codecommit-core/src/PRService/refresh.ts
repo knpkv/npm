@@ -40,7 +40,7 @@ export const makeRefresh = (
     if (!resolved) return
 
     const { accountIdMap, currentUser, enabledAccounts, subscribedRef } = resolved
-    const staleThreshold = new Date().toISOString()
+    const staleThreshold = new Date().toISOString().replace("T", " ").slice(0, 19)
 
     yield* hub.batch(
       Effect.gen(function*() {
@@ -52,10 +52,9 @@ export const makeRefresh = (
 
     // Set idle
     const now = yield* Clock.currentTimeMillis
-    yield* SubscriptionRef.update(state, (s) => ({
+    yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
       status: "idle" as const,
-      statusDetail: undefined,
       lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
     }))
 
