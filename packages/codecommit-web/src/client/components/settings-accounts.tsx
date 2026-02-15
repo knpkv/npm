@@ -1,7 +1,15 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { InfoIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
+import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
+import { Schema } from "effect"
+import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { configQueryAtom, configSaveAtom, notificationsSsoLogoutAtom } from "../atoms/app.js"
+import {
+  appStateAtom,
+  configQueryAtom,
+  configSaveAtom,
+  notificationsSsoLoginAtom,
+  notificationsSsoLogoutAtom
+} from "../atoms/app.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
@@ -22,7 +30,9 @@ interface ConfigData {
 
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
+  const appState = useAtomValue(appStateAtom)
   const saveConfig = useAtomSet(configSaveAtom)
+  const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
@@ -87,6 +97,7 @@ export function SettingsAccounts() {
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => (
           <AccountsList
+            currentUser={appState.currentUser}
             data={data}
             overrides={overrides}
             search={search}
@@ -94,6 +105,11 @@ export function SettingsAccounts() {
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
+            onSsoLogin={(profile) => {
+              try {
+                ssoLogin({ payload: { profile: Schema.decodeSync(AwsProfileName)(profile) } })
+              } catch { /* invalid profile */ }
+            }}
             onSsoLogout={() => ssoLogout({})}
           />
         ))
@@ -103,7 +119,9 @@ export function SettingsAccounts() {
 }
 
 function AccountsList({
+  currentUser,
   data,
+  onSsoLogin,
   onSsoLogout,
   overrides,
   search,
@@ -112,6 +130,7 @@ function AccountsList({
   statusFilter,
   toggleAccount
 }: {
+  readonly currentUser: string | undefined
   readonly data: ConfigData
   readonly overrides: Record<string, boolean>
   readonly search: string
@@ -119,6 +138,7 @@ function AccountsList({
   readonly statusFilter: StatusFilter
   readonly setStatusFilter: (f: StatusFilter) => void
   readonly toggleAccount: (profile: string, data: ConfigData) => void
+  readonly onSsoLogin: (profile: string) => void
   readonly onSsoLogout: () => void
 }) {
   const accounts = useMemo(
@@ -136,26 +156,49 @@ function AccountsList({
     })
   }, [accounts, search, statusFilter])
 
-  const enabledCount = accounts.filter((a) => a.enabled).length
+  const enabledAccounts = accounts.filter((a) => a.enabled)
+  const enabledCount = enabledAccounts.length
 
   return (
     <>
-      {data.currentUser && (
-        <div className="flex items-center gap-2 text-sm">
-          <UserIcon className="size-4 text-muted-foreground" />
-          <span className="text-muted-foreground">Current user:</span>
-          <span className="font-medium">{data.currentUser}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-xs"
-            title="SSO Logout"
-            onClick={() => onSsoLogout()}
-          >
-            <LogOutIcon className="size-3" />
-          </Button>
-        </div>
-      )}
+      <div className="flex items-center gap-2 text-sm">
+        <UserIcon className="size-4 text-muted-foreground" />
+        {currentUser
+          ? (
+            <>
+              <span className="text-muted-foreground">Current user:</span>
+              <span className="font-medium">{currentUser}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-xs"
+                title="SSO Logout"
+                onClick={() => onSsoLogout()}
+              >
+                <LogOutIcon className="size-3" />
+              </Button>
+            </>
+          )
+          : (
+            <>
+              <span className="text-muted-foreground">Not logged in</span>
+              {enabledAccounts[0] && (() => {
+                const profile = enabledAccounts[0].profile
+                return (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs"
+                    title="SSO Login"
+                    onClick={() => onSsoLogin(profile)}
+                  >
+                    <LogInIcon className="size-3" />
+                  </Button>
+                )
+              })()}
+            </>
+          )}
+      </div>
       {accounts.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
           No accounts configured. Edit the config file to add AWS profiles.

@@ -14,6 +14,9 @@ import { Layer } from "effect"
 // ConfigServiceLive needs FileSystem from BunContext
 const ConfigLayer = ConfigService.ConfigServiceLive.pipe(Layer.provide(BunContext.layer))
 
+// EventsHub — shared pub/sub for cache-change events
+const EventsHubLive = CacheService.EventsHub.Default
+
 // Cache repos — each auto-wires DatabaseLive via Effect.Service dependencies
 const ReposLive = Layer.mergeAll(
   CacheService.PullRequestRepo.Default,
@@ -28,7 +31,8 @@ const PRLayer = PRService.PRServiceLive.pipe(
   Layer.provide(AwsClient.AwsClientLive),
   Layer.provide(ConfigLayer),
   Layer.provide(NotificationsService.NotificationsServiceLive),
-  Layer.provide(ReposLive)
+  Layer.provide(ReposLive),
+  Layer.provide(EventsHubLive)
 )
 
 // Merge PRLayer with NotificationsServiceLive so both PRService and notificationsAtom

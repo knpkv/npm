@@ -1,6 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { BellIcon, MoonIcon, RefreshCwIcon, SettingsIcon, SunIcon } from "lucide-react"
+import { BellIcon, MoonIcon, RefreshCwIcon, SettingsIcon, SunIcon, UserIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 import { appStateAtom, refreshAtom } from "../atoms/app.js"
 import { cn } from "../lib/utils.js"
@@ -38,6 +38,12 @@ export function Header() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {state.currentUser && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <UserIcon className="size-3" />
+              {state.currentUser}
+            </span>
+          )}
           <Button variant="ghost" size="icon-sm" onClick={() => refresh({})} disabled={isLoading}>
             <RefreshCwIcon className={cn("size-4", isLoading && "animate-spin")} />
           </Button>

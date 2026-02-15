@@ -63,7 +63,8 @@ export function Header() {
         : state.accounts.length
 
   const title = (VIEW_TITLES[view] || "TUI").toUpperCase()
-  const headerText = `  AWS ${title} (${count}) ${lastUpdateStr}`
+  const userStr = state.currentUser ? ` [${state.currentUser}]` : ""
+  const headerText = `  AWS ${title} (${count}) ${lastUpdateStr}${userStr}`
 
   const bgColor = theme.backgroundHeader
 

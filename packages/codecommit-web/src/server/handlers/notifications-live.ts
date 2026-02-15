@@ -1,5 +1,6 @@
 import { Command, HttpApiBuilder } from "@effect/platform"
-import { NotificationsService } from "@knpkv/codecommit-core"
+import { AwsClient, NotificationsService, PRService } from "@knpkv/codecommit-core"
+import type { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, SubscriptionRef } from "effect"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
@@ -13,6 +14,8 @@ export const NotificationsLive = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const notificationsService = yield* NotificationsService.NotificationsService
+      const prService = yield* PRService.PRService
+      const awsClient = yield* AwsClient.AwsClient
 
       return handlers
         .handle("list", () =>
@@ -48,6 +51,23 @@ export const NotificationsLive = HttpApiBuilder.group(
               ssoSemaphore.withPermits(1)(
                 Command.exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
+                  Effect.tap(() =>
+                    Effect.gen(function*() {
+                      const state = yield* SubscriptionRef.get(prService.state)
+                      const account = state.accounts.find((a) => a.profile === payload.profile)
+                      const region = account?.region ?? ("us-east-1" as AwsRegion)
+                      const identity = yield* awsClient.getCallerIdentity({
+                        profile: payload.profile,
+                        region
+                      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)))
+                      if (identity) {
+                        yield* SubscriptionRef.update(prService.state, (s) => ({
+                          ...s,
+                          currentUser: identity.username
+                        }))
+                      }
+                    })
+                  ),
                   Effect.tap(() =>
                     notificationsService.add({
                       type: "success",
@@ -87,6 +107,9 @@ export const NotificationsLive = HttpApiBuilder.group(
               ssoSemaphore.withPermits(1)(
                 Command.exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
+                  Effect.tap(() =>
+                    SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)
+                  ),
                   Effect.tap(() =>
                     notificationsService.add({
                       type: "success",

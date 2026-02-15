@@ -48,12 +48,18 @@ export const fetchAndUpsertPRs = (params: {
           Stream.map((pr) => ({ awsAccountId, label, pr })),
           Stream.catchAllCause((cause) => {
             const errorStr = Cause.pretty(cause).split("\n")[0] ?? "Unknown error"
+            const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(errorStr)
             return Stream.fromEffect(
-              notificationsService.add({
-                type: "error" as const,
-                title: label,
-                message: errorStr,
-                profile: account.profile
+              Effect.gen(function*() {
+                yield* notificationsService.add({
+                  type: "error" as const,
+                  title: label,
+                  message: errorStr,
+                  profile: account.profile
+                })
+                if (isAuthError) {
+                  yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
+                }
               })
             ).pipe(Stream.flatMap(() => Stream.empty))
           })

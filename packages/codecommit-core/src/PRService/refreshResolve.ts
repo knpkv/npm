@@ -24,11 +24,15 @@ const resolveIdentity = (
   accountIdRef: Ref.Ref<Map<string, string>>,
   account: AccountConfig,
   region: string,
-  updateCurrentUser?: (username: string) => Effect.Effect<void>
+  options?: {
+    readonly updateCurrentUser?: (username: string) => Effect.Effect<void>
+    readonly clearCurrentUser?: Effect.Effect<void>
+  }
 ) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const notificationsService = yield* NotificationsService
+    const { clearCurrentUser, updateCurrentUser } = options ?? {}
 
     const identity = yield* awsClient.getCallerIdentity({
       profile: account.profile,
@@ -39,9 +43,10 @@ const resolveIdentity = (
       yield* notificationsService.add({
         type: "error" as const,
         title: `${account.profile} (${region})`,
-        message: "Failed to get caller identity",
+        message: "Failed to get caller identity — session may have expired",
         profile: account.profile
       })
+      if (clearCurrentUser) yield* clearCurrentUser
       return
     }
 
@@ -103,7 +108,10 @@ export const resolveAccounts = (state: PRState) =>
       accountIdRef,
       firstAccount,
       firstRegion,
-      (username) => SubscriptionRef.update(state, (s) => ({ ...s, currentUser: username }))
+      {
+        clearCurrentUser: SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest),
+        updateCurrentUser: (username) => SubscriptionRef.update(state, (s) => ({ ...s, currentUser: username }))
+      }
     )
 
     yield* Effect.forEach(
