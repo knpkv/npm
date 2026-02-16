@@ -1,7 +1,6 @@
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
 import { Array as Arr, Effect, Option, Schema } from "effect"
-import { PersistentNotificationType } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
 import type { NewNotification } from "../diff.js"
 import { EventsHub } from "../EventsHub.js"
@@ -10,8 +9,10 @@ const NotificationRow = Schema.Struct({
   id: Schema.Number,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
-  type: PersistentNotificationType,
+  type: Schema.String,
   message: Schema.String,
+  title: Schema.String,
+  profile: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
 })
@@ -43,7 +44,7 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
 
     const selectCols = sql`
       id, pull_request_id AS "pullRequestId", aws_account_id AS "awsAccountId",
-      type, message, created_at AS "createdAt", read
+      type, message, title, profile, created_at AS "createdAt", read
     `
 
     const findAllUnpaginated = SqlSchema.findAll({
@@ -56,8 +57,9 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
     })
 
     const add_ = (n: NewNotification) =>
-      sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message)
-          VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message})`.pipe(Effect.asVoid)
+      sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile)
+          VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${n.profile ?? ""})`
+        .pipe(Effect.asVoid)
 
     const markRead_ = (id: number) => sql`UPDATE notifications SET read = 1 WHERE id = ${id}`.pipe(Effect.asVoid)
 
@@ -96,6 +98,24 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
       },
 
       add: (n: NewNotification) => add_(n).pipe(Effect.tap(() => publish), Effect.orDie),
+
+      addSystem: (n: {
+        readonly type: string
+        readonly title: string
+        readonly message: string
+        readonly profile?: string
+      }) =>
+        add_({
+          pullRequestId: "",
+          awsAccountId: "",
+          type: n.type,
+          message: n.message,
+          title: n.title,
+          ...(n.profile !== undefined ? { profile: n.profile } : {})
+        }).pipe(
+          Effect.tap(() => publish),
+          Effect.orDie
+        ),
 
       markRead: (id: number) => markRead_(id).pipe(Effect.tap(() => publish), Effect.orDie),
 

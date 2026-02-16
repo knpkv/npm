@@ -1,11 +1,9 @@
 import { Command, HttpApiBuilder } from "@effect/platform"
-import { AwsClient, NotificationsService, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import type { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, SubscriptionRef } from "effect"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
-// Limit concurrent SSO commands to 1
-const ssoSemaphore = Effect.unsafeMakeSemaphore(1)
 const SSO_TIMEOUT = Duration.minutes(3)
 
 export const NotificationsLive = HttpApiBuilder.group(
@@ -13,30 +11,33 @@ export const NotificationsLive = HttpApiBuilder.group(
   "notifications",
   (handlers) =>
     Effect.gen(function*() {
-      const notificationsService = yield* NotificationsService.NotificationsService
       const prService = yield* PRService.PRService
       const awsClient = yield* AwsClient.AwsClient
+      const notificationRepo = yield* CacheService.NotificationRepo
+      const ssoSemaphore = yield* Effect.makeSemaphore(1)
 
       return handlers
-        .handle("list", () =>
-          Effect.gen(function*() {
-            const state = yield* SubscriptionRef.get(notificationsService.state)
-            return state.items.map((item) => ({
-              type: item.type,
-              title: item.title,
-              message: item.message,
-              timestamp: item.timestamp.toISOString(),
-              ...(item.profile ? { profile: item.profile } : {})
-            }))
+        .handle("list", ({ urlParams }) =>
+          notificationRepo.findAll({
+            limit: urlParams.limit ?? 20,
+            ...(urlParams.cursor !== undefined ? { cursor: urlParams.cursor } : {})
           }))
-        .handle("clear", () =>
-          Effect.gen(function*() {
-            yield* notificationsService.clear
-            return "ok"
-          }))
+        .handle("count", () =>
+          notificationRepo.unreadCount().pipe(
+            Effect.map((unread) => ({ unread }))
+          ))
+        .handle("markRead", ({ payload }) =>
+          notificationRepo.markRead(payload.id).pipe(
+            Effect.map(() => "ok")
+          ))
+        .handle("markAllRead", () =>
+          notificationRepo.markAllRead().pipe(
+            Effect.map(() => "ok"),
+            Effect.orDie
+          ))
         .handle("ssoLogin", ({ payload }) =>
           Effect.gen(function*() {
-            yield* notificationsService.add({
+            yield* notificationRepo.addSystem({
               type: "info",
               title: payload.profile,
               message: `Starting SSO login for ${payload.profile}...`,
@@ -69,7 +70,7 @@ export const NotificationsLive = HttpApiBuilder.group(
                     })
                   ),
                   Effect.tap(() =>
-                    notificationsService.add({
+                    notificationRepo.addSystem({
                       type: "success",
                       title: payload.profile,
                       message: `SSO login successful for ${payload.profile}`,
@@ -77,12 +78,14 @@ export const NotificationsLive = HttpApiBuilder.group(
                     })
                   ),
                   Effect.catchAll((e) =>
-                    notificationsService.add({
-                      type: "error",
-                      title: "SSO Login Failed",
-                      message: e instanceof Error ? e.message : String(e),
-                      profile: payload.profile
-                    })
+                    Effect.logWarning("SSO login failed", e).pipe(
+                      Effect.zipRight(notificationRepo.addSystem({
+                        type: "error",
+                        title: "SSO Login Failed",
+                        message: "SSO login failed — check credentials",
+                        profile: payload.profile
+                      }))
+                    )
                   )
                 )
               )
@@ -93,7 +96,7 @@ export const NotificationsLive = HttpApiBuilder.group(
           ))
         .handle("ssoLogout", () =>
           Effect.gen(function*() {
-            yield* notificationsService.add({
+            yield* notificationRepo.addSystem({
               type: "info",
               title: "SSO",
               message: "Logging out SSO session..."
@@ -109,18 +112,20 @@ export const NotificationsLive = HttpApiBuilder.group(
                   Effect.timeout(SSO_TIMEOUT),
                   Effect.tap(() => SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)),
                   Effect.tap(() =>
-                    notificationsService.add({
+                    notificationRepo.addSystem({
                       type: "success",
                       title: "SSO",
                       message: "SSO logout successful"
                     })
                   ),
                   Effect.catchAll((e) =>
-                    notificationsService.add({
-                      type: "error",
-                      title: "SSO Logout Failed",
-                      message: e instanceof Error ? e.message : String(e)
-                    })
+                    Effect.logWarning("SSO logout failed", e).pipe(
+                      Effect.zipRight(notificationRepo.addSystem({
+                        type: "error",
+                        title: "SSO Logout Failed",
+                        message: "SSO logout failed"
+                      }))
+                    )
                   )
                 )
               )

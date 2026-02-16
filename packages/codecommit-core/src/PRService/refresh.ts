@@ -11,7 +11,6 @@ import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import type { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import type { ConfigService } from "../ConfigService/index.js"
-import type { NotificationsService } from "../NotificationsService.js"
 import type { PRState } from "./internal.js"
 import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
@@ -21,7 +20,6 @@ import { calculateHealthScores } from "./refreshScore.js"
 export type RefreshDeps =
   | ConfigService
   | AwsClient
-  | NotificationsService
   | PullRequestRepo
   | CommentRepo
   | NotificationRepo

@@ -20,7 +20,6 @@ export * as ConfigService from "./ConfigService/index.js"
 export * as DateUtils from "./DateUtils.js"
 export * as Domain from "./Domain.js"
 export * as Errors from "./Errors.js"
-export * as NotificationsService from "./NotificationsService.js"
 export * as PRService from "./PRService/index.js"
 
 // Re-export Effect dependencies for convenience

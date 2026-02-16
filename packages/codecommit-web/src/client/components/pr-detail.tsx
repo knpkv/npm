@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
+import rehypeSanitize from "rehype-sanitize"
 import { useNavigate, useParams } from "react-router"
 import remarkGfm from "remark-gfm"
 import {
@@ -152,7 +153,9 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
           <span>{formatRelativeDate(thread.root.creationDate)}</span>
         </div>
         <div className="prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto">
-          <Markdown remarkPlugins={[remarkGfm]}>{thread.root.content}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            {thread.root.content}
+          </Markdown>
         </div>
       </div>
       {thread.replies.map((reply) => (
@@ -431,7 +434,9 @@ export function PRDetail() {
           </CardHeader>
           <CardContent>
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Markdown remarkPlugins={[remarkGfm]}>{pr.description}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                {pr.description}
+              </Markdown>
             </div>
           </CardContent>
         </Card>

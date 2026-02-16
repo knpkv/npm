@@ -27,9 +27,7 @@ export function Header() {
   const { setTheme, theme } = useTheme()
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
-  const systemCount = state.notifications?.length ?? 0
-  const persistentCount = state.unreadNotificationCount ?? 0
-  const notifCount = systemCount + persistentCount
+  const notifCount = state.unreadNotificationCount ?? 0
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

@@ -7,14 +7,7 @@ import {
   Path
 } from "@effect/platform"
 import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
-import {
-  AwsClient,
-  AwsClientConfig,
-  CacheService,
-  ConfigService,
-  NotificationsService,
-  PRService
-} from "@knpkv/codecommit-core"
+import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
 import { Duration, Effect, Layer } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
@@ -23,7 +16,6 @@ import {
   ConfigLive,
   EventsLive,
   NotificationsLive,
-  PersistentNotificationsLive,
   PrsLive,
   SubscriptionsLive
 } from "./handlers/index.js"
@@ -37,7 +29,11 @@ const mimeTypes: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".svg": "image/svg+xml",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".wasm": "application/wasm",
+  ".map": "application/json",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf"
 }
 
 // Static file serving — async Effect FileSystem, no sync node:fs
@@ -47,12 +43,7 @@ const serveStatic = Effect.gen(function*() {
   const path = yield* Path.Path
 
   const url = new URL(req.url, "http://localhost")
-  let filePath = url.pathname
-
-  // Security check
-  if (filePath.includes("..")) {
-    return HttpServerResponse.text("Forbidden", { status: 403 })
-  }
+  let filePath = decodeURIComponent(url.pathname)
 
   // Remove leading slash
   if (filePath.startsWith("/")) {
@@ -64,7 +55,12 @@ const serveStatic = Effect.gen(function*() {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
   const staticDir = path.resolve(__dirname, "../../dist/client")
-  const fullPath = path.join(staticDir, filePath)
+  const fullPath = path.resolve(staticDir, filePath)
+
+  // Path traversal guard — resolved path must stay within staticDir
+  if (!fullPath.startsWith(staticDir)) {
+    return HttpServerResponse.text("Forbidden", { status: 403 })
+  }
 
   if (yield* fileSystem.exists(fullPath)) {
     const stat = yield* fileSystem.stat(fullPath)
@@ -99,8 +95,7 @@ const HandlersLive = Layer.mergeAll(
   AccountsLive,
   EventsLive,
   NotificationsLive,
-  SubscriptionsLive,
-  PersistentNotificationsLive
+  SubscriptionsLive
 )
 
 // Platform dependencies
@@ -115,9 +110,6 @@ const ConfigLive_ = ConfigService.ConfigServiceLive.pipe(
   Layer.provide(PlatformLive),
   Layer.provide(CacheService.EventsHub.Default)
 )
-
-// NotificationsService — single shared instance
-const NotificationsLive_ = NotificationsService.NotificationsServiceLive
 
 // Cache repos + EventsHub — each auto-wires DatabaseLive via Effect.Service dependencies
 // EventsHub.Default is shared across all repos via layer memoization
@@ -137,12 +129,11 @@ const PRServiceDeps = Layer.mergeAll(
   ReposLive
 ).pipe(
   Layer.provideMerge(ConfigLive_),
-  Layer.provideMerge(NotificationsLive_),
   Layer.provide(AwsClientConfig.Default),
   Layer.provide(PlatformLive)
 )
 
-// PRService with all dependencies — provideMerge so NotificationsService flows to AllServicesLive
+// PRService with all dependencies
 const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRServiceDeps))
 
 // AwsClient for handlers that call AWS directly (e.g., createPR)
@@ -151,7 +142,7 @@ const AwsClientLive_ = AwsClient.AwsClientLive.pipe(
   Layer.provide(AwsClientConfig.Default)
 )
 
-// All services needed by handlers — NotificationsService flows through PRServiceDeps via provideMerge
+// All services needed by handlers
 const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
@@ -209,7 +200,7 @@ const StaticRouter = HttpLayerRouter.use((router) => router.add("GET", "/*", ser
 const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
   Layer.provide(
     HttpLayerRouter.cors({
-      allowedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+      allowedOrigins: process.env.ALLOWED_ORIGINS?.split(",") ?? ["http://localhost:3000", "http://127.0.0.1:3000"],
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"]
     })

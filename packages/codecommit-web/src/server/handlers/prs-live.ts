@@ -19,6 +19,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
+    const notificationRepo = yield* CacheService.NotificationRepo
 
     return handlers
       .handle("list", () =>
@@ -31,10 +32,17 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.map(() => "ok")
         ))
       .handle("search", ({ urlParams }) =>
-        prService.searchPullRequests(urlParams.q).pipe(
-          Effect.map((rows) => rows.map((row) => Schema.encodeSync(CacheService.CachedPullRequest)(row))),
-          Effect.mapError((e) => new ApiError({ message: String(e) }))
-        ))
+        Effect.gen(function*() {
+          const result = yield* prService.searchPullRequests(urlParams.q, {
+            limit: urlParams.limit ?? 20,
+            offset: urlParams.offset ?? 0
+          })
+          return {
+            items: result.items.map((row) => Schema.encodeSync(CacheService.CachedPullRequest)(row)),
+            total: result.total,
+            hasMore: result.hasMore
+          }
+        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ path }) =>
         prService.refreshSinglePR(path.awsAccountId, path.prId).pipe(
           Effect.forkDaemon,
@@ -67,7 +75,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Effect.catchAll(() => Effect.void)
           )
 
-          yield* prService.addNotification({
+          yield* notificationRepo.addSystem({
             type: "info",
             title: "Assume",
             message: `Opening ${payload.profile} → PR console...`
@@ -82,14 +90,14 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           yield* Effect.forkDaemon(
             Command.exitCode(cmd).pipe(
               Effect.tap(() =>
-                prService.addNotification({
+                notificationRepo.addSystem({
                   type: "success",
                   title: "Assume",
                   message: `Assumed ${payload.profile}`
                 })
               ),
               Effect.catchAll((e) =>
-                prService.addNotification({
+                notificationRepo.addSystem({
                   type: "error",
                   title: "Assume Failed",
                   message: e instanceof Error ? e.message : String(e)

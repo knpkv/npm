@@ -6,18 +6,12 @@ import { ApiClient } from "./runtime.js"
  * App state for web client — mirrors Domain.AppState
  */
 export interface NotificationItem {
-  readonly type: "error" | "info" | "warning" | "success"
-  readonly title: string
-  readonly message: string
-  readonly timestamp: string
-  readonly profile?: string
-}
-
-export interface PersistentNotificationItem {
   readonly id: number
   readonly pullRequestId: string
   readonly awsAccountId: string
   readonly type: string
+  readonly title: string
+  readonly profile: string
   readonly message: string
   readonly createdAt: string
   readonly read: number
@@ -31,10 +25,9 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
-  readonly notifications?: ReadonlyArray<NotificationItem>
   readonly unreadNotificationCount?: number
-  readonly persistentNotifications?: {
-    readonly items: ReadonlyArray<PersistentNotificationItem>
+  readonly notifications?: {
+    readonly items: ReadonlyArray<NotificationItem>
     readonly nextCursor?: number
   }
 }
@@ -111,19 +104,6 @@ export const configSaveAtom = ApiClient.mutation("config", "save")
 export const configResetAtom = ApiClient.mutation("config", "reset")
 
 /**
- * Notifications query atom
- */
-export const notificationsQueryAtom = ApiClient.query("notifications", "list", {
-  reactivityKeys: ["notifications"],
-  timeToLive: "10 seconds"
-})
-
-/**
- * Clear notifications mutation
- */
-export const notificationsClearAtom = ApiClient.mutation("notifications", "clear")
-
-/**
  * SSO login mutation
  */
 export const notificationsSsoLoginAtom = ApiClient.mutation("notifications", "ssoLogin")
@@ -141,19 +121,19 @@ export const subscriptionsQueryAtom = ApiClient.query("subscriptions", "list", {
 export const subscribeAtom = ApiClient.mutation("subscriptions", "subscribe")
 export const unsubscribeAtom = ApiClient.mutation("subscriptions", "unsubscribe")
 
-// Persistent notifications
-export const persistentNotificationsQueryAtom = ApiClient.query("persistentNotifications", "list", {
+// Notifications (unified)
+export const notificationsQueryAtom = ApiClient.query("notifications", "list", {
   urlParams: {},
-  reactivityKeys: ["persistentNotifications"],
+  reactivityKeys: ["notifications"],
   timeToLive: "10 seconds"
 })
-export const persistentNotificationsCountAtom = ApiClient.query("persistentNotifications", "count", {
-  reactivityKeys: ["persistentNotifications"],
+export const notificationsCountAtom = ApiClient.query("notifications", "count", {
+  reactivityKeys: ["notifications"],
   timeToLive: "10 seconds"
 })
-export const loadMoreNotificationsAtom = ApiClient.mutation("persistentNotifications", "list")
-export const markNotificationReadAtom = ApiClient.mutation("persistentNotifications", "markRead")
-export const markAllNotificationsReadAtom = ApiClient.mutation("persistentNotifications", "markAllRead")
+export const loadMoreNotificationsAtom = ApiClient.mutation("notifications", "list")
+export const markNotificationReadAtom = ApiClient.mutation("notifications", "markRead")
+export const markAllNotificationsReadAtom = ApiClient.mutation("notifications", "markAllRead")
 
 // FTS search
 export const searchPrsAtom = ApiClient.mutation("prs", "search")

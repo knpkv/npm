@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect"
 import { makeCodeCommitServer } from "./server/Server.js"
 
-const startServer = (port: number): Effect.Effect<never> =>
+const startServer: (port: number) => Effect.Effect<never> = (port) =>
   Effect.logInfo(`Starting CodeCommit Web on http://localhost:${port}`).pipe(
     Effect.andThen(Layer.launch(makeCodeCommitServer(port))),
     Effect.catchAllDefect((defect) =>

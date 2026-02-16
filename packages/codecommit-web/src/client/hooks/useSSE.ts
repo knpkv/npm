@@ -1,4 +1,4 @@
-import { AppStatus, NotificationType, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import type { AppState } from "../atoms/app.js"
@@ -26,19 +26,13 @@ const PullRequestWire = Schema.Struct({
   healthScore: Schema.optional(Schema.Number)
 })
 
-const NotificationItemWire = Schema.Struct({
-  type: NotificationType,
-  title: Schema.String,
-  message: Schema.String,
-  timestamp: Schema.String,
-  profile: Schema.optional(Schema.String)
-})
-
-const PersistentNotificationWire = Schema.Struct({
+const NotificationWire = Schema.Struct({
   id: Schema.Number,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   type: Schema.String,
+  title: Schema.String,
+  profile: Schema.String,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
@@ -56,10 +50,9 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
-  notifications: Schema.optional(Schema.Array(NotificationItemWire)),
   unreadNotificationCount: Schema.optional(Schema.Number),
-  persistentNotifications: Schema.optional(Schema.Struct({
-    items: Schema.Array(PersistentNotificationWire),
+  notifications: Schema.optional(Schema.Struct({
+    items: Schema.Array(NotificationWire),
     nextCursor: Schema.optional(Schema.Number)
   }))
 })
@@ -88,14 +81,21 @@ export function useSSE(onState: (state: AppState) => void) {
 
       es.onmessage = (event) => {
         try {
-          callbackRef.current(decode(event.data) as unknown as AppState)
-        } catch {
-          // decode errors are non-fatal
+          callbackRef.current(decode(event.data) as AppState)
+        } catch (e) {
+          if (process.env.NODE_ENV !== "production") {
+            // eslint-disable-next-line no-console
+            console.warn("SSE decode error:", e)
+          }
         }
       }
 
       es.onerror = () => {
         es?.close()
+        if (retryCount >= 50) {
+          setConnectionState("disconnected")
+          return
+        }
         setConnectionState("reconnecting")
         const delay = Math.min(1000 * 2 ** retryCount, 30000)
         retryTimeout = setTimeout(() => {

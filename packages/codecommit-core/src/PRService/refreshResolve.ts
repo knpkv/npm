@@ -5,12 +5,12 @@
 
 import { Clock, DateTime, Effect, Ref, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
+import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { AwsRegion } from "../Domain.js"
-import { NotificationsService } from "../NotificationsService.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 
 export interface ResolvedAccounts {
@@ -31,7 +31,7 @@ const resolveIdentity = (
 ) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
-    const notificationsService = yield* NotificationsService
+    const notificationRepo = yield* NotificationRepo
     const { clearCurrentUser, updateCurrentUser } = options ?? {}
 
     const identity = yield* awsClient.getCallerIdentity({
@@ -40,8 +40,8 @@ const resolveIdentity = (
     }).pipe(Effect.catchAll(() => Effect.succeed(undefined)))
 
     if (!identity) {
-      yield* notificationsService.add({
-        type: "error" as const,
+      yield* notificationRepo.addSystem({
+        type: "error",
         title: `${account.profile} (${region})`,
         message: "Failed to get caller identity — session may have expired",
         profile: account.profile
@@ -59,7 +59,6 @@ export const resolveAccounts = (state: PRState) =>
     const configService = yield* ConfigService
     const prRepo = yield* PullRequestRepo
     const subscriptionRepo = yield* SubscriptionRepo
-    const notificationsService = yield* NotificationsService
 
     // --- Phase 1: Load cached PRs immediately ---
     const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
@@ -70,8 +69,6 @@ export const resolveAccounts = (state: PRState) =>
       status: "loading" as const,
       ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
     }))
-
-    yield* notificationsService.clear
 
     const config = yield* configService.load.pipe(Effect.orDie)
     const detected = yield* configService.detectProfiles.pipe(Effect.catchAll(() => Effect.succeed([])))

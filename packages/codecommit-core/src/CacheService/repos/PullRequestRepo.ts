@@ -1,6 +1,6 @@
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { AwsProfileName, AwsRegion, PullRequestId, PullRequestStatus, RepositoryName } from "../../Domain.js"
 import { DatabaseLive } from "../Database.js"
 import { EventsHub } from "../EventsHub.js"
@@ -34,6 +34,12 @@ export const CachedPullRequest = Schema.Struct({
 })
 
 export type CachedPullRequest = typeof CachedPullRequest.Type
+
+export interface SearchResult {
+  readonly items: ReadonlyArray<CachedPullRequest>
+  readonly total: number
+  readonly hasMore: boolean
+}
 
 export const UpsertInput = Schema.Struct({
   id: Schema.String,
@@ -93,7 +99,7 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
     const upsert_ = SqlSchema.void({
       Request: UpsertInput,
       execute: (req) =>
-        sql`INSERT OR REPLACE INTO pull_requests
+        sql`INSERT INTO pull_requests
           (id, aws_account_id, account_profile, account_region, title, description,
            author, repository_name, creation_date, last_modified_date, status,
            source_branch, destination_branch, is_mergeable, is_approved,
@@ -102,18 +108,48 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
             ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
             ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
             ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
-            ${req.commentCount}, ${req.link}, datetime('now'))`
+            ${req.commentCount}, ${req.link}, strftime('%Y-%m-%d %H:%M:%S', 'now'))
+          ON CONFLICT (aws_account_id, id) DO UPDATE SET
+            account_profile = excluded.account_profile,
+            account_region = excluded.account_region,
+            title = excluded.title,
+            description = excluded.description,
+            author = excluded.author,
+            repository_name = excluded.repository_name,
+            creation_date = excluded.creation_date,
+            last_modified_date = excluded.last_modified_date,
+            status = excluded.status,
+            source_branch = excluded.source_branch,
+            destination_branch = excluded.destination_branch,
+            is_mergeable = excluded.is_mergeable,
+            is_approved = excluded.is_approved,
+            comment_count = COALESCE(excluded.comment_count, pull_requests.comment_count),
+            health_score = COALESCE(excluded.health_score, pull_requests.health_score),
+            link = excluded.link,
+            fetched_at = excluded.fetched_at`
     })
 
     const search_ = SqlSchema.findAll({
       Result: CachedPullRequest,
-      Request: Schema.Struct({ query: Schema.String }),
+      Request: Schema.Struct({ query: Schema.String, limit: Schema.Number, offset: Schema.Number }),
       execute: (req) =>
         sql`
         SELECT ${selectCols} FROM pull_requests
         JOIN pull_requests_fts fts ON pull_requests.rowid = fts.rowid
         WHERE pull_requests_fts MATCH ${req.query}
         ORDER BY rank
+        LIMIT ${req.limit} OFFSET ${req.offset}
+      `
+    })
+
+    const searchCount_ = SqlSchema.findOne({
+      Result: Schema.Struct({ count: Schema.Number }),
+      Request: Schema.Struct({ query: Schema.String }),
+      execute: (req) =>
+        sql`
+        SELECT count(*) as count FROM pull_requests
+        JOIN pull_requests_fts fts ON pull_requests.rowid = fts.rowid
+        WHERE pull_requests_fts MATCH ${req.query}
       `
     })
 
@@ -141,10 +177,23 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
         findByAccountAndId_({ awsAccountId, id }).pipe(Effect.orDie),
       upsert: (input: UpsertInput) => upsert_(input).pipe(Effect.tap(() => publish), Effect.orDie),
       upsertMany: (prs: ReadonlyArray<UpsertInput>) => upsertMany_(prs).pipe(Effect.tap(() => publish), Effect.orDie),
-      search: (query: string) => {
-        const escaped = query.replace(/"/g, `""`)
-        return search_({ query: `"${escaped}"` }).pipe(
-          Effect.catchAll(() => Effect.succeed([]))
+      search: (
+        query: string,
+        opts?: { readonly limit?: number; readonly offset?: number }
+      ): Effect.Effect<SearchResult> => {
+        const limit = opts?.limit ?? 20
+        const offset = opts?.offset ?? 0
+        const stripped = query.replace(/[*^"]/g, "").replace(/\b(NEAR|OR|NOT|AND)\b/gi, "")
+        const escaped = stripped.replace(/"/g, `""`)
+        const ftsQuery = `"${escaped}"`
+        return Effect.all({
+          items: search_({ query: ftsQuery, limit, offset }),
+          total: searchCount_({ query: ftsQuery }).pipe(
+            Effect.map((r) => r.pipe(Option.getOrElse(() => ({ count: 0 }))).count)
+          )
+        }).pipe(
+          Effect.map(({ items, total }) => ({ items, total, hasMore: offset + items.length < total })),
+          Effect.catchAll(() => Effect.succeed({ items: [], total: 0, hasMore: false }))
         )
       },
       deleteStale: (olderThan: string) => deleteStale_({ olderThan }).pipe(Effect.tap(() => publish), Effect.orDie),

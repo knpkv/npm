@@ -1,8 +1,8 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
-import { CacheService, NotificationsService, PRService } from "@knpkv/codecommit-core"
+import { CacheService, PRService } from "@knpkv/codecommit-core"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
-import { CodeCommitApi, NotificationItemResponse, PersistentNotificationResponse } from "../Api.js"
+import { CodeCommitApi, NotificationResponse } from "../Api.js"
 
 const AccountState = Schema.Struct({
   profile: Schema.String,
@@ -18,10 +18,9 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromSelf),
   currentUser: Schema.optional(Schema.String),
-  notifications: Schema.Array(NotificationItemResponse),
   unreadNotificationCount: Schema.Number,
-  persistentNotifications: Schema.Struct({
-    items: Schema.Array(PersistentNotificationResponse),
+  notifications: Schema.Struct({
+    items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
   })
 })
@@ -39,62 +38,53 @@ const keepalive = Stream.schedule(
 export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
-    const notificationsService = yield* NotificationsService.NotificationsService
     const prRepo = yield* CacheService.PullRequestRepo
     const notificationRepo = yield* CacheService.NotificationRepo
     const hub = yield* CacheService.EventsHub
 
-    // Cache unread count + persistent notifications — re-query on relevant triggers
-    const initialCount = yield* prService.getUnreadNotificationCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
+    // Cache unread count + notifications — re-query on relevant triggers
+    const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
     const lastUnreadRef = yield* Ref.make(initialCount)
-    const initialPersistent = yield* prService.getPersistentNotifications({ limit: 20 }).pipe(
-      Effect.catchAll(() => Effect.succeed({ items: [] as ReadonlyArray<typeof PersistentNotificationResponse.Type> }))
+    const initialNotifications = yield* notificationRepo.findAll({ limit: 20 }).pipe(
+      Effect.catchAll(() => Effect.succeed({ items: [] as ReadonlyArray<typeof NotificationResponse.Type> }))
     )
-    const lastPersistentRef = yield* Ref.make(initialPersistent)
+    const lastNotificationsRef = yield* Ref.make(initialNotifications)
 
     // Build full SSE payload — reused for initial event + change events
     const buildPayload = (refreshNotifs: boolean) =>
-      Effect.all({
-        prState: SubscriptionRef.get(prService.state),
-        notifState: SubscriptionRef.get(notificationsService.state),
-        pullRequests: prRepo.findAll().pipe(
+      Effect.gen(function*() {
+        const prState = yield* SubscriptionRef.get(prService.state)
+        const pullRequests = yield* prRepo.findAll().pipe(
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
           Effect.catchAllCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
-        ),
-        unreadCount: refreshNotifs
-          ? notificationRepo.unreadCount().pipe(
+        )
+        const unreadCount = refreshNotifs
+          ? yield* notificationRepo.unreadCount().pipe(
             Effect.tap((c) => Ref.set(lastUnreadRef, c)),
             Effect.catchAllCause(() => Ref.get(lastUnreadRef))
           )
-          : Ref.get(lastUnreadRef),
-        persistentNotifications: refreshNotifs
-          ? notificationRepo.findAll({ limit: 20 }).pipe(
-            Effect.tap((p) => Ref.set(lastPersistentRef, p)),
-            Effect.catchAllCause(() => Ref.get(lastPersistentRef))
+          : yield* Ref.get(lastUnreadRef)
+        const notifications = refreshNotifs
+          ? yield* notificationRepo.findAll({ limit: 20 }).pipe(
+            Effect.tap((p) => Ref.set(lastNotificationsRef, p)),
+            Effect.catchAllCause(() => Ref.get(lastNotificationsRef))
           )
-          : Ref.get(lastPersistentRef)
+          : yield* Ref.get(lastNotificationsRef)
+
+        const payload = yield* encode({
+          accounts: prState.accounts,
+          status: prState.status,
+          pullRequests,
+          ...(prState.statusDetail !== undefined ? { statusDetail: prState.statusDetail } : {}),
+          ...(prState.error !== undefined ? { error: prState.error } : {}),
+          ...(prState.lastUpdated !== undefined ? { lastUpdated: prState.lastUpdated } : {}),
+          ...(prState.currentUser !== undefined ? { currentUser: prState.currentUser } : {}),
+          unreadNotificationCount: unreadCount,
+          notifications
+        })
+
+        return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
       }).pipe(
-        Effect.flatMap(({ notifState, persistentNotifications, prState, pullRequests, unreadCount }) =>
-          encode({
-            accounts: prState.accounts,
-            status: prState.status,
-            pullRequests,
-            ...(prState.statusDetail !== undefined ? { statusDetail: prState.statusDetail } : {}),
-            ...(prState.error !== undefined ? { error: prState.error } : {}),
-            ...(prState.lastUpdated !== undefined ? { lastUpdated: prState.lastUpdated } : {}),
-            ...(prState.currentUser !== undefined ? { currentUser: prState.currentUser } : {}),
-            notifications: notifState.items.map((item) => ({
-              type: item.type,
-              title: item.title,
-              message: item.message,
-              timestamp: item.timestamp.toISOString(),
-              ...(item.profile ? { profile: item.profile } : {})
-            })),
-            unreadNotificationCount: unreadCount,
-            persistentNotifications
-          })
-        ),
-        Effect.map((payload) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)),
         Effect.catchAllCause((cause) =>
           Effect.logWarning("SSE payload failed", cause).pipe(
             Effect.map(() => encoder.encode(":\n\n"))
@@ -111,15 +101,12 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         const stateChanges = prService.state.changes.pipe(
           Stream.map(() => false as boolean)
         )
-        const notifChanges = notificationsService.state.changes.pipe(
-          Stream.map(() => false as boolean)
-        )
         // Repo changes via hub (PR upserts, notification adds, etc.)
         const repoChanges = hub.subscribe.pipe(
           Stream.map(() => true as boolean)
         )
 
-        const changes = Stream.mergeAll([stateChanges, notifChanges, repoChanges], { concurrency: 3 }).pipe(
+        const changes = Stream.mergeAll([stateChanges, repoChanges], { concurrency: 2 }).pipe(
           Stream.debounce(Duration.millis(200)),
           Stream.mapEffect((refreshNotifs) => buildPayload(refreshNotifs))
         )

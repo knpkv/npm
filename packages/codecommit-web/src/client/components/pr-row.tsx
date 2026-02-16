@@ -1,5 +1,5 @@
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
 import { MessageSquareIcon } from "lucide-react"
@@ -7,7 +7,7 @@ import { useMemo } from "react"
 import { Badge } from "./ui/badge.js"
 
 interface PRRowProps {
-  readonly pr: Domain.PullRequest
+  readonly pr: PullRequest
   readonly onClick: () => void
 }
 

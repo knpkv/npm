@@ -35,12 +35,14 @@ export const CachedPullRequestResponse = Schema.Struct({
   fetchedAt: Schema.String
 })
 
-// Persistent notification schema
-export const PersistentNotificationResponse = Schema.Struct({
+// Notification schema (unified)
+export const NotificationResponse = Schema.Struct({
   id: Schema.Number,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   type: Schema.String,
+  title: Schema.String,
+  profile: Schema.String,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
@@ -52,8 +54,16 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(HttpApiEndpoint.post("refresh", "/refresh").addSuccess(Schema.String))
   .add(
     HttpApiEndpoint.get("search", "/search")
-      .setUrlParams(Schema.Struct({ q: Schema.String }))
-      .addSuccess(Schema.Array(CachedPullRequestResponse))
+      .setUrlParams(Schema.Struct({
+        q: Schema.String,
+        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 50))),
+        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.greaterThanOrEqualTo(0)))
+      }))
+      .addSuccess(Schema.Struct({
+        items: Schema.Array(CachedPullRequestResponse),
+        total: Schema.Number,
+        hasMore: Schema.Boolean
+      }))
       .addError(ApiError)
   )
   .add(
@@ -82,7 +92,9 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       .setPayload(
         Schema.Struct({
           profile: Schema.String,
-          link: Schema.String
+          link: Schema.String.pipe(
+            Schema.filter((s) => /^https:\/\/[\w-]+\.console\.aws\.amazon\.com\//.test(s))
+          )
         })
       )
       .addSuccess(Schema.String)
@@ -168,15 +180,6 @@ export class AccountsGroup extends HttpApiGroup.make("accounts")
   .prefix("/api/accounts")
 {}
 
-// Notifications endpoints
-export const NotificationItemResponse = Schema.Struct({
-  type: Schema.Literal("error", "info", "warning", "success"),
-  title: Schema.String,
-  message: Schema.String,
-  timestamp: Schema.String,
-  profile: Schema.optional(Schema.String)
-})
-
 // Subscription endpoints
 const SubscriptionPayload = Schema.Struct({
   awsAccountId: Schema.String,
@@ -193,11 +196,13 @@ export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
     HttpApiEndpoint.post("subscribe", "/subscribe")
       .setPayload(SubscriptionPayload)
       .addSuccess(Schema.String)
+      .addError(ApiError)
   )
   .add(
     HttpApiEndpoint.post("unsubscribe", "/unsubscribe")
       .setPayload(SubscriptionPayload)
       .addSuccess(Schema.String)
+      .addError(ApiError)
   )
   .add(
     HttpApiEndpoint.get("list", "/")
@@ -206,20 +211,20 @@ export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
   .prefix("/api/subscriptions")
 {}
 
-// Persistent notifications endpoints
-const PaginatedPersistentNotifications = Schema.Struct({
-  items: Schema.Array(PersistentNotificationResponse),
+// Notification endpoints (unified)
+const PaginatedNotifications = Schema.Struct({
+  items: Schema.Array(NotificationResponse),
   nextCursor: Schema.optional(Schema.Number)
 })
 
-export class PersistentNotificationsGroup extends HttpApiGroup.make("persistentNotifications")
+export class NotificationsGroup extends HttpApiGroup.make("notifications")
   .add(
     HttpApiEndpoint.get("list", "/")
       .setUrlParams(Schema.Struct({
-        limit: Schema.optional(Schema.NumberFromString),
+        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 100))),
         cursor: Schema.optional(Schema.NumberFromString)
       }))
-      .addSuccess(PaginatedPersistentNotifications)
+      .addSuccess(PaginatedNotifications)
   )
   .add(
     HttpApiEndpoint.get("count", "/count")
@@ -234,12 +239,6 @@ export class PersistentNotificationsGroup extends HttpApiGroup.make("persistentN
     HttpApiEndpoint.post("markAllRead", "/read-all")
       .addSuccess(Schema.String)
   )
-  .prefix("/api/notifications/persistent")
-{}
-
-export class NotificationsGroup extends HttpApiGroup.make("notifications")
-  .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Array(NotificationItemResponse)))
-  .add(HttpApiEndpoint.post("clear", "/clear").addSuccess(Schema.String))
   .add(
     HttpApiEndpoint.post("ssoLogin", "/sso-login")
       .setPayload(Schema.Struct({ profile: AwsProfileName }))
@@ -262,5 +261,4 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(AccountsGroup)
   .add(NotificationsGroup)
   .add(SubscriptionsGroup)
-  .add(PersistentNotificationsGroup)
 {}

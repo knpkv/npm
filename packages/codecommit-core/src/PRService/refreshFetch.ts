@@ -10,7 +10,6 @@ import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import { NotificationsService } from "../NotificationsService.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 
 export const fetchAndUpsertPRs = (params: {
@@ -23,11 +22,10 @@ export const fetchAndUpsertPRs = (params: {
 }): Effect.Effect<
   void,
   never,
-  AwsClient | NotificationsService | PullRequestRepo | NotificationRepo | SubscriptionRepo
+  AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo
 > =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
-    const notificationsService = yield* NotificationsService
     const prRepo = yield* PullRequestRepo
     const notificationRepo = yield* NotificationRepo
     const subscriptionRepo = yield* SubscriptionRepo
@@ -51,8 +49,8 @@ export const fetchAndUpsertPRs = (params: {
             const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(errorStr)
             return Stream.fromEffect(
               Effect.gen(function*() {
-                yield* notificationsService.add({
-                  type: "error" as const,
+                yield* notificationRepo.addSystem({
+                  type: "error",
                   title: label,
                   message: errorStr,
                   profile: account.profile

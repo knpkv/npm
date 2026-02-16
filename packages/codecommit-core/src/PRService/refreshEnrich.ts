@@ -103,11 +103,13 @@ export const enrichComments = (params: {
     yield* Effect.forEach(
       enrichments,
       (r) =>
-        r !== undefined
-          ? prRepo.updateCommentCount(r.awsAccountId, r.id, r.commentCount).pipe(
-            Effect.catchAll(() => Effect.void)
-          )
-          : Effect.void,
+        Effect.gen(function*() {
+          if (r !== undefined) {
+            yield* prRepo.updateCommentCount(r.awsAccountId, r.id, r.commentCount).pipe(
+              Effect.catchAll(() => Effect.void)
+            )
+          }
+        }),
       { discard: true }
     )
   })

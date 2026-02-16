@@ -3,13 +3,15 @@
  *
  * @module
  */
-import type { CommentThread, PersistentNotificationType, PRCommentLocation } from "../Domain.js"
+import type { CommentThread, PRCommentLocation } from "../Domain.js"
 
 export interface NewNotification {
   readonly pullRequestId: string
   readonly awsAccountId: string
-  readonly type: PersistentNotificationType
+  readonly type: string
   readonly message: string
+  readonly title?: string
+  readonly profile?: string
 }
 
 export interface DiffablePR {
@@ -30,10 +32,12 @@ export const diffPR = (
   const base = { pullRequestId: fresh.id, awsAccountId }
   const notifications: Array<NewNotification> = []
 
-  const freshComments = fresh.commentCount ?? 0
-  const cachedComments = cached.commentCount ?? 0
-  if (freshComments > cachedComments) {
-    notifications.push({ ...base, type: "new_comment", message: `New comments on #${fresh.id} ${fresh.title}` })
+  // Skip comment diff when cached count is null/undefined (first fetch — no baseline to compare)
+  if (cached.commentCount != null) {
+    const freshComments = fresh.commentCount ?? 0
+    if (freshComments > cached.commentCount) {
+      notifications.push({ ...base, type: "new_comment", message: `New comments on #${fresh.id} ${fresh.title}` })
+    }
   }
 
   if (Boolean(fresh.isApproved) !== Boolean(cached.isApproved)) {

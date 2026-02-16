@@ -29,23 +29,19 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             refreshIntervalSeconds: config.refreshIntervalSeconds,
             currentUser: state.currentUser
           }
-        }))
+        }).pipe(Effect.orDie))
       .handle("path", () =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
-          const path = yield* configService.getConfigPath.pipe(
-            Effect.catchAll((e) => Effect.fail(new ApiError({ message: e.message })))
-          )
+          const path = yield* configService.getConfigPath
           const exists = yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))
           return { path, exists }
-        }).pipe(Effect.catchTag("ApiError", Effect.fail)))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
       .handle("validate", () =>
         Effect.gen(function*() {
-          const result = yield* configService.validate.pipe(
-            Effect.catchAll((e) => Effect.fail(new ApiError({ message: e.message })))
-          )
+          const result = yield* configService.validate
           return { status: result.status, path: result.path, errors: result.errors }
-        }).pipe(Effect.catchTag("ApiError", Effect.fail)))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const decodeProfile = Schema.decodeSync(AwsProfileName)
@@ -59,22 +55,22 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             autoDetect: payload.autoDetect,
             autoRefresh: payload.autoRefresh,
             refreshIntervalSeconds: payload.refreshIntervalSeconds
-          }).pipe(
-            Effect.mapError((e) => new ApiError({ message: e.message }))
+          })
+          yield* prService.refresh.pipe(
+            Effect.catchAll((e) => Effect.logWarning("refresh after config save failed", e))
           )
-          yield* prService.refresh.pipe(Effect.catchAll(() => Effect.void))
           return "ok"
-        }))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
       .handle("reset", () =>
         Effect.gen(function*() {
           const backupPath = yield* configService.backup.pipe(
             Effect.map((p): string | undefined => p),
             Effect.catchAll(() => Effect.succeed(undefined as string | undefined))
           )
-          const config = yield* configService.reset.pipe(
-            Effect.mapError((e) => new ApiError({ message: String(e) }))
+          const config = yield* configService.reset
+          yield* prService.refresh.pipe(
+            Effect.catchAll((e) => Effect.logWarning("refresh after config reset failed", e))
           )
-          yield* prService.refresh.pipe(Effect.catchAll(() => Effect.void))
           const state = yield* SubscriptionRef.get(prService.state)
           return {
             backupPath,
@@ -90,5 +86,5 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               currentUser: state.currentUser
             }
           }
-        }))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
   }))

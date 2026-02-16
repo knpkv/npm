@@ -1,16 +1,16 @@
 import { useAtom, useAtomValue } from "@effect-atom/atom-react"
 import { useCallback, useMemo, useRef, useState } from "react"
-import type { PersistentNotificationItem } from "../atoms/app.js"
+import type { NotificationItem } from "../atoms/app.js"
 import { appStateAtom, loadMoreNotificationsAtom } from "../atoms/app.js"
 
 interface Page {
-  readonly items: ReadonlyArray<PersistentNotificationItem>
+  readonly items: ReadonlyArray<NotificationItem>
   readonly nextCursor?: number
 }
 
 export function useInfiniteNotifications() {
   const state = useAtomValue(appStateAtom)
-  const firstPage = state.persistentNotifications
+  const firstPage = state.notifications
 
   const [extraPages, setExtraPages] = useState<ReadonlyArray<Page>>([])
   const [loadMoreResult, loadMore] = useAtom(loadMoreNotificationsAtom, { mode: "promise" })
