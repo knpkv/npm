@@ -108,7 +108,7 @@ export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequ
             ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
             ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
             ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
-            ${req.commentCount}, ${req.link}, strftime('%Y-%m-%d %H:%M:%S', 'now'))
+            ${req.commentCount}, ${req.link}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
           ON CONFLICT (aws_account_id, id) DO UPDATE SET
             account_profile = excluded.account_profile,
             account_region = excluded.account_region,

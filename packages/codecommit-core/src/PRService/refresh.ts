@@ -38,7 +38,7 @@ export const makeRefresh = (
     if (!resolved) return
 
     const { accountIdMap, currentUser, enabledAccounts, subscribedRef } = resolved
-    const staleThreshold = new Date().toISOString().replace("T", " ").slice(0, 19)
+    const staleThreshold = new Date().toISOString().slice(0, 19) + "Z"
 
     yield* hub.batch(
       Effect.gen(function*() {

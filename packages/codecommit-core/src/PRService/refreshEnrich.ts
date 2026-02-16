@@ -85,18 +85,15 @@ export const enrichComments = (params: {
     const enrichments = yield* Effect.forEach(
       freshPRs,
       (row) =>
-        enrichSinglePR(row, subscribedSnapshot).pipe(
-          Effect.tap(() =>
-            Ref.updateAndGet(enrichedRef, (v) => v + 1).pipe(
-              Effect.flatMap((n) =>
-                SubscriptionRef.update(state, (s) => ({
-                  ...s,
-                  statusDetail: `fetching comments (${n}/${freshPRs.length})`
-                }))
-              )
-            )
-          )
-        ),
+        Effect.gen(function*() {
+          const result = yield* enrichSinglePR(row, subscribedSnapshot)
+          const n = yield* Ref.updateAndGet(enrichedRef, (v) => v + 1)
+          yield* SubscriptionRef.update(state, (s) => ({
+            ...s,
+            statusDetail: `fetching comments (${n}/${freshPRs.length})`
+          }))
+          return result
+        }),
       { concurrency: 2 }
     )
 
