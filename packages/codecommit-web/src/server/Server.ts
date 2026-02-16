@@ -8,7 +8,7 @@ import {
 } from "@effect/platform"
 import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
-import { Config, Duration, Effect, Layer, Ref } from "effect"
+import { Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
 import {
@@ -225,15 +225,15 @@ const updatePortOnConflict = (
 ) =>
 <A, E, R>(self: Effect.Effect<A, E, R>) =>
   self.pipe(
-    Effect.catchAllDefect((defect) =>
-      defect instanceof Error && defect.message.includes("port")
-        ? Effect.gen(function*() {
+    Effect.catchSomeDefect((defect) =>
+      Predicate.isError(defect) && defect.message.includes("port")
+        ? Option.some(Effect.gen(function*() {
           const remaining = yield* Ref.getAndUpdate(retriesRef, (r) => r - 1)
           if (remaining <= 0) return yield* Effect.die(defect)
           const p = yield* Ref.getAndUpdate(portRef, (prev) => prev + 1)
           yield* Effect.logWarning(`Port ${p} in use, trying ${p + 1}`)
-        })
-        : Effect.die(defect)
+        }))
+        : Option.none()
     )
   )
 
