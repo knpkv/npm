@@ -8,7 +8,7 @@ import {
 } from "@effect/platform"
 import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
-import { Duration, Effect, Layer } from "effect"
+import { Config, Duration, Effect, Layer, Ref } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
 import {
@@ -217,5 +217,35 @@ export const makeServer = (options: { port: number; hostname?: string }) =>
 
 export const makeCodeCommitServer = (port: number) => makeServer({ port })
 
-// Default export
-export const CodeCommitServerLive = makeCodeCommitServer(3000)
+export const Port = Config.integer("PORT").pipe(Config.withDefault(3000))
+
+const updatePortOnConflict = (
+  portRef: Ref.Ref<number>,
+  retriesRef: Ref.Ref<number>
+) =>
+<A, E, R>(self: Effect.Effect<A, E, R>) =>
+  self.pipe(
+    Effect.catchAllDefect((defect) =>
+      defect instanceof Error && defect.message.includes("port")
+        ? Effect.gen(function*() {
+          const remaining = yield* Ref.getAndUpdate(retriesRef, (r) => r - 1)
+          if (remaining <= 0) return yield* Effect.die(defect)
+          const p = yield* Ref.getAndUpdate(portRef, (prev) => prev + 1)
+          yield* Effect.logWarning(`Port ${p} in use, trying ${p + 1}`)
+        })
+        : Effect.die(defect)
+    )
+  )
+
+export const CodeCommitServerLive = Effect.gen(function*() {
+  const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
+  const retriesRef = yield* Ref.make(10)
+
+  return yield* Effect.forever(
+    Effect.gen(function*() {
+      const p = yield* Ref.get(portRef)
+      yield* Effect.logInfo(`Starting server on http://localhost:${p}`)
+      return yield* Layer.launch(makeCodeCommitServer(p))
+    }).pipe(updatePortOnConflict(portRef, retriesRef))
+  )
+})

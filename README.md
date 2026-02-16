@@ -9,15 +9,15 @@ This repository uses [Effect-TS](https://effect.website) for type-safe functiona
 
 ## Packages
 
-| Package                                                                              | Description                                                     |
-| ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| [@knpkv/codecommit](./packages/codecommit)                                           | TUI for browsing AWS CodeCommit PRs                             |
-| [@knpkv/codecommit-core](./packages/codecommit-core)                                 | Core logic for CodeCommit PR browser                            |
-| [@knpkv/codecommit-web](./packages/codecommit-web)                                   | Web server and frontend for CodeCommit PR browser               |
-| [@knpkv/confluence-api-client](./packages/confluence-api-client)                     | Effect-based Confluence Cloud REST API client (v1 + v2)         |
-| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md)         | Sync Confluence Cloud pages to local markdown                   |
-| [@knpkv/effect-ai-claude-code-cli](./packages/effect-ai-claude-code-cli/README.md)   | Effect-TS wrapper for Claude Code CLI                           |
-| [@knpkv/effect-ai-claude-agent-sdk](./packages/effect-ai-claude-agent-sdk/README.md) | Effect-TS wrapper for Claude Agent SDK                          |
+| Package                                                                              | Description                                             |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| [@knpkv/codecommit](./packages/codecommit)                                           | TUI for browsing AWS CodeCommit PRs                     |
+| [@knpkv/codecommit-core](./packages/codecommit-core)                                 | Core logic for CodeCommit PR browser                    |
+| [@knpkv/codecommit-web](./packages/codecommit-web)                                   | Web server and frontend for CodeCommit PR browser       |
+| [@knpkv/confluence-api-client](./packages/confluence-api-client)                     | Effect-based Confluence Cloud REST API client (v1 + v2) |
+| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md)         | Sync Confluence Cloud pages to local markdown           |
+| [@knpkv/effect-ai-claude-code-cli](./packages/effect-ai-claude-code-cli/README.md)   | Effect-TS wrapper for Claude Code CLI                   |
+| [@knpkv/effect-ai-claude-agent-sdk](./packages/effect-ai-claude-agent-sdk/README.md) | Effect-TS wrapper for Claude Agent SDK                  |
 
 ## Repository Structure
 
