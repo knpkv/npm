@@ -90,7 +90,9 @@ export function NotificationsTable({ items, selectedIndex }: NotificationsTableP
       render: (item) => {
         if (item.type !== "notification") return null
         return (
-          <text fg={theme.textMuted}>{item.notification.timestamp.toLocaleTimeString("en-GB", { hour12: false })}</text>
+          <text fg={theme.textMuted}>
+            {new Date(item.notification.createdAt).toLocaleTimeString("en-GB", { hour12: false })}
+          </text>
         )
       }
     }
@@ -101,9 +103,7 @@ export function NotificationsTable({ items, selectedIndex }: NotificationsTableP
       data={items}
       columns={columns}
       selectedIndex={selectedIndex}
-      keyExtractor={(i) =>
-        i.type === "notification" ? i.notification.message + i.notification.timestamp.getTime() : ""
-      }
+      keyExtractor={(i) => (i.type === "notification" ? `${i.notification.id}` : "")}
     />
   )
 }

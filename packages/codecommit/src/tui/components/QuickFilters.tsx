@@ -1,4 +1,5 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { notificationsAtom } from "../atoms/app.js"
 import { quickFilterTypeAtom, quickFilterValuesAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
@@ -13,7 +14,7 @@ export function QuickFilters() {
   const filterValues = useAtomValue(quickFilterValuesAtom)
   const filterValue = filterValues[filterType]
   const notificationsResult = useAtomValue(notificationsAtom)
-  const notifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
 
   const errorCount = notifications.items.filter((n) => n.type === "error").length
   const totalCount = notifications.items.length

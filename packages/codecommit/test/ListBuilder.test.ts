@@ -18,8 +18,8 @@ import type { QuickFilter } from "../src/tui/ListBuilder.js"
 const decodeAccount = Schema.decodeSync(Domain.Account)
 const decodePR = Schema.decodeSync(Domain.PullRequest)
 
-const acc1 = decodeAccount({ id: "dev-account", region: "us-east-1" })
-const acc2 = decodeAccount({ id: "prod-account", region: "eu-west-1" })
+const acc1 = decodeAccount({ profile: "dev-account", region: "us-east-1" })
+const acc2 = decodeAccount({ profile: "prod-account", region: "eu-west-1" })
 
 const base = {
   author: "alice",
@@ -193,7 +193,7 @@ describe("buildListItems", () => {
       const qf: QuickFilter = { type: "account", value: "prod-account", currentUser: "" }
       const items = buildListItems(state(), "prs", "", [], qf)
       const prs = items.filter((i) => i.type === "pr")
-      expect(prs.every((p) => p.type === "pr" && p.pr.account.id === "prod-account")).toBe(true)
+      expect(prs.every((p) => p.type === "pr" && p.pr.account.profile === "prod-account")).toBe(true)
     })
 
     // Repo quick filter isolates PRs from a specific repository.
@@ -257,12 +257,17 @@ describe("buildListItems", () => {
   })
 
   describe("notifications view", () => {
-    const notif = new Domain.NotificationItem({
+    const notif = {
+      id: 1,
+      pullRequestId: "",
+      awsAccountId: "",
       type: "info",
       title: "Test",
       message: "msg",
-      timestamp: new Date()
-    })
+      profile: "",
+      createdAt: new Date().toISOString(),
+      read: 0
+    } as const
 
     // Notifications view wraps each notification in a ListItem.
     it("returns notification items", () => {

@@ -2,7 +2,7 @@ import { useAtomSet } from "@effect-atom/atom-react"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { clearNotificationsAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
+import { markAllReadAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
 import {
   filterTextAtom,
   isFilteringAtom,
@@ -36,7 +36,7 @@ export function DialogCommand() {
   const setIsFiltering = useAtomSet(isFilteringAtom)
   const setIsSettingsFiltering = useAtomSet(isSettingsFilteringAtom)
   const setFilterText = useAtomSet(filterTextAtom)
-  const clearNotifications = useAtomSet(clearNotificationsAtom)
+  const markAllRead = useAtomSet(markAllReadAtom)
   const setQuickFilterType = useAtomSet(quickFilterTypeAtom)
   const setAllAccounts = useAtomSet(setAllAccountsAtom)
   const setSettingsTab = useAtomSet(settingsTabAtom)
@@ -125,7 +125,7 @@ export function DialogCommand() {
       },
       { id: "settings-all-on", label: "Settings: Enable All", action: () => setAllAccounts({ enabled: true }) },
       { id: "settings-all-off", label: "Settings: Disable All", action: () => setAllAccounts({ enabled: false }) },
-      { id: "clear-notifications", label: "Clear Notifications", action: () => clearNotifications() }
+      { id: "clear-notifications", label: "Mark All Read", action: () => markAllRead() }
     ],
     [
       refresh,
@@ -133,7 +133,7 @@ export function DialogCommand() {
       setIsFiltering,
       setIsSettingsFiltering,
       setFilterText,
-      clearNotifications,
+      markAllRead,
       setQuickFilterType,
       setAllAccounts,
       setSettingsTab,

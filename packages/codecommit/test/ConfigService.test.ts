@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "@effect/platform"
-import { ConfigService } from "@knpkv/codecommit-core"
+import { CacheService, ConfigService } from "@knpkv/codecommit-core"
 import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 
@@ -24,7 +24,9 @@ describe("ConfigService", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(Layer.merge(MockFileSystem, MockPath)))
+          ConfigService.ConfigServiceLive.pipe(
+            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
+          )
         )
       )
     )
@@ -56,7 +58,9 @@ describe("ConfigService", () => {
     const result = await Effect.runPromise(
       program.pipe(
         Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(Layer.provide(Layer.merge(MockFileSystem, MockPath)))
+          ConfigService.ConfigServiceLive.pipe(
+            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
+          )
         )
       )
     )

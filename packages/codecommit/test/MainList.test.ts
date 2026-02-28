@@ -46,7 +46,7 @@ const mkPR = (id: string, description?: string): ListItem => ({
     creationDate: new Date(),
     lastModifiedDate: new Date(),
     link: "https://example.com",
-    account: { id: "dev", region: "us-east-1" },
+    account: { profile: "dev", region: "us-east-1" },
     status: "OPEN",
     sourceBranch: "feat",
     destinationBranch: "main",

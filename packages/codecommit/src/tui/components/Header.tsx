@@ -1,6 +1,7 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { useEffect, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom } from "../atoms/app.js"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { creatingPrAtom, viewAtom } from "../atoms/ui.js"
 import { SPINNER_FRAMES, VIEW_TITLES } from "../Constants.js"
 import { useTheme } from "../context/theme.js"
@@ -26,7 +27,7 @@ export function Header() {
   const [spinnerFrame, setSpinnerFrame] = useState(0)
 
   const state = Result.getOrElse(result, () => defaultState)
-  const notifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 10000)
@@ -63,7 +64,8 @@ export function Header() {
         : state.accounts.length
 
   const title = (VIEW_TITLES[view] || "TUI").toUpperCase()
-  const headerText = `  AWS ${title} (${count}) ${lastUpdateStr}`
+  const userStr = state.currentUser ? ` [${state.currentUser}]` : ""
+  const headerText = `  AWS ${title} (${count}) ${lastUpdateStr}${userStr}`
 
   const bgColor = theme.backgroundHeader
 

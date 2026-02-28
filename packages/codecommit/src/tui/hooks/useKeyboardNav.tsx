@@ -1,15 +1,10 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useMemo, useRef } from "react"
 import { loginToAwsAtom } from "../atoms/actions.js"
-import {
-  appStateAtom,
-  clearNotificationsAtom,
-  notificationsAtom,
-  refreshAtom,
-  setAllAccountsAtom
-} from "../atoms/app.js"
+import { appStateAtom, markAllReadAtom, notificationsAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
 import {
   currentPRAtom,
   currentUserAtom,
@@ -58,9 +53,9 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const currentPR = useAtomValue(currentPRAtom)
   const selectedIndex = useAtomValue(selectedIndexAtom)
   const refresh = useAtomSet(refreshAtom)
-  const clearNotifications = useAtomSet(clearNotificationsAtom)
+  const markAllRead = useAtomSet(markAllReadAtom)
   const notificationsResult = useAtomValue(notificationsAtom)
-  const notifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
   const loginToAws = useAtomSet(loginToAwsAtom)
   const exitPending = useAtomValue(exitPendingAtom)
   const setExitPending = useAtomSet(exitPendingAtom)
@@ -107,7 +102,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
     const repoSet = new Set<string>()
     for (const pr of appState.pullRequests) {
       authorSet.add(pr.author)
-      accountSet.add(pr.account.id)
+      accountSet.add(pr.account.profile)
       repoSet.add(pr.repositoryName)
       const scope = extractScope(pr.title)
       if (scope) {
@@ -364,7 +359,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
 
       case "c":
         if (view === "notifications") {
-          clearNotifications()
+          markAllRead()
         }
         break
 
