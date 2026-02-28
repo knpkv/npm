@@ -1,30 +1,35 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAutoAnimate } from "@formkit/auto-animate/react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { calculateHealthScore } from "@knpkv/codecommit-core/HealthScore.js"
-import { Option } from "effect"
-import { LoaderIcon } from "lucide-react"
-import { useMemo } from "react"
-import { appStateAtom } from "../atoms/app.js"
-import { filterTextAtom, quickFilterAtom, selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import { LoaderIcon, LogInIcon } from "lucide-react"
+import { useEffect, useMemo } from "react"
+import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
+import { useFilterParams } from "../hooks/useFilterParams.js"
 import { extractScope } from "../utils/extractScope.js"
 import { PRRow } from "./pr-row.js"
 import { Badge } from "./ui/badge.js"
+import { Button } from "./ui/button.js"
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
 
 type PullRequest = Domain.PullRequest
 
 export function PRList() {
   const state = useAtomValue(appStateAtom)
-  const filterText = useAtomValue(filterTextAtom)
-  const quickFilter = useAtomValue(quickFilterAtom)
-  const setSelectedPrId = useAtomSet(selectedPrIdAtom)
-  const setView = useAtomSet(viewAtom)
+  const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
+  const { filterText, quickFilter } = useFilterParams()
+  const [animateRef, enableAnimate] = useAutoAnimate()
 
   const isLoading = state.status === "loading"
   const prs = state.pullRequests
   const currentUser = state.currentUser
+  const isHot = quickFilter.type === "hot"
 
-  const groups = useMemo(() => {
-    if (prs.length === 0) return []
+  useEffect(() => {
+    enableAnimate(isHot)
+  }, [isHot, enableAnimate])
+
+  const { flat, grouped } = useMemo(() => {
+    if (prs.length === 0) return { flat: [], grouped: [] }
 
     const filterLower = filterText.toLowerCase()
     const filterByText = (pr: PullRequest) => {
@@ -38,18 +43,15 @@ export function PRList() {
       )
     }
 
-    const now = new Date()
-
     const filterByQuick = (pr: PullRequest) => {
       if (quickFilter.type === "all") return true
-      if (quickFilter.type === "hot") {
-        return Option.exists(calculateHealthScore(pr, now), (s) => s.total >= 7)
-      }
+      if (quickFilter.type === "hot") return true
       if (quickFilter.type === "mine") {
         if (currentUser && pr.author !== currentUser) return false
+        if (quickFilter.value === undefined) return true
         return extractScope(pr.title) === quickFilter.value
       }
-      if (quickFilter.type === "account") return pr.account?.id === quickFilter.value
+      if (quickFilter.type === "account") return pr.account?.profile === quickFilter.value
       if (quickFilter.type === "author") return pr.author === quickFilter.value
       if (quickFilter.type === "scope") return extractScope(pr.title) === quickFilter.value
       if (quickFilter.type === "repo") return pr.repositoryName === quickFilter.value
@@ -70,57 +72,53 @@ export function PRList() {
       return true
     }
 
-    const filterPR = (pr: PullRequest) => filterByText(pr) && filterByQuick(pr)
+    const filtered = prs.filter((pr) => pr.status !== "MERGED" && filterByText(pr) && filterByQuick(pr))
 
+    // Hot mode: flat list sorted by lastModifiedDate desc
+    if (quickFilter.type === "hot") {
+      const sorted = [...filtered].sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
+      return { flat: sorted, grouped: [] }
+    }
+
+    // Other modes: group by account
     const byAccount = new Map<string, Array<PullRequest>>()
-    for (const pr of prs) {
-      const accountId = pr.account?.id ?? "unknown"
+    for (const pr of filtered) {
+      const accountId = pr.account?.profile ?? "unknown"
       if (!byAccount.has(accountId)) {
         byAccount.set(accountId, [])
       }
       byAccount.get(accountId)!.push(pr)
     }
 
-    const sortPrs = (list: Array<PullRequest>): Array<PullRequest> => {
-      if (quickFilter.type !== "hot") return list
-      const scoreMap = new Map(
-        list.map((pr) => [
-          pr.id,
-          Option.getOrElse(calculateHealthScore(pr, now).pipe(Option.map((s) => s.total)), () => -1)
-        ])
-      )
-      return [...list].sort((a, b) => (scoreMap.get(b.id) ?? -1) - (scoreMap.get(a.id) ?? -1))
-    }
-
     const result: Array<[string, Array<PullRequest>]> = []
     for (const [accountId, accountPrs] of byAccount) {
-      const filtered = accountPrs.filter(filterPR)
-      if (filtered.length > 0) {
-        result.push([accountId, sortPrs(filtered)])
+      if (accountPrs.length > 0) {
+        result.push([accountId, accountPrs])
       }
     }
 
-    return result
+    return { flat: [], grouped: result }
   }, [prs, currentUser, filterText, quickFilter])
 
-  const handlePRClick = (pr: PullRequest) => {
-    setSelectedPrId(pr.id)
-    setView("details")
+  const prHref = (pr: PullRequest) => {
+    const accountKey = pr.account.awsAccountId ?? pr.account.profile
+    return `/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`
   }
 
-  const enrichedCount = prs.filter((p) => p.commentCount !== undefined).length
-
-  if (groups.length === 0) {
+  const isEmpty = flat.length === 0 && grouped.length === 0
+  if (isEmpty) {
     if (isLoading) {
       return (
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
           <LoaderIcon className="size-8 animate-spin opacity-40" />
           <p className="text-sm font-medium">Loading pull requests...</p>
-          {state.statusDetail && <p className="font-mono text-xs opacity-60">{state.statusDetail}</p>}
           {prs.length > 0 && <p className="text-xs opacity-50">{prs.length} PRs fetched (filter hides all)</p>}
         </div>
       )
     }
+
+    const profiles = [...new Set(state.accounts.filter((a) => a.enabled).map((a) => a.profile))]
+    const needsLogin = prs.length === 0 && profiles.length > 0
 
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
@@ -134,27 +132,45 @@ export function PRList() {
         </svg>
         <p className="text-sm">No pull requests found</p>
         {prs.length > 0 && <p className="text-xs opacity-50">{prs.length} PRs loaded — try a different filter</p>}
+        {needsLogin && (
+          <Card className="mt-4 w-full max-w-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">SSO Login</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground mb-1">Session may have expired. Log in to fetch PRs.</p>
+              {profiles.map((profile) => (
+                <Button
+                  key={profile}
+                  variant="outline"
+                  size="sm"
+                  className="justify-start gap-2"
+                  onClick={() => ssoLogin({ payload: { profile } })}
+                >
+                  <LogInIcon className="size-3.5" />
+                  {profile}
+                </Button>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    )
+  }
+
+  if (isHot) {
+    return (
+      <div key="hot" ref={animateRef} className="divide-y rounded-lg border bg-card">
+        {flat.map((pr) => (
+          <PRRow key={pr.id} pr={pr} to={prHref(pr)} showUpdated />
+        ))}
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {(isLoading || (enrichedCount < prs.length && prs.length > 0)) && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderIcon className="size-3 animate-spin" />
-          {isLoading ? (
-            <span>
-              Loading... {state.statusDetail && <span className="font-mono opacity-60">{state.statusDetail}</span>}
-            </span>
-          ) : (
-            <span>
-              Enriching details ({enrichedCount}/{prs.length})
-            </span>
-          )}
-        </div>
-      )}
-      {groups.map(([accountId, accountPrs]) => (
+    <div key="grouped" className="space-y-6">
+      {grouped.map(([accountId, accountPrs]) => (
         <section key={accountId}>
           <div className="mb-2 flex items-center gap-2">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{accountId}</span>
@@ -162,7 +178,7 @@ export function PRList() {
           </div>
           <div className="divide-y rounded-lg border bg-card">
             {accountPrs.map((pr) => (
-              <PRRow key={pr.id} pr={pr} onClick={() => handlePRClick(pr)} />
+              <PRRow key={pr.id} pr={pr} to={prHref(pr)} />
             ))}
           </div>
         </section>

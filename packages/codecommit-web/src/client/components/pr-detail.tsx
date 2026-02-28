@@ -2,6 +2,7 @@ import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
+import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -10,16 +11,38 @@ import {
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
-import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ExternalLinkIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BellIcon,
+  BellOffIcon,
+  ChevronDownIcon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  LoaderIcon,
+  RefreshCwIcon
+} from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
+import rehypeSanitize from "rehype-sanitize"
+import { Link, useNavigate, useParams } from "react-router"
 import remarkGfm from "remark-gfm"
-import { appStateAtom, commentsAtom, openPrAtom } from "../atoms/app.js"
-import { selectedPrIdAtom, viewAtom } from "../atoms/ui.js"
+import {
+  appStateAtom,
+  commentsAtom,
+  openPrAtom,
+  refreshSinglePrAtom,
+  subscribeAtom,
+  subscriptionsQueryAtom,
+  unsubscribeAtom
+} from "../atoms/app.js"
 import { useDismissable } from "../hooks/useDismissable.js"
+import { useOptimistic } from "../hooks/useOptimistic.js"
 import { StorageKeys } from "../storage-keys.js"
+import { extractScope } from "../utils/extractScope.js"
 import { Badge } from "./ui/badge.js"
-import { Button } from "./ui/button.js"
+import { Button, ButtonGroup } from "./ui/button.js"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
 import { Separator } from "./ui/separator.js"
@@ -134,7 +157,9 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
           <span>{formatRelativeDate(thread.root.creationDate)}</span>
         </div>
         <div className="prose prose-sm dark:prose-invert max-w-none break-words [&_a]:text-primary [&_img]:inline [&_img]:h-5 [&_img]:w-auto">
-          <Markdown remarkPlugins={[remarkGfm]}>{thread.root.content}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            {thread.root.content}
+          </Markdown>
         </div>
       </div>
       {thread.replies.map((reply) => (
@@ -156,10 +181,10 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
       payload: {
         pullRequestId: pr.id,
         repositoryName: pr.repositoryName,
-        account: { id: pr.account.id, region: pr.account.region }
+        account: { profile: pr.account.profile, region: pr.account.region }
       }
     })
-  }, [pr.id, pr.repositoryName, pr.account.id, pr.account.region, fetchComments])
+  }, [pr.id, pr.repositoryName, pr.account.profile, pr.account.region, fetchComments])
 
   return Result.builder(commentsResult)
     .onInitialOrWaiting(() => (
@@ -230,24 +255,99 @@ function CollapsibleSection({
 }
 
 export function PRDetail() {
-  const selectedPrId = useAtomValue(selectedPrIdAtom)
+  const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
+  const refreshSingle = useAtomSet(refreshSinglePrAtom)
+  const fetchedRef = useRef<string | null>(null)
   const pr = useMemo(
-    () => (selectedPrId ? (state.pullRequests.find((p) => p.id === selectedPrId) ?? null) : null),
-    [selectedPrId, state.pullRequests]
+    () =>
+      prId
+        ? (state.pullRequests.find(
+            (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
+          ) ?? null)
+        : null,
+    [accountId, prId, state.pullRequests]
   )
+
+  // Fetch from AWS when PR not in cache (e.g. merged/closed)
+  useEffect(() => {
+    if (pr || !accountId || !prId) return
+    const key = `${accountId}:${prId}`
+    if (fetchedRef.current === key) return
+    fetchedRef.current = key
+    refreshSingle({ path: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
+  }, [pr, accountId, prId, refreshSingle])
+
   const score: HealthScore | undefined = useMemo(
     () => (pr ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
-  const setView = useAtomSet(viewAtom)
+  const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
 
+  // Subscriptions
+  const subscriptionsResult = useAtomValue(subscriptionsQueryAtom)
+  const subscribe = useAtomSet(subscribeAtom)
+  const unsubscribe = useAtomSet(unsubscribeAtom)
+  const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
+  const serverSubscribed = useMemo(
+    () =>
+      Result.isSuccess(subscriptionsResult) && accountKey
+        ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
+        : false,
+    [subscriptionsResult, accountKey, prId]
+  )
+  const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
+  const handleSubscriptionToggle = useCallback(() => {
+    if (!accountKey || !pr) return
+    const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
+    setOptimistic(!isSubscribed)
+    if (isSubscribed) {
+      unsubscribe({ payload })
+    } else {
+      subscribe({ payload })
+    }
+  }, [accountKey, isSubscribed, pr, subscribe, unsubscribe])
+
+  // Refresh single PR
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const refreshFetchedAtRef = useRef(pr?.fetchedAt)
+  useEffect(() => {
+    if (isRefreshing && pr?.fetchedAt && pr.fetchedAt !== refreshFetchedAtRef.current) {
+      setIsRefreshing(false)
+    }
+    refreshFetchedAtRef.current = pr?.fetchedAt
+  }, [isRefreshing, pr?.fetchedAt])
+  const handleRefresh = useCallback(() => {
+    if (!accountKey || !prId || isRefreshing) return
+    setIsRefreshing(true)
+    refreshSingle({ path: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } })
+  }, [accountKey, isRefreshing, prId, refreshSingle])
+
+  // Copy console URL
+  const consoleUrl = pr
+    ? pr.link ||
+      `https://${pr.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${pr.repositoryName}/pull-requests/${pr.id}?region=${pr.account.region}`
+    : ""
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(() => {
+    if (!consoleUrl) return
+    navigator.clipboard.writeText(consoleUrl).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      },
+      () => {
+        /* clipboard denied — noop */
+      }
+    )
+  }, [consoleUrl])
+
   const proceedOpen = useCallback(() => {
-    if (!pr) return
-    openPr({ payload: { profile: pr.account.id, link: pr.link } })
-  }, [openPr, pr])
+    if (!pr || !consoleUrl) return
+    openPr({ payload: { profile: pr.account.profile, link: consoleUrl } })
+  }, [consoleUrl, openPr, pr])
 
   const handleOpen = useCallback(() => {
     if (!pr) return
@@ -263,54 +363,74 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === "Escape") {
         e.preventDefault()
-        setView("prs")
+        navigate("/")
       } else if ((e.key === "Enter" || e.key === "o") && pr?.link) {
         handleOpen()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleOpen, pr, setView])
+  }, [handleOpen, navigate, pr])
 
   if (!pr) {
     return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground">
-        <p className="text-sm">No PR selected</p>
+      <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
+        <LoaderIcon className="size-6 animate-spin opacity-40" />
+        <p className="text-sm">Loading pull request...</p>
       </div>
     )
   }
 
-  const mergeBadge = !pr.isMergeable ? (
-    <Badge variant="destructive">Conflict</Badge>
-  ) : (
-    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-      Mergeable
-    </Badge>
-  )
+  const isOpen = pr.status === "OPEN"
 
-  const approvalBadge = pr.isApproved ? (
-    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-      Approved
-    </Badge>
-  ) : (
-    <Badge variant="secondary">Pending</Badge>
-  )
+  const mergeBadge = isOpen ? (
+    !pr.isMergeable ? (
+      <Badge variant="destructive">Conflict</Badge>
+    ) : (
+      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+        Mergeable
+      </Badge>
+    )
+  ) : null
+
+  const approvalBadge = isOpen ? (
+    pr.isApproved ? (
+      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+        Approved
+      </Badge>
+    ) : (
+      <Badge variant="secondary">Pending</Badge>
+    )
+  ) : null
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => setView("prs")}>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
           <ArrowLeftIcon className="size-4" />
           Back
         </Button>
-        <div className="ml-auto">
-          <Button size="sm" onClick={handleOpen}>
-            <ExternalLinkIcon className="size-4" />
+        <ButtonGroup className="ml-auto">
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleSubscriptionToggle}>
+            {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
+            {isSubscribed ? "Unsubscribe" : "Subscribe"}
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy}>
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+            {copied ? "Copied" : "Copy Link"}
+          </Button>
+          <Button variant="default" size="sm" className="h-7 text-xs" onClick={handleOpen}>
+            <ExternalLinkIcon className="size-3.5" />
             Open in Console
           </Button>
-        </div>
+        </ButtonGroup>
       </div>
 
       <div>
@@ -320,9 +440,22 @@ export function PRDetail() {
           {approvalBadge}
           <Badge variant="outline">{pr.status}</Badge>
           <ScoreBadge score={score} />
-          <span className="text-sm text-muted-foreground">
-            {pr.author} · {DateUtils.formatDate(pr.creationDate)}
-          </span>
+          <Link
+            to={`/?filter=author&value=${encodeURIComponent(pr.author)}`}
+            className="text-sm text-muted-foreground hover:underline"
+          >
+            {pr.author}
+          </Link>
+          <span className="text-sm text-muted-foreground">·</span>
+          <span className="text-sm text-muted-foreground">{DateUtils.formatDate(pr.creationDate)}</span>
+          {pr.fetchedAt && (
+            <>
+              <span className="text-sm text-muted-foreground">·</span>
+              <span className="text-xs text-muted-foreground">
+                {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -330,8 +463,21 @@ export function PRDetail() {
 
       <Card>
         <CardContent className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 py-4 text-sm">
+          <span className="text-muted-foreground">Account</span>
+          <Link
+            to={`/?filter=account&value=${encodeURIComponent(pr.account.profile)}`}
+            className="font-mono text-xs hover:underline"
+          >
+            {pr.account.profile}
+          </Link>
+
           <span className="text-muted-foreground">Repository</span>
-          <span className="font-mono text-xs">{pr.repositoryName}</span>
+          <Link
+            to={`/?filter=repo&value=${encodeURIComponent(pr.repositoryName)}`}
+            className="font-mono text-xs hover:underline"
+          >
+            {pr.repositoryName}
+          </Link>
 
           <span className="text-muted-foreground">Branch</span>
           <div className="flex items-center gap-2">
@@ -342,6 +488,48 @@ export function PRDetail() {
             <Badge variant="outline" className="font-mono text-xs">
               {pr.destinationBranch}
             </Badge>
+          </div>
+
+          <span className="text-muted-foreground">Author</span>
+          <Link to={`/?filter=author&value=${encodeURIComponent(pr.author)}`} className="text-xs hover:underline">
+            {pr.author}
+          </Link>
+
+          {extractScope(pr.title) && (
+            <>
+              <span className="text-muted-foreground">Scope</span>
+              <Link
+                to={`/?filter=scope&value=${encodeURIComponent(extractScope(pr.title)!)}`}
+                className="text-xs hover:underline"
+              >
+                {extractScope(pr.title)}
+              </Link>
+            </>
+          )}
+
+          <span className="text-muted-foreground">Status</span>
+          <div className="flex items-center gap-2">
+            <Link to={`/?filter=status&value=${pr.isApproved ? "approved" : "pending"}`} className="hover:underline">
+              {pr.isApproved ? (
+                <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+                  Approved
+                </Badge>
+              ) : (
+                <Badge variant="secondary">Pending</Badge>
+              )}
+            </Link>
+            <Link
+              to={`/?filter=status&value=${pr.isMergeable ? "mergeable" : "conflicts"}`}
+              className="hover:underline"
+            >
+              {pr.isMergeable ? (
+                <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+                  Mergeable
+                </Badge>
+              ) : (
+                <Badge variant="destructive">Conflict</Badge>
+              )}
+            </Link>
           </div>
 
           <span className="text-muted-foreground">ID</span>
@@ -360,7 +548,9 @@ export function PRDetail() {
           </CardHeader>
           <CardContent>
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Markdown remarkPlugins={[remarkGfm]}>{pr.description}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                {pr.description}
+              </Markdown>
             </div>
           </CardContent>
         </Card>

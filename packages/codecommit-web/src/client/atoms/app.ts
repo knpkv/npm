@@ -6,11 +6,15 @@ import { ApiClient } from "./runtime.js"
  * App state for web client — mirrors Domain.AppState
  */
 export interface NotificationItem {
-  readonly type: "error" | "info" | "warning" | "success"
+  readonly id: number
+  readonly pullRequestId: string
+  readonly awsAccountId: string
+  readonly type: string
   readonly title: string
+  readonly profile: string
   readonly message: string
-  readonly timestamp: string
-  readonly profile?: string
+  readonly createdAt: string
+  readonly read: number
 }
 
 export interface AppState {
@@ -21,7 +25,11 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
-  readonly notifications?: ReadonlyArray<NotificationItem>
+  readonly unreadNotificationCount?: number
+  readonly notifications?: {
+    readonly items: ReadonlyArray<NotificationItem>
+    readonly nextCursor?: number
+  }
 }
 
 const defaultState: AppState = {
@@ -43,7 +51,7 @@ export const prsQueryAtom = ApiClient.query("prs", "list", {
  */
 export const configQueryAtom = ApiClient.query("config", "list", {
   reactivityKeys: ["config"],
-  timeToLive: "60 seconds"
+  timeToLive: "30 seconds"
 })
 
 /**
@@ -96,19 +104,6 @@ export const configSaveAtom = ApiClient.mutation("config", "save")
 export const configResetAtom = ApiClient.mutation("config", "reset")
 
 /**
- * Notifications query atom
- */
-export const notificationsQueryAtom = ApiClient.query("notifications", "list", {
-  reactivityKeys: ["notifications"],
-  timeToLive: "10 seconds"
-})
-
-/**
- * Clear notifications mutation
- */
-export const notificationsClearAtom = ApiClient.mutation("notifications", "clear")
-
-/**
  * SSO login mutation
  */
 export const notificationsSsoLoginAtom = ApiClient.mutation("notifications", "ssoLogin")
@@ -117,6 +112,35 @@ export const notificationsSsoLoginAtom = ApiClient.mutation("notifications", "ss
  * SSO logout mutation
  */
 export const notificationsSsoLogoutAtom = ApiClient.mutation("notifications", "ssoLogout")
+
+// Subscriptions
+export const subscriptionsQueryAtom = ApiClient.query("subscriptions", "list", {
+  reactivityKeys: ["subscriptions"],
+  timeToLive: "5 seconds"
+})
+export const subscribeAtom = ApiClient.mutation("subscriptions", "subscribe")
+export const unsubscribeAtom = ApiClient.mutation("subscriptions", "unsubscribe")
+
+// Notifications (unified)
+export const notificationsQueryAtom = ApiClient.query("notifications", "list", {
+  urlParams: {},
+  reactivityKeys: ["notifications"],
+  timeToLive: "10 seconds"
+})
+export const notificationsCountAtom = ApiClient.query("notifications", "count", {
+  reactivityKeys: ["notifications"],
+  timeToLive: "10 seconds"
+})
+export const loadMoreNotificationsAtom = ApiClient.mutation("notifications", "list")
+export const markNotificationReadAtom = ApiClient.mutation("notifications", "markRead")
+export const markNotificationUnreadAtom = ApiClient.mutation("notifications", "markUnread")
+export const markAllNotificationsReadAtom = ApiClient.mutation("notifications", "markAllRead")
+
+// FTS search
+export const searchPrsAtom = ApiClient.mutation("prs", "search")
+
+// Refresh single PR
+export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
 
 /**
  * Derived app state atom that combines queries

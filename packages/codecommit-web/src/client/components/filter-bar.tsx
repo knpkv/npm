@@ -1,8 +1,9 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect-atom/atom-react"
 import { FlameIcon, SearchIcon, XIcon } from "lucide-react"
 import { useMemo } from "react"
 import { appStateAtom } from "../atoms/app.js"
-import { filterTextAtom, quickFilterAtom, type QuickFilterType } from "../atoms/ui.js"
+import type { QuickFilterType } from "../atoms/ui.js"
+import { useFilterParams } from "../hooks/useFilterParams.js"
 import { extractScope } from "../utils/extractScope.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
@@ -22,10 +23,7 @@ const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string; icon?: true }>
 
 export function FilterBar() {
   const state = useAtomValue(appStateAtom)
-  const quickFilter = useAtomValue(quickFilterAtom)
-  const setQuickFilter = useAtomSet(quickFilterAtom)
-  const filterText = useAtomValue(filterTextAtom)
-  const setFilterText = useAtomSet(filterTextAtom)
+  const { quickFilter, filterText, setQuickFilter, setFilterText } = useFilterParams()
 
   const prs = state.pullRequests
   const currentUser = state.currentUser
@@ -39,7 +37,7 @@ export function FilterBar() {
 
     for (const pr of prs) {
       authors.add(pr.author)
-      accounts.add(pr.account?.id ?? "unknown")
+      accounts.add(pr.account?.profile ?? "unknown")
       repos.add(pr.repositoryName)
       const scope = extractScope(pr.title)
       if (scope) {
@@ -69,20 +67,22 @@ export function FilterBar() {
       setQuickFilter({ type: "hot" })
       return
     }
+    if (key === "mine") {
+      setQuickFilter({ type: "mine" })
+      return
+    }
     const options =
-      key === "mine"
-        ? filterOptions.myScopes
-        : key === "author"
-          ? filterOptions.authors
-          : key === "account"
-            ? filterOptions.accounts
-            : key === "scope"
-              ? filterOptions.scopes
-              : key === "repo"
-                ? filterOptions.repos
-                : key === "status"
-                  ? ["approved", "pending", "mergeable", "conflicts"]
-                  : []
+      key === "author"
+        ? filterOptions.authors
+        : key === "account"
+          ? filterOptions.accounts
+          : key === "scope"
+            ? filterOptions.scopes
+            : key === "repo"
+              ? filterOptions.repos
+              : key === "status"
+                ? ["approved", "pending", "mergeable", "conflicts"]
+                : []
 
     if (options.length > 0 && options[0] !== undefined) {
       setQuickFilter({ type: key, value: options[0] })
@@ -91,7 +91,7 @@ export function FilterBar() {
 
   const handleValueChange = (value: string) => {
     if (quickFilter.type !== "all") {
-      setQuickFilter({ type: quickFilter.type, value })
+      setQuickFilter(value ? { type: quickFilter.type, value } : { type: quickFilter.type })
     }
   }
 
@@ -128,12 +128,13 @@ export function FilterBar() {
           ))}
         </ToggleGroup>
 
-        {currentOptions.length > 0 && quickFilter.type !== "all" && quickFilter.type !== "hot" && quickFilter.value && (
-          <Select value={quickFilter.value} onValueChange={handleValueChange}>
+        {currentOptions.length > 0 && quickFilter.type !== "all" && quickFilter.type !== "hot" && (
+          <Select value={quickFilter.value ?? "_all"} onValueChange={(v) => handleValueChange(v === "_all" ? "" : v)}>
             <SelectTrigger size="sm" className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="_all">All</SelectItem>
               {currentOptions.map((opt) => (
                 <SelectItem key={opt} value={opt}>
                   {opt}

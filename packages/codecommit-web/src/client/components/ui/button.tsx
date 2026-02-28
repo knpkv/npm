@@ -59,4 +59,17 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+function ButtonGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="button-group"
+      className={cn(
+        "inline-flex items-stretch rounded-md border overflow-hidden [&>*]:rounded-none [&>*]:border-0 [&>*]:shadow-none [&>*:not(:last-child)]:border-r",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Button, ButtonGroup, buttonVariants }
