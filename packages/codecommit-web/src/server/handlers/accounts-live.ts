@@ -14,7 +14,7 @@ export const AccountsLive = HttpApiBuilder.group(CodeCommitApi, "accounts", (han
           .filter((a) => a.enabled)
           .map((a) =>
             new Domain.Account({
-              id: a.profile,
+              profile: a.profile,
               region: a.region
             })
           )

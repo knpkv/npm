@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "start": "bun run src/main.ts",
-    "dev": "vite",
+    "dev": "bun run --watch src/main.ts & vite --clearScreen false",
     "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",
@@ -23,6 +23,7 @@
     "docgen": "docgen"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.8.2",
     "@effect-atom/atom": "latest",
     "@effect-atom/atom-react": "latest",
     "@effect/cluster": "^0.56.2",
@@ -43,7 +44,10 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
+    "react-router": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",
     "tw-animate-css": "^1.4.0"

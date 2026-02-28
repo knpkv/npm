@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./Domain.js": "./src/Domain.ts",
+    "./CacheService.js": "./src/CacheService/index.ts",
     "./*.js": "./src/*.ts"
   },
   "publishConfig": {
@@ -35,6 +36,9 @@
     "@effect/experimental": "latest",
     "@effect/platform": "latest",
     "@effect/schema": "latest",
+    "@effect/sql": "latest",
+    "@effect/sql-libsql": "latest",
+    "@libsql/client": "^0.14.0",
     "distilled-aws": "0.0.21",
     "effect": "latest"
   },

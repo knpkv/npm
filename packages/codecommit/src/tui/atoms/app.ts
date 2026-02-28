@@ -1,5 +1,6 @@
-import { type Domain, NotificationsService, PRService } from "@knpkv/codecommit-core"
-import { Effect, Fiber } from "effect"
+import { CacheService, type Domain, PRService } from "@knpkv/codecommit-core"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
+import { Effect, Fiber, Stream, SubscriptionRef } from "effect"
 import { runtimeAtom } from "./runtime.js"
 
 // Track active refresh fiber for cleanup
@@ -66,26 +67,49 @@ export const setAllAccountsAtom = runtimeAtom.fn(
 )
 
 /**
- * Clears accumulated notifications
+ * Marks all notifications as read
  * @category atoms
  */
-export const clearNotificationsAtom = runtimeAtom.fn(
+export const markAllReadAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*() {
-    const prService = yield* PRService.PRService
-    yield* prService.clearNotifications
+    const notificationRepo = yield* CacheService.NotificationRepo
+    yield* notificationRepo.markAllRead()
   })
 )
 
+const emptyNotifications: PaginatedNotifications = { items: [] }
+
 /**
- * Subscribes to NotificationsService.state changes
+ * Subscribes to notification changes via EventsHub
  * @category atoms
  */
 export const notificationsAtom = runtimeAtom.subscribable(
   Effect.gen(function*() {
-    const notificationsService = yield* NotificationsService.NotificationsService
-    return notificationsService.state
+    const notificationRepo = yield* CacheService.NotificationRepo
+    const hub = yield* CacheService.EventsHub
+
+    const initial = yield* notificationRepo.findAll({ limit: 50 }).pipe(
+      Effect.catchAll(() => Effect.succeed(emptyNotifications))
+    )
+    const ref = yield* SubscriptionRef.make(initial)
+
+    yield* Effect.forkDaemon(
+      Effect.scoped(
+        hub.subscribe.pipe(
+          Stream.filter((e) => e._tag === "Notifications" || e._tag === "SystemNotifications"),
+          Stream.debounce("200 millis"),
+          Stream.runForEach(() =>
+            notificationRepo.findAll({ limit: 50 }).pipe(
+              Effect.flatMap((result) => SubscriptionRef.set(ref, result)),
+              Effect.catchAll(() => Effect.void)
+            )
+          )
+        )
+      )
+    )
+
+    return ref
   })
 )
 
 export type AppState = Domain.AppState
-export type NotificationsState = Domain.NotificationsState

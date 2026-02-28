@@ -4,10 +4,11 @@
  * @internal
  */
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import { Credentials } from "distilled-aws"
-import { Cause, Effect, Schedule } from "effect"
+import { HttpClient } from "@effect/platform"
+import { Credentials, Region } from "distilled-aws"
+import { Effect, Layer, Schedule, Schema } from "effect"
 import { AwsClientConfig, type AwsClientConfigShape } from "../AwsClientConfig.js"
-import type { AwsProfileName, AwsRegion } from "../Domain.js"
+import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
 
 export { AwsApiError, AwsCredentialError } from "../Errors.js"
@@ -15,15 +16,20 @@ export type { AwsClientError } from "../Errors.js"
 
 /**
  * Check if an error is an AWS throttling exception.
+ * Inspects structured error properties instead of pretty-printing.
  */
 export const isThrottlingError = (error: unknown): boolean => {
-  const errorStr = Cause.pretty(Cause.fail(error)).toLowerCase()
-  return errorStr.includes("throttl")
-    || errorStr.includes("rate exceed")
-    || errorStr.includes("too many requests")
-    || errorStr.includes("requestlimitexceeded")
-    || errorStr.includes("slowdown")
-    || errorStr.includes("toomanyrequestsexception")
+  if (typeof error !== "object" || error === null) return false
+  const name = "name" in error ? String(error.name) : ""
+  const code = "code" in error ? String(error.code).toLowerCase() : ""
+  const message = "message" in error ? String(error.message).toLowerCase() : ""
+  return name === "ThrottlingException"
+    || name === "TooManyRequestsException"
+    || code === "throttling"
+    || code === "requestlimitexceeded"
+    || code === "slowdown"
+    || message.includes("rate exceed")
+    || message.includes("too many requests")
 }
 
 const makeThrottleSchedule = (config: AwsClientConfigShape) =>
@@ -81,12 +87,40 @@ export const makeApiError = (operation: string, profile: AwsProfileName, region:
   new AwsApiError({ operation, profile, region, cause })
 
 /**
- * Common account parameter shape.
+ * Common account parameter shape. Derived from Domain.Account.
  */
-export interface AccountParams {
-  readonly profile: AwsProfileName
-  readonly region: AwsRegion
-}
+export type AccountParams = Pick<Account, "profile" | "region">
+
+/**
+ * Shared combinator: acquire credentials → build Layer → provide → retry → timeout.
+ * Eliminates boilerplate repeated across all AwsClient method files.
+ */
+export const withAwsContext = <A, E>(
+  operation: string,
+  account: AccountParams,
+  effect: Effect.Effect<A, E, HttpClient.HttpClient | Region.Region | Credentials.Credentials>,
+  options?: { readonly timeout?: "stream" }
+) =>
+  Effect.gen(function*() {
+    const config = yield* AwsClientConfig
+    const httpClient = yield* HttpClient.HttpClient
+    const credentials = yield* acquireCredentials(account.profile, account.region)
+    const timeout = options?.timeout === "stream" ? config.streamTimeout : config.operationTimeout
+
+    return yield* Effect.provide(
+      effect,
+      Layer.mergeAll(
+        Layer.succeed(HttpClient.HttpClient, httpClient),
+        Layer.succeed(Region.Region, account.region),
+        Layer.succeed(Credentials.Credentials, credentials)
+      )
+    ).pipe(
+      throttleRetry,
+      Effect.timeout(timeout),
+      Effect.catchTag("TimeoutException", (cause) =>
+        Effect.fail(makeApiError(operation, account.profile, account.region, cause)))
+    )
+  })
 
 // ---------------------------------------------------------------------------
 // Method Parameter Types
@@ -130,13 +164,13 @@ export interface GetPullRequestParams {
   readonly pullRequestId: string
 }
 
-export interface PullRequestDetail {
-  readonly title: string
-  readonly description?: string
-  readonly author: string
-  readonly status: string
-  readonly repositoryName: string
-  readonly sourceBranch: string
-  readonly destinationBranch: string
-  readonly creationDate: Date
-}
+export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequestDetail")({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  author: Schema.String,
+  status: Schema.String,
+  repositoryName: Schema.String,
+  sourceBranch: Schema.String,
+  destinationBranch: Schema.String,
+  creationDate: Schema.DateFromSelf
+}) {}

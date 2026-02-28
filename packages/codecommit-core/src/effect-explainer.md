@@ -13,6 +13,16 @@ src/
 ├── AwsClient/             <- AWS API service (1 file per method)
 ├── ConfigService/         <- Config loading/saving (split methods)
 ├── PRService/             <- PR orchestration (split methods)
+│   ├── internal.ts        <- Shared helpers (prToUpsertInput, countAllComments)
+│   ├── refresh.ts         <- Full refresh (Ref-managed state, streaming)
+│   ├── refreshSinglePR.ts <- Single PR refresh
+│   ├── setAllAccounts.ts  <- Enable/disable all accounts
+│   └── toggleAccount.ts   <- Toggle single account
+├── CacheService/          <- SQLite cache layer (libsql)
+│   ├── Database.ts        <- DatabaseLive layer (connection + migrations)
+│   ├── diff.ts            <- PR/comment diff → notifications
+│   ├── repos/             <- SqlSchema-based repos (Effect.Service pattern)
+│   └── migrations/        <- SQL schema migrations
 ├── NotificationsService.ts <- Notification state management
 └── index.ts               <- Namespace re-exports
 ```
@@ -310,41 +320,75 @@ if (Either.isRight(decoded)) result.push(decoded.right)
 ### Schema.parseJson — Replace JSON.parse
 
 ```typescript
-// Before: two steps, untyped intermediate
-const raw = JSON.parse(content)
-const config = Schema.decodeUnknown(TuiConfig)(raw)
-
-// After: single step, typed end-to-end
 const config = Schema.decodeUnknown(Schema.parseJson(TuiConfig))(content)
 ```
 
+`Schema.parseJson` combines JSON parsing and schema validation in a single step — typed end-to-end, no untyped intermediate.
+
 ## PRService/ — Orchestration
 
-### Internal Deps via Props (Not Layers)
+### Context Capture + Provide Pattern
+
+PRServiceLive captures the full service context at construction, then provides it to sub-effects:
 
 ```typescript
-// Props for internal wiring within a single Layer.effect
-interface PRServiceDeps {
-  readonly state: SubscriptionRef<AppState>
-  readonly configService: Context.Tag.Service<ConfigService>
-  readonly awsClient: Context.Tag.Service<AwsClient>
-  readonly notificationsService: Context.Tag.Service<NotificationsService>
-}
+// PRService/index.ts — captures context, provides to split methods
+export const PRServiceLive = Layer.effect(
+  PRService,
+  Effect.gen(function*() {
+    const ctx = yield* Effect.context<
+      ConfigService | AwsClient | NotificationsService
+      | PullRequestRepo | CommentRepo | NotificationRepo
+      | SubscriptionRepo | SyncMetadataRepo
+    >()
+    const state = yield* SubscriptionRef.make<AppState>({ ... })
+
+    const provide = <A, E>(effect: Effect.Effect<A, E, ...>) =>
+      Effect.provide(effect, ctx)
+
+    return {
+      state,
+      refresh: provide(makeRefresh(state)),          // state as param, services via R channel
+      refreshSinglePR: (a, p) => provide(makeRefreshSinglePR(state)(a, p)),
+      // ...
+    }
+  })
+)
 ```
 
-Why props, not layers? Because these are **internal splits of one service**.
-The Layer boundary is at `PRServiceLive` — inside, it's just function composition.
+Split methods (e.g. `makeRefresh`) take `state: PRState` as a parameter and access services via `yield*` from the R channel. The Layer captures context once; `provide` supplies it to each method call.
 
 ### Clock.currentTimeMillis — Testable Time
 
 ```typescript
-// Before: new Date() — untestable, impure
-yield * SubscriptionRef.update(state, (s) => ({ ...s, lastUpdated: new Date() }))
-
-// After: Clock — mockable in tests via TestClock
 const now = yield * Clock.currentTimeMillis
 const date = DateTime.toDate(DateTime.unsafeMake(now))
 ```
+
+`Clock.currentTimeMillis` is mockable in tests via `TestClock` — pure, deterministic time access.
+
+### Ref for Mutable State in refresh.ts
+
+refresh.ts uses `Ref` for Effect-managed mutable state instead of raw `Map`/`Set`:
+
+```typescript
+// Ref-managed state — referentially transparent, safe under concurrency
+const accountIdRef = yield* Ref.make(new Map<string, string>())
+yield* Effect.forEach(accounts, (a) =>
+  awsClient.getCallerIdentity(...).pipe(
+    Effect.tap((id) => Ref.update(accountIdRef, (m) => new Map(m).set(a.profile, id.accountId)))
+  ),
+  { concurrency: 3 }
+)
+// Snapshot after population — read-only from here
+const accountIdMap = yield* Ref.get(accountIdRef)
+```
+
+Three Refs in refresh:
+
+- `accountIdRef` — profile→awsAccountId mapping (populated once, then snapshotted read-only)
+- `subscribedRef` — subscribed PR keys (loaded from DB, grows during auto-subscribe)
+- `seenKeysRef` — tracks seen PRs in current refresh (for stale PR removal)
 
 ### Incremental Streaming in refresh.ts
 
@@ -353,13 +397,14 @@ refresh.ts streams PRs incrementally into app state. Not batch-then-display — 
 ```typescript
 yield *
   Stream.mergeAll(streams, { concurrency: 2 }).pipe(
-    Stream.runForEach(({ label, pr }) =>
-      SubscriptionRef.update(deps.state, (s) => {
-        const prs = s.pullRequests
-        // Insertion sort by creationDate (newest first)
-        const insertIdx = prs.findIndex((p) => p.creationDate.getTime() < pr.creationDate.getTime())
-        const newPrs = insertIdx === -1 ? [...prs, pr] : [...prs.slice(0, insertIdx), pr, ...prs.slice(insertIdx)]
-        return { ...s, pullRequests: newPrs, statusDetail: `${label} #${pr.id} ${pr.repositoryName}` }
+    Stream.runForEach(({ label, pr, awsAccountId }) =>
+      Effect.gen(function* () {
+        yield* Ref.update(seenKeysRef, (s) => new Set(s).add(`${pr.account.profile}:${pr.id}`))
+        const subscribed = yield* Ref.get(subscribedRef)
+        if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
+          // diff against cache for notifications
+        }
+        // upsert to cache, update SubscriptionRef state
       })
     )
   )
@@ -370,7 +415,78 @@ Key patterns:
 1. **Stream.mergeAll(streams, { concurrency: 2 })** — interleaves multiple account/region streams with concurrency cap of 2
 2. **Stream.runForEach** — processes each PR as it arrives (not `runCollect` which waits for all)
 3. **SubscriptionRef.update** — atomic state update per PR, UI reactively re-renders
-4. **Insertion sort by creationDate** — maintains sorted order without re-sorting the full array
+4. **Ref.update/Ref.get** — Effect-managed mutable state within the refresh lifecycle
+5. **Insertion sort by creationDate** — maintains sorted order without re-sorting the full array
+
+## CacheService/ — SQLite Cache Layer
+
+### Architecture
+
+```
+CacheService/
+├── Database.ts       ← DatabaseLive layer (libsql connection + migrations)
+├── diff.ts           ← diffPR / diffComments → NewNotification[]
+├── repos/
+│   ├── PullRequestRepo.ts    ← SqlSchema-based CRUD + FTS5 search
+│   ├── CommentRepo.ts        ← JSON-stored comments with Schema decode
+│   ├── NotificationRepo.ts   ← Persistent notifications (read/unread)
+│   ├── SubscriptionRepo.ts   ← PR subscriptions (SqlSchema)
+│   └── SyncMetadataRepo.ts   ← Last-synced timestamps (SqlSchema)
+└── migrations/               ← SQL schema migrations
+```
+
+### Effect.Service with dependencies
+
+Each repo uses `Effect.Service` with `dependencies: [DatabaseLive]`:
+
+```typescript
+export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequestRepo", {
+  dependencies: [DatabaseLive],  // auto-wires DatabaseLive (SqlClient)
+  effect: Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    const findAll = SqlSchema.findAll({ Result: CachedPullRequest, ... })
+    return { findAll: () => findAll(undefined as void).pipe(Effect.orDie), ... }
+  })
+}) {}
+```
+
+### SqlSchema for Type-Safe Queries
+
+All repos use `SqlSchema.findAll`/`SqlSchema.findOne`/`SqlSchema.void` for compile-time validated queries:
+
+```typescript
+// SubscriptionRepo — SqlSchema-based
+const findAll_ = SqlSchema.findAll({
+  Result: SubscriptionRow,
+  Request: Schema.Void,
+  execute: () =>
+    sql`SELECT aws_account_id AS "awsAccountId", pull_request_id AS "pullRequestId"
+        FROM pr_subscriptions`
+})
+```
+
+### CommentRepo — Schema.parseJson on Read
+
+Cached comments are stored as JSON strings. On read, `Schema.parseJson` combines JSON parsing + Schema validation in one step:
+
+```typescript
+const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
+
+find: (awsAccountId, prId) =>
+  find_({ awsAccountId, pullRequestId: prId }).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(Option.none()),
+        onSome: (r) =>
+          Schema.decodeUnknown(LocationsFromJson)(r.locationsJson).pipe(
+            Effect.map((decoded) => Option.some(decoded)),
+            Effect.catchAll(() => Effect.succeed(Option.some([]))) // corrupt data → empty
+          )
+      })
+    ),
+    Effect.orDie
+  )
+```
 
 ## index.ts — Namespace Re-exports
 

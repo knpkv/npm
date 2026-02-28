@@ -1,15 +1,17 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { ArrowLeftIcon, FileIcon, InfoIcon, PaletteIcon, UserIcon } from "lucide-react"
-import { type SettingsTab, SettingsTabs, settingsTabAtom, viewAtom } from "../atoms/ui.js"
+import { ArrowLeftIcon, FileIcon, InfoIcon, PaletteIcon, RefreshCwIcon, UserIcon } from "lucide-react"
+import { useNavigate, useParams } from "react-router"
+import { type SettingsTab, SettingsTabs } from "../atoms/ui.js"
 import { cn } from "../lib/utils.js"
 import { SettingsAbout } from "./settings-about.js"
 import { SettingsAccounts } from "./settings-accounts.js"
 import { SettingsConfig } from "./settings-config.js"
+import { SettingsRefresh } from "./settings-refresh.js"
 import { SettingsTheme } from "./settings-theme.js"
 import { Button } from "./ui/button.js"
 
 const TabIcons: Record<SettingsTab, React.ReactNode> = {
   accounts: <UserIcon className="size-4" />,
+  refresh: <RefreshCwIcon className="size-4" />,
   theme: <PaletteIcon className="size-4" />,
   config: <FileIcon className="size-4" />,
   about: <InfoIcon className="size-4" />
@@ -17,20 +19,23 @@ const TabIcons: Record<SettingsTab, React.ReactNode> = {
 
 const TabLabels: Record<SettingsTab, string> = {
   accounts: "Accounts",
+  refresh: "Refresh",
   theme: "Theme",
   config: "Config",
   about: "About"
 }
 
+const isSettingsTab = (v: string | undefined): v is SettingsTab => SettingsTabs.includes(v as SettingsTab)
+
 export function SettingsPage() {
-  const activeTab = useAtomValue(settingsTabAtom)
-  const setTab = useAtomSet(settingsTabAtom)
-  const setView = useAtomSet(viewAtom)
+  const { tab } = useParams<{ tab: string }>()
+  const activeTab: SettingsTab = isSettingsTab(tab) ? tab : "accounts"
+  const navigate = useNavigate()
 
   return (
     <div className="flex gap-6">
       <nav className="w-48 shrink-0">
-        <Button variant="ghost" size="sm" className="mb-4 gap-2" onClick={() => setView("prs")}>
+        <Button variant="ghost" size="sm" className="mb-4 gap-2" onClick={() => navigate("/")}>
           <ArrowLeftIcon className="size-4" />
           Back to PRs
         </Button>
@@ -40,7 +45,7 @@ export function SettingsPage() {
               key={id}
               role="tab"
               aria-selected={activeTab === id}
-              onClick={() => setTab(id)}
+              onClick={() => navigate(`/settings/${id}`, { replace: true })}
               className={cn(
                 "flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left transition-colors",
                 activeTab === id
@@ -56,6 +61,7 @@ export function SettingsPage() {
       </nav>
       <div className="flex-1 min-w-0">
         {activeTab === "accounts" && <SettingsAccounts />}
+        {activeTab === "refresh" && <SettingsRefresh />}
         {activeTab === "theme" && <SettingsTheme />}
         {activeTab === "config" && <SettingsConfig />}
         {activeTab === "about" && <SettingsAbout />}

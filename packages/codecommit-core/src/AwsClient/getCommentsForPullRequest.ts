@@ -1,19 +1,10 @@
 /**
  * @internal
  */
-import { HttpClient } from "@effect/platform"
-import { Credentials, Region } from "distilled-aws"
 import * as codecommit from "distilled-aws/codecommit"
-import { Effect, Layer, Option, Schema, Stream } from "effect"
-import { AwsClientConfig } from "../AwsClientConfig.js"
+import { Effect, Option, Schema, Stream } from "effect"
 import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"
-import {
-  acquireCredentials,
-  type GetCommentsForPullRequestParams,
-  makeApiError,
-  normalizeAuthor,
-  throttleRetry
-} from "./internal.js"
+import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +51,7 @@ const RawToPRComment = Schema.transform(
   }
 )
 
+// Sync decode — used inside Schema.transform (sync context)
 const decodeComment = Schema.decodeSync(RawToPRComment)
 
 const buildThreads = (comments: ReadonlyArray<PRComment>): Array<CommentThread> => {
@@ -118,9 +110,11 @@ const RawToCommentLocation = Schema.transform(
   }
 )
 
-const decodeCommentLocation = Schema.decodeSync(RawToCommentLocation) as (
-  raw: Schema.Schema.Encoded<typeof RawCommentLocation>
-) => PRCommentLocation
+// Effectful decode — ParseError in error channel instead of thrown defect
+const decodeCommentLocation = (raw: unknown) =>
+  Schema.decodeUnknown(RawToCommentLocation)(raw).pipe(
+    Effect.map((result) => result as unknown as PRCommentLocation)
+  )
 
 // NOTE: repositoryName is intentionally omitted — passing it without
 // beforeCommitId/afterCommitId triggers CommitIdRequiredException.
@@ -132,15 +126,19 @@ const fetchCommentPages = (pullRequestId: string) =>
         pullRequestId,
         ...(nextToken && { nextToken })
       }).pipe(
-        Effect.map((resp) =>
-          [
-            (resp.commentsForPullRequestData ?? []).map(decodeCommentLocation),
-            resp.nextToken ? Option.some(resp.nextToken) : Option.none()
-          ] as const
+        Effect.flatMap((resp) =>
+          Effect.forEach(resp.commentsForPullRequestData ?? [], decodeCommentLocation).pipe(
+            Effect.map((locations) =>
+              [
+                locations,
+                resp.nextToken ? Option.some(resp.nextToken) : Option.none()
+              ] as const
+            )
+          )
         )
       )
   ).pipe(
-    Stream.flatMap(Stream.fromIterable)
+    Stream.flatMap((locations) => Stream.fromIterable(locations))
   )
 
 const runCommentPages = (pullRequestId: string) => fetchCommentPages(pullRequestId).pipe(Stream.runCollect)
@@ -152,31 +150,13 @@ const runCommentPages = (pullRequestId: string) => fetchCommentPages(pullRequest
 export const getCommentsForPullRequest = (
   params: GetCommentsForPullRequestParams
 ) =>
-  Effect.gen(function*() {
-    const config = yield* AwsClientConfig
-    const httpClient = yield* HttpClient.HttpClient
-    const credentials = yield* acquireCredentials(params.account.profile, params.account.region)
-
-    const layer = Layer.mergeAll(
-      Layer.succeed(HttpClient.HttpClient, httpClient),
-      Layer.succeed(Region.Region, params.account.region),
-      Layer.succeed(Credentials.Credentials, credentials)
-    )
-
-    return yield* Effect.provide(
-      runCommentPages(params.pullRequestId).pipe(
-        Effect.mapError((cause) =>
-          makeApiError("getCommentsForPullRequest", params.account.profile, params.account.region, cause)
-        )
-      ),
-      layer
-    ).pipe(
-      throttleRetry,
-      Effect.map((chunk) => Array.from(chunk)),
-      Effect.timeout(config.streamTimeout),
-      Effect.catchTag("TimeoutException", (cause) =>
-        Effect.fail(
-          makeApiError("getCommentsForPullRequest", params.account.profile, params.account.region, cause)
-        ))
-    )
-  })
+  withAwsContext(
+    "getCommentsForPullRequest",
+    params.account,
+    runCommentPages(params.pullRequestId).pipe(
+      Effect.mapError((cause) =>
+        makeApiError("getCommentsForPullRequest", params.account.profile, params.account.region, cause)
+      )
+    ),
+    { timeout: "stream" }
+  ).pipe(Effect.map((chunk) => Array.from(chunk)))

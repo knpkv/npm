@@ -61,7 +61,7 @@ export function DialogCreatePR() {
   const repos = useMemo(() => {
     const seen = new Map<string, RepoOption>()
     for (const pr of appState.pullRequests) {
-      const key = `${pr.account.id}:${pr.repositoryName}`
+      const key = `${pr.account.profile}:${pr.repositoryName}`
       if (!seen.has(key)) {
         seen.set(key, { name: pr.repositoryName, account: pr.account })
       }
@@ -73,7 +73,9 @@ export function DialogCreatePR() {
   const filteredRepos = useMemo(() => {
     if (!repoFilter) return repos
     const filter = repoFilter.toLowerCase()
-    return repos.filter((r) => r.name.toLowerCase().includes(filter) || r.account.id.toLowerCase().includes(filter))
+    return repos.filter(
+      (r) => r.name.toLowerCase().includes(filter) || r.account.profile.toLowerCase().includes(filter)
+    )
   }, [repos, repoFilter])
 
   // Filter branches by search text
@@ -402,7 +404,7 @@ export function DialogCreatePR() {
           ) : (
             filteredRepos.map((repo, i) => (
               <box
-                key={`${repo.account.id}:${repo.name}`}
+                key={`${repo.account.profile}:${repo.name}`}
                 style={{
                   height: 1,
                   width: "100%",
@@ -411,7 +413,7 @@ export function DialogCreatePR() {
                 }}
               >
                 <text fg={i === selectedIndex ? theme.selectedText : theme.text}>
-                  {`${repo.name} (${repo.account.id})`}
+                  {`${repo.name} (${repo.account.profile})`}
                 </text>
               </box>
             ))
@@ -540,7 +542,7 @@ export function DialogCreatePR() {
           </box>
           <box style={{ height: 1, flexDirection: "row" }}>
             <text fg={theme.textMuted}>{"Account:    "}</text>
-            <text fg={theme.text}>{selectedRepo?.account.id ?? ""}</text>
+            <text fg={theme.text}>{selectedRepo?.account.profile ?? ""}</text>
           </box>
           <box style={{ height: 1, flexDirection: "row" }}>
             <text fg={theme.textMuted}>{"Source:     "}</text>

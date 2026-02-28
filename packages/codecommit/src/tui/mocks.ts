@@ -5,7 +5,7 @@ const decodeAccount = Schema.decodeSync(Domain.Account)
 const decodePullRequest = Schema.decodeSync(Domain.PullRequest)
 
 export const mockAccount = decodeAccount({
-  id: "123456789012",
+  profile: "123456789012",
   region: "us-east-1"
 })
 

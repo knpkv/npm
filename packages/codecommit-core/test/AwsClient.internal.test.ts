@@ -30,15 +30,28 @@ describe("AwsClient internals", () => {
   })
 
   describe("isThrottlingError", () => {
-    // AWS SDK throttling errors contain specific keywords in messages
+    // AWS SDK errors have structured .name property
     it.each([
-      "ThrottlingException",
-      "Rate exceeded",
-      "Too Many Requests",
-      "RequestLimitExceeded",
-      "SlowDown",
-      "TooManyRequestsException"
-    ])("detects throttling keyword: %s", (msg) => {
+      { name: "ThrottlingException" },
+      { name: "TooManyRequestsException" }
+    ])("detects error.name: $name", (err) => {
+      expect(isThrottlingError(Object.assign(new Error(), err))).toBe(true)
+    })
+
+    // AWS SDK errors may also use .code property
+    it.each([
+      { code: "Throttling" },
+      { code: "RequestLimitExceeded" },
+      { code: "SlowDown" }
+    ])("detects error.code: $code", (err) => {
+      expect(isThrottlingError(Object.assign(new Error(), err))).toBe(true)
+    })
+
+    // Fallback: throttling info in .message only
+    it.each([
+      "Rate exceeded for API calls",
+      "Too many requests, please slow down"
+    ])("detects throttling in message: %s", (msg) => {
       expect(isThrottlingError(new Error(msg))).toBe(true)
     })
 
@@ -49,8 +62,9 @@ describe("AwsClient internals", () => {
 
     // Must handle non-Error values gracefully
     it("handles non-Error values", () => {
-      expect(isThrottlingError("throttling string")).toBe(true)
+      expect(isThrottlingError(null)).toBe(false)
       expect(isThrottlingError(42)).toBe(false)
+      expect(isThrottlingError(undefined)).toBe(false)
     })
   })
 

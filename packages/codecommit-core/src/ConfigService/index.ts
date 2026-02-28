@@ -6,6 +6,7 @@
  */
 import type { FileSystem, Path } from "@effect/platform"
 import { Config, Context, Effect, Layer } from "effect"
+import { EventsHub } from "../CacheService/EventsHub.js"
 import { ConfigError, ProfileDetectionError } from "../Errors.js"
 import type { ConfigParseError } from "../Errors.js"
 import { backup } from "./backup.js"
@@ -76,6 +77,7 @@ export const ConfigServiceLive = Layer.effect(
   ConfigService,
   Effect.gen(function*() {
     const ctx = yield* Effect.context<FileSystem.FileSystem | Path.Path | ConfigPaths>()
+    const hub = yield* EventsHub
 
     const provide = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ConfigPaths>) =>
       Effect.provide(effect, ctx)
@@ -85,7 +87,7 @@ export const ConfigServiceLive = Layer.effect(
 
     return {
       load: provide(load),
-      save: (config) => provide(save(config)),
+      save: (config) => provide(save(config)).pipe(Effect.tap(() => hub.publish({ _tag: "Config" }))),
       detectProfiles: provide(detectProfiles),
       getConfigPath: provide(ConfigPaths.pipe(Effect.flatMap((p) => p.configPath))),
       backup: provide(backup),

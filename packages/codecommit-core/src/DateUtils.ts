@@ -13,13 +13,13 @@ export const formatDateTime = (date: Date): string => {
   return `${dStr} ${tStr}`
 }
 
-export const formatRelativeTime = (date: Date, now: Date): string => {
+export const formatRelativeTime = (date: Date, now: Date, prefix = "Updated"): string => {
   const seconds = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000))
 
   return Match.value(seconds).pipe(
-    Match.when((s) => s < 60, (s) => `Updated ${s}s ago`),
-    Match.when((s) => s < 3600, (s) => `Updated ${Math.floor(s / 60)}m ago`),
-    Match.when((s) => s < 86400, (s) => `Updated ${Math.floor(s / 3600)}h ago`),
-    Match.orElse(() => `Updated on ${formatDate(date)}`)
+    Match.when((s) => s < 60, (s) => `${prefix} ${s}s ago`),
+    Match.when((s) => s < 3600, (s) => `${prefix} ${Math.floor(s / 60)}m ago`),
+    Match.when((s) => s < 86400, (s) => `${prefix} ${Math.floor(s / 3600)}h ago`),
+    Match.orElse(() => `${prefix} on ${formatDate(date)}`)
   )
 }

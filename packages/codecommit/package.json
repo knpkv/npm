@@ -27,8 +27,8 @@
   "dependencies": {
     "@effect-atom/atom-react": "latest",
     "@effect/cli": "latest",
-    "@effect/platform": "^0.94.2",
-    "@effect/platform-bun": "^0.87.1",
+    "@effect/platform": "latest",
+    "@effect/platform-bun": "latest",
     "@effect/platform-node": "latest",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/codecommit-web": "workspace:^",

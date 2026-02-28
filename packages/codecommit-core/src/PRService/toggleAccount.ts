@@ -5,14 +5,11 @@
 import { Effect } from "effect"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
-import type { PRState } from "./internal.js"
 
 export const makeToggleAccount = (
-  state: PRState,
   refresh: Effect.Effect<void>
 ) =>
-(profile: AwsProfileName): Effect.Effect<void, never, ConfigService> =>
-  Effect.gen(function*() {
+  Effect.fn("PRService.toggleAccount")(function*(profile: AwsProfileName) {
     const configService = yield* ConfigService
     const config = yield* configService.load.pipe(Effect.orDie)
     const existingIdx = config.accounts.findIndex((a) => a.profile === profile)
@@ -35,4 +32,4 @@ export const makeToggleAccount = (
 
     yield* configService.save({ ...config, accounts: newAccounts }).pipe(Effect.orDie)
     yield* refresh
-  }).pipe(Effect.withSpan("PRService.toggleAccount"))
+  })

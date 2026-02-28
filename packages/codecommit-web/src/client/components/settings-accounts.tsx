@@ -1,16 +1,38 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { InfoIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
+import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
+import { Schema } from "effect"
+import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { configQueryAtom, configSaveAtom, notificationsSsoLogoutAtom } from "../atoms/app.js"
-import { Button } from "./ui/button.js"
+import {
+  appStateAtom,
+  configQueryAtom,
+  configSaveAtom,
+  notificationsSsoLoginAtom,
+  notificationsSsoLogoutAtom
+} from "../atoms/app.js"
+import { Button, ButtonGroup } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
 
 type StatusFilter = "all" | "on" | "off"
 
+interface ConfigData {
+  readonly accounts: ReadonlyArray<{
+    readonly profile: string
+    readonly regions: ReadonlyArray<string>
+    readonly enabled: boolean
+  }>
+  readonly autoDetect: boolean
+  readonly autoRefresh: boolean
+  readonly refreshIntervalSeconds: number
+  readonly currentUser?: string | undefined
+}
+
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
+  const appState = useAtomValue(appStateAtom)
   const saveConfig = useAtomSet(configSaveAtom)
+  const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
@@ -24,35 +46,39 @@ export function SettingsAccounts() {
     []
   )
 
-  const toggleAccount = useCallback(
-    (
-      profile: string,
-      accounts: ReadonlyArray<{
-        readonly profile: string
-        readonly regions: ReadonlyArray<string>
-        readonly enabled: boolean
-      }>,
+  const saveWithDebounce = useCallback(
+    (payload: {
+      accounts: Array<{ profile: string; regions: string[]; enabled: boolean }>
       autoDetect: boolean
-    ) => {
-      const current = overrides[profile] ?? accounts.find((a) => a.profile === profile)?.enabled ?? true
+      autoRefresh: boolean
+      refreshIntervalSeconds: number
+    }) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        saveConfig({ payload })
+      }, 500)
+    },
+    [saveConfig]
+  )
+
+  const toggleAccount = useCallback(
+    (profile: string, data: ConfigData) => {
+      const current = overrides[profile] ?? data.accounts.find((a) => a.profile === profile)?.enabled ?? true
       const next = !current
       const nextOverrides = { ...overrides, [profile]: next }
       setOverrides(nextOverrides)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        saveConfig({
-          payload: {
-            accounts: accounts.map((a) => ({
-              profile: a.profile,
-              regions: [...a.regions],
-              enabled: a.profile === profile ? next : (nextOverrides[a.profile] ?? a.enabled)
-            })),
-            autoDetect
-          }
-        })
-      }, 500)
+      saveWithDebounce({
+        accounts: data.accounts.map((a) => ({
+          profile: a.profile,
+          regions: [...a.regions],
+          enabled: a.profile === profile ? next : (nextOverrides[a.profile] ?? a.enabled)
+        })),
+        autoDetect: data.autoDetect,
+        autoRefresh: data.autoRefresh,
+        refreshIntervalSeconds: data.refreshIntervalSeconds
+      })
     },
-    [saveConfig, overrides]
+    [saveWithDebounce, overrides]
   )
 
   return (
@@ -68,6 +94,7 @@ export function SettingsAccounts() {
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => (
           <AccountsList
+            currentUser={appState.currentUser}
             data={data}
             overrides={overrides}
             search={search}
@@ -75,7 +102,14 @@ export function SettingsAccounts() {
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
-            onSsoLogout={(profile) => ssoLogout({ payload: { profile } })}
+            onSsoLogin={(profile) => {
+              try {
+                ssoLogin({ payload: { profile: Schema.decodeSync(AwsProfileName)(profile) } })
+              } catch {
+                /* invalid profile */
+              }
+            }}
+            onSsoLogout={() => ssoLogout({})}
           />
         ))
         .render()}
@@ -84,7 +118,9 @@ export function SettingsAccounts() {
 }
 
 function AccountsList({
+  currentUser,
   data,
+  onSsoLogin,
   onSsoLogout,
   overrides,
   search,
@@ -93,30 +129,16 @@ function AccountsList({
   statusFilter,
   toggleAccount
 }: {
-  readonly data: {
-    readonly accounts: ReadonlyArray<{
-      readonly profile: string
-      readonly regions: ReadonlyArray<string>
-      readonly enabled: boolean
-    }>
-    readonly autoDetect: boolean
-    readonly currentUser?: string | undefined
-  }
+  readonly currentUser: string | undefined
+  readonly data: ConfigData
   readonly overrides: Record<string, boolean>
   readonly search: string
   readonly setSearch: (s: string) => void
   readonly statusFilter: StatusFilter
   readonly setStatusFilter: (f: StatusFilter) => void
-  readonly toggleAccount: (
-    profile: string,
-    accounts: ReadonlyArray<{
-      readonly profile: string
-      readonly regions: ReadonlyArray<string>
-      readonly enabled: boolean
-    }>,
-    autoDetect: boolean
-  ) => void
-  readonly onSsoLogout: (profile: string) => void
+  readonly toggleAccount: (profile: string, data: ConfigData) => void
+  readonly onSsoLogin: (profile: string) => void
+  readonly onSsoLogout: () => void
 }) {
   const accounts = useMemo(
     () => data.accounts.map((a) => ({ ...a, enabled: overrides[a.profile] ?? a.enabled })),
@@ -133,26 +155,48 @@ function AccountsList({
     })
   }, [accounts, search, statusFilter])
 
-  const enabledCount = accounts.filter((a) => a.enabled).length
+  const enabledAccounts = accounts.filter((a) => a.enabled)
+  const enabledCount = enabledAccounts.length
 
   return (
     <>
-      {data.currentUser && (
-        <div className="flex items-center gap-2 text-sm">
-          <UserIcon className="size-4 text-muted-foreground" />
-          <span className="text-muted-foreground">Current user:</span>
-          <span className="font-medium">{data.currentUser}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-xs"
-            title="SSO Logout"
-            onClick={() => onSsoLogout(data.currentUser!)}
-          >
-            <LogOutIcon className="size-3" />
-          </Button>
-        </div>
-      )}
+      <div className="flex items-center gap-2 text-sm">
+        <UserIcon className="size-4 text-muted-foreground" />
+        {currentUser ? (
+          <>
+            <span className="text-muted-foreground">Current user:</span>
+            <span className="font-medium">{currentUser}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-xs"
+              title="SSO Logout"
+              onClick={() => onSsoLogout()}
+            >
+              <LogOutIcon className="size-3" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="text-muted-foreground">Not logged in</span>
+            {enabledAccounts[0] &&
+              (() => {
+                const profile = enabledAccounts[0].profile
+                return (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs"
+                    title="SSO Login"
+                    onClick={() => onSsoLogin(profile)}
+                  >
+                    <LogInIcon className="size-3" />
+                  </Button>
+                )
+              })()}
+          </>
+        )}
+      </div>
       {accounts.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
           No accounts configured. Edit the config file to add AWS profiles.
@@ -169,7 +213,7 @@ function AccountsList({
                 className="h-8 pl-8 text-sm"
               />
             </div>
-            <div className="flex gap-1">
+            <ButtonGroup>
               {(["all", "on", "off"] as const).map((f) => (
                 <Button
                   key={f}
@@ -181,7 +225,7 @@ function AccountsList({
                   {f}
                 </Button>
               ))}
-            </div>
+            </ButtonGroup>
           </div>
           <div className="text-xs text-muted-foreground">
             {enabledCount}/{accounts.length} enabled
@@ -201,7 +245,7 @@ function AccountsList({
                   variant={account.enabled ? "default" : "outline"}
                   size="sm"
                   className="ml-2 h-6 px-2 text-xs shrink-0"
-                  onClick={() => toggleAccount(account.profile, data.accounts, data.autoDetect)}
+                  onClick={() => toggleAccount(account.profile, data)}
                 >
                   {account.enabled ? "On" : "Off"}
                 </Button>

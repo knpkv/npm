@@ -8,22 +8,33 @@ Service architecture overview — why Effect services beat DI frameworks.
                     ┌─────────────────┐
                     │   PRService      │
                     │  (orchestrator)  │
-                    └──┬──┬──┬────────┘
-                       │  │  │
-          ┌────────────┘  │  └────────────┐
-          ▼               ▼               ▼
+                    └──┬──┬──┬──┬─────┘
+                       │  │  │  │
+          ┌────────────┘  │  │  └────────────┐
+          │      ┌────────┘  └──────┐        │
+          ▼      ▼                  ▼        ▼
+  ┌────────────┐ ┌──────────────┐ ┌────────────────────┐
+  │ AwsClient  │ │ConfigService │ │   CacheService     │
+  │ (8 methods)│ │(load/save/   │ │   (SQLite repos)   │
+  │            │ │ detect)      │ │                    │
+  └──────┬─────┘ └──────┬───────┘ └────────┬───────────┘
+         │              │                  │
+         ▼              ▼                  ▼
   ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-  │  AwsClient   │ │ConfigService │ │NotificationsService│
-  │  (8 methods) │ │(load/save/   │ │  (add/clear/state) │
-  │              │ │ detect)      │ │                    │
-  └──────┬───────┘ └──────┬───────┘ └────────────────────┘
-         │                │
-         ▼                ▼
-  ┌──────────────┐ ┌──────────────┐
-  │AwsClientConfig│ │  FileSystem  │
-  │  (timeouts,  │ │  Path        │
-  │   retries)   │ │  (platform)  │
-  └──────────────┘ └──────────────┘
+  │AwsClientConfig│ │  FileSystem  │ │  DatabaseLive    │
+  │  (timeouts,  │ │  Path        │ │ (libsql/Turso +  │
+  │   retries)   │ │  (platform)  │ │  migrations)     │
+  └──────────────┘ └──────────────┘ └──────────────────┘
+
+  ┌───────────────────────────────────────────────────┐
+  │  CacheService Repos (Effect.Service auto-wired)   │
+  │  PullRequestRepo │ CommentRepo │ NotificationRepo │
+  │  SubscriptionRepo│ SyncMetadataRepo               │
+  │  EventsHub (PubSub-based change notification)     │
+  │                                                   │
+  │  Each declares: dependencies: [DatabaseLive,      │
+  │    EventsHub.Default] → auto-satisfied by layer   │
+  └───────────────────────────────────────────────────┘
 ```
 
 ## Why Effect Services > DI Frameworks
@@ -128,40 +139,53 @@ Keeps each function 5-15 lines. Main export just orchestrates them.
 
 ## Key Architectural Decisions
 
-### Context-Scoped Dependencies (Effect.provide + Layer.mergeAll)
+### withAwsContext Combinator (S1)
 
-Every AwsClient method follows the same scoping pattern:
+All AwsClient methods (except `getPullRequests` which returns a Stream) share the same boilerplate:
+acquire credentials → build Layer → provide → retry → timeout → error map.
+
+The `withAwsContext` combinator in `internal.ts` eliminates this duplication:
 
 ```typescript
-// createPullRequest.ts — representative pattern used in ALL methods
-export const createPullRequest = (params: CreatePullRequestParams) =>
-  Effect.gen(function*() {
-    const config = yield* AwsClientConfig          // read config from context
-    const httpClient = yield* HttpClient.HttpClient // read HttpClient from context
-    const credentials = yield* acquireCredentials(params.account.profile, params.account.region)
+// internal.ts — shared combinator
+export const withAwsContext = <A, E>(
+  operation: string,
+  account: AccountParams,
+  effect: Effect.Effect<A, E, HttpClient | Region | Credentials>,
+  options?: { readonly timeout?: "stream" }
+) =>
+  Effect.gen(function* () {
+    const config = yield* AwsClientConfig
+    const httpClient = yield* HttpClient.HttpClient
+    const credentials = yield* acquireCredentials(account.profile, account.region)
+    const timeout = options?.timeout === "stream" ? config.streamTimeout : config.operationTimeout
 
     return yield* Effect.provide(
-      callCreatePullRequest(params),               // inner effect needing AWS deps
-      Layer.mergeAll(                              // scope AWS deps to this call
+      effect,
+      Layer.mergeAll(
         Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(Region.Region, params.account.region),
+        Layer.succeed(Region.Region, account.region),
         Layer.succeed(Credentials.Credentials, credentials)
       )
     ).pipe(
-      throttleRetry,                               // retry on throttle (reads AwsClientConfig)
-      Effect.timeout(config.operationTimeout),
+      throttleRetry,
+      Effect.timeout(timeout),
       Effect.catchTag("TimeoutException", (cause) =>
-        Effect.fail(makeApiError("createPullRequest", ...)))
+        Effect.fail(makeApiError(operation, account.profile, account.region, cause))
+      )
     )
   })
 ```
 
-Why `Effect.provide` + `Layer.mergeAll` instead of individual `provideService` calls:
+Each method file becomes minimal — just the API call logic:
 
-- Scopes all 3 AWS deps (HttpClient, Region, Credentials) to one inner effect
-- Credentials are per-call (different profile/region per account)
-- Inner effects (from `distilled-aws`) declare their deps; `Layer.mergeAll` satisfies all at once
-- Stream variant uses `Stream.provideService` (see `getPullRequests.ts`)
+```typescript
+// createPullRequest.ts — entire file is ~15 lines
+export const createPullRequest = (params: CreatePullRequestParams) =>
+  withAwsContext("createPullRequest", params.account, callCreatePullRequest(params))
+```
+
+The `options.timeout` parameter differentiates operations (`operationTimeout`) from streaming calls (`streamTimeout`). `getPullRequests.ts` doesn't use this combinator because it returns `Stream.Stream` which requires `Stream.provideService` instead of `Effect.provide`.
 
 ### Centralized Config via AwsClientConfig
 
@@ -220,7 +244,8 @@ CodeCommitError (union)
 ├── ConfigError           — config file I/O
 ├── ConfigParseError      — config JSON invalid
 ├── ProfileDetectionError — AWS config parsing
-└── RefreshError          — PR refresh orchestration
+├── RefreshError          — PR refresh orchestration
+└── CacheError            — SQLite cache operation failure (SQL, parse, connection)
 ```
 
 Every error is a `Schema.TaggedError` — serializable, pattern-matchable, no `unknown`.
@@ -249,8 +274,9 @@ PRs stream incrementally to the UI via `SubscriptionRef`:
 yield *
   Stream.mergeAll(streams, { concurrency: 2 }).pipe(
     Stream.runForEach(({ label, pr }) =>
-      SubscriptionRef.update(deps.state, (s) => {
+      SubscriptionRef.update(state, (s) => {
         // insert PR sorted by creationDate — UI updates per-PR
+        const prs = s.pullRequests.filter((p) => !(p.id === pr.id && p.account.profile === pr.account.profile))
         const insertIdx = prs.findIndex((p) => p.creationDate.getTime() < pr.creationDate.getTime())
         const newPrs = insertIdx === -1 ? [...prs, pr] : [...prs.slice(0, insertIdx), pr, ...prs.slice(insertIdx)]
         return { ...s, pullRequests: newPrs, statusDetail: `${label} #${pr.id}` }
@@ -290,6 +316,132 @@ export const formatRelativeTime = (date: Date, now: Date): string => {
 ```
 
 `Match.value` = exhaustive pattern matching on values (not union types). Replaces if/else chains with declarative pipelines.
+
+## CacheService Architecture
+
+Local SQLite cache powered by `@effect/sql-libsql` (Turso/libsql).
+
+### Database Layer
+
+```typescript
+// Database.ts
+export const LibsqlLive = Layer.unwrapEffect(
+  Effect.map(dbUrl, (url) =>
+    LibsqlClient.layer({
+      url,
+      transformResultNames: (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+    })
+  )
+)
+
+export const MigrationsLive = LibsqlMigrator.layer({
+  loader: LibsqlMigrator.fromRecord({
+    "0001_initial": migration0001,
+    "0002_indexes": migration0002
+    // ...
+  })
+})
+
+export const DatabaseLive = MigrationsLive.pipe(Layer.provideMerge(LibsqlLive))
+```
+
+`transformResultNames` converts SQL `snake_case` columns to JS `camelCase` automatically — no manual mapping in queries. Migrations use `LibsqlMigrator.fromRecord` for bundled (non-filesystem) loaders.
+
+### Repo Pattern (Effect.Service)
+
+Each repo uses `Effect.Service` with auto-wired dependencies:
+
+```typescript
+export class PullRequestRepo extends Effect.Service<PullRequestRepo>()("PullRequestRepo", {
+  dependencies: [DatabaseLive, EventsHub.Default],  // ← auto-provided
+  effect: Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    const hub = yield* EventsHub
+
+    const upsert = (input: UpsertInput) =>
+      upsert_(input).pipe(
+        Effect.tap(() => hub.publish(RepoChange.PullRequests())),
+        cacheError("upsert")
+      )
+    // ...
+    return { findAll, findByAccountAndId, upsert, search, ... }
+  })
+}) {}
+```
+
+`dependencies` declares which layers are auto-provided when using `PullRequestRepo.Default` — no manual wiring. Each mutation publishes to `EventsHub` for real-time change propagation.
+
+### EventsHub (Batched PubSub)
+
+```typescript
+export class EventsHub extends Effect.Service<EventsHub>()("EventsHub", {
+  effect: Effect.gen(function* () {
+    const pubsub = yield* PubSub.unbounded<RepoChange>()
+    // ...
+    return { publish, batch, subscribe }
+  })
+}) {}
+```
+
+`batch(effect)` accumulates change tags during the effect, then emits deduplicated notifications when done. Prevents notification storms during refresh (dozens of upserts → one `PullRequests` event).
+
+`RepoChange` uses `Data.TaggedEnum` for type-safe event variants:
+
+```typescript
+export type RepoChange = Data.TaggedEnum<{
+  PullRequests: {}
+  Notifications: {}
+  Subscriptions: {}
+  Comments: {}
+  Config: {}
+  AppState: {}
+  SystemNotifications: {}
+}>
+```
+
+### CacheError (C2)
+
+All cache operations wrap errors in a typed `CacheError`:
+
+```typescript
+export class CacheError extends Schema.TaggedError<CacheError>()("CacheError", {
+  operation: Schema.String,
+  cause: Schema.Defect
+}) {}
+```
+
+Per-repo error wrapper pattern:
+
+```typescript
+const cacheError =
+  (op: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.mapError((cause) => new CacheError({ operation: `PullRequestRepo.${op}`, cause })),
+      Effect.withSpan(`PullRequestRepo.${op}`, { captureStackTrace: false })
+    )
+```
+
+Every repo method pipes through `cacheError("methodName")` — typed errors + automatic OpenTelemetry spans.
+
+## Effect.fn for Traced Functions (S5)
+
+PRService methods use `Effect.fn` for automatic OpenTelemetry span tracing:
+
+```typescript
+export const makeRefresh = Effect.fn("PRService.refresh")(
+  function*(state: PRState) { /* body */ },
+  (effect, state) => effect.pipe(    // ← pipeables receive (effect, ...originalArgs)
+    Effect.timeout("120 seconds"),
+    Effect.catchAllCause((cause) => {
+      const squashed = Cause.squash(cause)
+      return SubscriptionRef.update(state, (s) => ({ ...s, status: "error", error: ... }))
+    })
+  )
+)
+```
+
+`Effect.fn` wraps a generator into a traced function. The first argument is the span name. Pipeables receive `(effect, ...originalArgs)` — enabling error handlers that reference original args (like `state`).
 
 ## Testing Story
 

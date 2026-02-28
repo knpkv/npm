@@ -1,15 +1,9 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { BellIcon, FilterIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
 import { useEffect } from "react"
+import { useNavigate } from "react-router"
 import { refreshAtom } from "../atoms/app.js"
-import {
-  commandPaletteAtom,
-  quickFilterAtom,
-  type QuickFilterType,
-  type SettingsTab,
-  settingsTabAtom,
-  viewAtom
-} from "../atoms/ui.js"
+import { commandPaletteAtom, type QuickFilterType, type SettingsTab } from "../atoms/ui.js"
 import {
   CommandDialog,
   CommandEmpty,
@@ -17,31 +11,27 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
-  CommandShortcut
+  CommandSeparator
 } from "./ui/command.js"
 
-const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string; shortcut: string }> = [
-  { key: "all", label: "All", shortcut: "1" },
-  { key: "mine", label: "Mine", shortcut: "2" },
-  { key: "account", label: "Account", shortcut: "3" },
-  { key: "author", label: "Author", shortcut: "4" },
-  { key: "scope", label: "Scope", shortcut: "5" },
-  { key: "repo", label: "Repo", shortcut: "6" },
-  { key: "status", label: "Status", shortcut: "7" }
+const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "mine", label: "Mine" },
+  { key: "account", label: "Account" },
+  { key: "author", label: "Author" },
+  { key: "scope", label: "Scope" },
+  { key: "repo", label: "Repo" },
+  { key: "status", label: "Status" }
 ]
 
 export function CommandPalette() {
   const isOpen = useAtomValue(commandPaletteAtom)
   const setIsOpen = useAtomSet(commandPaletteAtom)
-  const setView = useAtomSet(viewAtom)
-  const setQuickFilter = useAtomSet(quickFilterAtom)
+  const navigate = useNavigate()
   const refresh = useAtomSet(refreshAtom)
-  const setSettingsTab = useAtomSet(settingsTabAtom)
 
   const openSettings = (tab?: SettingsTab) => {
-    setView("settings")
-    if (tab) setSettingsTab(tab)
+    navigate(tab ? `/settings/${tab}` : "/settings")
     setIsOpen(false)
   }
 
@@ -70,11 +60,10 @@ export function CommandPalette() {
           >
             <RefreshCwIcon />
             Refresh PRs
-            <CommandShortcut>R</CommandShortcut>
           </CommandItem>
           <CommandItem
             onSelect={() => {
-              setView("prs")
+              navigate("/")
               setIsOpen(false)
             }}
           >
@@ -83,13 +72,12 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             onSelect={() => {
-              setView("notifications")
+              navigate("/notifications")
               setIsOpen(false)
             }}
           >
             <BellIcon />
             View: Notifications
-            <CommandShortcut>N</CommandShortcut>
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />
@@ -121,17 +109,12 @@ export function CommandPalette() {
             <CommandItem
               key={f.key}
               onSelect={() => {
-                if (f.key === "all") {
-                  setQuickFilter({ type: "all" })
-                } else {
-                  setQuickFilter({ type: f.key })
-                }
+                navigate(f.key === "all" ? "/" : `/?filter=${f.key}`)
                 setIsOpen(false)
               }}
             >
               <FilterIcon />
               Filter: {f.label}
-              <CommandShortcut>{f.shortcut}</CommandShortcut>
             </CommandItem>
           ))}
         </CommandGroup>

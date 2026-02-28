@@ -41,18 +41,7 @@ Wrapping pure functions in Effect adds noise without value.
 
 ## Extracting Testable Logic from Components
 
-**Before** — logic trapped inside render:
-
-```typescript
-export function Table({ selectedIndex }) {
-  useEffect(() => {
-    const targetY = Math.max(0, (selectedIndex - 2) * 2) // magic numbers
-    scrollRef.current.scrollTo({ x: 0, y: targetY })
-  }, [selectedIndex])
-}
-```
-
-**After** — pure function + named constants:
+Extract testable logic from components as pure functions with named constants:
 
 ```typescript
 export const ROW_HEIGHT = 2

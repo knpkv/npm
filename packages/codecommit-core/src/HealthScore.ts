@@ -35,11 +35,9 @@ const daysBetween = (from: Date, to: Date): number => Math.max(0, (to.getTime() 
 const hasScope = (title: string): boolean => /^\w+(\([^)]+\))?:/.test(title) || /^[A-Z]+-\d+:/.test(title)
 
 export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<HealthScore> => {
-  if (pr.commentCount === undefined) return Option.none()
-
   const daysSinceLastActivity = daysBetween(pr.lastModifiedDate, now)
   const daysSinceCreation = daysBetween(pr.creationDate, now)
-  const commentCount = pr.commentCount
+  const commentCount = pr.commentCount ?? 0
   const scopeDetected = hasScope(pr.title)
   const hasDescription = !!pr.description && pr.description.trim().length > 0
 

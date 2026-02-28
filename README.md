@@ -9,11 +9,33 @@ This repository uses [Effect-TS](https://effect.website) for type-safe functiona
 
 ## Packages
 
-| Package                                                                              | Description                                   |
-| ------------------------------------------------------------------------------------ | --------------------------------------------- |
-| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md)         | Sync Confluence Cloud pages to local markdown |
-| [@knpkv/effect-ai-claude-code-cli](./packages/effect-ai-claude-code-cli/README.md)   | Effect-TS wrapper for Claude Code CLI         |
-| [@knpkv/effect-ai-claude-agent-sdk](./packages/effect-ai-claude-agent-sdk/README.md) | Effect-TS wrapper for Claude Agent SDK        |
+| Package                                                                              | Description                                             |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| [@knpkv/codecommit](./packages/codecommit)                                           | TUI for browsing AWS CodeCommit PRs                     |
+| [@knpkv/codecommit-core](./packages/codecommit-core)                                 | Core logic for CodeCommit PR browser                    |
+| [@knpkv/codecommit-web](./packages/codecommit-web)                                   | Web server and frontend for CodeCommit PR browser       |
+| [@knpkv/confluence-api-client](./packages/confluence-api-client)                     | Effect-based Confluence Cloud REST API client (v1 + v2) |
+| [@knpkv/confluence-to-markdown](./packages/confluence-to-markdown/README.md)         | Sync Confluence Cloud pages to local markdown           |
+| [@knpkv/effect-ai-claude-code-cli](./packages/effect-ai-claude-code-cli/README.md)   | Effect-TS wrapper for Claude Code CLI                   |
+| [@knpkv/effect-ai-claude-agent-sdk](./packages/effect-ai-claude-agent-sdk/README.md) | Effect-TS wrapper for Claude Agent SDK                  |
+
+### CodeCommit Package Stack
+
+```
+codecommit-core         — Domain, services, AWS client, local SQLite cache
+  ├── AwsClient         — AWS CodeCommit API (distilled-aws)
+  ├── CacheService      — Local SQLite via @effect/sql-libsql (Turso)
+  │   ├── PullRequestRepo, CommentRepo, NotificationRepo
+  │   ├── SubscriptionRepo, SyncMetadataRepo
+  │   └── EventsHub (PubSub-based change notifications)
+  ├── ConfigService     — User config (accounts, auto-refresh)
+  └── PRService         — Orchestration (refresh, subscriptions, diffs)
+
+codecommit              — TUI (Ink/React) → imports codecommit-core
+codecommit-web          — Web server (Bun + HttpApi) + React SPA → imports codecommit-core
+```
+
+Both `codecommit` (TUI) and `codecommit-web` share `codecommit-core` services. Client-side code uses deep subpath imports (`@knpkv/codecommit-core/Domain.js`) to avoid pulling in server-only deps.
 
 ## Repository Structure
 

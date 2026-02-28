@@ -1,5 +1,6 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { type ScrollBoxRenderable } from "@opentui/core"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
@@ -43,7 +44,7 @@ const useFilteredItems = (state: AppState, view: TuiView): ReadonlyArray<ListIte
   const currentUser = useAtomValue(currentUserAtom)
   const settingsFilter = useAtomValue(settingsFilterAtom)
   const notificationsResult = useAtomValue(notificationsAtom)
-  const notifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
 
   const quickFilter = useMemo(
     () => ({ type: quickFilterType, value: quickFilterValues[quickFilterType], currentUser }),

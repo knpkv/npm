@@ -9,30 +9,37 @@ server/
 ├── Api.ts          ← Endpoint declarations (schemas, routes)
 ├── Server.ts       ← Server composition (layers, static files, CORS)
 └── handlers/
-    ├── index.ts    ← Barrel export
-    ├── prs-live.ts      ← PR list/refresh/create
-    ├── config-live.ts   ← Config loading
-    ├── accounts-live.ts ← Account listing
-    └── events-live.ts   ← SSE stream
+    ├── index.ts                       ← Barrel export
+    ├── prs-live.ts                    ← PR list/refresh/create/search/comments/open
+    ├── config-live.ts                 ← Config load/save/validate/reset
+    ├── accounts-live.ts               ← Account listing
+    ├── events-live.ts                 ← SSE stream
+    ├── notifications-live.ts          ← Notifications + SSO login/logout
+    ├── subscriptions-live.ts          ← PR subscription management
+    └── persistent-notifications-live.ts ← Persistent notifications (DB-backed)
 ```
 
 ## Api.ts — The Contract
 
 ```typescript
-class PrsGroup extends HttpApiGroup.make("prs").pipe(
-  HttpApiGroup.add(HttpApiEndpoint.get("list", "/list")),
-  HttpApiGroup.add(HttpApiEndpoint.post("refresh", "/refresh")),
-  HttpApiGroup.add(HttpApiEndpoint.post("create", "/create")),
-  HttpApiGroup.prefix("/api/prs")
-) {}
+class PrsGroup extends HttpApiGroup.make("prs")
+  .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Chunk(PullRequest)))
+  .add(HttpApiEndpoint.post("refresh", "/refresh").addSuccess(Schema.String))
+  .add(HttpApiEndpoint.get("search", "/search").setUrlParams(...).addSuccess(...).addError(ApiError))
+  .add(HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh").setPath(...))
+  .add(HttpApiEndpoint.post("create", "/").setPayload(...).addError(ApiError))
+  .add(HttpApiEndpoint.post("open", "/open").setPayload(...).addError(ApiError))
+  .add(HttpApiEndpoint.post("comments", "/comments").setPayload(...).addError(ApiError))
+  .prefix("/api/prs")
+{}
 ```
 
 This is a **contract** — it declares:
 
-- Endpoint names (`"list"`, `"refresh"`, `"create"`)
+- Endpoint names (`"list"`, `"refresh"`, `"create"`, etc.)
 - HTTP methods (`get`, `post`)
-- URL paths (`/api/prs/list`)
-- (Future) Request/response schemas, error types
+- URL paths (`/api/prs/`, `/api/prs/refresh`, etc.)
+- Request/response schemas and error types
 
 The contract is separate from implementation. This separation enables:
 
@@ -44,16 +51,38 @@ The contract is separate from implementation. This separation enables:
 
 ```
 CodeCommitApi
-├── PrsGroup      /api/prs/*
-│   ├── GET  /list
-│   ├── POST /refresh
-│   └── POST /create
-├── EventsGroup   /api/events/*
-│   └── GET  /stream
-├── ConfigGroup   /api/config
-│   └── GET  /
-└── AccountsGroup /api/accounts
-    └── GET  /
+├── PrsGroup                    /api/prs/*
+│   ├── GET  /                  (list)
+│   ├── POST /refresh           (refresh — forkDaemon)
+│   ├── GET  /search?q=...      (search — FTS5)
+│   ├── POST /:awsAccountId/:prId/refresh (refreshSingle)
+│   ├── POST /                  (create)
+│   ├── POST /open              (open via assume)
+│   └── POST /comments          (comments)
+├── EventsGroup                 /api/events/*
+│   └── GET  /                  (SSE stream)
+├── ConfigGroup                 /api/config/*
+│   ├── GET  /                  (list)
+│   ├── GET  /path              (config file path)
+│   ├── GET  /validate          (config validation)
+│   ├── POST /save              (save config)
+│   └── POST /reset             (reset config)
+├── AccountsGroup               /api/accounts
+│   └── GET  /                  (list enabled)
+├── NotificationsGroup          /api/notifications/*
+│   ├── GET  /                  (list)
+│   ├── POST /clear             (clear all)
+│   ├── POST /sso-login         (SSO login)
+│   └── POST /sso-logout        (SSO logout)
+├── SubscriptionsGroup          /api/subscriptions/*
+│   ├── POST /subscribe         (subscribe to PR)
+│   ├── POST /unsubscribe       (unsubscribe)
+│   └── GET  /                  (list subscriptions)
+└── PersistentNotificationsGroup /api/notifications/persistent/*
+    ├── GET  /                  (list)
+    ├── GET  /count             (unread count)
+    ├── POST /read              (mark read)
+    └── POST /read-all          (mark all read)
 ```
 
 ## Server.ts — Composition
@@ -61,22 +90,47 @@ CodeCommitApi
 ### Layer Stack
 
 ```
-AllRoutes
+AllRoutes (Layer.orDie — remaining service construction errors)
 │
 ├── ApiLive
 │   ├── HttpLayerRouter.addHttpApi(CodeCommitApi)  ← registers the API
 │   ├── HandlersLive (PrsLive, ConfigLive, etc.)   ← implements endpoints
+│   ├── AutoRefresh                                ← daemon: initial + recurring refresh
 │   └── AllServicesLive
-│       ├── PRServiceLive_ → AwsClientLive + AwsClientConfig.Default + ConfigServiceLive + ...
+│       ├── PRServiceLive_ → PRServiceDeps (AwsClient + ReposLive + Config + Notifications)
 │       ├── ConfigLive_ → ConfigServiceLive + PlatformLive
 │       └── AwsClientLive_ → FetchHttpClient + AwsClientConfig.Default
+├── ReposLive (Layer.orDie — DB/migration errors)
+│   ├── PullRequestRepo.Default, CommentRepo.Default, ...
 ├── StaticRouter                                   ← SPA file serving
-├── CORS middleware
-└── Platform (BunHttpServer, BunContext)
+├── CORS middleware (allowedOrigins: localhost only)
+└── Platform (BunHttpServer, BunContext, idleTimeout: 0 for SSE)
 ```
 
-Note: `AwsClientConfig.Default` is required in the layer stack wherever `AwsClientLive`
-is used. It provides AWS SDK configuration (credentials, retry settings).
+`Layer.orDie` is scoped: `ReposLive.pipe(Layer.orDie)` for DB/migration errors specifically,
+plus `AllRoutes` for remaining service construction errors.
+
+### AutoRefresh — Daemon with Per-Iteration Error Recovery
+
+```typescript
+const refreshIteration = Effect.gen(function* () {
+  // ...
+}).pipe(
+  Effect.catchAllCause((cause) =>
+    Effect.logError("Auto-refresh failed", cause).pipe(Effect.zipRight(Effect.sleep(Duration.seconds(10))))
+  )
+)
+
+yield *
+  Effect.forkDaemon(
+    prService.refresh.pipe(
+      Effect.zipRight(Effect.logInfo("Initial PR refresh complete")),
+      Effect.zipRight(Effect.forever(refreshIteration))
+    )
+  )
+```
+
+`catchAllCause` inside `Effect.forever` — each iteration recovers independently, loop never dies.
 
 ### Static File Middleware
 
@@ -107,7 +161,11 @@ const mimeTypes: Record<string, string> = {
 ### CORS as Layer
 
 ```typescript
-HttpApiBuilder.middlewareCors({ allowOrigin: "*" })
+HttpLayerRouter.cors({
+  allowedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+})
 ```
 
 CORS is a Layer, not a middleware function. This means:
@@ -121,26 +179,34 @@ CORS is a Layer, not a middleware function. This means:
 ```typescript
 // handlers/prs-live.ts — services resolved in Effect.gen scope, handlers chained
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
-    const httpClient = yield* HttpClient.HttpClient
 
     return handlers
       .handle("list", () =>
-        SubscriptionRef.get(prService.state).pipe(
-          Effect.map((state) => Chunk.fromIterable(state.pullRequests))
-        ))
+        SubscriptionRef.get(prService.state).pipe(Effect.map((state) => Chunk.fromIterable(state.pullRequests)))
+      )
       .handle("refresh", () =>
         prService.refresh.pipe(
-          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.forkDaemon, // non-blocking — returns immediately
           Effect.map(() => "ok")
-        ))
+        )
+      )
+      .handle("search", ({ urlParams }) =>
+        prService.searchPullRequests(urlParams.q).pipe(Effect.mapError((e) => new ApiError({ message: String(e) })))
+      )
       .handle("create", ({ payload }) =>
-        awsClient.createPullRequest({ ... }).pipe(
-          Effect.mapError((e) => new ApiError({ message: e.message }))
-        ))
-  }))
+        awsClient
+          .createPullRequest({
+            account: { profile: payload.account.profile, region: payload.account.region }
+            // ...
+          })
+          .pipe(Effect.mapError((e) => new ApiError({ message: e.message })))
+      )
+    // + refreshSingle, comments, open handlers
+  })
+)
 ```
 
 Key points:

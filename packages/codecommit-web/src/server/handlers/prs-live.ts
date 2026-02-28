@@ -1,7 +1,7 @@
 import { Command, HttpApiBuilder } from "@effect/platform"
-import { AwsClient, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Schema, Stream, SubscriptionRef } from "effect"
 import { platform } from "node:os"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
@@ -19,6 +19,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
+    const notificationRepo = yield* CacheService.NotificationRepo
 
     return handlers
       .handle("list", () =>
@@ -30,9 +31,26 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.forkDaemon,
           Effect.map(() => "ok")
         ))
+      .handle("search", ({ urlParams }) =>
+        Effect.gen(function*() {
+          const result = yield* prService.searchPullRequests(urlParams.q, {
+            limit: urlParams.limit ?? 20,
+            offset: urlParams.offset ?? 0
+          })
+          const items = yield* Effect.forEach(
+            result.items,
+            (row) => Schema.encode(CacheService.CachedPullRequest)(row)
+          )
+          return { items, total: result.total, hasMore: result.hasMore }
+        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
+      .handle("refreshSingle", ({ path }) =>
+        prService.refreshSinglePR(path.awsAccountId, path.prId).pipe(
+          Effect.forkDaemon,
+          Effect.map(() => "ok")
+        ))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({
-          account: { profile: payload.account.id, region: payload.account.region },
+          account: { profile: payload.account.profile, region: payload.account.region },
           repositoryName: payload.repositoryName,
           title: payload.title,
           ...(payload.description && { description: payload.description }),
@@ -43,7 +61,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("comments", ({ payload }) =>
         awsClient.getCommentsForPullRequest({
-          account: { profile: payload.account.id, region: payload.account.region },
+          account: { profile: payload.account.profile, region: payload.account.region },
           pullRequestId: payload.pullRequestId,
           repositoryName: payload.repositoryName
         }).pipe(
@@ -56,12 +74,6 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Effect.catchAll(() => Effect.void)
           )
 
-          yield* prService.addNotification({
-            type: "info",
-            title: "Assume",
-            message: `Opening ${payload.profile} → PR console...`
-          })
-
           // -c: console login, -d: open URL in default browser
           const cmd = Command.make("assume", "-cd", payload.link, payload.profile).pipe(
             Command.stdout("inherit"),
@@ -70,15 +82,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           yield* Effect.forkDaemon(
             Command.exitCode(cmd).pipe(
-              Effect.tap(() =>
-                prService.addNotification({
-                  type: "success",
-                  title: "Assume",
-                  message: `Assumed ${payload.profile}`
-                })
-              ),
               Effect.catchAll((e) =>
-                prService.addNotification({
+                notificationRepo.addSystem({
                   type: "error",
                   title: "Assume Failed",
                   message: e instanceof Error ? e.message : String(e)
@@ -88,6 +93,6 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           return payload.link
         }).pipe(
-          Effect.mapError(() => new ApiError({ message: "Failed to open PR" }))
+          Effect.mapError((e) => new ApiError({ message: String(e) }))
         ))
   }))

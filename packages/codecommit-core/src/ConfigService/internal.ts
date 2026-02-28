@@ -25,7 +25,9 @@ export type AccountConfig = typeof AccountConfig.Type
 
 export const TuiConfig = Schema.Struct({
   accounts: Schema.Array(AccountConfig),
-  autoDetect: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true }))
+  autoDetect: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
+  autoRefresh: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
+  refreshIntervalSeconds: Schema.Number.pipe(Schema.optionalWith({ default: () => 300 }))
 })
 
 export type TuiConfig = typeof TuiConfig.Type

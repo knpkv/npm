@@ -1,5 +1,5 @@
 import { Command } from "@effect/platform"
-import { AwsClient, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Stream } from "effect"
 import { runtimeAtom } from "./runtime.js"
 
@@ -25,8 +25,8 @@ const isDarwin = process.platform === "darwin"
 
 const notifyError = (title: string, error: Errors.AwsClientError) =>
   Effect.gen(function*() {
-    const service = yield* PRService.PRService
-    yield* service.addNotification({
+    const notificationRepo = yield* CacheService.NotificationRepo
+    yield* notificationRepo.addSystem({
       type: "error",
       title,
       message: error.message
@@ -45,8 +45,8 @@ const copyToClipboard = (text: string) =>
   }).pipe(
     Effect.catchAll((error) =>
       Effect.gen(function*() {
-        const service = yield* PRService.PRService
-        yield* service.addNotification({
+        const notificationRepo = yield* CacheService.NotificationRepo
+        yield* notificationRepo.addSystem({
           type: "error",
           title: "Clipboard",
           message: error instanceof Error ? error.message : String(error)
@@ -66,10 +66,10 @@ const copyToClipboard = (text: string) =>
  */
 export const loginToAwsAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*(profile: Domain.AwsProfileName) {
-    const service = yield* PRService.PRService
+    const notificationRepo = yield* CacheService.NotificationRepo
 
     if (!profile || profile.trim() === "") {
-      yield* service.addNotification({
+      yield* notificationRepo.addSystem({
         type: "error",
         title: "SSO Login",
         message: "No profile specified"
@@ -77,7 +77,7 @@ export const loginToAwsAtom = runtimeAtom.fn(
       return
     }
 
-    yield* service.addNotification({
+    yield* notificationRepo.addSystem({
       type: "info",
       title: "SSO Login",
       message: `Opening browser for ${profile}...`
@@ -91,14 +91,14 @@ export const loginToAwsAtom = runtimeAtom.fn(
     yield* Effect.forkDaemon(
       Command.exitCode(cmd).pipe(
         Effect.tap(() =>
-          service.addNotification({
+          notificationRepo.addSystem({
             type: "success",
             title: "SSO Login",
             message: `Login complete for ${profile}`
           })
         ),
         Effect.catchAll((e) =>
-          service.addNotification({
+          notificationRepo.addSystem({
             type: "error",
             title: "SSO Login Failed",
             message: e instanceof Error ? e.message : String(e)
@@ -116,12 +116,12 @@ export const loginToAwsAtom = runtimeAtom.fn(
  */
 export const openPrAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*(pr: Domain.PullRequest) {
-    const service = yield* PRService.PRService
-    const profile = pr.account.id
+    const notificationRepo = yield* CacheService.NotificationRepo
+    const profile = pr.account.profile
 
     yield* copyToClipboard(pr.link)
 
-    yield* service.addNotification({
+    yield* notificationRepo.addSystem({
       type: "info",
       title: "Assume",
       message: `Opening ${profile} → PR console...`
@@ -136,14 +136,14 @@ export const openPrAtom = runtimeAtom.fn(
     yield* Effect.forkDaemon(
       Command.exitCode(cmd).pipe(
         Effect.tap(() =>
-          service.addNotification({
+          notificationRepo.addSystem({
             type: "success",
             title: "Assume",
             message: `Assumed ${profile}`
           })
         ),
         Effect.catchAll((e) =>
-          service.addNotification({
+          notificationRepo.addSystem({
             type: "error",
             title: "Assume Failed",
             message: e instanceof Error ? e.message : String(e)
@@ -170,8 +170,8 @@ export const openBrowserAtom = runtimeAtom.fn(
     yield* Command.exitCode(cmd).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function*() {
-          const service = yield* PRService.PRService
-          yield* service.addNotification({
+          const notificationRepo = yield* CacheService.NotificationRepo
+          yield* notificationRepo.addSystem({
             type: "error",
             title: "Open Browser",
             message: error instanceof Error ? error.message : String(error)
@@ -193,15 +193,16 @@ export const createPrAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*(input: CreatePRInput) {
     const service = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
+    const notificationRepo = yield* CacheService.NotificationRepo
 
-    yield* service.addNotification({
+    yield* notificationRepo.addSystem({
       type: "info",
       title: "Creating PR",
       message: `${input.title} in ${input.repositoryName}...`
     })
 
     const prId = yield* awsClient.createPullRequest({
-      account: { profile: input.account.id, region: input.account.region },
+      account: { profile: input.account.profile, region: input.account.region },
       repositoryName: input.repositoryName,
       title: input.title,
       ...(input.description && { description: input.description }),
@@ -209,10 +210,6 @@ export const createPrAtom = runtimeAtom.fn(
       destinationReference: input.destinationBranch
     }).pipe(
       Effect.tapError((e) => notifyError("Create PR Failed", e)),
-      // Error recovery: AwsClient already retries throttle errors with exponential
-      // backoff (see throttleRetry). These catchTags handle exhausted retries
-      // and non-retryable errors — notifyError shows the user what happened,
-      // then we return a fallback so the UI doesn't crash.
       Effect.catchTag("AwsApiError", () => Effect.succeed("")),
       Effect.catchTag("AwsCredentialError", () => Effect.succeed("")),
       Effect.catchTag("AwsThrottleError", () => Effect.succeed("")),
@@ -220,7 +217,7 @@ export const createPrAtom = runtimeAtom.fn(
     )
 
     if (prId) {
-      yield* service.addNotification({
+      yield* notificationRepo.addSystem({
         type: "success",
         title: "PR Created",
         message: `${input.title} (#${prId})`
@@ -241,7 +238,7 @@ export const fetchPrCommentsAtom = runtimeAtom.fn(
     const awsClient = yield* AwsClient.AwsClient
 
     return yield* awsClient.getCommentsForPullRequest({
-      account: { profile: pr.account.id, region: pr.account.region },
+      account: { profile: pr.account.profile, region: pr.account.region },
       pullRequestId: pr.id,
       repositoryName: pr.repositoryName
     }).pipe(
@@ -263,11 +260,10 @@ export const listBranchesAtom = runtimeAtom.fn(
     const awsClient = yield* AwsClient.AwsClient
 
     const branches: Array<string> = yield* awsClient.listBranches({
-      account: { profile: input.account.id, region: input.account.region },
+      account: { profile: input.account.profile, region: input.account.region },
       repositoryName: input.repositoryName
     }).pipe(
       Effect.tapError((e) => notifyError("List Branches Failed", e)),
-      // Exhausted-retry fallbacks — throttle retry happens inside AwsClient
       Effect.catchTag("AwsApiError", () => Effect.succeed<Array<string>>([])),
       Effect.catchTag("AwsCredentialError", () => Effect.succeed<Array<string>>([])),
       Effect.catchTag("AwsThrottleError", () => Effect.succeed<Array<string>>([])),
