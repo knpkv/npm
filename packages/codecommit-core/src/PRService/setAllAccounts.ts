@@ -5,14 +5,11 @@
 import { Effect } from "effect"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
-import type { PRState } from "./internal.js"
 
 export const makeSetAllAccounts = (
-  state: PRState,
   refresh: Effect.Effect<void>
 ) =>
-(enabled: boolean, profiles?: Array<AwsProfileName>): Effect.Effect<void, never, ConfigService> =>
-  Effect.gen(function*() {
+  Effect.fn("PRService.setAllAccounts")(function*(enabled: boolean, profiles?: Array<AwsProfileName>) {
     const configService = yield* ConfigService
     const config = yield* configService.load.pipe(Effect.orDie)
     const detected = yield* configService.detectProfiles.pipe(Effect.orDie)
@@ -30,4 +27,4 @@ export const makeSetAllAccounts = (
 
     yield* configService.save({ ...config, accounts: newAccounts }).pipe(Effect.orDie)
     yield* refresh
-  }).pipe(Effect.withSpan("PRService.setAllAccounts"))
+  })

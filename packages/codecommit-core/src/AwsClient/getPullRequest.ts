@@ -1,18 +1,14 @@
 /**
  * @internal
  */
-import { HttpClient } from "@effect/platform"
-import { Credentials, Region } from "distilled-aws"
 import * as codecommit from "distilled-aws/codecommit"
-import { Effect, Layer, Schema } from "effect"
-import { AwsClientConfig } from "../AwsClientConfig.js"
+import { Effect, Schema } from "effect"
 import {
-  acquireCredentials,
   type GetPullRequestParams,
   makeApiError,
   normalizeAuthor,
-  type PullRequestDetail,
-  throttleRetry
+  PullRequestDetail,
+  withAwsContext
 } from "./internal.js"
 
 const EpochFallback = new Date(0)
@@ -27,35 +23,28 @@ const RawGetPullRequestResponse = Schema.Struct({
     pullRequestTargets: Schema.optional(Schema.Array(Schema.Struct({
       repositoryName: Schema.optional(Schema.String),
       sourceReference: Schema.optional(Schema.String),
-      destinationReference: Schema.optional(Schema.String)
+      destinationReference: Schema.optional(Schema.String),
+      mergeMetadata: Schema.optional(Schema.Struct({
+        isMerged: Schema.optional(Schema.Boolean)
+      }))
     }))),
     creationDate: Schema.optional(Schema.DateFromSelf)
   }))
 })
 
-const PullRequestDetailSchema = Schema.Struct({
-  title: Schema.String,
-  description: Schema.optional(Schema.String),
-  author: Schema.String,
-  status: Schema.String,
-  repositoryName: Schema.String,
-  sourceBranch: Schema.String,
-  destinationBranch: Schema.String,
-  creationDate: Schema.DateFromSelf
-})
-
 const RawToPullRequestDetail = Schema.transform(
   RawGetPullRequestResponse,
-  PullRequestDetailSchema,
+  PullRequestDetail,
   {
     decode: (raw) => {
       const pr = raw.pullRequest
       const target = pr?.pullRequestTargets?.[0]
+      const isMerged = target?.mergeMetadata?.isMerged === true
       return {
         title: pr?.title ?? "",
         description: pr?.description,
         author: pr?.authorArn ? normalizeAuthor(pr.authorArn) : "unknown",
-        status: pr?.pullRequestStatus ?? "UNKNOWN",
+        status: isMerged ? "MERGED" : (pr?.pullRequestStatus ?? "UNKNOWN"),
         repositoryName: target?.repositoryName ?? "",
         sourceBranch: target?.sourceReference ?? "",
         destinationBranch: target?.destinationReference ?? "",
@@ -79,33 +68,14 @@ const RawToPullRequestDetail = Schema.transform(
   }
 )
 
-const decodePullRequestDetail = Schema.decodeSync(RawToPullRequestDetail) as (raw: unknown) => PullRequestDetail
+// Effectful decode — ParseError in error channel instead of thrown defect
+const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknown(RawToPullRequestDetail)(raw)
 
 const callGetPullRequest = (params: GetPullRequestParams) =>
   codecommit.getPullRequest({ pullRequestId: params.pullRequestId }).pipe(
-    Effect.map(decodePullRequestDetail),
+    Effect.flatMap(decodePullRequestDetail),
     Effect.mapError((cause) => makeApiError("getPullRequest", params.account.profile, params.account.region, cause))
   )
 
 export const getPullRequest = (params: GetPullRequestParams) =>
-  Effect.gen(function*() {
-    const config = yield* AwsClientConfig
-    const httpClient = yield* HttpClient.HttpClient
-    const credentials = yield* acquireCredentials(params.account.profile, params.account.region)
-
-    return yield* Effect.provide(
-      callGetPullRequest(params),
-      Layer.mergeAll(
-        Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(Region.Region, params.account.region),
-        Layer.succeed(Credentials.Credentials, credentials)
-      )
-    ).pipe(
-      throttleRetry,
-      Effect.timeout(config.operationTimeout),
-      Effect.catchTag(
-        "TimeoutException",
-        (cause) => Effect.fail(makeApiError("getPullRequest", params.account.profile, params.account.region, cause))
-      )
-    )
-  })
+  withAwsContext("getPullRequest", params.account, callGetPullRequest(params))

@@ -10,7 +10,7 @@ import { AwsClientConfig } from "../AwsClientConfig.js"
 import type { PRCommentLocation, PullRequest } from "../Domain.js"
 import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"
 import { createPullRequest } from "./createPullRequest.js"
-import { getCallerIdentity } from "./getCallerIdentity.js"
+import { type CallerIdentity, getCallerIdentity } from "./getCallerIdentity.js"
 import { getCommentsForPullRequest } from "./getCommentsForPullRequest.js"
 import { getPullRequest } from "./getPullRequest.js"
 import { getPullRequests } from "./getPullRequests.js"
@@ -29,6 +29,12 @@ import { updatePullRequestDescription } from "./updatePullRequestDescription.js"
 import { updatePullRequestTitle } from "./updatePullRequestTitle.js"
 
 // ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+
+export type { CallerIdentity } from "./getCallerIdentity.js"
+
+// ---------------------------------------------------------------------------
 // Error Union
 // ---------------------------------------------------------------------------
 
@@ -45,7 +51,7 @@ export class AwsClient extends Context.Tag("@knpkv/codecommit-core/AwsClient")<
       account: AccountParams,
       options?: { status?: "OPEN" | "CLOSED" }
     ) => Stream.Stream<PullRequest, AwsClientError>
-    readonly getCallerIdentity: (account: AccountParams) => Effect.Effect<string, AwsClientError>
+    readonly getCallerIdentity: (account: AccountParams) => Effect.Effect<CallerIdentity, AwsClientError>
     readonly createPullRequest: (params: CreatePullRequestParams) => Effect.Effect<string, AwsClientError>
     readonly listBranches: (params: ListBranchesParams) => Effect.Effect<Array<string>, AwsClientError>
     readonly getCommentsForPullRequest: (

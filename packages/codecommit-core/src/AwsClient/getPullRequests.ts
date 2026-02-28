@@ -16,17 +16,19 @@ import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, 
 
 const decodeAccount = Schema.decodeSync(Account)
 
+const EpochFallback = new Date(0)
+
 /**
  * Fetch approval + merge status for a single PR.
  */
 const fetchPRDetails = (id: string, repoName: string) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: id })
-    const pr = resp.pullRequest!
-    const revisionId = pr.revisionId!
+    const pr = resp.pullRequest
+    if (!pr) return yield* Effect.die(new Error(`Missing pullRequest in response for ${id}`))
 
     const [isApproved, isMergeable] = yield* Effect.all([
-      fetchApprovalStatus(id, revisionId),
+      fetchApprovalStatus(id, pr.revisionId ?? ""),
       fetchMergeStatus(repoName, pr.pullRequestTargets?.[0])
     ])
 
@@ -55,8 +57,8 @@ const fetchMergeStatus = (
   return throttleRetry(
     codecommit.getMergeConflicts({
       repositoryName: repoName,
-      destinationCommitSpecifier: target.destinationCommit!,
-      sourceCommitSpecifier: target.sourceCommit!,
+      destinationCommitSpecifier: target.destinationCommit ?? "",
+      sourceCommitSpecifier: target.sourceCommit ?? "",
       mergeOption: "THREE_WAY_MERGE"
     })
   ).pipe(
@@ -95,16 +97,16 @@ const RawToPullRequest = Schema.transform(
       const sourceBranch = target?.sourceReference?.split("/").pop() ?? "unknown"
       const destinationBranch = target?.destinationReference?.split("/").pop() ?? "unknown"
       return {
-        id: raw.pullRequestId!,
-        title: raw.title!,
+        id: raw.pullRequestId ?? "",
+        title: raw.title ?? "",
         description: raw.description,
         author: raw.authorArn ? normalizeAuthor(raw.authorArn) : "unknown",
         repositoryName: raw.repoName,
-        creationDate: raw.creationDate!,
-        lastModifiedDate: raw.lastActivityDate!,
+        creationDate: raw.creationDate ?? EpochFallback,
+        lastModifiedDate: raw.lastActivityDate ?? EpochFallback,
         link:
           `https://${raw.accountRegion}.console.aws.amazon.com/codesuite/codecommit/repositories/${raw.repoName}/pull-requests/${raw.pullRequestId}?region=${raw.accountRegion}`,
-        account: decodeAccount({ id: raw.accountProfile, region: raw.accountRegion }),
+        account: decodeAccount({ profile: raw.accountProfile, region: raw.accountRegion }),
         status: raw.pullRequestStatus === "OPEN" ? "OPEN" as const : "CLOSED" as const,
         sourceBranch,
         destinationBranch,
@@ -127,13 +129,17 @@ const RawToPullRequest = Schema.transform(
       repoName: pr.repositoryName,
       isApproved: pr.isApproved,
       isMergeable: pr.isMergeable,
-      accountProfile: pr.account.id,
+      accountProfile: pr.account.profile,
       accountRegion: pr.account.region
     })
   }
 )
 
-const decodePullRequest = Schema.decodeSync(RawToPullRequest)
+// Effectful decode — ParseError in error channel instead of thrown defect
+const decodePullRequest = (raw: unknown) =>
+  Schema.decodeUnknown(RawToPullRequest)(raw).pipe(
+    Effect.map((result) => result as unknown as PullRequest)
+  )
 
 // ---------------------------------------------------------------------------
 // Stream builders
@@ -142,7 +148,7 @@ const decodePullRequest = Schema.decodeSync(RawToPullRequest)
 const listAllRepositories = () =>
   codecommit.listRepositories.pages({}).pipe(
     Stream.flatMap((page) => Stream.fromIterable(page.repositories ?? [])),
-    Stream.map((repo) => repo.repositoryName!)
+    Stream.map((repo) => repo.repositoryName ?? "")
   )
 
 const listPullRequestIds = (repoName: string, status: "OPEN" | "CLOSED") =>
@@ -172,7 +178,7 @@ export const getPullRequests = (
           ({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)),
           { concurrency: 3 }
         ),
-        Stream.map((pr) =>
+        Stream.mapEffect((pr) =>
           decodePullRequest({ ...pr, accountProfile: account.profile, accountRegion: account.region })
         ),
         Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
