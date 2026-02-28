@@ -138,7 +138,15 @@ const ConfigResponse = Schema.Struct({
 
 const ConfigPathResponse = Schema.Struct({
   path: Schema.String,
-  exists: Schema.Boolean
+  exists: Schema.Boolean,
+  modifiedAt: Schema.optional(Schema.String)
+})
+
+const DatabaseInfoResponse = Schema.Struct({
+  path: Schema.String,
+  sizeBytes: Schema.Number,
+  exists: Schema.Boolean,
+  modifiedAt: Schema.optional(Schema.String)
 })
 
 const ConfigValidationResponse = Schema.Struct({
@@ -168,6 +176,7 @@ const ConfigResetResponse = Schema.Struct({
 export class ConfigGroup extends HttpApiGroup.make("config")
   .add(HttpApiEndpoint.get("list", "/").addSuccess(ConfigResponse))
   .add(HttpApiEndpoint.get("path", "/path").addSuccess(ConfigPathResponse).addError(ApiError))
+  .add(HttpApiEndpoint.get("database", "/database").addSuccess(DatabaseInfoResponse).addError(ApiError))
   .add(HttpApiEndpoint.get("validate", "/validate").addSuccess(ConfigValidationResponse).addError(ApiError))
   .add(HttpApiEndpoint.post("save", "/save").setPayload(ConfigSavePayload).addSuccess(Schema.String).addError(ApiError))
   .add(HttpApiEndpoint.post("reset", "/reset").addSuccess(ConfigResetResponse).addError(ApiError))

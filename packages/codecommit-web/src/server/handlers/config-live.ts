@@ -1,7 +1,7 @@
 import { FileSystem, HttpApiBuilder } from "@effect/platform"
 import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Effect, Schema, SubscriptionRef } from "effect"
+import { Config, Effect, Option, Schema, SubscriptionRef } from "effect"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
@@ -35,8 +35,33 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
           const fs = yield* FileSystem.FileSystem
           const path = yield* configService.getConfigPath
           const exists = yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))
-          return { path, exists }
+          const modifiedAt = exists
+            ? yield* fs.stat(path).pipe(
+              Effect.map((s) =>
+                Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
+              ),
+              Effect.catchAll(() => Effect.succeed(undefined))
+            )
+            : undefined
+          return { path, exists, modifiedAt }
         }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
+      .handle("database", () =>
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const home = yield* Config.string("HOME").pipe(Config.orElse(() => Config.string("USERPROFILE")))
+          const path = `${home}/.codecommit/cache.db`
+          const exists = yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))
+          const stat = exists
+            ? yield* fs.stat(path).pipe(
+              Effect.map((s) => ({
+                size: Number(s.size),
+                modifiedAt: Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
+              })),
+              Effect.catchAll(() => Effect.succeed(undefined))
+            )
+            : undefined
+          return { path, sizeBytes: stat?.size ?? 0, exists, modifiedAt: stat?.modifiedAt }
+        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("validate", () =>
         Effect.gen(function*() {
           const result = yield* configService.validate
