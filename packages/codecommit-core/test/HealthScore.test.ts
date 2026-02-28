@@ -21,7 +21,7 @@ const makePR = (overrides: Partial<{
     creationDate: overrides.creationDate ?? new Date("2024-01-01"),
     lastModifiedDate: overrides.lastModifiedDate ?? new Date("2024-01-01"),
     link: "https://example.com",
-    account: { id: "dev", region: "us-east-1" },
+    account: { profile: "dev", region: "us-east-1" },
     status: "OPEN" as const,
     sourceBranch: "feature/x",
     destinationBranch: "main",
@@ -98,10 +98,10 @@ describe("HealthScore", () => {
       expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(0)
     })
 
-    it("returns none without commentCount", () => {
+    it("treats missing commentCount as 0", () => {
       const now = new Date("2024-01-01")
       const pr = makePR({ creationDate: now, lastModifiedDate: now })
-      expect(Option.isNone(calculateHealthScore(pr, now))).toBe(true)
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
     })
 
     it("combined: approved + conflicts + comments + age", () => {
