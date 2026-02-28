@@ -1,5 +1,17 @@
 # @knpkv/codecommit
 
+## 0.4.0
+
+### Minor Changes
+
+- [#41](https://github.com/knpkv/npm/pull/41) [`c94efb9`](https://github.com/knpkv/npm/commit/c94efb90455b6e0049f80bd0d43b2bfc4f61de7b) Thanks @konopkov! - Add local SQLite cache layer with persistent notifications, PR subscriptions, per-PR refresh, and enriched notification messages
+
+### Patch Changes
+
+- Updated dependencies [[`c94efb9`](https://github.com/knpkv/npm/commit/c94efb90455b6e0049f80bd0d43b2bfc4f61de7b)]:
+  - @knpkv/codecommit-core@0.4.0
+  - @knpkv/codecommit-web@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
