@@ -1,5 +1,3 @@
-import { KeyboardIcon } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
 import { Separator } from "./ui/separator.js"
 
 const SHORTCUTS = [
@@ -19,24 +17,15 @@ export function SettingsAbout() {
         <p className="text-sm text-muted-foreground">Keyboard shortcuts and info</p>
       </div>
       <Separator />
-      <Card>
-        <CardHeader className="py-3">
-          <div className="flex items-center gap-2">
-            <KeyboardIcon className="size-4" />
-            <CardTitle className="text-sm">Keyboard Shortcuts</CardTitle>
+      <div className="space-y-1.5">
+        <p className="text-xs font-medium text-muted-foreground">Keyboard Shortcuts</p>
+        {SHORTCUTS.map((s) => (
+          <div key={s.key} className="flex items-center justify-between py-0.5">
+            <span className="text-sm text-muted-foreground">{s.desc}</span>
+            <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">{s.key}</kbd>
           </div>
-        </CardHeader>
-        <CardContent className="pb-3">
-          <div className="space-y-1">
-            {SHORTCUTS.map((s) => (
-              <div key={s.key} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{s.desc}</span>
-                <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">{s.key}</kbd>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        ))}
+      </div>
     </div>
   )
 }

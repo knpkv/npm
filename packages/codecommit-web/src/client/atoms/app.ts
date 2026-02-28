@@ -86,6 +86,14 @@ export const configPathQueryAtom = ApiClient.query("config", "path", {
 })
 
 /**
+ * Database info query
+ */
+export const databaseInfoQueryAtom = ApiClient.query("config", "database", {
+  reactivityKeys: ["config"],
+  timeToLive: "60 seconds"
+})
+
+/**
  * Config validation query
  */
 export const configValidateQueryAtom = ApiClient.query("config", "validate", {
