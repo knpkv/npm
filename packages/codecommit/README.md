@@ -2,6 +2,15 @@
 
 CLI and TUI for AWS CodeCommit pull requests.
 
+## Features
+
+- Multi-account, multi-region PR dashboard (TUI and Web)
+- **Local SQLite cache** — PRs are cached locally via libsql for instant search, offline access, and change notifications
+- PR subscriptions with diff-based notifications (title changes, new comments, status updates)
+- Health score ranking (staleness, review urgency)
+- SSO login/logout management
+- Full-text search across cached PRs
+
 ## Prerequisites
 
 - AWS SSO configured (`~/.aws/config`)
