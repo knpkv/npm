@@ -40,6 +40,22 @@ const NotificationWire = Schema.Struct({
   read: Schema.Number
 })
 
+const SandboxWire = Schema.Struct({
+  id: Schema.String,
+  pullRequestId: Schema.String,
+  awsAccountId: Schema.String,
+  repositoryName: Schema.String,
+  sourceBranch: Schema.String,
+  containerId: Schema.NullOr(Schema.String),
+  port: Schema.NullOr(Schema.Number),
+  status: Schema.String,
+  statusDetail: Schema.NullOr(Schema.String),
+  logs: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  lastActivityAt: Schema.String
+})
+
 const SsePayload = Schema.Struct({
   pullRequests: Schema.Array(PullRequestWire),
   accounts: Schema.Array(Schema.Struct({
@@ -56,7 +72,8 @@ const SsePayload = Schema.Struct({
   notifications: Schema.optional(Schema.Struct({
     items: Schema.Array(NotificationWire),
     nextCursor: Schema.optional(Schema.Number)
-  }))
+  })),
+  sandboxes: Schema.optional(Schema.Array(SandboxWire))
 })
 
 const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))

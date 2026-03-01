@@ -2,6 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import {
   BellIcon,
+  BoxIcon,
   LoaderIcon,
   LogOutIcon,
   MoonIcon,
@@ -28,6 +29,9 @@ export function Header() {
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
   const notifCount = state.unreadNotificationCount ?? 0
+  const activeSandboxes = (state.sandboxes ?? []).filter(
+    (s) => s.status === "running" || s.status === "creating" || s.status === "cloning" || s.status === "starting"
+  )
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -65,6 +69,15 @@ export function Header() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          <Button variant="ghost" size="icon-sm" className="relative" onClick={() => navigate("/sandboxes")}>
+            <BoxIcon className="size-4" />
+            {activeSandboxes.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                {activeSandboxes.length}
+              </span>
+            )}
+            <span className="sr-only">Sandboxes</span>
+          </Button>
           <Button variant="ghost" size="icon-sm" onClick={() => refresh({})} disabled={isLoading}>
             <RefreshCwIcon className={cn("size-4", isLoading && "animate-spin")} />
           </Button>

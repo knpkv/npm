@@ -9,4 +9,4 @@ export {
   refreshAtom
 } from "./app.js"
 export { ApiClient, runtimeAtom } from "./runtime.js"
-export { commandPaletteAtom, type QuickFilter, type QuickFilterType } from "./ui.js"
+export { commandPaletteAtom, filterTextAtom, type QuickFilter, quickFilterAtom, type QuickFilterType } from "./ui.js"
