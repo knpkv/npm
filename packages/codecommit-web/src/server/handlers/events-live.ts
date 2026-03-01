@@ -2,7 +2,8 @@ import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, PRService } from "@knpkv/codecommit-core"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
-import { CodeCommitApi, NotificationResponse } from "../Api.js"
+import { CodeCommitApi, NotificationResponse, SandboxResponse } from "../Api.js"
+import { encodeSandbox } from "./sandbox-live.js"
 
 const AccountState = Schema.Struct({
   profile: Schema.String,
@@ -22,7 +23,8 @@ const SsePayload = Schema.Struct({
   notifications: Schema.Struct({
     items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
-  })
+  }),
+  sandboxes: Schema.Array(SandboxResponse)
 })
 
 const encode = Schema.encode(SsePayload)
@@ -40,6 +42,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const prService = yield* PRService.PRService
     const prRepo = yield* CacheService.PullRequestRepo
     const notificationRepo = yield* CacheService.NotificationRepo
+    const sandboxRepo = yield* CacheService.SandboxRepo
     const hub = yield* CacheService.EventsHub
 
     // Cache unread count + notifications — re-query on relevant triggers
@@ -51,20 +54,29 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const lastNotificationsRef = yield* Ref.make(initialNotifications)
 
     // Build full SSE payload — reused for initial event + change events
-    const buildPayload = () =>
+    const buildPayload = (refreshNotifs: boolean) =>
       Effect.gen(function*() {
         const prState = yield* SubscriptionRef.get(prService.state)
         const pullRequests = yield* prRepo.findAll().pipe(
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
           Effect.catchAllCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
         )
-        const unreadCount = yield* notificationRepo.unreadCount().pipe(
-          Effect.tap((c) => Ref.set(lastUnreadRef, c)),
-          Effect.catchAllCause(() => Ref.get(lastUnreadRef))
-        )
-        const notifications = yield* notificationRepo.findAll({ limit: 20 }).pipe(
-          Effect.tap((p) => Ref.set(lastNotificationsRef, p)),
-          Effect.catchAllCause(() => Ref.get(lastNotificationsRef))
+        const unreadCount = refreshNotifs
+          ? yield* notificationRepo.unreadCount().pipe(
+            Effect.tap((c) => Ref.set(lastUnreadRef, c)),
+            Effect.catchAllCause(() => Ref.get(lastUnreadRef))
+          )
+          : yield* Ref.get(lastUnreadRef)
+        const notifications = refreshNotifs
+          ? yield* notificationRepo.findAll({ limit: 20 }).pipe(
+            Effect.tap((p) => Ref.set(lastNotificationsRef, p)),
+            Effect.catchAllCause(() => Ref.get(lastNotificationsRef))
+          )
+          : yield* Ref.get(lastNotificationsRef)
+
+        const sandboxes = yield* sandboxRepo.findAll().pipe(
+          Effect.map((rows) => rows.map(encodeSandbox)),
+          Effect.catchAllCause(() => Effect.succeed([] as ReadonlyArray<typeof SandboxResponse.Type>))
         )
 
         const payload = yield* encode({
@@ -76,7 +88,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           lastUpdated: prState.lastUpdated,
           currentUser: prState.currentUser,
           unreadNotificationCount: unreadCount,
-          notifications
+          notifications,
+          sandboxes
         })
 
         return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
@@ -91,16 +104,20 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     return handlers.handleRaw("stream", () =>
       Effect.gen(function*() {
         // Eagerly build initial snapshot before stream starts
-        const initialChunk = yield* buildPayload()
+        const initialChunk = yield* buildPayload(true)
 
         // Watch SubscriptionRef changes directly (no bridge daemon)
-        const stateChanges = prService.state.changes
+        const stateChanges = prService.state.changes.pipe(
+          Stream.map((): boolean => false)
+        )
         // Repo changes via hub (PR upserts, notification adds, etc.)
-        const repoChanges = hub.subscribe
+        const repoChanges = hub.subscribe.pipe(
+          Stream.map((): boolean => true)
+        )
 
         const changes = Stream.merge(stateChanges, repoChanges).pipe(
           Stream.debounce(Duration.millis(200)),
-          Stream.mapEffect(() => buildPayload())
+          Stream.mapEffect((refreshNotifs) => buildPayload(refreshNotifs))
         )
 
         // merge (not concat) so subscriptions start immediately — no missed events

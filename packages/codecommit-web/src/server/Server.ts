@@ -9,8 +9,15 @@ import {
   Path
 } from "@effect/platform"
 import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
-import { AwsClient, AwsClientConfig, CacheService, ConfigService, PRService } from "@knpkv/codecommit-core"
-import { Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
+import {
+  AwsClient,
+  AwsClientConfig,
+  CacheService,
+  ConfigService,
+  PRService,
+  SandboxService
+} from "@knpkv/codecommit-core"
+import { Cause, Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
 import {
@@ -19,6 +26,7 @@ import {
   EventsLive,
   NotificationsLive,
   PrsLive,
+  SandboxLive,
   SubscriptionsLive
 } from "./handlers/index.js"
 
@@ -97,7 +105,8 @@ const HandlersLive = Layer.mergeAll(
   AccountsLive,
   EventsLive,
   NotificationsLive,
-  SubscriptionsLive
+  SubscriptionsLive,
+  SandboxLive
 )
 
 // Platform dependencies
@@ -144,11 +153,24 @@ const AwsClientLive_ = AwsClient.AwsClientLive.pipe(
   Layer.provide(AwsClientConfig.Default)
 )
 
+// Sandbox services — DockerService uses `docker` CLI via Command, no HttpClient needed
+// SandboxService reads ConfigService at runtime for sandbox settings
+const SandboxServicesLive = Layer.mergeAll(
+  SandboxService.SandboxService.Default,
+  SandboxService.DockerService.Default,
+  CacheService.SandboxRepo.Default
+).pipe(
+  Layer.provide(ConfigLive_),
+  Layer.provide(ReposLive),
+  Layer.provide(PlatformLive)
+)
+
 // All services needed by handlers
 const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
-  AwsClientLive_
+  AwsClientLive_,
+  SandboxServicesLive
 )
 
 // Fork auto-refresh loop: initial refresh + recurring based on config
@@ -186,10 +208,40 @@ const AutoRefresh = Layer.effectDiscard(
   })
 )
 
+// Sandbox startup: Docker check + reconcile orphans + GC daemon
+const SandboxStartup = Layer.effectDiscard(
+  Effect.gen(function*() {
+    const sandboxService = yield* SandboxService.SandboxService
+    const docker = yield* SandboxService.DockerService
+    const available = yield* docker.isAvailable()
+    if (!available) {
+      yield* Effect.logWarning("Docker not available — sandbox feature disabled")
+      return
+    }
+    yield* sandboxService.reconcile()
+    yield* Effect.logInfo("Sandbox service ready")
+
+    // GC daemon — stop idle sandboxes, cleanup stopped ones
+    yield* Effect.forkDaemon(
+      Effect.forever(
+        Effect.gen(function*() {
+          yield* Effect.sleep(Duration.minutes(5))
+          yield* sandboxService.gcIdle()
+        }).pipe(Effect.catchAllCause((c) =>
+          Cause.isInterruptedOnly(c)
+            ? Effect.failCause(c)
+            : Effect.logWarning("Sandbox GC failed", c)
+        ))
+      )
+    )
+  })
+)
+
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
-const ApiLive = Layer.merge(
+const ApiLive = Layer.mergeAll(
   HttpLayerRouter.addHttpApi(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
-  AutoRefresh
+  AutoRefresh,
+  SandboxStartup
 ).pipe(
   Layer.provide(AllServicesLive),
   Layer.provide(FetchHttpClient.layer)

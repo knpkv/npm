@@ -4,7 +4,9 @@ import {
   AwsProfileName,
   PRCommentLocationJson,
   PullRequest,
-  PullRequestId
+  PullRequestId,
+  SandboxId,
+  SandboxStatus
 } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
@@ -122,6 +124,22 @@ export class EventsGroup extends HttpApiGroup.make("events")
 {}
 
 // Config endpoints
+const VolumeMount = Schema.Struct({
+  hostPath: Schema.String,
+  containerPath: Schema.String,
+  readonly: Schema.Boolean
+})
+
+const SandboxSettingsResponse = Schema.Struct({
+  image: Schema.String,
+  extensions: Schema.Array(Schema.String),
+  setupCommands: Schema.Array(Schema.String),
+  env: Schema.Record({ key: Schema.String, value: Schema.String }),
+  enableClaudeCode: Schema.Boolean,
+  volumeMounts: Schema.Array(VolumeMount),
+  cloneDepth: Schema.Number
+})
+
 const ConfigResponse = Schema.Struct({
   accounts: Schema.Array(
     Schema.Struct({
@@ -133,7 +151,8 @@ const ConfigResponse = Schema.Struct({
   autoDetect: Schema.Boolean,
   autoRefresh: Schema.Boolean,
   refreshIntervalSeconds: Schema.Number,
-  currentUser: Schema.optional(Schema.String)
+  currentUser: Schema.optional(Schema.String),
+  sandbox: Schema.optional(SandboxSettingsResponse)
 })
 
 const ConfigPathResponse = Schema.Struct({
@@ -165,7 +184,8 @@ const ConfigSavePayload = Schema.Struct({
   ),
   autoDetect: Schema.Boolean,
   autoRefresh: Schema.Boolean,
-  refreshIntervalSeconds: Schema.Number
+  refreshIntervalSeconds: Schema.Number,
+  sandbox: Schema.optional(SandboxSettingsResponse)
 })
 
 const ConfigResetResponse = Schema.Struct({
@@ -269,6 +289,73 @@ export class NotificationsGroup extends HttpApiGroup.make("notifications")
   .prefix("/api/notifications")
 {}
 
+// Sandbox endpoints
+export const SandboxResponse = Schema.Struct({
+  id: Schema.String,
+  pullRequestId: Schema.String,
+  awsAccountId: Schema.String,
+  repositoryName: Schema.String,
+  sourceBranch: Schema.String,
+  containerId: Schema.NullOr(Schema.String),
+  port: Schema.NullOr(Schema.Number),
+  status: SandboxStatus,
+  statusDetail: Schema.NullOr(Schema.String),
+  logs: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  lastActivityAt: Schema.String
+})
+
+const CreateSandboxPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  awsAccountId: Schema.String,
+  repositoryName: Schema.String,
+  sourceBranch: Schema.String,
+  profile: AwsProfileName,
+  region: Schema.String
+})
+
+const SandboxIdPath = Schema.Struct({ sandboxId: SandboxId })
+
+export class SandboxGroup extends HttpApiGroup.make("sandbox")
+  .add(
+    HttpApiEndpoint.post("create", "/")
+      .setPayload(CreateSandboxPayload)
+      .addSuccess(SandboxResponse)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.get("list", "/")
+      .addSuccess(Schema.Array(SandboxResponse))
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.get("get", "/:sandboxId")
+      .setPath(SandboxIdPath)
+      .addSuccess(SandboxResponse)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("stop", "/:sandboxId/stop")
+      .setPath(SandboxIdPath)
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("restart", "/:sandboxId/restart")
+      .setPath(SandboxIdPath)
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.del("delete", "/:sandboxId")
+      .setPath(SandboxIdPath)
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .prefix("/api/sandbox")
+{}
+
 // Combined API
 export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(PrsGroup)
@@ -277,4 +364,5 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(AccountsGroup)
   .add(NotificationsGroup)
   .add(SubscriptionsGroup)
+  .add(SandboxGroup)
 {}

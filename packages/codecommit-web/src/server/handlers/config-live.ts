@@ -14,7 +14,13 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const config = yield* configService.load.pipe(
             Effect.catchAll(() =>
-              Effect.succeed({ accounts: [], autoDetect: true, autoRefresh: true, refreshIntervalSeconds: 300 })
+              Effect.succeed({
+                accounts: [] as Array<{ profile: string; regions: Array<string>; enabled: boolean }>,
+                autoDetect: true,
+                autoRefresh: true,
+                refreshIntervalSeconds: 300,
+                sandbox: ConfigService.defaultSandboxConfig
+              })
             )
           )
           const state = yield* SubscriptionRef.get(prService.state)
@@ -27,7 +33,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             autoDetect: config.autoDetect,
             autoRefresh: config.autoRefresh,
             refreshIntervalSeconds: config.refreshIntervalSeconds,
-            currentUser: state.currentUser
+            currentUser: state.currentUser,
+            sandbox: config.sandbox
           }
         }).pipe(Effect.orDie))
       .handle("path", () =>
@@ -69,6 +76,9 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
+          const existing = yield* configService.load.pipe(
+            Effect.catchAll(() => Effect.succeed({ sandbox: ConfigService.defaultSandboxConfig }))
+          )
           const accounts = yield* Effect.forEach(payload.accounts, (a) =>
             Effect.all({
               profile: Schema.decode(AwsProfileName)(a.profile),
@@ -79,7 +89,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             accounts,
             autoDetect: payload.autoDetect,
             autoRefresh: payload.autoRefresh,
-            refreshIntervalSeconds: payload.refreshIntervalSeconds
+            refreshIntervalSeconds: payload.refreshIntervalSeconds,
+            sandbox: payload.sandbox ?? existing.sandbox
           })
           yield* prService.refresh.pipe(
             Effect.catchAll((e) => Effect.logWarning("refresh after config save failed", e))
@@ -108,7 +119,8 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               autoDetect: config.autoDetect,
               autoRefresh: config.autoRefresh,
               refreshIntervalSeconds: config.refreshIntervalSeconds,
-              currentUser: state.currentUser
+              currentUser: state.currentUser,
+              sandbox: config.sandbox
             }
           }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))

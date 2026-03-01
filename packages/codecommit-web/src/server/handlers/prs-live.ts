@@ -74,6 +74,12 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Effect.catchAll(() => Effect.void)
           )
 
+          yield* notificationRepo.addSystem({
+            type: "info",
+            title: "Assume",
+            message: `Opening ${payload.profile} → PR console...`
+          })
+
           // -c: console login, -d: open URL in default browser
           const cmd = Command.make("assume", "-cd", payload.link, payload.profile).pipe(
             Command.stdout("inherit"),
@@ -82,6 +88,13 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           yield* Effect.forkDaemon(
             Command.exitCode(cmd).pipe(
+              Effect.tap(() =>
+                notificationRepo.addSystem({
+                  type: "success",
+                  title: "Assume",
+                  message: `Assumed ${payload.profile}`
+                })
+              ),
               Effect.catchAll((e) =>
                 notificationRepo.addSystem({
                   type: "error",
