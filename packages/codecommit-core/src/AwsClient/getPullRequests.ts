@@ -94,8 +94,8 @@ const RawToPullRequest = Schema.transform(
     strict: false,
     decode: (raw) => {
       const target = raw.pullRequestTargets?.[0]
-      const sourceBranch = target?.sourceReference?.split("/").pop() ?? "unknown"
-      const destinationBranch = target?.destinationReference?.split("/").pop() ?? "unknown"
+      const sourceBranch = target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "unknown"
+      const destinationBranch = target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "unknown"
       return {
         id: raw.pullRequestId ?? "",
         title: raw.title ?? "",
