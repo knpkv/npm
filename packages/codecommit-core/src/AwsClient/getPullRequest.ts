@@ -46,8 +46,8 @@ const RawToPullRequestDetail = Schema.transform(
         author: pr?.authorArn ? normalizeAuthor(pr.authorArn) : "unknown",
         status: isMerged ? "MERGED" : (pr?.pullRequestStatus ?? "UNKNOWN"),
         repositoryName: target?.repositoryName ?? "",
-        sourceBranch: target?.sourceReference ?? "",
-        destinationBranch: target?.destinationReference ?? "",
+        sourceBranch: target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "",
+        destinationBranch: target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "",
         creationDate: pr?.creationDate ?? EpochFallback
       }
     },

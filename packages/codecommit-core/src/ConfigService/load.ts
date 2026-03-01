@@ -6,7 +6,7 @@ import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
 import { ConfigError, ConfigParseError } from "../Errors.js"
 import type { ProfileDetectionError } from "../Errors.js"
-import { ConfigPaths, type DetectedProfile, TuiConfig } from "./internal.js"
+import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, TuiConfig } from "./internal.js"
 
 export const makeLoad = (
   detectProfiles: Effect.Effect<
@@ -37,10 +37,17 @@ export const makeLoad = (
           })),
           autoDetect: true,
           autoRefresh: true,
-          refreshIntervalSeconds: 300
+          refreshIntervalSeconds: 300,
+          sandbox: defaultSandboxConfig
         }
       }
-      return { accounts: [], autoDetect: true, autoRefresh: true, refreshIntervalSeconds: 300 }
+      return {
+        accounts: [],
+        autoDetect: true,
+        autoRefresh: true,
+        refreshIntervalSeconds: 300,
+        sandbox: defaultSandboxConfig
+      }
     }
 
     const content = yield* fs.readFileString(configPath).pipe(

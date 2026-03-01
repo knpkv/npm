@@ -17,6 +17,22 @@ export interface NotificationItem {
   readonly read: number
 }
 
+export interface SandboxItem {
+  readonly id: string
+  readonly pullRequestId: string
+  readonly awsAccountId: string
+  readonly repositoryName: string
+  readonly sourceBranch: string
+  readonly containerId: string | null
+  readonly port: number | null
+  readonly status: string
+  readonly statusDetail: string | null
+  readonly logs: string | null
+  readonly error: string | null
+  readonly createdAt: string
+  readonly lastActivityAt: string
+}
+
 export interface AppState {
   readonly pullRequests: ReadonlyArray<Domain.PullRequest>
   readonly accounts: ReadonlyArray<Domain.AccountState>
@@ -30,6 +46,7 @@ export interface AppState {
     readonly items: ReadonlyArray<NotificationItem>
     readonly nextCursor?: number
   }
+  readonly sandboxes?: ReadonlyArray<SandboxItem>
 }
 
 const defaultState: AppState = {
@@ -143,6 +160,16 @@ export const loadMoreNotificationsAtom = ApiClient.mutation("notifications", "li
 export const markNotificationReadAtom = ApiClient.mutation("notifications", "markRead")
 export const markNotificationUnreadAtom = ApiClient.mutation("notifications", "markUnread")
 export const markAllNotificationsReadAtom = ApiClient.mutation("notifications", "markAllRead")
+
+// Sandbox
+export const sandboxListAtom = ApiClient.query("sandbox", "list", {
+  reactivityKeys: ["sandbox"],
+  timeToLive: "5 seconds"
+})
+export const createSandboxAtom = ApiClient.mutation("sandbox", "create")
+export const stopSandboxAtom = ApiClient.mutation("sandbox", "stop")
+export const restartSandboxAtom = ApiClient.mutation("sandbox", "restart")
+export const deleteSandboxAtom = ApiClient.mutation("sandbox", "delete")
 
 // FTS search
 export const searchPrsAtom = ApiClient.mutation("prs", "search")

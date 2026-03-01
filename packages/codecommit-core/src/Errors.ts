@@ -24,7 +24,7 @@
  * @module
  */
 import { Schema } from "effect"
-import { AwsProfileName, AwsRegion } from "./Domain.js"
+import { AwsProfileName, AwsRegion, SandboxId } from "./Domain.js"
 
 /**
  * AWS credential acquisition failure.
@@ -122,6 +122,33 @@ export class RefreshError extends Schema.TaggedError<RefreshError>()(
 ) {}
 
 /**
+ * Docker Engine interaction failure.
+ *
+ * @category Errors
+ */
+export class DockerError extends Schema.TaggedError<DockerError>()(
+  "DockerError",
+  {
+    operation: Schema.String,
+    cause: Schema.optional(Schema.Defect)
+  }
+) {}
+
+/**
+ * Sandbox lifecycle failure.
+ *
+ * @category Errors
+ */
+export class SandboxError extends Schema.TaggedError<SandboxError>()(
+  "SandboxError",
+  {
+    sandboxId: Schema.optional(SandboxId),
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect)
+  }
+) {}
+
+/**
  * Union of errors from AwsClient methods.
  *
  * @category Errors
@@ -141,3 +168,5 @@ export type CodeCommitError =
   | ConfigParseError
   | ProfileDetectionError
   | RefreshError
+  | DockerError
+  | SandboxError

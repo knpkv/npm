@@ -15,6 +15,34 @@ export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProf
   region: Schema.optionalWith(AwsRegion, { exact: true })
 }) {}
 
+export const SandboxConfig = Schema.Struct({
+  image: Schema.String.pipe(Schema.optionalWith({ default: () => "codercom/code-server:latest" })),
+  extensions: Schema.Array(Schema.String).pipe(Schema.optionalWith({ default: () => [] as Array<string> })),
+  setupCommands: Schema.Array(Schema.String).pipe(Schema.optionalWith({ default: () => [] as Array<string> })),
+  env: Schema.Record({ key: Schema.String, value: Schema.String }).pipe(
+    Schema.optionalWith({ default: () => ({}) as Record<string, string> })
+  ),
+  enableClaudeCode: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
+  volumeMounts: Schema.Array(
+    Schema.Struct({
+      hostPath: Schema.String,
+      containerPath: Schema.String,
+      readonly: Schema.Boolean.pipe(Schema.optionalWith({ default: () => false }))
+    })
+  ).pipe(
+    Schema.optionalWith({ default: () => [] as Array<{ hostPath: string; containerPath: string; readonly: boolean }> })
+  ),
+  cloneDepth: Schema.Number.pipe(
+    Schema.int(),
+    Schema.greaterThanOrEqualTo(0),
+    Schema.optionalWith({ default: () => 0 })
+  )
+})
+
+export type SandboxConfig = typeof SandboxConfig.Type
+
+export const defaultSandboxConfig = Schema.decodeSync(SandboxConfig)({})
+
 export const AccountConfig = Schema.Struct({
   profile: AwsProfileName,
   regions: Schema.Array(AwsRegion).pipe(Schema.optionalWith({ default: () => ["us-east-1" as AwsRegion] })),
@@ -27,7 +55,8 @@ export const TuiConfig = Schema.Struct({
   accounts: Schema.Array(AccountConfig),
   autoDetect: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
   autoRefresh: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
-  refreshIntervalSeconds: Schema.Number.pipe(Schema.optionalWith({ default: () => 300 }))
+  refreshIntervalSeconds: Schema.Number.pipe(Schema.optionalWith({ default: () => 300 })),
+  sandbox: SandboxConfig.pipe(Schema.optionalWith({ default: () => Schema.decodeSync(SandboxConfig)({}) }))
 })
 
 export type TuiConfig = typeof TuiConfig.Type

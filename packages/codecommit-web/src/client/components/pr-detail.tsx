@@ -18,6 +18,7 @@ import {
   BellOffIcon,
   ChevronDownIcon,
   CheckIcon,
+  CodeIcon,
   CopyIcon,
   ExternalLinkIcon,
   LoaderIcon,
@@ -31,6 +32,7 @@ import remarkGfm from "remark-gfm"
 import {
   appStateAtom,
   commentsAtom,
+  createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
   subscribeAtom,
@@ -285,6 +287,7 @@ export function PRDetail() {
   const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
+  const docker = useDismissable(StorageKeys.dockerDismissed)
 
   // Subscriptions
   const subscriptionsResult = useAtomValue(subscriptionsQueryAtom)
@@ -344,6 +347,58 @@ export function PRDetail() {
     )
   }, [consoleUrl])
 
+  // Sandbox
+  const createSandbox = useAtomSet(createSandboxAtom)
+  const existingSandbox = useMemo(
+    () =>
+      state.sandboxes?.find(
+        (s) =>
+          s.pullRequestId === prId && s.awsAccountId === accountId && s.status !== "stopped" && s.status !== "error"
+      ),
+    [state.sandboxes, prId, accountId]
+  )
+
+  const [sandboxCreating, setSandboxCreating] = useState(false)
+
+  useEffect(() => {
+    if (sandboxCreating && existingSandbox) {
+      setSandboxCreating(false)
+      navigate(`/sandbox/${existingSandbox.id}`)
+    }
+  }, [sandboxCreating, existingSandbox, navigate])
+
+  const proceedSandbox = useCallback(() => {
+    if (!pr) return
+    const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
+    createSandbox({
+      payload: {
+        pullRequestId: pr.id,
+        awsAccountId: sandboxAccountKey,
+        repositoryName: pr.repositoryName,
+        sourceBranch: pr.sourceBranch,
+        profile: pr.account.profile,
+        region: pr.account.region
+      }
+    })
+    setSandboxCreating(true)
+  }, [pr, createSandbox])
+
+  const handleSandbox = useCallback(() => {
+    if (!pr) return
+    if (existingSandbox) {
+      navigate(`/sandbox/${existingSandbox.id}`)
+      return
+    }
+    if (!docker.show()) {
+      proceedSandbox()
+    }
+  }, [pr, existingSandbox, docker, proceedSandbox, navigate])
+
+  const handleDockerContinue = () => {
+    docker.dismiss()
+    proceedSandbox()
+  }
+
   const proceedOpen = useCallback(() => {
     if (!pr || !consoleUrl) return
     openPr({ payload: { profile: pr.account.profile, link: consoleUrl } })
@@ -369,11 +424,14 @@ export function PRDetail() {
         navigate("/")
       } else if ((e.key === "Enter" || e.key === "o") && pr?.link) {
         handleOpen()
+      } else if (e.key === "." && pr) {
+        e.preventDefault()
+        handleSandbox()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleOpen, navigate, pr])
+  }, [handleOpen, handleSandbox, navigate, pr])
 
   if (!pr) {
     return (
@@ -421,6 +479,10 @@ export function PRDetail() {
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleSubscriptionToggle}>
             {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
             {isSubscribed ? "Unsubscribe" : "Subscribe"}
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleSandbox}>
+            <CodeIcon className="size-3.5" />
+            {existingSandbox ? "Open Sandbox" : "Sandbox"}
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleCopy}>
             {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
@@ -593,6 +655,29 @@ export function PRDetail() {
               Cancel
             </Button>
             <Button onClick={handleGrantedContinue}>Continue</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={docker.visible} onOpenChange={docker.cancel}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Docker Required</DialogTitle>
+            <DialogDescription>
+              Sandbox uses Docker to run a code-server container. Make sure Docker is started before continuing.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground mr-auto">
+              <input
+                type="checkbox"
+                checked={docker.dontRemind}
+                onChange={(e) => docker.setDontRemind(e.target.checked)}
+                className="accent-primary"
+              />
+              Don't show again
+            </label>
+            <Button onClick={handleDockerContinue}>OK</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
