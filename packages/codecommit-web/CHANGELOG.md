@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.5.0
+
+### Minor Changes
+
+- [#44](https://github.com/knpkv/npm/pull/44) [`e9c349f`](https://github.com/knpkv/npm/commit/e9c349fac3d2214a94aedaa3aaac40d0ea23d081) Thanks @konopkov! - Add code sandbox feature with Docker-based environments, plugin system, and web UI
+
+### Patch Changes
+
+- Updated dependencies [[`e9c349f`](https://github.com/knpkv/npm/commit/e9c349fac3d2214a94aedaa3aaac40d0ea23d081)]:
+  - @knpkv/codecommit-core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
