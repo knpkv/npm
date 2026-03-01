@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./Domain.js": "./src/Domain.ts",
     "./CacheService.js": "./src/CacheService/index.ts",
+    "./SandboxService.js": "./src/SandboxService/index.ts",
     "./*.js": "./src/*.ts"
   },
   "publishConfig": {
