@@ -54,6 +54,14 @@ export type AwsRegion = typeof AwsRegion.Type
 export const CommentId = Schema.String.pipe(Schema.brand("CommentId"))
 export type CommentId = typeof CommentId.Type
 
+/**
+ * Branded sandbox identifier.
+ *
+ * @category Domain
+ */
+export const SandboxId = Schema.String.pipe(Schema.brand("SandboxId"))
+export type SandboxId = typeof SandboxId.Type
+
 // ---------------------------------------------------------------------------
 // Enumerations
 // ---------------------------------------------------------------------------
@@ -81,6 +89,22 @@ export type NotificationType = typeof NotificationType.Type
  */
 export const AppStatus = Schema.Literal("idle", "loading", "error")
 export type AppStatus = typeof AppStatus.Type
+
+/**
+ * Sandbox lifecycle status.
+ *
+ * @category Domain
+ */
+export const SandboxStatus = Schema.Literal(
+  "creating",
+  "cloning",
+  "starting",
+  "running",
+  "stopping",
+  "stopped",
+  "error"
+)
+export type SandboxStatus = typeof SandboxStatus.Type
 
 // ---------------------------------------------------------------------------
 // Domain Models
@@ -128,6 +152,26 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
     return `https://${this.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${this.repositoryName}/pull-requests/${this.id}?region=${this.account.region}`
   }
 }
+
+/**
+ * Code sandbox instance for a pull request.
+ *
+ * @category Domain
+ */
+export class Sandbox extends Schema.Class<Sandbox>("Sandbox")({
+  id: SandboxId,
+  pullRequestId: PullRequestId,
+  awsAccountId: Schema.String,
+  repositoryName: RepositoryName,
+  sourceBranch: Schema.String,
+  containerId: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Number),
+  workspacePath: Schema.String,
+  status: SandboxStatus,
+  error: Schema.optional(Schema.String),
+  createdAt: Schema.DateFromSelf,
+  lastActivityAt: Schema.DateFromSelf
+}) {}
 
 /**
  * Comment on a pull request.

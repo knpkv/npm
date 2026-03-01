@@ -6,7 +6,7 @@ import { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
 import type { ConfigError, ProfileDetectionError } from "../Errors.js"
 import { backup } from "./backup.js"
-import { ConfigPaths, type DetectedProfile, type TuiConfig } from "./internal.js"
+import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, type TuiConfig } from "./internal.js"
 import { save } from "./save.js"
 
 export const makeReset = (
@@ -43,7 +43,8 @@ export const makeReset = (
       })),
       autoDetect: true,
       autoRefresh: true,
-      refreshIntervalSeconds: 300
+      refreshIntervalSeconds: 300,
+      sandbox: defaultSandboxConfig
     }
 
     yield* save(config)
