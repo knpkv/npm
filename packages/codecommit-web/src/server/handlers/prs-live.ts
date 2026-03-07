@@ -59,11 +59,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
-      .handle("comments", ({ payload }) =>
+      .handle("comments", ({ urlParams }) =>
         awsClient.getCommentsForPullRequest({
-          account: { profile: payload.account.profile, region: payload.account.region },
-          pullRequestId: payload.pullRequestId,
-          repositoryName: payload.repositoryName
+          account: { profile: urlParams.profile, region: urlParams.region },
+          pullRequestId: urlParams.pullRequestId,
+          repositoryName: urlParams.repositoryName
         }).pipe(
           Effect.map(encodeCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))

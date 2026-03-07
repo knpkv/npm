@@ -15,7 +15,8 @@ import {
   CacheService,
   ConfigService,
   PRService,
-  SandboxService
+  SandboxService,
+  StatsService
 } from "@knpkv/codecommit-core"
 import { Cause, Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 import { fileURLToPath } from "node:url"
@@ -27,6 +28,7 @@ import {
   NotificationsLive,
   PrsLive,
   SandboxLive,
+  StatsLive,
   SubscriptionsLive
 } from "./handlers/index.js"
 
@@ -106,7 +108,8 @@ const HandlersLive = Layer.mergeAll(
   EventsLive,
   NotificationsLive,
   SubscriptionsLive,
-  SandboxLive
+  SandboxLive,
+  StatsLive
 )
 
 // Platform dependencies
@@ -165,12 +168,19 @@ const SandboxServicesLive = Layer.mergeAll(
   Layer.provide(PlatformLive)
 )
 
+// Stats service — StatsRepo provided first, then rest via PRServiceDeps
+const StatsServiceLive = StatsService.StatsService.Default.pipe(
+  Layer.provide(CacheService.StatsRepo.Default),
+  Layer.provide(PRServiceDeps)
+)
+
 // All services needed by handlers
 const AllServicesLive = Layer.mergeAll(
   PRServiceLive_,
   ConfigLive_,
   AwsClientLive_,
-  SandboxServicesLive
+  SandboxServicesLive,
+  StatsServiceLive
 )
 
 // Fork auto-refresh loop: initial refresh + recurring based on config
