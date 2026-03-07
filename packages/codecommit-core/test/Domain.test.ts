@@ -27,7 +27,9 @@ describe("Domain", () => {
       sourceBranch: "feature/x",
       destinationBranch: "main",
       isMergeable: true,
-      isApproved: false
+      isApproved: false,
+      approvedBy: [],
+      commentedBy: []
     }
 
     // Ensures Schema.Class roundtrips and all fields are preserved

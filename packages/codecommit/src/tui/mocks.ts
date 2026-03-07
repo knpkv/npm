@@ -23,7 +23,9 @@ export const mockPR = decodePullRequest({
   sourceBranch: "feature/docs",
   destinationBranch: "main",
   isMergeable: true,
-  isApproved: false
+  isApproved: false,
+  approvedBy: [],
+  commentedBy: []
 })
 
 export const mockPRConflict = decodePullRequest({
