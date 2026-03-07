@@ -4,6 +4,7 @@ import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { LoaderIcon, LogInIcon } from "lucide-react"
 import { useEffect, useMemo } from "react"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
+import type { FilterEntry, FilterKey } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
 import { extractScope } from "../utils/extractScope.js"
 import { PRRow } from "./pr-row.js"
@@ -13,27 +14,81 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
 
 type PullRequest = Domain.PullRequest
 
+const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
+  switch (entry.key) {
+    case "account":
+      return pr.account?.profile === entry.value
+    case "author":
+      return pr.author === entry.value
+    case "scope":
+      return extractScope(pr.title) === entry.value
+    case "repo":
+      return pr.repositoryName === entry.value
+    case "approver":
+      return pr.approvedBy.some((n) => n === entry.value)
+    case "commenter":
+      return pr.commentedBy.some((n) => n === entry.value)
+    case "size": {
+      const fc = pr.filesChanged
+      if (fc == null) return false
+      switch (entry.value) {
+        case "small":
+          return fc < 5
+        case "medium":
+          return fc >= 5 && fc <= 15
+        case "large":
+          return fc >= 16 && fc <= 30
+        case "xlarge":
+          return fc > 30
+        default:
+          return true
+      }
+    }
+    case "status":
+      switch (entry.value) {
+        case "approved":
+          return pr.isApproved
+        case "pending":
+          return !pr.isApproved
+        case "mergeable":
+          return pr.isMergeable
+        case "conflicts":
+          return !pr.isMergeable
+        case "merged":
+          return pr.status === "MERGED"
+        case "closed":
+          return pr.status === "CLOSED"
+        case "open":
+          return pr.status === "OPEN"
+        default:
+          return true
+      }
+    default:
+      return true
+  }
+}
+
 export function PRList() {
-  const state = useAtomValue(appStateAtom)
+  const appState = useAtomValue(appStateAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
-  const { filterText, quickFilter } = useFilterParams()
+  const { state: filterState, toggleFilter } = useFilterParams()
   const [animateRef, enableAnimate] = useAutoAnimate()
 
-  const isLoading = state.status === "loading"
-  const prs = state.pullRequests
-  const currentUser = state.currentUser
-  const isHot = quickFilter.type === "hot"
-
+  const isLoading = appState.status === "loading"
+  const prs = appState.pullRequests
   useEffect(() => {
-    enableAnimate(isHot)
-  }, [isHot, enableAnimate])
+    enableAnimate(filterState.hot)
+  }, [filterState.hot, enableAnimate])
 
   const { flat, grouped } = useMemo(() => {
     if (prs.length === 0) return { flat: [], grouped: [] }
 
-    const filterLower = filterText.toLowerCase()
+    const { filters, from, hot, q, to } = filterState
+
+    // Text search
+    const filterLower = q.toLowerCase()
     const filterByText = (pr: PullRequest) => {
-      if (!filterText) return true
+      if (!q) return true
       return (
         pr.repositoryName.toLowerCase().includes(filterLower) ||
         pr.title.toLowerCase().includes(filterLower) ||
@@ -43,62 +98,64 @@ export function PRList() {
       )
     }
 
-    const filterByQuick = (pr: PullRequest) => {
-      if (quickFilter.type === "all") return true
-      if (quickFilter.type === "hot") return true
-      if (quickFilter.type === "mine") {
-        if (currentUser && pr.author !== currentUser) return false
-        if (quickFilter.value === undefined) return true
-        return extractScope(pr.title) === quickFilter.value
-      }
-      if (quickFilter.type === "account") return pr.account?.profile === quickFilter.value
-      if (quickFilter.type === "author") return pr.author === quickFilter.value
-      if (quickFilter.type === "scope") return extractScope(pr.title) === quickFilter.value
-      if (quickFilter.type === "repo") return pr.repositoryName === quickFilter.value
-      if (quickFilter.type === "status") {
-        switch (quickFilter.value) {
-          case "approved":
-            return pr.isApproved
-          case "pending":
-            return !pr.isApproved
-          case "mergeable":
-            return pr.isMergeable
-          case "conflicts":
-            return !pr.isMergeable
-          default:
-            return true
-        }
-      }
-      return true
+    // Group filters by key, then AND across keys, OR within same key
+    const byKey = new Map<FilterKey, Array<FilterEntry>>()
+    for (const f of filters) {
+      const arr = byKey.get(f.key)
+      if (arr) arr.push(f)
+      else byKey.set(f.key, [f])
+    }
+    const filterByEntries = (pr: PullRequest) =>
+      [...byKey.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
+
+    // Status visibility: which PR statuses to include?
+    const hasStatusLifecycle = filters.some((f) => f.key === "status" && ["merged", "closed", "open"].includes(f.value))
+    const hasParticipantFilter = filters.some((f) => f.key === "approver" || f.key === "commenter")
+    const includesClosedPRs = hasStatusLifecycle || hasParticipantFilter
+    const hasDateRange = !!from && !!to
+
+    // Date filter
+    const fromMs = from ? new Date(from).getTime() : undefined
+    const toMs = to ? new Date(to).getTime() : undefined
+    const statusFilter = filters.find((f) => f.key === "status")
+    const filterByDate = (pr: PullRequest) => {
+      if (!fromMs || !toMs) return true
+      const ts =
+        statusFilter?.value === "merged" || statusFilter?.value === "closed"
+          ? pr.lastModifiedDate.getTime()
+          : pr.creationDate.getTime()
+      return ts >= fromMs && ts < toMs
     }
 
-    const filtered = prs.filter((pr) => pr.status !== "MERGED" && filterByText(pr) && filterByQuick(pr))
+    const filtered = prs.filter(
+      (pr) =>
+        (includesClosedPRs || (hasDateRange ? pr.status !== "CLOSED" : pr.status === "OPEN")) &&
+        filterByText(pr) &&
+        filterByEntries(pr) &&
+        filterByDate(pr)
+    )
 
     // Hot mode: flat list sorted by lastModifiedDate desc
-    if (quickFilter.type === "hot") {
+    if (hot) {
       const sorted = [...filtered].sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
       return { flat: sorted, grouped: [] }
     }
 
-    // Other modes: group by account
+    // Default: group by account
     const byAccount = new Map<string, Array<PullRequest>>()
     for (const pr of filtered) {
       const accountId = pr.account?.profile ?? "unknown"
-      if (!byAccount.has(accountId)) {
-        byAccount.set(accountId, [])
-      }
+      if (!byAccount.has(accountId)) byAccount.set(accountId, [])
       byAccount.get(accountId)!.push(pr)
     }
 
     const result: Array<[string, Array<PullRequest>]> = []
     for (const [accountId, accountPrs] of byAccount) {
-      if (accountPrs.length > 0) {
-        result.push([accountId, accountPrs])
-      }
+      if (accountPrs.length > 0) result.push([accountId, accountPrs])
     }
 
     return { flat: [], grouped: result }
-  }, [prs, currentUser, filterText, quickFilter])
+  }, [prs, filterState])
 
   const prHref = (pr: PullRequest) => {
     const accountKey = pr.account.awsAccountId ?? pr.account.profile
@@ -117,7 +174,7 @@ export function PRList() {
       )
     }
 
-    const profiles = [...new Set(state.accounts.filter((a) => a.enabled).map((a) => a.profile))]
+    const profiles = [...new Set(appState.accounts.filter((a) => a.enabled).map((a) => a.profile))]
     const needsLogin = prs.length === 0 && profiles.length > 0
 
     return (
@@ -130,8 +187,20 @@ export function PRList() {
           <circle cx="28" cy="18" r="2" fill="currentColor" />
           <path d="M24 36h16M28 42h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
-        <p className="text-sm">No pull requests found</p>
-        {prs.length > 0 && <p className="text-xs opacity-50">{prs.length} PRs loaded — try a different filter</p>}
+        <p className="text-sm">No open pull requests</p>
+        {prs.length > 0 && (
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-xs opacity-50">{prs.length} PRs in cache (all merged or closed)</p>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" onClick={() => toggleFilter("status", "merged")}>
+                Show merged
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => toggleFilter("status", "closed")}>
+                Show closed
+              </Button>
+            </div>
+          </div>
+        )}
         {needsLogin && (
           <Card className="mt-4 w-full max-w-sm">
             <CardHeader className="pb-2">
@@ -158,7 +227,7 @@ export function PRList() {
     )
   }
 
-  if (isHot) {
+  if (filterState.hot) {
     return (
       <div key="hot" ref={animateRef} className="divide-y rounded-lg border bg-card">
         {flat.map((pr) => (

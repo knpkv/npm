@@ -1,6 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import {
+  BarChart3Icon,
   BellIcon,
   BoxIcon,
   LoaderIcon,
@@ -69,6 +70,10 @@ export function Header() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          <Button variant="ghost" size="icon-sm" onClick={() => navigate("/stats")}>
+            <BarChart3Icon className="size-4" />
+            <span className="sr-only">Statistics</span>
+          </Button>
           <Button variant="ghost" size="icon-sm" className="relative" onClick={() => navigate("/sandboxes")}>
             <BoxIcon className="size-4" />
             {activeSandboxes.length > 0 && (

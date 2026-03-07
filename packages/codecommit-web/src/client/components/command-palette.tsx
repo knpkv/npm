@@ -1,9 +1,9 @@
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { BellIcon, FilterIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
+import { BellIcon, FilterIcon, FlameIcon, RefreshCwIcon, SettingsIcon } from "lucide-react"
 import { useEffect } from "react"
 import { useNavigate } from "react-router"
 import { refreshAtom } from "../atoms/app.js"
-import { commandPaletteAtom, type QuickFilterType, type SettingsTab } from "../atoms/ui.js"
+import { commandPaletteAtom, FILTER_KEYS, type FilterKey, type SettingsTab } from "../atoms/ui.js"
 import {
   CommandDialog,
   CommandEmpty,
@@ -14,15 +14,16 @@ import {
   CommandSeparator
 } from "./ui/command.js"
 
-const QUICK_FILTERS: Array<{ key: QuickFilterType; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "mine", label: "Mine" },
-  { key: "account", label: "Account" },
-  { key: "author", label: "Author" },
-  { key: "scope", label: "Scope" },
-  { key: "repo", label: "Repo" },
-  { key: "status", label: "Status" }
-]
+const FILTER_LABELS: Record<FilterKey, string> = {
+  account: "Account",
+  author: "Author",
+  approver: "Approver",
+  commenter: "Commenter",
+  scope: "Scope",
+  repo: "Repo",
+  status: "Status",
+  size: "Size"
+}
 
 export function CommandPalette() {
   const isOpen = useAtomValue(commandPaletteAtom)
@@ -105,16 +106,25 @@ export function CommandPalette() {
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Filters">
-          {QUICK_FILTERS.map((f) => (
+          <CommandItem
+            onSelect={() => {
+              navigate("/?hot=1")
+              setIsOpen(false)
+            }}
+          >
+            <FlameIcon />
+            Hot
+          </CommandItem>
+          {FILTER_KEYS.map((key) => (
             <CommandItem
-              key={f.key}
+              key={key}
               onSelect={() => {
-                navigate(f.key === "all" ? "/" : `/?filter=${f.key}`)
+                navigate(`/?f=${key}:`)
                 setIsOpen(false)
               }}
             >
               <FilterIcon />
-              Filter: {f.label}
+              Filter: {FILTER_LABELS[key]}
             </CommandItem>
           ))}
         </CommandGroup>
