@@ -6,7 +6,7 @@
 import { Clock, DateTime, Effect, Ref, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"

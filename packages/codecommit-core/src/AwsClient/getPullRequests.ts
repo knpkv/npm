@@ -4,15 +4,19 @@
 import { HttpClient } from "@effect/platform"
 import { Credentials, Region } from "distilled-aws"
 import * as codecommit from "distilled-aws/codecommit"
-import { Effect, Schema, Stream } from "effect"
+import { Data, Effect, Schema, Stream } from "effect"
 import { AwsClientConfig } from "../AwsClientConfig.js"
-import { Account, AwsProfileName, AwsRegion, PullRequest } from "../Domain.js"
+import { Account, AwsProfileName, AwsRegion, codecommitConsoleUrl, PullRequest } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
 
 // ---------------------------------------------------------------------------
 // Sub-helpers
 // ---------------------------------------------------------------------------
+
+class MissingPullRequestResponse extends Data.TaggedError("MissingPullRequestResponse")<{
+  readonly pullRequestId: string
+}> {}
 
 const decodeAccount = Schema.decodeSync(Account)
 
@@ -25,14 +29,16 @@ const fetchPRDetails = (id: string, repoName: string) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: id })
     const pr = resp.pullRequest
-    if (!pr) return yield* Effect.die(new Error(`Missing pullRequest in response for ${id}`))
+    if (!pr) return yield* new MissingPullRequestResponse({ pullRequestId: id })
 
-    const [isApproved, isMergeable] = yield* Effect.all([
-      fetchApprovalStatus(id, pr.revisionId ?? ""),
-      fetchMergeStatus(repoName, pr.pullRequestTargets?.[0])
+    const revisionId = pr.revisionId ?? ""
+    const [isApproved, isMergeable, approvers] = yield* Effect.all([
+      fetchApprovalStatus(id, revisionId),
+      fetchMergeStatus(repoName, pr.pullRequestTargets?.[0]),
+      fetchApprovers(id, revisionId)
     ])
 
-    return { ...pr, repoName, isApproved, isMergeable }
+    return { ...pr, repoName, isApproved, isMergeable, approvers }
   })
 
 /**
@@ -44,6 +50,21 @@ const fetchApprovalStatus = (pullRequestId: string, revisionId: string) =>
   ).pipe(
     Effect.map((r) => r.evaluation?.approved ?? false),
     Effect.catchAll(() => Effect.succeed(false))
+  )
+
+/**
+ * Fetch who approved a PR (ARN list of approvers with APPROVE state).
+ */
+const fetchApprovers = (pullRequestId: string, revisionId: string) =>
+  throttleRetry(
+    codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId })
+  ).pipe(
+    Effect.map((r) =>
+      (r.approvals ?? [])
+        .filter((a) => a.approvalState === "APPROVE" && a.userArn)
+        .map((a) => normalizeAuthor(a.userArn!))
+    ),
+    Effect.catchAll(() => Effect.succeed([] as Array<string>))
   )
 
 /**
@@ -78,11 +99,15 @@ const RawPullRequest = Schema.Struct({
   pullRequestStatus: Schema.optional(Schema.String),
   pullRequestTargets: Schema.optional(Schema.Array(Schema.Struct({
     sourceReference: Schema.optional(Schema.String),
-    destinationReference: Schema.optional(Schema.String)
+    destinationReference: Schema.optional(Schema.String),
+    mergeMetadata: Schema.optional(Schema.Struct({
+      isMerged: Schema.optional(Schema.Boolean)
+    }))
   }))),
   repoName: Schema.String,
   isApproved: Schema.Boolean,
   isMergeable: Schema.Boolean,
+  approvers: Schema.Array(Schema.String),
   accountProfile: AwsProfileName,
   accountRegion: AwsRegion
 })
@@ -96,6 +121,7 @@ const RawToPullRequest = Schema.transform(
       const target = raw.pullRequestTargets?.[0]
       const sourceBranch = target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "unknown"
       const destinationBranch = target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "unknown"
+      const isMerged = target?.mergeMetadata?.isMerged === true
       return {
         id: raw.pullRequestId ?? "",
         title: raw.title ?? "",
@@ -104,14 +130,15 @@ const RawToPullRequest = Schema.transform(
         repositoryName: raw.repoName,
         creationDate: raw.creationDate ?? EpochFallback,
         lastModifiedDate: raw.lastActivityDate ?? EpochFallback,
-        link:
-          `https://${raw.accountRegion}.console.aws.amazon.com/codesuite/codecommit/repositories/${raw.repoName}/pull-requests/${raw.pullRequestId}?region=${raw.accountRegion}`,
+        link: codecommitConsoleUrl(raw.accountRegion, raw.repoName, raw.pullRequestId ?? ""),
         account: decodeAccount({ profile: raw.accountProfile, region: raw.accountRegion }),
-        status: raw.pullRequestStatus === "OPEN" ? "OPEN" as const : "CLOSED" as const,
+        status: isMerged ? "MERGED" as const : raw.pullRequestStatus === "OPEN" ? "OPEN" as const : "CLOSED" as const,
         sourceBranch,
         destinationBranch,
         isMergeable: raw.isMergeable,
-        isApproved: raw.isApproved
+        isApproved: raw.isApproved,
+        approvedBy: raw.approvers,
+        commentedBy: []
       }
     },
     encode: (pr) => ({
@@ -129,6 +156,7 @@ const RawToPullRequest = Schema.transform(
       repoName: pr.repositoryName,
       isApproved: pr.isApproved,
       isMergeable: pr.isMergeable,
+      approvers: pr.approvedBy ?? [],
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region
     })

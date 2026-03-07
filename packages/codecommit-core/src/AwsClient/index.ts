@@ -12,12 +12,15 @@ import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Error
 import { createPullRequest } from "./createPullRequest.js"
 import { type CallerIdentity, getCallerIdentity } from "./getCallerIdentity.js"
 import { getCommentsForPullRequest } from "./getCommentsForPullRequest.js"
+import { getDifferences } from "./getDifferences.js"
 import { getPullRequest } from "./getPullRequest.js"
 import { getPullRequests } from "./getPullRequests.js"
 import type {
   AccountParams,
   CreatePullRequestParams,
+  DiffStats,
   GetCommentsForPullRequestParams,
+  GetDifferencesParams,
   GetPullRequestParams,
   ListBranchesParams,
   PullRequestDetail,
@@ -33,6 +36,7 @@ import { updatePullRequestTitle } from "./updatePullRequestTitle.js"
 // ---------------------------------------------------------------------------
 
 export type { CallerIdentity } from "./getCallerIdentity.js"
+export type { DiffStats, GetDifferencesParams } from "./internal.js"
 
 // ---------------------------------------------------------------------------
 // Error Union
@@ -46,7 +50,14 @@ export type AwsClientError = AwsCredentialError | AwsThrottleError | AwsApiError
 
 export class AwsClient extends Context.Tag("@knpkv/codecommit-core/AwsClient")<
   AwsClient,
-  {
+  AwsClient.Service
+>() {}
+
+export declare namespace AwsClient {
+  /**
+   * @category models
+   */
+  export interface Service {
     readonly getPullRequests: (
       account: AccountParams,
       options?: { status?: "OPEN" | "CLOSED" }
@@ -62,8 +73,9 @@ export class AwsClient extends Context.Tag("@knpkv/codecommit-core/AwsClient")<
       params: UpdatePullRequestDescriptionParams
     ) => Effect.Effect<void, AwsClientError>
     readonly getPullRequest: (params: GetPullRequestParams) => Effect.Effect<PullRequestDetail, AwsClientError>
+    readonly getDifferences: (params: GetDifferencesParams) => Effect.Effect<DiffStats, AwsClientError>
   }
->() {}
+}
 
 // ---------------------------------------------------------------------------
 // Live Implementation
@@ -99,7 +111,8 @@ export const AwsClientLive = Layer.effect(
       getCommentsForPullRequest: (params) => provide(getCommentsForPullRequest(params)),
       updatePullRequestTitle: (params) => provide(updatePullRequestTitle(params)),
       updatePullRequestDescription: (params) => provide(updatePullRequestDescription(params)),
-      getPullRequest: (params) => provide(getPullRequest(params))
+      getPullRequest: (params) => provide(getPullRequest(params)),
+      getDifferences: (params) => provide(getDifferences(params))
     }
   })
 )

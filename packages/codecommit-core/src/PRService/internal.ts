@@ -1,12 +1,17 @@
 /**
  * @internal
  */
-import { Schema } from "effect"
 import type { SubscriptionRef } from "effect"
-import { CachedPullRequest, UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
+import { Schema } from "effect"
+import { CachedPullRequest, UpsertInput } from "../CacheService/repos/PullRequestRepo/index.js"
 import { type AppState, type CommentThread, type PRCommentLocation, PullRequest } from "../Domain.js"
 
 export type PRState = SubscriptionRef.SubscriptionRef<AppState>
+
+const sumFileChanges = (...counts: Array<number | null>): number | undefined => {
+  const defined = counts.filter((n): n is number => n != null)
+  return defined.length > 0 ? defined.reduce((a, b) => a + b, 0) : undefined
+}
 
 export const CachedPRToPullRequest = Schema.transform(
   Schema.typeSchema(CachedPullRequest),
@@ -34,7 +39,10 @@ export const CachedPRToPullRequest = Schema.transform(
       isApproved: row.isApproved,
       commentCount: row.commentCount ?? undefined,
       healthScore: row.healthScore ?? undefined,
-      fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined
+      fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined,
+      approvedBy: row.approvedBy,
+      commentedBy: row.commentedBy,
+      filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,
@@ -55,7 +63,14 @@ export const CachedPRToPullRequest = Schema.transform(
       commentCount: pr.commentCount ?? null,
       healthScore: pr.healthScore ?? null,
       link: pr.link,
-      fetchedAt: pr.fetchedAt?.toISOString() ?? ""
+      fetchedAt: pr.fetchedAt?.toISOString() ?? "",
+      filesAdded: null,
+      filesModified: null,
+      filesDeleted: null,
+      closedAt: null,
+      mergedBy: null,
+      approvedBy: pr.approvedBy,
+      commentedBy: pr.commentedBy
     })
   }
 )
@@ -88,7 +103,10 @@ export const PullRequestToUpsertInput = Schema.transform(
       isApproved: row.isApproved === 1,
       commentCount: row.commentCount ?? undefined,
       healthScore: undefined,
-      fetchedAt: undefined
+      fetchedAt: undefined,
+      approvedBy: row.approvedBy,
+      commentedBy: [],
+      filesChanged: undefined
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,
@@ -107,7 +125,8 @@ export const PullRequestToUpsertInput = Schema.transform(
       isMergeable: pr.isMergeable ? 1 : 0,
       isApproved: pr.isApproved ? 1 : 0,
       commentCount: pr.commentCount ?? null,
-      link: pr.link
+      link: pr.link,
+      approvedBy: pr.approvedBy
     })
   }
 )
