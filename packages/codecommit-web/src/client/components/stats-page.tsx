@@ -391,6 +391,10 @@ export function StatsPage() {
         <h1 className="text-lg font-semibold">Statistics</h1>
       </div>
 
+      <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-200">
+        🚧 Experimental — stats may be incomplete or inaccurate
+      </div>
+
       {/* Week picker */}
       <div className="flex items-center gap-2 flex-wrap">
         <Button variant="ghost" size="icon-sm" onClick={() => navigateWeek(-1)}>
