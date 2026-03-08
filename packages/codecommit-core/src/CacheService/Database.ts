@@ -13,6 +13,10 @@ import migration0003 from "./migrations/0003_add_health_score.js"
 import migration0004 from "./migrations/0004_unify_notifications.js"
 import migration0005 from "./migrations/0005_add_sandboxes.js"
 import migration0006 from "./migrations/0006_sandbox_logs.js"
+import migration0007 from "./migrations/0007_stats_columns.js"
+import migration0008 from "./migrations/0008_merged_by.js"
+import migration0009 from "./migrations/0009_approved_by.js"
+import migration0010 from "./migrations/0010_commented_by.js"
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -45,7 +49,11 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0003_add_health_score": migration0003,
     "0004_unify_notifications": migration0004,
     "0005_add_sandboxes": migration0005,
-    "0006_sandbox_logs": migration0006
+    "0006_sandbox_logs": migration0006,
+    "0007_stats_columns": migration0007,
+    "0008_merged_by": migration0008,
+    "0009_approved_by": migration0009,
+    "0010_commented_by": migration0010
   })
 })
 

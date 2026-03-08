@@ -26,15 +26,24 @@ export function PRRow({ pr, to, showUpdated }: PRRowProps) {
         ? "text-yellow-600 dark:text-yellow-400"
         : "text-red-600 dark:text-red-400"
 
-  const badge = !pr.isMergeable ? (
-    <Badge variant="destructive">Conflict</Badge>
-  ) : pr.isApproved ? (
-    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-      Approved
-    </Badge>
-  ) : (
-    <Badge variant="secondary">Pending</Badge>
-  )
+  const badge =
+    pr.status === "MERGED" ? (
+      <Badge variant="outline" className="border-purple-500/30 text-purple-600 dark:text-purple-400">
+        Merged
+      </Badge>
+    ) : pr.status === "CLOSED" ? (
+      <Badge variant="outline" className="border-red-500/30 text-red-600 dark:text-red-400">
+        Closed
+      </Badge>
+    ) : !pr.isMergeable ? (
+      <Badge variant="destructive">Conflict</Badge>
+    ) : pr.isApproved ? (
+      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+        Approved
+      </Badge>
+    ) : (
+      <Badge variant="secondary">Pending</Badge>
+    )
 
   return (
     <Link

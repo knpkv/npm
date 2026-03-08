@@ -8,8 +8,8 @@ import { AwsClient } from "../AwsClient/index.js"
 import { diffComments } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 
@@ -108,5 +108,10 @@ export const enrichComments = (params: {
             )
         }),
       { discard: true }
+    )
+
+    // Derive commented_by from cached pr_comments
+    yield* prRepo.refreshCommentedBy().pipe(
+      Effect.catchAll(() => Effect.void)
     )
   })

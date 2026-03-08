@@ -16,8 +16,8 @@ import {
   ArrowRightIcon,
   BellIcon,
   BellOffIcon,
-  ChevronDownIcon,
   CheckIcon,
+  ChevronDownIcon,
   CodeIcon,
   CopyIcon,
   ExternalLinkIcon,
@@ -26,12 +26,11 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
-import rehypeSanitize from "rehype-sanitize"
 import { Link, useNavigate, useParams } from "react-router"
+import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import {
   appStateAtom,
-  commentsAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
@@ -39,6 +38,7 @@ import {
   subscriptionsQueryAtom,
   unsubscribeAtom
 } from "../atoms/app.js"
+import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { StorageKeys } from "../storage-keys.js"
@@ -172,21 +172,12 @@ function CommentThread({ depth, thread }: { readonly thread: CommentThreadJsonEn
 }
 
 function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
-  const fetchComments = useAtomSet(commentsAtom)
-  const commentsResult = useAtomValue(commentsAtom)
-  const fetchedRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (fetchedRef.current === pr.id) return
-    fetchedRef.current = pr.id
-    fetchComments({
-      payload: {
-        pullRequestId: pr.id,
-        repositoryName: pr.repositoryName,
-        account: { profile: pr.account.profile, region: pr.account.region }
-      }
-    })
-  }, [pr.id, pr.repositoryName, pr.account.profile, pr.account.region, fetchComments])
+  const commentsResult = useComments({
+    pullRequestId: pr.id,
+    repositoryName: pr.repositoryName,
+    profile: pr.account.profile,
+    region: pr.account.region
+  })
 
   return Result.builder(commentsResult)
     .onInitialOrWaiting(() => (
@@ -229,6 +220,76 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
       )
     })
     .render()
+}
+
+function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
+  const commentsResult = useComments({
+    pullRequestId: pr.id,
+    repositoryName: pr.repositoryName,
+    profile: pr.account.profile,
+    region: pr.account.region
+  })
+
+  const timeToMerge = pr.status === "MERGED" ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
+
+  const { timeToAddressFeedback, timeToFirstReview } = useMemo(() => {
+    if (!Result.isSuccess(commentsResult)) return { timeToFirstReview: null, timeToAddressFeedback: null }
+    const allComments: Array<{ author: string; date: Date }> = []
+    for (const loc of commentsResult.value) {
+      const walk = (threads: ReadonlyArray<CommentThreadJsonEncoded>) => {
+        for (const t of threads) {
+          allComments.push({ author: t.root.author, date: new Date(t.root.creationDate) })
+          walk(t.replies)
+        }
+      }
+      walk(loc.comments)
+    }
+    allComments.sort((a, b) => a.date.getTime() - b.date.getTime())
+
+    const firstComment = allComments.find((c) => c.author !== pr.author)
+    const commentMs = firstComment ? firstComment.date.getTime() - pr.creationDate.getTime() : null
+    // Approval as review fallback: use lastModifiedDate as proxy for approval time
+    const hasNonAuthorApproval = pr.isApproved && pr.approvedBy.some((a) => a !== pr.author)
+    const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
+    const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
+
+    const feedbackDeltas: Array<number> = []
+    for (let i = 0; i < allComments.length; i++) {
+      if (allComments[i]!.author !== pr.author) {
+        const reply = allComments.slice(i + 1).find((c) => c.author === pr.author)
+        if (reply) feedbackDeltas.push(reply.date.getTime() - allComments[i]!.date.getTime())
+      }
+    }
+    const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
+
+    return { timeToFirstReview: ttfr, timeToAddressFeedback: ttaf }
+  }, [commentsResult, pr.author, pr.creationDate])
+
+  const hasAny = timeToMerge != null || timeToFirstReview != null || timeToAddressFeedback != null
+  if (!hasAny) return null
+
+  return (
+    <>
+      {timeToMerge != null && (
+        <>
+          <span className="text-muted-foreground">Time to Merge</span>
+          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToMerge)}</span>
+        </>
+      )}
+      {timeToFirstReview != null && (
+        <>
+          <span className="text-muted-foreground">Time to First Review</span>
+          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToFirstReview)}</span>
+        </>
+      )}
+      {timeToAddressFeedback != null && (
+        <>
+          <span className="text-muted-foreground">Time to Address Feedback</span>
+          <span className="text-xs font-medium tabular-nums">{DateUtils.formatDuration(timeToAddressFeedback)}</span>
+        </>
+      )}
+    </>
+  )
 }
 
 function CollapsibleSection({
@@ -503,7 +564,7 @@ export function PRDetail() {
           <Badge variant="outline">{pr.status}</Badge>
           <ScoreBadge score={score} />
           <Link
-            to={`/?filter=author&value=${encodeURIComponent(pr.author)}`}
+            to={`/?f=author:${encodeURIComponent(pr.author)}`}
             className="text-sm text-muted-foreground hover:underline"
           >
             {pr.author}
@@ -527,17 +588,14 @@ export function PRDetail() {
         <CardContent className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 py-4 text-sm">
           <span className="text-muted-foreground">Account</span>
           <Link
-            to={`/?filter=account&value=${encodeURIComponent(pr.account.profile)}`}
+            to={`/?f=account:${encodeURIComponent(pr.account.profile)}`}
             className="font-mono text-xs hover:underline"
           >
             {pr.account.profile}
           </Link>
 
           <span className="text-muted-foreground">Repository</span>
-          <Link
-            to={`/?filter=repo&value=${encodeURIComponent(pr.repositoryName)}`}
-            className="font-mono text-xs hover:underline"
-          >
+          <Link to={`/?f=repo:${encodeURIComponent(pr.repositoryName)}`} className="font-mono text-xs hover:underline">
             {pr.repositoryName}
           </Link>
 
@@ -553,17 +611,14 @@ export function PRDetail() {
           </div>
 
           <span className="text-muted-foreground">Author</span>
-          <Link to={`/?filter=author&value=${encodeURIComponent(pr.author)}`} className="text-xs hover:underline">
+          <Link to={`/?f=author:${encodeURIComponent(pr.author)}`} className="text-xs hover:underline">
             {pr.author}
           </Link>
 
           {extractScope(pr.title) && (
             <>
               <span className="text-muted-foreground">Scope</span>
-              <Link
-                to={`/?filter=scope&value=${encodeURIComponent(extractScope(pr.title)!)}`}
-                className="text-xs hover:underline"
-              >
+              <Link to={`/?f=scope:${encodeURIComponent(extractScope(pr.title)!)}`} className="text-xs hover:underline">
                 {extractScope(pr.title)}
               </Link>
             </>
@@ -571,31 +626,46 @@ export function PRDetail() {
 
           <span className="text-muted-foreground">Status</span>
           <div className="flex items-center gap-2">
-            <Link to={`/?filter=status&value=${pr.isApproved ? "approved" : "pending"}`} className="hover:underline">
-              {pr.isApproved ? (
-                <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-                  Approved
+            {pr.status === "MERGED" ? (
+              <Link to="/?f=status:merged" className="hover:underline">
+                <Badge variant="outline" className="border-purple-500/30 text-purple-600 dark:text-purple-400">
+                  Merged
                 </Badge>
-              ) : (
-                <Badge variant="secondary">Pending</Badge>
-              )}
-            </Link>
-            <Link
-              to={`/?filter=status&value=${pr.isMergeable ? "mergeable" : "conflicts"}`}
-              className="hover:underline"
-            >
-              {pr.isMergeable ? (
-                <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-                  Mergeable
+              </Link>
+            ) : pr.status === "CLOSED" ? (
+              <Link to="/?f=status:closed" className="hover:underline">
+                <Badge variant="outline" className="border-red-500/30 text-red-600 dark:text-red-400">
+                  Closed
                 </Badge>
-              ) : (
-                <Badge variant="destructive">Conflict</Badge>
-              )}
-            </Link>
+              </Link>
+            ) : (
+              <>
+                <Link to={`/?f=status:${pr.isApproved ? "approved" : "pending"}`} className="hover:underline">
+                  {pr.isApproved ? (
+                    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+                      Approved
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Pending</Badge>
+                  )}
+                </Link>
+                <Link to={`/?f=status:${pr.isMergeable ? "mergeable" : "conflicts"}`} className="hover:underline">
+                  {pr.isMergeable ? (
+                    <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+                      Mergeable
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive">Conflict</Badge>
+                  )}
+                </Link>
+              </>
+            )}
           </div>
 
           <span className="text-muted-foreground">ID</span>
           <span className="font-mono text-xs">{pr.id}</span>
+
+          <LifecycleInfo pr={pr} />
         </CardContent>
       </Card>
 

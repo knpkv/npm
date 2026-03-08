@@ -143,15 +143,18 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   isApproved: Schema.Boolean,
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
-  fetchedAt: Schema.optional(Schema.DateFromSelf)
+  fetchedAt: Schema.optional(Schema.DateFromSelf),
+  approvedBy: Schema.Array(Schema.String),
+  commentedBy: Schema.Array(Schema.String),
+  filesChanged: Schema.optional(Schema.Number)
 }) {
-  /**
-   * AWS Console URL for this pull request.
-   */
   get consoleUrl(): string {
-    return `https://${this.account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${this.repositoryName}/pull-requests/${this.id}?region=${this.account.region}`
+    return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
   }
 }
+
+export const codecommitConsoleUrl = (region: string, repo: string, prId: string): string =>
+  `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${repo}/pull-requests/${prId}?region=${region}`
 
 /**
  * Code sandbox instance for a pull request.

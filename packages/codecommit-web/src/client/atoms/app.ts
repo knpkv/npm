@@ -90,11 +90,6 @@ export const refreshAtom = ApiClient.mutation("prs", "refresh")
 export const openPrAtom = ApiClient.mutation("prs", "open")
 
 /**
- * Fetch comments for a PR
- */
-export const commentsAtom = ApiClient.mutation("prs", "comments")
-
-/**
  * Config path query
  */
 export const configPathQueryAtom = ApiClient.query("config", "path", {
@@ -170,6 +165,9 @@ export const createSandboxAtom = ApiClient.mutation("sandbox", "create")
 export const stopSandboxAtom = ApiClient.mutation("sandbox", "stop")
 export const restartSandboxAtom = ApiClient.mutation("sandbox", "restart")
 export const deleteSandboxAtom = ApiClient.mutation("sandbox", "delete")
+
+// Stats
+export const statsSyncAtom = ApiClient.mutation("stats", "sync")
 
 // FTS search
 export const searchPrsAtom = ApiClient.mutation("prs", "search")

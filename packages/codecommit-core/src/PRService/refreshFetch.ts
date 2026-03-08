@@ -5,12 +5,31 @@
 
 import { Cause, Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
+import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
+
+/** Resolve a stale OPEN PR: delete if still open, update status if merged/closed. */
+const resolveStaleStatus = (
+  prRepo: PullRequestRepo,
+  detail: PullRequestDetail,
+  awsAccountId: string,
+  id: string
+) =>
+  detail.status === "OPEN"
+    ? prRepo.deleteOne(awsAccountId, id)
+    : prRepo.updateStatusAndClosedAt(
+      awsAccountId,
+      id,
+      detail.status,
+      detail.lastActivityDate.toISOString(),
+      detail.mergedBy,
+      detail.approvedBy
+    )
 
 export const fetchAndUpsertPRs = (params: {
   readonly state: PRState
@@ -112,6 +131,25 @@ export const fetchAndUpsertPRs = (params: {
       )
     )
 
-    // Remove stale PRs not refreshed in this cycle
-    yield* prRepo.deleteStale(staleThreshold).pipe(Effect.catchAll(() => Effect.void))
+    // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
+    yield* prRepo.findStaleOpen(staleThreshold).pipe(
+      Effect.flatMap((stalePRs) =>
+        Effect.forEach(
+          stalePRs,
+          (pr) =>
+            awsClient
+              .getPullRequest({
+                account: { profile: pr.accountProfile, region: pr.accountRegion },
+                pullRequestId: pr.id
+              })
+              .pipe(
+                Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
+                Effect.catchAll(() => prRepo.deleteOne(pr.awsAccountId, pr.id)),
+                Effect.catchAll(() => Effect.void)
+              ),
+          { concurrency: 5, discard: true }
+        )
+      ),
+      Effect.catchAll(() => Effect.void)
+    )
   })

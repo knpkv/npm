@@ -27,7 +27,9 @@ const makePR = (overrides: Partial<{
     destinationBranch: "main",
     isMergeable: overrides.isMergeable ?? true,
     isApproved: overrides.isApproved ?? false,
-    commentCount: overrides.commentCount
+    commentCount: overrides.commentCount,
+    approvedBy: [],
+    commentedBy: []
   })
 
 describe("HealthScore", () => {

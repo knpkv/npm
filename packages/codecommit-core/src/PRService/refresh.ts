@@ -7,11 +7,12 @@ import type { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import type { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import type { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import type { ConfigService } from "../ConfigService/index.js"
 import type { PRState } from "./internal.js"
+import { enrichDiffs } from "./refreshDiffs.js"
 import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
 import { resolveAccounts } from "./refreshResolve.js"
@@ -43,6 +44,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
       Effect.gen(function*() {
         yield* fetchAndUpsertPRs({ state, enabledAccounts, accountIdMap, subscribedRef, currentUser, staleThreshold })
         yield* enrichComments({ state, subscribedRef })
+        yield* enrichDiffs(state)
         yield* calculateHealthScores(state)
       })
     )

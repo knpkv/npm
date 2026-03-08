@@ -4,7 +4,7 @@
  */
 
 import { Clock, DateTime, Effect, SubscriptionRef } from "effect"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { scoreTotalOr } from "../HealthScore.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 

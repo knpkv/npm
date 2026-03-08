@@ -1,27 +1,41 @@
 import { Atom } from "@effect-atom/atom-react"
 
 /**
- * Filter text for PR list
+ * Multi-filter key — each maps to a PR field
  */
-export const filterTextAtom = Atom.make("").pipe(Atom.keepAlive)
+export type FilterKey = "account" | "author" | "approver" | "commenter" | "scope" | "repo" | "status" | "size"
 
 /**
- * Quick filter type
+ * Single filter entry (one per key allowed)
  */
-export type QuickFilterType = "all" | "mine" | "account" | "author" | "scope" | "repo" | "status" | "hot"
-
-/**
- * Quick filter state
- */
-export interface QuickFilter {
-  type: QuickFilterType
-  value?: string
+export interface FilterEntry {
+  readonly key: FilterKey
+  readonly value: string
 }
 
 /**
- * Current quick filter
+ * Full filter state — derived from URL search params
  */
-export const quickFilterAtom = Atom.make<QuickFilter>({ type: "all" }).pipe(Atom.keepAlive)
+export interface FilterState {
+  readonly filters: ReadonlyArray<FilterEntry>
+  readonly hot: boolean
+  readonly mine: boolean
+  readonly mineScope?: string
+  readonly q: string
+  readonly from?: string
+  readonly to?: string
+}
+
+export const FILTER_KEYS: ReadonlyArray<FilterKey> = [
+  "account",
+  "author",
+  "approver",
+  "commenter",
+  "scope",
+  "repo",
+  "status",
+  "size"
+]
 
 /**
  * Command palette open state

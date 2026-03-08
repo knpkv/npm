@@ -7,11 +7,11 @@ import { AwsClient } from "../AwsClient/index.js"
 import { diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import type { UpsertInput } from "../CacheService/repos/PullRequestRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo.js"
+import type { UpsertInput } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
-import type { PullRequestId } from "../Domain.js"
+import { codecommitConsoleUrl, type PullRequestId } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 
 /** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
@@ -95,8 +95,8 @@ export const makeRefreshSinglePR = (
       isMergeable: cached ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       isApproved: cached ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       commentCount: countAllComments(locs),
-      link: cached?.link ?? pr?.link
-        ?? `https://${account.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${detail.repositoryName}/pull-requests/${prId}?region=${account.region}`
+      link: cached?.link ?? pr?.link ?? codecommitConsoleUrl(account.region, detail.repositoryName, prId),
+      approvedBy: cached?.approvedBy ?? []
     }
 
     // Diff for subscribed PRs

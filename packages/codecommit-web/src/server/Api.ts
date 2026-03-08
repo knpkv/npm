@@ -2,12 +2,14 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
 import {
   Account,
   AwsProfileName,
+  AwsRegion,
   PRCommentLocationJson,
   PullRequest,
   PullRequestId,
   SandboxId,
   SandboxStatus
 } from "@knpkv/codecommit-core/Domain.js"
+import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
 
 // API error returned to clients for AWS failures
@@ -103,12 +105,13 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       .addError(ApiError)
   )
   .add(
-    HttpApiEndpoint.post("comments", "/comments")
-      .setPayload(
+    HttpApiEndpoint.get("comments", "/comments")
+      .setUrlParams(
         Schema.Struct({
           pullRequestId: Schema.String,
           repositoryName: Schema.String,
-          account: Account
+          profile: AwsProfileName,
+          region: AwsRegion
         })
       )
       .addSuccess(Schema.Array(PRCommentLocationJson))
@@ -356,6 +359,30 @@ export class SandboxGroup extends HttpApiGroup.make("sandbox")
   .prefix("/api/sandbox")
 {}
 
+// Stats endpoints
+export { WeeklyStats }
+
+export class StatsGroup extends HttpApiGroup.make("stats")
+  .add(
+    HttpApiEndpoint.get("get", "/")
+      .setUrlParams(Schema.Struct({
+        week: Schema.String.pipe(Schema.pattern(/^\d{4}-W\d{2}$/)),
+        repo: Schema.optional(Schema.String),
+        author: Schema.optional(Schema.String),
+        account: Schema.optional(Schema.String)
+      }))
+      .addSuccess(WeeklyStats)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("sync", "/sync")
+      .setPayload(Schema.Struct({ week: Schema.String.pipe(Schema.pattern(/^\d{4}-W\d{2}$/)) }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .prefix("/api/stats")
+{}
+
 // Combined API
 export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(PrsGroup)
@@ -365,4 +392,5 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(NotificationsGroup)
   .add(SubscriptionsGroup)
   .add(SandboxGroup)
+  .add(StatsGroup)
 {}

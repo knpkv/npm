@@ -25,7 +25,10 @@ const PullRequestWire = Schema.Struct({
   isApproved: Schema.Boolean,
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
-  fetchedAt: Schema.optional(Schema.DateFromString)
+  fetchedAt: Schema.optional(Schema.DateFromString),
+  approvedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  commentedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  filesChanged: Schema.optional(Schema.Number)
 })
 
 const NotificationWire = Schema.Struct({

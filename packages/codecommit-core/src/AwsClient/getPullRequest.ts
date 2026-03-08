@@ -25,10 +25,12 @@ const RawGetPullRequestResponse = Schema.Struct({
       sourceReference: Schema.optional(Schema.String),
       destinationReference: Schema.optional(Schema.String),
       mergeMetadata: Schema.optional(Schema.Struct({
-        isMerged: Schema.optional(Schema.Boolean)
+        isMerged: Schema.optional(Schema.Boolean),
+        mergedBy: Schema.optional(Schema.String)
       }))
     }))),
-    creationDate: Schema.optional(Schema.DateFromSelf)
+    creationDate: Schema.optional(Schema.DateFromSelf),
+    lastActivityDate: Schema.optional(Schema.DateFromSelf)
   }))
 })
 
@@ -40,6 +42,7 @@ const RawToPullRequestDetail = Schema.transform(
       const pr = raw.pullRequest
       const target = pr?.pullRequestTargets?.[0]
       const isMerged = target?.mergeMetadata?.isMerged === true
+      const mergedByArn = target?.mergeMetadata?.mergedBy
       return {
         title: pr?.title ?? "",
         description: pr?.description,
@@ -48,7 +51,10 @@ const RawToPullRequestDetail = Schema.transform(
         repositoryName: target?.repositoryName ?? "",
         sourceBranch: target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "",
         destinationBranch: target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "",
-        creationDate: pr?.creationDate ?? EpochFallback
+        creationDate: pr?.creationDate ?? EpochFallback,
+        lastActivityDate: pr?.lastActivityDate ?? pr?.creationDate ?? EpochFallback,
+        approvedBy: [],
+        mergedBy: mergedByArn ? normalizeAuthor(mergedByArn) : undefined
       }
     },
     encode: (detail) => ({
@@ -62,7 +68,8 @@ const RawToPullRequestDetail = Schema.transform(
           sourceReference: detail.sourceBranch,
           destinationReference: detail.destinationBranch
         }],
-        creationDate: detail.creationDate
+        creationDate: detail.creationDate,
+        lastActivityDate: detail.lastActivityDate
       }
     })
   }
@@ -71,9 +78,29 @@ const RawToPullRequestDetail = Schema.transform(
 // Effectful decode — ParseError in error channel instead of thrown defect
 const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknown(RawToPullRequestDetail)(raw)
 
+const fetchApprovers = (pullRequestId: string, revisionId: string) =>
+  codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId }).pipe(
+    Effect.map((r) =>
+      (r.approvals ?? [])
+        .filter((a) => a.approvalState === "APPROVE" && a.userArn)
+        .map((a) => normalizeAuthor(a.userArn!))
+    ),
+    Effect.catchAll(() => Effect.succeed([] as Array<string>))
+  )
+
 const callGetPullRequest = (params: GetPullRequestParams) =>
-  codecommit.getPullRequest({ pullRequestId: params.pullRequestId }).pipe(
-    Effect.flatMap(decodePullRequestDetail),
+  Effect.gen(function*() {
+    const resp = yield* codecommit.getPullRequest({ pullRequestId: params.pullRequestId })
+    const revisionId = resp.pullRequest?.revisionId ?? ""
+    const [detail, approvers] = yield* Effect.all([
+      decodePullRequestDetail(resp),
+      fetchApprovers(params.pullRequestId, revisionId)
+    ], { concurrency: 2 })
+    return new PullRequestDetail({
+      ...detail,
+      approvedBy: approvers
+    })
+  }).pipe(
     Effect.mapError((cause) => makeApiError("getPullRequest", params.account.profile, params.account.region, cause))
   )
 

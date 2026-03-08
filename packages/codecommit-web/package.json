@@ -23,7 +23,6 @@
     "docgen": "docgen"
   },
   "dependencies": {
-    "@formkit/auto-animate": "^0.8.2",
     "@effect-atom/atom": "latest",
     "@effect-atom/atom-react": "latest",
     "@effect/cluster": "^0.56.2",
@@ -32,6 +31,7 @@
     "@effect/platform-node": "latest",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
+    "@formkit/auto-animate": "^0.8.2",
     "@knpkv/codecommit-core": "workspace:^",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
@@ -42,6 +42,7 @@
     "lucide-react": "^0.563.0",
     "radix-ui": "^1.4.3",
     "react": "^19.1.0",
+    "react-day-picker": "^9.14.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-router": "^7.0.0",

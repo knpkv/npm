@@ -6,6 +6,7 @@ import { PRList } from "./components/pr-list.js"
 import { SandboxView } from "./components/sandbox-view.js"
 import { SandboxesPage } from "./components/sandboxes-page.js"
 import { SettingsPage } from "./components/settings-page.js"
+import { StatsPage } from "./components/stats-page.js"
 
 interface RouteHandle {
   readonly fullWidth?: boolean
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
       { path: "sandbox/:sandboxId", element: <SandboxView />, handle: { fullWidth: true } },
       { path: "settings/:tab?", element: <SettingsPage /> },
       { path: "notifications", element: <NotificationsPage /> },
+      { path: "stats", element: <StatsPage /> },
       { path: "*", element: <Navigate to="/" replace /> }
     ]
   }

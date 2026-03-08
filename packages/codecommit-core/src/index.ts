@@ -22,6 +22,7 @@ export * as Domain from "./Domain.js"
 export * as Errors from "./Errors.js"
 export * as PRService from "./PRService/index.js"
 export * as SandboxService from "./SandboxService/index.js"
+export * as StatsService from "./StatsService/index.js"
 
 // Re-export Effect dependencies for convenience
 export { Registry } from "@effect-atom/atom"

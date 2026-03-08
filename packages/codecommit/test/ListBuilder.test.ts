@@ -31,7 +31,9 @@ const base = {
   sourceBranch: "feature/auth",
   destinationBranch: "main",
   isMergeable: true,
-  isApproved: false
+  isApproved: false,
+  approvedBy: [],
+  commentedBy: []
 }
 
 const pr1 = decodePR({ ...base, id: "1", title: "feat(auth): add login", account: acc1 })

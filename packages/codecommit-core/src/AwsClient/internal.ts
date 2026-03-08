@@ -164,6 +164,19 @@ export interface GetPullRequestParams {
   readonly pullRequestId: string
 }
 
+export interface GetDifferencesParams {
+  readonly account: AccountParams
+  readonly repositoryName: string
+  readonly beforeCommitSpecifier: string
+  readonly afterCommitSpecifier: string
+}
+
+export interface DiffStats {
+  readonly filesAdded: number
+  readonly filesModified: number
+  readonly filesDeleted: number
+}
+
 export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequestDetail")({
   title: Schema.String,
   description: Schema.optional(Schema.String),
@@ -172,5 +185,8 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
-  creationDate: Schema.DateFromSelf
+  creationDate: Schema.DateFromSelf,
+  lastActivityDate: Schema.DateFromSelf,
+  mergedBy: Schema.optional(Schema.String),
+  approvedBy: Schema.Array(Schema.String)
 }) {}
