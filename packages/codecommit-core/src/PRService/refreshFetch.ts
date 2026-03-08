@@ -26,7 +26,7 @@ const resolveStaleStatus = (
       awsAccountId,
       id,
       detail.status,
-      new Date().toISOString(),
+      detail.lastActivityDate.toISOString(),
       detail.mergedBy,
       detail.approvedBy
     )

@@ -29,7 +29,8 @@ const RawGetPullRequestResponse = Schema.Struct({
         mergedBy: Schema.optional(Schema.String)
       }))
     }))),
-    creationDate: Schema.optional(Schema.DateFromSelf)
+    creationDate: Schema.optional(Schema.DateFromSelf),
+    lastActivityDate: Schema.optional(Schema.DateFromSelf)
   }))
 })
 
@@ -51,6 +52,7 @@ const RawToPullRequestDetail = Schema.transform(
         sourceBranch: target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "",
         destinationBranch: target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "",
         creationDate: pr?.creationDate ?? EpochFallback,
+        lastActivityDate: pr?.lastActivityDate ?? pr?.creationDate ?? EpochFallback,
         approvedBy: [],
         mergedBy: mergedByArn ? normalizeAuthor(mergedByArn) : undefined
       }
@@ -66,7 +68,8 @@ const RawToPullRequestDetail = Schema.transform(
           sourceReference: detail.sourceBranch,
           destinationReference: detail.destinationBranch
         }],
-        creationDate: detail.creationDate
+        creationDate: detail.creationDate,
+        lastActivityDate: detail.lastActivityDate
       }
     })
   }

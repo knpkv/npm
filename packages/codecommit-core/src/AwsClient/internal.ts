@@ -186,6 +186,7 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   creationDate: Schema.DateFromSelf,
+  lastActivityDate: Schema.DateFromSelf,
   mergedBy: Schema.optional(Schema.String),
   approvedBy: Schema.Array(Schema.String)
 }) {}
