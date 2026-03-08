@@ -177,10 +177,11 @@ export const filterOptions = (sql: SqlClient.SqlClient) => () =>
     `.pipe(
     Effect.map((rows) => {
       const r = rows[0]
+      const sorted = (s: string | undefined) => s?.split(",").filter(Boolean).sort() ?? []
       return {
-        repos: r?.repos?.split(",").filter(Boolean) ?? [],
-        authors: r?.authors?.split(",").filter(Boolean) ?? [],
-        accounts: r?.accounts?.split(",").filter(Boolean) ?? []
+        repos: sorted(r?.repos),
+        authors: sorted(r?.authors),
+        accounts: sorted(r?.accounts)
       }
     }),
     cacheError("filterOptions")

@@ -22,6 +22,7 @@ import {
 
 export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, weekEnd: string, filters: Filters) => {
   const f = whereFilters(sql, filters)
+  const fJoin = whereFilters(sql, filters, "p")
   return Effect.all({
     prs: sql<PRForReviewRow>`
         SELECT id, title, author, aws_account_id, repository_name, creation_date, closed_at,
@@ -37,7 +38,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
         INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
         WHERE COALESCE(p.closed_at, p.last_modified_date) >= ${weekStart} AND COALESCE(p.closed_at, p.last_modified_date) < ${weekEnd}
           AND p.status != 'CLOSED'
-          ${f.repo} ${f.author} ${f.account}
+          ${fJoin.repo} ${fJoin.author} ${fJoin.account}
       `
   }).pipe(
     Effect.flatMap(({ comments, prs }) =>

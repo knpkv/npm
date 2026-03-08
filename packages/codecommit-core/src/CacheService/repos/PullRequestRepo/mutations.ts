@@ -131,31 +131,33 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       ),
 
     refreshCommentedBy: () =>
-      Effect.gen(function*() {
-        const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
-        const rows = yield* sql<
-          { awsAccountId: string; pullRequestId: string; author: string; locationsJson: string }
-        >`
-          SELECT c.aws_account_id, c.pull_request_id, p.author, c.locations_json
-          FROM pr_comments c
-          INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
-        `
-        for (const row of rows) {
-          const parsed = yield* Schema.decodeUnknown(LocationsFromJson)(row.locationsJson).pipe(
-            Effect.catchAll(() => Effect.succeed([]))
-          )
-          const commenters = new Set<string>()
-          const walk = (threads: ReadonlyArray<typeof PRCommentLocationJson.Type["comments"][number]>) => {
-            for (const t of threads) {
-              if (t.root.author !== row.author) commenters.add(t.root.author)
-              walk(t.replies)
+      sql.withTransaction(
+        Effect.gen(function*() {
+          const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
+          const rows = yield* sql<
+            { awsAccountId: string; pullRequestId: string; author: string; locationsJson: string }
+          >`
+            SELECT c.aws_account_id, c.pull_request_id, p.author, c.locations_json
+            FROM pr_comments c
+            INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
+          `
+          for (const row of rows) {
+            const parsed = yield* Schema.decodeUnknown(LocationsFromJson)(row.locationsJson).pipe(
+              Effect.catchAll(() => Effect.succeed([]))
+            )
+            const commenters = new Set<string>()
+            const walk = (threads: ReadonlyArray<typeof PRCommentLocationJson.Type["comments"][number]>) => {
+              for (const t of threads) {
+                if (t.root.author !== row.author) commenters.add(t.root.author)
+                walk(t.replies)
+              }
             }
+            for (const loc of parsed) walk(loc.comments)
+            const commentedBy = commenters.size > 0 ? [...commenters].join(",") : null
+            yield* sql`UPDATE pull_requests SET commented_by = ${commentedBy}
+                        WHERE id = ${row.pullRequestId} AND aws_account_id = ${row.awsAccountId}`
           }
-          for (const loc of parsed) walk(loc.comments)
-          const commentedBy = commenters.size > 0 ? [...commenters].join(",") : null
-          yield* sql`UPDATE pull_requests SET commented_by = ${commentedBy}
-                      WHERE id = ${row.pullRequestId} AND aws_account_id = ${row.awsAccountId}`
-        }
-      }).pipe(Effect.asVoid, cacheError("refreshCommentedBy"))
+        })
+      ).pipe(Effect.asVoid, cacheError("refreshCommentedBy"))
   } as const
 }

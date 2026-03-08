@@ -158,13 +158,14 @@ export type Filters = {
   readonly account?: string | undefined
 }
 
-export const whereFilters = (sql: SqlClient.SqlClient, filters: Filters) => {
+export const whereFilters = (sql: SqlClient.SqlClient, filters: Filters, table?: string) => {
   const repos = parseFilter(filters.repo)
   const authors = parseFilter(filters.author)
   const accounts = parseFilter(filters.account)
+  const t = table ? `${table}.` : ""
   return {
-    repo: repos ? sql`AND repository_name IN ${sql.in(repos)}` : sql``,
-    author: authors ? sql`AND author IN ${sql.in(authors)}` : sql``,
-    account: accounts ? sql`AND aws_account_id IN ${sql.in(accounts)}` : sql``
+    repo: repos ? sql`AND ${sql.unsafe(`${t}repository_name`)} IN ${sql.in(repos)}` : sql``,
+    author: authors ? sql`AND ${sql.unsafe(`${t}author`)} IN ${sql.in(authors)}` : sql``,
+    account: accounts ? sql`AND ${sql.unsafe(`${t}aws_account_id`)} IN ${sql.in(accounts)}` : sql``
   }
 }

@@ -92,13 +92,10 @@ export class StatsService extends Effect.Service<StatsService>()("@knpkv/codecom
         const approvalRate = health.total > 0 ? health.approved / health.total : null
 
         const busFactor = topContributors.length > 0
-          ? (() => {
-            const totalPRs = topContributors.reduce((s, c) => s + c.prCount, 0)
-            return {
-              topContributorShare: totalPRs > 0 ? topContributors[0]!.prCount / totalPRs : 0,
-              uniqueContributors: topContributors.length
-            }
-          })()
+          ? {
+            topContributorShare: volume.prsCreated > 0 ? topContributors[0]!.prCount / volume.prsCreated : 0,
+            uniqueContributors: topContributors.length
+          }
           : null
 
         return {
@@ -138,44 +135,44 @@ export class StatsService extends Effect.Service<StatsService>()("@knpkv/codecom
     )
 
     return {
-      getWeeklyStats: (week: string, filters: StatsRepo.Filters): Effect.Effect<WeeklyStats> =>
-        getWeeklyStats(week, filters).pipe(
-          Effect.catchAll((e) => {
-            const fallback: WeeklyStats = {
-              week,
-              weekStart: "",
-              weekEnd: "",
-              dataAvailableSince: null,
-              prsCreated: 0,
-              prsMerged: 0,
-              prsClosed: 0,
-              totalComments: 0,
-              topContributors: [],
-              topReviewers: [],
-              topApprovers: [],
-              medianTimeToMerge: null,
-              medianTimeToFirstReview: null,
-              medianTimeToAddressFeedback: null,
-              mergeTimeDetails: [],
-              firstReviewDetails: [],
-              feedbackDetails: [],
-              mostActivePRs: [],
-              prSizeDistribution: { small: 0, medium: 0, large: 0, extraLarge: 0 },
-              avgDiffSize: null,
-              diffSizeByContributor: [],
-              stalePRs: [],
-              reviewCoverage: null,
-              approvalRate: null,
-              busFactor: null,
-              availableRepos: [],
-              availableAuthors: [],
-              availableAccounts: []
-            }
-            return Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(
-              Effect.as(fallback)
-            )
+      getWeeklyStats: (week: string, filters: StatsRepo.Filters): Effect.Effect<WeeklyStats> => {
+        const fallback: WeeklyStats = {
+          week,
+          weekStart: "",
+          weekEnd: "",
+          dataAvailableSince: null,
+          prsCreated: 0,
+          prsMerged: 0,
+          prsClosed: 0,
+          totalComments: 0,
+          topContributors: [],
+          topReviewers: [],
+          topApprovers: [],
+          medianTimeToMerge: null,
+          medianTimeToFirstReview: null,
+          medianTimeToAddressFeedback: null,
+          mergeTimeDetails: [],
+          firstReviewDetails: [],
+          feedbackDetails: [],
+          mostActivePRs: [],
+          prSizeDistribution: { small: 0, medium: 0, large: 0, extraLarge: 0 },
+          avgDiffSize: null,
+          diffSizeByContributor: [],
+          stalePRs: [],
+          reviewCoverage: null,
+          approvalRate: null,
+          busFactor: null,
+          availableRepos: [],
+          availableAuthors: [],
+          availableAccounts: []
+        }
+        return getWeeklyStats(week, filters).pipe(
+          Effect.catchTags({
+            CacheError: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback)),
+            InvalidISOWeek: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback))
           })
-        ),
+        )
+      },
 
       syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>): Effect.Effect<void> =>
         syncWeekImpl(state, week).pipe(Effect.provide(depsLayer)),

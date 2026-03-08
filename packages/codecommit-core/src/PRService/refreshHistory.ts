@@ -125,7 +125,7 @@ export const syncWeek = Effect.fn("syncWeek")(
                       pr.awsAccountId,
                       pr.id,
                       detail.status,
-                      new Date().toISOString(),
+                      detail.lastActivityDate.toISOString(),
                       detail.mergedBy,
                       detail.approvedBy
                     )

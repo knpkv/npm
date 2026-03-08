@@ -130,6 +130,7 @@ describe("StatsService", () => {
       expect(stats.busFactor!.topContributorShare).toBe(0.5)
       expect(stats.busFactor!.uniqueContributors).toBe(3)
     }).pipe(Effect.provide(testLayer({
+      volume: { prsCreated: 10, prsMerged: 0, prsClosed: 0 },
       contributors: [
         { author: "alice", prCount: 5 },
         { author: "bob", prCount: 3 },
