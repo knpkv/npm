@@ -1,5 +1,13 @@
 # @knpkv/codecommit
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [[`3932903`](https://github.com/knpkv/npm/commit/3932903aefc932fc74fcd599e7cd7850a0a3f57c)]:
+  - @knpkv/codecommit-web@0.6.0
+  - @knpkv/codecommit-core@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

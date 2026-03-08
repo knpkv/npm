@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.6.0
+
+### Minor Changes
+
+- [#47](https://github.com/knpkv/npm/pull/47) [`3932903`](https://github.com/knpkv/npm/commit/3932903aefc932fc74fcd599e7cd7850a0a3f57c) Thanks @konopkov! - Add statistics dashboard page and improve PR list filtering with default status:open filter
+
+### Patch Changes
+
+- Updated dependencies [[`3932903`](https://github.com/knpkv/npm/commit/3932903aefc932fc74fcd599e7cd7850a0a3f57c)]:
+  - @knpkv/codecommit-core@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes
