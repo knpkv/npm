@@ -4,9 +4,16 @@ import { FILTER_KEYS, type FilterEntry, type FilterKey, type FilterState } from 
 
 const isFilterKey = (k: string): k is FilterKey => (FILTER_KEYS as ReadonlyArray<string>).includes(k)
 
+const DEFAULT_FILTERS: ReadonlyArray<FilterEntry> = [{ key: "status", value: "open" }]
+const DEFAULT_FILTER_PARAMS = DEFAULT_FILTERS.map((f) => `${f.key}:${f.value}`)
+
 function parseFilters(params: URLSearchParams): ReadonlyArray<FilterEntry> {
+  const rawEntries = params.getAll("f")
+  // No explicit f= params → apply defaults
+  if (rawEntries.length === 0) return DEFAULT_FILTERS
+
   const entries: Array<FilterEntry> = []
-  for (const raw of params.getAll("f")) {
+  for (const raw of rawEntries) {
     const idx = raw.indexOf(":")
     if (idx < 1) continue
     const key = raw.slice(0, idx)
@@ -41,15 +48,28 @@ export function useFilterParams() {
   const toggleFilter = useCallback(
     (key: FilterKey, value: string) => {
       setSearchParams((prev) => {
-        const existing = prev.getAll("f")
+        let existing = prev.getAll("f")
         const target = `${key}:${value}`
+
+        // Materialize defaults into URL when no explicit f= params
+        if (existing.length === 0) {
+          for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
+          existing = prev.getAll("f")
+        }
+
         const has = existing.includes(target)
         prev.delete("f")
         for (const raw of existing) {
-          if (raw === target) continue // skip — we'll either remove or re-add
+          if (raw === target || raw === "") continue
           prev.append("f", raw)
         }
         if (!has) prev.append("f", target)
+
+        // Sentinel prevents default re-injection when all filters removed
+        if (prev.getAll("f").length === 0 && has) {
+          prev.append("f", "")
+        }
+
         return prev
       }, { replace: true })
     },
@@ -60,12 +80,23 @@ export function useFilterParams() {
   const removeFilterKey = useCallback(
     (key: FilterKey) => {
       setSearchParams((prev) => {
-        const existing = prev.getAll("f")
+        let existing = prev.getAll("f")
+
+        if (existing.length === 0) {
+          for (const d of DEFAULT_FILTER_PARAMS) prev.append("f", d)
+          existing = prev.getAll("f")
+        }
+
         prev.delete("f")
         for (const raw of existing) {
-          const k = raw.slice(0, raw.indexOf(":"))
-          if (k !== key) prev.append("f", raw)
+          if (raw === "" || raw.slice(0, raw.indexOf(":")) === key) continue
+          prev.append("f", raw)
         }
+
+        if (prev.getAll("f").length === 0) {
+          prev.append("f", "")
+        }
+
         return prev
       }, { replace: true })
     },

@@ -61,6 +61,14 @@ function FilterCombobox({
   const count = selected.length
 
   const groupChildren = useMemo(() => (groups ? new Set(Object.values(groups).flat()) : new Set<string>()), [groups])
+  const childToParent = useMemo(() => {
+    if (!groups) return new Map<string, string>()
+    const map = new Map<string, string>()
+    for (const [g, children] of Object.entries(groups)) {
+      for (const c of children) map.set(c, g)
+    }
+    return map
+  }, [groups])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -84,7 +92,10 @@ function FilterCombobox({
               {options.map((opt, i) => {
                 const isGroup = groups != null && opt in groups
                 const isChild = groupChildren.has(opt)
-                const isSelected = isGroup ? groups![opt]!.every((c) => selected.includes(c)) : selected.includes(opt)
+                const parentName = childToParent.get(opt)
+                const isSelected = isGroup
+                  ? groups![opt]!.every((c) => selected.includes(c)) || selected.includes(opt)
+                  : selected.includes(opt) || (parentName != null && selected.includes(parentName))
                 // Separator after last child in a group
                 const prevOpt = i > 0 ? options[i - 1] : undefined
                 const showSep = !isChild && !isGroup && prevOpt != null && groupChildren.has(prevOpt)
@@ -236,13 +247,41 @@ export function FilterBar() {
   const prs = appState.pullRequests
   const currentUser = appState.currentUser
 
-  // "open" group toggle: expands to 3 sub-statuses atomically
+  // Selected values grouped by key (moved above handleToggle so it can reference it)
+  const selectedMap = useMemo(() => {
+    const map = new Map<FilterKey, Array<string>>()
+    for (const f of state.filters) {
+      const arr = map.get(f.key)
+      if (arr) arr.push(f.value)
+      else map.set(f.key, [f.value])
+    }
+    return map
+  }, [state.filters])
+
+  // Status group toggle with parent-expansion awareness
   const handleToggle = useCallback(
     (key: FilterKey, value: string) => {
       if (key === "status" && value === "open") {
+        // Clicking the "open" group header
         setSearchParams(
           (prev) => {
-            const existing = prev.getAll("f")
+            let existing = prev.getAll("f")
+            // Materialize defaults if needed
+            if (existing.length === 0) {
+              prev.append("f", "status:open")
+              existing = prev.getAll("f")
+            }
+            // If "open" is directly selected, toggle it off
+            if (existing.includes("status:open")) {
+              prev.delete("f")
+              for (const raw of existing) {
+                if (raw === "status:open" || raw === "") continue
+                prev.append("f", raw)
+              }
+              if (prev.getAll("f").length === 0) prev.append("f", "")
+              return prev
+            }
+            // Otherwise, group expansion (toggle all sub-statuses)
             const subs = OPEN_SUB_STATUSES.map((s) => `status:${s}`)
             const allPresent = subs.every((s) => existing.includes(s))
             prev.delete("f")
@@ -253,6 +292,33 @@ export function FilterBar() {
             if (!allPresent) {
               for (const s of subs) prev.append("f", s)
             }
+            if (prev.getAll("f").length === 0) prev.append("f", "")
+            return prev
+          },
+          { replace: true }
+        )
+      } else if (
+        key === "status" &&
+        (OPEN_SUB_STATUSES as ReadonlyArray<string>).includes(value) &&
+        selectedMap.get("status")?.includes("open")
+      ) {
+        // Clicking a sub-status while parent "open" is directly selected:
+        // expand parent into all sub-statuses minus the clicked one
+        setSearchParams(
+          (prev) => {
+            let existing = prev.getAll("f")
+            if (existing.length === 0) {
+              prev.append("f", "status:open")
+              existing = prev.getAll("f")
+            }
+            prev.delete("f")
+            for (const raw of existing) {
+              if (raw === "status:open" || raw === "") continue
+              prev.append("f", raw)
+            }
+            for (const s of OPEN_SUB_STATUSES) {
+              if (s !== value) prev.append("f", `status:${s}`)
+            }
             return prev
           },
           { replace: true }
@@ -261,19 +327,8 @@ export function FilterBar() {
         toggleFilter(key, value)
       }
     },
-    [toggleFilter, setSearchParams]
+    [toggleFilter, setSearchParams, selectedMap]
   )
-
-  // Selected values grouped by key
-  const selectedMap = useMemo(() => {
-    const map = new Map<FilterKey, Array<string>>()
-    for (const f of state.filters) {
-      const arr = map.get(f.key)
-      if (arr) arr.push(f.value)
-      else map.set(f.key, [f.value])
-    }
-    return map
-  }, [state.filters])
 
   // Cascading options: for each filter key, compute available options
   // from PRs that match all OTHER active filter groups
@@ -355,7 +410,7 @@ export function FilterBar() {
                 key={`${key}:${value}`}
                 variant="secondary"
                 className="cursor-pointer gap-1 pl-2 pr-0.5 h-5 text-[10px] shrink-0"
-                onClick={() => handleToggle(key, value)}
+                onClick={() => toggleFilter(key, value)}
               >
                 {FILTER_LABELS[key]}: {value}
                 <XIcon className="size-2.5" />

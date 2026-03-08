@@ -108,12 +108,6 @@ export function PRList() {
     const filterByEntries = (pr: PullRequest) =>
       [...byKey.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
 
-    // Status visibility: which PR statuses to include?
-    const hasStatusLifecycle = filters.some((f) => f.key === "status" && ["merged", "closed", "open"].includes(f.value))
-    const hasParticipantFilter = filters.some((f) => f.key === "approver" || f.key === "commenter")
-    const includesClosedPRs = hasStatusLifecycle || hasParticipantFilter
-    const hasDateRange = !!from && !!to
-
     // Date filter
     const fromMs = from ? new Date(from).getTime() : undefined
     const toMs = to ? new Date(to).getTime() : undefined
@@ -127,13 +121,7 @@ export function PRList() {
       return ts >= fromMs && ts < toMs
     }
 
-    const filtered = prs.filter(
-      (pr) =>
-        (includesClosedPRs || (hasDateRange ? pr.status !== "CLOSED" : pr.status === "OPEN")) &&
-        filterByText(pr) &&
-        filterByEntries(pr) &&
-        filterByDate(pr)
-    )
+    const filtered = prs.filter((pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr))
 
     // Hot mode: flat list sorted by lastModifiedDate desc
     if (hot) {
