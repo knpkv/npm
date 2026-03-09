@@ -200,13 +200,13 @@ function matchesPR(pr: PullRequest, entry: FilterEntry): boolean {
     case "status":
       switch (entry.value) {
         case "approved":
-          return pr.isApproved
+          return pr.status === "OPEN" && pr.isApproved
         case "pending":
-          return !pr.isApproved
+          return pr.status === "OPEN" && !pr.isApproved
         case "mergeable":
-          return pr.isMergeable
+          return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
-          return !pr.isMergeable
+          return pr.status === "OPEN" && !pr.isMergeable
         case "merged":
           return pr.status === "MERGED"
         case "closed":
@@ -281,12 +281,14 @@ export function FilterBar() {
               if (prev.getAll("f").length === 0) prev.append("f", "")
               return prev
             }
-            // Otherwise, group expansion (toggle all sub-statuses)
+            // Otherwise, group expansion (toggle all sub-statuses).
+            // Strip lifecycle peers (merged/closed) to avoid contradictory cross-axis combos.
             const subs = OPEN_SUB_STATUSES.map((s) => `status:${s}`)
+            const lifecycle = new Set(["status:merged", "status:closed"])
             const allPresent = subs.every((s) => existing.includes(s))
             prev.delete("f")
             for (const raw of existing) {
-              if (subs.includes(raw as (typeof subs)[number])) continue
+              if (subs.includes(raw as (typeof subs)[number]) || lifecycle.has(raw)) continue
               prev.append("f", raw)
             }
             if (!allPresent) {
@@ -331,26 +333,35 @@ export function FilterBar() {
   )
 
   // Cascading options: for each filter key, compute available options
-  // from PRs that match all OTHER active filter groups
+  // from PRs that match all OTHER active filter groups.
+  // Status uses axis-based sub-grouping (same as pr-list filtering).
+  const STATUS_AXIS: Record<string, string> = {
+    open: "lifecycle",
+    merged: "lifecycle",
+    closed: "lifecycle",
+    approved: "approval",
+    pending: "approval",
+    mergeable: "merge",
+    conflicts: "merge"
+  }
   const cascadedOptions = useMemo(() => {
-    // Group filters by key
-    const byKey = new Map<FilterKey, ReadonlyArray<FilterEntry>>()
+    const byGroup = new Map<string, ReadonlyArray<FilterEntry>>()
     for (const f of state.filters) {
-      const arr = byKey.get(f.key)
+      const groupKey = f.key === "status" ? `status:${STATUS_AXIS[f.value] ?? f.value}` : f.key
+      const arr = byGroup.get(groupKey)
       if (arr) (arr as Array<FilterEntry>).push(f)
-      else byKey.set(f.key, [f])
+      else byGroup.set(groupKey, [f])
     }
 
     const result: Record<string, ReadonlyArray<string>> = {}
 
     for (const key of VISIBLE_KEYS) {
-      // Filter PRs by all groups EXCEPT the current key
-      const otherKeys = [...byKey.entries()].filter(([k]) => k !== key)
+      // Filter PRs by all groups EXCEPT ones belonging to the current key
+      const otherGroups = [...byGroup.entries()].filter(([k]) => k !== key && !k.startsWith(`${key}:`))
       let subset = prs
-      if (otherKeys.length > 0) {
-        subset = prs.filter((pr) => otherKeys.every(([, group]) => group.some((f) => matchesPR(pr, f))))
+      if (otherGroups.length > 0) {
+        subset = prs.filter((pr) => otherGroups.every(([, group]) => group.some((f) => matchesPR(pr, f))))
       }
-      // Extract options from subset
       const opts = extractOptionsFromPRs(subset, currentUser)
       result[key] = opts[key] ?? []
     }
