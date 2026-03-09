@@ -4,7 +4,7 @@ import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { LoaderIcon, LogInIcon } from "lucide-react"
 import { useEffect, useMemo } from "react"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
-import type { FilterEntry, FilterKey } from "../atoms/ui.js"
+import type { FilterEntry } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
 import { extractScope } from "../utils/extractScope.js"
 import { PRRow } from "./pr-row.js"
@@ -47,13 +47,13 @@ const matchesFilter = (pr: PullRequest, entry: FilterEntry): boolean => {
     case "status":
       switch (entry.value) {
         case "approved":
-          return pr.isApproved
+          return pr.status === "OPEN" && pr.isApproved
         case "pending":
-          return !pr.isApproved
+          return pr.status === "OPEN" && !pr.isApproved
         case "mergeable":
-          return pr.isMergeable
+          return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
-          return !pr.isMergeable
+          return pr.status === "OPEN" && !pr.isMergeable
         case "merged":
           return pr.status === "MERGED"
         case "closed":
@@ -98,15 +98,28 @@ export function PRList() {
       )
     }
 
-    // Group filters by key, then AND across keys, OR within same key
-    const byKey = new Map<FilterKey, Array<FilterEntry>>()
+    // Group filters by key, then AND across keys, OR within same key.
+    // Status sub-values split into orthogonal axes so approval and
+    // mergeability are AND'd, not OR'd (e.g. "approved + mergeable"
+    // means approved AND mergeable, not approved OR mergeable).
+    const STATUS_AXIS: Record<string, string> = {
+      open: "lifecycle",
+      merged: "lifecycle",
+      closed: "lifecycle",
+      approved: "approval",
+      pending: "approval",
+      mergeable: "merge",
+      conflicts: "merge"
+    }
+    const byGroup = new Map<string, Array<FilterEntry>>()
     for (const f of filters) {
-      const arr = byKey.get(f.key)
+      const groupKey = f.key === "status" ? `status:${STATUS_AXIS[f.value] ?? f.value}` : f.key
+      const arr = byGroup.get(groupKey)
       if (arr) arr.push(f)
-      else byKey.set(f.key, [f])
+      else byGroup.set(groupKey, [f])
     }
     const filterByEntries = (pr: PullRequest) =>
-      [...byKey.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
+      [...byGroup.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
 
     // Date filter
     const fromMs = from ? new Date(from).getTime() : undefined
