@@ -1,5 +1,11 @@
 # @knpkv/codecommit-web
 
+## 0.6.1
+
+### Patch Changes
+
+- [#49](https://github.com/knpkv/npm/pull/49) [`0f7d6e6`](https://github.com/knpkv/npm/commit/0f7d6e6b399d2e4da525c99b887a5762d3685157) Thanks @konopkov! - Fix status sub-filters leaking merged/closed PRs by splitting into orthogonal axes (approval, mergeability, lifecycle)
+
 ## 0.6.0
 
 ### Minor Changes
