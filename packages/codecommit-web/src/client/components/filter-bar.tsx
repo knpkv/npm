@@ -281,12 +281,14 @@ export function FilterBar() {
               if (prev.getAll("f").length === 0) prev.append("f", "")
               return prev
             }
-            // Otherwise, group expansion (toggle all sub-statuses)
+            // Otherwise, group expansion (toggle all sub-statuses).
+            // Strip lifecycle peers (merged/closed) to avoid contradictory cross-axis combos.
             const subs = OPEN_SUB_STATUSES.map((s) => `status:${s}`)
+            const lifecycle = new Set(["status:merged", "status:closed"])
             const allPresent = subs.every((s) => existing.includes(s))
             prev.delete("f")
             for (const raw of existing) {
-              if (subs.includes(raw as (typeof subs)[number])) continue
+              if (subs.includes(raw as (typeof subs)[number]) || lifecycle.has(raw)) continue
               prev.append("f", raw)
             }
             if (!allPresent) {
