@@ -1,5 +1,11 @@
 # @knpkv/codecommit-web
 
+## 0.7.0
+
+### Minor Changes
+
+- [#51](https://github.com/knpkv/npm/pull/51) [`ada91ba`](https://github.com/knpkv/npm/commit/ada91bab4fe275cefe6aac1c061a0f7f16b1e000) Thanks @konopkov! - Gold star treatment for #1 contributor/commenter/approver in ranking charts
+
 ## 0.6.1
 
 ### Patch Changes
