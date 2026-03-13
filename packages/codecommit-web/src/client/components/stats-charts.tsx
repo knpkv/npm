@@ -1,5 +1,6 @@
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
+import { StarIcon } from "lucide-react"
 import { Badge } from "./ui/badge.js"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card.js"
 
@@ -34,6 +35,52 @@ export function KPICard({
   )
 }
 
+function RankingRow({
+  highlight,
+  label,
+  onClick,
+  pct,
+  value
+}: {
+  label: string
+  value: number
+  pct: number
+  highlight?: boolean | undefined
+  onClick?: (() => void) | undefined
+}) {
+  return (
+    <div
+      className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5${onClick ? " cursor-pointer" : ""}`}
+      onClick={onClick}
+    >
+      <div
+        className={`absolute inset-0 rounded-md transition-colors ${
+          highlight
+            ? "bg-amber-400/[0.08] group-hover:bg-amber-400/[0.14]"
+            : "bg-foreground/[0.06] dark:bg-foreground/[0.08] group-hover:bg-foreground/[0.10] dark:group-hover:bg-foreground/[0.14]"
+        }`}
+        style={{ width: `${pct}%` }}
+      />
+      {highlight && (
+        <StarIcon
+          key={label}
+          aria-hidden="true"
+          className="relative z-10 size-3 shrink-0 text-amber-400 fill-amber-400"
+          style={{ animation: "star-in 400ms ease-out" }}
+        />
+      )}
+      <span className={`relative z-10 flex-1 truncate text-xs${highlight ? " text-amber-400 font-medium" : ""}`}>
+        {label}
+      </span>
+      <span
+        className={`relative z-10 shrink-0 text-xs tabular-nums ${highlight ? "text-amber-400/60" : "text-muted-foreground"}`}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
 export function RankingChart({
   data,
   labelKey,
@@ -58,25 +105,19 @@ export function RankingChart({
           <p className="text-sm text-muted-foreground">No data</p>
         ) : (
           <div className="space-y-1.5">
-            {data.map((d) => {
+            {data.map((d, i) => {
               const label = String(d[labelKey])
               const value = Number(d[valueKey]) || 0
               const pct = max > 0 ? (value / max) * 100 : 0
               return (
-                <div
+                <RankingRow
                   key={label}
-                  className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5${
-                    onItemClick ? " cursor-pointer" : ""
-                  }`}
+                  label={label}
+                  value={value}
+                  pct={pct}
+                  highlight={i === 0}
                   onClick={onItemClick ? () => onItemClick(label) : undefined}
-                >
-                  <div
-                    className="absolute inset-0 rounded-md bg-foreground/[0.06] dark:bg-foreground/[0.08] transition-colors group-hover:bg-foreground/[0.10] dark:group-hover:bg-foreground/[0.14]"
-                    style={{ width: `${pct}%` }}
-                  />
-                  <span className="relative z-10 flex-1 truncate text-xs">{label}</span>
-                  <span className="relative z-10 shrink-0 text-xs tabular-nums text-muted-foreground">{value}</span>
-                </div>
+                />
               )
             })}
           </div>

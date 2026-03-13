@@ -389,10 +389,9 @@ export function StatsPage() {
           <ChevronLeftIcon className="size-4" />
         </Button>
         <h1 className="text-lg font-semibold">Statistics</h1>
-      </div>
-
-      <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-200">
-        🚧 Experimental — stats may be incomplete or inaccurate
+        <Badge variant="secondary" className="text-[10px] tracking-wide uppercase font-normal text-muted-foreground/60">
+          🚧 Experimental
+        </Badge>
       </div>
 
       {/* Week picker */}
