@@ -8,6 +8,7 @@ import {
   LogOutIcon,
   MoonIcon,
   RefreshCwIcon,
+  ScrollTextIcon,
   SettingsIcon,
   SunIcon,
   UserIcon
@@ -73,6 +74,10 @@ export function Header() {
           <Button variant="ghost" size="icon-sm" onClick={() => navigate("/stats")}>
             <BarChart3Icon className="size-4" />
             <span className="sr-only">Statistics</span>
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => navigate("/audit")}>
+            <ScrollTextIcon className="size-4" />
+            <span className="sr-only">Audit Log</span>
           </Button>
           <Button variant="ghost" size="icon-sm" className="relative" onClick={() => navigate("/sandboxes")}>
             <BoxIcon className="size-4" />

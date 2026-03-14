@@ -1,10 +1,20 @@
-import { ArrowLeftIcon, BoxIcon, FileIcon, InfoIcon, PaletteIcon, RefreshCwIcon, UserIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  BoxIcon,
+  FileIcon,
+  InfoIcon,
+  PaletteIcon,
+  RefreshCwIcon,
+  ShieldCheckIcon,
+  UserIcon
+} from "lucide-react"
 import { useNavigate, useParams } from "react-router"
 import { type SettingsTab, SettingsTabs } from "../atoms/ui.js"
 import { cn } from "../lib/utils.js"
 import { SettingsAbout } from "./settings-about.js"
 import { SettingsAccounts } from "./settings-accounts.js"
 import { SettingsConfig } from "./settings-config.js"
+import { SettingsPermissions } from "./settings-permissions.js"
 import { SettingsRefresh } from "./settings-refresh.js"
 import { SettingsSandbox } from "./settings-sandbox.js"
 import { SettingsTheme } from "./settings-theme.js"
@@ -14,6 +24,7 @@ const TabIcons: Record<SettingsTab, React.ReactNode> = {
   accounts: <UserIcon className="size-4" />,
   refresh: <RefreshCwIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
+  permissions: <ShieldCheckIcon className="size-4" />,
   theme: <PaletteIcon className="size-4" />,
   config: <FileIcon className="size-4" />,
   about: <InfoIcon className="size-4" />
@@ -23,6 +34,7 @@ const TabLabels: Record<SettingsTab, string> = {
   accounts: "Accounts",
   refresh: "Refresh",
   sandbox: "Sandbox",
+  permissions: "Permissions",
   theme: "Theme",
   config: "Config",
   about: "About"
@@ -66,6 +78,7 @@ export function SettingsPage() {
         {activeTab === "accounts" && <SettingsAccounts />}
         {activeTab === "refresh" && <SettingsRefresh />}
         {activeTab === "sandbox" && <SettingsSandbox />}
+        {activeTab === "permissions" && <SettingsPermissions />}
         {activeTab === "theme" && <SettingsTheme />}
         {activeTab === "config" && <SettingsConfig />}
         {activeTab === "about" && <SettingsAbout />}
