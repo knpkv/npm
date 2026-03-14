@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.8.0
+
+### Minor Changes
+
+- [#53](https://github.com/knpkv/npm/pull/53) [`ed64b64`](https://github.com/knpkv/npm/commit/ed64b64ae5e8e27a6629a72807e35299826a1372) Thanks @konopkov! - feat: API permissions gate and audit log
+
+### Patch Changes
+
+- Updated dependencies [[`ed64b64`](https://github.com/knpkv/npm/commit/ed64b64ae5e8e27a6629a72807e35299826a1372)]:
+  - @knpkv/codecommit-core@0.6.0
+
 ## 0.7.0
 
 ### Minor Changes
