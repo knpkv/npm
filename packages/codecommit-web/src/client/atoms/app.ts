@@ -47,6 +47,12 @@ export interface AppState {
     readonly nextCursor?: number
   }
   readonly sandboxes?: ReadonlyArray<SandboxItem>
+  readonly permissionPrompt?: {
+    readonly id: string
+    readonly operation: string
+    readonly category: string
+    readonly context: string
+  }
 }
 
 const defaultState: AppState = {
@@ -174,6 +180,24 @@ export const searchPrsAtom = ApiClient.mutation("prs", "search")
 
 // Refresh single PR
 export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
+
+// Permissions
+export const permissionsQueryAtom = ApiClient.query("permissions", "list", {
+  reactivityKeys: ["permissions"],
+  timeToLive: "30 seconds"
+})
+export const permissionRespondAtom = ApiClient.mutation("permissions", "respond")
+export const permissionUpdateAtom = ApiClient.mutation("permissions", "update")
+export const permissionResetAtom = ApiClient.mutation("permissions", "reset")
+export const auditSettingsQueryAtom = ApiClient.query("permissions", "auditSettings", {
+  reactivityKeys: ["permissions"],
+  timeToLive: "30 seconds"
+})
+export const updateAuditSettingsAtom = ApiClient.mutation("permissions", "updateAuditSettings")
+
+// Audit log
+export const auditLogQueryAtom = ApiClient.mutation("audit", "list")
+export const auditExportAtom = ApiClient.mutation("audit", "export")
 
 /**
  * Derived app state atom that combines queries

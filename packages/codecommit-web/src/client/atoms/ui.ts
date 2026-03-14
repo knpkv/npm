@@ -45,6 +45,15 @@ export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
 /**
  * Settings tab
  */
-export type SettingsTab = "accounts" | "refresh" | "sandbox" | "theme" | "config" | "about"
-export const SettingsTabs: ReadonlyArray<SettingsTab> = ["accounts", "refresh", "sandbox", "theme", "config", "about"]
+export type SettingsTab = "accounts" | "refresh" | "sandbox" | "permissions" | "audit" | "theme" | "config" | "about"
+export const SettingsTabs: ReadonlyArray<SettingsTab> = [
+  "accounts",
+  "refresh",
+  "sandbox",
+  "permissions",
+  "audit",
+  "theme",
+  "config",
+  "about"
+]
 export const settingsTabAtom = Atom.make<SettingsTab>("accounts").pipe(Atom.keepAlive)

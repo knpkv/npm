@@ -383,6 +383,106 @@ export class StatsGroup extends HttpApiGroup.make("stats")
   .prefix("/api/stats")
 {}
 
+// Permission endpoints
+const PermissionStateSchema = Schema.Literal("always_allow", "allow", "deny")
+
+const PermissionEntry = Schema.Struct({
+  operation: Schema.String,
+  state: PermissionStateSchema,
+  category: Schema.Literal("read", "write"),
+  description: Schema.String
+})
+
+export const AuditLogEntryResponse = Schema.Struct({
+  id: Schema.Number,
+  timestamp: Schema.String,
+  operation: Schema.String,
+  accountProfile: Schema.String,
+  region: Schema.String,
+  permissionState: Schema.String,
+  context: Schema.String,
+  durationMs: Schema.NullOr(Schema.Number)
+})
+
+export class PermissionsGroup extends HttpApiGroup.make("permissions")
+  .add(
+    HttpApiEndpoint.post("respond", "/respond")
+      .setPayload(Schema.Struct({
+        id: Schema.String,
+        response: Schema.Literal("allow_once", "always_allow", "deny")
+      }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.get("list", "/")
+      .addSuccess(Schema.Array(PermissionEntry))
+  )
+  .add(
+    HttpApiEndpoint.post("update", "/update")
+      .setPayload(Schema.Struct({
+        operation: Schema.String,
+        state: PermissionStateSchema
+      }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("reset", "/reset")
+      .addSuccess(Schema.String)
+  )
+  .add(
+    HttpApiEndpoint.get("auditSettings", "/audit")
+      .addSuccess(Schema.Struct({
+        enabled: Schema.Boolean,
+        retentionDays: Schema.Number
+      }))
+  )
+  .add(
+    HttpApiEndpoint.post("updateAuditSettings", "/audit")
+      .setPayload(Schema.Struct({
+        enabled: Schema.optional(Schema.Boolean),
+        retentionDays: Schema.optional(Schema.Number)
+      }))
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .prefix("/api/permissions")
+{}
+
+// Audit log endpoints
+export class AuditGroup extends HttpApiGroup.make("audit")
+  .add(
+    HttpApiEndpoint.get("list", "/")
+      .setUrlParams(Schema.Struct({
+        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 200))),
+        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.greaterThanOrEqualTo(0))),
+        operation: Schema.optional(Schema.String),
+        accountProfile: Schema.optional(Schema.String),
+        permissionState: Schema.optional(Schema.String),
+        from: Schema.optional(Schema.String),
+        to: Schema.optional(Schema.String),
+        search: Schema.optional(Schema.String)
+      }))
+      .addSuccess(Schema.Struct({
+        items: Schema.Array(AuditLogEntryResponse),
+        total: Schema.Number,
+        nextCursor: Schema.optional(Schema.Number)
+      }))
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.get("export", "/export")
+      .setUrlParams(Schema.Struct({
+        from: Schema.optional(Schema.String),
+        to: Schema.optional(Schema.String)
+      }))
+      .addSuccess(Schema.Array(AuditLogEntryResponse))
+      .addError(ApiError)
+  )
+  .prefix("/api/audit")
+{}
+
 // Combined API
 export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(PrsGroup)
@@ -393,4 +493,6 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(SubscriptionsGroup)
   .add(SandboxGroup)
   .add(StatsGroup)
+  .add(PermissionsGroup)
+  .add(AuditGroup)
 {}

@@ -76,7 +76,13 @@ const SsePayload = Schema.Struct({
     items: Schema.Array(NotificationWire),
     nextCursor: Schema.optional(Schema.Number)
   })),
-  sandboxes: Schema.optional(Schema.Array(SandboxWire))
+  sandboxes: Schema.optional(Schema.Array(SandboxWire)),
+  permissionPrompt: Schema.optional(Schema.Struct({
+    id: Schema.String,
+    operation: Schema.String,
+    category: Schema.String,
+    context: Schema.String
+  }))
 })
 
 const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))

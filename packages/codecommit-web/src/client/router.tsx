@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, useMatches } from "react-router"
 import { AppLayout } from "./components/app.js"
+import { AuditLogPage } from "./components/audit-log-page.js"
 import { NotificationsPage } from "./components/notifications-page.js"
 import { PRDetail } from "./components/pr-detail.js"
 import { PRList } from "./components/pr-list.js"
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       { path: "settings/:tab?", element: <SettingsPage /> },
       { path: "notifications", element: <NotificationsPage /> },
       { path: "stats", element: <StatsPage /> },
+      { path: "audit", element: <AuditLogPage /> },
       { path: "*", element: <Navigate to="/" replace /> }
     ]
   }

@@ -1,6 +1,7 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, PRService } from "@knpkv/codecommit-core"
 import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { CodeCommitApi, NotificationResponse, SandboxResponse } from "../Api.js"
 import { encodeSandbox } from "./sandbox-live.js"
@@ -24,7 +25,13 @@ const SsePayload = Schema.Struct({
     items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
   }),
-  sandboxes: Schema.Array(SandboxResponse)
+  sandboxes: Schema.Array(SandboxResponse),
+  permissionPrompt: Schema.optional(Schema.Struct({
+    id: Schema.String,
+    operation: Schema.String,
+    category: Schema.String,
+    context: Schema.String
+  }))
 })
 
 const encode = Schema.encode(SsePayload)
@@ -44,6 +51,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const notificationRepo = yield* CacheService.NotificationRepo
     const sandboxRepo = yield* CacheService.SandboxRepo
     const hub = yield* CacheService.EventsHub
+    const permGate = yield* PermissionGateLiveTag
 
     // Cache unread count + notifications — re-query on relevant triggers
     const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
@@ -79,6 +87,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           Effect.catchAllCause(() => Effect.succeed([] as ReadonlyArray<typeof SandboxResponse.Type>))
         )
 
+        const pendingPrompt = yield* permGate.getFirstPending().pipe(
+          Effect.catchAll(() => Effect.succeed(undefined))
+        )
+
         const payload = yield* encode({
           accounts: prState.accounts,
           status: prState.status,
@@ -89,7 +101,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           currentUser: prState.currentUser,
           unreadNotificationCount: unreadCount,
           notifications,
-          sandboxes
+          sandboxes,
+          permissionPrompt: pendingPrompt
         })
 
         return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)

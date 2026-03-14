@@ -17,6 +17,8 @@ import migration0007 from "./migrations/0007_stats_columns.js"
 import migration0008 from "./migrations/0008_merged_by.js"
 import migration0009 from "./migrations/0009_approved_by.js"
 import migration0010 from "./migrations/0010_commented_by.js"
+import migration0011 from "./migrations/0011_audit_log.js"
+import migration0012 from "./migrations/0012_audit_log_indexes.js"
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -53,7 +55,9 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0007_stats_columns": migration0007,
     "0008_merged_by": migration0008,
     "0009_approved_by": migration0009,
-    "0010_commented_by": migration0010
+    "0010_commented_by": migration0010,
+    "0011_audit_log": migration0011,
+    "0012_audit_log_indexes": migration0012
   })
 })
 
