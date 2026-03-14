@@ -14,18 +14,27 @@ import {
   AwsClientConfig,
   CacheService,
   ConfigService,
+  PermissionService,
   PRService,
   SandboxService,
   StatsService
 } from "@knpkv/codecommit-core"
+import { AwsClientGatedLive, InnerAwsClient } from "@knpkv/codecommit-core/AwsClient/AwsClientGated.js"
+import { AuditLogRepo } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
+import {
+  PermissionGateLiveLayer,
+  PermissionGateLiveTag
+} from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Cause, Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 import { fileURLToPath } from "node:url"
 import { CodeCommitApi } from "./Api.js"
 import {
   AccountsLive,
+  AuditLive,
   ConfigLive,
   EventsLive,
   NotificationsLive,
+  PermissionsLive,
   PrsLive,
   SandboxLive,
   StatsLive,
@@ -109,7 +118,9 @@ const HandlersLive = Layer.mergeAll(
   NotificationsLive,
   SubscriptionsLive,
   SandboxLive,
-  StatsLive
+  StatsLive,
+  PermissionsLive,
+  AuditLive
 )
 
 // Platform dependencies
@@ -137,9 +148,42 @@ const ReposLive = Layer.mergeAll(
   CacheService.EventsHub.Default
 ).pipe(Layer.orDie)
 
+// Permission infrastructure
+const PermissionLive = Layer.mergeAll(
+  PermissionService.PermissionService.Default,
+  PermissionGateLiveTag.Default,
+  AuditLogRepo.Default
+).pipe(
+  Layer.provide(PlatformLive),
+  Layer.provide(ReposLive)
+)
+
+// PermissionGate (abstract) provided from PermissionGateLive (concrete)
+const PermissionGateLive_ = PermissionGateLiveLayer.pipe(
+  Layer.provide(PermissionGateLiveTag.Default),
+  Layer.provide(ReposLive)
+)
+
+// Original AwsClient → InnerAwsClient
+const InnerAwsClientLive = Layer.effect(
+  InnerAwsClient,
+  AwsClient.AwsClient
+).pipe(
+  Layer.provide(AwsClient.AwsClientLive),
+  Layer.provide(AwsClientConfig.Default),
+  Layer.provide(FetchHttpClient.layer)
+)
+
+// Gated AwsClient wrapping InnerAwsClient with permission checks + audit
+const GatedAwsClientLive = AwsClientGatedLive.pipe(
+  Layer.provide(InnerAwsClientLive),
+  Layer.provide(PermissionLive),
+  Layer.provide(PermissionGateLive_)
+)
+
 // PRService dependencies
 const PRServiceDeps = Layer.mergeAll(
-  AwsClient.AwsClientLive,
+  GatedAwsClientLive,
   ReposLive
 ).pipe(
   Layer.provideMerge(ConfigLive_),
@@ -151,10 +195,7 @@ const PRServiceDeps = Layer.mergeAll(
 const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRServiceDeps))
 
 // AwsClient for handlers that call AWS directly (e.g., createPR)
-const AwsClientLive_ = AwsClient.AwsClientLive.pipe(
-  Layer.provide(FetchHttpClient.layer),
-  Layer.provide(AwsClientConfig.Default)
-)
+const AwsClientLive_ = GatedAwsClientLive
 
 // Sandbox services — DockerService uses `docker` CLI via Command, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
@@ -180,7 +221,19 @@ const AllServicesLive = Layer.mergeAll(
   ConfigLive_,
   AwsClientLive_,
   SandboxServicesLive,
-  StatsServiceLive
+  StatsServiceLive,
+  PermissionLive
+)
+
+// Prune old audit log entries on startup
+const AuditPrune = Layer.effectDiscard(
+  Effect.gen(function*() {
+    const auditLog = yield* AuditLogRepo
+    const permService = yield* PermissionService.PermissionService
+    const retentionDays = yield* permService.getAuditRetention()
+    const deleted = yield* auditLog.prune(retentionDays).pipe(Effect.catchAll(() => Effect.succeed(0)))
+    if (deleted > 0) yield* Effect.logInfo(`Pruned ${deleted} audit log entries older than ${retentionDays} days`)
+  })
 )
 
 // Fork auto-refresh loop: initial refresh + recurring based on config
@@ -251,6 +304,7 @@ const SandboxStartup = Layer.effectDiscard(
 const ApiLive = Layer.mergeAll(
   HttpLayerRouter.addHttpApi(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
   AutoRefresh,
+  AuditPrune,
   SandboxStartup
 ).pipe(
   Layer.provide(AllServicesLive),
