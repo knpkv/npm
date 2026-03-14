@@ -149,6 +149,19 @@ export class SandboxError extends Schema.TaggedError<SandboxError>()(
 ) {}
 
 /**
+ * API call blocked by permission gate.
+ *
+ * @category Errors
+ */
+export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>()(
+  "PermissionDeniedError",
+  {
+    operation: Schema.String,
+    reason: Schema.Literal("denied", "timeout")
+  }
+) {}
+
+/**
  * Union of errors from AwsClient methods.
  *
  * @category Errors
@@ -170,3 +183,4 @@ export type CodeCommitError =
   | RefreshError
   | DockerError
   | SandboxError
+  | PermissionDeniedError

@@ -9,6 +9,8 @@ export type RepoChange = Data.TaggedEnum<{
   AppState: {}
   SystemNotifications: {}
   Sandboxes: {}
+  PermissionRequired: {}
+  PermissionResolved: {}
 }>
 
 export const RepoChange = Data.taggedEnum<RepoChange>()
