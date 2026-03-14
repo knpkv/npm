@@ -1,19 +1,21 @@
-import { useAtomSet } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { useCallback } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router"
-import { useFullWidthRoute } from "../router.js"
 import { Toaster } from "sonner"
 import { appStateAtom } from "../atoms/app.js"
 import { useSSE } from "../hooks/useSSE.js"
+import { useFullWidthRoute } from "../router.js"
 import { CommandPalette } from "./command-palette.js"
 import { FilterBar } from "./filter-bar.js"
 import { Header } from "./header.js"
+import { PermissionModal } from "./permission-modal.js"
 
 export function AppLayout() {
   const setAppState = useAtomSet(appStateAtom)
+  const state = useAtomValue(appStateAtom)
   const navigate = useNavigate()
   const goToNotifications = useCallback(() => navigate("/notifications"), [navigate])
-  useSSE((state) => setAppState(state), goToNotifications)
+  useSSE((s) => setAppState(s), goToNotifications)
   const { pathname } = useLocation()
   const isHome = pathname === "/"
   const isFullWidth = useFullWidthRoute()
@@ -27,6 +29,7 @@ export function AppLayout() {
       </main>
       <CommandPalette />
       <Toaster />
+      {state.permissionPrompt && <PermissionModal prompt={state.permissionPrompt} />}
     </div>
   )
 }

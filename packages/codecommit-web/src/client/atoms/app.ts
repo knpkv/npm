@@ -47,6 +47,12 @@ export interface AppState {
     readonly nextCursor?: number
   }
   readonly sandboxes?: ReadonlyArray<SandboxItem>
+  readonly permissionPrompt?: {
+    readonly id: string
+    readonly operation: string
+    readonly category: string
+    readonly context: string
+  }
 }
 
 const defaultState: AppState = {
