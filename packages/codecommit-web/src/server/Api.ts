@@ -432,7 +432,14 @@ export class PermissionsGroup extends HttpApiGroup.make("permissions")
       .addSuccess(Schema.String)
   )
   .add(
-    HttpApiEndpoint.post("auditSettings", "/audit")
+    HttpApiEndpoint.get("auditSettings", "/audit")
+      .addSuccess(Schema.Struct({
+        enabled: Schema.Boolean,
+        retentionDays: Schema.Number
+      }))
+  )
+  .add(
+    HttpApiEndpoint.post("updateAuditSettings", "/audit")
       .setPayload(Schema.Struct({
         enabled: Schema.optional(Schema.Boolean),
         retentionDays: Schema.optional(Schema.Number)

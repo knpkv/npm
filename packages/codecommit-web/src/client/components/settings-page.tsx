@@ -5,6 +5,7 @@ import {
   InfoIcon,
   PaletteIcon,
   RefreshCwIcon,
+  ScrollTextIcon,
   ShieldCheckIcon,
   UserIcon
 } from "lucide-react"
@@ -13,6 +14,7 @@ import { type SettingsTab, SettingsTabs } from "../atoms/ui.js"
 import { cn } from "../lib/utils.js"
 import { SettingsAbout } from "./settings-about.js"
 import { SettingsAccounts } from "./settings-accounts.js"
+import { SettingsAudit } from "./settings-audit.js"
 import { SettingsConfig } from "./settings-config.js"
 import { SettingsPermissions } from "./settings-permissions.js"
 import { SettingsRefresh } from "./settings-refresh.js"
@@ -25,6 +27,7 @@ const TabIcons: Record<SettingsTab, React.ReactNode> = {
   refresh: <RefreshCwIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
   permissions: <ShieldCheckIcon className="size-4" />,
+  audit: <ScrollTextIcon className="size-4" />,
   theme: <PaletteIcon className="size-4" />,
   config: <FileIcon className="size-4" />,
   about: <InfoIcon className="size-4" />
@@ -35,6 +38,7 @@ const TabLabels: Record<SettingsTab, string> = {
   refresh: "Refresh",
   sandbox: "Sandbox",
   permissions: "Permissions",
+  audit: "Audit",
   theme: "Theme",
   config: "Config",
   about: "About"
@@ -79,6 +83,7 @@ export function SettingsPage() {
         {activeTab === "refresh" && <SettingsRefresh />}
         {activeTab === "sandbox" && <SettingsSandbox />}
         {activeTab === "permissions" && <SettingsPermissions />}
+        {activeTab === "audit" && <SettingsAudit />}
         {activeTab === "theme" && <SettingsTheme />}
         {activeTab === "config" && <SettingsConfig />}
         {activeTab === "about" && <SettingsAbout />}
