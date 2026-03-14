@@ -1,18 +1,21 @@
 /**
  * @title Audit log page — browse and export AWS API call history
  *
- * Sortable table with filters (operation, account, state, date range),
- * search, pagination, and JSON export.
+ * Uses mutation atoms with `mode: "promise"` for dynamic filter/pagination.
  *
  * @module
  */
+import { useAtom } from "@effect-atom/atom-react"
 import { ArrowLeftIcon, DownloadIcon, SearchIcon } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
+import { auditExportAtom, auditLogQueryAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
+
+const PAGE_SIZE = 50
 
 interface AuditEntry {
   readonly id: number
@@ -24,14 +27,6 @@ interface AuditEntry {
   readonly context: string
   readonly durationMs: number | null
 }
-
-interface AuditResponse {
-  readonly items: ReadonlyArray<AuditEntry>
-  readonly total: number
-  readonly nextCursor?: number
-}
-
-const PAGE_SIZE = 50
 
 const stateBadgeVariant = (state: string) => {
   switch (state) {
@@ -50,52 +45,56 @@ const stateBadgeVariant = (state: string) => {
 
 export function AuditLogPage() {
   const navigate = useNavigate()
+  const [, fetchLog] = useAtom(auditLogQueryAtom, { mode: "promise" })
+  const [, fetchExport] = useAtom(auditExportAtom, { mode: "promise" })
+
   const [entries, setEntries] = useState<ReadonlyArray<AuditEntry>>([])
   const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState("")
   const [operationFilter, setOperationFilter] = useState<string>("")
   const [stateFilter, setStateFilter] = useState<string>("")
-  const [loading, setLoading] = useState(false)
 
-  const fetchEntries = useCallback(
-    async (currentOffset: number) => {
-      setLoading(true)
-      try {
-        const params = new URLSearchParams()
-        params.set("limit", String(PAGE_SIZE))
-        params.set("offset", String(currentOffset))
-        if (search) params.set("search", search)
-        if (operationFilter) params.set("operation", operationFilter)
-        if (stateFilter) params.set("permissionState", stateFilter)
-        const res = await fetch(`/api/audit/?${params}`)
-        const data = (await res.json()) as AuditResponse
-        setEntries(data.items)
-        setTotal(data.total)
-      } finally {
-        setLoading(false)
-      }
-    },
-    [search, operationFilter, stateFilter]
-  )
+  const urlParams = useMemo(() => {
+    const p: Record<string, string | number> = { limit: PAGE_SIZE, offset }
+    if (search) p.search = search
+    if (operationFilter) p.operation = operationFilter
+    if (stateFilter) p.permissionState = stateFilter
+    return p
+  }, [offset, search, operationFilter, stateFilter])
 
   useEffect(() => {
-    fetchEntries(offset)
-  }, [fetchEntries, offset])
-
-  const exportJson = useCallback(async () => {
-    const res = await fetch("/api/audit/export")
-    const data = await res.json()
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [])
+    let cancelled = false
+    setLoading(true)
+    fetchLog({ urlParams })
+      .then((result) => {
+        if (cancelled) return
+        setEntries(result.items as ReadonlyArray<AuditEntry>)
+        setTotal(result.total)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+    return () => {
+      cancelled = true
+    }
+  }, [fetchLog, urlParams])
 
   const hasMore = offset + PAGE_SIZE < total
+
+  const exportJson = useCallback(() => {
+    fetchExport({ urlParams: {} })
+      .then((result) => {
+        const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      })
+      .catch(() => {})
+  }, [fetchExport])
 
   return (
     <div className="space-y-4">
@@ -128,7 +127,7 @@ export function AuditLogPage() {
           />
         </div>
         <Select
-          value={operationFilter}
+          value={operationFilter || "all"}
           onValueChange={(v) => {
             setOperationFilter(v === "all" ? "" : v)
             setOffset(0)
@@ -150,7 +149,7 @@ export function AuditLogPage() {
           </SelectContent>
         </Select>
         <Select
-          value={stateFilter}
+          value={stateFilter || "all"}
           onValueChange={(v) => {
             setStateFilter(v === "all" ? "" : v)
             setOffset(0)
@@ -196,7 +195,7 @@ export function AuditLogPage() {
                 </td>
               </tr>
             )}
-            {entries.map((e) => (
+            {entries.map((e: AuditEntry) => (
               <tr key={e.id} className="border-b last:border-0 hover:bg-muted/30">
                 <td className="px-3 py-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
                   {new Date(e.timestamp).toLocaleString()}
@@ -220,7 +219,7 @@ export function AuditLogPage() {
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+          {total > 0 ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "0 entries"}
         </span>
         <div className="flex gap-2">
           <Button

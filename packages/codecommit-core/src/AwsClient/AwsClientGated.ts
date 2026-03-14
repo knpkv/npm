@@ -55,26 +55,31 @@ export const AwsClientGatedLive: Layer.Layer<
     const permService = yield* PermissionService
     const gateService = yield* PermissionGate
     const auditLog = yield* AuditLogRepo
-    const auditEnabled = yield* permService.isAuditEnabled()
-
     // --- Core gate logic (captured services, no R leakage) ---
 
+    // Reads auditEnabled dynamically from Ref on each call —
+    // toggling audit in settings takes effect without restart
     const logAudit = (
       params: GateParams,
       permissionState: NewAuditLogEntry["permissionState"],
       durationMs: number | null
     ): Effect.Effect<void> =>
-      auditEnabled
-        ? auditLog.log({
-          timestamp: new Date().toISOString(),
-          operation: params.operation,
-          accountProfile: params.accountProfile,
-          region: params.region,
-          permissionState,
-          context: params.context,
-          durationMs
-        }).pipe(Effect.catchAll(() => Effect.void))
-        : Effect.void
+      permService.isAuditEnabled().pipe(
+        Effect.flatMap((enabled) =>
+          enabled
+            ? auditLog.log({
+              timestamp: new Date().toISOString(),
+              operation: params.operation,
+              accountProfile: params.accountProfile,
+              region: params.region,
+              permissionState,
+              context: params.context,
+              durationMs
+            })
+            : Effect.void
+        ),
+        Effect.catchAll(() => Effect.void)
+      )
 
     const promptUser = (params: GateParams): Effect.Effect<"always_allowed" | "allowed", AwsClientError> =>
       Effect.gen(function*() {

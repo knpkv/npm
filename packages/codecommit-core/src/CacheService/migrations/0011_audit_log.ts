@@ -16,6 +16,8 @@ export default Effect.flatMap(
         duration_ms INTEGER
       )`,
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp)`,
-      sql`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`
+      sql`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`,
+      sql`CREATE INDEX IF NOT EXISTS idx_audit_log_permission_state ON audit_log(permission_state)`,
+      sql`CREATE INDEX IF NOT EXISTS idx_audit_log_account_profile ON audit_log(account_profile)`
     ]).pipe(Effect.asVoid, Effect.catchAll(() => Effect.void))
 )

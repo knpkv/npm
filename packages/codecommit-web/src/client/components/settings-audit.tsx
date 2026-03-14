@@ -3,39 +3,33 @@
  *
  * @module
  */
-import { useCallback, useEffect, useState } from "react"
+import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
+import { auditSettingsQueryAtom, updateAuditSettingsAtom } from "../atoms/app.js"
 import { Button } from "./ui/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 
 export function SettingsAudit() {
   const navigate = useNavigate()
+  const result = useAtomValue(auditSettingsQueryAtom)
+  const save = useAtomSet(updateAuditSettingsAtom)
   const [enabled, setEnabled] = useState(true)
   const [retentionDays, setRetentionDays] = useState(30)
-  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
-    fetch("/api/permissions/audit")
-      .then((r) => r.json())
-      .then((data: { enabled: boolean; retentionDays: number }) => {
-        setEnabled(data.enabled)
-        setRetentionDays(data.retentionDays)
-      })
-  }, [])
-
-  const save = useCallback(async () => {
-    setSaving(true)
-    try {
-      await fetch("/api/permissions/audit", {
-        // POST handled by updateAuditSettings
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled, retentionDays })
-      })
-    } finally {
-      setSaving(false)
+    if (Result.isSuccess(result)) {
+      setEnabled(result.value.enabled)
+      setRetentionDays(result.value.retentionDays)
+      setDirty(false)
     }
-  }, [enabled, retentionDays])
+  }, [result])
+
+  const handleSave = () => {
+    save({ payload: { enabled, retentionDays } })
+    setDirty(false)
+  }
 
   return (
     <div className="space-y-6">
@@ -53,7 +47,10 @@ export function SettingsAudit() {
           <button
             role="switch"
             aria-checked={enabled}
-            onClick={() => setEnabled(!enabled)}
+            onClick={() => {
+              setEnabled(!enabled)
+              setDirty(true)
+            }}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
               enabled ? "bg-primary" : "bg-muted"
             }`}
@@ -69,7 +66,13 @@ export function SettingsAudit() {
         <div className="rounded-md border px-3 py-3 space-y-2">
           <label className="text-sm font-medium">Retention period (days)</label>
           <p className="text-xs text-muted-foreground">Entries older than this are pruned on server start</p>
-          <Select value={String(retentionDays)} onValueChange={(v) => setRetentionDays(Number(v))}>
+          <Select
+            value={String(retentionDays)}
+            onValueChange={(v) => {
+              setRetentionDays(Number(v))
+              setDirty(true)
+            }}
+          >
             <SelectTrigger className="w-36">
               <SelectValue />
             </SelectTrigger>
@@ -87,8 +90,8 @@ export function SettingsAudit() {
       </div>
 
       <div className="flex items-center gap-0 rounded-md border w-fit">
-        <Button size="sm" disabled={saving} onClick={save} className="rounded-r-none border-0">
-          {saving ? "Saving..." : "Save"}
+        <Button size="sm" disabled={!dirty} onClick={handleSave} className="rounded-r-none border-0">
+          Save
         </Button>
         <Button
           variant="outline"

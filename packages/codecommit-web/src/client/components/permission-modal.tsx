@@ -3,14 +3,14 @@
  *
  * Appears when the server pushes a `permissionPrompt` via SSE.
  * Three actions: Allow Once, Always Allow, Deny.
- * POSTs response to /api/permissions/respond.
  * Dismissed automatically when SSE removes the prompt (other tab responded).
  *
  * @module
  */
+import { useAtomSet } from "@effect-atom/atom-react"
 import { ShieldCheckIcon } from "lucide-react"
-import { useCallback, useState } from "react"
 import type { AppState } from "../atoms/app.js"
+import { permissionRespondAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
@@ -18,23 +18,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 type PermissionResponse = "allow_once" | "always_allow" | "deny"
 
 export function PermissionModal({ prompt }: { prompt: NonNullable<AppState["permissionPrompt"]> }) {
-  const [loading, setLoading] = useState(false)
+  const respond = useAtomSet(permissionRespondAtom)
 
-  const respond = useCallback(
-    async (response: PermissionResponse) => {
-      setLoading(true)
-      try {
-        await fetch("/api/permissions/respond", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: prompt.id, response })
-        })
-      } finally {
-        setLoading(false)
-      }
-    },
-    [prompt.id]
-  )
+  const handleRespond = (response: PermissionResponse) => respond({ payload: { id: prompt.id, response } })
 
   return (
     <Dialog open>
@@ -51,15 +37,13 @@ export function PermissionModal({ prompt }: { prompt: NonNullable<AppState["perm
           <code className="text-xs font-mono">{prompt.operation}</code>
         </div>
         <DialogFooter>
-          <Button variant="outline" disabled={loading} onClick={() => respond("deny")}>
+          <Button variant="outline" onClick={() => handleRespond("deny")}>
             Deny
           </Button>
-          <Button variant="secondary" disabled={loading} onClick={() => respond("allow_once")}>
+          <Button variant="secondary" onClick={() => handleRespond("allow_once")}>
             Allow Once
           </Button>
-          <Button disabled={loading} onClick={() => respond("always_allow")}>
-            Always Allow
-          </Button>
+          <Button onClick={() => handleRespond("always_allow")}>Always Allow</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

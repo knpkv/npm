@@ -87,8 +87,9 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         readonly to?: string | undefined
         readonly search?: string | undefined
       }): Effect.Effect<PaginatedAuditLog, CacheError> => {
-        const limit = opts?.limit ?? 50
-        const offset = opts?.offset ?? 0
+        // Clamp numeric params to prevent injection via malformed input
+        const limit = Math.max(1, Math.min(200, Math.floor(opts?.limit ?? 50)))
+        const offset = Math.max(0, Math.floor(opts?.offset ?? 0))
 
         // For filtered queries, build dynamic SQL
         if (
@@ -140,13 +141,17 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         )
       },
 
-      prune: (retentionDays: number): Effect.Effect<number, CacheError> =>
-        sql.unsafe(
-          `DELETE FROM audit_log WHERE timestamp < datetime('now', '-${retentionDays} days')`
+      prune: (retentionDays: number): Effect.Effect<number, CacheError> => {
+        const days = Math.max(1, Math.floor(retentionDays))
+        return sql.unsafe(
+          `DELETE FROM audit_log WHERE timestamp < datetime('now', '-${days} days')`
         ).pipe(
-          Effect.map((r) => r.length),
+          // DELETE returns no rows — use changes() to get actual deleted count
+          Effect.flatMap(() => sql<{ n: number }>`SELECT changes() as n`),
+          Effect.map((rows) => rows[0]?.n ?? 0),
           cacheError("prune")
-        ),
+        )
+      },
 
       exportAll: (opts?: {
         readonly from?: string | undefined

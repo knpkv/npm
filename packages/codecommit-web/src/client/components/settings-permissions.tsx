@@ -1,75 +1,35 @@
 /**
- * @title Permissions settings — manage per-operation permission states + audit config
+ * @title Permissions settings — manage per-operation permission states
  *
  * @module
  */
-import { useCallback, useEffect, useState } from "react"
+import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { permissionResetAtom, permissionsQueryAtom, permissionUpdateAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 
-interface PermissionEntry {
-  readonly operation: string
-  readonly state: "always_allow" | "allow" | "deny"
-  readonly category: "read" | "write"
-  readonly description: string
-}
-
 export function SettingsPermissions() {
-  const [permissions, setPermissions] = useState<ReadonlyArray<PermissionEntry>>([])
-  const [loading, setLoading] = useState(true)
+  const result = useAtomValue(permissionsQueryAtom)
+  const update = useAtomSet(permissionUpdateAtom)
+  const reset = useAtomSet(permissionResetAtom)
 
-  const fetchPermissions = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/permissions/")
-      setPermissions((await res.json()) as ReadonlyArray<PermissionEntry>)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const items = Result.isSuccess(result) ? result.value : []
+  const reads = items.filter((p) => p.category === "read")
+  const writes = items.filter((p) => p.category === "write")
 
-  useEffect(() => {
-    fetchPermissions()
-  }, [fetchPermissions])
-
-  const updatePermission = useCallback(
-    async (operation: string, state: string) => {
-      await fetch("/api/permissions/update", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation, state })
-      })
-      await fetchPermissions()
-    },
-    [fetchPermissions]
-  )
-
-  const resetAll = useCallback(async () => {
-    await fetch("/api/permissions/reset", { method: "POST" })
-    await fetchPermissions()
-  }, [fetchPermissions])
-
-  const allowAll = useCallback(async () => {
-    for (const p of permissions) {
+  const allowAll = () => {
+    for (const p of items) {
       if (p.state !== "always_allow") {
-        await fetch("/api/permissions/update", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ operation: p.operation, state: "always_allow" })
-        })
+        update({ payload: { operation: p.operation, state: "always_allow" as const } })
       }
     }
-    await fetchPermissions()
-  }, [permissions, fetchPermissions])
+  }
 
-  const reads = permissions.filter((p) => p.category === "read")
-  const writes = permissions.filter((p) => p.category === "write")
-
-  const renderGroup = (label: string, items: ReadonlyArray<PermissionEntry>) => (
+  const renderGroup = (label: string, group: typeof items) => (
     <div className="space-y-2">
       <h4 className="text-sm font-medium text-muted-foreground">{label}</h4>
-      {items.map((p) => (
+      {group.map((p) => (
         <div key={p.operation} className="flex items-center justify-between rounded-md border px-3 py-2">
           <div className="flex items-center gap-2 min-w-0">
             <Badge variant={p.category === "write" ? "destructive" : "secondary"} className="text-xs shrink-0">
@@ -80,7 +40,12 @@ export function SettingsPermissions() {
               <p className="text-xs text-muted-foreground truncate">{p.description}</p>
             </div>
           </div>
-          <Select value={p.state} onValueChange={(v) => updatePermission(p.operation, v)}>
+          <Select
+            value={p.state}
+            onValueChange={(v) =>
+              update({ payload: { operation: p.operation, state: v as "always_allow" | "allow" | "deny" } })
+            }
+          >
             <SelectTrigger className="w-36 shrink-0">
               <SelectValue />
             </SelectTrigger>
@@ -106,12 +71,12 @@ export function SettingsPermissions() {
         <Button variant="outline" size="sm" onClick={allowAll}>
           Always Allow All
         </Button>
-        <Button variant="outline" size="sm" onClick={resetAll}>
+        <Button variant="outline" size="sm" onClick={() => reset({})}>
           Reset (Clear All)
         </Button>
       </div>
 
-      {loading ? (
+      {Result.isInitial(result) ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
       ) : (
         <div className="space-y-6">
