@@ -1,3 +1,15 @@
+/**
+ * PR endpoint handlers — list, refresh, create, open, comments, approval rules.
+ *
+ * Handles PR CRUD (list, search, refresh, create, open in console via Granted),
+ * comments fetch, and approval rule management (create/update/delete).
+ * {@link buildApprovalRuleContent} constructs the AWS JSON format
+ * `{Version, Statements, ApprovalPoolMembers}`. {@link extractAwsMessage}
+ * drills into AwsApiError.cause.message for human-readable error text.
+ * Approval rule errors produce system notifications via tapError.
+ *
+ * @module
+ */
 import { Command, HttpApiBuilder } from "@effect/platform"
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
@@ -14,6 +26,34 @@ const copyToClipboard = (text: string) => {
     Command.stdin(cmd, Stream.make(text).pipe(Stream.encodeText))
   )
 }
+
+const extractAwsMessage = (e: unknown): string => {
+  if (!e || typeof e !== "object") return String(e)
+  const err = e as Record<string, unknown>
+  // AwsApiError.cause may contain the real AWS exception
+  const cause = err.cause
+  if (cause && typeof cause === "object" && "message" in cause) {
+    return String((cause as Record<string, unknown>).message)
+  }
+  if ("message" in err && typeof err.message === "string" && err.message) return err.message
+  // PermissionDeniedError or other tagged errors
+  if ("reason" in err) return `Permission ${err.reason}: ${err.operation ?? "unknown operation"}`
+  try {
+    return JSON.stringify(e)
+  } catch {
+    return String(e)
+  }
+}
+
+const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: ReadonlyArray<string>) =>
+  JSON.stringify({
+    Version: "2018-11-08",
+    Statements: [{
+      Type: "Approvers",
+      NumberOfApprovalsNeeded: requiredApprovals,
+      ApprovalPoolMembers: poolMembers
+    }]
+  })
 
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
@@ -74,12 +114,6 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Effect.catchAll(() => Effect.void)
           )
 
-          yield* notificationRepo.addSystem({
-            type: "info",
-            title: "Assume",
-            message: `Opening ${payload.profile} → PR console...`
-          })
-
           // -c: console login, -d: open URL in default browser
           const cmd = Command.make("assume", "-cd", payload.link, payload.profile).pipe(
             Command.stdout("inherit"),
@@ -88,13 +122,6 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           yield* Effect.forkDaemon(
             Command.exitCode(cmd).pipe(
-              Effect.tap(() =>
-                notificationRepo.addSystem({
-                  type: "success",
-                  title: "Assume",
-                  message: `Assumed ${payload.profile}`
-                })
-              ),
               Effect.catchAll((e) =>
                 notificationRepo.addSystem({
                   type: "error",
@@ -107,5 +134,55 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return payload.link
         }).pipe(
           Effect.mapError((e) => new ApiError({ message: String(e) }))
+        ))
+      .handle("createApprovalRule", ({ payload }) =>
+        awsClient.createApprovalRule({
+          account: { profile: payload.account.profile, region: payload.account.region },
+          pullRequestId: payload.pullRequestId,
+          approvalRuleName: payload.approvalRuleName,
+          approvalRuleContent: buildApprovalRuleContent(payload.requiredApprovals, payload.poolMembers)
+        }).pipe(
+          Effect.map(() => "ok"),
+          Effect.tapError((e) =>
+            notificationRepo.addSystem({
+              type: "error",
+              title: "Approval Rule",
+              message: extractAwsMessage(e)
+            })
+          ),
+          Effect.mapError((e) => new ApiError({ message: e.message }))
+        ))
+      .handle("updateApprovalRule", ({ payload }) =>
+        awsClient.updateApprovalRule({
+          account: { profile: payload.account.profile, region: payload.account.region },
+          pullRequestId: payload.pullRequestId,
+          approvalRuleName: payload.approvalRuleName,
+          newApprovalRuleContent: buildApprovalRuleContent(payload.requiredApprovals, payload.poolMembers)
+        }).pipe(
+          Effect.map(() => "ok"),
+          Effect.tapError((e) =>
+            notificationRepo.addSystem({
+              type: "error",
+              title: "Approval Rule",
+              message: extractAwsMessage(e)
+            })
+          ),
+          Effect.mapError((e) => new ApiError({ message: e.message }))
+        ))
+      .handle("deleteApprovalRule", ({ payload }) =>
+        awsClient.deleteApprovalRule({
+          account: { profile: payload.account.profile, region: payload.account.region },
+          pullRequestId: payload.pullRequestId,
+          approvalRuleName: payload.approvalRuleName
+        }).pipe(
+          Effect.map(() => "ok"),
+          Effect.tapError((e) =>
+            notificationRepo.addSystem({
+              type: "error",
+              title: "Approval Rule",
+              message: extractAwsMessage(e)
+            })
+          ),
+          Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
   }))

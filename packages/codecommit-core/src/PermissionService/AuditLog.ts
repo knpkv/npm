@@ -153,6 +153,13 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         )
       },
 
+      clearAll: (): Effect.Effect<number, CacheError> =>
+        sql`DELETE FROM audit_log`.pipe(
+          Effect.flatMap(() => sql<{ n: number }>`SELECT changes() as n`),
+          Effect.map((rows) => rows[0]?.n ?? 0),
+          cacheError("clearAll")
+        ),
+
       exportAll: (opts?: {
         readonly from?: string | undefined
         readonly to?: string | undefined

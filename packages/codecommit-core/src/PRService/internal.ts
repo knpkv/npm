@@ -1,4 +1,13 @@
 /**
+ * PRService internal transforms and helpers.
+ *
+ * Provides bidirectional Schema transforms between cache rows, domain objects,
+ * and SQL upsert inputs: {@link CachedPRToPullRequest} (cache row → PullRequest,
+ * including repoAccountId on Account), {@link PullRequestToUpsertInput}
+ * (PullRequest → UpsertInput), and {@link prToUpsertInput} (convenience
+ * wrapper that ensures approvalRules is always present). Also provides
+ * {@link countAllComments} for flattening comment thread trees.
+ *
  * @internal
  */
 import type { SubscriptionRef } from "effect"
@@ -30,7 +39,8 @@ export const CachedPRToPullRequest = Schema.transform(
       account: {
         profile: row.accountProfile,
         region: row.accountRegion,
-        awsAccountId: row.awsAccountId
+        awsAccountId: row.awsAccountId,
+        repoAccountId: row.repoAccountId ?? undefined
       },
       status: row.status,
       sourceBranch: row.sourceBranch,
@@ -41,12 +51,15 @@ export const CachedPRToPullRequest = Schema.transform(
       healthScore: row.healthScore ?? undefined,
       fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined,
       approvedBy: row.approvedBy,
+      approvedByArns: row.approvedByArns,
       commentedBy: row.commentedBy,
+      approvalRules: row.approvalRules,
       filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,
       awsAccountId: pr.account.awsAccountId ?? "",
+      repoAccountId: pr.account.repoAccountId ?? null,
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region,
       title: pr.title,
@@ -70,7 +83,9 @@ export const CachedPRToPullRequest = Schema.transform(
       closedAt: null,
       mergedBy: null,
       approvedBy: pr.approvedBy,
-      commentedBy: pr.commentedBy
+      approvedByArns: pr.approvedByArns,
+      commentedBy: pr.commentedBy,
+      approvalRules: pr.approvalRules
     })
   }
 )
@@ -94,7 +109,8 @@ export const PullRequestToUpsertInput = Schema.transform(
       account: {
         profile: row.accountProfile,
         region: row.accountRegion,
-        awsAccountId: row.awsAccountId
+        awsAccountId: row.awsAccountId,
+        repoAccountId: row.repoAccountId ?? undefined
       },
       status: row.status,
       sourceBranch: row.sourceBranch,
@@ -105,12 +121,14 @@ export const PullRequestToUpsertInput = Schema.transform(
       healthScore: undefined,
       fetchedAt: undefined,
       approvedBy: row.approvedBy,
+      approvedByArns: row.approvedByArns,
       commentedBy: [],
       filesChanged: undefined
     }),
     encode: (_encoded, pr) => ({
       id: pr.id,
       awsAccountId: pr.account.awsAccountId ?? "",
+      repoAccountId: pr.account.repoAccountId ?? null,
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region,
       title: pr.title,
@@ -126,7 +144,9 @@ export const PullRequestToUpsertInput = Schema.transform(
       isApproved: pr.isApproved ? 1 : 0,
       commentCount: pr.commentCount ?? null,
       link: pr.link,
-      approvedBy: pr.approvedBy
+      approvedBy: pr.approvedBy,
+      approvedByArns: pr.approvedByArns,
+      approvalRules: pr.approvalRules
     })
   }
 )
@@ -135,7 +155,10 @@ const encodePRToUpsert = Schema.encodeSync(PullRequestToUpsertInput)
 
 export const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertInput => ({
   ...encodePRToUpsert(pr),
-  awsAccountId
+  awsAccountId,
+  // Explicit: encodePRToUpsert's Encoded type makes approvalRules optional (Schema.optionalWith default),
+  // but UpsertInput.Type requires it. Guarantee it's always present.
+  approvalRules: pr.approvalRules
 })
 
 const countThreadComments = (thread: CommentThread): number =>

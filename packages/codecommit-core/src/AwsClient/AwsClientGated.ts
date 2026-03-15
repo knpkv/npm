@@ -12,6 +12,9 @@
  * PermissionDeniedError → AwsApiError at the boundary for type transparency.
  * The actual PermissionDeniedError is preserved as the AwsApiError's `cause`.
  *
+ * All operations — reads, writes, and approval rule CRUD — are gated with
+ * the appropriate category for UI badge color and prompt behavior.
+ *
  * @module
  */
 import { Context, Effect, Layer, Match, Stream } from "effect"
@@ -207,7 +210,25 @@ export const AwsClientGatedLive: Layer.Layer<
         inner.updatePullRequestDescription
       ),
       getPullRequest: gated("getPullRequest", (p) => `Fetch PR #${p.pullRequestId}`, nested, inner.getPullRequest),
-      getDifferences: gated("getDifferences", (p) => `Diff for ${p.repositoryName}`, nested, inner.getDifferences)
+      getDifferences: gated("getDifferences", (p) => `Diff for ${p.repositoryName}`, nested, inner.getDifferences),
+      createApprovalRule: gated(
+        "createApprovalRule",
+        (p) => `Create rule "${p.approvalRuleName}" on PR #${p.pullRequestId}`,
+        nested,
+        inner.createApprovalRule
+      ),
+      updateApprovalRule: gated(
+        "updateApprovalRule",
+        (p) => `Update rule "${p.approvalRuleName}" on PR #${p.pullRequestId}`,
+        nested,
+        inner.updateApprovalRule
+      ),
+      deleteApprovalRule: gated(
+        "deleteApprovalRule",
+        (p) => `Delete rule "${p.approvalRuleName}" on PR #${p.pullRequestId}`,
+        nested,
+        inner.deleteApprovalRule
+      )
     } satisfies AwsClient.Service
   })
 )

@@ -3,11 +3,24 @@
  *
  * Schemas, types, and helpers shared across the PullRequestRepo modules.
  *
+ * Defines {@link CachedPullRequest} (SQLite row schema with approval rules,
+ * approver ARNs, repo account ID), {@link UpsertInput} (write-side schema),
+ * and codec transforms: `ApprovalRulesFromJson` (JSON TEXT <-> ApprovalRule[]),
+ * `CommaSeparatedArray` (TEXT <-> string[] for approved_by, approved_by_arns,
+ * commented_by).
+ *
  * @category CacheService
  */
 import * as Model from "@effect/sql/Model"
 import { Effect, Schema } from "effect"
-import { AwsProfileName, AwsRegion, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
+import {
+  ApprovalRule,
+  AwsProfileName,
+  AwsRegion,
+  PullRequestId,
+  PullRequestStatus,
+  RepositoryName
+} from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
 
 /** DB column `TEXT` (comma-separated) <-> `readonly string[]` */
@@ -20,9 +33,27 @@ export const CommaSeparatedArray = Schema.transform(
   }
 )
 
+/** DB column `TEXT` (JSON) <-> `readonly ApprovalRule[]` */
+const ApprovalRulesFromJson = Schema.transform(
+  Schema.NullOr(Schema.String),
+  Schema.Array(ApprovalRule),
+  {
+    decode: (s) => {
+      if (!s) return []
+      try {
+        return JSON.parse(s)
+      } catch {
+        return []
+      }
+    },
+    encode: (arr) => (arr.length > 0 ? JSON.stringify(arr) : null)
+  }
+)
+
 export const CachedPullRequest = Schema.Struct({
   id: PullRequestId,
   awsAccountId: Schema.String,
+  repoAccountId: Schema.NullOr(Schema.String),
   accountProfile: AwsProfileName,
   accountRegion: AwsRegion,
   title: Schema.String,
@@ -46,7 +77,9 @@ export const CachedPullRequest = Schema.Struct({
   closedAt: Schema.NullOr(Schema.String),
   mergedBy: Schema.NullOr(Schema.String),
   approvedBy: CommaSeparatedArray,
-  commentedBy: CommaSeparatedArray
+  approvedByArns: CommaSeparatedArray,
+  commentedBy: CommaSeparatedArray,
+  approvalRules: ApprovalRulesFromJson
 })
 
 export type CachedPullRequest = typeof CachedPullRequest.Type
@@ -60,6 +93,7 @@ export interface SearchResult {
 export const UpsertInput = Schema.Struct({
   id: Schema.String,
   awsAccountId: Schema.String,
+  repoAccountId: Schema.NullOr(Schema.String),
   accountProfile: Schema.String,
   accountRegion: Schema.String,
   title: Schema.String,
@@ -75,7 +109,9 @@ export const UpsertInput = Schema.Struct({
   isApproved: Schema.Number,
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
-  approvedBy: Schema.Array(Schema.String)
+  approvedBy: Schema.Array(Schema.String),
+  approvedByArns: Schema.Array(Schema.String),
+  approvalRules: Schema.optionalWith(Schema.Array(ApprovalRule), { default: () => [] })
 })
 
 export type UpsertInput = typeof UpsertInput.Type

@@ -1,8 +1,19 @@
+/**
+ * Single PR row — status badge, health score, review indicator.
+ *
+ * Renders a clickable row with status badge (Merged/Closed/Conflict/
+ * Approved/Pending), review badge (EyeIcon when {@link needsMyReview}
+ * returns true), health score with color tiers (green/yellow/red),
+ * author, date, comment count, repository name, and PR title.
+ *
+ * @module
+ */
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
-import { MessageSquareIcon } from "lucide-react"
+import { EyeIcon, MessageSquareIcon } from "lucide-react"
 import { useMemo } from "react"
 import { Link } from "react-router"
 import { Badge } from "./ui/badge.js"
@@ -11,9 +22,11 @@ interface PRRowProps {
   readonly pr: PullRequest
   readonly to: string
   readonly showUpdated?: boolean
+  readonly currentUser?: string | undefined
 }
 
-export function PRRow({ pr, to, showUpdated }: PRRowProps) {
+export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
+  const reviewRequested = needsMyReview(pr, currentUser)
   const score: HealthScore | undefined = useMemo(
     () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
     [pr]
@@ -52,6 +65,12 @@ export function PRRow({ pr, to, showUpdated }: PRRowProps) {
     >
       <div className="flex items-center gap-2">
         {badge}
+        {reviewRequested && (
+          <Badge variant="outline" className="border-yellow-500/30 text-yellow-600 dark:text-yellow-400 gap-0.5">
+            <EyeIcon className="size-3" />
+            Review
+          </Badge>
+        )}
         {score && <span className={`text-xs font-semibold tabular-nums ${scoreColor}`}>{score.total.toFixed(1)}</span>}
         <span className="text-xs text-muted-foreground">
           {pr.author} ·{" "}

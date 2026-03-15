@@ -1,9 +1,41 @@
 /**
  * Domain models for CodeCommit operations.
  *
- * Uses `Schema.Class` for rich models with computed properties,
- * branded types for compile-time ID safety, and `Schema.Literal`
- * for type-safe enumerations.
+ * Provides branded types for compile-time ID safety, `Schema.Class` models
+ * with computed properties, and `Schema.Literal` enumerations. Central types
+ * include {@link PullRequest} (with approval rules, approver ARNs, and
+ * review detection), {@link ApprovalRule} (per-PR rule with pool members
+ * and satisfaction state), and {@link PersistentNotification} (including
+ * approval_requested and review_reminder types).
+ *
+ * **Mental model**
+ *
+ * - ApprovalRule: per-PR rule with pool members (normalized names) + raw ARNs
+ * - needsMyReview: standalone fn (not method) so it works with wire objects too
+ * - PersistentNotificationType: includes approval_requested, review_reminder
+ *
+ * **Gotchas**
+ *
+ * - ApprovalRule uses `Schema.Class`, but instances round-trip as plain objects
+ *   through JSON without class instance checks
+ *
+ * **Common tasks**
+ *
+ * - Define approval rule: {@link ApprovalRule}
+ * - Check review needed: {@link needsMyReview}
+ * - PR console URL: {@link codecommitConsoleUrl}
+ * - Notification types: {@link PersistentNotificationType}
+ *
+ * **Quickstart**
+ *
+ * ```ts
+ * import { needsMyReview, PullRequest } from "./Domain.js"
+ *
+ * declare const pr: PullRequest
+ * if (needsMyReview(pr, "alice")) {
+ *   console.log(`Review needed: ${pr.consoleUrl}`)
+ * }
+ * ```
  *
  * @category Domain
  * @module
@@ -118,7 +150,22 @@ export type SandboxStatus = typeof SandboxStatus.Type
 export class Account extends Schema.Class<Account>("Account")({
   profile: AwsProfileName,
   region: AwsRegion,
-  awsAccountId: Schema.optional(Schema.String)
+  awsAccountId: Schema.optional(Schema.String),
+  repoAccountId: Schema.optional(Schema.String)
+}) {}
+
+/**
+ * Approval rule attached to a pull request.
+ *
+ * @category Domain
+ */
+export class ApprovalRule extends Schema.Class<ApprovalRule>("ApprovalRule")({
+  ruleName: Schema.String,
+  requiredApprovals: Schema.Number,
+  poolMembers: Schema.Array(Schema.String),
+  poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  satisfied: Schema.Boolean,
+  fromTemplate: Schema.optional(Schema.String)
 }) {}
 
 /**
@@ -145,12 +192,29 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.DateFromSelf),
   approvedBy: Schema.Array(Schema.String),
+  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   commentedBy: Schema.Array(Schema.String),
-  filesChanged: Schema.optional(Schema.Number)
+  filesChanged: Schema.optional(Schema.Number),
+  approvalRules: Schema.optionalWith(Schema.Array(ApprovalRule), { default: () => [] })
 }) {
   get consoleUrl(): string {
     return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
   }
+}
+
+/**
+ * Check if a PR needs review from the given user.
+ * Standalone function so it works with both Schema.Class instances and plain wire objects.
+ */
+export const needsMyReview = (
+  pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
+  currentUser: string | undefined
+): boolean => {
+  if (!currentUser) return false
+  if (pr.approvedBy.includes(currentUser)) return false
+  return pr.approvalRules.some(
+    (rule) => !rule.satisfied && rule.poolMembers.includes(currentUser)
+  )
 }
 
 export const codecommitConsoleUrl = (region: string, repo: string, prId: string): string =>
@@ -292,6 +356,8 @@ export const PersistentNotificationType = Schema.Literal(
   "comment_edited",
   "comment_deleted",
   "approval_changed",
+  "approval_requested",
+  "review_reminder",
   "merge_changed",
   "title_changed",
   "description_changed",
@@ -369,4 +435,5 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  readonly pendingReviewCount?: number
 }

@@ -1,6 +1,19 @@
+/**
+ * Filter bar — multi-axis combobox filters + toggle buttons.
+ *
+ * Renders Hot/Mine/Review toggle buttons and combobox dropdowns for
+ * each filter dimension (author, repo, status, scope, account, approver,
+ * commenter, size). Options cascade: each combobox shows values from PRs
+ * matching all OTHER active filters. Status uses axis-based grouping
+ * (lifecycle vs approval vs merge) for orthogonal AND semantics.
+ * Review toggle (shown when currentUser is set) uses toggleReview
+ * from {@link useFilterParams}.
+ *
+ * @module
+ */
 import { useAtomValue } from "@effect-atom/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { CheckIcon, ChevronDownIcon, FlameIcon, SearchIcon, UserIcon, XIcon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon, EyeIcon, FlameIcon, SearchIcon, UserIcon, XIcon } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
 import { appStateAtom } from "../atoms/app.js"
@@ -225,7 +238,7 @@ const OPEN_SUB_STATUSES = ["approved", "pending", "mergeable", "conflicts"] as c
 
 export function FilterBar() {
   const appState = useAtomValue(appStateAtom)
-  const { clearAll, setFilterText, state, toggleFilter, toggleHot } = useFilterParams()
+  const { clearAll, setFilterText, state, toggleFilter, toggleHot, toggleReview } = useFilterParams()
   const [, setSearchParams] = useSearchParams()
 
   const setDateRange = useCallback(
@@ -370,7 +383,7 @@ export function FilterBar() {
   }, [prs, currentUser, state.filters])
 
   const hasDateRange = !!state.from || !!state.to
-  const hasAny = state.filters.length > 0 || state.hot || state.q || hasDateRange
+  const hasAny = state.filters.length > 0 || state.hot || state.review || state.q || hasDateRange
 
   const hasChips = state.filters.length > 0
 
@@ -392,6 +405,13 @@ export function FilterBar() {
           >
             <UserIcon className="size-3.5" />
             Mine
+          </Button>
+        )}
+
+        {currentUser && (
+          <Button variant={state.review ? "default" : "outline"} size="sm" className="gap-1 h-7" onClick={toggleReview}>
+            <EyeIcon className="size-3.5" />
+            Review
           </Button>
         )}
 

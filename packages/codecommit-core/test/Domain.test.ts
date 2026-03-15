@@ -1,6 +1,14 @@
+/**
+ * Unit tests for Domain schemas and logic.
+ *
+ * Covers Account, PullRequest, PRComment decode/encode, ApprovalRule
+ * encode/decode (optional fromTemplate, roundtrip with poolMemberArns),
+ * and needsMyReview edge cases (no user, not in pool, already approved,
+ * all rules satisfied, no rules, approvalRules defaults to []).
+ */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Account, PRComment, PullRequest } from "../src/Domain.js"
+import { Account, ApprovalRule, needsMyReview, PRComment, PullRequest } from "../src/Domain.js"
 
 describe("Domain", () => {
   describe("Account", () => {
@@ -65,6 +73,127 @@ describe("Domain", () => {
           Effect.flip
         )
         expect(result).toBeDefined()
+      }))
+  })
+
+  describe("ApprovalRule", () => {
+    it.effect("decodes valid approval rule", () =>
+      Effect.gen(function*() {
+        const rule = yield* Schema.decode(ApprovalRule)({
+          ruleName: "Require 2 approvers",
+          requiredApprovals: 2,
+          poolMembers: ["alice", "bob"],
+          satisfied: false
+        })
+        expect(rule.ruleName).toBe("Require 2 approvers")
+        expect(rule.requiredApprovals).toBe(2)
+        expect(rule.poolMembers).toEqual(["alice", "bob"])
+        expect(rule.satisfied).toBe(false)
+        expect(rule.fromTemplate).toBeUndefined()
+      }))
+
+    it.effect("decodes with optional fromTemplate", () =>
+      Effect.gen(function*() {
+        const rule = yield* Schema.decode(ApprovalRule)({
+          ruleName: "Template rule",
+          requiredApprovals: 1,
+          poolMembers: ["alice"],
+          satisfied: true,
+          fromTemplate: "default-template"
+        })
+        expect(rule.fromTemplate).toBe("default-template")
+      }))
+
+    it.effect("roundtrips through encode/decode", () =>
+      Effect.gen(function*() {
+        const input = {
+          ruleName: "Rule",
+          requiredApprovals: 1,
+          poolMembers: ["alice"],
+          poolMemberArns: ["arn:aws:iam::123:user/alice"],
+          satisfied: false
+        }
+        const decoded = yield* Schema.decode(ApprovalRule)(input)
+        const encoded = yield* Schema.encode(ApprovalRule)(decoded)
+        expect(encoded).toEqual(input)
+      }))
+  })
+
+  describe("PullRequest.needsMyReview", () => {
+    const basePR = {
+      id: "123",
+      title: "Feature",
+      author: "john",
+      repositoryName: "repo",
+      creationDate: new Date("2024-01-15"),
+      lastModifiedDate: new Date("2024-01-16"),
+      link: "https://console.aws.amazon.com",
+      account: { profile: "dev", region: "us-east-1" },
+      status: "OPEN" as const,
+      sourceBranch: "feature/x",
+      destinationBranch: "main",
+      isMergeable: true,
+      isApproved: false,
+      approvedBy: [] as Array<string>,
+      commentedBy: [] as Array<string>
+    }
+
+    it.effect("returns false when no currentUser", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, undefined)).toBe(false)
+      }))
+
+    it.effect("returns false when user not in any pool", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, "bob")).toBe(false)
+      }))
+
+    it.effect("returns true when user is in unsatisfied rule pool", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice", "bob"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(true)
+      }))
+
+    it.effect("returns false when user already approved", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvedBy: ["alice"],
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(false)
+      }))
+
+    it.effect("returns false when all rules satisfied", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: true }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(false)
+      }))
+
+    it.effect("returns false when no approval rules", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)(basePR)
+        expect(needsMyReview(pr, "alice")).toBe(false)
+      }))
+
+    it.effect("defaults approvalRules to empty array", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)(basePR)
+        expect(pr.approvalRules).toEqual([])
       }))
   })
 

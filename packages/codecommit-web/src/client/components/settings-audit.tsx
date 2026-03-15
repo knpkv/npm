@@ -6,7 +6,7 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
-import { auditSettingsQueryAtom, updateAuditSettingsAtom } from "../atoms/app.js"
+import { auditClearAtom, auditSettingsQueryAtom, updateAuditSettingsAtom } from "../atoms/app.js"
 import { Button } from "./ui/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 
@@ -14,6 +14,7 @@ export function SettingsAudit() {
   const navigate = useNavigate()
   const result = useAtomValue(auditSettingsQueryAtom)
   const save = useAtomSet(updateAuditSettingsAtom)
+  const clearAudit = useAtomSet(auditClearAtom)
   const [enabled, setEnabled] = useState(true)
   const [retentionDays, setRetentionDays] = useState(30)
   const [dirty, setDirty] = useState(false)
@@ -89,17 +90,22 @@ export function SettingsAudit() {
         </div>
       </div>
 
-      <div className="flex items-center gap-0 rounded-md border w-fit">
-        <Button size="sm" disabled={!dirty} onClick={handleSave} className="rounded-r-none border-0">
-          Save
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate("/audit")}
-          className="rounded-l-none border-0 border-l"
-        >
-          View Audit Log
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-0 rounded-md border w-fit">
+          <Button size="sm" disabled={!dirty} onClick={handleSave} className="rounded-r-none border-0">
+            Save
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/audit")}
+            className="rounded-l-none border-0 border-l"
+          >
+            View Audit Log
+          </Button>
+        </div>
+        <Button variant="destructive" size="sm" onClick={() => clearAudit({})}>
+          Clear All Logs
         </Button>
       </div>
     </div>

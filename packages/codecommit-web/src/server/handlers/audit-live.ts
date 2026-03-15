@@ -36,5 +36,10 @@ export const AuditLive = HttpApiBuilder.group(
           }).pipe(
             Effect.mapError((e) => new ApiError({ message: String(e) }))
           ))
+        .handle("clear", () =>
+          auditLog.clearAll().pipe(
+            Effect.map((deleted) => ({ deleted })),
+            Effect.mapError((e) => new ApiError({ message: String(e) }))
+          ))
     })
 )

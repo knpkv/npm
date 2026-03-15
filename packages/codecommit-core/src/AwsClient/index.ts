@@ -1,6 +1,15 @@
 /**
  * AWS CodeCommit API client service.
  *
+ * Provides an Effect `Context.Tag`-based service wrapping distilled-aws
+ * CodeCommit calls. Exposes PR CRUD, branch listing, comments, diff stats,
+ * caller identity, and approval rule management (create/update/delete).
+ *
+ * **Mental model**
+ *
+ * - Thin Effect wrappers over distilled-aws CodeCommit calls
+ * - Each method acquires credentials and provides region/HTTP context
+ *
  * @category Client
  * @module
  */
@@ -9,7 +18,9 @@ import { Context, Effect, Layer, Stream } from "effect"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import type { PRCommentLocation, PullRequest } from "../Domain.js"
 import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"
+import { createApprovalRule } from "./createApprovalRule.js"
 import { createPullRequest } from "./createPullRequest.js"
+import { deleteApprovalRule } from "./deleteApprovalRule.js"
 import { type CallerIdentity, getCallerIdentity } from "./getCallerIdentity.js"
 import { getCommentsForPullRequest } from "./getCommentsForPullRequest.js"
 import { getDifferences } from "./getDifferences.js"
@@ -17,17 +28,21 @@ import { getPullRequest } from "./getPullRequest.js"
 import { getPullRequests } from "./getPullRequests.js"
 import type {
   AccountParams,
+  CreateApprovalRuleParams,
   CreatePullRequestParams,
+  DeleteApprovalRuleParams,
   DiffStats,
   GetCommentsForPullRequestParams,
   GetDifferencesParams,
   GetPullRequestParams,
   ListBranchesParams,
   PullRequestDetail,
+  UpdateApprovalRuleParams,
   UpdatePullRequestDescriptionParams,
   UpdatePullRequestTitleParams
 } from "./internal.js"
 import { listBranches } from "./listBranches.js"
+import { updateApprovalRule } from "./updateApprovalRule.js"
 import { updatePullRequestDescription } from "./updatePullRequestDescription.js"
 import { updatePullRequestTitle } from "./updatePullRequestTitle.js"
 
@@ -74,6 +89,9 @@ export declare namespace AwsClient {
     ) => Effect.Effect<void, AwsClientError>
     readonly getPullRequest: (params: GetPullRequestParams) => Effect.Effect<PullRequestDetail, AwsClientError>
     readonly getDifferences: (params: GetDifferencesParams) => Effect.Effect<DiffStats, AwsClientError>
+    readonly createApprovalRule: (params: CreateApprovalRuleParams) => Effect.Effect<void, AwsClientError>
+    readonly updateApprovalRule: (params: UpdateApprovalRuleParams) => Effect.Effect<void, AwsClientError>
+    readonly deleteApprovalRule: (params: DeleteApprovalRuleParams) => Effect.Effect<void, AwsClientError>
   }
 }
 
@@ -112,7 +130,10 @@ export const AwsClientLive = Layer.effect(
       updatePullRequestTitle: (params) => provide(updatePullRequestTitle(params)),
       updatePullRequestDescription: (params) => provide(updatePullRequestDescription(params)),
       getPullRequest: (params) => provide(getPullRequest(params)),
-      getDifferences: (params) => provide(getDifferences(params))
+      getDifferences: (params) => provide(getDifferences(params)),
+      createApprovalRule: (params) => provide(createApprovalRule(params)),
+      updateApprovalRule: (params) => provide(updateApprovalRule(params)),
+      deleteApprovalRule: (params) => provide(deleteApprovalRule(params))
     }
   })
 )

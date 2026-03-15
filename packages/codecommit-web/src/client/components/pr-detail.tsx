@@ -1,3 +1,28 @@
+/**
+ * PR detail page — full PR view with approval management.
+ *
+ * Renders PR metadata, status badges, health score breakdown, description,
+ * comments (collapsible with Markdown), lifecycle metrics (time to merge,
+ * first review, address feedback), and the {@link ApproversCard} for
+ * managing approval pool membership.
+ *
+ * **Mental model**
+ *
+ * - ApproversCard: manages the non-template "Required approvers" rule;
+ *   remove = update rule (SSO roles lack delete permission),
+ *   remove all = update to requiredApprovals:0, poolMembers:["*"]
+ * - {@link toApprovalPoolPrefill}: STS ARN → CodeCommitApprovers format
+ * - knownUserArns: discovered from approvedByArns + poolMemberArns across all PRs
+ * - Keyboard shortcuts: Enter/o = open, . = sandbox, Esc = back
+ *
+ * **Common tasks**
+ *
+ * - Show approvers: {@link ApproversCard}
+ * - Convert ARN: {@link toApprovalPoolPrefill}
+ * - Managed rule name: {@link MANAGED_RULE_NAME}
+ *
+ * @module
+ */
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
@@ -22,7 +47,9 @@ import {
   CopyIcon,
   ExternalLinkIcon,
   LoaderIcon,
-  RefreshCwIcon
+  PlusIcon,
+  RefreshCwIcon,
+  TrashIcon
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
@@ -31,16 +58,19 @@ import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import {
   appStateAtom,
+  createApprovalRuleAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
   subscribeAtom,
   subscriptionsQueryAtom,
-  unsubscribeAtom
+  unsubscribeAtom,
+  updateApprovalRuleAtom
 } from "../atoms/app.js"
 import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
+import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
 import { Badge } from "./ui/badge.js"
@@ -317,10 +347,201 @@ function CollapsibleSection({
   )
 }
 
+const MANAGED_RULE_NAME = "Required approvers"
+
+/**
+ * Convert STS assumed-role ARN to CodeCommitApprovers pre-fill.
+ * Extracts session name, leaves account blank for user to fill.
+ */
+const toApprovalPoolPrefill = (arn: string, accountId: string): string => {
+  const match = /^arn:aws:sts::[^:]*:assumed-role\/[^/]+\/(.+)$/.exec(arn)
+  return match ? `CodeCommitApprovers:${accountId}:${match[1]}` : arn
+}
+
+interface ApproversCardProps {
+  readonly approvalRules: ReadonlyArray<{
+    readonly ruleName: string
+    readonly requiredApprovals: number
+    readonly poolMembers: ReadonlyArray<string>
+    readonly poolMemberArns: ReadonlyArray<string>
+    readonly satisfied: boolean
+    readonly fromTemplate?: string | undefined
+  }>
+  readonly approvedBy: ReadonlyArray<string>
+  readonly knownUserArns: ReadonlyMap<string, string>
+  readonly currentUser: string | undefined
+  readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
+  readonly onRefresh: () => void
+  readonly permissionPrompt: boolean
+}
+
+function ApproversCard({
+  approvalRules,
+  approvedBy,
+  currentUser,
+  knownUserArns,
+  onRefresh,
+  onSetApprovers,
+  permissionPrompt
+}: ApproversCardProps) {
+  const [showPicker, setShowPicker] = useState(false)
+  const [manualArn, setManualArn] = useState("")
+  const poolKey = approvalRules.flatMap((r) => r.poolMembers).join(",")
+  const optimistic = useOptimisticSet({
+    items: approvalRules.flatMap((r) => r.poolMembers),
+    stableKey: poolKey,
+    permissionPrompt,
+    onRefresh
+  })
+  const { pendingAdd, pendingRemove } = optimistic
+
+  // Flatten all pool members across all rules
+  const allPoolMembers = useMemo(() => {
+    const set = new Set<string>()
+    for (const rule of approvalRules) {
+      for (const m of rule.poolMembers) set.add(m)
+    }
+    return [...set]
+  }, [approvalRules])
+
+  // Find the managed rule (non-template rule we can edit)
+  const managedRule = approvalRules.find((r) => !r.fromTemplate)
+  const managedArns = managedRule?.poolMemberArns ?? []
+  const managedMembers = managedRule?.poolMembers ?? []
+
+  // Users available to add (have known ARN + not already in pool)
+  const addable = useMemo(
+    () => [...knownUserArns.entries()].filter(([name]) => !allPoolMembers.includes(name) && name !== pendingAdd),
+    [knownUserArns, allPoolMembers, pendingAdd]
+  )
+
+  const handleAdd = (arn: string) => {
+    const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(arn)
+    if (nameMatch) optimistic.add(nameMatch[1]!)
+    onSetApprovers([...managedArns, arn])
+    setShowPicker(false)
+  }
+
+  const handleRemove = (user: string) => {
+    optimistic.remove(user)
+    const idx = managedMembers.indexOf(user)
+    if (idx >= 0) {
+      onSetApprovers(managedArns.filter((_, i) => i !== idx))
+    }
+  }
+
+  const isSatisfied = approvalRules.length > 0 && approvalRules.every((r) => r.satisfied)
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm">Required Approvers</CardTitle>
+          {approvalRules.length > 0 &&
+            (isSatisfied ? (
+              <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
+                Satisfied
+              </Badge>
+            ) : (
+              <Badge variant="secondary">Pending</Badge>
+            ))}
+        </div>
+        <Button variant="ghost" size="icon-sm" onClick={() => setShowPicker(!showPicker)}>
+          <PlusIcon className="size-4" />
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {showPicker && (
+          <div className="flex flex-col gap-2 rounded-md border p-2 bg-muted/30">
+            {addable.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {addable.map(([name, arn]) => (
+                  <Button
+                    key={name}
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-xs gap-1"
+                    onClick={() => setManualArn(arn)}
+                  >
+                    {name}
+                  </Button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1">
+              <input
+                placeholder="CodeCommitApprovers:REPO_ACCOUNT_ID:USERNAME"
+                className="flex-1 rounded-md border bg-background px-2 py-1 text-xs font-mono"
+                value={manualArn}
+                onChange={(e) => setManualArn(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && manualArn.trim()) {
+                    handleAdd(manualArn.trim())
+                    setManualArn("")
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!manualArn.trim()}
+                onClick={() => {
+                  handleAdd(manualArn.trim())
+                  setManualArn("")
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+        )}
+        {allPoolMembers.length === 0 && !showPicker && (
+          <p className="text-xs text-muted-foreground">No required approvers</p>
+        )}
+        {(allPoolMembers.length > 0 || pendingAdd) && (
+          <div className="flex flex-wrap gap-1">
+            {allPoolMembers.map((member) => {
+              const hasApproved = approvedBy.includes(member)
+              const isManaged = managedMembers.includes(member)
+              const isRemoving = member === pendingRemove
+              return (
+                <Badge
+                  key={member}
+                  variant={member === currentUser ? "default" : hasApproved ? "outline" : "secondary"}
+                  className={`text-xs gap-1 ${
+                    hasApproved ? "border-green-500/30 text-green-600 dark:text-green-400" : ""
+                  } ${isRemoving ? "opacity-50" : ""}`}
+                >
+                  {isRemoving && <LoaderIcon className="size-3 animate-spin" />}
+                  {!isRemoving && hasApproved && <CheckIcon className="size-3" />}
+                  {member}
+                  {isManaged && !isRemoving && (
+                    <button className="ml-0.5 hover:text-destructive" onClick={() => handleRemove(member)}>
+                      <TrashIcon className="size-3" />
+                    </button>
+                  )}
+                </Badge>
+              )
+            })}
+            {pendingAdd && !allPoolMembers.includes(pendingAdd) && (
+              <Badge variant="secondary" className="text-xs gap-1 opacity-70">
+                <LoaderIcon className="size-3 animate-spin" />
+                {pendingAdd}
+              </Badge>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
+  const createRule = useAtomSet(createApprovalRuleAtom)
+  const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
   const pr = useMemo(
     () =>
@@ -331,6 +552,29 @@ export function PRDetail() {
         : null,
     [accountId, prId, state.pullRequests]
   )
+
+  // Collect known user ARNs from approval rules + approvedBy/approvedByArns across all PRs (name → ARN)
+  const knownUserArns = useMemo(() => {
+    const map = new Map<string, string>()
+    // Find any known repoAccountId — all repos share the same CodeCommit account
+    const repoAcct = state.pullRequests.find((p) => p.account?.repoAccountId)?.account?.repoAccountId ?? ""
+    for (const p of state.pullRequests) {
+      const acct = repoAcct || p.account?.awsAccountId || ""
+      for (const rule of p.approvalRules) {
+        for (let i = 0; i < rule.poolMembers.length; i++) {
+          const name = rule.poolMembers[i]
+          const arn = rule.poolMemberArns[i]
+          if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
+        }
+      }
+      for (let i = 0; i < p.approvedBy.length; i++) {
+        const name = p.approvedBy[i]
+        const arn = p.approvedByArns[i]
+        if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
+      }
+    }
+    return map
+  }, [state.pullRequests])
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
@@ -668,6 +912,39 @@ export function PRDetail() {
           <LifecycleInfo pr={pr} />
         </CardContent>
       </Card>
+
+      <ApproversCard
+        approvalRules={pr.approvalRules}
+        approvedBy={pr.approvedBy}
+        knownUserArns={knownUserArns}
+        currentUser={state.currentUser}
+        permissionPrompt={!!state.permissionPrompt}
+        onSetApprovers={(arns) => {
+          const existing = pr.approvalRules.find((r) => !r.fromTemplate)
+          if (existing) {
+            updateRule({
+              payload: {
+                pullRequestId: pr.id,
+                approvalRuleName: existing.ruleName,
+                requiredApprovals: arns.length > 0 ? arns.length : 0,
+                poolMembers: arns.length > 0 ? arns : ["*"],
+                account: pr.account
+              }
+            })
+          } else if (arns.length > 0) {
+            createRule({
+              payload: {
+                pullRequestId: pr.id,
+                approvalRuleName: MANAGED_RULE_NAME,
+                requiredApprovals: arns.length,
+                poolMembers: arns,
+                account: pr.account
+              }
+            })
+          }
+        }}
+        onRefresh={() => refreshSingle({ path: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
+      />
 
       <CollapsibleSection title="Health Score Breakdown">
         <ScoreBreakdown score={score} />

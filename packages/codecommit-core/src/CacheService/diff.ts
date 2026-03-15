@@ -1,9 +1,21 @@
 /**
  * Diff logic for generating persistent notifications from state changes.
  *
+ * Compares cached vs fresh PR data to produce notification events: field
+ * changes ({@link diffPR}), comment changes ({@link diffComments}), and
+ * approval pool membership transitions ({@link diffApprovalPools} — fires
+ * `approval_requested` when the current user transitions from not-in-pool
+ * to in-pool).
+ *
+ * **Common tasks**
+ *
+ * - Diff PR fields: {@link diffPR}
+ * - Diff approval pools: {@link diffApprovalPools}
+ * - Diff comments: {@link diffComments}
+ *
  * @module
  */
-import type { CommentThread, PRCommentLocation } from "../Domain.js"
+import type { ApprovalRule, CommentThread, PRCommentLocation } from "../Domain.js"
 
 export interface NewNotification {
   readonly pullRequestId: string
@@ -83,6 +95,49 @@ export const diffPR = (
     } else if (fresh.status === "OPEN" && cached.status === "CLOSED") {
       notifications.push({ ...base, type: "pr_reopened", title: fresh.title, message: `${label} was reopened` })
     }
+  }
+
+  return notifications
+}
+
+/**
+ * Detect when currentUser is newly added to an approval pool.
+ */
+export const diffApprovalPools = (
+  cachedRules: ReadonlyArray<ApprovalRule>,
+  freshRules: ReadonlyArray<ApprovalRule>,
+  currentUser: string | undefined,
+  prId: string,
+  awsAccountId: string,
+  prTitle?: string,
+  profile?: string
+): Array<NewNotification> => {
+  if (!currentUser) return []
+  const wasInPool = cachedRules.some((r) => r.poolMembers.includes(currentUser))
+  const nowInPool = freshRules.some((r) => r.poolMembers.includes(currentUser))
+
+  const notifications: Array<NewNotification> = []
+  const optional = {
+    ...(prTitle != null ? { title: prTitle } : {}),
+    ...(profile != null ? { profile } : {})
+  }
+
+  if (!wasInPool && nowInPool) {
+    notifications.push({
+      pullRequestId: prId,
+      awsAccountId,
+      type: "approval_requested",
+      message: `Your review is requested on #${prId}`,
+      ...optional
+    })
+  } else if (wasInPool && !nowInPool) {
+    notifications.push({
+      pullRequestId: prId,
+      awsAccountId,
+      type: "approval_changed",
+      message: `Your review is no longer required on #${prId}`,
+      ...optional
+    })
   }
 
   return notifications

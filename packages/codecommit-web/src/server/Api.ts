@@ -1,3 +1,21 @@
+/**
+ * HTTP API schema definitions for the CodeCommit web server.
+ *
+ * Defines all endpoint groups ({@link PrsGroup}, {@link EventsGroup},
+ * {@link ConfigGroup}, {@link AccountsGroup}, {@link SubscriptionsGroup},
+ * {@link NotificationsGroup}, {@link SandboxGroup}, {@link StatsGroup},
+ * {@link PermissionsGroup}, {@link AuditGroup}) and combines them into
+ * {@link CodeCommitApi}. Each group uses `HttpApiEndpoint` with
+ * schema-validated payloads and responses.
+ *
+ * **Mental model**
+ *
+ * - PrsGroup: CRUD for PRs + approval-rule endpoints (create/update/delete)
+ *   on /api/prs/approval-rules with `account` payload for cross-account routing
+ * - CodeCommitApi combines all groups into a single API definition
+ *
+ * @module
+ */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
 import {
   Account,
@@ -115,6 +133,46 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         })
       )
       .addSuccess(Schema.Array(PRCommentLocationJson))
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.post("createApprovalRule", "/approval-rules")
+      .setPayload(
+        Schema.Struct({
+          pullRequestId: Schema.String,
+          approvalRuleName: Schema.String,
+          requiredApprovals: Schema.Number,
+          poolMembers: Schema.Array(Schema.String),
+          account: Account
+        })
+      )
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.put("updateApprovalRule", "/approval-rules")
+      .setPayload(
+        Schema.Struct({
+          pullRequestId: Schema.String,
+          approvalRuleName: Schema.String,
+          requiredApprovals: Schema.Number,
+          poolMembers: Schema.Array(Schema.String),
+          account: Account
+        })
+      )
+      .addSuccess(Schema.String)
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.del("deleteApprovalRule", "/approval-rules")
+      .setPayload(
+        Schema.Struct({
+          pullRequestId: Schema.String,
+          approvalRuleName: Schema.String,
+          account: Account
+        })
+      )
+      .addSuccess(Schema.String)
       .addError(ApiError)
   )
   .prefix("/api/prs")
@@ -478,6 +536,11 @@ export class AuditGroup extends HttpApiGroup.make("audit")
         to: Schema.optional(Schema.String)
       }))
       .addSuccess(Schema.Array(AuditLogEntryResponse))
+      .addError(ApiError)
+  )
+  .add(
+    HttpApiEndpoint.del("clear", "/")
+      .addSuccess(Schema.Struct({ deleted: Schema.Number }))
       .addError(ApiError)
   )
   .prefix("/api/audit")

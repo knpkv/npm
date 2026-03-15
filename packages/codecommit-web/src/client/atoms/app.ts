@@ -1,3 +1,15 @@
+/**
+ * Application state atoms — SSE-driven AppState + API mutation atoms.
+ *
+ * Defines {@link AppState} (mirrors Domain.AppState with pending review
+ * count, notifications, sandboxes, permission prompts) and
+ * {@link appStateAtom} (kept alive, updated by useSSE on every event).
+ * Exposes query/mutation atoms for all API groups: PRs, config, accounts,
+ * subscriptions, notifications, sandbox, stats, permissions, audit, and
+ * approval rule CRUD (create/update/deleteApprovalRuleAtom).
+ *
+ * @module
+ */
 import { Atom } from "@effect-atom/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { ApiClient } from "./runtime.js"
@@ -41,6 +53,7 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  readonly pendingReviewCount?: number
   readonly unreadNotificationCount?: number
   readonly notifications?: {
     readonly items: ReadonlyArray<NotificationItem>
@@ -181,6 +194,11 @@ export const searchPrsAtom = ApiClient.mutation("prs", "search")
 // Refresh single PR
 export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
 
+// Approval rule CRUD
+export const createApprovalRuleAtom = ApiClient.mutation("prs", "createApprovalRule")
+export const updateApprovalRuleAtom = ApiClient.mutation("prs", "updateApprovalRule")
+export const deleteApprovalRuleAtom = ApiClient.mutation("prs", "deleteApprovalRule")
+
 // Permissions
 export const permissionsQueryAtom = ApiClient.query("permissions", "list", {
   reactivityKeys: ["permissions"],
@@ -198,6 +216,7 @@ export const updateAuditSettingsAtom = ApiClient.mutation("permissions", "update
 // Audit log
 export const auditLogQueryAtom = ApiClient.mutation("audit", "list")
 export const auditExportAtom = ApiClient.mutation("audit", "export")
+export const auditClearAtom = ApiClient.mutation("audit", "clear")
 
 /**
  * Derived app state atom that combines queries

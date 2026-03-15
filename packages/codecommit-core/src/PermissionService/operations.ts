@@ -7,7 +7,17 @@
  *
  * `OperationName` is a union of known builtin operations + `(string & {})`
  * for runtime extensions. This gives autocomplete for known ops while
- * allowing `registerOperation` to add new ones (e.g. approval rule CRUD).
+ * allowing {@link registerOperation} to extend at runtime.
+ *
+ * Builtin operations cover reads (getPullRequests, listBranches, etc.)
+ * and writes (createPullRequest, updatePullRequestTitle, and approval
+ * rule CRUD: createApprovalRule, updateApprovalRule, deleteApprovalRule).
+ *
+ * **Common tasks**
+ *
+ * - Get operation metadata: {@link getOperationMeta}
+ * - List all operations: {@link allOperations}
+ * - Register new operation: {@link registerOperation}
  *
  * @internal
  */
@@ -33,7 +43,10 @@ const BuiltinOperations = {
   getDifferences: op("read", "Diff stats"),
   createPullRequest: op("write", "Create a pull request"),
   updatePullRequestTitle: op("write", "Edit PR title"),
-  updatePullRequestDescription: op("write", "Edit PR description")
+  updatePullRequestDescription: op("write", "Edit PR description"),
+  createApprovalRule: op("write", "Create approval rule"),
+  updateApprovalRule: op("write", "Update approval rule"),
+  deleteApprovalRule: op("write", "Delete approval rule")
 } as const satisfies Record<string, OperationMeta>
 
 export type BuiltinOperation = keyof typeof BuiltinOperations

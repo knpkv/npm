@@ -1,3 +1,14 @@
+/**
+ * UI state atoms — filter state, command palette, settings tabs.
+ *
+ * Defines {@link FilterState} (multi-axis filters, hot/mine/review toggles,
+ * text search, date range), {@link FILTER_KEYS} (all allowed filter
+ * dimensions), {@link SettingsTab} (accounts, refresh, sandbox,
+ * notifications, permissions, audit, theme, config, about), and
+ * atoms for command palette and active settings tab.
+ *
+ * @module
+ */
 import { Atom } from "@effect-atom/atom-react"
 
 /**
@@ -20,6 +31,7 @@ export interface FilterState {
   readonly filters: ReadonlyArray<FilterEntry>
   readonly hot: boolean
   readonly mine: boolean
+  readonly review: boolean
   readonly mineScope?: string
   readonly q: string
   readonly from?: string
@@ -45,11 +57,21 @@ export const commandPaletteAtom = Atom.make(false).pipe(Atom.keepAlive)
 /**
  * Settings tab
  */
-export type SettingsTab = "accounts" | "refresh" | "sandbox" | "permissions" | "audit" | "theme" | "config" | "about"
+export type SettingsTab =
+  | "accounts"
+  | "refresh"
+  | "sandbox"
+  | "notifications"
+  | "permissions"
+  | "audit"
+  | "theme"
+  | "config"
+  | "about"
 export const SettingsTabs: ReadonlyArray<SettingsTab> = [
   "accounts",
   "refresh",
   "sandbox",
+  "notifications",
   "permissions",
   "audit",
   "theme",
