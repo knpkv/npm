@@ -101,8 +101,10 @@ export class NotificationRepo extends Effect.Service<NotificationRepo>()("Notifi
     })
 
     const add_ = (n: NewNotification) =>
-      sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile)
-          VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${n.profile ?? ""})`
+      sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile, created_at)
+          VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${
+        n.profile ?? ""
+      }, ${new Date().toISOString()})`
         .pipe(Effect.asVoid)
 
     const markRead_ = (id: number) => sql`UPDATE notifications SET read = 1 WHERE id = ${id}`.pipe(Effect.asVoid)

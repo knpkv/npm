@@ -1,4 +1,14 @@
+/**
+ * Unit tests for AwsClient internal helpers.
+ *
+ * Covers {@link normalizeAuthor} (assumed-role ARN → session name, IAM user
+ * → username, fallback), {@link isThrottlingError} (`.name` / `.code` /
+ * `.message` detection + non-Error values), {@link parseRuleContent}
+ * (valid/invalid/empty AWS JSON, poolMemberArns preservation), and
+ * {@link makeApiError} (factory produces AwsApiError with correct fields).
+ */
 import { describe, expect, it } from "@effect/vitest"
+import { parseRuleContent } from "../src/AwsClient/getPullRequests.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
 import type { AwsProfileName, AwsRegion } from "../src/Domain.js"
 
@@ -65,6 +75,63 @@ describe("AwsClient internals", () => {
       expect(isThrottlingError(null)).toBe(false)
       expect(isThrottlingError(42)).toBe(false)
       expect(isThrottlingError(undefined)).toBe(false)
+    })
+  })
+
+  describe("parseRuleContent", () => {
+    it("parses valid AWS approval rule content", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{
+          Type: "Approvers",
+          NumberOfApprovalsNeeded: 2,
+          ApprovalPoolMembers: [
+            "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+            "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+          ]
+        }]
+      })
+      const result = parseRuleContent(content)
+      expect(result.requiredApprovals).toBe(2)
+      expect(result.poolMembers).toEqual(["alice", "bob"])
+      expect(result.poolMemberArns).toEqual([
+        "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+        "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+      ])
+    })
+
+    it("returns defaults for undefined content", () => {
+      const result = parseRuleContent(undefined)
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual([])
+    })
+
+    it("returns defaults for invalid JSON", () => {
+      const result = parseRuleContent("not json")
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual([])
+    })
+
+    it("returns defaults for empty JSON object", () => {
+      const result = parseRuleContent("{}")
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual([])
+    })
+
+    it("handles missing Statements array", () => {
+      const result = parseRuleContent(JSON.stringify({ Version: "2018-11-08" }))
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual([])
+    })
+
+    it("handles empty ApprovalPoolMembers", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: 1, ApprovalPoolMembers: [] }]
+      })
+      const result = parseRuleContent(content)
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual([])
     })
   })
 

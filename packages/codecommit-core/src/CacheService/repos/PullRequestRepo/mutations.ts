@@ -1,8 +1,17 @@
 /**
  * @module PullRequestRepo/mutations
  *
- * SQL write operations. Each function takes `sql` and `publish` (change event)
- * and returns the mutation implementations as an object.
+ * SQL write operations for the pull_requests table. Each function takes `sql`
+ * and `publish` (change event) and returns the mutation implementations.
+ *
+ * Provides upsert (INSERT ON CONFLICT UPDATE with column-specific merge
+ * strategy), stale cleanup, diff stats updates, status transitions,
+ * comment count updates, health score updates, and commented-by refresh.
+ *
+ * **Gotchas**
+ *
+ * - approval_rules uses `= excluded` (no COALESCE) — always fresh from API
+ * - repo_account_id uses COALESCE — preserves across partial updates
  *
  * @category CacheService
  */
@@ -17,16 +26,20 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     Request: UpsertInput,
     execute: (req) => {
       const approvedByStr = joinApprovedBy(req.approvedBy)
+      const approvedByArnsStr = joinApprovedBy(req.approvedByArns)
+      const approvalRulesJson = req.approvalRules && req.approvalRules.length > 0
+        ? JSON.stringify(req.approvalRules)
+        : "[]"
       return sql`INSERT INTO pull_requests
-        (id, aws_account_id, account_profile, account_region, title, description,
+        (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
          author, repository_name, creation_date, last_modified_date, status,
          source_branch, destination_branch, is_mergeable, is_approved,
-         comment_count, link, approved_by, fetched_at)
-        VALUES (${req.id}, ${req.awsAccountId}, ${req.accountProfile}, ${req.accountRegion},
+         comment_count, link, approved_by, approved_by_arns, approval_rules, fetched_at)
+        VALUES (${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
           ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
           ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
           ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
-          ${req.commentCount}, ${req.link}, ${approvedByStr}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+          ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         ON CONFLICT (aws_account_id, id) DO UPDATE SET
           account_profile = excluded.account_profile,
           account_region = excluded.account_region,
@@ -45,6 +58,10 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           health_score = COALESCE(excluded.health_score, pull_requests.health_score),
           link = excluded.link,
           approved_by = COALESCE(excluded.approved_by, pull_requests.approved_by),
+          approved_by_arns = COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns),
+          -- Always overwrite: rules are fetched fresh on every sync, unlike approved_by which accumulates
+          approval_rules = excluded.approval_rules,
+          repo_account_id = COALESCE(excluded.repo_account_id, pull_requests.repo_account_id),
           fetched_at = excluded.fetched_at`
     }
   })
@@ -158,6 +175,19 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
                         WHERE id = ${row.pullRequestId} AND aws_account_id = ${row.awsAccountId}`
           }
         })
-      ).pipe(Effect.asVoid, cacheError("refreshCommentedBy"))
+      ).pipe(Effect.asVoid, cacheError("refreshCommentedBy")),
+
+    propagateRepoAccountId: () =>
+      sql`UPDATE pull_requests
+          SET repo_account_id = (
+            SELECT p2.repo_account_id FROM pull_requests p2
+            WHERE p2.repo_account_id IS NOT NULL
+              AND p2.repository_name = pull_requests.repository_name
+            LIMIT 1
+          )
+          WHERE repo_account_id IS NULL`.pipe(
+        Effect.asVoid,
+        cacheError("propagateRepoAccountId")
+      )
   } as const
 }

@@ -1,5 +1,27 @@
 /**
- * Shared internal helpers for AwsClient methods.
+ * Shared helpers, parameter types, and transport schemas for all AwsClient
+ * method files.
+ *
+ * Provides {@link withAwsContext} (credential acquisition + Layer provision +
+ * throttle-retry + timeout), {@link throttleRetry} (exponential backoff on
+ * ThrottlingException), {@link normalizeAuthor} (ARN → human name), and
+ * {@link PullRequestDetail} (internal transport type for single-PR fetch
+ * with approval rules, approver ARNs, and repo account ID).
+ *
+ * **Mental model**
+ *
+ * - {@link withAwsContext}: acquires credentials, provides Credentials + Region +
+ *   HttpClient + AwsClientConfig to inner effect, wraps with throttle-retry + timeout
+ * - {@link throttleRetry}: exponential backoff on AWS ThrottlingException
+ * - {@link normalizeAuthor}: `arn:aws:sts::ACCT:assumed-role/Role/Session` → `Session`
+ * - {@link PullRequestDetail}: transport type for single-PR path. Uses inline struct
+ *   for `approvalRules` — Schema.Class constructors reject plain objects.
+ *
+ * **Gotchas**
+ *
+ * - `withAwsContext` effect type includes `AwsClientConfig` — inner effects
+ *   that use `throttleRetry` need this in their context
+ * - `PullRequestDetail.approvalRules` intentionally diverges from `Domain.ApprovalRule`
  *
  * @internal
  */
@@ -98,7 +120,7 @@ export type AccountParams = Pick<Account, "profile" | "region">
 export const withAwsContext = <A, E>(
   operation: string,
   account: AccountParams,
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Region.Region | Credentials.Credentials>,
+  effect: Effect.Effect<A, E, HttpClient.HttpClient | Region.Region | Credentials.Credentials | AwsClientConfig>,
   options?: { readonly timeout?: "stream" }
 ) =>
   Effect.gen(function*() {
@@ -112,7 +134,8 @@ export const withAwsContext = <A, E>(
       Layer.mergeAll(
         Layer.succeed(HttpClient.HttpClient, httpClient),
         Layer.succeed(Region.Region, account.region),
-        Layer.succeed(Credentials.Credentials, credentials)
+        Layer.succeed(Credentials.Credentials, credentials),
+        Layer.succeed(AwsClientConfig, config)
       )
     ).pipe(
       throttleRetry,
@@ -177,6 +200,26 @@ export interface DiffStats {
   readonly filesDeleted: number
 }
 
+export interface CreateApprovalRuleParams {
+  readonly account: AccountParams
+  readonly pullRequestId: string
+  readonly approvalRuleName: string
+  readonly approvalRuleContent: string
+}
+
+export interface UpdateApprovalRuleParams {
+  readonly account: AccountParams
+  readonly pullRequestId: string
+  readonly approvalRuleName: string
+  readonly newApprovalRuleContent: string
+}
+
+export interface DeleteApprovalRuleParams {
+  readonly account: AccountParams
+  readonly pullRequestId: string
+  readonly approvalRuleName: string
+}
+
 export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequestDetail")({
   title: Schema.String,
   description: Schema.optional(Schema.String),
@@ -188,5 +231,20 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   creationDate: Schema.DateFromSelf,
   lastActivityDate: Schema.DateFromSelf,
   mergedBy: Schema.optional(Schema.String),
-  approvedBy: Schema.Array(Schema.String)
+  approvedBy: Schema.Array(Schema.String),
+  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  repoAccountId: Schema.optional(Schema.String),
+  // Inline struct instead of Domain.ApprovalRule — Schema.Class constructors reject plain objects
+  // from buildApprovalRules(). PullRequestDetail is an internal transport type, not a domain boundary.
+  approvalRules: Schema.optionalWith(
+    Schema.Array(Schema.Struct({
+      ruleName: Schema.String,
+      requiredApprovals: Schema.Number,
+      poolMembers: Schema.Array(Schema.String),
+      poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+      satisfied: Schema.Boolean,
+      fromTemplate: Schema.optional(Schema.String)
+    })),
+    { default: () => [] }
+  )
 }) {}

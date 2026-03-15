@@ -17,6 +17,7 @@
  */
 import * as SqlClient from "@effect/sql/SqlClient"
 import * as SqlSchema from "@effect/sql/SqlSchema"
+import * as Statement from "@effect/sql/Statement"
 import { Effect, Schema } from "effect"
 import { CacheError } from "../CacheService/CacheError.js"
 import { DatabaseLive } from "../CacheService/Database.js"
@@ -68,6 +69,12 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
       execute: () => sql`SELECT count(*) as count FROM audit_log`
     })
 
+    const exportAllQuery = SqlSchema.findAll({
+      Result: AuditLogEntry,
+      Request: Schema.Void,
+      execute: () => sql`SELECT * FROM audit_log ORDER BY id DESC`
+    })
+
     return {
       log: (entry: NewAuditLogEntry) =>
         sql`INSERT INTO audit_log (timestamp, operation, account_profile, region, permission_state, context, duration_ms)
@@ -87,35 +94,31 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         readonly to?: string | undefined
         readonly search?: string | undefined
       }): Effect.Effect<PaginatedAuditLog, CacheError> => {
-        // Clamp numeric params to prevent injection via malformed input
+        // Clamp numeric params
         const limit = Math.max(1, Math.min(200, Math.floor(opts?.limit ?? 50)))
         const offset = Math.max(0, Math.floor(opts?.offset ?? 0))
 
-        // For filtered queries, build dynamic SQL
-        if (
-          opts?.operation || opts?.accountProfile || opts?.permissionState || opts?.from || opts?.to || opts?.search
-        ) {
-          const conditions: Array<string> = []
-          if (opts?.operation) conditions.push(`operation = '${opts.operation.replace(/'/g, "''")}'`)
-          if (opts?.accountProfile) {
-            conditions.push(`account_profile = '${opts.accountProfile.replace(/'/g, "''")}'`)
-          }
-          if (opts?.permissionState) {
-            conditions.push(`permission_state = '${opts.permissionState.replace(/'/g, "''")}'`)
-          }
-          if (opts?.from) conditions.push(`timestamp >= '${opts.from.replace(/'/g, "''")}'`)
-          if (opts?.to) conditions.push(`timestamp <= '${opts.to.replace(/'/g, "''")}'`)
+        // Compose parameterized WHERE using Statement.and
+        const hasFilter = opts?.operation || opts?.accountProfile || opts?.permissionState
+          || opts?.from || opts?.to || opts?.search
+        if (hasFilter) {
+          const conditions: Array<Statement.Fragment> = []
+          if (opts?.operation) conditions.push(sql`operation = ${opts.operation}`)
+          if (opts?.accountProfile) conditions.push(sql`account_profile = ${opts.accountProfile}`)
+          if (opts?.permissionState) conditions.push(sql`permission_state = ${opts.permissionState}`)
+          if (opts?.from) conditions.push(sql`timestamp >= ${opts.from}`)
+          if (opts?.to) conditions.push(sql`timestamp <= ${opts.to}`)
           if (opts?.search) {
-            const escaped = opts.search.replace(/'/g, "''")
-            conditions.push(`(operation LIKE '%${escaped}%' OR context LIKE '%${escaped}%')`)
+            const pattern = `%${opts.search}%`
+            conditions.push(sql`(operation LIKE ${pattern} OR context LIKE ${pattern})`)
           }
-          const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+          const where = Statement.and(conditions)
 
           return Effect.all([
-            sql.unsafe(`SELECT * FROM audit_log ${where} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`).pipe(
-              Effect.map((rows) => rows.map((r) => r as unknown as AuditLogEntry))
+            sql`SELECT * FROM audit_log WHERE ${where} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`.pipe(
+              Effect.map((rows) => rows.map((r) => Schema.decodeUnknownSync(AuditLogEntry)(r)))
             ),
-            sql.unsafe(`SELECT count(*) as count FROM audit_log ${where}`).pipe(
+            sql`SELECT count(*) as count FROM audit_log WHERE ${where}`.pipe(
               Effect.map((rows) => (rows[0] as unknown as { count: number })?.count ?? 0)
             )
           ]).pipe(
@@ -143,9 +146,8 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
 
       prune: (retentionDays: number): Effect.Effect<number, CacheError> => {
         const days = Math.max(1, Math.floor(retentionDays))
-        return sql.unsafe(
-          `DELETE FROM audit_log WHERE timestamp < datetime('now', '-${days} days')`
-        ).pipe(
+        const modifier = `-${days} days`
+        return sql`DELETE FROM audit_log WHERE timestamp < datetime('now', ${modifier})`.pipe(
           // DELETE returns no rows — use changes() to get actual deleted count
           Effect.flatMap(() => sql<{ n: number }>`SELECT changes() as n`),
           Effect.map((rows) => rows[0]?.n ?? 0),
@@ -153,24 +155,28 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         )
       },
 
+      clearAll: (): Effect.Effect<number, CacheError> =>
+        sql`DELETE FROM audit_log`.pipe(
+          Effect.flatMap(() => sql<{ n: number }>`SELECT changes() as n`),
+          Effect.map((rows) => rows[0]?.n ?? 0),
+          cacheError("clearAll")
+        ),
+
       exportAll: (opts?: {
         readonly from?: string | undefined
         readonly to?: string | undefined
       }): Effect.Effect<ReadonlyArray<AuditLogEntry>, CacheError> => {
         if (opts?.from && opts?.to) {
-          return sql.unsafe(
-            `SELECT * FROM audit_log WHERE timestamp >= '${opts.from.replace(/'/g, "''")}' AND timestamp <= '${
-              opts.to.replace(/'/g, "''")
-            }' ORDER BY id DESC`
-          ).pipe(
-            Effect.map((rows) => rows.map((r) => r as unknown as AuditLogEntry)),
-            cacheError("exportAll")
-          )
+          const exportFiltered = SqlSchema.findAll({
+            Result: AuditLogEntry,
+            Request: Schema.Void,
+            execute: () =>
+              sql`SELECT * FROM audit_log WHERE timestamp >= ${opts.from!} AND timestamp <= ${opts
+                .to!} ORDER BY id DESC`
+          })
+          return exportFiltered(undefined as void).pipe(cacheError("exportAll"))
         }
-        return sql.unsafe("SELECT * FROM audit_log ORDER BY id DESC").pipe(
-          Effect.map((rows) => rows.map((r) => r as unknown as AuditLogEntry)),
-          cacheError("exportAll")
-        )
+        return exportAllQuery(undefined as void).pipe(cacheError("exportAll"))
       }
     }
   })

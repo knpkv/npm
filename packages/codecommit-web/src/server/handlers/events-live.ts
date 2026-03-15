@@ -1,6 +1,21 @@
+/**
+ * SSE event stream handler — pushes full app state to the browser.
+ *
+ * Streams a serialized SsePayload (pull requests, accounts, notifications,
+ * sandboxes, pending review count, permission prompts) on every state or
+ * repo change. Computes `pendingReviewCount` via {@link needsMyReview}.
+ *
+ * **Mental model**
+ *
+ * - Uses handleRaw (not handle) to bypass schema response encoding
+ * - Merges stateChanges (SubscriptionRef) + repoChanges (EventsHub), debounced 200ms
+ * - 30s keepalive heartbeat prevents browser/proxy timeout
+ *
+ * @module
+ */
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, PRService } from "@knpkv/codecommit-core"
-import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, needsMyReview, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { CodeCommitApi, NotificationResponse, SandboxResponse } from "../Api.js"
@@ -25,6 +40,7 @@ const SsePayload = Schema.Struct({
     items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
   }),
+  pendingReviewCount: Schema.optionalWith(Schema.Number, { default: () => 0 }),
   sandboxes: Schema.Array(SandboxResponse),
   permissionPrompt: Schema.optional(Schema.Struct({
     id: Schema.String,
@@ -91,6 +107,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           Effect.catchAll(() => Effect.succeed(undefined))
         )
 
+        const pendingReviewCount = prState.currentUser
+          ? pullRequests.filter((pr) => needsMyReview(pr, prState.currentUser)).length
+          : 0
+
         const payload = yield* encode({
           accounts: prState.accounts,
           status: prState.status,
@@ -99,6 +119,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           error: prState.error,
           lastUpdated: prState.lastUpdated,
           currentUser: prState.currentUser,
+          pendingReviewCount,
           unreadNotificationCount: unreadCount,
           notifications,
           sandboxes,

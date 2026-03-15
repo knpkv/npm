@@ -1,3 +1,25 @@
+/**
+ * SSE client hook — connects to /api/events/ and decodes state updates.
+ *
+ * {@link useSSE} opens an EventSource to `/api/events/`, decodes each
+ * message into AppState (pull requests with approval rules and approver
+ * ARNs, pending review count, notifications, sandboxes, permission
+ * prompts), fires toasts for genuinely new notifications (suppressing
+ * title_changed/description_changed), and reconnects with exponential
+ * backoff up to 50 retries.
+ *
+ * **Gotchas**
+ *
+ * - `as AppState` cast works because only consoleUrl getter is missing from
+ *   wire objects (it's a Schema.Class getter, not serialized)
+ *
+ * **Common tasks**
+ *
+ * - Connect SSE: {@link useSSE}
+ * - Connection state: {@link ConnectionState}
+ *
+ * @module
+ */
 import { AppStatus, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
@@ -16,7 +38,8 @@ const PullRequestWire = Schema.Struct({
   account: Schema.Struct({
     profile: Schema.String,
     region: Schema.String,
-    awsAccountId: Schema.optional(Schema.String)
+    awsAccountId: Schema.optional(Schema.String),
+    repoAccountId: Schema.optional(Schema.String)
   }),
   status: PullRequestStatus,
   sourceBranch: Schema.String,
@@ -27,8 +50,20 @@ const PullRequestWire = Schema.Struct({
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.DateFromString),
   approvedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   commentedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
-  filesChanged: Schema.optional(Schema.Number)
+  filesChanged: Schema.optional(Schema.Number),
+  approvalRules: Schema.optionalWith(
+    Schema.Array(Schema.Struct({
+      ruleName: Schema.String,
+      requiredApprovals: Schema.Number,
+      poolMembers: Schema.Array(Schema.String),
+      poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+      satisfied: Schema.Boolean,
+      fromTemplate: Schema.optional(Schema.String)
+    })),
+    { default: () => [] }
+  )
 })
 
 const NotificationWire = Schema.Struct({
@@ -71,6 +106,7 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
+  pendingReviewCount: Schema.optionalWith(Schema.Number, { default: () => 0 }),
   unreadNotificationCount: Schema.optional(Schema.Number),
   notifications: Schema.optional(Schema.Struct({
     items: Schema.Array(NotificationWire),
@@ -89,11 +125,19 @@ const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected"
 
-export function useSSE(onState: (state: AppState) => void, onToastClick?: () => void) {
+export function useSSE(
+  onState: (state: AppState) => void,
+  onToastClick?: (path?: string) => void,
+  onDesktopNotify?: (
+    n: { id?: number; type: string; title: string; message: string; awsAccountId?: string; pullRequestId?: string }
+  ) => void
+) {
   const callbackRef = useRef(onState)
   callbackRef.current = onState
   const toastClickRef = useRef(onToastClick)
   toastClickRef.current = onToastClick
+  const desktopNotifyRef = useRef(onDesktopNotify)
+  desktopNotifyRef.current = onDesktopNotify
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected")
   const maxSeenIdRef = useRef<number>(0)
 
@@ -116,12 +160,28 @@ export function useSSE(onState: (state: AppState) => void, onToastClick?: () => 
 
           // Toast for genuinely new notifications
           const notifications = state.notifications?.items ?? []
+          const suppressedToastTypes = new Set(["title_changed", "description_changed"])
           if (maxSeenIdRef.current > 0) {
             for (const n of notifications) {
-              if (n.id > maxSeenIdRef.current) {
+              if (n.id > maxSeenIdRef.current && !suppressedToastTypes.has(n.type)) {
                 toast(n.title || "New notification", {
+                  id: `notif-${n.id}`,
                   description: n.message,
-                  action: { label: "View", onClick: () => toastClickRef.current?.() }
+                  duration: 8000,
+                  action: n.awsAccountId && n.pullRequestId
+                    ? {
+                      label: "View",
+                      onClick: () => toastClickRef.current?.(`/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`)
+                    }
+                    : { label: "View", onClick: () => toastClickRef.current?.("/notifications") }
+                })
+                desktopNotifyRef.current?.({
+                  id: n.id,
+                  type: n.type,
+                  title: n.title || "CodeCommit",
+                  message: n.message,
+                  awsAccountId: n.awsAccountId,
+                  pullRequestId: n.pullRequestId
                 })
               }
             }

@@ -1,6 +1,19 @@
+/**
+ * PR list — filtered, grouped, or hot-sorted list of pull requests.
+ *
+ * Applies multi-axis filters (status axis-based grouping, date range,
+ * text search, review filter via {@link needsMyReview}), then renders
+ * either a hot-mode flat list (sorted by lastModifiedDate desc with
+ * auto-animate) or a grouped-by-account layout. Passes currentUser to
+ * {@link PRRow} for review indicator badge. Shows SSO login prompt
+ * when no PRs are available.
+ *
+ * @module
+ */
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import { useAutoAnimate } from "@formkit/auto-animate/react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { LoaderIcon, LogInIcon } from "lucide-react"
 import { useEffect, useMemo } from "react"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
@@ -83,7 +96,7 @@ export function PRList() {
   const { flat, grouped } = useMemo(() => {
     if (prs.length === 0) return { flat: [], grouped: [] }
 
-    const { filters, from, hot, q, to } = filterState
+    const { filters, from, hot, q, review, to } = filterState
 
     // Text search
     const filterLower = q.toLowerCase()
@@ -134,7 +147,11 @@ export function PRList() {
       return ts >= fromMs && ts < toMs
     }
 
-    const filtered = prs.filter((pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr))
+    const filterByReview = (pr: PullRequest) => !review || needsMyReview(pr, appState.currentUser)
+
+    const filtered = prs.filter(
+      (pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr) && filterByReview(pr)
+    )
 
     // Hot mode: flat list sorted by lastModifiedDate desc
     if (hot) {
@@ -232,7 +249,7 @@ export function PRList() {
     return (
       <div key="hot" ref={animateRef} className="divide-y rounded-lg border bg-card">
         {flat.map((pr) => (
-          <PRRow key={pr.id} pr={pr} to={prHref(pr)} showUpdated />
+          <PRRow key={pr.id} pr={pr} to={prHref(pr)} showUpdated currentUser={appState.currentUser} />
         ))}
       </div>
     )
@@ -248,7 +265,7 @@ export function PRList() {
           </div>
           <div className="divide-y rounded-lg border bg-card">
             {accountPrs.map((pr) => (
-              <PRRow key={pr.id} pr={pr} to={prHref(pr)} />
+              <PRRow key={pr.id} pr={pr} to={prHref(pr)} currentUser={appState.currentUser} />
             ))}
           </div>
         </section>

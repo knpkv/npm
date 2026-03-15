@@ -1,3 +1,13 @@
+/**
+ * Notification endpoint handlers — SSO login/logout + CRUD for notifications.
+ *
+ * Provides list/count/markRead/markUnread/markAllRead for unified notifications,
+ * plus ssoLogin (forks daemon: `aws sso login` → getCallerIdentity → refresh)
+ * and ssoLogout. Only login success and errors produce system notifications.
+ * `ssoSemaphore(1)` serializes concurrent SSO commands.
+ *
+ * @module
+ */
 import { Command, HttpApiBuilder } from "@effect/platform"
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import type { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
@@ -46,13 +56,6 @@ export const NotificationsLive = HttpApiBuilder.group(
           ))
         .handle("ssoLogin", ({ payload }) =>
           Effect.gen(function*() {
-            yield* notificationRepo.addSystem({
-              type: "info",
-              title: payload.profile,
-              message: `Starting SSO login for ${payload.profile}...`,
-              profile: payload.profile
-            })
-
             const cmd = Command.make("aws", "sso", "login", "--profile", payload.profile).pipe(
               Command.stdout("inherit"),
               Command.stderr("inherit")
@@ -106,12 +109,6 @@ export const NotificationsLive = HttpApiBuilder.group(
           ))
         .handle("ssoLogout", () =>
           Effect.gen(function*() {
-            yield* notificationRepo.addSystem({
-              type: "info",
-              title: "SSO",
-              message: "Logging out SSO session..."
-            })
-
             const cmd = Command.make("aws", "sso", "logout").pipe(
               Command.stdout("inherit"),
               Command.stderr("inherit")
@@ -121,13 +118,6 @@ export const NotificationsLive = HttpApiBuilder.group(
                 Command.exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
                   Effect.tap(() => SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)),
-                  Effect.tap(() =>
-                    notificationRepo.addSystem({
-                      type: "success",
-                      title: "SSO",
-                      message: "SSO logout successful"
-                    })
-                  ),
                   Effect.catchAll((e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
                       Effect.zipRight(notificationRepo.addSystem({

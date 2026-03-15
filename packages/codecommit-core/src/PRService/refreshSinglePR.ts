@@ -1,10 +1,17 @@
 /**
+ * Refreshes a single PR by ID (e.g. from webhook or manual refresh).
+ *
+ * Fetches fresh detail and comments from AWS, diffs against cache (field
+ * changes, approval pool membership, comment changes), emits notifications,
+ * and upserts the result. Uses `detail.repoAccountId` from getPullRequest
+ * with fallback to cached value.
+ *
  * @internal
  */
 
 import { Cause, Effect, Option, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
-import { diffComments, diffPR } from "../CacheService/diff.js"
+import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { UpsertInput } from "../CacheService/repos/PullRequestRepo/index.js"
@@ -81,6 +88,7 @@ export const makeRefreshSinglePR = (
     const freshUpsert: UpsertInput = {
       id: prId,
       awsAccountId,
+      repoAccountId: detail.repoAccountId ?? cached?.repoAccountId ?? null,
       accountProfile: account.profile,
       accountRegion: account.region,
       title: detail.title,
@@ -96,7 +104,9 @@ export const makeRefreshSinglePR = (
       isApproved: cached ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ?? codecommitConsoleUrl(account.region, detail.repositoryName, prId),
-      approvedBy: cached?.approvedBy ?? []
+      approvedBy: detail.approvedBy,
+      approvedByArns: detail.approvedByArns,
+      approvalRules: detail.approvalRules
     }
 
     // Diff for subscribed PRs
@@ -106,7 +116,18 @@ export const makeRefreshSinglePR = (
 
     if (isSubscribed && Option.isSome(cachedPR)) {
       const prNotifications = diffPR(cachedPR.value, freshUpsert, awsAccountId)
-      yield* Effect.forEach(prNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+      const poolNotifications = diffApprovalPools(
+        cachedPR.value.approvalRules ?? [],
+        freshUpsert.approvalRules,
+        currentState.currentUser,
+        prId,
+        awsAccountId,
+        detail.title,
+        account.profile
+      )
+      yield* Effect.forEach([...prNotifications, ...poolNotifications], (n) => notificationRepo.add(n), {
+        discard: true
+      }).pipe(
         Effect.catchAll(() => Effect.void)
       )
 

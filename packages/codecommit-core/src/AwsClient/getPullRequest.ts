@@ -1,8 +1,31 @@
 /**
+ * Fetches a single PR's full detail — metadata, approvers, approval rules,
+ * and repo account ID in parallel. Returns a {@link PullRequestDetail}
+ * transport object.
+ *
+ * **Mental model**
+ *
+ * ```
+ * codecommit.getPullRequest ─┬─► decodePullRequestDetail
+ *                            ├─► fetchApprovers          → { names, arns }
+ *                            ├─► fetchApprovalEvaluation → satisfiedNames
+ *                            └─► fetchRepoAccountId      → repo account ID
+ * ```
+ *
+ * - Shared: {@link buildApprovalRules}, {@link fetchApprovalEvaluation},
+ *   {@link fetchRepoAccountId} from getPullRequests.ts
+ * - Runs inside {@link withAwsContext} (Credentials + Region + AwsClientConfig)
+ *
+ * **Gotchas**
+ *
+ * - `PullRequestDetail.approvalRules` uses inline struct, not Schema.Class —
+ *   class constructors reject plain objects from `buildApprovalRules`
+ *
  * @internal
  */
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect, Schema } from "effect"
+import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
   makeApiError,
@@ -78,27 +101,24 @@ const RawToPullRequestDetail = Schema.transform(
 // Effectful decode — ParseError in error channel instead of thrown defect
 const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknown(RawToPullRequestDetail)(raw)
 
-const fetchApprovers = (pullRequestId: string, revisionId: string) =>
-  codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId }).pipe(
-    Effect.map((r) =>
-      (r.approvals ?? [])
-        .filter((a) => a.approvalState === "APPROVE" && a.userArn)
-        .map((a) => normalizeAuthor(a.userArn!))
-    ),
-    Effect.catchAll(() => Effect.succeed([] as Array<string>))
-  )
-
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: params.pullRequestId })
     const revisionId = resp.pullRequest?.revisionId ?? ""
-    const [detail, approvers] = yield* Effect.all([
+    const repoName = resp.pullRequest?.pullRequestTargets?.[0]?.repositoryName ?? ""
+    const [detail, approvers, evaluation, repoAccountId] = yield* Effect.all([
       decodePullRequestDetail(resp),
-      fetchApprovers(params.pullRequestId, revisionId)
-    ], { concurrency: 2 })
+      fetchApprovers(params.pullRequestId, revisionId),
+      fetchApprovalEvaluation(params.pullRequestId, revisionId),
+      fetchRepoAccountId(repoName)
+    ], { concurrency: 4 })
+    const approvalRules = buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
     return new PullRequestDetail({
       ...detail,
-      approvedBy: approvers
+      approvedBy: approvers.names,
+      approvedByArns: approvers.arns,
+      approvalRules,
+      repoAccountId: repoAccountId || undefined
     })
   }).pipe(
     Effect.mapError((cause) => makeApiError("getPullRequest", params.account.profile, params.account.region, cause))

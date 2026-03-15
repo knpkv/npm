@@ -1,6 +1,10 @@
 /**
  * Database layer for local SQLite cache via libsql/Turso.
  *
+ * Manages the `~/.codecommit/cache.db` database lifecycle: directory creation,
+ * libsql client configuration (with camelCase column transform), and sequential
+ * migration execution (0001 through 0015).
+ *
  * @module
  */
 import { FileSystem } from "@effect/platform"
@@ -19,6 +23,9 @@ import migration0009 from "./migrations/0009_approved_by.js"
 import migration0010 from "./migrations/0010_commented_by.js"
 import migration0011 from "./migrations/0011_audit_log.js"
 import migration0012 from "./migrations/0012_audit_log_indexes.js"
+import migration0013 from "./migrations/0013_approval_rules.js"
+import migration0014 from "./migrations/0014_approved_by_arns.js"
+import migration0015 from "./migrations/0015_repo_account_id.js"
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -57,7 +64,10 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0009_approved_by": migration0009,
     "0010_commented_by": migration0010,
     "0011_audit_log": migration0011,
-    "0012_audit_log_indexes": migration0012
+    "0012_audit_log_indexes": migration0012,
+    "0013_approval_rules": migration0013,
+    "0014_approved_by_arns": migration0014,
+    "0015_repo_account_id": migration0015
   })
 })
 

@@ -1,3 +1,20 @@
+/**
+ * URL search-param filter hook — bidirectional sync between URL and FilterState.
+ *
+ * Parses `?f=key:value` params into {@link FilterState}, injects defaults
+ * when no `f=` is present, and provides toggle/remove/clear callbacks for
+ * all filter dimensions (account, author, repo, status, etc.), hot mode
+ * (`?hot=1`), review mode (`?review=1`), mine mode (`?mine=1`), text
+ * search (`?q=`), and date range (`?from=`/`?to=`).
+ *
+ * **Common tasks**
+ *
+ * - Toggle review filter: toggleReview
+ * - Toggle hot mode: toggleHot
+ * - Clear all filters: clearAll
+ *
+ * @module
+ */
 import { useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router"
 import { FILTER_KEYS, type FilterEntry, type FilterKey, type FilterState } from "../atoms/ui.js"
@@ -37,6 +54,7 @@ export function useFilterParams() {
       filters: parseFilters(searchParams),
       hot: searchParams.has("hot"),
       mine: searchParams.has("mine"),
+      review: searchParams.has("review"),
       ...(mineScope != null ? { mineScope } : {}),
       q: searchParams.get("q") ?? "",
       ...(from != null ? { from } : {}),
@@ -111,6 +129,14 @@ export function useFilterParams() {
     }, { replace: true })
   }, [setSearchParams])
 
+  const toggleReview = useCallback(() => {
+    setSearchParams((prev) => {
+      if (prev.has("review")) prev.delete("review")
+      else prev.set("review", "1")
+      return prev
+    }, { replace: true })
+  }, [setSearchParams])
+
   const toggleMine = useCallback(() => {
     setSearchParams((prev) => {
       if (prev.has("mine")) {
@@ -150,6 +176,7 @@ export function useFilterParams() {
       prev.delete("f")
       prev.delete("hot")
       prev.delete("mine")
+      prev.delete("review")
       prev.delete("mineScope")
       prev.delete("q")
       prev.delete("from")
@@ -158,5 +185,15 @@ export function useFilterParams() {
     }, { replace: true })
   }, [setSearchParams])
 
-  return { state, toggleFilter, removeFilterKey, toggleHot, toggleMine, setMineScope, setFilterText, clearAll } as const
+  return {
+    state,
+    toggleFilter,
+    removeFilterKey,
+    toggleHot,
+    toggleReview,
+    toggleMine,
+    setMineScope,
+    setFilterText,
+    clearAll
+  } as const
 }

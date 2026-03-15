@@ -1,9 +1,21 @@
+/**
+ * Top navigation header — status, user menu, action buttons.
+ *
+ * Renders sync status, relative timestamp, user dropdown (SSO logout),
+ * and icon buttons for stats, audit, sandboxes (active count badge),
+ * review (pending count badge, navigates to `/?review=1`), refresh,
+ * notifications (unread count badge), settings, command palette hint,
+ * and theme toggle.
+ *
+ * @module
+ */
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import {
   BarChart3Icon,
   BellIcon,
   BoxIcon,
+  EyeIcon,
   LoaderIcon,
   LogOutIcon,
   MoonIcon,
@@ -31,6 +43,7 @@ export function Header() {
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
   const notifCount = state.unreadNotificationCount ?? 0
+  const reviewCount = state.pendingReviewCount ?? 0
   const activeSandboxes = (state.sandboxes ?? []).filter(
     (s) => s.status === "running" || s.status === "creating" || s.status === "cloning" || s.status === "starting"
   )
@@ -88,6 +101,15 @@ export function Header() {
             )}
             <span className="sr-only">Sandboxes</span>
           </Button>
+          {reviewCount > 0 && (
+            <Button variant="ghost" size="icon-sm" className="relative" onClick={() => navigate("/?review=1")}>
+              <EyeIcon className="size-4" />
+              <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-yellow-500 text-[10px] font-medium text-white">
+                {reviewCount > 9 ? "9+" : reviewCount}
+              </span>
+              <span className="sr-only">Needs my review</span>
+            </Button>
+          )}
           <Button variant="ghost" size="icon-sm" onClick={() => refresh({})} disabled={isLoading}>
             <RefreshCwIcon className={cn("size-4", isLoading && "animate-spin")} />
           </Button>

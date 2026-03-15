@@ -27,14 +27,22 @@ export const AuditLive = HttpApiBuilder.group(
             to: urlParams.to,
             search: urlParams.search
           }).pipe(
-            Effect.mapError((e) => new ApiError({ message: String(e) }))
+            Effect.tapError((e) => Effect.logWarning("Audit operation failed", e)),
+            Effect.mapError(() => new ApiError({ message: "Audit query failed" }))
           ))
         .handle("export", ({ urlParams }) =>
           auditLog.exportAll({
             from: urlParams.from,
             to: urlParams.to
           }).pipe(
-            Effect.mapError((e) => new ApiError({ message: String(e) }))
+            Effect.tapError((e) => Effect.logWarning("Audit operation failed", e)),
+            Effect.mapError(() => new ApiError({ message: "Audit query failed" }))
+          ))
+        .handle("clear", () =>
+          auditLog.clearAll().pipe(
+            Effect.map((deleted) => ({ deleted })),
+            Effect.tapError((e) => Effect.logWarning("Audit operation failed", e)),
+            Effect.mapError(() => new ApiError({ message: "Audit query failed" }))
           ))
     })
 )

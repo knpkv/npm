@@ -1,5 +1,16 @@
+/**
+ * Settings page — tabbed layout for all app settings.
+ *
+ * Renders a side navigation driven by {@link SettingsTabs} (accounts,
+ * refresh, sandbox, notifications, permissions, audit, theme, config,
+ * about) with URL-based tab routing (`/settings/:tab`). Each tab
+ * renders its corresponding settings component.
+ *
+ * @module
+ */
 import {
   ArrowLeftIcon,
+  BellIcon,
   BoxIcon,
   FileIcon,
   InfoIcon,
@@ -16,6 +27,7 @@ import { SettingsAbout } from "./settings-about.js"
 import { SettingsAccounts } from "./settings-accounts.js"
 import { SettingsAudit } from "./settings-audit.js"
 import { SettingsConfig } from "./settings-config.js"
+import { SettingsNotifications } from "./settings-notifications.js"
 import { SettingsPermissions } from "./settings-permissions.js"
 import { SettingsRefresh } from "./settings-refresh.js"
 import { SettingsSandbox } from "./settings-sandbox.js"
@@ -26,6 +38,7 @@ const TabIcons: Record<SettingsTab, React.ReactNode> = {
   accounts: <UserIcon className="size-4" />,
   refresh: <RefreshCwIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
+  notifications: <BellIcon className="size-4" />,
   permissions: <ShieldCheckIcon className="size-4" />,
   audit: <ScrollTextIcon className="size-4" />,
   theme: <PaletteIcon className="size-4" />,
@@ -37,6 +50,7 @@ const TabLabels: Record<SettingsTab, string> = {
   accounts: "Accounts",
   refresh: "Refresh",
   sandbox: "Sandbox",
+  notifications: "Notifications",
   permissions: "Permissions",
   audit: "Audit",
   theme: "Theme",
@@ -82,6 +96,7 @@ export function SettingsPage() {
         {activeTab === "accounts" && <SettingsAccounts />}
         {activeTab === "refresh" && <SettingsRefresh />}
         {activeTab === "sandbox" && <SettingsSandbox />}
+        {activeTab === "notifications" && <SettingsNotifications />}
         {activeTab === "permissions" && <SettingsPermissions />}
         {activeTab === "audit" && <SettingsAudit />}
         {activeTab === "theme" && <SettingsTheme />}

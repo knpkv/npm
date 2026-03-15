@@ -27,7 +27,7 @@ export const PermissionState = Schema.Literal("always_allow", "allow", "deny")
 export type PermissionState = typeof PermissionState.Type
 
 const AuditConfig = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
+  enabled: Schema.Boolean.pipe(Schema.optionalWith({ default: () => false })),
   retentionDays: Schema.Number.pipe(Schema.optionalWith({ default: () => 30 }))
 })
 

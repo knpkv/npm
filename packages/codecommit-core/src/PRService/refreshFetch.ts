@@ -1,12 +1,16 @@
 /**
+ * Phase 3 of the PR refresh cycle: streams PRs from AWS, diffs subscribed
+ * PRs against cache (field changes via {@link diffPR} and approval pool
+ * membership via {@link diffApprovalPools}), upserts to cache, and
+ * transitions stale OPEN PRs by re-fetching their status.
+ *
  * @internal
- * Phase 3: Stream PRs from AWS, diff subscribed PRs, upsert to cache.
  */
 
 import { Cause, Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
-import { diffPR } from "../CacheService/diff.js"
+import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
@@ -105,7 +109,18 @@ export const fetchAndUpsertPRs = (params: {
             )
             if (Option.isSome(cached)) {
               const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
-              yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+              const poolNotifications = diffApprovalPools(
+                cached.value.approvalRules ?? [],
+                pr.approvalRules,
+                currentUser,
+                pr.id,
+                awsAccountId,
+                pr.title,
+                pr.account.profile
+              )
+              yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
+                discard: true
+              }).pipe(
                 Effect.catchAll(() => Effect.void)
               )
             }
@@ -117,7 +132,9 @@ export const fetchAndUpsertPRs = (params: {
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
               Effect.catchAll(() => Effect.void)
             )
-            if (currentUser && pr.author === currentUser) {
+            const isAuthor = currentUser && pr.author === currentUser
+            const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
+            if (isAuthor || isApprover) {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchAll(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
             }
@@ -152,4 +169,7 @@ export const fetchAndUpsertPRs = (params: {
       ),
       Effect.catchAll(() => Effect.void)
     )
+
+    // Propagate repoAccountId from any PR that has it to all PRs that don't
+    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchAll(() => Effect.void))
   })
