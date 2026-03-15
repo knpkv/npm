@@ -390,7 +390,7 @@ export function FilterBar() {
   return (
     <div className="border-b bg-background">
       {/* Row 1: Toggles + filter dropdowns */}
-      <div className="mx-auto flex max-w-5xl items-center gap-1.5 px-4 pt-2 pb-1 flex-wrap">
+      <div className="flex items-center gap-2 px-8 pt-4 pb-2 flex-wrap">
         <Button variant={state.hot ? "default" : "outline"} size="sm" className="gap-1 h-7" onClick={toggleHot}>
           <FlameIcon className="size-3.5" />
           Hot
@@ -431,7 +431,7 @@ export function FilterBar() {
       </div>
 
       {/* Row 2: Full-width search bar with inline filter tags */}
-      <div className="mx-auto max-w-5xl px-4 pb-2">
+      <div className="px-8 pb-4">
         <div className="flex items-center gap-1.5 rounded-md border bg-background px-3 min-h-[44px] focus-within:ring-1 focus-within:ring-ring flex-wrap py-1.5">
           <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
 

@@ -30,6 +30,7 @@ export interface FilterEntry {
 export interface FilterState {
   readonly filters: ReadonlyArray<FilterEntry>
   readonly hot: boolean
+  readonly groupBy?: string
   readonly mine: boolean
   readonly review: boolean
   readonly mineScope?: string
