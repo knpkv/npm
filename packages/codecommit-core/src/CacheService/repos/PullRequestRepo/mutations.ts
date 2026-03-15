@@ -175,6 +175,19 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
                         WHERE id = ${row.pullRequestId} AND aws_account_id = ${row.awsAccountId}`
           }
         })
-      ).pipe(Effect.asVoid, cacheError("refreshCommentedBy"))
+      ).pipe(Effect.asVoid, cacheError("refreshCommentedBy")),
+
+    propagateRepoAccountId: () =>
+      sql`UPDATE pull_requests
+          SET repo_account_id = (
+            SELECT p2.repo_account_id FROM pull_requests p2
+            WHERE p2.repo_account_id IS NOT NULL
+              AND p2.repository_name = pull_requests.repository_name
+            LIMIT 1
+          )
+          WHERE repo_account_id IS NULL`.pipe(
+        Effect.asVoid,
+        cacheError("propagateRepoAccountId")
+      )
   } as const
 }

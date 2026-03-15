@@ -169,4 +169,7 @@ export const fetchAndUpsertPRs = (params: {
       ),
       Effect.catchAll(() => Effect.void)
     )
+
+    // Propagate repoAccountId from any PR that has it to all PRs that don't
+    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchAll(() => Effect.void))
   })

@@ -580,26 +580,27 @@ export function PRDetail() {
     [accountId, prId, state.pullRequests]
   )
 
-  // Collect known user ARNs from approval rules + approvedBy/approvedByArns across all PRs (name → ARN)
+  // Collect known users from all PRs, but always use CURRENT PR's account for CodeCommitApprovers format
+  // (the approval rule is created on this PR's repo, so pool members must reference this account)
+  const currentAcct = pr?.account?.repoAccountId || ""
   const knownUserArns = useMemo(() => {
     const map = new Map<string, string>()
     for (const p of state.pullRequests) {
-      const acct = p.account?.repoAccountId ?? p.account?.awsAccountId ?? ""
       for (const rule of p.approvalRules) {
         for (let i = 0; i < rule.poolMembers.length; i++) {
           const name = rule.poolMembers[i]
           const arn = i < rule.poolMemberArns.length ? rule.poolMemberArns[i] : undefined
-          if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
+          if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, currentAcct))
         }
       }
       for (let i = 0; i < p.approvedBy.length; i++) {
         const name = p.approvedBy[i]
         const arn = i < p.approvedByArns.length ? p.approvedByArns[i] : undefined
-        if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
+        if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, currentAcct))
       }
     }
     return map
-  }, [state.pullRequests])
+  }, [state.pullRequests, currentAcct])
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
