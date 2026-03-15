@@ -104,8 +104,8 @@ export const makeRefreshSinglePR = (
       isApproved: cached ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ?? codecommitConsoleUrl(account.region, detail.repositoryName, prId),
-      approvedBy: cached?.approvedBy ?? [],
-      approvedByArns: cached?.approvedByArns ?? [],
+      approvedBy: detail.approvedBy,
+      approvedByArns: detail.approvedByArns,
       approvalRules: detail.approvalRules
     }
 

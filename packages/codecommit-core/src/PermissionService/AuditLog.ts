@@ -69,6 +69,12 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
       execute: () => sql`SELECT count(*) as count FROM audit_log`
     })
 
+    const exportAllQuery = SqlSchema.findAll({
+      Result: AuditLogEntry,
+      Request: Schema.Void,
+      execute: () => sql`SELECT * FROM audit_log ORDER BY id DESC`
+    })
+
     return {
       log: (entry: NewAuditLogEntry) =>
         sql`INSERT INTO audit_log (timestamp, operation, account_profile, region, permission_state, context, duration_ms)
@@ -140,9 +146,8 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
 
       prune: (retentionDays: number): Effect.Effect<number, CacheError> => {
         const days = Math.max(1, Math.floor(retentionDays))
-        return sql.unsafe(
-          `DELETE FROM audit_log WHERE timestamp < datetime('now', '-${days} days')`
-        ).pipe(
+        const modifier = `-${days} days`
+        return sql`DELETE FROM audit_log WHERE timestamp < datetime('now', ${modifier})`.pipe(
           // DELETE returns no rows — use changes() to get actual deleted count
           Effect.flatMap(() => sql<{ n: number }>`SELECT changes() as n`),
           Effect.map((rows) => rows[0]?.n ?? 0),
@@ -161,11 +166,6 @@ export class AuditLogRepo extends Effect.Service<AuditLogRepo>()("AuditLogRepo",
         readonly from?: string | undefined
         readonly to?: string | undefined
       }): Effect.Effect<ReadonlyArray<AuditLogEntry>, CacheError> => {
-        const exportAllQuery = SqlSchema.findAll({
-          Result: AuditLogEntry,
-          Request: Schema.Void,
-          execute: () => sql`SELECT * FROM audit_log ORDER BY id DESC`
-        })
         if (opts?.from && opts?.to) {
           const exportFiltered = SqlSchema.findAll({
             Result: AuditLogEntry,

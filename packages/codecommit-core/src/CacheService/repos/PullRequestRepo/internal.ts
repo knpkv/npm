@@ -28,7 +28,7 @@ export const CommaSeparatedArray = Schema.transform(
   Schema.NullOr(Schema.String),
   Schema.Array(Schema.String),
   {
-    decode: (s) => (s ? s.split(",") : []),
+    decode: (s) => (s ? s.split(",").filter(Boolean) : []),
     encode: (arr) => (arr.length > 0 ? arr.join(",") : null)
   }
 )

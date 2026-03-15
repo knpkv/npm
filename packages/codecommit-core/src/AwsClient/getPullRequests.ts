@@ -60,6 +60,7 @@ export const parseRuleContent = (
 ): { requiredApprovals: number; poolMembers: Array<string>; poolMemberArns: Array<string> } => {
   try {
     const parsed = JSON.parse(content ?? "{}")
+    // Only first statement parsed — AWS rules typically have one statement per rule
     const stmt = parsed.Statements?.[0]
     const rawArns: Array<string> = stmt?.ApprovalPoolMembers ?? []
     return {

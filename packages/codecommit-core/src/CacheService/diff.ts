@@ -131,6 +131,7 @@ export const diffApprovalPools = (
       ...optional
     })
   } else if (wasInPool && !nowInPool) {
+    // Uses approval_changed (not a dedicated type) — removal is an approval state change
     notifications.push({
       pullRequestId: prId,
       awsAccountId,

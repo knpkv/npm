@@ -19,7 +19,7 @@
  *
  * - Show approvers: {@link ApproversCard}
  * - Convert ARN: {@link toApprovalPoolPrefill}
- * - Managed rule name: {@link MANAGED_RULE_NAME}
+ * - Managed rule names: {@link REQUIRED_RULE_NAME}, {@link OPTIONAL_RULE_NAME}
  *
  * @module
  */
@@ -426,7 +426,12 @@ function ApproversCard({
 
   const handleAdd = (arn: string) => {
     const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(arn)
-    if (nameMatch) optimistic.add(nameMatch[1]!)
+    if (nameMatch) {
+      optimistic.add(nameMatch[1]!)
+    } else {
+      const stsMatch = /assumed-role\/[^/]+\/(.+)$/.exec(arn)
+      optimistic.add(stsMatch ? stsMatch[1]! : arn)
+    }
     onSetApprovers([...managedArns, arn])
     setShowPicker(false)
   }
@@ -578,10 +583,8 @@ export function PRDetail() {
   // Collect known user ARNs from approval rules + approvedBy/approvedByArns across all PRs (name → ARN)
   const knownUserArns = useMemo(() => {
     const map = new Map<string, string>()
-    // Find any known repoAccountId — all repos share the same CodeCommit account
-    const repoAcct = state.pullRequests.find((p) => p.account?.repoAccountId)?.account?.repoAccountId ?? ""
     for (const p of state.pullRequests) {
-      const acct = repoAcct || p.account?.awsAccountId || ""
+      const acct = p.account?.repoAccountId ?? p.account?.awsAccountId ?? ""
       for (const rule of p.approvalRules) {
         for (let i = 0; i < rule.poolMembers.length; i++) {
           const name = rule.poolMembers[i]

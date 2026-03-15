@@ -39,30 +39,39 @@ export function useReviewReminder(pendingReviewCount: number) {
   countRef.current = pendingReviewCount
 
   useEffect(() => {
-    const check = () => {
-      const enabled = readBool(StorageKeys.reminders, true)
-      if (!enabled || countRef.current === 0) return
+    let timer: ReturnType<typeof setTimeout> | null = null
 
-      toast(`You have ${countRef.current} PR${countRef.current > 1 ? "s" : ""} awaiting your review`, {
-        duration: 10000
-      })
-
-      // Desktop notification if enabled
-      if (
-        typeof Notification !== "undefined" &&
-        Notification.permission === "granted" &&
-        readBool(StorageKeys.desktopNotifications, false)
-      ) {
-        new Notification("Review Reminder", {
-          body: `${countRef.current} PR${countRef.current > 1 ? "s" : ""} awaiting your review`,
-          icon: "/favicon.ico",
-          tag: "review-reminder"
-        })
-      }
+    const schedule = () => {
+      const interval = readNumber(StorageKeys.reminderInterval, DEFAULT_INTERVAL)
+      timer = setTimeout(tick, interval)
     }
 
-    const interval = readNumber(StorageKeys.reminderInterval, DEFAULT_INTERVAL)
-    const timer = setInterval(check, interval)
-    return () => clearInterval(timer)
+    const tick = () => {
+      const enabled = readBool(StorageKeys.reminders, true)
+      if (enabled && countRef.current > 0) {
+        toast(`You have ${countRef.current} PR${countRef.current > 1 ? "s" : ""} awaiting your review`, {
+          duration: 10000
+        })
+
+        // Desktop notification if enabled
+        if (
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted" &&
+          readBool(StorageKeys.desktopNotifications, false)
+        ) {
+          new Notification("Review Reminder", {
+            body: `${countRef.current} PR${countRef.current > 1 ? "s" : ""} awaiting your review`,
+            icon: "/favicon.ico",
+            tag: "review-reminder"
+          })
+        }
+      }
+      schedule()
+    }
+
+    schedule()
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
   }, [])
 }
