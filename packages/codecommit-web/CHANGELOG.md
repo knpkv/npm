@@ -1,5 +1,11 @@
 # @knpkv/codecommit-web
 
+## 0.9.1
+
+### Patch Changes
+
+- [#57](https://github.com/knpkv/npm/pull/57) [`3c731e9`](https://github.com/knpkv/npm/commit/3c731e94c71fe9a4fe05a84da1acbda6fe474a8c) Thanks @konopkov! - Approver discovery: discover all users (authors, approvers, commenters) not just ARN holders, auto-prefix CodeCommitApprovers:REPO_ACCT: so users type just a username
+
 ## 0.9.0
 
 ### Minor Changes
