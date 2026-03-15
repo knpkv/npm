@@ -1,21 +1,18 @@
 /**
- * PR list — filtered, grouped, or hot-sorted list of pull requests.
+ * PR list — filtered, sorted by lastModifiedDate.
  *
  * Applies multi-axis filters (status axis-based grouping, date range,
  * text search, review filter via {@link needsMyReview}), then renders
- * either a hot-mode flat list (sorted by lastModifiedDate desc with
- * auto-animate) or a grouped-by-account layout. Passes currentUser to
- * {@link PRRow} for review indicator badge. Shows SSO login prompt
+ * a flat list sorted by lastModifiedDate desc. Shows SSO login prompt
  * when no PRs are available.
  *
  * @module
  */
 import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { useAutoAnimate } from "@formkit/auto-animate/react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { LoaderIcon, LogInIcon } from "lucide-react"
-import { useEffect, useMemo } from "react"
+import { useMemo } from "react"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import type { FilterEntry } from "../atoms/ui.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
@@ -85,18 +82,14 @@ export function PRList() {
   const appState = useAtomValue(appStateAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const { state: filterState, toggleFilter } = useFilterParams()
-  const [animateRef, enableAnimate] = useAutoAnimate()
 
   const isLoading = appState.status === "loading"
   const prs = appState.pullRequests
-  useEffect(() => {
-    enableAnimate(filterState.hot)
-  }, [filterState.hot, enableAnimate])
 
-  const { flat, grouped } = useMemo(() => {
-    if (prs.length === 0) return { flat: [], grouped: [] }
+  const sorted = useMemo(() => {
+    if (prs.length === 0) return []
 
-    const { filters, from, hot, q, review, to } = filterState
+    const { filters, from, q, review, to } = filterState
 
     // Text search
     const filterLower = q.toLowerCase()
@@ -112,9 +105,6 @@ export function PRList() {
     }
 
     // Group filters by key, then AND across keys, OR within same key.
-    // Status sub-values split into orthogonal axes so approval and
-    // mergeability are AND'd, not OR'd (e.g. "approved + mergeable"
-    // means approved AND mergeable, not approved OR mergeable).
     const STATUS_AXIS: Record<string, string> = {
       open: "lifecycle",
       merged: "lifecycle",
@@ -131,8 +121,18 @@ export function PRList() {
       if (arr) arr.push(f)
       else byGroup.set(groupKey, [f])
     }
-    const filterByEntries = (pr: PullRequest) =>
-      [...byGroup.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
+
+    // When open sub-statuses are active but no lifecycle filter, require OPEN
+    const hasOpenSubStatus = filters.some(
+      (f) => f.key === "status" && ["approved", "pending", "mergeable", "conflicts"].includes(f.value)
+    )
+    const hasLifecycle = filters.some((f) => f.key === "status" && ["open", "merged", "closed"].includes(f.value))
+    const requireOpen = hasOpenSubStatus && !hasLifecycle
+
+    const filterByEntries = (pr: PullRequest) => {
+      if (requireOpen && pr.status !== "OPEN") return false
+      return [...byGroup.values()].every((group) => group.some((f) => matchesFilter(pr, f)))
+    }
 
     // Date filter
     const fromMs = from ? new Date(from).getTime() : undefined
@@ -149,39 +149,17 @@ export function PRList() {
 
     const filterByReview = (pr: PullRequest) => !review || needsMyReview(pr, appState.currentUser)
 
-    const filtered = prs.filter(
-      (pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr) && filterByReview(pr)
-    )
-
-    // Hot mode: flat list sorted by lastModifiedDate desc
-    if (hot) {
-      const sorted = [...filtered].sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
-      return { flat: sorted, grouped: [] }
-    }
-
-    // Default: group by account
-    const byAccount = new Map<string, Array<PullRequest>>()
-    for (const pr of filtered) {
-      const accountId = pr.account?.profile ?? "unknown"
-      if (!byAccount.has(accountId)) byAccount.set(accountId, [])
-      byAccount.get(accountId)!.push(pr)
-    }
-
-    const result: Array<[string, Array<PullRequest>]> = []
-    for (const [accountId, accountPrs] of byAccount) {
-      if (accountPrs.length > 0) result.push([accountId, accountPrs])
-    }
-
-    return { flat: [], grouped: result }
-  }, [prs, filterState])
+    return prs
+      .filter((pr) => filterByText(pr) && filterByEntries(pr) && filterByDate(pr) && filterByReview(pr))
+      .sort((a, b) => b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime())
+  }, [prs, filterState, appState.currentUser])
 
   const prHref = (pr: PullRequest) => {
     const accountKey = pr.account.awsAccountId ?? pr.account.profile
     return `/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`
   }
 
-  const isEmpty = flat.length === 0 && grouped.length === 0
-  if (isEmpty) {
+  if (sorted.length === 0) {
     if (isLoading) {
       return (
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
@@ -245,27 +223,42 @@ export function PRList() {
     )
   }
 
-  if (filterState.hot) {
+  const isGrouped = filterState.groupBy === "account"
+
+  // Flat sorted list (default / Hot)
+  if (!isGrouped) {
     return (
-      <div key="hot" ref={animateRef} className="divide-y rounded-lg border bg-card">
-        {flat.map((pr) => (
-          <PRRow key={pr.id} pr={pr} to={prHref(pr)} showUpdated currentUser={appState.currentUser} />
+      <div className="flex flex-col gap-2">
+        {sorted.map((pr) => (
+          <div key={pr.id} className="rounded-lg border bg-card">
+            <PRRow pr={pr} to={prHref(pr)} showUpdated currentUser={appState.currentUser} />
+          </div>
         ))}
       </div>
     )
   }
 
+  // Grouped by account
+  const byAccount = new Map<string, Array<PullRequest>>()
+  for (const pr of sorted) {
+    const accountId = pr.account?.profile ?? "unknown"
+    if (!byAccount.has(accountId)) byAccount.set(accountId, [])
+    byAccount.get(accountId)!.push(pr)
+  }
+
   return (
-    <div key="grouped" className="space-y-6">
-      {grouped.map(([accountId, accountPrs]) => (
+    <div className="space-y-8">
+      {[...byAccount.entries()].map(([accountId, accountPrs]) => (
         <section key={accountId}>
-          <div className="mb-2 flex items-center gap-2">
+          <div className="mb-3 flex items-center gap-2">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{accountId}</span>
             <Badge variant="secondary">{accountPrs.length}</Badge>
           </div>
-          <div className="divide-y rounded-lg border bg-card">
+          <div className="flex flex-col gap-2">
             {accountPrs.map((pr) => (
-              <PRRow key={pr.id} pr={pr} to={prHref(pr)} currentUser={appState.currentUser} />
+              <div key={pr.id} className="rounded-lg border bg-card">
+                <PRRow pr={pr} to={prHref(pr)} currentUser={appState.currentUser} />
+              </div>
             ))}
           </div>
         </section>
