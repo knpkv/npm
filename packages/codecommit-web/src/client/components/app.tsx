@@ -3,6 +3,8 @@ import { useCallback } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router"
 import { Toaster } from "sonner"
 import { appStateAtom } from "../atoms/app.js"
+import { useDesktopNotification } from "../hooks/useDesktopNotification.js"
+import { useReviewReminder } from "../hooks/useReviewReminder.js"
 import { useSSE } from "../hooks/useSSE.js"
 import { useFullWidthRoute } from "../router.js"
 import { CommandPalette } from "./command-palette.js"
@@ -14,8 +16,10 @@ export function AppLayout() {
   const setAppState = useAtomSet(appStateAtom)
   const state = useAtomValue(appStateAtom)
   const navigate = useNavigate()
-  const goToNotifications = useCallback(() => navigate("/notifications"), [navigate])
-  useSSE((s) => setAppState(s), goToNotifications)
+  const goToNotifications = useCallback((path?: string) => navigate(path ?? "/notifications"), [navigate])
+  const { notify } = useDesktopNotification((path) => navigate(path))
+  useSSE((s) => setAppState(s), goToNotifications, notify)
+  useReviewReminder(state.pendingReviewCount ?? 0)
   const { pathname } = useLocation()
   const isHome = pathname === "/"
   const isFullWidth = useFullWidthRoute()

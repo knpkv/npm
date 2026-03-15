@@ -13,57 +13,61 @@
 import { useCallback, useRef } from "react"
 import { StorageKeys } from "../storage-keys.js"
 
-const DESKTOP_WORTHY_TYPES = new Set([
-  "approval_requested",
-  "approval_changed",
-  "new_comment",
-  "pr_merged",
-  "pr_closed"
-])
-
 export function useDesktopNotification(onNavigate?: (path: string) => void) {
-  const permissionRef = useRef(
-    typeof Notification !== "undefined" ? Notification.permission : ("unsupported" as string)
-  )
-
-  const isEnabled = useCallback(() => {
-    try {
-      return localStorage.getItem(StorageKeys.desktopNotifications) === "true"
-    } catch {
-      return false
-    }
-  }, [])
+  const navigateRef = useRef(onNavigate)
+  navigateRef.current = onNavigate
+  const activeRef = useRef<Array<Notification>>([])
+  const firedIdsRef = useRef(new Set<number>())
 
   const notify = useCallback(
-    (
-      n: {
-        readonly type: string
-        readonly title: string
-        readonly message: string
-        readonly awsAccountId?: string
-        readonly pullRequestId?: string
+    (n: {
+      readonly id?: number
+      readonly type: string
+      readonly title: string
+      readonly message: string
+      readonly awsAccountId?: string
+      readonly pullRequestId?: string
+    }) => {
+      // Dedup: don't fire the same notification twice
+      if (n.id != null) {
+        if (firedIdsRef.current.has(n.id)) return
+        firedIdsRef.current.add(n.id)
+        // Cap at 500 entries to prevent unbounded growth in long sessions
+        if (firedIdsRef.current.size > 500) {
+          const arr = [...firedIdsRef.current]
+          firedIdsRef.current = new Set(arr.slice(arr.length - 250))
+        }
       }
-    ) => {
-      if (!isEnabled()) return
-      if (permissionRef.current !== "granted") return
-      if (!DESKTOP_WORTHY_TYPES.has(n.type)) return
+      if (typeof Notification === "undefined") return
+      if (Notification.permission !== "granted") return
+      try {
+        if (localStorage.getItem(StorageKeys.desktopNotifications) !== "true") return
+      } catch {
+        return
+      }
 
       const notification = new Notification(n.title || "CodeCommit", {
         body: n.message,
-        icon: "/favicon.ico",
-        tag: `${n.type}:${n.pullRequestId ?? ""}`,
-        requireInteraction: false
+        icon: "/favicon.ico"
       })
 
-      if (n.awsAccountId && n.pullRequestId && onNavigate) {
-        notification.onclick = () => {
-          window.focus()
-          onNavigate(`/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`)
-        }
-      }
+      notification.addEventListener("click", () => {
+        window.focus()
+        notification.close()
+        const path = n.awsAccountId && n.pullRequestId
+          ? `/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`
+          : "/notifications"
+        navigateRef.current?.(path)
+      })
+
+      // Prevent GC from collecting the notification before user clicks
+      activeRef.current.push(notification)
+      setTimeout(() => {
+        activeRef.current = activeRef.current.filter((x) => x !== notification)
+      }, 30000)
     },
-    [isEnabled, onNavigate]
+    []
   )
 
-  return { notify, isDesktopWorthy: (type: string) => DESKTOP_WORTHY_TYPES.has(type) }
+  return { notify }
 }

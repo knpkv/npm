@@ -58,18 +58,30 @@ export function SettingsNotifications() {
     }
     const next = !desktopEnabled
     setDesktopEnabled(next)
-    localStorage.setItem(StorageKeys.desktopNotifications, String(next))
+    try {
+      localStorage.setItem(StorageKeys.desktopNotifications, String(next))
+    } catch {
+      /* quota exceeded */
+    }
   }, [desktopEnabled, permission])
 
   const toggleReminders = useCallback(() => {
     const next = !remindersEnabled
     setRemindersEnabled(next)
-    localStorage.setItem(StorageKeys.reminders, String(next))
+    try {
+      localStorage.setItem(StorageKeys.reminders, String(next))
+    } catch {
+      /* quota exceeded */
+    }
   }, [remindersEnabled])
 
   const selectInterval = useCallback((ms: number) => {
     setReminderInterval(ms)
-    localStorage.setItem(StorageKeys.reminderInterval, String(ms))
+    try {
+      localStorage.setItem(StorageKeys.reminderInterval, String(ms))
+    } catch {
+      /* quota exceeded */
+    }
   }, [])
 
   // Sync permission state on focus (user might change in OS settings)
