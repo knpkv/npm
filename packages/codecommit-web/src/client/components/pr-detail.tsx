@@ -8,17 +8,16 @@
  *
  * **Mental model**
  *
- * - ApproversCard: manages the non-template "Required approvers" rule;
+ * - ApproversCard: manages non-template approval rules (Required + Optional);
  *   remove = update rule (SSO roles lack delete permission),
  *   remove all = update to requiredApprovals:0, poolMembers:["*"]
- * - {@link toApprovalPoolPrefill}: STS ARN → CodeCommitApprovers format
- * - knownUserArns: discovered from approvedByArns + poolMemberArns across all PRs
+ * - knownUserArns: all users (authors, approvers, commenters, pool members)
+ *   → `CodeCommitApprovers:REPO_ACCT:username` format. Typing just a username auto-prefixes.
  * - Keyboard shortcuts: Enter/o = open, . = sandbox, Esc = back
  *
  * **Common tasks**
  *
  * - Show approvers: {@link ApproversCard}
- * - Convert ARN: {@link toApprovalPoolPrefill}
  * - Managed rule names: {@link REQUIRED_RULE_NAME}, {@link OPTIONAL_RULE_NAME}
  *
  * @module
@@ -236,7 +235,7 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
               {[...comments]
                 .sort((a, b) => earliestDate(b) - earliestDate(a))
                 .map((loc, i) => (
-                  <div key={i}>
+                  <div key={loc.filePath ?? `loc-${i}`}>
                     {loc.filePath && <p className="font-mono text-xs text-muted-foreground">{loc.filePath}</p>}
                     {loc.comments.map((thread) => (
                       <CommentThread key={thread.root.id} thread={thread} depth={0} />
@@ -293,7 +292,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
 
     return { timeToFirstReview: ttfr, timeToAddressFeedback: ttaf }
-  }, [commentsResult, pr.author, pr.creationDate])
+  }, [commentsResult, pr.author, pr.creationDate, pr.lastModifiedDate, pr.isApproved, pr.approvedBy])
 
   const hasAny = timeToMerge != null || timeToFirstReview != null || timeToAddressFeedback != null
   if (!hasAny) return null
@@ -350,15 +349,6 @@ function CollapsibleSection({
 const REQUIRED_RULE_NAME = "Required approvers"
 const OPTIONAL_RULE_NAME = "Optional approvers"
 
-/**
- * Convert STS assumed-role ARN to CodeCommitApprovers pre-fill.
- * Extracts session name, leaves account blank for user to fill.
- */
-const toApprovalPoolPrefill = (arn: string, accountId: string): string => {
-  const match = /^arn:aws:sts::[^:]*:assumed-role\/[^/]+\/(.+)$/.exec(arn)
-  return match ? `CodeCommitApprovers:${accountId}:${match[1]}` : arn
-}
-
 interface ApproversCardProps {
   readonly title: string
   readonly ruleName: string
@@ -374,6 +364,7 @@ interface ApproversCardProps {
   readonly approvedBy: ReadonlyArray<string>
   readonly knownUserArns: ReadonlyMap<string, string>
   readonly currentUser: string | undefined
+  readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
   readonly onRefresh: () => void
   readonly permissionPrompt: boolean
@@ -387,6 +378,7 @@ function ApproversCard({
   onRefresh,
   onSetApprovers,
   permissionPrompt,
+  repoAccountId,
   required,
   ruleName,
   title
@@ -424,15 +416,14 @@ function ApproversCard({
     [knownUserArns, allPoolMembers, pendingAdd]
   )
 
-  const handleAdd = (arn: string) => {
-    const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(arn)
-    if (nameMatch) {
-      optimistic.add(nameMatch[1]!)
-    } else {
-      const stsMatch = /assumed-role\/[^/]+\/(.+)$/.exec(arn)
-      optimistic.add(stsMatch ? stsMatch[1]! : arn)
-    }
-    onSetApprovers([...managedArns, arn])
+  const prefix = repoAccountId ? `CodeCommitApprovers:${repoAccountId}:` : ""
+
+  const handleAdd = (input: string) => {
+    // If user typed just a username, prepend the CodeCommitApprovers prefix
+    const value = input.startsWith("CodeCommitApprovers:") ? input : `${prefix}${input}`
+    const nameMatch = /^CodeCommitApprovers:[^:]*:(.+)$/.exec(value)
+    optimistic.add(nameMatch ? nameMatch[1]! : input)
+    onSetApprovers([...managedArns, value])
     setShowPicker(false)
   }
 
@@ -476,7 +467,7 @@ function ApproversCard({
                     variant="outline"
                     size="sm"
                     className="h-6 text-xs gap-1"
-                    onClick={() => setManualArn(arn)}
+                    onClick={() => setManualArn(name)}
                   >
                     {name}
                   </Button>
@@ -485,7 +476,7 @@ function ApproversCard({
             )}
             <div className="flex gap-1">
               <input
-                placeholder="CodeCommitApprovers:REPO_ACCOUNT_ID:USERNAME"
+                placeholder={prefix ? `${prefix}USERNAME` : "username"}
                 className="flex-1 rounded-md border bg-background px-2 py-1 text-xs font-mono"
                 value={manualArn}
                 onChange={(e) => setManualArn(e.target.value)}
@@ -499,7 +490,7 @@ function ApproversCard({
               <Button
                 size="sm"
                 className="h-7 text-xs"
-                disabled={!manualArn.trim()}
+                disabled={!manualArn.trim() || !prefix}
                 onClick={() => {
                   handleAdd(manualArn.trim())
                   setManualArn("")
@@ -580,23 +571,25 @@ export function PRDetail() {
     [accountId, prId, state.pullRequests]
   )
 
-  // Collect known users from all PRs, but always use CURRENT PR's account for CodeCommitApprovers format
-  // (the approval rule is created on this PR's repo, so pool members must reference this account)
+  // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
+  // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
   const currentAcct = pr?.account?.repoAccountId || ""
   const knownUserArns = useMemo(() => {
     const map = new Map<string, string>()
-    for (const p of state.pullRequests) {
-      for (const rule of p.approvalRules) {
-        for (let i = 0; i < rule.poolMembers.length; i++) {
-          const name = rule.poolMembers[i]
-          const arn = i < rule.poolMemberArns.length ? rule.poolMemberArns[i] : undefined
-          if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, currentAcct))
-        }
+    // All users stamped with currentAcct — approval pools reference the PR's repo account.
+    // If same username exists across accounts, first-seen wins (acceptable for single-org use).
+    const addUser = (name: string) => {
+      if (!name || name === "*") return
+      if (!map.has(name)) {
+        map.set(name, currentAcct ? `CodeCommitApprovers:${currentAcct}:${name}` : name)
       }
-      for (let i = 0; i < p.approvedBy.length; i++) {
-        const name = p.approvedBy[i]
-        const arn = i < p.approvedByArns.length ? p.approvedByArns[i] : undefined
-        if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, currentAcct))
+    }
+    for (const p of state.pullRequests) {
+      addUser(p.author)
+      for (const name of p.approvedBy) addUser(name)
+      for (const name of p.commentedBy) addUser(name)
+      for (const rule of p.approvalRules) {
+        for (const name of rule.poolMembers) addUser(name)
       }
     }
     return map
@@ -951,6 +944,7 @@ export function PRDetail() {
           approvalRules={pr.approvalRules}
           approvedBy={pr.approvedBy}
           knownUserArns={knownUserArns}
+          repoAccountId={currentAcct}
           currentUser={state.currentUser}
           permissionPrompt={!!state.permissionPrompt}
           onSetApprovers={(arns) => {
