@@ -122,6 +122,7 @@ export const PullRequestToUpsertInput = Schema.transform(
       fetchedAt: undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      approvalRules: row.approvalRules ?? [],
       commentedBy: [],
       filesChanged: undefined
     }),
