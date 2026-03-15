@@ -1,5 +1,16 @@
 # @knpkv/codecommit-web
 
+## 0.10.0
+
+### Minor Changes
+
+- [#59](https://github.com/knpkv/npm/pull/59) [`0f58736`](https://github.com/knpkv/npm/commit/0f587363a1a7acb203f41a24b0cfe4861a2998c0) Thanks @konopkov! - Breathable UI redesign: sidebar filters, rolling status, recent activity
+  - Card layout for PR rows with status dot badges, large health score, repo pill
+  - Structured rolling status in header (phase-based: cache→fetch→comments→diffs→health)
+  - Filter sidebar with mutually exclusive modes (Hot/All/Mine/Review), searchable combobox popovers, sortBy/groupBy query params
+  - Recent Activity right aside with clickable PR links, filtered to PR notifications only
+  - Full-width sidebar layout (left filters + main content + right activity)
+
 ## 0.9.1
 
 ### Patch Changes
