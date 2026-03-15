@@ -41,7 +41,7 @@ const ApprovalRulesFromJson = Schema.transform(
     decode: (s) => {
       if (!s) return []
       try {
-        return JSON.parse(s)
+        return Schema.decodeUnknownSync(Schema.Array(ApprovalRule))(JSON.parse(s))
       } catch {
         return []
       }
