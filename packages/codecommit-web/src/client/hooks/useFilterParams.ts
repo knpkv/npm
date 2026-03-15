@@ -176,6 +176,7 @@ export function useFilterParams() {
     setSearchParams((prev) => {
       prev.delete("f")
       prev.delete("sortBy")
+      prev.delete("groupBy")
       prev.delete("mine")
       prev.delete("review")
       prev.delete("mineScope")

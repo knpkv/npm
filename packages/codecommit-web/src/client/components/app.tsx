@@ -38,7 +38,7 @@ export function AppLayout() {
           </main>
           {state.currentUser && (state.notifications?.items?.length ?? 0) > 0 && (
             <aside className="sticky top-20 w-64 shrink-0 self-start" style={{ maxHeight: "calc(100vh - 5rem)" }}>
-              <RecentActivity notifications={state.notifications!.items} />
+              <RecentActivity notifications={state.notifications?.items ?? []} />
             </aside>
           )}
         </div>

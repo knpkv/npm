@@ -37,7 +37,7 @@ interface RecentActivityProps {
 
 export function RecentActivity({ notifications }: RecentActivityProps) {
   // Only show PR notifications (skip system notifications with empty pullRequestId)
-  const prItems = notifications.filter((n) => n.pullRequestId && n.type in ICON_MAP).slice(0, 5)
+  const prItems = notifications.filter((n) => n.pullRequestId).slice(0, 5)
   if (prItems.length === 0) return null
 
   const now = new Date()

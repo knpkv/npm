@@ -251,7 +251,7 @@ export function FilterSidebar() {
     setSearchParams(
       (prev) => {
         const hasAuthorFilter = prev.getAll("f").some((f) => f.startsWith("author:"))
-        if (!prev.has("sortBy") && !prev.has("review") && !hasAuthorFilter) {
+        if (!prev.has("sortBy") && !prev.has("groupBy") && !prev.has("review") && !hasAuthorFilter) {
           prev.set("sortBy", "updated")
         }
         return prev

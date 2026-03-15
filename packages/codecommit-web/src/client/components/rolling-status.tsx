@@ -46,8 +46,7 @@ function parseMessage(msg: string): ParsedMessage {
   }
 
   // Per-PR fetch: "profile (region) #123 repoName"
-  const prMatch = msg.match(FETCH_PR_RE)
-  if (prMatch) {
+  if (FETCH_PR_RE.test(msg)) {
     return { phase: "fetch", label: "Fetching", detail: msg }
   }
 
