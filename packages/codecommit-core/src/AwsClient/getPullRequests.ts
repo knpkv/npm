@@ -85,11 +85,23 @@ export const fetchApprovalEvaluation = (pullRequestId: string, revisionId: strin
       isApproved: r.evaluation?.approved ?? false,
       satisfiedNames: new Set(r.evaluation?.approvalRulesSatisfied ?? [])
     })),
+    Effect.tapError((e) => Effect.logWarning("fetchApprovalEvaluation failed", e)),
     Effect.catchAll(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
   )
 
+/** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
+export interface ApprovalRuleData {
+  readonly ruleName: string
+  readonly satisfied: boolean
+  readonly requiredApprovals: number
+  readonly poolMembers: Array<string>
+  readonly poolMemberArns: Array<string>
+  readonly fromTemplate?: string
+}
+
 /**
- * Build ApprovalRule domain objects from getPullRequest's raw rules + evaluation satisfaction state.
+ * Build ApprovalRule data from getPullRequest's raw rules + evaluation satisfaction state.
+ * Filters out rules with empty names (phantom rules from missing AWS data).
  */
 export const buildApprovalRules = (
   rawRules: ReadonlyArray<
@@ -100,15 +112,17 @@ export const buildApprovalRules = (
     }
   >,
   satisfiedNames: Set<string>
-): Array<typeof ApprovalRule.Type> =>
-  rawRules.map((rule) => ({
-    ruleName: rule.approvalRuleName ?? "",
-    satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
-    ...parseRuleContent(rule.approvalRuleContent),
-    ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
-      ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
-      : {})
-  })) as Array<typeof ApprovalRule.Type>
+): Array<ApprovalRuleData> =>
+  rawRules
+    .filter((rule) => rule.approvalRuleName)
+    .map((rule) => ({
+      ruleName: rule.approvalRuleName ?? "",
+      satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
+      ...parseRuleContent(rule.approvalRuleContent),
+      ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
+        ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
+        : {})
+    }))
 
 /**
  * Fetch approval + merge status for a single PR.
@@ -141,15 +155,16 @@ const fetchPRDetails = (id: string, repoName: string) =>
 /**
  * Fetch who approved a PR (ARN list of approvers with APPROVE state).
  */
-const fetchApprovers = (pullRequestId: string, revisionId: string) =>
+export const fetchApprovers = (pullRequestId: string, revisionId: string) =>
   throttleRetry(
     codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId })
   ).pipe(
     Effect.map((r) => {
-      const approved = (r.approvals ?? []).filter((a) => a.approvalState === "APPROVE" && a.userArn)
+      const approved = (r.approvals ?? [])
+        .filter((a): a is typeof a & { userArn: string } => a.approvalState === "APPROVE" && !!a.userArn)
       return {
-        names: approved.map((a) => normalizeAuthor(a.userArn!)),
-        arns: approved.map((a) => a.userArn!)
+        names: approved.map((a) => normalizeAuthor(a.userArn)),
+        arns: approved.map((a) => a.userArn)
       }
     }),
     Effect.catchAll(() => Effect.succeed({ names: [] as Array<string>, arns: [] as Array<string> }))
@@ -279,6 +294,7 @@ const listAllRepositories = () =>
 export const fetchRepoAccountId = (repoName: string) =>
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
+    Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
     Effect.catchAll(() => Effect.succeed(""))
   )
 

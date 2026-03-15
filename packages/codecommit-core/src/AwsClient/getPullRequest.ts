@@ -25,7 +25,7 @@
  */
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect, Schema } from "effect"
-import { buildApprovalRules, fetchApprovalEvaluation, fetchRepoAccountId } from "./getPullRequests.js"
+import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
   makeApiError,
@@ -100,18 +100,6 @@ const RawToPullRequestDetail = Schema.transform(
 
 // Effectful decode — ParseError in error channel instead of thrown defect
 const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknown(RawToPullRequestDetail)(raw)
-
-const fetchApprovers = (pullRequestId: string, revisionId: string) =>
-  codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId }).pipe(
-    Effect.map((r) => {
-      const approved = (r.approvals ?? []).filter((a) => a.approvalState === "APPROVE" && a.userArn)
-      return {
-        names: approved.map((a) => normalizeAuthor(a.userArn!)),
-        arns: approved.map((a) => a.userArn!)
-      }
-    }),
-    Effect.catchAll(() => Effect.succeed({ names: [] as Array<string>, arns: [] as Array<string> }))
-  )
 
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {
