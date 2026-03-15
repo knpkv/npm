@@ -27,10 +27,20 @@ export function SettingsAudit() {
     }
   }, [result])
 
+  const [saving, setSaving] = useState(false)
+
   const handleSave = () => {
     save({ payload: { enabled, retentionDays } })
-    setDirty(false)
+    setSaving(true)
   }
+
+  // Clear dirty only when server confirms the change (query result updates)
+  useEffect(() => {
+    if (saving && Result.isSuccess(result)) {
+      setSaving(false)
+      setDirty(false)
+    }
+  }, [saving, result])
 
   return (
     <div className="space-y-6">
