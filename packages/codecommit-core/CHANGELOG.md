@@ -1,5 +1,20 @@
 # @knpkv/codecommit-core
 
+## 0.7.0
+
+### Minor Changes
+
+- [#55](https://github.com/knpkv/npm/pull/55) [`3ce2182`](https://github.com/knpkv/npm/commit/3ce21821504c75b294555163a660bf02010a4bde) Thanks @konopkov! - PR approvers: approval rules, review UI, desktop notifications
+  - ApprovalRule domain model with needsMyReview, diffApprovalPools, approval_requested/review_reminder notifications
+  - Approval rule CRUD via CodeCommitApprovers format with cross-account SSO support (repoAccountId from getRepository)
+  - Cache: 3 migrations (approval_rules, approved_by_arns, repo_account_id)
+  - SSE: pendingReviewCount, approvalRules + approvedByArns in wire schema
+  - UI: header review badge, Review filter, required/optional approvers cards with suggested users + optimistic spinners
+  - Desktop notifications with click-to-navigate, dedup, review reminders (configurable interval)
+  - Notification settings tab (desktop toggle, reminder interval)
+  - Audit: clear all logs, Statement.and parameterized queries, disabled by default
+  - Noise reduction: removed transient SSO/assume notifications, toast suppression for title/description changes
+
 ## 0.6.0
 
 ### Minor Changes
