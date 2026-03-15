@@ -41,7 +41,7 @@ interface UseOptimisticSetResult {
 }
 
 export function useOptimisticSet({
-  items,
+  items: _items,
   onRefresh,
   permissionPrompt,
   stableKey
@@ -49,8 +49,9 @@ export function useOptimisticSet({
   const [pendingAdd, setPendingAdd] = useState<string | null>(null)
   const [pendingRemove, setPendingRemove] = useState<string | null>(null)
   const hadPromptRef = useRef(false)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-refresh when permission prompt clears
+  // Auto-refresh when permission prompt clears (prompt mode)
   useEffect(() => {
     if (permissionPrompt) {
       hadPromptRef.current = true
@@ -60,10 +61,37 @@ export function useOptimisticSet({
     }
   }, [permissionPrompt, onRefresh])
 
+  // Auto-refresh fallback: when pending and no prompt appeared (always-allow mode),
+  // poll with increasing delay until server data changes. Absolute 30s timeout.
+  useEffect(() => {
+    if ((pendingAdd || pendingRemove) && !permissionPrompt) {
+      let delay = 500
+      const startTime = Date.now()
+      const poll = () => {
+        if (Date.now() - startTime > 30_000) {
+          setPendingAdd(null)
+          setPendingRemove(null)
+          return
+        }
+        onRefresh()
+        delay = Math.min(delay * 1.5, 3000)
+        refreshTimerRef.current = setTimeout(poll, delay)
+      }
+      refreshTimerRef.current = setTimeout(poll, delay)
+      return () => {
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      }
+    }
+  }, [pendingAdd, pendingRemove, permissionPrompt, onRefresh])
+
   // Clear pending state when server data changes
   useEffect(() => {
     setPendingAdd(null)
     setPendingRemove(null)
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = null
+    }
   }, [stableKey])
 
   return {

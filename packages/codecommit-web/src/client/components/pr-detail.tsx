@@ -347,7 +347,8 @@ function CollapsibleSection({
   )
 }
 
-const MANAGED_RULE_NAME = "Required approvers"
+const REQUIRED_RULE_NAME = "Required approvers"
+const OPTIONAL_RULE_NAME = "Optional approvers"
 
 /**
  * Convert STS assumed-role ARN to CodeCommitApprovers pre-fill.
@@ -359,6 +360,9 @@ const toApprovalPoolPrefill = (arn: string, accountId: string): string => {
 }
 
 interface ApproversCardProps {
+  readonly title: string
+  readonly ruleName: string
+  readonly required: boolean
   readonly approvalRules: ReadonlyArray<{
     readonly ruleName: string
     readonly requiredApprovals: number
@@ -382,7 +386,10 @@ function ApproversCard({
   knownUserArns,
   onRefresh,
   onSetApprovers,
-  permissionPrompt
+  permissionPrompt,
+  required,
+  ruleName,
+  title
 }: ApproversCardProps) {
   const [showPicker, setShowPicker] = useState(false)
   const [manualArn, setManualArn] = useState("")
@@ -395,17 +402,19 @@ function ApproversCard({
   })
   const { pendingAdd, pendingRemove } = optimistic
 
-  // Flatten all pool members across all rules
+  // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
   const allPoolMembers = useMemo(() => {
     const set = new Set<string>()
     for (const rule of approvalRules) {
-      for (const m of rule.poolMembers) set.add(m)
+      if (rule.fromTemplate || rule.ruleName === ruleName) {
+        for (const m of rule.poolMembers) set.add(m)
+      }
     }
     return [...set]
-  }, [approvalRules])
+  }, [approvalRules, ruleName])
 
-  // Find the managed rule (non-template rule we can edit)
-  const managedRule = approvalRules.find((r) => !r.fromTemplate)
+  // Find the managed rule by name (non-template rule we can edit)
+  const managedRule = approvalRules.find((r) => r.ruleName === ruleName && !r.fromTemplate)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
 
@@ -436,8 +445,9 @@ function ApproversCard({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-sm">Required Approvers</CardTitle>
-          {approvalRules.length > 0 &&
+          <CardTitle className="text-sm">{title}</CardTitle>
+          {required &&
+            approvalRules.length > 0 &&
             (isSatisfied ? (
               <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
                 Satisfied
@@ -495,8 +505,20 @@ function ApproversCard({
             </div>
           </div>
         )}
-        {allPoolMembers.length === 0 && !showPicker && (
-          <p className="text-xs text-muted-foreground">No required approvers</p>
+        {!showPicker && addable.length > 0 && (
+          <div className="flex flex-wrap gap-1 items-center">
+            <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">Suggested</span>
+            {addable.slice(0, 5).map(([name, arn]) => (
+              <button
+                key={name}
+                className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:border-primary/50 hover:text-foreground transition-colors"
+                onClick={() => handleAdd(arn)}
+              >
+                <PlusIcon className="size-2.5" />
+                {name}
+              </button>
+            ))}
+          </div>
         )}
         {(allPoolMembers.length > 0 || pendingAdd) && (
           <div className="flex flex-wrap gap-1">
@@ -563,13 +585,13 @@ export function PRDetail() {
       for (const rule of p.approvalRules) {
         for (let i = 0; i < rule.poolMembers.length; i++) {
           const name = rule.poolMembers[i]
-          const arn = rule.poolMemberArns[i]
+          const arn = i < rule.poolMemberArns.length ? rule.poolMemberArns[i] : undefined
           if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
         }
       }
       for (let i = 0; i < p.approvedBy.length; i++) {
         const name = p.approvedBy[i]
-        const arn = p.approvedByArns[i]
+        const arn = i < p.approvedByArns.length ? p.approvedByArns[i] : undefined
         if (name && arn && arn !== "*") map.set(name, toApprovalPoolPrefill(arn, acct))
       }
     }
@@ -913,38 +935,47 @@ export function PRDetail() {
         </CardContent>
       </Card>
 
-      <ApproversCard
-        approvalRules={pr.approvalRules}
-        approvedBy={pr.approvedBy}
-        knownUserArns={knownUserArns}
-        currentUser={state.currentUser}
-        permissionPrompt={!!state.permissionPrompt}
-        onSetApprovers={(arns) => {
-          const existing = pr.approvalRules.find((r) => !r.fromTemplate)
-          if (existing) {
-            updateRule({
-              payload: {
-                pullRequestId: pr.id,
-                approvalRuleName: existing.ruleName,
-                requiredApprovals: arns.length > 0 ? arns.length : 0,
-                poolMembers: arns.length > 0 ? arns : ["*"],
-                account: pr.account
-              }
-            })
-          } else if (arns.length > 0) {
-            createRule({
-              payload: {
-                pullRequestId: pr.id,
-                approvalRuleName: MANAGED_RULE_NAME,
-                requiredApprovals: arns.length,
-                poolMembers: arns,
-                account: pr.account
-              }
-            })
-          }
-        }}
-        onRefresh={() => refreshSingle({ path: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
-      />
+      {[
+        { title: "Required Approvers", ruleName: REQUIRED_RULE_NAME, required: true },
+        { title: "Optional Approvers", ruleName: OPTIONAL_RULE_NAME, required: false }
+      ].map((card) => (
+        <ApproversCard
+          key={card.ruleName}
+          title={card.title}
+          ruleName={card.ruleName}
+          required={card.required}
+          approvalRules={pr.approvalRules}
+          approvedBy={pr.approvedBy}
+          knownUserArns={knownUserArns}
+          currentUser={state.currentUser}
+          permissionPrompt={!!state.permissionPrompt}
+          onSetApprovers={(arns) => {
+            const existing = pr.approvalRules.find((r) => r.ruleName === card.ruleName && !r.fromTemplate)
+            if (existing) {
+              updateRule({
+                payload: {
+                  pullRequestId: pr.id,
+                  approvalRuleName: existing.ruleName,
+                  requiredApprovals: card.required ? (arns.length > 0 ? arns.length : 0) : 0,
+                  poolMembers: arns.length > 0 ? arns : ["*"],
+                  account: pr.account
+                }
+              })
+            } else if (arns.length > 0) {
+              createRule({
+                payload: {
+                  pullRequestId: pr.id,
+                  approvalRuleName: card.ruleName,
+                  requiredApprovals: card.required ? arns.length : 0,
+                  poolMembers: arns,
+                  account: pr.account
+                }
+              })
+            }
+          }}
+          onRefresh={() => refreshSingle({ path: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
+        />
+      ))}
 
       <CollapsibleSection title="Health Score Breakdown">
         <ScoreBreakdown score={score} />
