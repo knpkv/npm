@@ -16,7 +16,6 @@ import {
   BellIcon,
   BoxIcon,
   EyeIcon,
-  LoaderIcon,
   LogOutIcon,
   MoonIcon,
   RefreshCwIcon,
@@ -28,11 +27,12 @@ import {
 import { useNavigate } from "react-router"
 import { appStateAtom, notificationsSsoLogoutAtom, refreshAtom } from "../atoms/app.js"
 import { cn } from "../lib/utils.js"
+import { RollingStatus } from "./rolling-status.js"
 import { useTheme } from "./theme-provider.js"
 import { Button } from "./ui/button.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
 import { Kbd } from "./ui/kbd.js"
-import { Separator } from "./ui/separator.js"
+// Separator removed — brand takes sidebar width for alignment
 
 export function Header() {
   const state = useAtomValue(appStateAtom)
@@ -50,18 +50,15 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
-        <button className="text-sm font-semibold tracking-tight hover:text-foreground/80" onClick={() => navigate("/")}>
+      <div className="flex h-20 items-center gap-4 px-8">
+        <button
+          className="w-56 shrink-0 text-left text-sm font-semibold tracking-tight hover:text-foreground/80"
+          onClick={() => navigate("/")}
+        >
           codecommit
         </button>
-        <Separator orientation="vertical" className="h-4" />
         {hasError && <span className="text-sm text-destructive">{state.error ?? "Error loading PRs"}</span>}
-        {isLoading && (
-          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            <LoaderIcon className="size-3 animate-spin" />
-            {state.statusDetail && <span className="font-mono opacity-60">{state.statusDetail}</span>}
-          </span>
-        )}
+        {isLoading && <RollingStatus statusDetail={state.statusDetail} isLoading={isLoading} />}
         {state.lastUpdated && !hasError && !isLoading && (
           <span className="text-xs text-muted-foreground">
             {DateUtils.formatRelativeTime(state.lastUpdated, new Date())}
