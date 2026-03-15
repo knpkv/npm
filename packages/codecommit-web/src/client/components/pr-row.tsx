@@ -25,6 +25,22 @@ interface PRRowProps {
   readonly currentUser?: string | undefined
 }
 
+const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
+  conflict: { label: "conflict", dot: "bg-red-500", badge: "border-red-500/30 text-red-500" },
+  approved: { label: "approved", dot: "bg-green-500", badge: "border-green-500/30 text-green-500" },
+  pending: { label: "pending", dot: "bg-yellow-500", badge: "border-yellow-500/30 text-yellow-500" },
+  merged: { label: "merged", dot: "bg-purple-500", badge: "border-purple-500/30 text-purple-500" },
+  closed: { label: "closed", dot: "bg-red-500", badge: "border-red-500/30 text-red-500" }
+}
+
+function getStatusKey(pr: PullRequest): string {
+  if (pr.status === "MERGED") return "merged"
+  if (pr.status === "CLOSED") return "closed"
+  if (!pr.isMergeable) return "conflict"
+  if (pr.isApproved) return "approved"
+  return "pending"
+}
+
 export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
   const reviewRequested = needsMyReview(pr, currentUser)
   const score: HealthScore | undefined = useMemo(
@@ -39,59 +55,60 @@ export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
         ? "text-yellow-600 dark:text-yellow-400"
         : "text-red-600 dark:text-red-400"
 
-  const badge =
-    pr.status === "MERGED" ? (
-      <Badge variant="outline" className="border-purple-500/30 text-purple-600 dark:text-purple-400">
-        Merged
-      </Badge>
-    ) : pr.status === "CLOSED" ? (
-      <Badge variant="outline" className="border-red-500/30 text-red-600 dark:text-red-400">
-        Closed
-      </Badge>
-    ) : !pr.isMergeable ? (
-      <Badge variant="destructive">Conflict</Badge>
-    ) : pr.isApproved ? (
-      <Badge variant="outline" className="border-green-500/30 text-green-600 dark:text-green-400">
-        Approved
-      </Badge>
-    ) : (
-      <Badge variant="secondary">Pending</Badge>
-    )
+  const statusKey = getStatusKey(pr)
+  const cfg = STATUS_CONFIG[statusKey]!
 
   return (
     <Link
       to={to}
-      className="group flex cursor-pointer flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-accent/50 no-underline text-inherit"
+      className="group flex cursor-pointer flex-col gap-2.5 px-5 py-5 transition-colors hover:bg-accent/50 no-underline text-inherit"
     >
-      <div className="flex items-center gap-2">
-        {badge}
+      {/* Row 1: status + score ... author · date · comments */}
+      <div className="flex items-center gap-2.5">
+        <Badge variant="outline" className={`gap-1.5 ${cfg.badge}`}>
+          <span className={`size-1.5 rounded-full ${cfg.dot}`} />
+          {cfg.label}
+        </Badge>
         {reviewRequested && (
-          <Badge variant="outline" className="border-yellow-500/30 text-yellow-600 dark:text-yellow-400 gap-0.5">
+          <Badge variant="outline" className="border-yellow-500/30 text-yellow-500 gap-1">
             <EyeIcon className="size-3" />
             Review
           </Badge>
         )}
-        {score && <span className={`text-xs font-semibold tabular-nums ${scoreColor}`}>{score.total.toFixed(1)}</span>}
-        <span className="text-xs text-muted-foreground">
-          {pr.author} ·{" "}
+        {score && (
+          <span className={`font-mono text-base font-semibold tabular-nums ${scoreColor}`}>
+            {score.total.toFixed(1)}
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          {pr.author}
+          <span className="opacity-40">·</span>
           {showUpdated
             ? DateUtils.formatRelativeTime(pr.lastModifiedDate, new Date())
             : DateUtils.formatDate(pr.creationDate)}
+          {pr.commentCount !== undefined && pr.commentCount > 0 && (
+            <>
+              <span className="opacity-40">·</span>
+              <MessageSquareIcon className="size-3" />
+              {pr.commentCount}
+            </>
+          )}
         </span>
-        {pr.commentCount !== undefined && pr.commentCount > 0 && (
-          <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-            <MessageSquareIcon className="size-3" />
-            {pr.commentCount}
-          </span>
-        )}
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="font-mono text-xs text-muted-foreground">{pr.repositoryName}</span>
-        <span className="text-muted-foreground/50">›</span>
-        <span className="text-sm font-medium">{pr.title}</span>
+
+      {/* Row 2: repo pill */}
+      <div>
+        <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">
+          {pr.repositoryName}
+        </Badge>
       </div>
+
+      {/* Row 3: title */}
+      <span className="text-[15px] font-medium leading-snug">{pr.title}</span>
+
+      {/* Row 4: description */}
       {pr.description && (
-        <p className="line-clamp-2 text-xs text-muted-foreground">{pr.description.split("\n").slice(0, 2).join(" ")}</p>
+        <p className="line-clamp-1 text-sm text-muted-foreground">{pr.description.split("\n").slice(0, 2).join(" ")}</p>
       )}
     </Link>
   )

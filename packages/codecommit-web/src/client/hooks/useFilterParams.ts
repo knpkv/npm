@@ -52,7 +52,8 @@ export function useFilterParams() {
     const to = searchParams.get("to")
     return {
       filters: parseFilters(searchParams),
-      hot: searchParams.has("hot"),
+      hot: searchParams.get("sortBy") === "updated",
+      ...(searchParams.has("groupBy") ? { groupBy: searchParams.get("groupBy")! } : {}),
       mine: searchParams.has("mine"),
       review: searchParams.has("review"),
       ...(mineScope != null ? { mineScope } : {}),
@@ -123,8 +124,8 @@ export function useFilterParams() {
 
   const toggleHot = useCallback(() => {
     setSearchParams((prev) => {
-      if (prev.has("hot")) prev.delete("hot")
-      else prev.set("hot", "1")
+      if (prev.get("sortBy") === "updated") prev.delete("sortBy")
+      else prev.set("sortBy", "updated")
       return prev
     }, { replace: true })
   }, [setSearchParams])
@@ -174,7 +175,7 @@ export function useFilterParams() {
   const clearAll = useCallback(() => {
     setSearchParams((prev) => {
       prev.delete("f")
-      prev.delete("hot")
+      prev.delete("sortBy")
       prev.delete("mine")
       prev.delete("review")
       prev.delete("mineScope")
