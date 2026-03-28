@@ -1,0 +1,73 @@
+{
+  "name": "@knpkv/clockify-api-client",
+  "version": "0.1.0",
+  "description": "Effect-based Clockify REST API client",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/clockify-api-client"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./ClockifyApiClient": {
+      "import": "./dist/ClockifyApiClient.js",
+      "types": "./dist/ClockifyApiClient.d.ts"
+    },
+    "./ClockifyApiConfig": {
+      "import": "./dist/ClockifyApiConfig.js",
+      "types": "./dist/ClockifyApiConfig.d.ts"
+    },
+    "./ClockifyApiError": {
+      "import": "./dist/ClockifyApiError.js",
+      "types": "./dist/ClockifyApiError.d.ts"
+    },
+    "./generated": {
+      "import": "./dist/generated/index.js",
+      "types": "./dist/generated/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && cp src/generated/schema.d.ts dist/generated/schema.d.ts",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src",
+    "regenerate": "tsx scripts/regenerate.ts"
+  },
+  "peerDependencies": {
+    "effect": "^3.19.3"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "latest",
+    "@types/node": "latest",
+    "effect": "latest",
+    "openapi-typescript": "^7.13.0",
+    "openapi-typescript-helpers": "^0.1.0",
+    "tsx": "^4.19.4",
+    "typescript": "~5.9.0",
+    "vitest": "^4.0.13"
+  },
+  "keywords": [
+    "effect",
+    "effect-ts",
+    "clockify",
+    "time-tracking",
+    "api-client",
+    "openapi"
+  ]
+}
