@@ -1,0 +1,49 @@
+{
+  "name": "@knpkv/jira-clockify",
+  "version": "0.1.0",
+  "description": "TUI for Jira-Clockify time tracking, attachable to neovim",
+  "license": "MIT",
+  "author": "knpkv",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/dts/index.d.ts",
+  "bin": {
+    "jcf": "dist/src/bin.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "nvim"
+  ],
+  "scripts": {
+    "start": "tsx src/bin.ts",
+    "build": "tsc -b && chmod +x dist/src/bin.js",
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
+  },
+  "dependencies": {
+    "@effect-atom/atom": "latest",
+    "@effect-atom/atom-react": "latest",
+    "@effect/cli": "latest",
+    "@effect/platform": "latest",
+    "@effect/platform-node": "latest",
+    "@knpkv/atlassian-common": "workspace:^",
+    "@knpkv/clockify-api-client": "workspace:^",
+    "@knpkv/jira-api-client": "workspace:^",
+    "@knpkv/jira-cli": "workspace:^",
+    "@opentui/core": "https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e",
+    "@opentui/react": "https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e",
+    "effect": "latest",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "latest",
+    "@types/node": "latest",
+    "@types/react": "^19.1.8",
+    "tsx": "^4.19.4",
+    "vitest": "latest"
+  }
+}

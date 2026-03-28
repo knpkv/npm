@@ -115,40 +115,42 @@ export const checkAuthOrSetup = Effect.gen(function*() {
 // TUI launcher
 // ---------------------------------------------------------------------------
 
-export const launchTui = Effect.gen(function*() {
-  // @opentui/react requires Bun (react-reconciler import without .js extension)
-  const isBun = "Bun" in globalThis
-  if (isBun) {
-    yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
-  } else {
-    // Relaunch with Bun if available
-    const { execFileSync } = yield* Effect.promise(() => import("node:child_process"))
-    try {
-      execFileSync("bun", ["--version"], { stdio: "ignore" })
-    } catch {
-      yield* Console.log("TUI requires Bun runtime (@opentui/react dependency).")
-      yield* Console.log("Install Bun: curl -fsSL https://bun.sh/install | bash")
-      yield* Console.log("")
-      yield* Console.log("CLI commands work without Bun: jcf start, jcf stop, jcf status, jcf list")
+export const launchTui = (args: ReadonlyArray<string>) =>
+  Effect.gen(function*() {
+    // @opentui/react requires Bun (react-reconciler import without .js extension)
+    const isBun = "Bun" in globalThis
+    if (isBun) {
+      yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
+    } else {
+      // Relaunch with Bun if available
+      const { execFileSync } = yield* Effect.promise(() => import("node:child_process"))
+      try {
+        execFileSync("bun", ["--version"], { stdio: "ignore" })
+      } catch {
+        yield* Console.log("TUI requires Bun runtime (@opentui/react dependency).")
+        yield* Console.log("Install Bun: curl -fsSL https://bun.sh/install | bash")
+        yield* Console.log("")
+        yield* Console.log("CLI commands work without Bun: jcf start, jcf stop, jcf status, jcf list")
+        return
+      }
+      // Re-exec with bun — must point to bin.ts, not this module
+      const thisDir = new URL(".", import.meta.url).pathname
+      const scriptPath = thisDir + "../bin.js"
+      const cliArgs = args.slice(2)
+      try {
+        execFileSync("bun", [scriptPath, ...cliArgs], { stdio: "inherit" })
+      } catch {
+        // bun process exited — normal
+      }
+    }
+  })
+
+export const launchTuiOrSetup = (args: ReadonlyArray<string>) =>
+  Effect.gen(function*() {
+    const ready = yield* checkAuthOrSetup.pipe(Effect.catchAll(() => Effect.succeed(false)))
+    if (!ready) {
+      yield* Console.log("Setup incomplete. Run 'jcf auth status' to check.")
       return
     }
-    // Re-exec with bun — must point to bin.ts, not this module
-    const thisDir = new URL(".", import.meta.url).pathname
-    const scriptPath = thisDir + "../bin.js"
-    const args = process.argv.slice(2)
-    try {
-      execFileSync("bun", [scriptPath, ...args], { stdio: "inherit" })
-    } catch {
-      // bun process exited — normal
-    }
-  }
-})
-
-export const launchTuiOrSetup = Effect.gen(function*() {
-  const ready = yield* checkAuthOrSetup.pipe(Effect.catchAll(() => Effect.succeed(false)))
-  if (!ready) {
-    yield* Console.log("Setup incomplete. Run 'jcf auth status' to check.")
-    return
-  }
-  yield* launchTui
-})
+    yield* launchTui(args)
+  })

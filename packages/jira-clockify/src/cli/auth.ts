@@ -4,10 +4,12 @@
  * @module
  */
 import { Command, Options, Prompt } from "@effect/cli"
+import * as PlatformCommand from "@effect/platform/Command"
+import * as CommandExecutor from "@effect/platform/CommandExecutor"
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Option } from "effect"
+import { Console, Effect, Layer, Option } from "effect"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 // ---------------------------------------------------------------------------
@@ -34,19 +36,15 @@ Create OAuth app in Atlassian Developer Console:
 5. Go to "Settings" → copy Client ID and Secret
 6. Run: jcf auth jira configure
 `)
-      yield* Effect.promise(() =>
-        import("node:child_process").then(
-          (cp) =>
-            new Promise<void>((resolve, reject) => {
-              cp.execFile(
-                process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open",
-                process.platform === "win32"
-                  ? ["/c", "start", "", "https://developer.atlassian.com/console/myapps/create-3lo-app/"]
-                  : ["https://developer.atlassian.com/console/myapps/create-3lo-app/"],
-                (err) => (err ? reject(err) : resolve())
-              )
-            })
-        )
+      const url = "https://developer.atlassian.com/console/myapps/create-3lo-app/"
+      const executor = yield* CommandExecutor.CommandExecutor
+      yield* PlatformCommand.make("open", url).pipe(
+        PlatformCommand.exitCode,
+        Effect.catchAll(() => PlatformCommand.make("xdg-open", url).pipe(PlatformCommand.exitCode)),
+        Effect.catchAll(() => PlatformCommand.make("cmd", "/c", "start", "", url).pipe(PlatformCommand.exitCode)),
+        Effect.provide(Layer.succeed(CommandExecutor.CommandExecutor, executor)),
+        Effect.asVoid,
+        Effect.catchAll(() => Effect.void)
       )
     })
 )
