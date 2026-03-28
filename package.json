@@ -57,7 +57,8 @@
       "distilled-aws>fast-xml-parser": "^5.3.4",
       "vitest": "$vitest",
       "@effect/platform": "0.95.0",
-      "@effect/platform-node": "0.105.0"
+      "@effect/platform-node": "0.105.0",
+      "effect": "3.21.0"
     }
   }
 }
