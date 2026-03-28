@@ -1,0 +1,48 @@
+{
+  "$comment": "Patches for clockify-v1.json — the official spec has incomplete DTOs. Applied by scripts/regenerate.ts before generating types.",
+  "schemas": {
+    "UserDto": {
+      "addProperties": {
+        "activeWorkspace": { "type": "string" },
+        "defaultWorkspace": { "type": "string" },
+        "profilePicture": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "activeWorkspace", "defaultWorkspace", "status"]
+    },
+    "TimeEntryDto": {
+      "renameProperties": {
+        "get_id": "id"
+      },
+      "addProperties": {
+        "workspaceId": { "type": "string" },
+        "type": { "type": "string" },
+        "isLocked": { "type": "boolean" },
+        "tagIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "description", "billable", "userId", "workspaceId", "timeInterval"]
+    },
+    "TimeIntervalDto": {
+      "required": ["start"],
+      "patchProperties": {
+        "end": { "type": "string", "format": "date-time", "nullable": true },
+        "duration": { "type": "string", "nullable": true }
+      }
+    },
+    "TagDto": {
+      "required": ["id", "name", "workspaceId", "archived"]
+    },
+    "ProjectDtoV1": {
+      "addProperties": {
+        "name": { "type": "string" },
+        "note": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "public": { "type": "boolean" }
+      },
+      "required": ["id", "name", "archived", "billable", "color", "workspaceId"]
+    },
+    "CreateTimeEntryRequest": {
+      "required": ["description", "start"]
+    }
+  }
+}

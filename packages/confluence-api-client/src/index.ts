@@ -1,7 +1,13 @@
 /**
- * @knpkv/confluence-api-client
+ * Root barrel export for `@knpkv/confluence-api-client` -- openapi-fetch + Effect Confluence REST clients.
  *
- * Effect-based Confluence Cloud REST API client (v1 + v2).
+ * **Mental model**
+ *
+ * - **Namespaced versions**: `V1` and `V2` re-export the generated OpenAPI types (paths, components, operations).
+ * - **Config + client split**: {@link ConfluenceApiConfig} is provided separately from the
+ *   generated clients to support auth-polymorphic usage.
+ * - **openapi-fetch wrapper**: {@link OpenApiFetchClient} provides Effect-based `execute` method
+ *   around raw openapi-fetch clients.
  *
  * @packageDocumentation
  */
@@ -10,30 +16,10 @@ export { ConfluenceApiConfig, type ConfluenceApiConfigShape } from "./Confluence
 
 export { ConfluenceApiClient, type ConfluenceApiClientShape, layer } from "./ConfluenceApiClient.js"
 
-// Re-export V1 types
-export type {
-  ApiError as V1ApiError,
-  ConfluenceV1Client,
-  ContentProperty as V1ContentProperty,
-  ContentPropertyRequest as V1ContentPropertyRequest,
-  User as V1User
-} from "./generated/v1/Client.js"
+export { FetchClientError, type OpenApiFetchClient, type SuccessData, toEffect } from "./OpenApiFetchClient.js"
 
-// Re-export V2 types
-export type {
-  ApiError as V2ApiError,
-  ConfluenceV2Client,
-  CreatePageRequest,
-  GetChildrenParams,
-  GetPageParams,
-  GetVersionsParams,
-  Page,
-  PageBody,
-  PageChildrenResponse,
-  PageLinks,
-  PageListItem,
-  PageVersion,
-  PageVersionsResponse,
-  PageVersionWithBody,
-  UpdatePageRequest
-} from "./generated/v2/Client.js"
+// Re-export generated V1 types
+export type * as V1 from "./generated/v1/index.js"
+
+// Re-export generated V2 types
+export type * as V2 from "./generated/v2/index.js"

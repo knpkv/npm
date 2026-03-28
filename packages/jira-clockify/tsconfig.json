@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "declaration": false,
+    "declarationMap": false,
+    "composite": false,
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "resolveJsonModule": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src", "test", "src/**/*.json", "package.json"]
+}

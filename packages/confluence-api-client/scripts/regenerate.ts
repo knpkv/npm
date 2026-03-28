@@ -2,12 +2,13 @@
 /**
  * Regeneration script for Confluence API clients.
  *
- * Fetches OpenAPI specs from Atlassian, compares versions, and regenerates clients if needed.
+ * Fetches OpenAPI specs from Atlassian, compares versions, and regenerates types if needed.
  */
 import { Command, Options } from "@effect/cli"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import { execSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -17,6 +18,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SPECS_DIR = path.join(__dirname, "..", ".specs")
 const VERSION_V1_FILE = path.join(SPECS_DIR, "VERSION_V1")
 const VERSION_V2_FILE = path.join(SPECS_DIR, "VERSION_V2")
+const GENERATED_V1_DIR = path.join(__dirname, "..", "src", "generated", "v1")
+const GENERATED_V2_DIR = path.join(__dirname, "..", "src", "generated", "v2")
 
 const SPEC_URLS = {
   v1: "https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json",
@@ -73,6 +76,23 @@ const ensureDir = (dir: string): Effect.Effect<void> =>
     }
   })
 
+interface GenerateTypesOptions {
+  readonly specPath: string
+  readonly outputDir: string
+}
+
+const generateTypes = (options: GenerateTypesOptions): Effect.Effect<void, Error> =>
+  Effect.tryPromise({
+    try: async () => {
+      const outputFile = path.join(options.outputDir, "schema.d.ts")
+      execSync(
+        `pnpm exec openapi-typescript "${options.specPath}" -o "${outputFile}"`,
+        { cwd: path.join(__dirname, "..") }
+      )
+    },
+    catch: (e) => new Error(`Type generation failed: ${e}`)
+  })
+
 const checkOnly = Options.boolean("check").pipe(
   Options.withDescription("Check only, exit 1 if outdated"),
   Options.withDefault(false)
@@ -109,32 +129,43 @@ const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
     }
 
     yield* ensureDir(SPECS_DIR)
+    yield* ensureDir(GENERATED_V1_DIR)
+    yield* ensureDir(GENERATED_V2_DIR)
 
     if (v1Changed) {
       yield* Console.log(`Fetching V1 spec (${v1Info.version})...`)
       const specPath = path.join(SPECS_DIR, `confluence-v1-${v1Info.version}.json`)
       yield* fetchAndSaveSpec(SPEC_URLS.v1, specPath)
-      yield* writeVersion(VERSION_V1_FILE, v1Info.version)
       yield* Console.log(`Saved: ${specPath}`)
+
+      yield* Console.log("Generating V1 types...")
+      yield* generateTypes({
+        specPath,
+        outputDir: GENERATED_V1_DIR
+      })
+      yield* Console.log(`Generated: src/generated/v1/schema.d.ts`)
+
+      yield* writeVersion(VERSION_V1_FILE, v1Info.version)
     }
 
     if (v2Changed) {
       yield* Console.log(`Fetching V2 spec (${v2Info.version})...`)
       const specPath = path.join(SPECS_DIR, `confluence-v2-${v2Info.version}.json`)
       yield* fetchAndSaveSpec(SPEC_URLS.v2, specPath)
-      yield* writeVersion(VERSION_V2_FILE, v2Info.version)
       yield* Console.log(`Saved: ${specPath}`)
+
+      yield* Console.log("Generating V2 types...")
+      yield* generateTypes({
+        specPath,
+        outputDir: GENERATED_V2_DIR
+      })
+      yield* Console.log(`Generated: src/generated/v2/schema.d.ts`)
+
+      yield* writeVersion(VERSION_V2_FILE, v2Info.version)
     }
 
-    yield* Console.log("")
-    yield* Console.log("NOTE: Manual client files in src/generated/ need manual updates.")
-    yield* Console.log("The generated clients are minimal and hand-crafted due to OpenAPI spec complexity.")
-    yield* Console.log("")
-    yield* Console.log("Review the new specs and update the client files if needed:")
-    yield* Console.log("  - src/generated/v1/Client.ts")
-    yield* Console.log("  - src/generated/v2/Client.ts")
-  })
-).pipe(Command.withDescription("Regenerate Confluence API clients from OpenAPI specs"))
+    yield* Console.log("Done!")
+  })).pipe(Command.withDescription("Regenerate Confluence API types from OpenAPI specs"))
 
 const cli = Command.run(regenerate, {
   name: pkg.name,

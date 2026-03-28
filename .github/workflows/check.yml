@@ -68,4 +68,5 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node-version: 24.10.0
+      - run: pnpm build
       - run: pnpm test
