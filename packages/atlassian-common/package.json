@@ -66,8 +66,8 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
-    "@effect/platform": "0.95.0",
-    "@effect/platform-node": "0.105.0",
+    "@effect/platform": "latest",
+    "@effect/platform-node": "latest",
     "@effect/vitest": "latest",
     "@types/node": "latest",
     "effect": "latest",
