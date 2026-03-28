@@ -43,7 +43,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/generated/v1/schema.d.ts dist/generated/v1/schema.d.ts && cp src/generated/v2/schema.d.ts dist/generated/v2/schema.d.ts",
     "clean": "rimraf dist dist-test .tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -51,22 +51,22 @@
     "lint:fix": "eslint src --fix",
     "check": "tsc --noEmit",
     "regenerate": "tsx scripts/regenerate.ts",
-    "regenerate:check": "tsx scripts/regenerate.ts --check",
-    "openapi-gen": "openapi-gen"
+    "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": "^3.19.3"
+    "effect": ">=3.19.3"
   },
   "dependencies": {
-    "@effect/platform": "^0.95.0"
+    "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
-    "@effect/cli": "^0.61.0",
-    "@effect/platform-node": "^0.105.0",
-    "@effect/vitest": "^0.27.0",
-    "@tim-smart/openapi-gen": "^0.4.13",
-    "@types/node": "^22.15.21",
-    "effect": "^3.21.0",
+    "@effect/cli": "latest",
+    "@effect/platform-node": "latest",
+    "@effect/vitest": "latest",
+    "@types/node": "latest",
+    "effect": "latest",
+    "openapi-typescript": "^7.13.0",
+    "openapi-typescript-helpers": "^0.1.0",
     "tsx": "^4.19.4",
     "typescript": "~5.9.0",
     "vitest": "^4.0.13"

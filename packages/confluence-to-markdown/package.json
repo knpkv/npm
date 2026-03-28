@@ -85,12 +85,12 @@
     "link": "npm link"
   },
   "peerDependencies": {
-    "effect": "^3.19.3"
+    "effect": ">=3.19.3"
   },
   "dependencies": {
-    "@effect/cli": "^0.61.0",
-    "@effect/platform": "^0.93.0",
-    "@effect/platform-node": "^0.87.0",
+    "@effect/cli": "latest",
+    "@effect/platform": "latest",
+    "@effect/platform-node": "latest",
     "@knpkv/confluence-api-client": "workspace:^",
     "gray-matter": "^4.0.3",
     "rehype-parse": "^9.0.1",
@@ -105,7 +105,7 @@
   "devDependencies": {
     "@effect/vitest": "^0.27.0",
     "@types/node": "^22.15.21",
-    "effect": "^3.19.3",
+    "effect": "^3.21.0",
     "typescript": "~5.9.0",
     "vitest": "^4.0.13"
   },

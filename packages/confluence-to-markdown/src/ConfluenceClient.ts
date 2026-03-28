@@ -5,13 +5,7 @@
  *
  * @module
  */
-import * as HttpClient from "@effect/platform/HttpClient"
-import {
-  ConfluenceApiClient,
-  ConfluenceApiConfig,
-  type V1ApiError,
-  type V2ApiError
-} from "@knpkv/confluence-api-client"
+import { ConfluenceApiClient, ConfluenceApiConfig, type FetchClientError, toEffect } from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -128,7 +122,7 @@ export class ConfluenceClient extends Context.Tag(
 
     /**
      * Set editor version for a page (v1 or v2).
-     * Uses V1 API to set page property.
+     * Uses V2 page properties API.
      */
     readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
   }
@@ -170,7 +164,7 @@ const rateLimitSchedule = Schedule.exponential("1 second").pipe(
 /**
  * Map API client errors to domain errors.
  */
-const mapApiError = (error: V1ApiError | V2ApiError, endpoint: string, pageId?: string): ApiError =>
+const mapApiError = (error: FetchClientError, endpoint: string, pageId?: string): ApiError =>
   new ApiError({
     status: error.status,
     message: error.message,
@@ -183,7 +177,7 @@ const mapApiError = (error: V1ApiError | V2ApiError, endpoint: string, pageId?: 
  */
 const make = (
   config: ConfluenceClientConfig
-): Effect.Effect<Context.Tag.Service<typeof ConfluenceClient>, never, HttpClient.HttpClient> =>
+): Effect.Effect<Context.Tag.Service<typeof ConfluenceClient>> =>
   Effect.gen(function*() {
     // Create underlying API client
     const apiConfigLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -193,22 +187,23 @@ const make = (
         : { type: "oauth2", accessToken: Redacted.make(config.auth.accessToken), cloudId: config.auth.cloudId }
     })
 
-    const httpClient = yield* HttpClient.HttpClient
-
     const apiClient = yield* ConfluenceApiClient.pipe(
       Effect.provide(ConfluenceApiClient.layer),
-      Effect.provide(apiConfigLayer),
-      Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
+      Effect.provide(apiConfigLayer)
     )
 
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      apiClient.v2.getPageById(id, { bodyFormat: "storage" }).pipe(
+      toEffect(apiClient.v2.client.GET("/pages/{id}", {
+        params: { path: { id: Number(id) }, query: { "body-format": "storage" } }
+      })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
         Effect.retry(rateLimitSchedule)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
-      apiClient.v2.getPageChildren(id, { bodyFormat: "storage" }).pipe(
+      toEffect(apiClient.v2.client.GET("/pages/{id}/children", {
+        params: { path: { id: Number(id) } }
+      })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
         Effect.retry(rateLimitSchedule)
       ) as Effect.Effect<PageChildrenResponse, ApiError | RateLimitError>
@@ -231,20 +226,21 @@ const make = (
             )
           }
 
-          const response = yield* apiClient.v2.getPageChildren(id, {
-            bodyFormat: "storage",
-            cursor
-          }).pipe(
+          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/children", {
+            params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}) } }
+          })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
             Effect.retry(rateLimitSchedule)
           )
 
-          for (const child of response.results) {
-            allChildren.push(child as PageListItem)
+          for (const child of (response as { results?: Array<PageListItem> }).results ?? []) {
+            allChildren.push(child)
           }
 
-          cursor = response._links?.next
-            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
+          cursor = (response as { _links?: { next?: string } })._links?.next
+            ? new URL((response as { _links: { next: string } })._links.next, config.baseUrl).searchParams.get(
+              "cursor"
+            ) ?? undefined
             : undefined
 
           iterations++
@@ -254,19 +250,39 @@ const make = (
       })
 
     const createPage = (req: CreatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      apiClient.v2.createPage(req).pipe(
+      toEffect(apiClient.v2.client.POST("/pages", {
+        body: {
+          spaceId: req.spaceId,
+          title: req.title,
+          ...(req.parentId ? { parentId: req.parentId } : {}),
+          body: { representation: req.body.representation, value: req.body.value },
+          status: "current"
+        }
+      })).pipe(
         Effect.mapError((e) => mapApiError(e, "/pages")),
         Effect.retry(rateLimitSchedule)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      apiClient.v2.updatePage(req.id, req).pipe(
+      toEffect(apiClient.v2.client.PUT("/pages/{id}", {
+        params: { path: { id: Number(req.id) } },
+        body: {
+          id: req.id,
+          title: req.title,
+          status: req.status ?? "current",
+          body: { representation: req.body.representation, value: req.body.value },
+          version: { number: req.version.number, ...(req.version.message ? { message: req.version.message } : {}) }
+        }
+      })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
         Effect.retry(rateLimitSchedule)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
-      apiClient.v2.deletePage(id).pipe(
+      toEffect(apiClient.v2.client.DELETE("/pages/{id}", {
+        params: { path: { id: Number(id) } }
+      })).pipe(
+        Effect.map(() => void 0),
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
         Effect.retry(rateLimitSchedule)
       )
@@ -292,23 +308,30 @@ const make = (
             )
           }
 
-          const response = yield* apiClient.v2.getPageVersions(id, {
-            bodyFormat: options?.includeBody ? "storage" : undefined,
-            cursor,
-            limit: VERSIONS_PAGE_SIZE
-          }).pipe(
+          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/versions", {
+            params: {
+              path: { id: Number(id) },
+              query: {
+                ...(options?.includeBody ? { "body-format": "storage" as const } : {}),
+                ...(cursor ? { cursor } : {}),
+                limit: VERSIONS_PAGE_SIZE
+              }
+            }
+          })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
             Effect.retry(rateLimitSchedule)
           )
 
-          for (const version of response.results) {
+          for (const version of (response as { results?: Array<PageVersion> }).results ?? []) {
             if (options?.since === undefined || (version.number ?? 0) > options.since) {
-              allVersions.push(version as PageVersion)
+              allVersions.push(version)
             }
           }
 
-          cursor = response._links?.next
-            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
+          cursor = (response as { _links?: { next?: string } })._links?.next
+            ? new URL((response as { _links: { next: string } })._links.next, config.baseUrl).searchParams.get(
+              "cursor"
+            ) ?? undefined
             : undefined
 
           iterations++
@@ -318,7 +341,9 @@ const make = (
       })
 
     const getUser = (accountId: string): Effect.Effect<AtlassianUser, ApiError | RateLimitError> =>
-      apiClient.v1.getUser({ accountId }).pipe(
+      toEffect(apiClient.v1.client.GET("/wiki/rest/api/user", {
+        params: { query: { accountId } }
+      })).pipe(
         Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
         Effect.retry(rateLimitSchedule)
       ) as Effect.Effect<AtlassianUser, ApiError | RateLimitError>
@@ -341,29 +366,39 @@ const make = (
 
     const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
       Effect.gen(function*() {
-        // Try to get current property version, only treat 404 as "not exists"
-        const propertyVersion = yield* apiClient.v1.getContentProperty(pageId, "editor").pipe(
-          Effect.map((prop) => prop.version.number + 1),
+        // Try to get existing property by key, treat 404 as "not exists"
+        const existing = yield* toEffect(apiClient.v2.client.GET("/pages/{page-id}/properties", {
+          params: { path: { "page-id": Number(pageId) }, query: { key: "editor" } }
+        })).pipe(
+          Effect.map((resp) => {
+            const results = (resp as { results?: Array<{ id?: string; version?: { number?: number } }> }).results
+            return results?.[0]
+          }),
           Effect.catchIf(
-            (e) => e.status === 404,
-            () => Effect.succeed(1)
+            (e: FetchClientError) => e.status === 404,
+            () => Effect.succeed(undefined)
           ),
-          Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
+          Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties?key=editor`, pageId))
         )
 
-        const payload = {
-          key: "editor",
-          value: version,
-          version: { number: propertyVersion }
-        }
-
-        if (propertyVersion === 1) {
-          yield* apiClient.v1.createContentProperty(pageId, { payload }).pipe(
-            Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
+        if (existing?.id) {
+          // Update existing property
+          const nextVersion = (existing.version?.number ?? 0) + 1
+          yield* toEffect(apiClient.v2.client.PUT("/pages/{page-id}/properties/{property-id}", {
+            params: {
+              path: { "page-id": Number(pageId), "property-id": Number(existing.id) }
+            },
+            body: { key: "editor", value: version, version: { number: nextVersion } }
+          })).pipe(
+            Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         } else {
-          yield* apiClient.v1.updateContentProperty(pageId, "editor", { payload }).pipe(
-            Effect.mapError((e) => mapApiError(e, `/content/${pageId}/property/editor`, pageId))
+          // Create new property
+          yield* toEffect(apiClient.v2.client.POST("/pages/{page-id}/properties", {
+            params: { path: { "page-id": Number(pageId) } },
+            body: { key: "editor", value: version }
+          })).pipe(
+            Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         }
       }).pipe(Effect.retry(rateLimitSchedule))
@@ -388,7 +423,6 @@ const make = (
  * @example
  * ```typescript
  * import { ConfluenceClient } from "@knpkv/confluence-to-markdown/ConfluenceClient"
- * import { NodeHttpClient } from "@effect/platform-node"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -406,8 +440,7 @@ const make = (
  *         email: "you@example.com",
  *         token: process.env.CONFLUENCE_API_KEY
  *       }
- *     })),
- *     Effect.provide(NodeHttpClient.layer)
+ *     }))
  *   )
  * )
  * ```
@@ -416,4 +449,4 @@ const make = (
  */
 export const layer = (
   config: ConfluenceClientConfig
-): Layer.Layer<ConfluenceClient, never, HttpClient.HttpClient> => Layer.effect(ConfluenceClient, make(config))
+): Layer.Layer<ConfluenceClient> => Layer.effect(ConfluenceClient, make(config))

@@ -1,6 +1,6 @@
 /**
- * Generated Confluence Cloud REST API v1 client.
+ * Generated Confluence Cloud REST API v1 types.
  *
  * @module
  */
-export * from "./Client.js"
+export type { components, operations, paths } from "./schema.js"
