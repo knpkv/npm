@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jira-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI tool to fetch Jira tickets and export to markdown",
   "license": "MIT",
   "author": "knpkv",
