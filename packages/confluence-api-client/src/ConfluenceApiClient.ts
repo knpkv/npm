@@ -7,6 +7,7 @@ import * as HttpClient from "@effect/platform/HttpClient"
 import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { ConfluenceApiConfig } from "./ConfluenceApiConfig.js"
@@ -80,7 +81,7 @@ export class ConfluenceApiClient extends Context.Tag(
 
       // Build auth header
       const authHeader = config.auth.type === "basic"
-        ? `Basic ${Buffer.from(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`).toString("base64")}`
+        ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
         : `Bearer ${Redacted.value(config.auth.accessToken)}`
 
       // Base URLs differ by auth type

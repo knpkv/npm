@@ -1,7 +1,12 @@
 /**
- * @knpkv/confluence-api-client
+ * Root barrel export for `@knpkv/confluence-api-client` — auto-generated V1/V2 Confluence REST clients.
  *
- * Effect-based Confluence Cloud REST API client (v1 + v2).
+ * **Mental model**
+ *
+ * - **Namespaced versions**: `V1` and `V2` re-export the full generated client interfaces.
+ *   Consumer code picks the version matching their API needs.
+ * - **Config + client split**: {@link ConfluenceApiConfig} is provided separately from the
+ *   generated clients to support auth-polymorphic usage.
  *
  * @packageDocumentation
  */
@@ -10,30 +15,8 @@ export { ConfluenceApiConfig, type ConfluenceApiConfigShape } from "./Confluence
 
 export { ConfluenceApiClient, type ConfluenceApiClientShape, layer } from "./ConfluenceApiClient.js"
 
-// Re-export V1 types
-export type {
-  ApiError as V1ApiError,
-  ConfluenceV1Client,
-  ContentProperty as V1ContentProperty,
-  ContentPropertyRequest as V1ContentPropertyRequest,
-  User as V1User
-} from "./generated/v1/Client.js"
+// Re-export generated V1 client
+export * as V1 from "./generated/v1/Client.js"
 
-// Re-export V2 types
-export type {
-  ApiError as V2ApiError,
-  ConfluenceV2Client,
-  CreatePageRequest,
-  GetChildrenParams,
-  GetPageParams,
-  GetVersionsParams,
-  Page,
-  PageBody,
-  PageChildrenResponse,
-  PageLinks,
-  PageListItem,
-  PageVersion,
-  PageVersionsResponse,
-  PageVersionWithBody,
-  UpdatePageRequest
-} from "./generated/v2/Client.js"
+// Re-export generated V2 client
+export * as V2 from "./generated/v2/Client.js"
