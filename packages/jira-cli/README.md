@@ -104,35 +104,36 @@ jira auth status     # Show current auth status
 
 ```typescript
 import { Effect, Layer } from "effect"
-import { NodeHttpClient } from "@effect/platform-node"
-import { JiraAuth, IssueService, JiraAuthLayer, IssueServiceLayer } from "@knpkv/jira-cli"
-import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import * as Redacted from "effect/Redacted"
+import { IssueService, IssueServiceLayer } from "@knpkv/jira-cli"
+import { JiraApiClient, JiraApiConfig, toEffect } from "@knpkv/jira-api-client"
 
-const program = Effect.gen(function* () {
-  const auth = yield* JiraAuth
-  const accessToken = yield* auth.getAccessToken()
-  const cloudId = yield* auth.getCloudId()
-
-  // Build config layer
-  const configLayer = Layer.succeed(JiraApiConfig, {
-    baseUrl: "",
-    auth: { type: "oauth2", accessToken: Redacted.make(accessToken), cloudId }
-  })
-
-  // Use IssueService
-  const issues = yield* Effect.gen(function* () {
-    const service = yield* IssueService
-    return yield* service.searchAll('fixVersion = "1.0.0"')
-  }).pipe(
-    Effect.provide(IssueServiceLayer),
-    Effect.provide(JiraApiClient.layer),
-    Effect.provide(configLayer),
-    Effect.provide(NodeHttpClient.layer)
-  )
-
-  console.log(`Found ${issues.length} issues`)
+const configLayer = Layer.succeed(JiraApiConfig, {
+  baseUrl: "https://mysite.atlassian.net",
+  auth: {
+    type: "basic",
+    email: "user@example.com",
+    apiToken: Redacted.make("your-api-token")
+  }
 })
+
+// Using IssueService (high-level)
+const program = Effect.gen(function* () {
+  const service = yield* IssueService
+  const issues = yield* service.searchAll('fixVersion = "1.0.0"')
+  console.log(`Found ${issues.length} issues`)
+}).pipe(Effect.provide(IssueServiceLayer), Effect.provide(JiraApiClient.layer), Effect.provide(configLayer))
+
+// Or using JiraApiClient directly (low-level)
+const direct = Effect.gen(function* () {
+  const client = yield* JiraApiClient
+  const issue = yield* toEffect(
+    client.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
+      params: { path: { issueIdOrKey: "PROJ-123" } }
+    })
+  )
+  console.log(issue.fields?.summary)
+}).pipe(Effect.provide(JiraApiClient.layer), Effect.provide(configLayer))
 ```
 
 ## License
