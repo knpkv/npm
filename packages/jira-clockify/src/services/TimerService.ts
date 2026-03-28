@@ -337,14 +337,15 @@ export const layer = Layer.effect(
       if (running && running.timeInterval.start) {
         const startedAt = new Date(running.timeInterval.start)
         // Parse "[KEY] summary" or "KEY: summary" format
-        const bracketMatch = running.description.match(/^\[([^\]]+)\]\s*(.*)$/)
-        const colonMatch = running.description.match(/^([^:]+):\s*(.*)$/)
+        const desc = running.description ?? ""
+        const bracketMatch = desc.match(/^\[([^\]]+)\]\s*(.*)$/)
+        const colonMatch = desc.match(/^([^:]+):\s*(.*)$/)
         const ticketKey = bracketMatch?.[1]?.trim() ?? colonMatch?.[1]?.trim() ?? null
         const summary = bracketMatch?.[2]?.trim() ?? colonMatch?.[2]?.trim() ?? null
 
         if (!ticketKey) {
           yield* Effect.logWarning(
-            `Running Clockify timer has unparseable description: "${running.description}"`
+            `Running Clockify timer has unparseable description: "${desc}"`
           )
         }
 

@@ -278,10 +278,9 @@ const make = Effect.gen(function*() {
         Effect.catchTag(
           "TimeoutException",
           () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
-        )
+        ),
+        Effect.ensuring(shutdown)
       )
-
-      yield* shutdown
 
       yield* Console.log("Exchanging code for tokens...")
       const tokens = yield* exchangeCodeForTokens(code, config, { port, codeVerifier }).pipe(

@@ -5,8 +5,6 @@
   "license": "MIT",
   "author": "knpkv",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/dts/index.d.ts",
   "bin": {
     "jcf": "dist/src/bin.js"
   },
