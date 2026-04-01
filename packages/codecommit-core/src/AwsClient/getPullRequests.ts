@@ -173,17 +173,26 @@ export const fetchApprovers = (pullRequestId: string, revisionId: string) =>
 
 /**
  * Check PR merge status.
+ *
+ * Uses branch refs (destinationReference/sourceReference) instead of stored
+ * commit SHAs — the SHAs are snapshots from PR creation and become stale
+ * as the destination branch advances, causing false `mergeable: true`.
  */
 const fetchMergeStatus = (
   repoName: string,
-  target?: { destinationCommit?: string; sourceCommit?: string }
+  target?: {
+    destinationReference?: string
+    sourceReference?: string
+    destinationCommit?: string
+    sourceCommit?: string
+  }
 ) => {
   if (!target) return Effect.succeed(true)
   return throttleRetry(
     codecommit.getMergeConflicts({
       repositoryName: repoName,
-      destinationCommitSpecifier: target.destinationCommit ?? "",
-      sourceCommitSpecifier: target.sourceCommit ?? "",
+      destinationCommitSpecifier: target.destinationReference ?? target.destinationCommit ?? "",
+      sourceCommitSpecifier: target.sourceReference ?? target.sourceCommit ?? "",
       mergeOption: "THREE_WAY_MERGE"
     })
   ).pipe(
