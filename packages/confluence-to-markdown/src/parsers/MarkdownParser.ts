@@ -40,7 +40,7 @@ import {
   UnsupportedInline,
   UserMention
 } from "../ast/InlineNode.js"
-import { type InfoPanel, PanelTypes, type TocMacro } from "../ast/MacroNode.js"
+import { type ExpandMacro, type InfoPanel, PanelTypes, type TocMacro } from "../ast/MacroNode.js"
 import { ParseError } from "../SchemaConverterError.js"
 
 // Mdast types (inline to avoid dependency)
@@ -251,16 +251,69 @@ const preprocessContainers = (markdown: string): string => {
 
 /**
  * Convert mdast Root to document nodes.
+ *
+ * Recognises `<details><summary>title</summary>...body...</details>` HTML blocks
+ * and rebuilds them as ExpandMacro nodes so they round-trip back to Confluence.
  */
 const mdastToDocumentNodes = (root: MdastRoot): Effect.Effect<Array<DocumentNode>, ParseError> =>
   Effect.gen(function*() {
     const nodes: Array<DocumentNode> = []
-    for (const child of root.children) {
+    const children = root.children
+    let i = 0
+    while (i < children.length) {
+      const child = children[i]
+      if (!child) {
+        i++
+        continue
+      }
+      if (child.type === "html") {
+        const detailsMatch = (child as MdastHtml).value.match(
+          /^<details(?:\s[^>]*)?>\s*<summary(?:\s[^>]*)?>([\s\S]*?)<\/summary>/
+        )
+        if (detailsMatch) {
+          const title = decodeHtmlEntities(detailsMatch[1] ?? "").trim()
+          let j = i + 1
+          while (j < children.length) {
+            const c = children[j]
+            if (c?.type === "html" && /<\/details>/.test((c as MdastHtml).value)) break
+            j++
+          }
+          const bodyChildren = children.slice(i + 1, j)
+          const bodyBlocks = yield* mdastChildrenToSimpleBlocks(bodyChildren)
+          nodes.push(
+            {
+              _tag: "ExpandMacro" as const,
+              version: 1,
+              ...(title ? { title } : {}),
+              children: bodyBlocks
+            } satisfies ExpandMacro
+          )
+          i = j + 1
+          continue
+        }
+        // Synthetic empty-header marker: drop it and tell the next table to drop
+        // its first row (which the serializer added only to satisfy GFM).
+        if ((child as MdastHtml).value.trim() === "<!--cf:synth-thead-->") {
+          const next = children[i + 1]
+          if (next?.type === "table") {
+            const table = yield* parseTable(next as MdastTable, { dropSyntheticHeader: true })
+            nodes.push(table)
+            i += 2
+            continue
+          }
+          i++
+          continue
+        }
+      }
       const node = yield* mdastNodeToBlock(child)
       if (node !== null) nodes.push(node)
+      i++
     }
     return nodes
   })
+
+const decodeHtmlEntities = (s: string): string =>
+  s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'")
 
 /**
  * Convert mdast node to BlockNode or MacroNode.
@@ -580,6 +633,11 @@ const mdastNodeToInline = (node: MdastNode): Effect.Effect<InlineNode | null, Pa
 
       case "link": {
         const link = node as MdastLink
+        // Recognise the visible round-trip carriers emitted by MarkdownSerializer
+        // for inline macros (`#cf-user:`, `#cf-status:`, `#cf-toc:`) and rebuild
+        // the proper AST node so push back to Confluence is lossless.
+        const macroNode = parseInlineMacroLink(link)
+        if (macroNode) return macroNode
         const children = yield* mdastChildrenToBaseInline(link.children)
         return new Link({
           href: link.url,
@@ -665,6 +723,41 @@ const parseInlineHtml = (html: string): Effect.Effect<InlineNode | null, ParseEr
 
     return null
   })
+
+/**
+ * Recognise visible markdown links emitted as round-trip carriers for inline
+ * Confluence macros (UserMention, StatusMacro, TocMacro). Returns the rebuilt
+ * AST node, or null if the link is a regular link.
+ *
+ * The raw `<!--cf:status:title;color-->` form expects URL-encoded values;
+ * link text is the human-readable (decoded) form, so we re-encode it here.
+ * URL fragments are already URL-encoded, so they pass through verbatim.
+ */
+const parseInlineMacroLink = (link: MdastLink): InlineNode | null => {
+  const userMatch = link.url.match(/^#cf-user:(.+)$/)
+  if (userMatch) {
+    return new UserMention({ accountId: decodeURIComponent(userMatch[1] ?? "") })
+  }
+  const statusMatch = link.url.match(/^#cf-status:(.*)$/)
+  if (statusMatch) {
+    const text = link.children
+      .filter((c): c is MdastText => c.type === "text")
+      .map((c) => c.value)
+      .join("")
+    return new UnsupportedInline({
+      raw: `<!--cf:status:${encodeURIComponent(text)};${statusMatch[1] ?? ""}-->`,
+      source: "markdown"
+    })
+  }
+  const tocMatch = link.url.match(/^#cf-toc:([^:]*):([^:]*)$/)
+  if (tocMatch) {
+    return new UnsupportedInline({
+      raw: `<!--cf:toc:${tocMatch[1] ?? ""};${tocMatch[2] ?? ""}-->`,
+      source: "markdown"
+    })
+  }
+  return null
+}
 
 /**
  * Parse comment-encoded task list.
@@ -1065,16 +1158,16 @@ const mdastChildrenToBaseInline = (
   })
 
 /**
- * Convert mdast children to simple block nodes.
+ * Convert mdast children to block nodes for list items.
+ *
+ * Allows nested {@link NestedList} children — recurses on `list` mdast nodes so
+ * second-level bullets become proper nested markdown lists rather than raw HTML.
  */
-const mdastChildrenToSimpleBlocks = (
+const mdastChildrenToListItemBlocks = (
   children: Array<MdastNode>
-): Effect.Effect<
-  Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock>,
-  ParseError
-> =>
+): Effect.Effect<Array<SimpleBlock>, ParseError> =>
   Effect.gen(function*() {
-    const blocks: Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock> = []
+    const blocks: Array<SimpleBlock> = []
     for (const child of children) {
       switch (child.type) {
         case "heading": {
@@ -1116,9 +1209,7 @@ const mdastChildrenToSimpleBlocks = (
           break
         }
         case "list": {
-          // Nested lists - when markdown nested lists are parsed, we lose Confluence local-ids
-          // This should rarely happen as Confluence nested lists are preserved as HTML
-          blocks.push(new UnsupportedBlock({ rawMarkdown: "", source: "markdown" }))
+          blocks.push(yield* parseList(child as MdastList))
           break
         }
         default: {
@@ -1129,8 +1220,44 @@ const mdastChildrenToSimpleBlocks = (
     return blocks
   })
 
-// Type for simple blocks used in lists
-type SimpleBlock = Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock
+/**
+ * Convert mdast children to simple block nodes (no nested lists).
+ *
+ * Used for AST nodes whose schema does not permit nested lists (BlockQuote etc.).
+ */
+const mdastChildrenToSimpleBlocks = (
+  children: Array<MdastNode>
+): Effect.Effect<
+  Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock>,
+  ParseError
+> =>
+  Effect.gen(function*() {
+    const blocks = yield* mdastChildrenToListItemBlocks(children)
+    return blocks.map((block) =>
+      block._tag === "List"
+        ? new UnsupportedBlock({ rawMarkdown: "", source: "markdown" })
+        : block
+    )
+  })
+
+// Type for simple blocks used in lists. Recursive: a list item may contain nested Lists.
+type SimpleBlock =
+  | Heading
+  | Paragraph
+  | CodeBlock
+  | ThematicBreak
+  | Image
+  | Table
+  | UnsupportedBlock
+  | NestedList
+
+type NestedList = {
+  _tag: "List"
+  version: number
+  ordered: boolean
+  start?: number
+  children: Array<{ _tag: "ListItem"; checked?: boolean; children: Array<SimpleBlock> }>
+}
 
 /**
  * Parse mdast list.
@@ -1153,7 +1280,7 @@ const parseList = (
     const start = ordered && list.start != null ? list.start : undefined
 
     for (const item of list.children) {
-      const children = yield* mdastChildrenToSimpleBlocks(item.children)
+      const children = yield* mdastChildrenToListItemBlocks(item.children)
       if (item.checked != null) {
         items.push({ _tag: "ListItem", checked: item.checked, children })
       } else {
@@ -1169,8 +1296,17 @@ const parseList = (
 
 /**
  * Parse mdast table.
+ *
+ * `dropSyntheticHeader` is set by `mdastToDocumentNodes` when the table was
+ * preceded by a `<!--cf:synth-thead-->` marker — only then do we discard the
+ * first row (which the serializer added solely to satisfy GFM's required
+ * divider line). A legitimate empty `<thead>` from real Confluence storage is
+ * always preserved.
  */
-const parseTable = (table: MdastTable): Effect.Effect<Table, ParseError> =>
+const parseTable = (
+  table: MdastTable,
+  options: { dropSyntheticHeader?: boolean } = {}
+): Effect.Effect<Table, ParseError> =>
   Effect.gen(function*() {
     let header: TableRow | undefined
     const rows: Array<TableRow> = []
@@ -1192,6 +1328,10 @@ const parseTable = (table: MdastTable): Effect.Effect<Table, ParseError> =>
       } else {
         rows.push(tableRow)
       }
+    }
+
+    if (options.dropSyntheticHeader) {
+      header = undefined
     }
 
     return new Table({ header, rows })

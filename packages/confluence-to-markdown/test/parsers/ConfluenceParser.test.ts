@@ -216,6 +216,58 @@ describe("ConfluenceParser", () => {
           }
         }
       }))
+
+    it.effect("parses nested unordered list as nested List AST", () =>
+      Effect.gen(function*() {
+        const html = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc = yield* parseConfluenceHtml(html)
+        const outerList = doc.children[0]
+        expect(outerList?._tag).toBe("List")
+        if (outerList?._tag === "List") {
+          expect(outerList.children.length).toBe(1)
+          const outerItem = outerList.children[0]
+          expect(outerItem?.children.length).toBe(2)
+          // First child is the "Outer" paragraph
+          expect(outerItem?.children[0]?._tag).toBe("Paragraph")
+          // Second child is the nested List (no longer UnsupportedBlock)
+          const nested = outerItem?.children[1]
+          expect(nested?._tag).toBe("List")
+          if (nested?._tag === "List") {
+            expect(nested.children.length).toBe(2)
+            const firstInner = nested.children[0]
+            expect(firstInner?.children[0]?._tag).toBe("Paragraph")
+          }
+        }
+      }))
+
+    it.effect("serializes nested list as indented markdown bullets", () =>
+      Effect.gen(function*() {
+        const html = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc = yield* parseConfluenceHtml(html)
+        const md = yield* serializeToMarkdown(doc, { includeRawSource: false })
+        expect(md).toContain("- Outer")
+        expect(md).toContain("   - Inner A")
+        expect(md).toContain("   - Inner B")
+        expect(md).not.toContain("<ul")
+        expect(md).not.toContain("local-id")
+      }))
+
+    it.effect("unwraps table cell with leading empty <p> placeholder", () =>
+      Effect.gen(function*() {
+        // Confluence editor frequently emits an empty <p/> alongside the real content.
+        const html = `<table><tbody>
+          <tr><td><p local-id="empty"/><p><strong>Must</strong></p></td><td><p>Text</p></td></tr>
+        </tbody></table>`
+        const doc = yield* parseConfluenceHtml(html)
+        const table = doc.children[0]
+        expect(table?._tag).toBe("Table")
+        if (table?._tag === "Table") {
+          const cell = table.rows[0]?.cells[0]
+          expect(cell?.children.length).toBe(1)
+          const strong = cell?.children[0]
+          expect(strong?._tag).toBe("Strong")
+        }
+      }))
   })
 
   describe("integration test fixture", () => {
@@ -261,6 +313,123 @@ describe("ConfluenceParser", () => {
 
         // 1-to-1 roundtrip: finalHtml should EXACTLY match originalHtml
         expect(finalHtml).toBe(originalHtml)
+      }))
+
+    it.effect("renders UserMention as visible markdown link and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml = `<p><ac:link><ri:user ri:account-id="557058:abc123"/></ac:link></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[@557058:abc123](#cf-user:")
+        expect(md).not.toContain("<!--cf:user:")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ri:account-id=\"557058:abc123\"")
+      }))
+
+    it.effect("renders inline StatusMacro as visible link and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="status"><ac:parameter ac:name="title">READY</ac:parameter><ac:parameter ac:name="colour">Blue</ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[READY](#cf-status:Blue)")
+        expect(md).not.toContain("<!--cf:status:")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"status\"")
+        expect(finalHtml).toContain("READY")
+        expect(finalHtml).toContain("Blue")
+      }))
+
+    it.effect("decodes multi-word status title for visible link text", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="status"><ac:parameter ac:name="title">In Progress</ac:parameter><ac:parameter ac:name="colour">Yellow</ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        // Display text is decoded; URL fragment carries the encoded value.
+        expect(md).toContain("[In Progress](#cf-status:Yellow)")
+        expect(md).not.toContain("In%20Progress")
+        const finalHtml = yield* serializeToConfluence(yield* parseMarkdown(md))
+        expect(finalHtml).toContain("In Progress")
+      }))
+
+    it.effect("preserves real <thead> with empty header cells (no synthetic-header drop)", () =>
+      Effect.gen(function*() {
+        // A legitimate empty <thead> in the source must round-trip intact —
+        // it must NOT be confused with the synthetic empty header the
+        // serializer emits for <tbody>-only tables.
+        const originalHtml =
+          `<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).not.toContain("cf:synth-thead")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
+    it.effect("renders view-file macro as a link to the attachment", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name"><ri:attachment ri:filename="guidelines.md"/></ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[guidelines.md](attachment:guidelines.md)")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"view-file\"")
+        expect(finalHtml).toContain("ri:filename=\"guidelines.md\"")
+      }))
+
+    it.effect("roundtrips nested unordered list HTML -> markdown -> HTML", () =>
+      Effect.gen(function*() {
+        const originalHtml = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
+    it.effect("emits markdown header divider for headerless table and roundtrips", () =>
+      Effect.gen(function*() {
+        // Tables without <thead> need a synthetic header in markdown to render.
+        const originalHtml =
+          `<table><tbody><tr><td>Cell A1</td><td>Cell A2</td></tr><tr><td>Cell B1</td><td>Cell B2</td></tr></tbody></table>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        // Synthetic empty header + divider so md viewers render it as a table.
+        expect(md).toMatch(/\|\s*\|\s*\|\n\| --- \| --- \|/)
+        expect(md).toContain("| Cell A1 | Cell A2 |")
+        expect(md).toContain("| Cell B1 | Cell B2 |")
+        // Roundtrip: the synthetic empty header is dropped on parse, so the
+        // Confluence output omits <thead> just like the source.
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
+    it.effect("renders ExpandMacro as <details>/<summary> and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">Glossary term</ac:parameter><ac:rich-text-body><p>Body content here.</p></ac:rich-text-body></ac:structured-macro>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("<details>")
+        expect(md).toContain("<summary>Glossary term</summary>")
+        expect(md).toContain("Body content here.")
+        expect(md).toContain("</details>")
+        // No more opaque cf:expand comment.
+        expect(md).not.toContain("<!--cf:expand:")
+
+        const doc2 = yield* parseMarkdown(md)
+        expect(doc2.children[0]?._tag).toBe("ExpandMacro")
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"expand\"")
+        expect(finalHtml).toContain("Glossary term")
+        expect(finalHtml).toContain("Body content here.")
       }))
 
     it.effect("roundtrips TOC macro", () =>

@@ -11,6 +11,7 @@ import {
   CodeBlock,
   Heading,
   Image,
+  type List,
   Paragraph,
   Table,
   TableCell,
@@ -722,12 +723,20 @@ const parseTableRow = (element: HastElement, isHeader: boolean): Effect.Effect<T
 
 /**
  * Parse cell content, unwrapping single <p> elements.
+ *
+ * Confluence's editor frequently emits empty `<p>` placeholders alongside the
+ * real content (e.g. `<p/><p>Must</p>` for a styled cell). Skip those so the
+ * single-real-paragraph case still hits the unwrap path.
  */
 const parseCellContent = (children: Array<HastNode>): Effect.Effect<Array<InlineNode>, ParseError> =>
   Effect.gen(function*() {
-    // Find actual element children (skip whitespace text)
+    const isEmptyParagraph = (el: HastElement): boolean =>
+      el.tagName.toLowerCase() === "p" &&
+      el.children.every((c) => c.type === "text" && !(c as HastText).value.trim())
+
+    // Find actual element children (skip whitespace text and empty <p> placeholders)
     const elementChildren = children.filter((c) => {
-      if (c.type === "element") return true
+      if (c.type === "element") return !isEmptyParagraph(c as HastElement)
       if (c.type === "text" && (c as HastText).value.trim()) return true
       return false
     })
@@ -744,8 +753,8 @@ const parseCellContent = (children: Array<HastNode>): Effect.Effect<Array<Inline
     return yield* hastChildrenToInline(children)
   })
 
-// Type for simple blocks used in lists
-type SimpleBlock = Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock
+// Type for blocks allowed inside list items: simple blocks plus nested Lists.
+type SimpleBlock = Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock | List
 
 /**
  * Parse task list element (preprocessed from ac:task-list).
@@ -865,7 +874,7 @@ const parseListItemContent = (
           const el = child as HastElement
           const tagName = el.tagName.toLowerCase()
           if (tagName === "ul" || tagName === "ol") {
-            blocks.push(new UnsupportedBlock({ rawHtml: hastToHtml(el), source: "confluence" }))
+            blocks.push(yield* parseList(el, tagName === "ol"))
           }
         }
       }
@@ -881,12 +890,9 @@ const parseListItemContent = (
       if (tagName === "p") {
         const inlineChildren = yield* hastChildrenToInline(el.children)
         blocks.push(new Paragraph({ children: inlineChildren }))
-      } // Nested lists - convert to paragraph with raw HTML for now (will be handled later)
-      else if (tagName === "ul" || tagName === "ol") {
-        // For nested lists, preserve as unsupported for now
-        blocks.push(new UnsupportedBlock({ rawHtml: hastToHtml(el), source: "confluence" }))
-      } // Other block elements
-      else if (tagName === "pre") {
+      } else if (tagName === "ul" || tagName === "ol") {
+        blocks.push(yield* parseList(el, tagName === "ol"))
+      } else if (tagName === "pre") {
         const codeEl = el.children.find(
           (c): c is HastElement => c.type === "element" && (c as HastElement).tagName === "code"
         )

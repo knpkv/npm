@@ -305,28 +305,79 @@ export type BlockQuote = Schema.Schema.Type<typeof BlockQuote>
 /**
  * List item with nested block content.
  *
+ * Children may include any simple block as well as nested {@link List} elements.
+ *
  * @category BlockNode
  */
-export const ListItem = Schema.Struct({
-  _tag: Schema.Literal("ListItem"),
-  checked: Schema.optional(Schema.Boolean),
-  children: Schema.Array(SimpleBlockNode),
-  rawConfluence: RawConfluence
-})
-
-/**
- * Type for ListItem.
- *
- * @category Types
- */
-export type ListItem = Schema.Schema.Type<typeof ListItem>
+export interface ListItem {
+  readonly _tag: "ListItem"
+  readonly checked?: boolean | undefined
+  readonly children: ReadonlyArray<
+    Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock | List
+  >
+  readonly rawConfluence?: string | undefined
+}
 
 /**
  * List element (ordered or unordered).
  *
  * @category BlockNode
  */
-export const List = Schema.Struct({
+export interface List {
+  readonly _tag: "List"
+  readonly version: number
+  readonly ordered: boolean
+  readonly start?: number | undefined
+  readonly children: ReadonlyArray<ListItem>
+  readonly rawConfluence?: string | undefined
+}
+
+// Encoded shapes (input to decode): `version` is optional via SchemaVersion's
+// optionalWith({ default }), and the recursive cycle is List → ListItem → List.
+export interface ListEncoded {
+  readonly _tag: "List"
+  readonly version?: number | undefined
+  readonly ordered: boolean
+  readonly start?: number | undefined
+  readonly children: ReadonlyArray<ListItemEncoded>
+  readonly rawConfluence?: string | undefined
+}
+
+export interface ListItemEncoded {
+  readonly _tag: "ListItem"
+  readonly checked?: boolean | undefined
+  readonly children: ReadonlyArray<
+    | Schema.Schema.Encoded<typeof Heading>
+    | Schema.Schema.Encoded<typeof Paragraph>
+    | Schema.Schema.Encoded<typeof CodeBlock>
+    | Schema.Schema.Encoded<typeof ThematicBreak>
+    | Schema.Schema.Encoded<typeof Image>
+    | Schema.Schema.Encoded<typeof Table>
+    | Schema.Schema.Encoded<typeof UnsupportedBlock>
+    | ListEncoded
+  >
+  readonly rawConfluence?: string | undefined
+}
+
+const ListItemChild = Schema.Union(
+  Heading,
+  Paragraph,
+  CodeBlock,
+  ThematicBreak,
+  Image,
+  Table,
+  UnsupportedBlock,
+  Schema.suspend((): Schema.Schema<List, ListEncoded> => List)
+)
+
+export const ListItem: Schema.Schema<ListItem, ListItemEncoded> = Schema.Struct({
+  _tag: Schema.Literal("ListItem"),
+  checked: Schema.optional(Schema.Boolean),
+  children: Schema.Array(ListItemChild),
+  rawConfluence: RawConfluence
+})
+
+export const List: Schema.Schema<List, ListEncoded> = Schema.Struct({
   _tag: Schema.Literal("List"),
   version: SchemaVersion,
   ordered: Schema.Boolean,
@@ -334,13 +385,6 @@ export const List = Schema.Struct({
   children: Schema.Array(ListItem),
   rawConfluence: RawConfluence
 })
-
-/**
- * Type for List.
- *
- * @category Types
- */
-export type List = Schema.Schema.Type<typeof List>
 
 /**
  * Task item with status for Confluence task lists.

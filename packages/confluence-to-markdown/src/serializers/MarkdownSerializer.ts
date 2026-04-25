@@ -195,7 +195,15 @@ const serializeTable = (
   Effect.gen(function*() {
     const lines: Array<string> = []
 
-    // Header
+    // Markdown tables require a header divider. When the source had no <thead>,
+    // emit a synthetic empty header so the table still renders. A leading
+    // <!--cf:synth-thead--> marker discriminates it from a legitimate empty
+    // header — MarkdownParser strips the marker and drops only that synthetic row,
+    // so a real Confluence <thead> with empty <th>s round-trips intact.
+    const columnCount = node.header?.cells.length ?? node.rows[0]?.cells.length ?? 0
+    const synthMarker = "<!--cf:synth-thead-->"
+    let prefix = ""
+
     if (node.header) {
       const headerCells: Array<string> = []
       for (const cell of node.header.cells) {
@@ -203,6 +211,10 @@ const serializeTable = (
       }
       lines.push(`| ${headerCells.join(" | ")} |`)
       lines.push(`| ${headerCells.map(() => "---").join(" | ")} |`)
+    } else if (columnCount > 0) {
+      prefix = `${synthMarker}\n\n`
+      lines.push(`| ${Array(columnCount).fill("").join(" | ")} |`)
+      lines.push(`| ${Array(columnCount).fill("---").join(" | ")} |`)
     }
 
     // Body rows
@@ -214,10 +226,10 @@ const serializeTable = (
       lines.push(`| ${cells.join(" | ")} |`)
     }
 
-    return lines.join("\n")
+    return `${prefix}${lines.join("\n")}`
   })
 
-// Simple block type for list items
+// Simple block type for list items (allows nested Lists for sub-bullets).
 type SimpleBlock =
   | Heading
   | Paragraph
@@ -226,6 +238,15 @@ type SimpleBlock =
   | Image
   | Table
   | UnsupportedBlock
+  | NestedList
+
+// Structural shape of a nested list inside a list item.
+type NestedList = {
+  readonly _tag: "List"
+  readonly ordered: boolean
+  readonly start?: number | undefined
+  readonly children: ReadonlyArray<ListItemType>
+}
 
 // List item type
 type ListItemType = {
@@ -297,6 +318,8 @@ const serializeSimpleBlock = (node: SimpleBlock): Effect.Effect<string, Serializ
         const unsupported = node as unknown as { rawMarkdown?: string; rawHtml?: string }
         return unsupported.rawMarkdown || unsupported.rawHtml || ""
       }
+      case "List":
+        return yield* serializeList(node)
       default:
         return ""
     }
@@ -339,7 +362,11 @@ const serializeInfoPanel = (
   })
 
 /**
- * Serialize expand macro - use comment encoding for roundtrip.
+ * Serialize expand macro as a GFM-compatible <details> block.
+ *
+ * The opening and closing HTML tags are recognised on round-trip by
+ * MarkdownParser to rebuild the ExpandMacro AST node. Body content is rendered
+ * as ordinary markdown so it shows up in viewers (Obsidian, GitHub, etc.).
  */
 const serializeExpandMacro = (
   node: { title?: string | undefined; children: ReadonlyArray<SimpleBlock> }
@@ -353,10 +380,12 @@ const serializeExpandMacro = (
       contentParts.push(serialized)
     }
 
-    const content = contentParts.join("\n")
-    // Use comment encoding for roundtrip
-    return `<!--cf:expand:${encodeURIComponent(title)}:${encodeURIComponent(content)}-->`
+    const body = contentParts.join("\n\n")
+    const summary = `<summary>${escapeHtml(title)}</summary>`
+    return `<details>\n${summary}\n\n${body}\n\n</details>`
   })
+
+const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 /**
  * Serialize TOC macro.
@@ -470,8 +499,10 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
           encodeURIComponent(node.fallback)
         }-->`
       case "UserMention":
-        // Wrap in HTML comment to prevent remark from parsing
-        return `<!--cf:user:${node.accountId}-->`
+        // Render as a markdown link so the mention is visible in viewers.
+        // The #cf-user: URL fragment is the round-trip carrier — MarkdownParser
+        // rebuilds the UserMention node when it sees a link with that prefix.
+        return `[@${node.accountId}](#cf-user:${encodeURIComponent(node.accountId)})`
       case "DateTime":
         // Wrap in HTML comment to prevent remark from parsing
         return `<!--cf:date:${node.datetime}-->`
@@ -485,8 +516,27 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
         const content = yield* serializeInlineNodes(node.children)
         return `<span style="background-color: ${node.backgroundColor};">${content}</span>`
       }
-      case "UnsupportedInline":
+      case "UnsupportedInline": {
+        // Some inline macros are stored as UnsupportedInline carrying a comment-
+        // encoded round-trip marker. Rewrite the round-trippable ones as visible
+        // markdown links so they show up in viewers; MarkdownParser reverses this.
+        // The raw payload is already URL-encoded (ConfluenceParser uses
+        // encodeURIComponent), so we decode the title for human-readable link
+        // text and pass the encoded value through to the URL fragment as-is.
+        const statusMatch = node.raw.match(/^<!--cf:status:([^;]*);([^;]*)-->$/)
+        if (statusMatch) {
+          const text = decodeURIComponent(statusMatch[1] ?? "")
+          const color = statusMatch[2] ?? ""
+          return `[${text}](#cf-status:${color})`
+        }
+        const tocMatch = node.raw.match(/^<!--cf:toc:([^;]*);([^;]*)-->$/)
+        if (tocMatch) {
+          const min = tocMatch[1] ?? ""
+          const max = tocMatch[2] ?? ""
+          return `[Table of Contents](#cf-toc:${min}:${max})`
+        }
         return node.raw
+      }
       default:
         return ""
     }

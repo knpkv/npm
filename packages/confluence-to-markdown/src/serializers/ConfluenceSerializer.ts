@@ -359,7 +359,7 @@ const serializeTable = (
     return parts.join("")
   })
 
-// Simple block type for list items
+// Simple block type for list items (allows nested Lists for sub-bullets).
 type SimpleBlock =
   | Heading
   | Paragraph
@@ -368,6 +368,15 @@ type SimpleBlock =
   | Image
   | Table
   | UnsupportedBlock
+  | NestedList
+
+// Structural shape of a nested list inside a list item.
+type NestedList = {
+  readonly _tag: "List"
+  readonly ordered: boolean
+  readonly start?: number | undefined
+  readonly children: ReadonlyArray<ListItemType>
+}
 
 // List item type
 type ListItemType = {
@@ -436,6 +445,8 @@ const serializeSimpleBlock = (node: SimpleBlock): Effect.Effect<string, Serializ
         const unsupported = node as unknown as { rawHtml?: string; rawMarkdown?: string }
         return unsupported.rawHtml || unsupported.rawMarkdown || ""
       }
+      case "List":
+        return yield* serializeList(node)
       default:
         return ""
     }
@@ -646,6 +657,15 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
       case "InlineCode":
         return `<code>${escapeHtml(node.value)}</code>`
       case "Link": {
+        // Round-trip view-file macro: a Link with href="attachment:FILENAME"
+        // came from a Confluence ac:structured-macro name="view-file".
+        const attachmentMatch = node.href.match(/^attachment:(.+)$/)
+        if (attachmentMatch) {
+          const filename = attachmentMatch[1] ?? ""
+          return `<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name"><ri:attachment ri:filename="${
+            escapeHtml(filename)
+          }"/></ac:parameter></ac:structured-macro>`
+        }
         const content = yield* serializeInlineNodes(node.children)
         const title = node.title ? ` title="${escapeHtml(node.title)}"` : ""
         return `<a href="${escapeHtml(node.href)}"${title}>${content}</a>`
