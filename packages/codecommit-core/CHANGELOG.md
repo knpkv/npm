@@ -1,5 +1,13 @@
 # @knpkv/codecommit-core
 
+## 0.7.1
+
+### Patch Changes
+
+- [#63](https://github.com/knpkv/npm/pull/63) [`acf502b`](https://github.com/knpkv/npm/commit/acf502bd7f36d6c69db3da0f9b4613af5e5de71b) Thanks @konopkov! - fix(codecommit-core): coerce `NumberOfApprovalsNeeded` from string to number
+
+  AWS CodeCommit returns `NumberOfApprovalsNeeded` inconsistently as either a number or a string. `parseRuleContent` now coerces with `Number()` and falls back to `1` when the value is non-numeric, so `requiredApprovals` is always a number.
+
 ## 0.7.0
 
 ### Minor Changes
