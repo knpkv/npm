@@ -723,12 +723,20 @@ const parseTableRow = (element: HastElement, isHeader: boolean): Effect.Effect<T
 
 /**
  * Parse cell content, unwrapping single <p> elements.
+ *
+ * Confluence's editor frequently emits empty `<p>` placeholders alongside the
+ * real content (e.g. `<p/><p>Must</p>` for a styled cell). Skip those so the
+ * single-real-paragraph case still hits the unwrap path.
  */
 const parseCellContent = (children: Array<HastNode>): Effect.Effect<Array<InlineNode>, ParseError> =>
   Effect.gen(function*() {
-    // Find actual element children (skip whitespace text)
+    const isEmptyParagraph = (el: HastElement): boolean =>
+      el.tagName.toLowerCase() === "p" &&
+      el.children.every((c) => c.type === "text" && !(c as HastText).value.trim())
+
+    // Find actual element children (skip whitespace text and empty <p> placeholders)
     const elementChildren = children.filter((c) => {
-      if (c.type === "element") return true
+      if (c.type === "element") return !isEmptyParagraph(c as HastElement)
       if (c.type === "text" && (c as HastText).value.trim()) return true
       return false
     })

@@ -219,8 +219,7 @@ describe("ConfluenceParser", () => {
 
     it.effect("parses nested unordered list as nested List AST", () =>
       Effect.gen(function*() {
-        const html =
-          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const html = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
         const doc = yield* parseConfluenceHtml(html)
         const outerList = doc.children[0]
         expect(outerList?._tag).toBe("List")
@@ -243,8 +242,7 @@ describe("ConfluenceParser", () => {
 
     it.effect("serializes nested list as indented markdown bullets", () =>
       Effect.gen(function*() {
-        const html =
-          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const html = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
         const doc = yield* parseConfluenceHtml(html)
         const md = yield* serializeToMarkdown(doc, { includeRawSource: false })
         expect(md).toContain("- Outer")
@@ -252,6 +250,23 @@ describe("ConfluenceParser", () => {
         expect(md).toContain("   - Inner B")
         expect(md).not.toContain("<ul")
         expect(md).not.toContain("local-id")
+      }))
+
+    it.effect("unwraps table cell with leading empty <p> placeholder", () =>
+      Effect.gen(function*() {
+        // Confluence editor frequently emits an empty <p/> alongside the real content.
+        const html = `<table><tbody>
+          <tr><td><p local-id="empty"/><p><strong>Must</strong></p></td><td><p>Text</p></td></tr>
+        </tbody></table>`
+        const doc = yield* parseConfluenceHtml(html)
+        const table = doc.children[0]
+        expect(table?._tag).toBe("Table")
+        if (table?._tag === "Table") {
+          const cell = table.rows[0]?.cells[0]
+          expect(cell?.children.length).toBe(1)
+          const strong = cell?.children[0]
+          expect(strong?._tag).toBe("Strong")
+        }
       }))
   })
 
@@ -302,8 +317,7 @@ describe("ConfluenceParser", () => {
 
     it.effect("roundtrips nested unordered list HTML -> markdown -> HTML", () =>
       Effect.gen(function*() {
-        const originalHtml =
-          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const originalHtml = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
         const doc1 = yield* parseConfluenceHtml(originalHtml)
         const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
         const doc2 = yield* parseMarkdown(md)
