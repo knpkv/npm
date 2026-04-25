@@ -51,31 +51,55 @@ const decodeAccount = Schema.decodeSync(Account)
 
 const EpochFallback = new Date(0)
 
+// AWS sometimes returns NumberOfApprovalsNeeded as a string — accept both
+const ApprovalsCount = Schema.Union(Schema.Number, Schema.NumberFromString)
+
+const RuleStatement = Schema.Struct({
+  NumberOfApprovalsNeeded: Schema.optional(ApprovalsCount),
+  ApprovalPoolMembers: Schema.optional(Schema.Array(Schema.String))
+})
+
+const RuleContent = Schema.Struct({
+  Statements: Schema.optional(Schema.Array(RuleStatement))
+})
+
+const RuleContentFromJson = Schema.parseJson(RuleContent)
+const decodeRuleContent = Schema.decodeUnknownEither(RuleContentFromJson)
+
+interface ParsedRule {
+  readonly requiredApprovals: number
+  readonly poolMembers: Array<string>
+  readonly poolMemberArns: Array<string>
+}
+
+const ruleDefaults: ParsedRule = { requiredApprovals: 1, poolMembers: [], poolMemberArns: [] }
+
 /**
  * Parse AWS approval rule content JSON into pool members + required count.
  * Format: {"Version":"2018-11-08","Statements":[{"Type":"Approvers","NumberOfApprovalsNeeded":N,"ApprovalPoolMembers":["arn:..."]}]}
+ *
+ * Falls back to defaults on malformed JSON; logs a warning when content was provided.
  */
-export const parseRuleContent = (
-  content?: string
-): { requiredApprovals: number; poolMembers: Array<string>; poolMemberArns: Array<string> } => {
-  try {
-    const parsed = JSON.parse(content ?? "{}")
-    // Only first statement parsed — AWS rules typically have one statement per rule
-    const stmt = parsed.Statements?.[0]
-    const rawArns: Array<string> = stmt?.ApprovalPoolMembers ?? []
-    // AWS returns NumberOfApprovalsNeeded inconsistently as number or string — coerce
-    const required = Number(stmt?.NumberOfApprovalsNeeded ?? 1)
-    return {
-      requiredApprovals: Number.isFinite(required) ? required : 1,
-      poolMembers: rawArns.map(normalizeAuthor),
-      poolMemberArns: rawArns
-    }
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    if (content) console.warn("Failed to parse approval rule content:", content, e)
-    return { requiredApprovals: 1, poolMembers: [], poolMemberArns: [] }
-  }
-}
+export const parseRuleContent = (content?: string): Effect.Effect<ParsedRule> =>
+  decodeRuleContent(content ?? "{}").pipe(
+    Effect.map((parsed): ParsedRule => {
+      // Only first statement parsed — AWS rules typically have one statement per rule
+      const stmt = parsed.Statements?.[0]
+      const rawArns = stmt?.ApprovalPoolMembers ?? []
+      return {
+        requiredApprovals: stmt?.NumberOfApprovalsNeeded ?? 1,
+        poolMembers: rawArns.map(normalizeAuthor),
+        poolMemberArns: [...rawArns]
+      }
+    }),
+    Effect.catchAll((e) =>
+      content
+        ? Effect.logWarning("Failed to parse approval rule content", { content, error: e }).pipe(
+          Effect.as(ruleDefaults)
+        )
+        : Effect.succeed(ruleDefaults)
+    )
+  )
 
 /**
  * Evaluate which approval rules are satisfied/not, returning just the boolean + satisfied rule names.
@@ -115,17 +139,21 @@ export const buildApprovalRules = (
     }
   >,
   satisfiedNames: Set<string>
-): Array<ApprovalRuleData> =>
-  rawRules
-    .filter((rule) => rule.approvalRuleName)
-    .map((rule) => ({
-      ruleName: rule.approvalRuleName ?? "",
-      satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
-      ...parseRuleContent(rule.approvalRuleContent),
-      ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
-        ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
-        : {})
-    }))
+): Effect.Effect<Array<ApprovalRuleData>> =>
+  Effect.forEach(
+    rawRules.filter((rule) => rule.approvalRuleName),
+    (rule) =>
+      parseRuleContent(rule.approvalRuleContent).pipe(
+        Effect.map((parsed) => ({
+          ruleName: rule.approvalRuleName ?? "",
+          satisfied: satisfiedNames.has(rule.approvalRuleName ?? ""),
+          ...parsed,
+          ...(rule.originApprovalRuleTemplate?.approvalRuleTemplateName
+            ? { fromTemplate: rule.originApprovalRuleTemplate.approvalRuleTemplateName }
+            : {})
+        }))
+      )
+  )
 
 /**
  * Fetch approval + merge status for a single PR.
@@ -143,7 +171,7 @@ const fetchPRDetails = (id: string, repoName: string) =>
       fetchApprovers(id, revisionId)
     ])
 
-    const approvalRules = buildApprovalRules(pr.approvalRules ?? [], evaluation.satisfiedNames)
+    const approvalRules = yield* buildApprovalRules(pr.approvalRules ?? [], evaluation.satisfiedNames)
     return {
       ...pr,
       repoName,

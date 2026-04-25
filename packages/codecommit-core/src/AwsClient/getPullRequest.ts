@@ -112,7 +112,7 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
       fetchApprovalEvaluation(params.pullRequestId, revisionId),
       fetchRepoAccountId(repoName)
     ], { concurrency: 4 })
-    const approvalRules = buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
+    const approvalRules = yield* buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
     return new PullRequestDetail({
       ...detail,
       approvedBy: approvers.names,
