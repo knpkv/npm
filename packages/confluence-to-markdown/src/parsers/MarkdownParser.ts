@@ -1228,5 +1228,11 @@ const parseTable = (table: MdastTable): Effect.Effect<Table, ParseError> =>
       }
     }
 
+    // Drop a synthetic empty header (every cell has no inline children) — the
+    // markdown serializer emits these to satisfy GFM's required divider line.
+    if (header && header.cells.every((cell) => cell.children.length === 0)) {
+      header = undefined
+    }
+
     return new Table({ header, rows })
   })

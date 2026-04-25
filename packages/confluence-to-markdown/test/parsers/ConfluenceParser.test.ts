@@ -325,6 +325,24 @@ describe("ConfluenceParser", () => {
         expect(finalHtml).toBe(originalHtml)
       }))
 
+    it.effect("emits markdown header divider for headerless table and roundtrips", () =>
+      Effect.gen(function*() {
+        // Tables without <thead> need a synthetic header in markdown to render.
+        const originalHtml =
+          `<table><tbody><tr><td>Cell A1</td><td>Cell A2</td></tr><tr><td>Cell B1</td><td>Cell B2</td></tr></tbody></table>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        // Synthetic empty header + divider so md viewers render it as a table.
+        expect(md).toMatch(/\|\s*\|\s*\|\n\| --- \| --- \|/)
+        expect(md).toContain("| Cell A1 | Cell A2 |")
+        expect(md).toContain("| Cell B1 | Cell B2 |")
+        // Roundtrip: the synthetic empty header is dropped on parse, so the
+        // Confluence output omits <thead> just like the source.
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
     it.effect("roundtrips TOC macro", () =>
       Effect.gen(function*() {
         const html =

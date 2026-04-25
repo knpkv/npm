@@ -195,7 +195,11 @@ const serializeTable = (
   Effect.gen(function*() {
     const lines: Array<string> = []
 
-    // Header
+    // Markdown tables require a header divider. When the source had no <thead>,
+    // emit a synthetic empty header so the table still renders. ConfluenceSerializer
+    // drops headers whose cells are all empty, so the round-trip stays lossless.
+    const columnCount = node.header?.cells.length ?? node.rows[0]?.cells.length ?? 0
+
     if (node.header) {
       const headerCells: Array<string> = []
       for (const cell of node.header.cells) {
@@ -203,6 +207,9 @@ const serializeTable = (
       }
       lines.push(`| ${headerCells.join(" | ")} |`)
       lines.push(`| ${headerCells.map(() => "---").join(" | ")} |`)
+    } else if (columnCount > 0) {
+      lines.push(`| ${Array(columnCount).fill("").join(" | ")} |`)
+      lines.push(`| ${Array(columnCount).fill("---").join(" | ")} |`)
     }
 
     // Body rows
@@ -217,7 +224,7 @@ const serializeTable = (
     return lines.join("\n")
   })
 
-// Simple block type for list items
+// Simple block type for list items (allows nested Lists for sub-bullets).
 type SimpleBlock =
   | Heading
   | Paragraph
