@@ -7,7 +7,7 @@
  * (valid/invalid/empty AWS JSON, poolMemberArns preservation), and
  * {@link makeApiError} (factory produces AwsApiError with correct fields).
  */
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import { parseRuleContent } from "../src/AwsClient/getPullRequests.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
 import type { AwsProfileName, AwsRegion } from "../src/Domain.js"
@@ -107,9 +107,14 @@ describe("AwsClient internals", () => {
     })
 
     it("returns defaults for invalid JSON", () => {
+      // parseRuleContent warns on truthy invalid input; silence to keep stderr
+      // attribution clean across subsequent tests
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       const result = parseRuleContent("not json")
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
+      expect(warn).toHaveBeenCalledOnce()
+      warn.mockRestore()
     })
 
     it("returns defaults for empty JSON object", () => {
@@ -122,6 +127,26 @@ describe("AwsClient internals", () => {
       const result = parseRuleContent(JSON.stringify({ Version: "2018-11-08" }))
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
+    })
+
+    // AWS sometimes returns NumberOfApprovalsNeeded as a string — must coerce
+    it("coerces string NumberOfApprovalsNeeded to number", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: "3", ApprovalPoolMembers: [] }]
+      })
+      const result = parseRuleContent(content)
+      expect(result.requiredApprovals).toBe(3)
+      expect(typeof result.requiredApprovals).toBe("number")
+    })
+
+    it("falls back to 1 when NumberOfApprovalsNeeded is non-numeric", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: "not-a-number", ApprovalPoolMembers: [] }]
+      })
+      const result = parseRuleContent(content)
+      expect(result.requiredApprovals).toBe(1)
     })
 
     it("handles empty ApprovalPoolMembers", () => {

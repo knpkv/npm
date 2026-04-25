@@ -63,8 +63,10 @@ export const parseRuleContent = (
     // Only first statement parsed — AWS rules typically have one statement per rule
     const stmt = parsed.Statements?.[0]
     const rawArns: Array<string> = stmt?.ApprovalPoolMembers ?? []
+    // AWS returns NumberOfApprovalsNeeded inconsistently as number or string — coerce
+    const required = Number(stmt?.NumberOfApprovalsNeeded ?? 1)
     return {
-      requiredApprovals: stmt?.NumberOfApprovalsNeeded ?? 1,
+      requiredApprovals: Number.isFinite(required) ? required : 1,
       poolMembers: rawArns.map(normalizeAuthor),
       poolMemberArns: rawArns
     }
