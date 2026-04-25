@@ -147,6 +147,29 @@ describe("AwsClient internals", () => {
       expect(result.requiredApprovals).toBe(1)
     })
 
+    // Regression: a malformed count must not discard reviewer ARNs — downstream
+    // checks (needsMyReview against poolMembers) depend on this data.
+    it("preserves pool members when NumberOfApprovalsNeeded is non-numeric", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{
+          Type: "Approvers",
+          NumberOfApprovalsNeeded: "not-a-number",
+          ApprovalPoolMembers: [
+            "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+            "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+          ]
+        }]
+      })
+      const result = runParse(content)
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual(["alice", "bob"])
+      expect(result.poolMemberArns).toEqual([
+        "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+        "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+      ])
+    })
+
     it("handles empty ApprovalPoolMembers", () => {
       const content = JSON.stringify({
         Version: "2018-11-08",

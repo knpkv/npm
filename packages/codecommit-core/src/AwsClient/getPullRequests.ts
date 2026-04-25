@@ -51,11 +51,11 @@ const decodeAccount = Schema.decodeSync(Account)
 
 const EpochFallback = new Date(0)
 
-// AWS sometimes returns NumberOfApprovalsNeeded as a string — accept both
-const ApprovalsCount = Schema.Union(Schema.Number, Schema.NumberFromString)
-
+// Schema is permissive on NumberOfApprovalsNeeded: AWS returns it as number or
+// string, and a malformed value must NOT discard ApprovalPoolMembers — the count
+// is coerced (with fallback) in the mapper below.
 const RuleStatement = Schema.Struct({
-  NumberOfApprovalsNeeded: Schema.optional(ApprovalsCount),
+  NumberOfApprovalsNeeded: Schema.optional(Schema.Unknown),
   ApprovalPoolMembers: Schema.optional(Schema.Array(Schema.String))
 })
 
@@ -74,6 +74,11 @@ interface ParsedRule {
 
 const ruleDefaults: ParsedRule = { requiredApprovals: 1, poolMembers: [], poolMemberArns: [] }
 
+const coerceApprovalCount = (raw: unknown): number => {
+  const n = Number(raw ?? 1)
+  return Number.isFinite(n) ? n : 1
+}
+
 /**
  * Parse AWS approval rule content JSON into pool members + required count.
  * Format: {"Version":"2018-11-08","Statements":[{"Type":"Approvers","NumberOfApprovalsNeeded":N,"ApprovalPoolMembers":["arn:..."]}]}
@@ -87,7 +92,7 @@ export const parseRuleContent = (content?: string): Effect.Effect<ParsedRule> =>
       const stmt = parsed.Statements?.[0]
       const rawArns = stmt?.ApprovalPoolMembers ?? []
       return {
-        requiredApprovals: stmt?.NumberOfApprovalsNeeded ?? 1,
+        requiredApprovals: coerceApprovalCount(stmt?.NumberOfApprovalsNeeded),
         poolMembers: rawArns.map(normalizeAuthor),
         poolMemberArns: [...rawArns]
       }
