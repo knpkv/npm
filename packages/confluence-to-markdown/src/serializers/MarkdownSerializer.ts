@@ -196,9 +196,13 @@ const serializeTable = (
     const lines: Array<string> = []
 
     // Markdown tables require a header divider. When the source had no <thead>,
-    // emit a synthetic empty header so the table still renders. ConfluenceSerializer
-    // drops headers whose cells are all empty, so the round-trip stays lossless.
+    // emit a synthetic empty header so the table still renders. A leading
+    // <!--cf:synth-thead--> marker discriminates it from a legitimate empty
+    // header — MarkdownParser strips the marker and drops only that synthetic row,
+    // so a real Confluence <thead> with empty <th>s round-trips intact.
     const columnCount = node.header?.cells.length ?? node.rows[0]?.cells.length ?? 0
+    const synthMarker = "<!--cf:synth-thead-->"
+    let prefix = ""
 
     if (node.header) {
       const headerCells: Array<string> = []
@@ -208,6 +212,7 @@ const serializeTable = (
       lines.push(`| ${headerCells.join(" | ")} |`)
       lines.push(`| ${headerCells.map(() => "---").join(" | ")} |`)
     } else if (columnCount > 0) {
+      prefix = `${synthMarker}\n\n`
       lines.push(`| ${Array(columnCount).fill("").join(" | ")} |`)
       lines.push(`| ${Array(columnCount).fill("---").join(" | ")} |`)
     }
@@ -221,7 +226,7 @@ const serializeTable = (
       lines.push(`| ${cells.join(" | ")} |`)
     }
 
-    return lines.join("\n")
+    return `${prefix}${lines.join("\n")}`
   })
 
 // Simple block type for list items (allows nested Lists for sub-bullets).
@@ -515,17 +520,20 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
         // Some inline macros are stored as UnsupportedInline carrying a comment-
         // encoded round-trip marker. Rewrite the round-trippable ones as visible
         // markdown links so they show up in viewers; MarkdownParser reverses this.
+        // The raw payload is already URL-encoded (ConfluenceParser uses
+        // encodeURIComponent), so we decode the title for human-readable link
+        // text and pass the encoded value through to the URL fragment as-is.
         const statusMatch = node.raw.match(/^<!--cf:status:([^;]*);([^;]*)-->$/)
         if (statusMatch) {
-          const text = statusMatch[1] ?? ""
+          const text = decodeURIComponent(statusMatch[1] ?? "")
           const color = statusMatch[2] ?? ""
-          return `[${text}](#cf-status:${encodeURIComponent(color)})`
+          return `[${text}](#cf-status:${color})`
         }
         const tocMatch = node.raw.match(/^<!--cf:toc:([^;]*);([^;]*)-->$/)
         if (tocMatch) {
           const min = tocMatch[1] ?? ""
           const max = tocMatch[2] ?? ""
-          return `[Table of Contents](#cf-toc:${encodeURIComponent(min)}:${encodeURIComponent(max)})`
+          return `[Table of Contents](#cf-toc:${min}:${max})`
         }
         return node.raw
       }

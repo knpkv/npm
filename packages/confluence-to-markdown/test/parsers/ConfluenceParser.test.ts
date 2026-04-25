@@ -342,6 +342,34 @@ describe("ConfluenceParser", () => {
         expect(finalHtml).toContain("Blue")
       }))
 
+    it.effect("decodes multi-word status title for visible link text", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="status"><ac:parameter ac:name="title">In Progress</ac:parameter><ac:parameter ac:name="colour">Yellow</ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        // Display text is decoded; URL fragment carries the encoded value.
+        expect(md).toContain("[In Progress](#cf-status:Yellow)")
+        expect(md).not.toContain("In%20Progress")
+        const finalHtml = yield* serializeToConfluence(yield* parseMarkdown(md))
+        expect(finalHtml).toContain("In Progress")
+      }))
+
+    it.effect("preserves real <thead> with empty header cells (no synthetic-header drop)", () =>
+      Effect.gen(function*() {
+        // A legitimate empty <thead> in the source must round-trip intact —
+        // it must NOT be confused with the synthetic empty header the
+        // serializer emits for <tbody>-only tables.
+        const originalHtml =
+          `<table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).not.toContain("cf:synth-thead")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
     it.effect("renders view-file macro as a link to the attachment", () =>
       Effect.gen(function*() {
         const originalHtml =

@@ -291,6 +291,19 @@ const mdastToDocumentNodes = (root: MdastRoot): Effect.Effect<Array<DocumentNode
           i = j + 1
           continue
         }
+        // Synthetic empty-header marker: drop it and tell the next table to drop
+        // its first row (which the serializer added only to satisfy GFM).
+        if ((child as MdastHtml).value.trim() === "<!--cf:synth-thead-->") {
+          const next = children[i + 1]
+          if (next?.type === "table") {
+            const table = yield* parseTable(next as MdastTable, { dropSyntheticHeader: true })
+            nodes.push(table)
+            i += 2
+            continue
+          }
+          i++
+          continue
+        }
       }
       const node = yield* mdastNodeToBlock(child)
       if (node !== null) nodes.push(node)
@@ -715,6 +728,10 @@ const parseInlineHtml = (html: string): Effect.Effect<InlineNode | null, ParseEr
  * Recognise visible markdown links emitted as round-trip carriers for inline
  * Confluence macros (UserMention, StatusMacro, TocMacro). Returns the rebuilt
  * AST node, or null if the link is a regular link.
+ *
+ * The raw `<!--cf:status:title;color-->` form expects URL-encoded values;
+ * link text is the human-readable (decoded) form, so we re-encode it here.
+ * URL fragments are already URL-encoded, so they pass through verbatim.
  */
 const parseInlineMacroLink = (link: MdastLink): InlineNode | null => {
   const userMatch = link.url.match(/^#cf-user:(.+)$/)
@@ -727,18 +744,15 @@ const parseInlineMacroLink = (link: MdastLink): InlineNode | null => {
       .filter((c): c is MdastText => c.type === "text")
       .map((c) => c.value)
       .join("")
-    const color = decodeURIComponent(statusMatch[1] ?? "")
     return new UnsupportedInline({
-      raw: `<!--cf:status:${text};${color}-->`,
+      raw: `<!--cf:status:${encodeURIComponent(text)};${statusMatch[1] ?? ""}-->`,
       source: "markdown"
     })
   }
   const tocMatch = link.url.match(/^#cf-toc:([^:]*):([^:]*)$/)
   if (tocMatch) {
-    const min = decodeURIComponent(tocMatch[1] ?? "")
-    const max = decodeURIComponent(tocMatch[2] ?? "")
     return new UnsupportedInline({
-      raw: `<!--cf:toc:${min};${max}-->`,
+      raw: `<!--cf:toc:${tocMatch[1] ?? ""};${tocMatch[2] ?? ""}-->`,
       source: "markdown"
     })
   }
@@ -1282,8 +1296,17 @@ const parseList = (
 
 /**
  * Parse mdast table.
+ *
+ * `dropSyntheticHeader` is set by `mdastToDocumentNodes` when the table was
+ * preceded by a `<!--cf:synth-thead-->` marker — only then do we discard the
+ * first row (which the serializer added solely to satisfy GFM's required
+ * divider line). A legitimate empty `<thead>` from real Confluence storage is
+ * always preserved.
  */
-const parseTable = (table: MdastTable): Effect.Effect<Table, ParseError> =>
+const parseTable = (
+  table: MdastTable,
+  options: { dropSyntheticHeader?: boolean } = {}
+): Effect.Effect<Table, ParseError> =>
   Effect.gen(function*() {
     let header: TableRow | undefined
     const rows: Array<TableRow> = []
@@ -1307,9 +1330,7 @@ const parseTable = (table: MdastTable): Effect.Effect<Table, ParseError> =>
       }
     }
 
-    // Drop a synthetic empty header (every cell has no inline children) — the
-    // markdown serializer emits these to satisfy GFM's required divider line.
-    if (header && header.cells.every((cell) => cell.children.length === 0)) {
+    if (options.dropSyntheticHeader) {
       header = undefined
     }
 
