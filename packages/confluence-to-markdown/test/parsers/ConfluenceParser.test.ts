@@ -342,6 +342,19 @@ describe("ConfluenceParser", () => {
         expect(finalHtml).toContain("Blue")
       }))
 
+    it.effect("renders view-file macro as a link to the attachment", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name"><ri:attachment ri:filename="guidelines.md"/></ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[guidelines.md](attachment:guidelines.md)")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"view-file\"")
+        expect(finalHtml).toContain("ri:filename=\"guidelines.md\"")
+      }))
+
     it.effect("roundtrips nested unordered list HTML -> markdown -> HTML", () =>
       Effect.gen(function*() {
         const originalHtml = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`

@@ -657,6 +657,15 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
       case "InlineCode":
         return `<code>${escapeHtml(node.value)}</code>`
       case "Link": {
+        // Round-trip view-file macro: a Link with href="attachment:FILENAME"
+        // came from a Confluence ac:structured-macro name="view-file".
+        const attachmentMatch = node.href.match(/^attachment:(.+)$/)
+        if (attachmentMatch) {
+          const filename = attachmentMatch[1] ?? ""
+          return `<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name"><ri:attachment ri:filename="${
+            escapeHtml(filename)
+          }"/></ac:parameter></ac:structured-macro>`
+        }
         const content = yield* serializeInlineNodes(node.children)
         const title = node.title ? ` title="${escapeHtml(node.title)}"` : ""
         return `<a href="${escapeHtml(node.href)}"${title}>${content}</a>`

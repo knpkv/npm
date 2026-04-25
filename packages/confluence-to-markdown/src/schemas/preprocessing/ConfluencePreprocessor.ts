@@ -290,8 +290,17 @@ const processSingleMacro = (macroContent: string): string => {
     return `<span data-macro="status" data-color="${colorMatch?.[1] ?? ""}">${escapeHtml(titleMatch?.[1] ?? "")}</span>`
   }
 
-  // Unknown macro - preserve as unsupported
-  return `<div data-unsupported-macro="${macroName}">${macroContent}</div>`
+  // view-file macro: render as a visible anchor pointing at the attachment.
+  if (macroName === "view-file") {
+    const filenameMatch = macroContent.match(/ri:filename="([^"]+)"/)
+    const filename = filenameMatch?.[1] ?? ""
+    return `<a data-macro="view-file" href="attachment:${escapeHtml(filename)}">${escapeHtml(filename)}</a>`
+  }
+
+  // Unknown macro - preserve as unsupported. The body is HTML-escaped so the
+  // next iteration of processStructuredMacros doesn't re-match the same
+  // <ac:structured-macro> tag and loop forever.
+  return `<div data-unsupported-macro="${macroName}">${escapeHtml(macroContent)}</div>`
 }
 
 /**
