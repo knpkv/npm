@@ -494,8 +494,10 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
           encodeURIComponent(node.fallback)
         }-->`
       case "UserMention":
-        // Wrap in HTML comment to prevent remark from parsing
-        return `<!--cf:user:${node.accountId}-->`
+        // Render as a markdown link so the mention is visible in viewers.
+        // The #cf-user: URL fragment is the round-trip carrier — MarkdownParser
+        // rebuilds the UserMention node when it sees a link with that prefix.
+        return `[@${node.accountId}](#cf-user:${encodeURIComponent(node.accountId)})`
       case "DateTime":
         // Wrap in HTML comment to prevent remark from parsing
         return `<!--cf:date:${node.datetime}-->`
@@ -509,8 +511,24 @@ const serializeInlineNode = (node: InlineNode): Effect.Effect<string, SerializeE
         const content = yield* serializeInlineNodes(node.children)
         return `<span style="background-color: ${node.backgroundColor};">${content}</span>`
       }
-      case "UnsupportedInline":
+      case "UnsupportedInline": {
+        // Some inline macros are stored as UnsupportedInline carrying a comment-
+        // encoded round-trip marker. Rewrite the round-trippable ones as visible
+        // markdown links so they show up in viewers; MarkdownParser reverses this.
+        const statusMatch = node.raw.match(/^<!--cf:status:([^;]*);([^;]*)-->$/)
+        if (statusMatch) {
+          const text = statusMatch[1] ?? ""
+          const color = statusMatch[2] ?? ""
+          return `[${text}](#cf-status:${encodeURIComponent(color)})`
+        }
+        const tocMatch = node.raw.match(/^<!--cf:toc:([^;]*);([^;]*)-->$/)
+        if (tocMatch) {
+          const min = tocMatch[1] ?? ""
+          const max = tocMatch[2] ?? ""
+          return `[Table of Contents](#cf-toc:${encodeURIComponent(min)}:${encodeURIComponent(max)})`
+        }
         return node.raw
+      }
       default:
         return ""
     }

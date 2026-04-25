@@ -620,6 +620,11 @@ const mdastNodeToInline = (node: MdastNode): Effect.Effect<InlineNode | null, Pa
 
       case "link": {
         const link = node as MdastLink
+        // Recognise the visible round-trip carriers emitted by MarkdownSerializer
+        // for inline macros (`#cf-user:`, `#cf-status:`, `#cf-toc:`) and rebuild
+        // the proper AST node so push back to Confluence is lossless.
+        const macroNode = parseInlineMacroLink(link)
+        if (macroNode) return macroNode
         const children = yield* mdastChildrenToBaseInline(link.children)
         return new Link({
           href: link.url,
@@ -705,6 +710,40 @@ const parseInlineHtml = (html: string): Effect.Effect<InlineNode | null, ParseEr
 
     return null
   })
+
+/**
+ * Recognise visible markdown links emitted as round-trip carriers for inline
+ * Confluence macros (UserMention, StatusMacro, TocMacro). Returns the rebuilt
+ * AST node, or null if the link is a regular link.
+ */
+const parseInlineMacroLink = (link: MdastLink): InlineNode | null => {
+  const userMatch = link.url.match(/^#cf-user:(.+)$/)
+  if (userMatch) {
+    return new UserMention({ accountId: decodeURIComponent(userMatch[1] ?? "") })
+  }
+  const statusMatch = link.url.match(/^#cf-status:(.*)$/)
+  if (statusMatch) {
+    const text = link.children
+      .filter((c): c is MdastText => c.type === "text")
+      .map((c) => c.value)
+      .join("")
+    const color = decodeURIComponent(statusMatch[1] ?? "")
+    return new UnsupportedInline({
+      raw: `<!--cf:status:${text};${color}-->`,
+      source: "markdown"
+    })
+  }
+  const tocMatch = link.url.match(/^#cf-toc:([^:]*):([^:]*)$/)
+  if (tocMatch) {
+    const min = decodeURIComponent(tocMatch[1] ?? "")
+    const max = decodeURIComponent(tocMatch[2] ?? "")
+    return new UnsupportedInline({
+      raw: `<!--cf:toc:${min};${max}-->`,
+      source: "markdown"
+    })
+  }
+  return null
+}
 
 /**
  * Parse comment-encoded task list.

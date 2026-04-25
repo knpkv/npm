@@ -315,6 +315,33 @@ describe("ConfluenceParser", () => {
         expect(finalHtml).toBe(originalHtml)
       }))
 
+    it.effect("renders UserMention as visible markdown link and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml = `<p><ac:link><ri:user ri:account-id="557058:abc123"/></ac:link></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[@557058:abc123](#cf-user:")
+        expect(md).not.toContain("<!--cf:user:")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ri:account-id=\"557058:abc123\"")
+      }))
+
+    it.effect("renders inline StatusMacro as visible link and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<p><ac:structured-macro ac:name="status"><ac:parameter ac:name="title">READY</ac:parameter><ac:parameter ac:name="colour">Blue</ac:parameter></ac:structured-macro></p>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("[READY](#cf-status:Blue)")
+        expect(md).not.toContain("<!--cf:status:")
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"status\"")
+        expect(finalHtml).toContain("READY")
+        expect(finalHtml).toContain("Blue")
+      }))
+
     it.effect("roundtrips nested unordered list HTML -> markdown -> HTML", () =>
       Effect.gen(function*() {
         const originalHtml = `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
