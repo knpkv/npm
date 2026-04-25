@@ -8,9 +8,12 @@
  * {@link makeApiError} (factory produces AwsApiError with correct fields).
  */
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { parseRuleContent } from "../src/AwsClient/getPullRequests.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
 import type { AwsProfileName, AwsRegion } from "../src/Domain.js"
+
+const runParse = (content?: string) => Effect.runSync(parseRuleContent(content))
 
 describe("AwsClient internals", () => {
   describe("normalizeAuthor", () => {
@@ -91,7 +94,7 @@ describe("AwsClient internals", () => {
           ]
         }]
       })
-      const result = parseRuleContent(content)
+      const result = runParse(content)
       expect(result.requiredApprovals).toBe(2)
       expect(result.poolMembers).toEqual(["alice", "bob"])
       expect(result.poolMemberArns).toEqual([
@@ -101,27 +104,70 @@ describe("AwsClient internals", () => {
     })
 
     it("returns defaults for undefined content", () => {
-      const result = parseRuleContent(undefined)
+      const result = runParse(undefined)
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
     })
 
     it("returns defaults for invalid JSON", () => {
-      const result = parseRuleContent("not json")
+      const result = runParse("not json")
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
     })
 
     it("returns defaults for empty JSON object", () => {
-      const result = parseRuleContent("{}")
+      const result = runParse("{}")
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
     })
 
     it("handles missing Statements array", () => {
-      const result = parseRuleContent(JSON.stringify({ Version: "2018-11-08" }))
+      const result = runParse(JSON.stringify({ Version: "2018-11-08" }))
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
+    })
+
+    // AWS sometimes returns NumberOfApprovalsNeeded as a string — must coerce
+    it("coerces string NumberOfApprovalsNeeded to number", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: "3", ApprovalPoolMembers: [] }]
+      })
+      const result = runParse(content)
+      expect(result.requiredApprovals).toBe(3)
+      expect(typeof result.requiredApprovals).toBe("number")
+    })
+
+    it("falls back to 1 when NumberOfApprovalsNeeded is non-numeric", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: "not-a-number", ApprovalPoolMembers: [] }]
+      })
+      const result = runParse(content)
+      expect(result.requiredApprovals).toBe(1)
+    })
+
+    // Regression: a malformed count must not discard reviewer ARNs — downstream
+    // checks (needsMyReview against poolMembers) depend on this data.
+    it("preserves pool members when NumberOfApprovalsNeeded is non-numeric", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{
+          Type: "Approvers",
+          NumberOfApprovalsNeeded: "not-a-number",
+          ApprovalPoolMembers: [
+            "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+            "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+          ]
+        }]
+      })
+      const result = runParse(content)
+      expect(result.requiredApprovals).toBe(1)
+      expect(result.poolMembers).toEqual(["alice", "bob"])
+      expect(result.poolMemberArns).toEqual([
+        "arn:aws:sts::123456789012:assumed-role/MyRole/alice",
+        "arn:aws:sts::123456789012:assumed-role/MyRole/bob"
+      ])
     })
 
     it("handles empty ApprovalPoolMembers", () => {
@@ -129,7 +175,7 @@ describe("AwsClient internals", () => {
         Version: "2018-11-08",
         Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: 1, ApprovalPoolMembers: [] }]
       })
-      const result = parseRuleContent(content)
+      const result = runParse(content)
       expect(result.requiredApprovals).toBe(1)
       expect(result.poolMembers).toEqual([])
     })
