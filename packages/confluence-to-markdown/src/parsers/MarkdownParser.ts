@@ -1065,16 +1065,16 @@ const mdastChildrenToBaseInline = (
   })
 
 /**
- * Convert mdast children to simple block nodes.
+ * Convert mdast children to block nodes for list items.
+ *
+ * Allows nested {@link NestedList} children — recurses on `list` mdast nodes so
+ * second-level bullets become proper nested markdown lists rather than raw HTML.
  */
-const mdastChildrenToSimpleBlocks = (
+const mdastChildrenToListItemBlocks = (
   children: Array<MdastNode>
-): Effect.Effect<
-  Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock>,
-  ParseError
-> =>
+): Effect.Effect<Array<SimpleBlock>, ParseError> =>
   Effect.gen(function*() {
-    const blocks: Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock> = []
+    const blocks: Array<SimpleBlock> = []
     for (const child of children) {
       switch (child.type) {
         case "heading": {
@@ -1116,9 +1116,7 @@ const mdastChildrenToSimpleBlocks = (
           break
         }
         case "list": {
-          // Nested lists - when markdown nested lists are parsed, we lose Confluence local-ids
-          // This should rarely happen as Confluence nested lists are preserved as HTML
-          blocks.push(new UnsupportedBlock({ rawMarkdown: "", source: "markdown" }))
+          blocks.push(yield* parseList(child as MdastList))
           break
         }
         default: {
@@ -1129,8 +1127,44 @@ const mdastChildrenToSimpleBlocks = (
     return blocks
   })
 
-// Type for simple blocks used in lists
-type SimpleBlock = Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock
+/**
+ * Convert mdast children to simple block nodes (no nested lists).
+ *
+ * Used for AST nodes whose schema does not permit nested lists (BlockQuote etc.).
+ */
+const mdastChildrenToSimpleBlocks = (
+  children: Array<MdastNode>
+): Effect.Effect<
+  Array<Heading | Paragraph | CodeBlock | ThematicBreak | Image | Table | UnsupportedBlock>,
+  ParseError
+> =>
+  Effect.gen(function*() {
+    const blocks = yield* mdastChildrenToListItemBlocks(children)
+    return blocks.map((block) =>
+      block._tag === "List"
+        ? new UnsupportedBlock({ rawMarkdown: "", source: "markdown" })
+        : block
+    )
+  })
+
+// Type for simple blocks used in lists. Recursive: a list item may contain nested Lists.
+type SimpleBlock =
+  | Heading
+  | Paragraph
+  | CodeBlock
+  | ThematicBreak
+  | Image
+  | Table
+  | UnsupportedBlock
+  | NestedList
+
+type NestedList = {
+  _tag: "List"
+  version: number
+  ordered: boolean
+  start?: number
+  children: Array<{ _tag: "ListItem"; checked?: boolean; children: Array<SimpleBlock> }>
+}
 
 /**
  * Parse mdast list.
@@ -1153,7 +1187,7 @@ const parseList = (
     const start = ordered && list.start != null ? list.start : undefined
 
     for (const item of list.children) {
-      const children = yield* mdastChildrenToSimpleBlocks(item.children)
+      const children = yield* mdastChildrenToListItemBlocks(item.children)
       if (item.checked != null) {
         items.push({ _tag: "ListItem", checked: item.checked, children })
       } else {

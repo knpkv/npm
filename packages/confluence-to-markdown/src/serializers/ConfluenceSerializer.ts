@@ -359,7 +359,7 @@ const serializeTable = (
     return parts.join("")
   })
 
-// Simple block type for list items
+// Simple block type for list items (allows nested Lists for sub-bullets).
 type SimpleBlock =
   | Heading
   | Paragraph
@@ -368,6 +368,15 @@ type SimpleBlock =
   | Image
   | Table
   | UnsupportedBlock
+  | NestedList
+
+// Structural shape of a nested list inside a list item.
+type NestedList = {
+  readonly _tag: "List"
+  readonly ordered: boolean
+  readonly start?: number | undefined
+  readonly children: ReadonlyArray<ListItemType>
+}
 
 // List item type
 type ListItemType = {
@@ -436,6 +445,8 @@ const serializeSimpleBlock = (node: SimpleBlock): Effect.Effect<string, Serializ
         const unsupported = node as unknown as { rawHtml?: string; rawMarkdown?: string }
         return unsupported.rawHtml || unsupported.rawMarkdown || ""
       }
+      case "List":
+        return yield* serializeList(node)
       default:
         return ""
     }

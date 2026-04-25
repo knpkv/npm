@@ -216,6 +216,43 @@ describe("ConfluenceParser", () => {
           }
         }
       }))
+
+    it.effect("parses nested unordered list as nested List AST", () =>
+      Effect.gen(function*() {
+        const html =
+          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc = yield* parseConfluenceHtml(html)
+        const outerList = doc.children[0]
+        expect(outerList?._tag).toBe("List")
+        if (outerList?._tag === "List") {
+          expect(outerList.children.length).toBe(1)
+          const outerItem = outerList.children[0]
+          expect(outerItem?.children.length).toBe(2)
+          // First child is the "Outer" paragraph
+          expect(outerItem?.children[0]?._tag).toBe("Paragraph")
+          // Second child is the nested List (no longer UnsupportedBlock)
+          const nested = outerItem?.children[1]
+          expect(nested?._tag).toBe("List")
+          if (nested?._tag === "List") {
+            expect(nested.children.length).toBe(2)
+            const firstInner = nested.children[0]
+            expect(firstInner?.children[0]?._tag).toBe("Paragraph")
+          }
+        }
+      }))
+
+    it.effect("serializes nested list as indented markdown bullets", () =>
+      Effect.gen(function*() {
+        const html =
+          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc = yield* parseConfluenceHtml(html)
+        const md = yield* serializeToMarkdown(doc, { includeRawSource: false })
+        expect(md).toContain("- Outer")
+        expect(md).toContain("   - Inner A")
+        expect(md).toContain("   - Inner B")
+        expect(md).not.toContain("<ul")
+        expect(md).not.toContain("local-id")
+      }))
   })
 
   describe("integration test fixture", () => {
@@ -260,6 +297,17 @@ describe("ConfluenceParser", () => {
         const finalHtml = yield* serializeToConfluence(doc2)
 
         // 1-to-1 roundtrip: finalHtml should EXACTLY match originalHtml
+        expect(finalHtml).toBe(originalHtml)
+      }))
+
+    it.effect("roundtrips nested unordered list HTML -> markdown -> HTML", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<ul><li><p>Outer</p><ul><li><p>Inner A</p></li><li><p>Inner B</p></li></ul></li></ul>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        const doc2 = yield* parseMarkdown(md)
+        const finalHtml = yield* serializeToConfluence(doc2)
         expect(finalHtml).toBe(originalHtml)
       }))
 
