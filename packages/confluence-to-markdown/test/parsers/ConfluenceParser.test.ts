@@ -343,6 +343,27 @@ describe("ConfluenceParser", () => {
         expect(finalHtml).toBe(originalHtml)
       }))
 
+    it.effect("renders ExpandMacro as <details>/<summary> and roundtrips", () =>
+      Effect.gen(function*() {
+        const originalHtml =
+          `<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">Glossary term</ac:parameter><ac:rich-text-body><p>Body content here.</p></ac:rich-text-body></ac:structured-macro>`
+        const doc1 = yield* parseConfluenceHtml(originalHtml)
+        const md = yield* serializeToMarkdown(doc1, { includeRawSource: false })
+        expect(md).toContain("<details>")
+        expect(md).toContain("<summary>Glossary term</summary>")
+        expect(md).toContain("Body content here.")
+        expect(md).toContain("</details>")
+        // No more opaque cf:expand comment.
+        expect(md).not.toContain("<!--cf:expand:")
+
+        const doc2 = yield* parseMarkdown(md)
+        expect(doc2.children[0]?._tag).toBe("ExpandMacro")
+        const finalHtml = yield* serializeToConfluence(doc2)
+        expect(finalHtml).toContain("ac:name=\"expand\"")
+        expect(finalHtml).toContain("Glossary term")
+        expect(finalHtml).toContain("Body content here.")
+      }))
+
     it.effect("roundtrips TOC macro", () =>
       Effect.gen(function*() {
         const html =

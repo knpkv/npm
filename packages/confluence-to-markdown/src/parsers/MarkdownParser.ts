@@ -40,7 +40,7 @@ import {
   UnsupportedInline,
   UserMention
 } from "../ast/InlineNode.js"
-import { type InfoPanel, PanelTypes, type TocMacro } from "../ast/MacroNode.js"
+import { type ExpandMacro, type InfoPanel, PanelTypes, type TocMacro } from "../ast/MacroNode.js"
 import { ParseError } from "../SchemaConverterError.js"
 
 // Mdast types (inline to avoid dependency)
@@ -251,16 +251,56 @@ const preprocessContainers = (markdown: string): string => {
 
 /**
  * Convert mdast Root to document nodes.
+ *
+ * Recognises `<details><summary>title</summary>...body...</details>` HTML blocks
+ * and rebuilds them as ExpandMacro nodes so they round-trip back to Confluence.
  */
 const mdastToDocumentNodes = (root: MdastRoot): Effect.Effect<Array<DocumentNode>, ParseError> =>
   Effect.gen(function*() {
     const nodes: Array<DocumentNode> = []
-    for (const child of root.children) {
+    const children = root.children
+    let i = 0
+    while (i < children.length) {
+      const child = children[i]
+      if (!child) {
+        i++
+        continue
+      }
+      if (child.type === "html") {
+        const detailsMatch = (child as MdastHtml).value.match(
+          /^<details(?:\s[^>]*)?>\s*<summary(?:\s[^>]*)?>([\s\S]*?)<\/summary>/
+        )
+        if (detailsMatch) {
+          const title = decodeHtmlEntities(detailsMatch[1] ?? "").trim()
+          let j = i + 1
+          while (j < children.length) {
+            const c = children[j]
+            if (c?.type === "html" && /<\/details>/.test((c as MdastHtml).value)) break
+            j++
+          }
+          const bodyChildren = children.slice(i + 1, j)
+          const bodyBlocks = yield* mdastChildrenToSimpleBlocks(bodyChildren)
+          nodes.push(
+            {
+              _tag: "ExpandMacro" as const,
+              version: 1,
+              ...(title ? { title } : {}),
+              children: bodyBlocks
+            } satisfies ExpandMacro
+          )
+          i = j + 1
+          continue
+        }
+      }
       const node = yield* mdastNodeToBlock(child)
       if (node !== null) nodes.push(node)
+      i++
     }
     return nodes
   })
+
+const decodeHtmlEntities = (s: string): string =>
+  s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'")
 
 /**
  * Convert mdast node to BlockNode or MacroNode.

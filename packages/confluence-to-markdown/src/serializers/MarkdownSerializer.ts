@@ -357,7 +357,11 @@ const serializeInfoPanel = (
   })
 
 /**
- * Serialize expand macro - use comment encoding for roundtrip.
+ * Serialize expand macro as a GFM-compatible <details> block.
+ *
+ * The opening and closing HTML tags are recognised on round-trip by
+ * MarkdownParser to rebuild the ExpandMacro AST node. Body content is rendered
+ * as ordinary markdown so it shows up in viewers (Obsidian, GitHub, etc.).
  */
 const serializeExpandMacro = (
   node: { title?: string | undefined; children: ReadonlyArray<SimpleBlock> }
@@ -371,10 +375,12 @@ const serializeExpandMacro = (
       contentParts.push(serialized)
     }
 
-    const content = contentParts.join("\n")
-    // Use comment encoding for roundtrip
-    return `<!--cf:expand:${encodeURIComponent(title)}:${encodeURIComponent(content)}-->`
+    const body = contentParts.join("\n\n")
+    const summary = `<summary>${escapeHtml(title)}</summary>`
+    return `<details>\n${summary}\n\n${body}\n\n</details>`
   })
+
+const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 /**
  * Serialize TOC macro.
