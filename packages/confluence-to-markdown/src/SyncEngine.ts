@@ -102,6 +102,18 @@ type SyncError =
   | StructureError
 
 /**
+ * Pretty-print an ADF JSON wire string for the `.source.json` companion file.
+ * Falls back to the raw string if it can't be parsed as JSON.
+ */
+const prettyAdf = (raw: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+/**
  * Sync engine service for Confluence <-> Markdown operations.
  *
  * @example
@@ -334,10 +346,8 @@ export const layer: Layer.Layer<
       position?: number
     ): Effect.Effect<{ markdown: string; frontMatter: PageFrontMatter }, SyncError> =>
       Effect.gen(function*() {
-        const htmlContent = version.body?.storage?.value ?? ""
-        const markdown = yield* converter.htmlToMarkdown(htmlContent, {
-          includeRawSource: config.saveSource
-        })
+        const adfJson = version.body?.atlas_doc_format?.value ?? ""
+        const markdown = yield* converter.adfToMarkdown(adfJson)
         const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
 
         // Get author info
@@ -434,7 +444,7 @@ export const layer: Layer.Layer<
             }
 
             // Check if body content is available from the versions list
-            const bodyContent = versionInfo.page?.body?.storage?.value
+            const bodyContent = versionInfo.page?.body?.atlas_doc_format?.value
             if (!bodyContent) {
               // No body content available - history replay not supported
               historyReplayFailed = true
@@ -448,9 +458,9 @@ export const layer: Layer.Layer<
               createdAt: versionInfo.createdAt,
               message: versionInfo.message,
               body: {
-                storage: {
+                atlas_doc_format: {
                   value: bodyContent,
-                  representation: "storage" as const
+                  representation: "atlas_doc_format" as const
                 }
               }
             }
@@ -465,10 +475,10 @@ export const layer: Layer.Layer<
             // Write file
             yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
 
-            // Save source HTML if configured
-            if (config.saveSource && versionContent.body?.storage?.value) {
-              const sourceFilePath = filePath.replace(/\.md$/, ".html")
-              yield* localFs.writeFile(sourceFilePath, versionContent.body.storage.value)
+            // Save source ADF JSON if configured
+            if (config.saveSource && versionContent.body?.atlas_doc_format?.value) {
+              const sourceFilePath = filePath.replace(/\.md$/, ".source.json")
+              yield* localFs.writeFile(sourceFilePath, prettyAdf(versionContent.body.atlas_doc_format.value))
             }
 
             // Commit this version
@@ -501,10 +511,8 @@ export const layer: Layer.Layer<
           }
 
           // Simple pull without history replay
-          const htmlContent = fullPage.body?.storage?.value ?? ""
-          let markdown = yield* converter.htmlToMarkdown(htmlContent, {
-            includeRawSource: config.saveSource
-          })
+          const adfJson = fullPage.body?.atlas_doc_format?.value ?? ""
+          let markdown = yield* converter.adfToMarkdown(adfJson)
 
           // Add child page links for index pages
           if (hasChildren && config.spaceKey) {
@@ -538,10 +546,10 @@ export const layer: Layer.Layer<
 
           yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
 
-          // Save source HTML if configured
-          if (config.saveSource && htmlContent) {
-            const sourceFilePath = filePath.replace(/\.md$/, ".html")
-            yield* localFs.writeFile(sourceFilePath, htmlContent)
+          // Save source ADF JSON if configured
+          if (config.saveSource && adfJson) {
+            const sourceFilePath = filePath.replace(/\.md$/, ".source.json")
+            yield* localFs.writeFile(sourceFilePath, prettyAdf(adfJson))
           }
         }
 
@@ -641,8 +649,8 @@ export const layer: Layer.Layer<
           // Resolve parent from directory structure
           const parentId = yield* resolveParent(filePath, pageIdMap)
 
-          // Convert markdown to HTML
-          const html = yield* converter.markdownToHtml(localFile.content)
+          // Convert markdown to ADF
+          const adfValue = yield* converter.markdownToAdf(localFile.content)
 
           // Create the page
           const createdPage = yield* client.createPage({
@@ -650,8 +658,8 @@ export const layer: Layer.Layer<
             parentId,
             title,
             body: {
-              representation: "storage",
-              value: html
+              representation: "atlas_doc_format",
+              value: adfValue
             }
           })
 
@@ -665,10 +673,8 @@ export const layer: Layer.Layer<
 
           // Fetch canonical content back from Confluence
           const canonicalPage = yield* client.getPage(createdPage.id as PageId)
-          const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
-          const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
-            includeRawSource: config.saveSource
-          })
+          const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
+          const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
           const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
 
           // Write canonical content with full front-matter
@@ -698,7 +704,7 @@ export const layer: Layer.Layer<
 
         // Fetch current version to avoid conflicts
         const remotePage = yield* client.getPage(fm.pageId)
-        const html = yield* converter.markdownToHtml(localFile.content)
+        const adfValue = yield* converter.markdownToAdf(localFile.content)
         const updatedPage = yield* client.updatePage({
           id: fm.pageId,
           title: fm.title,
@@ -708,17 +714,15 @@ export const layer: Layer.Layer<
             message: revisionMessage
           },
           body: {
-            representation: "storage",
-            value: html
+            representation: "atlas_doc_format",
+            value: adfValue
           }
         })
 
         // Fetch canonical content back from Confluence
         const canonicalPage = yield* client.getPage(fm.pageId)
-        const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
-        const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
-          includeRawSource: config.saveSource
-        })
+        const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
+        const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
         const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
 
         // Write canonical content with updated front-matter

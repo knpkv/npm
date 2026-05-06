@@ -6,6 +6,8 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeTerminal from "@effect/platform-node/NodeTerminal"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
+import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
 import type { PageId } from "../Brand.js"
 import { ConfluenceAuth, layer as ConfluenceAuthLayer } from "../ConfluenceAuth.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
@@ -20,6 +22,11 @@ import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
 import { getAuth } from "./shared.js"
+
+const ConverterPipeline = MarkdownConverterLayer.pipe(
+  Layer.provide(AtlaskitTransformersLayer),
+  Layer.provide(AdfSchemaValidatorLayer)
+)
 
 // Dummy config layer for help/init
 const DummyConfigLayer = ConfluenceConfigLayerFromValues({
@@ -136,7 +143,7 @@ export const AppLayer = SyncEngineLayer.pipe(
   Layer.provideMerge(UserCacheLayer),
   Layer.provideMerge(GitServiceLayer),
   Layer.provideMerge(ConfluenceClientLive),
-  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(ConfluenceConfigLayer()),
   Layer.provideMerge(AuthLive),
@@ -152,7 +159,7 @@ export const AuthOnlyLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(DummyGitServiceLayer),
   Layer.provideMerge(DummyConfluenceClientLayer),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
   Layer.provideMerge(NodeHttpClient.layer),
@@ -167,7 +174,7 @@ export const MinimalLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(GitServiceLayer),
   Layer.provideMerge(DummyConfluenceClientLayer),
   Layer.provideMerge(DummyConfluenceAuthLayer),
-  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
   Layer.provideMerge(NodeTerminal.layer),
@@ -182,7 +189,7 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(GitServiceLayer),
   Layer.provideMerge(DummyConfluenceClientLayer),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(MarkdownConverterLayer),
+  Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
   Layer.provideMerge(NodeHttpClient.layer),
