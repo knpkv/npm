@@ -8,7 +8,12 @@
  *
  * @module
  */
-import { defaultSchema } from "@atlaskit/adf-schema/schema-default"
+// Deep import into the published CJS file: Atlaskit's `schema-default`
+// subpath has no `exports` map (Node ESM rejects it as a directory import)
+// and its ESM build uses extensionless relative imports (also rejected).
+// The CJS file works under Node's CJS-into-ESM interop. Types come from the
+// ambient declaration in `atlaskit-adf-schema.d.ts`.
+import { defaultSchema } from "@atlaskit/adf-schema/dist/cjs/schema/default-schema.js"
 import { type JSONDocNode, JSONTransformer } from "@atlaskit/editor-json-transformer"
 import { MarkdownTransformer } from "@atlaskit/editor-markdown-transformer"
 import * as Context from "effect/Context"
