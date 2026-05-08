@@ -193,8 +193,9 @@ const block = (n: AdfNode, ctx: Ctx): string => {
     case "decisionList":
       return decisionList(n, ctx)
     case "mediaSingle":
-    case "mediaGroup":
       return mediaSingle(n, ctx)
+    case "mediaGroup":
+      return mediaGroup(n, ctx)
     default:
       ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
       return `<!-- unsupported ADF node: ${n.type} -->`
@@ -313,8 +314,7 @@ const decisionList = (n: AdfNode, ctx: Ctx): string => {
   return lines.join("\n")
 }
 
-const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
-  const media = (n.content ?? [])[0]
+const renderMedia = (media: AdfNode | undefined, ctx: Ctx): string => {
   const id = (media && attrStr(media, "id")) ?? ""
   const alt = (media && attrStr(media, "alt")) ?? ""
   const url = media && attrStr(media, "url")
@@ -322,6 +322,11 @@ const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
   ctx.warnings.push({ _tag: "MediaWithoutUrl", mediaId: id })
   return `<!-- adf:media id=${id} -->`
 }
+
+const mediaSingle = (n: AdfNode, ctx: Ctx): string => renderMedia((n.content ?? [])[0], ctx)
+
+const mediaGroup = (n: AdfNode, ctx: Ctx): string =>
+  (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n")
 
 /**
  * Walk an ADF document and emit GFM markdown. Always synchronous; warnings

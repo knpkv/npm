@@ -151,6 +151,21 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("- [ ] todo")
   })
 
+  it("renders every child of a mediaGroup", () => {
+    const r = walk(doc([{
+      type: "mediaGroup",
+      content: [
+        { type: "media", attrs: { id: "m1", alt: "first", url: "https://x.test/1.png" } },
+        { type: "media", attrs: { id: "m2", alt: "second", url: "https://x.test/2.png" } },
+        { type: "media", attrs: { id: "m3" } }
+      ]
+    }]))
+    expect(r.markdown).toContain("![first](https://x.test/1.png)")
+    expect(r.markdown).toContain("![second](https://x.test/2.png)")
+    expect(r.markdown).toContain("<!-- adf:media id=m3 -->")
+    expect(r.warnings.some((w) => w._tag === "MediaWithoutUrl" && w.mediaId === "m3")).toBe(true)
+  })
+
   it("emits placeholders + warnings for unknown nodes", () => {
     const r = walk(doc([{ type: "totallyMadeUp" }]))
     expect(r.markdown).toContain("<!-- unsupported ADF node: totallyMadeUp -->")
