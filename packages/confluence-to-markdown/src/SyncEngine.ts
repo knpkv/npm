@@ -114,6 +114,14 @@ const prettyAdf = (raw: string): string => {
 }
 
 /**
+ * Hash a markdown body in the form `readMarkdownFile` will later return it.
+ * `parseMarkdown` trims the body when reading, so the hash we store on
+ * frontmatter must hash the trimmed body too — otherwise every subsequent
+ * read sees a "changed" file and `push` keeps pushing a no-op update.
+ */
+const hashBody = (markdown: string) => computeHash(markdown.trim()).pipe(Effect.provide(HashServiceLive))
+
+/**
  * Sync engine service for Confluence <-> Markdown operations.
  *
  * @example
@@ -348,7 +356,7 @@ export const layer: Layer.Layer<
       Effect.gen(function*() {
         const adfJson = version.body?.atlas_doc_format?.value ?? ""
         const markdown = yield* converter.adfToMarkdown(adfJson)
-        const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+        const contentHash = yield* hashBody(markdown)
 
         // Get author info
         const author = version.authorId ? yield* getUser(version.authorId) : undefined
@@ -525,7 +533,7 @@ export const layer: Layer.Layer<
             markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
           }
 
-          const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+          const contentHash = yield* hashBody(markdown)
 
           // Get author info
           const author = fullPage.version.authorId ? yield* getUser(fullPage.version.authorId) : undefined
@@ -675,7 +683,7 @@ export const layer: Layer.Layer<
           const canonicalPage = yield* client.getPage(createdPage.id as PageId)
           const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
           const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
-          const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+          const canonicalHash = yield* hashBody(canonicalMarkdown)
 
           // Write canonical content with full front-matter
           const newFrontMatter: PageFrontMatter = {
@@ -723,7 +731,7 @@ export const layer: Layer.Layer<
         const canonicalPage = yield* client.getPage(fm.pageId)
         const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
         const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
-        const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+        const canonicalHash = yield* hashBody(canonicalMarkdown)
 
         // Write canonical content with updated front-matter
         const newFrontMatter: PageFrontMatter = {
