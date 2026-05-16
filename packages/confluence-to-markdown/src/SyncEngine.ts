@@ -763,34 +763,45 @@ export const layer: Layer.Layer<
         const allCommits = yield* git.log({ n: 100 })
         if (allCommits.length === 0) return []
 
-        const unpushed: Array<{ hash: string; message: string }> = []
+        // We checkout each commit to compare content; restore HEAD before returning
+        // so subsequent pushFile() calls see the working-tree content the user staged,
+        // not whatever commit we last inspected.
+        const originalBranch = yield* git.getCurrentBranch()
 
-        for (const commit of allCommits) {
-          yield* git.checkout(commit.hash)
+        const collect = Effect.gen(function*() {
+          const unpushed: Array<{ hash: string; message: string }> = []
+          for (const commit of allCommits) {
+            yield* git.checkout(commit.hash)
 
-          let hasChanges = false
-          for (const filePath of files) {
-            const exists = yield* localFs.exists(filePath)
-            if (!exists) continue
+            let hasChanges = false
+            for (const filePath of files) {
+              const exists = yield* localFs.exists(filePath)
+              if (!exists) continue
 
-            const localFile = yield* localFs.readMarkdownFile(filePath)
-            if (!localFile.frontMatter) {
-              hasChanges = true
-              break
+              const localFile = yield* localFs.readMarkdownFile(filePath)
+              if (!localFile.frontMatter) {
+                hasChanges = true
+                break
+              }
+
+              const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+              if (currentHash !== localFile.frontMatter.contentHash) {
+                hasChanges = true
+                break
+              }
             }
 
-            const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
-            if (currentHash !== localFile.frontMatter.contentHash) {
-              hasChanges = true
-              break
-            }
+            if (!hasChanges) break
+            unpushed.push({ hash: commit.hash, message: commit.message })
           }
+          return unpushed.reverse()
+        })
 
-          if (!hasChanges) break
-          unpushed.push({ hash: commit.hash, message: commit.message })
-        }
-
-        return unpushed.reverse()
+        return yield* collect.pipe(
+          Effect.ensuring(
+            originalBranch ? git.checkout(originalBranch).pipe(Effect.ignore) : Effect.void
+          )
+        )
       })
 
     const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>
