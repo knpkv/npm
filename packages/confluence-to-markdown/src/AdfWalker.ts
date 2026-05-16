@@ -17,6 +17,12 @@ export type WalkerWarning =
   | { readonly _tag: "UnsupportedNode"; readonly nodeType: string }
   | { readonly _tag: "LossyMark"; readonly mark: string }
   | { readonly _tag: "MediaWithoutUrl"; readonly mediaId: string }
+  | {
+    readonly _tag: "UnsupportedExtension"
+    readonly nodeType: "extension" | "bodiedExtension" | "inlineExtension"
+    readonly extensionKey: string
+    readonly extensionType: string
+  }
 
 export interface WalkResult {
   readonly markdown: string
@@ -75,8 +81,16 @@ const inlineNode = (n: AdfNode, ctx: Ctx): string => {
     case "hardBreak":
       return ctx.inTable ? "<br>" : "  \n"
     case "mention": {
-      const text = attrStr(n, "text") ?? attrStr(n, "id") ?? ""
-      return `@${escapeText(text)}`
+      // Confluence stores the mention's `text` attr with the leading `@`
+      // already (e.g. "@John Doe"). Strip it so we don't emit `@@John Doe`.
+      const id = attrStr(n, "id")
+      const raw = attrStr(n, "text") ?? id ?? ""
+      const stripped = raw.startsWith("@") ? raw.slice(1) : raw
+      const display = `@${escapeText(stripped)}`
+      // Encode the accountId in a custom-scheme link so the push side can
+      // reconstruct a real mention node. Without `id` we can only emit plain
+      // text; on push, that becomes plain text in Confluence (lossy).
+      return id ? `[${display}](confluence-mention://${encodeURIComponent(id)})` : display
     }
     case "emoji": {
       const short = attrStr(n, "shortName")
@@ -102,10 +116,25 @@ const inlineNode = (n: AdfNode, ctx: Ctx): string => {
       ctx.warnings.push({ _tag: "MediaWithoutUrl", mediaId: id })
       return `<!-- adf:media id=${id} -->`
     }
+    case "inlineExtension":
+      return extensionPlaceholder(n, "inlineExtension", ctx)
     default:
       ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
       return `<!-- unsupported ADF inline: ${n.type} -->`
   }
+}
+
+const extensionPlaceholder = (
+  n: AdfNode,
+  nodeType: "extension" | "bodiedExtension" | "inlineExtension",
+  ctx: Ctx
+): string => {
+  const extensionKey = attrStr(n, "extensionKey") ?? ""
+  const extensionType = attrStr(n, "extensionType") ?? ""
+  ctx.warnings.push({ _tag: "UnsupportedExtension", nodeType, extensionKey, extensionType })
+  const keyPart = extensionKey ? ` key=${extensionKey}` : ""
+  const typePart = extensionType ? ` type=${extensionType}` : ""
+  return `<!-- adf:${nodeType}${keyPart}${typePart} -->`
 }
 
 const applyMarks = (text: string, marks: ReadonlyArray<AdfNode>, ctx: Ctx): string => {
@@ -196,6 +225,10 @@ const block = (n: AdfNode, ctx: Ctx): string => {
       return mediaSingle(n, ctx)
     case "mediaGroup":
       return mediaGroup(n, ctx)
+    case "extension":
+      return extensionPlaceholder(n, "extension", ctx)
+    case "bodiedExtension":
+      return extensionPlaceholder(n, "bodiedExtension", ctx)
     default:
       ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
       return `<!-- unsupported ADF node: ${n.type} -->`

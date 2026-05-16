@@ -100,4 +100,26 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).not.toContain("v1\\.0\\.0")
       expect(md).not.toContain("2026\\-05\\-03")
     }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("preserves an inline status placeholder through round-trip", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip(
+        `Status: <span class="adf-status" data-color="blue">TESTING</span>\n`
+      )
+      expect(md).toContain(`<span class="adf-status" data-color="blue">TESTING</span>`)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("preserves a block extension placeholder through round-trip", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip(
+        `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->\n`
+      )
+      expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("preserves a mention's accountId through round-trip", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip(`[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)\n`)
+      expect(md).toContain("[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)")
+    }).pipe(Effect.provide(TestLayer)))
 })

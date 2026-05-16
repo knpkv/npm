@@ -172,6 +172,70 @@ describe("AdfWalker", () => {
     expect(r.warnings.some((w) => w._tag === "UnsupportedNode")).toBe(true)
   })
 
+  it("does not double the @ on mentions whose text already starts with @", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "mention", attrs: { id: "557057:abc", text: "@Andrey Konopkov" } }]
+    }]))
+    expect(r.markdown).toContain("@Andrey Konopkov")
+    expect(r.markdown).not.toContain("@@")
+  })
+
+  it("encodes the mention accountId in a custom-scheme link", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "mention", attrs: { id: "557057:abc-123", text: "@Andrey Konopkov" } }]
+    }]))
+    // ":" gets percent-encoded by encodeURIComponent so the URL is unambiguous.
+    expect(r.markdown).toContain("[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)")
+  })
+
+  it("falls back to plain @text when the mention has no id", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "mention", attrs: { text: "@Anon" } }]
+    }]))
+    expect(r.markdown).toContain("@Anon")
+    expect(r.markdown).not.toContain("confluence-mention")
+  })
+
+  it("preserves extension key in placeholder for Confluence macros", () => {
+    const r = walk(doc([{
+      type: "extension",
+      attrs: {
+        extensionType: "com.atlassian.confluence.macro.core",
+        extensionKey: "toc"
+      }
+    }]))
+    expect(r.markdown).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->")
+    expect(
+      r.warnings.some((w) =>
+        w._tag === "UnsupportedExtension" && w.extensionKey === "toc" && w.nodeType === "extension"
+      )
+    ).toBe(true)
+  })
+
+  it("handles inline and bodied extensions", () => {
+    const r = walk(doc([
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "before " },
+          { type: "inlineExtension", attrs: { extensionKey: "jira-issue", extensionType: "com.example" } },
+          { type: "text", text: " after" }
+        ]
+      },
+      {
+        type: "bodiedExtension",
+        attrs: { extensionKey: "details", extensionType: "com.example" },
+        content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }]
+      }
+    ]))
+    expect(r.markdown).toContain("<!-- adf:inlineExtension key=jira-issue type=com.example -->")
+    expect(r.markdown).toContain("<!-- adf:bodiedExtension key=details type=com.example -->")
+    expect(r.warnings.filter((w) => w._tag === "UnsupportedExtension")).toHaveLength(2)
+  })
+
   it("ends output with exactly one newline", () => {
     const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "x" }] }]))
     expect(r.markdown.endsWith("\n")).toBe(true)

@@ -11,6 +11,7 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { revertPlaceholders } from "./AdfPlaceholders.js"
 import { AdfSchemaValidator } from "./AdfSchemaValidator.js"
 import { walk, type WalkerWarning } from "./AdfWalker.js"
 import { AtlaskitTransformers } from "./AtlaskitTransformers.js"
@@ -63,6 +64,8 @@ const warningSummary = (w: WalkerWarning): string => {
       return `${w._tag} ${w.mark}`
     case "MediaWithoutUrl":
       return `${w._tag} ${w.mediaId}`
+    case "UnsupportedExtension":
+      return `${w._tag} ${w.nodeType} ${w.extensionKey || "?"}`
   }
 }
 
@@ -108,7 +111,12 @@ export const layer: Layer.Layer<
         const adf = yield* transformers.use(({ json, md }) => json.encode(md.parse(markdown))).pipe(
           Effect.mapError(toConversionError("markdownToAdf"))
         )
-        const validated = yield* validator.check(adf, "outgoing").pipe(
+        // The walker emits HTML/comment placeholders for Confluence-only nodes
+        // (status, extension). @atlaskit's markdown transformer doesn't know
+        // these, so they come through as plain text. Rewrite them back into
+        // the structured nodes Confluence expects before validation.
+        const reverted = revertPlaceholders(adf)
+        const validated = yield* validator.check(reverted, "outgoing").pipe(
           Effect.mapError(toConversionError("markdownToAdf"))
         )
         return JSON.stringify(validated)
