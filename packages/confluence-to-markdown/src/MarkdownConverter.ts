@@ -2,15 +2,19 @@
  * ADF ↔ Markdown conversion facade.
  *
  * Push (markdown → ADF) routes through the official `@atlaskit` markdown
- * + JSON transformers. Pull (ADF → markdown) routes through the in-package
- * `AdfWalker`. Both paths run through `AdfSchemaValidator`, so library bugs
- * and remote drift surface as structured errors instead of silent corruption.
+ * + JSON transformers and is strictly validated by `AdfSchemaValidator` —
+ * we author that side, so schema failures are bugs. Pull (ADF → markdown)
+ * routes through the in-package `AdfWalker`; incoming validation is advisory
+ * (logged, not thrown) because Confluence Cloud routinely emits documents the
+ * canonical schema lags behind.
  *
  * @module
  */
+import type { DocNode } from "@atlaskit/adf-schema"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import { revertPlaceholders } from "./AdfPlaceholders.js"
 import { AdfSchemaValidator } from "./AdfSchemaValidator.js"
 import { walk, type WalkerWarning } from "./AdfWalker.js"
@@ -42,8 +46,9 @@ export class MarkdownConverter extends Context.Tag(
   {
     /**
      * Convert an ADF JSON document (as wire-format string) to GitHub Flavored
-     * Markdown. Validates against the canonical @atlaskit/adf-schema before
-     * walking.
+     * Markdown. Checks against the canonical @atlaskit/adf-schema before
+     * walking; violations are logged as warnings (remote drift), and only a
+     * document too malformed to walk at all fails with ConversionError.
      */
     readonly adfToMarkdown: (adfJson: string) => Effect.Effect<string, ConversionError>
 
@@ -75,6 +80,15 @@ const toConversionError = (
 (cause: AdfSchemaError | AtlaskitTransformersError | { readonly cause: unknown }): ConversionError =>
   new ConversionError({ direction, cause })
 
+// The least structure the walker needs: a doc node with a content array.
+// Anything failing this isn't "schema drift", it's not an ADF document —
+// advisory validation must not let it through (walking `null` is a defect;
+// walking `{}` silently produces an empty page).
+const isWalkableDoc = Schema.is(Schema.Struct({
+  type: Schema.Literal("doc"),
+  content: Schema.Array(Schema.Unknown)
+}))
+
 /**
  * Layer that provides the MarkdownConverter service.
  *
@@ -96,8 +110,25 @@ export const layer: Layer.Layer<
           try: () => JSON.parse(adfJson),
           catch: (cause) => new ConversionError({ direction: "adfToMarkdown", cause })
         })
+        // Incoming validation is advisory: the canonical @atlaskit schema is
+        // routinely stricter than what Confluence Cloud actually emits (old
+        // revisions, experimental nodes), so a failure here usually means
+        // "schema drift", not "broken document". Log + continue. Outgoing
+        // validation stays strict because we control that side.
         const doc = yield* validator.check(raw, "incoming").pipe(
-          Effect.mapError(toConversionError("adfToMarkdown"))
+          Effect.catchTag("AdfSchemaError", (err) =>
+            isWalkableDoc(raw)
+              ? Effect.gen(function*() {
+                yield* Effect.logWarning(
+                  `adf schema (incoming): ${err.issues.length} issue(s); first: ${
+                    err.issues.slice(0, 3).map((i) =>
+                      `${i.instancePath ?? "?"} ${i.keyword ?? "?"} ${i.message ?? ""}`.trim()
+                    ).join(" | ")
+                  }`
+                )
+                return raw as DocNode
+              })
+              : Effect.fail(toConversionError("adfToMarkdown")(err)))
         )
         const { markdown, warnings } = walk(doc)
         for (const w of warnings) {

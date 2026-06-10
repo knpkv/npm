@@ -100,15 +100,35 @@ describe("MarkdownConverter", () => {
         }
       }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("fails with ConversionError on schema-invalid input", () =>
+    it.effect("treats schema-invalid incoming ADF as advisory and still converts", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const result = yield* Effect.either(
-          converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: "not an array" }))
-        )
-        expect(result._tag).toBe("Left")
-        if (result._tag === "Left") {
-          expect(result.left._tag).toBe("ConversionError")
+        // Missing `version`, and `attrs.level` should be a number — both are
+        // schema violations Confluence would never produce, but representative
+        // of the schema drift we tolerate on the incoming side.
+        const md = yield* converter.adfToMarkdown(JSON.stringify({
+          type: "doc",
+          content: [{
+            type: "heading",
+            attrs: { level: "1" },
+            content: [{ type: "text", text: "Hello" }]
+          }]
+        }))
+        expect(md).toContain("Hello")
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("still fails on input too malformed to walk", () =>
+      Effect.gen(function*() {
+        // Advisory validation tolerates schema drift, not non-documents:
+        // walking `null` is a defect, `{}`/arrays silently produce an empty
+        // page that could overwrite a real local file.
+        const converter = yield* MarkdownConverter
+        for (const bad of ["null", "{}", "[1,2]", `{"type":"doc","content":"not an array"}`]) {
+          const result = yield* Effect.either(converter.adfToMarkdown(bad))
+          expect(result._tag).toBe("Left")
+          if (result._tag === "Left") {
+            expect(result.left._tag).toBe("ConversionError")
+          }
         }
       }).pipe(Effect.provide(TestLayer)))
   })
