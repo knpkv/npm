@@ -94,9 +94,11 @@ const attrNum = (n: AdfNode, key: string): number | undefined => {
   return typeof v === "number" ? v : undefined
 }
 
+// Color-matched to GitHub's admonition palette: info/blue→NOTE, note/purple→
+// IMPORTANT, success/green→TIP, warning/yellow→WARNING, error/red→CAUTION.
 const PANEL_MAP: Record<string, string> = {
   info: "NOTE",
-  note: "TIP",
+  note: "IMPORTANT",
   warning: "WARNING",
   success: "TIP",
   error: "CAUTION"

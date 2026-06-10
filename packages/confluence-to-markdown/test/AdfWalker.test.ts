@@ -505,6 +505,23 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("_orphan_")
   })
 
+  it("maps note panels to IMPORTANT and success panels to TIP", () => {
+    const r = walk(doc([
+      {
+        type: "panel",
+        attrs: { panelType: "note" },
+        content: [{ type: "paragraph", content: [{ type: "text", text: "n" }] }]
+      },
+      {
+        type: "panel",
+        attrs: { panelType: "success" },
+        content: [{ type: "paragraph", content: [{ type: "text", text: "s" }] }]
+      }
+    ]))
+    expect(r.markdown).toContain("[!IMPORTANT]")
+    expect(r.markdown).toContain("[!TIP]")
+  })
+
   it("ends output with exactly one newline", () => {
     const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "x" }] }]))
     expect(r.markdown.endsWith("\n")).toBe(true)
