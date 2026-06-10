@@ -231,6 +231,32 @@ describe("revertPlaceholders", () => {
     expect(out.content).toEqual([para("before"), para("after")])
   })
 
+  it("leaves code-marked text that quotes placeholder syntax untouched", () => {
+    const codeText = (text: string) => ({
+      type: "paragraph",
+      content: [{ type: "text", text, marks: [{ type: "code" }] }]
+    })
+    const input = docOf([
+      codeText(`<span class="adf-status" data-color="green">DONE</span>`),
+      codeText(`<!-- adf:extension key=k type=t -->`),
+      codeText(`<!-- adf:/bodiedExtension -->`)
+    ])
+    expect(revertPlaceholders(input)).toEqual(input)
+  })
+
+  it("leaves placeholder-looking text inside a codeBlock untouched", () => {
+    // A code sample *quoting* the placeholder syntax must not get structured
+    // nodes injected — codeBlock only permits text children, so the document
+    // would fail outgoing schema validation and the push would error out.
+    const code = `<span class="adf-status" data-color="blue">X</span>\n<!-- adf:inlineExtension key=k type=t -->`
+    const input = docOf([{
+      type: "codeBlock",
+      attrs: { language: "html" },
+      content: [{ type: "text", text: code }]
+    }])
+    expect(revertPlaceholders(input)).toEqual(input)
+  })
+
   it("leaves text without placeholders untouched", () => {
     const input = docOf([para("plain content")])
     const out = revertPlaceholders(input)

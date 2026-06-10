@@ -47,6 +47,11 @@ const BODIED_EXTENSION_END_RE = /^\s*<!--\s*adf:\/bodiedExtension\s*-->\s*$/
 const textNode = (text: string, marks: ReadonlyArray<AdfNode> | undefined): AdfNode =>
   marks && marks.length > 0 ? { type: "text", text, marks } : { type: "text", text }
 
+// Code-marked text is a *quotation* of placeholder syntax, not a placeholder
+// (the walker never emits placeholders with a code mark) — expanding it would
+// corrupt documentation that demonstrates the syntax.
+const hasCodeMark = (n: AdfNode): boolean => (n.marks ?? []).some((m) => m.type === "code")
+
 // Parents whose content model permits bodiedExtension per @atlaskit/adf-schema
 // (blockquote/listItem/tableCell allow plain extension but NOT bodied — emitting
 // one there fails outgoing validation and the whole push errors out).
@@ -152,7 +157,7 @@ const soleTextChild = (node: AdfNode): AdfNode | null => {
   const content = node.content ?? []
   if (content.length !== 1) return null
   const child = content[0]
-  if (!child || child.type !== "text" || !child.text) return null
+  if (!child || child.type !== "text" || !child.text || hasCodeMark(child)) return null
   return child
 }
 
@@ -233,11 +238,15 @@ const groupBlockExtensions = (children: ReadonlyArray<AdfNode>, parentType: stri
 }
 
 const transform = (node: AdfNode): AdfNode => {
+  // ADF codeBlock permits only plain text children — expanding placeholder-
+  // looking text inside one would inject schema-invalid nodes and corrupt
+  // code samples that merely *quote* the placeholder syntax.
+  if (node.type === "codeBlock") return node
   if (!node.content) return node
 
   const newContent: Array<AdfNode> = []
   for (const child of node.content) {
-    if (child.type === "text" && child.text) {
+    if (child.type === "text" && child.text && !hasCodeMark(child)) {
       const mention = tryParseMentionTextNode(child)
       if (mention) {
         newContent.push(mention)

@@ -189,6 +189,33 @@ describe("MarkdownConverter round-trip", () => {
       ])
     }).pipe(Effect.provide(TestLayer)))
 
+  // Regression: a code fence *quoting* the placeholder syntax got structured
+  // nodes injected into the codeBlock, failing outgoing schema validation.
+  it.effect("does not expand placeholder-looking text inside a code fence", () =>
+    Effect.gen(function*() {
+      const fence = "```html\n" +
+        `<span class="adf-status" data-color="blue">X</span>\n` +
+        `<!-- adf:inlineExtension key=k type=t -->\n` +
+        "```\n"
+      const md = yield* roundTrip(fence)
+      expect(md).toContain(`<span class="adf-status" data-color="blue">X</span>`)
+      expect(md).toContain(`<!-- adf:inlineExtension key=k type=t -->`)
+      expect(md).toContain("```html")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Regression: the inline twin of the fence case — a code *span* quoting a
+  // placeholder was replaced by a real status node, silently dropping the
+  // quoted sample.
+  it.effect("does not expand placeholder-looking text inside a code span", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = `Use \`<span class="adf-status" data-color="green">DONE</span>\` in docs\n`
+      const adf = JSON.parse(yield* converter.markdownToAdf(source)) as {
+        content: Array<{ content: Array<{ type: string }> }>
+      }
+      expect(adf.content[0]!.content.some((n) => n.type === "status")).toBe(false)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Regression: '# x' / '> x' / '+ x' paragraph text became real headings,
   // quotes, and lists after the ESCAPE_RE narrowing dropped those characters.
   it.effect("keeps line-start block markers in paragraph text as text", () =>
