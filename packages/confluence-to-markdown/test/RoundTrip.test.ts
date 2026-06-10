@@ -109,23 +109,6 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).not.toContain("\\+")
     }).pipe(Effect.provide(TestLayer)))
 
-  // Regression: '# x' / '> x' / '+ x' paragraph text became real headings,
-  // quotes, and lists after the ESCAPE_RE narrowing dropped those characters.
-  it.effect("keeps line-start block markers in paragraph text as text", () =>
-    Effect.gen(function*() {
-      const converter = yield* MarkdownConverter
-      const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] })
-      const md = yield* converter.adfToMarkdown(JSON.stringify({
-        version: 1,
-        type: "doc",
-        content: [paragraph("# not a heading"), paragraph("> not a quote"), paragraph("+ not a list")]
-      }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string }>
-      }
-      expect(adfOut.content.map((n) => n.type)).toEqual(["paragraph", "paragraph", "paragraph"])
-    }).pipe(Effect.provide(TestLayer)))
-
   // Regression: escaping inside code spans put literal backslashes into the
   // ADF text, which the next pull re-escaped — doubling them on every
   // round-trip (`a_b` → `a\_b` → `a\\\_b` → …).
@@ -148,12 +131,94 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).toContain(`<span class="adf-status" data-color="blue">TESTING</span>`)
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("preserves a block extension placeholder through round-trip", () =>
+  it.effect("upgrades a legacy block extension placeholder to the attrs form, then stays fixed", () =>
     Effect.gen(function*() {
       const md = yield* roundTrip(
         `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->\n`
       )
-      expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->")
+      expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=")
+      const again = yield* roundTrip(md)
+      expect(again).toBe(md)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips macro parameters through the placeholder attrs blob", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const attrs = {
+        extensionKey: "toc",
+        extensionType: "com.atlassian.confluence.macro.core",
+        layout: "default",
+        localId: "abc-123",
+        parameters: { macroParams: { maxLevel: { value: "3" } } }
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [{ type: "extension", attrs }]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string; attrs: Record<string, unknown> }>
+      }
+      expect(adfOut.content[0]).toEqual({ type: "extension", attrs })
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips a bodiedExtension with its body re-attached", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const attrs = { extensionKey: "details", extensionType: "com.atlassian.confluence.macro.core" }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "bodiedExtension",
+          attrs,
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "first body paragraph" }] },
+            { type: "paragraph", content: [{ type: "text", text: "second body paragraph" }] }
+          ]
+        }]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string; attrs: Record<string, unknown>; content: Array<unknown> }>
+      }
+      expect(adfOut.content).toHaveLength(1)
+      expect(adfOut.content[0]).toMatchObject({ type: "bodiedExtension", attrs })
+      expect(adfOut.content[0]!.content).toEqual([
+        { type: "paragraph", content: [{ type: "text", text: "first body paragraph" }] },
+        { type: "paragraph", content: [{ type: "text", text: "second body paragraph" }] }
+      ])
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Regression: '# x' / '> x' / '+ x' paragraph text became real headings,
+  // quotes, and lists after the ESCAPE_RE narrowing dropped those characters.
+  it.effect("keeps line-start block markers in paragraph text as text", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] })
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [paragraph("# not a heading"), paragraph("> not a quote"), paragraph("+ not a list")]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string }>
+      }
+      expect(adfOut.content.map((n) => n.type)).toEqual(["paragraph", "paragraph", "paragraph"])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("keeps the bodied kind for an empty-body bodied extension", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const attrs = { extensionKey: "excerpt", extensionType: "com.atlassian.confluence.macro.core" }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [{ type: "bodiedExtension", attrs, content: [{ type: "paragraph", content: [] }] }]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string }>
+      }
+      expect(adfOut.content[0]!.type).toBe("bodiedExtension")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("preserves a mention's accountId through round-trip", () =>

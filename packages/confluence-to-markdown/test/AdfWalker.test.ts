@@ -4,6 +4,10 @@ import { walk } from "../src/AdfWalker.js"
 
 const doc = (content: ReadonlyArray<unknown>): DocNode => ({ version: 1, type: "doc", content } as unknown as DocNode)
 
+// Expected `attrs=` blob: base64 of the attrs JSON with keys sorted (write
+// the literal in sorted key order so JSON.stringify matches the walker).
+const b64 = (attrs: Record<string, unknown>): string => Buffer.from(JSON.stringify(attrs)).toString("base64")
+
 describe("AdfWalker", () => {
   it("emits a heading at the right level", () => {
     const r = walk(doc([{ type: "heading", attrs: { level: 3 }, content: [{ type: "text", text: "Hi" }] }]))
@@ -21,33 +25,6 @@ describe("AdfWalker", () => {
       content: [{ type: "text", text: "a (b) c+ d! {e} #1 > #2" }]
     }]))
     expect(r.markdown).toContain("a (b) c+ d! {e} #1 > #2")
-  })
-
-  it("escapes block markers at line start so text cannot become structure", () => {
-    const r = walk(doc([
-      { type: "paragraph", content: [{ type: "text", text: "# not a heading" }] },
-      { type: "paragraph", content: [{ type: "text", text: "> not a quote" }] },
-      { type: "paragraph", content: [{ type: "text", text: "+ not a list" }] },
-      { type: "paragraph", content: [{ type: "text", text: "1. not a list" }] },
-      {
-        type: "paragraph",
-        content: [
-          { type: "text", text: "a" },
-          { type: "hardBreak" },
-          { type: "text", text: "# b stays text" }
-        ]
-      }
-    ]))
-    expect(r.markdown).toContain("\\# not a heading")
-    expect(r.markdown).toContain("\\> not a quote")
-    expect(r.markdown).toContain("\\+ not a list")
-    expect(r.markdown).toContain("1\\. not a list")
-    expect(r.markdown).toContain("\\# b stays text")
-  })
-
-  it("does not escape mid-line hashes or list-like text after the first word", () => {
-    const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "a #1 > #2 + b" }] }]))
-    expect(r.markdown).toContain("a #1 > #2 + b")
   })
 
   it("does not escape code-marked text", () => {
@@ -260,20 +237,34 @@ describe("AdfWalker", () => {
     expect(r.markdown).not.toContain("confluence-mention")
   })
 
-  it("preserves extension key in placeholder for Confluence macros", () => {
+  it("preserves the full attrs (parameters included) in the extension placeholder", () => {
     const r = walk(doc([{
       type: "extension",
       attrs: {
         extensionType: "com.atlassian.confluence.macro.core",
-        extensionKey: "toc"
+        extensionKey: "toc",
+        parameters: { macroParams: { maxLevel: { value: "3" } } }
       }
     }]))
-    expect(r.markdown).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->")
+    const attrs = b64({
+      extensionKey: "toc",
+      extensionType: "com.atlassian.confluence.macro.core",
+      parameters: { macroParams: { maxLevel: { value: "3" } } }
+    })
+    expect(r.markdown).toContain(
+      `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=${attrs} -->`
+    )
     expect(
       r.warnings.some((w) =>
         w._tag === "UnsupportedExtension" && w.extensionKey === "toc" && w.nodeType === "extension"
       )
     ).toBe(true)
+  })
+
+  it("emits the same attrs blob regardless of source key order", () => {
+    const a = walk(doc([{ type: "extension", attrs: { extensionKey: "toc", extensionType: "t" } }]))
+    const b = walk(doc([{ type: "extension", attrs: { extensionType: "t", extensionKey: "toc" } }]))
+    expect(a.markdown).toBe(b.markdown)
   })
 
   it("handles inline and bodied extensions", () => {
@@ -292,9 +283,77 @@ describe("AdfWalker", () => {
         content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }]
       }
     ]))
-    expect(r.markdown).toContain("<!-- adf:inlineExtension key=jira-issue type=com.example -->")
-    expect(r.markdown).toContain("<!-- adf:bodiedExtension key=details type=com.example -->")
+    const inlineAttrs = b64({ extensionKey: "jira-issue", extensionType: "com.example" })
+    const bodiedAttrs = b64({ extensionKey: "details", extensionType: "com.example" })
+    expect(r.markdown).toContain(
+      `<!-- adf:inlineExtension key=jira-issue type=com.example attrs=${inlineAttrs} -->`
+    )
+    // The bodied extension renders its body between an open and an end marker
+    // so the push side can re-attach it.
+    expect(r.markdown).toContain(
+      `<!-- adf:bodiedExtension key=details type=com.example attrs=${bodiedAttrs} -->\n\nbody\n\n<!-- adf:/bodiedExtension -->`
+    )
     expect(r.warnings.filter((w) => w._tag === "UnsupportedExtension")).toHaveLength(2)
+  })
+
+  it("emits the end marker even for an empty bodied extension", () => {
+    // Without it the push side cannot tell "bodied macro with empty body"
+    // apart from a legacy/corrupted open marker, and would change node type.
+    const r = walk(doc([{
+      type: "bodiedExtension",
+      attrs: { extensionKey: "excerpt", extensionType: "com.example" },
+      content: [{ type: "paragraph", content: [] }]
+    }]))
+    expect(r.markdown).toContain("<!-- adf:/bodiedExtension -->")
+  })
+
+  it("emits only the single-line marker for a bodied extension inside a table cell", () => {
+    // <br>-flattened multi-block emission cannot be reverted on push; the
+    // bare marker at least comes back as a clean extension node.
+    const r = walk(doc([{
+      type: "table",
+      content: [{
+        type: "tableRow",
+        content: [{
+          type: "tableCell",
+          content: [{
+            type: "bodiedExtension",
+            attrs: { extensionKey: "details", extensionType: "com.example" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }]
+          }]
+        }]
+      }]
+    }]))
+    expect(r.markdown).not.toContain("adf:/bodiedExtension")
+    expect(r.markdown).not.toContain("body")
+    expect(r.markdown).toContain("<!-- adf:bodiedExtension key=details type=com.example")
+  })
+
+  it("escapes block markers at line start so text cannot become structure", () => {
+    const r = walk(doc([
+      { type: "paragraph", content: [{ type: "text", text: "# not a heading" }] },
+      { type: "paragraph", content: [{ type: "text", text: "> not a quote" }] },
+      { type: "paragraph", content: [{ type: "text", text: "+ not a list" }] },
+      { type: "paragraph", content: [{ type: "text", text: "1. not a list" }] },
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "a" },
+          { type: "hardBreak" },
+          { type: "text", text: "# b stays text" }
+        ]
+      }
+    ]))
+    expect(r.markdown).toContain("\\# not a heading")
+    expect(r.markdown).toContain("\\> not a quote")
+    expect(r.markdown).toContain("\\+ not a list")
+    expect(r.markdown).toContain("1\\. not a list")
+    expect(r.markdown).toContain("\\# b stays text")
+  })
+
+  it("does not escape mid-line hashes or list-like text after the first word", () => {
+    const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "a #1 > #2 + b" }] }]))
+    expect(r.markdown).toContain("a #1 > #2 + b")
   })
 
   it("ends output with exactly one newline", () => {

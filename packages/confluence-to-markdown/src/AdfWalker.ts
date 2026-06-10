@@ -52,7 +52,6 @@ interface Ctx {
 const ESCAPE_RE = /[\\`*_[\]<|]/g
 const escapeText = (s: string): string => s.replace(ESCAPE_RE, "\\$&")
 const escapeAttr = (s: string): string => s.replace(/[\\"]/g, "\\$&")
-
 // ESCAPE_RE deliberately skips characters that are only special at line
 // start, so lines assembled from paragraph text (including after hardBreak)
 // must neutralize leading block markers: ATX headings, blockquotes, list
@@ -85,6 +84,32 @@ const PANEL_MAP: Record<string, string> = {
   warning: "WARNING",
   success: "TIP",
   error: "CAUTION"
+}
+
+// btoa operates on byte strings; route through TextEncoder so non-ASCII attrs
+// survive. Web APIs only — this module is a standalone subpath export and
+// must not assume Node (same reasoning as internal/hashUtils' Web Crypto).
+const toBase64 = (s: string): string => {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ""
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return btoa(bin)
+}
+
+// Deterministic JSON for the placeholder attrs blob: object keys are sorted
+// recursively so the same attrs always produce the same base64, no matter
+// what order Confluence happens to serialize them in. Keeps pull → push →
+// pull a byte-level fixed point (and contentHash stable).
+const stableStringify = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
+  if (v !== null && typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>)
+      .filter(([, value]) => value !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, value]) => `${JSON.stringify(k)}:${stableStringify(value)}`)
+    return `{${entries.join(",")}}`
+  }
+  return JSON.stringify(v) ?? "null"
 }
 
 const inline = (nodes: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): string => {
@@ -161,7 +186,29 @@ const extensionPlaceholder = (
   ctx.warnings.push({ _tag: "UnsupportedExtension", nodeType, extensionKey, extensionType })
   const keyPart = extensionKey ? ` key=${extensionKey}` : ""
   const typePart = extensionType ? ` type=${extensionType}` : ""
-  return `<!-- adf:${nodeType}${keyPart}${typePart} -->`
+  // key/type are repeated for human readability; `attrs` is the source of
+  // truth on push — it carries the *full* attrs (parameters, localId, layout)
+  // so macros survive a pull → push round-trip with their configuration.
+  const attrs = n.attrs ?? {}
+  const attrsPart = Object.keys(attrs).length > 0
+    ? ` attrs=${toBase64(stableStringify(attrs))}`
+    : ""
+  return `<!-- adf:${nodeType}${keyPart}${typePart}${attrsPart} -->`
+}
+
+const bodiedExtension = (n: AdfNode, ctx: Ctx): string => {
+  const open = extensionPlaceholder(n, "bodiedExtension", ctx)
+  // Table cells flatten newlines to <br>, which would weld the markers and
+  // body into one un-revertible line — emit only the single-line marker
+  // there (body dropped; the placeholder warning above covers it).
+  if (ctx.inTable) return open
+  // Render the body so it stays visible/editable; the end marker lets the
+  // push side re-attach everything in between as the bodiedExtension's body.
+  // It is emitted even for an empty body so the push side can tell "bodied
+  // macro with nothing in it" apart from a legacy/corrupted open marker.
+  const body = (n.content ?? []).map((c) => block(c, ctx)).join("\n\n")
+  const parts = body.length > 0 ? [open, body] : [open]
+  return [...parts, "<!-- adf:/bodiedExtension -->"].join("\n\n")
 }
 
 const applyMarks = (text: string, marks: ReadonlyArray<AdfNode>, ctx: Ctx): string => {
@@ -262,7 +309,7 @@ const block = (n: AdfNode, ctx: Ctx): string => {
     case "extension":
       return extensionPlaceholder(n, "extension", ctx)
     case "bodiedExtension":
-      return extensionPlaceholder(n, "bodiedExtension", ctx)
+      return bodiedExtension(n, ctx)
     default:
       ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
       return `<!-- unsupported ADF node: ${n.type} -->`
