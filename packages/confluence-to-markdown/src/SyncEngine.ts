@@ -592,31 +592,55 @@ export const layer: Layer.Layer<
           yield* git.checkout("origin/confluence")
         }
 
-        const rootPage = yield* client.getPage(config.rootPageId)
-        const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
+        const pullAndMerge = Effect.gen(function*() {
+          const rootPage = yield* client.getPage(config.rootPageId)
+          const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
 
-        // If git is initialized and we have changes but didn't replay history, auto-commit
-        if (gitInitialized && !options.replayHistory && result.pulled > 0) {
-          yield* git.addAll()
-          yield* git.commit({
-            message: `Pull from Confluence (${result.pulled} page${result.pulled !== 1 ? "s" : ""})`
-          }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
-        }
+          // If git is initialized and we have changes but didn't replay history, auto-commit
+          if (gitInitialized && !options.replayHistory && result.pulled > 0) {
+            yield* git.addAll()
+            yield* git.commit({
+              message: `Pull from Confluence (${result.pulled} page${result.pulled !== 1 ? "s" : ""})`
+            }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
+          }
 
-        // Two-branch model: merge origin/confluence into current branch
-        if (hasRemoteBranch && originalBranch && originalBranch !== "origin/confluence") {
-          yield* git.checkout(originalBranch)
-          yield* git.merge("origin/confluence", {
-            message: `Merge remote changes from Confluence`
-          }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
-        }
+          // Two-branch model: merge origin/confluence into current branch
+          if (hasRemoteBranch && originalBranch && originalBranch !== "origin/confluence") {
+            yield* git.checkout(originalBranch)
+            yield* git.merge("origin/confluence", {
+              message: `Merge remote changes from Confluence`
+            }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
+          }
 
-        return {
-          pulled: result.pulled,
-          skipped: 0,
-          commits: result.commits,
-          errors: [] as ReadonlyArray<string>
-        }
+          return {
+            pulled: result.pulled,
+            skipped: 0,
+            commits: result.commits,
+            errors: [] as ReadonlyArray<string>
+          }
+        })
+
+        // Any failure after the origin/confluence checkout (API, conversion,
+        // git) must not strand the repo on a detached HEAD — same protection
+        // as findUnpushedCommits. On success this re-checkout is a no-op.
+        // The restore itself can fail (a half-written pull leaves dirty files
+        // that differ between branches); that must be loud, not swallowed.
+        return yield* pullAndMerge.pipe(
+          Effect.ensuring(
+            hasRemoteBranch && originalBranch
+              ? git.checkout(originalBranch).pipe(
+                Effect.catchAll((error) =>
+                  Effect.logWarning(
+                    `pull: could not restore branch '${originalBranch}' — the repo may still be on origin/confluence. ` +
+                      `Restore manually with \`git checkout ${originalBranch}\` (stash local changes first if needed). Cause: ${
+                        String(error)
+                      }`
+                  )
+                )
+              )
+              : Effect.void
+          )
+        )
       })
 
     /**
