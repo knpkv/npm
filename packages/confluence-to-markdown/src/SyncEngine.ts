@@ -102,6 +102,26 @@ type SyncError =
   | StructureError
 
 /**
+ * Pretty-print an ADF JSON wire string for the `.source.json` companion file.
+ * Falls back to the raw string if it can't be parsed as JSON.
+ */
+const prettyAdf = (raw: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * Hash a markdown body in the form `readMarkdownFile` will later return it.
+ * `parseMarkdown` trims the body when reading, so the hash we store on
+ * frontmatter must hash the trimmed body too — otherwise every subsequent
+ * read sees a "changed" file and `push` keeps pushing a no-op update.
+ */
+const hashBody = (markdown: string) => computeHash(markdown.trim()).pipe(Effect.provide(HashServiceLive))
+
+/**
  * Sync engine service for Confluence <-> Markdown operations.
  *
  * @example
@@ -334,11 +354,9 @@ export const layer: Layer.Layer<
       position?: number
     ): Effect.Effect<{ markdown: string; frontMatter: PageFrontMatter }, SyncError> =>
       Effect.gen(function*() {
-        const htmlContent = version.body?.storage?.value ?? ""
-        const markdown = yield* converter.htmlToMarkdown(htmlContent, {
-          includeRawSource: config.saveSource
-        })
-        const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+        const adfJson = version.body?.atlas_doc_format?.value ?? ""
+        const markdown = yield* converter.adfToMarkdown(adfJson)
+        const contentHash = yield* hashBody(markdown)
 
         // Get author info
         const author = version.authorId ? yield* getUser(version.authorId) : undefined
@@ -434,7 +452,7 @@ export const layer: Layer.Layer<
             }
 
             // Check if body content is available from the versions list
-            const bodyContent = versionInfo.page?.body?.storage?.value
+            const bodyContent = versionInfo.page?.body?.atlas_doc_format?.value
             if (!bodyContent) {
               // No body content available - history replay not supported
               historyReplayFailed = true
@@ -448,9 +466,9 @@ export const layer: Layer.Layer<
               createdAt: versionInfo.createdAt,
               message: versionInfo.message,
               body: {
-                storage: {
+                atlas_doc_format: {
                   value: bodyContent,
-                  representation: "storage" as const
+                  representation: "atlas_doc_format" as const
                 }
               }
             }
@@ -465,10 +483,10 @@ export const layer: Layer.Layer<
             // Write file
             yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
 
-            // Save source HTML if configured
-            if (config.saveSource && versionContent.body?.storage?.value) {
-              const sourceFilePath = filePath.replace(/\.md$/, ".html")
-              yield* localFs.writeFile(sourceFilePath, versionContent.body.storage.value)
+            // Save source ADF JSON if configured
+            if (config.saveSource && versionContent.body?.atlas_doc_format?.value) {
+              const sourceFilePath = filePath.replace(/\.md$/, ".source.json")
+              yield* localFs.writeFile(sourceFilePath, prettyAdf(versionContent.body.atlas_doc_format.value))
             }
 
             // Commit this version
@@ -501,10 +519,8 @@ export const layer: Layer.Layer<
           }
 
           // Simple pull without history replay
-          const htmlContent = fullPage.body?.storage?.value ?? ""
-          let markdown = yield* converter.htmlToMarkdown(htmlContent, {
-            includeRawSource: config.saveSource
-          })
+          const adfJson = fullPage.body?.atlas_doc_format?.value ?? ""
+          let markdown = yield* converter.adfToMarkdown(adfJson)
 
           // Add child page links for index pages
           if (hasChildren && config.spaceKey) {
@@ -517,7 +533,7 @@ export const layer: Layer.Layer<
             markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
           }
 
-          const contentHash = yield* computeHash(markdown).pipe(Effect.provide(HashServiceLive))
+          const contentHash = yield* hashBody(markdown)
 
           // Get author info
           const author = fullPage.version.authorId ? yield* getUser(fullPage.version.authorId) : undefined
@@ -538,10 +554,10 @@ export const layer: Layer.Layer<
 
           yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
 
-          // Save source HTML if configured
-          if (config.saveSource && htmlContent) {
-            const sourceFilePath = filePath.replace(/\.md$/, ".html")
-            yield* localFs.writeFile(sourceFilePath, htmlContent)
+          // Save source ADF JSON if configured
+          if (config.saveSource && adfJson) {
+            const sourceFilePath = filePath.replace(/\.md$/, ".source.json")
+            yield* localFs.writeFile(sourceFilePath, prettyAdf(adfJson))
           }
         }
 
@@ -576,31 +592,55 @@ export const layer: Layer.Layer<
           yield* git.checkout("origin/confluence")
         }
 
-        const rootPage = yield* client.getPage(config.rootPageId)
-        const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
+        const pullAndMerge = Effect.gen(function*() {
+          const rootPage = yield* client.getPage(config.rootPageId)
+          const result = yield* pullPage(rootPage, docsPath, options, gitInitialized)
 
-        // If git is initialized and we have changes but didn't replay history, auto-commit
-        if (gitInitialized && !options.replayHistory && result.pulled > 0) {
-          yield* git.addAll()
-          yield* git.commit({
-            message: `Pull from Confluence (${result.pulled} page${result.pulled !== 1 ? "s" : ""})`
-          }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
-        }
+          // If git is initialized and we have changes but didn't replay history, auto-commit
+          if (gitInitialized && !options.replayHistory && result.pulled > 0) {
+            yield* git.addAll()
+            yield* git.commit({
+              message: `Pull from Confluence (${result.pulled} page${result.pulled !== 1 ? "s" : ""})`
+            }).pipe(Effect.catchTag("GitNoChangesError", () => Effect.void))
+          }
 
-        // Two-branch model: merge origin/confluence into current branch
-        if (hasRemoteBranch && originalBranch && originalBranch !== "origin/confluence") {
-          yield* git.checkout(originalBranch)
-          yield* git.merge("origin/confluence", {
-            message: `Merge remote changes from Confluence`
-          }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
-        }
+          // Two-branch model: merge origin/confluence into current branch
+          if (hasRemoteBranch && originalBranch && originalBranch !== "origin/confluence") {
+            yield* git.checkout(originalBranch)
+            yield* git.merge("origin/confluence", {
+              message: `Merge remote changes from Confluence`
+            }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
+          }
 
-        return {
-          pulled: result.pulled,
-          skipped: 0,
-          commits: result.commits,
-          errors: [] as ReadonlyArray<string>
-        }
+          return {
+            pulled: result.pulled,
+            skipped: 0,
+            commits: result.commits,
+            errors: [] as ReadonlyArray<string>
+          }
+        })
+
+        // Any failure after the origin/confluence checkout (API, conversion,
+        // git) must not strand the repo on a detached HEAD — same protection
+        // as findUnpushedCommits. On success this re-checkout is a no-op.
+        // The restore itself can fail (a half-written pull leaves dirty files
+        // that differ between branches); that must be loud, not swallowed.
+        return yield* pullAndMerge.pipe(
+          Effect.ensuring(
+            hasRemoteBranch && originalBranch
+              ? git.checkout(originalBranch).pipe(
+                Effect.catchAll((error) =>
+                  Effect.logWarning(
+                    `pull: could not restore branch '${originalBranch}' — the repo may still be on origin/confluence. ` +
+                      `Restore manually with \`git checkout ${originalBranch}\` (stash local changes first if needed). Cause: ${
+                        String(error)
+                      }`
+                  )
+                )
+              )
+              : Effect.void
+          )
+        )
       })
 
     /**
@@ -641,8 +681,8 @@ export const layer: Layer.Layer<
           // Resolve parent from directory structure
           const parentId = yield* resolveParent(filePath, pageIdMap)
 
-          // Convert markdown to HTML
-          const html = yield* converter.markdownToHtml(localFile.content)
+          // Convert markdown to ADF
+          const adfValue = yield* converter.markdownToAdf(localFile.content)
 
           // Create the page
           const createdPage = yield* client.createPage({
@@ -650,8 +690,8 @@ export const layer: Layer.Layer<
             parentId,
             title,
             body: {
-              representation: "storage",
-              value: html
+              representation: "atlas_doc_format",
+              value: adfValue
             }
           })
 
@@ -665,11 +705,9 @@ export const layer: Layer.Layer<
 
           // Fetch canonical content back from Confluence
           const canonicalPage = yield* client.getPage(createdPage.id as PageId)
-          const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
-          const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
-            includeRawSource: config.saveSource
-          })
-          const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+          const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
+          const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+          const canonicalHash = yield* hashBody(canonicalMarkdown)
 
           // Write canonical content with full front-matter
           const newFrontMatter: PageFrontMatter = {
@@ -698,7 +736,7 @@ export const layer: Layer.Layer<
 
         // Fetch current version to avoid conflicts
         const remotePage = yield* client.getPage(fm.pageId)
-        const html = yield* converter.markdownToHtml(localFile.content)
+        const adfValue = yield* converter.markdownToAdf(localFile.content)
         const updatedPage = yield* client.updatePage({
           id: fm.pageId,
           title: fm.title,
@@ -708,18 +746,16 @@ export const layer: Layer.Layer<
             message: revisionMessage
           },
           body: {
-            representation: "storage",
-            value: html
+            representation: "atlas_doc_format",
+            value: adfValue
           }
         })
 
         // Fetch canonical content back from Confluence
         const canonicalPage = yield* client.getPage(fm.pageId)
-        const canonicalHtml = canonicalPage.body?.storage?.value ?? ""
-        const canonicalMarkdown = yield* converter.htmlToMarkdown(canonicalHtml, {
-          includeRawSource: config.saveSource
-        })
-        const canonicalHash = yield* computeHash(canonicalMarkdown).pipe(Effect.provide(HashServiceLive))
+        const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
+        const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+        const canonicalHash = yield* hashBody(canonicalMarkdown)
 
         // Write canonical content with updated front-matter
         const newFrontMatter: PageFrontMatter = {
@@ -759,34 +795,45 @@ export const layer: Layer.Layer<
         const allCommits = yield* git.log({ n: 100 })
         if (allCommits.length === 0) return []
 
-        const unpushed: Array<{ hash: string; message: string }> = []
+        // We checkout each commit to compare content; restore HEAD before returning
+        // so subsequent pushFile() calls see the working-tree content the user staged,
+        // not whatever commit we last inspected.
+        const originalBranch = yield* git.getCurrentBranch()
 
-        for (const commit of allCommits) {
-          yield* git.checkout(commit.hash)
+        const collect = Effect.gen(function*() {
+          const unpushed: Array<{ hash: string; message: string }> = []
+          for (const commit of allCommits) {
+            yield* git.checkout(commit.hash)
 
-          let hasChanges = false
-          for (const filePath of files) {
-            const exists = yield* localFs.exists(filePath)
-            if (!exists) continue
+            let hasChanges = false
+            for (const filePath of files) {
+              const exists = yield* localFs.exists(filePath)
+              if (!exists) continue
 
-            const localFile = yield* localFs.readMarkdownFile(filePath)
-            if (!localFile.frontMatter) {
-              hasChanges = true
-              break
+              const localFile = yield* localFs.readMarkdownFile(filePath)
+              if (!localFile.frontMatter) {
+                hasChanges = true
+                break
+              }
+
+              const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
+              if (currentHash !== localFile.frontMatter.contentHash) {
+                hasChanges = true
+                break
+              }
             }
 
-            const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
-            if (currentHash !== localFile.frontMatter.contentHash) {
-              hasChanges = true
-              break
-            }
+            if (!hasChanges) break
+            unpushed.push({ hash: commit.hash, message: commit.message })
           }
+          return unpushed.reverse()
+        })
 
-          if (!hasChanges) break
-          unpushed.push({ hash: commit.hash, message: commit.message })
-        }
-
-        return unpushed.reverse()
+        return yield* collect.pipe(
+          Effect.ensuring(
+            originalBranch ? git.checkout(originalBranch).pipe(Effect.ignore) : Effect.void
+          )
+        )
       })
 
     const push = (options: { dryRun: boolean; message?: string }): Effect.Effect<PushResult, SyncError> =>

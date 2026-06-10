@@ -26,7 +26,7 @@ export interface CreatePageRequest {
   readonly title: string
   readonly parentId?: string
   readonly body: {
-    readonly representation: "storage"
+    readonly representation: "atlas_doc_format"
     readonly value: string
   }
 }
@@ -45,7 +45,7 @@ export interface UpdatePageRequest {
     readonly message?: string
   }
   readonly body: {
-    readonly representation: "storage"
+    readonly representation: "atlas_doc_format"
     readonly value: string
   }
 }
@@ -194,7 +194,7 @@ const make = (
 
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.GET("/pages/{id}", {
-        params: { path: { id: Number(id) }, query: { "body-format": "storage" } }
+        params: { path: { id: Number(id) }, query: { "body-format": "atlas_doc_format" } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
         Effect.retry(rateLimitSchedule)
@@ -312,7 +312,7 @@ const make = (
             params: {
               path: { id: Number(id) },
               query: {
-                ...(options?.includeBody ? { "body-format": "storage" as const } : {}),
+                ...(options?.includeBody ? { "body-format": "atlas_doc_format" as const } : {}),
                 ...(cursor ? { cursor } : {}),
                 limit: VERSIONS_PAGE_SIZE
               }

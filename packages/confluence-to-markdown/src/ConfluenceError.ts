@@ -124,20 +124,78 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
 }
 
 /**
- * Error thrown when HTML/Markdown conversion fails.
+ * Direction of an ADF/Markdown conversion.
+ *
+ * @category Errors
+ */
+export type ConversionDirection = "adfToMarkdown" | "markdownToAdf"
+
+/**
+ * Error thrown when ADF/Markdown conversion fails.
  *
  * @category Errors
  */
 export class ConversionError extends Data.TaggedError("ConversionError")<{
-  readonly direction: "htmlToMarkdown" | "markdownToHtml"
+  readonly direction: ConversionDirection
   readonly cause: unknown
   readonly message: string
 }> {
-  constructor(params: { direction: "htmlToMarkdown" | "markdownToHtml"; cause: unknown }) {
+  constructor(params: { direction: ConversionDirection; cause: unknown }) {
     super({
       direction: params.direction,
       cause: params.cause,
       message: `Conversion failed (${params.direction}): ${params.cause}`
+    })
+  }
+}
+
+/**
+ * Issue produced by ADF JSON Schema validation.
+ *
+ * @category Errors
+ */
+export interface AdfSchemaIssue {
+  readonly instancePath?: string
+  readonly schemaPath?: string
+  readonly keyword?: string
+  readonly message?: string
+  readonly params?: Record<string, unknown>
+}
+
+/**
+ * Error thrown when an ADF document fails JSON Schema validation.
+ *
+ * @category Errors
+ */
+export class AdfSchemaError extends Data.TaggedError("AdfSchemaError")<{
+  readonly direction: "incoming" | "outgoing"
+  readonly issues: ReadonlyArray<AdfSchemaIssue>
+  readonly message: string
+}> {
+  constructor(params: { direction: "incoming" | "outgoing"; issues: ReadonlyArray<AdfSchemaIssue> }) {
+    super({
+      direction: params.direction,
+      issues: params.issues,
+      message: `ADF schema validation failed (${params.direction}): ${params.issues.length} issue(s)`
+    })
+  }
+}
+
+/**
+ * Error thrown when the wrapped @atlaskit transformer libraries throw.
+ *
+ * @category Errors
+ */
+export class AtlaskitTransformersError extends Data.TaggedError("AtlaskitTransformersError")<{
+  readonly cause: unknown
+  readonly message: string
+}> {
+  constructor(params: { cause: unknown }) {
+    super({
+      cause: params.cause,
+      message: `Atlaskit transformer failed: ${
+        params.cause instanceof Error ? params.cause.message : String(params.cause)
+      }`
     })
   }
 }
@@ -255,6 +313,8 @@ export type ConfluenceError =
   | ApiError
   | RateLimitError
   | ConversionError
+  | AdfSchemaError
+  | AtlaskitTransformersError
   | ConflictError
   | FileSystemError
   | OAuthError
@@ -281,6 +341,8 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "ApiError",
     "RateLimitError",
     "ConversionError",
+    "AdfSchemaError",
+    "AtlaskitTransformersError",
     "ConflictError",
     "FileSystemError",
     "OAuthError",

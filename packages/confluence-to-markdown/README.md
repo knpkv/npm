@@ -107,6 +107,41 @@ confluence diff --commit HEAD~1   # compare with commit
 4. Version messages from Confluence are preserved in markdown front-matter
 5. Use standard git commands in `.confluence/` for advanced operations
 
+### Conversion pipeline
+
+This package talks to Confluence Cloud in **Atlassian Document Format (ADF)**:
+
+- **Push (markdown → ADF)** delegates to the official `@atlaskit/editor-markdown-transformer` and `@atlaskit/editor-json-transformer`. Atlassian's own libraries author the JSON we send back to Confluence.
+- **Pull (ADF → markdown)** uses an in-package tree walker (`AdfWalker`). The walker covers paragraphs, headings, lists, code blocks, tables, panels, task and decision lists, mentions, emojis, status, dates, expand sections, and inline cards. Lossy marks (`underline`, `textColor`, `backgroundColor`, `subsup`) fall back to inline HTML; unknown nodes degrade to a placeholder comment plus a logged warning.
+- Both directions validate against the canonical `@atlaskit/adf-schema` JSON Schema, so library bugs and remote drift surface as structured errors instead of silent corruption.
+
+When `saveSource` is enabled, the raw ADF JSON is persisted as `<page>.source.json` (pretty-printed) alongside the markdown.
+
+#### Known fidelity limitations
+
+Nodes that survive a pull → edit → push round-trip structurally intact: status (unless its text contains `<`), mentions (with an accountId), and macros (`extension` / `bodiedExtension` / `inlineExtension` — the placeholder comment carries the full macro attrs, including `parameters`, as a base64 blob, and a bodied macro's body is re-attached from the blocks between its `<!-- adf:bodiedExtension … -->` / `<!-- adf:/bodiedExtension -->` markers; a bodied macro inside a table cell keeps only the marker, its body is dropped). Everything below does **not** fully survive:
+
+- **Attachment media.** Pages with images or other attachments use ADF `mediaSingle` / `mediaInline` nodes that reference attachments by `id` + `collection`. Resolving these to download URLs requires a separate Confluence API call per attachment, which this package does not yet make. Such nodes are currently emitted as `<!-- adf:media id=… -->` placeholders plus a logged `MediaWithoutUrl` warning. A media-resolver hook is on the roadmap.
+- **Media captions.** A `mediaSingle` caption is rendered as an italic line under the media on pull, but pushes back as plain italic text — the structured `caption` node is lost.
+- **Link titles.** The official `@atlaskit/editor-markdown-transformer` does not retain link titles when parsing markdown, so `[text](url "title")` round-trips back as `[text](url)`.
+- **Decision lists.** Pulled as bulleted lists prefixed with 🔘 — there is no equivalent ADF construct emitted by the markdown transformer on push, so decision lists do not survive a markdown → ADF round-trip.
+- **Panels.** Pulled as GitHub admonition blockquotes (`> [!NOTE]` etc.); on push they become plain blockquotes — the `panel` node and its type are lost.
+- **Task lists.** Pulled as GFM checkboxes (`- [x]`); on push they become ordinary bullet lists — `taskList` state and item ids are lost.
+- **Expand sections.** Pulled as `<details><summary>` HTML; on push the HTML is plain text, not an `expand` node.
+- **Dates, emojis, inline cards.** Pulled as plain text (`2026-06-10`), shortnames (`:smile:`), and autolinks (`<url>`) respectively; none map back to their structured ADF nodes on push. An inline card carrying only a `data` payload (no `url`) cannot be rendered at all and is dropped with a warning.
+- **Lossy marks.** `underline`, `textColor`, `backgroundColor`, and `subsup` fall back to inline HTML on pull; on push that HTML comes back as literal text, not marks.
+- **Table cell merges.** `colspan`/`rowspan` are flattened — GFM tables have no merged cells.
+
+Editing and pushing a page that uses one of these constructs will downgrade it on the Confluence side. The pull side logs warnings for unknown node types, lossy marks, macro placeholders, and unresolvable media or inline cards; the structural conversions listed above (panels → admonitions, task lists → checkboxes, …) are deliberate and not warned per node.
+
+#### Migrating from earlier versions
+
+Prior versions of this package wrote a `<page>.html` companion file when `saveSource` was enabled; the current version writes `<page>.source.json` instead. Existing `.html` files are harmless and can be removed manually:
+
+```bash
+find .confluence/docs -name "*.html" -delete
+```
+
 ## Git Implementation
 
 ### Two-Branch Model
@@ -144,7 +179,7 @@ Note: Front-matter (`contentHash`, `version`) is **not** updated at commit time.
 When you push:
 
 1. **Detect changes**: Compares content hash vs stored `contentHash` in front-matter
-2. **Push to Confluence**: Uploads markdown converted to Confluence storage format
+2. **Push to Confluence**: Converts markdown to Atlassian Document Format (ADF) via the official `@atlaskit/editor-markdown-transformer` + `@atlaskit/editor-json-transformer`, validated against `@atlaskit/adf-schema`
 3. **Fetch canonical content**: Downloads what Confluence actually stored (may differ slightly)
 4. **Amend commit**: Updates local file with canonical content so future clones match exactly
 5. **Update tracking branch**: Moves `origin/confluence` to HEAD
@@ -250,15 +285,15 @@ This creates `.confluence/config.json` in your project root:
 
 ### Configuration Options
 
-| Option            | Description                           | Default            |
-| ----------------- | ------------------------------------- | ------------------ |
-| `rootPageId`      | Confluence page ID to sync from       | Required           |
-| `baseUrl`         | Confluence Cloud URL                  | Required           |
-| `spaceKey`        | Optional space key                    | -                  |
-| `docsPath`        | Local path for markdown files         | `.confluence/docs` |
-| `excludePatterns` | Glob patterns to exclude              | `[]`               |
-| `saveSource`      | Save original HTML alongside markdown | `false`            |
-| `trackedPaths`    | Glob patterns for git tracking        | `["**/*.md"]`      |
+| Option            | Description                                                 | Default            |
+| ----------------- | ----------------------------------------------------------- | ------------------ |
+| `rootPageId`      | Confluence page ID to sync from                             | Required           |
+| `baseUrl`         | Confluence Cloud URL                                        | Required           |
+| `spaceKey`        | Optional space key                                          | -                  |
+| `docsPath`        | Local path for markdown files                               | `.confluence/docs` |
+| `excludePatterns` | Glob patterns to exclude                                    | `[]`               |
+| `saveSource`      | Save raw ADF JSON alongside markdown (`<page>.source.json`) | `false`            |
+| `trackedPaths`    | Glob patterns for git tracking                              | `["**/*.md"]`      |
 
 ## Directory Structure
 

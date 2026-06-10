@@ -163,7 +163,7 @@ export const PageResponseSchema = Schema.Struct({
   }),
   body: Schema.optional(
     Schema.Struct({
-      storage: Schema.optional(
+      atlas_doc_format: Schema.optional(
         Schema.Struct({
           value: Schema.String,
           representation: Schema.optional(Schema.String)
@@ -204,7 +204,7 @@ export const PageListItemSchema = Schema.Struct({
   })),
   body: Schema.optional(
     Schema.Struct({
-      storage: Schema.optional(
+      atlas_doc_format: Schema.optional(
         Schema.Struct({
           value: Schema.String,
           representation: Schema.optional(Schema.String)
@@ -377,7 +377,7 @@ export const PageVersionSchema = Schema.Struct({
       title: Schema.optional(Schema.String),
       body: Schema.optional(
         Schema.Struct({
-          storage: Schema.optional(
+          atlas_doc_format: Schema.optional(
             Schema.Struct({
               value: Schema.String,
               representation: Schema.optional(Schema.String)
@@ -413,7 +413,7 @@ export const PageVersionContentSchema = Schema.Struct({
   /** Page content */
   body: Schema.optional(
     Schema.Struct({
-      storage: Schema.optional(
+      atlas_doc_format: Schema.optional(
         Schema.Struct({
           value: Schema.String,
           representation: Schema.optional(Schema.String)

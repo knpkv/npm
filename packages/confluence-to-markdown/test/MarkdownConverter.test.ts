@@ -1,142 +1,157 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { layer as MarkdownConverterLayer, MarkdownConverter, schemaBasedLayer } from "../src/MarkdownConverter.js"
+import * as Layer from "effect/Layer"
+import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
+import { layer as AtlaskitTransformersLayer } from "../src/AtlaskitTransformers.js"
+import { layer as MarkdownConverterLayer, MarkdownConverter } from "../src/MarkdownConverter.js"
+
+const TestLayer = MarkdownConverterLayer.pipe(
+  Layer.provide(AtlaskitTransformersLayer),
+  Layer.provide(AdfSchemaValidatorLayer)
+)
+
+const minimalDoc = (content: ReadonlyArray<unknown>): string => JSON.stringify({ version: 1, type: "doc", content })
 
 describe("MarkdownConverter", () => {
-  describe("htmlToMarkdown", () => {
-    it.effect("converts basic HTML to markdown", () =>
+  describe("adfToMarkdown", () => {
+    it.effect("converts a heading", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html = "<p>Hello <strong>world</strong></p>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("Hello")
-        expect(markdown).toContain("**world**")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const md = yield* converter.adfToMarkdown(
+          minimalDoc([{ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Hello" }] }])
+        )
+        expect(md).toContain("# Hello")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts headings", () =>
+    it.effect("converts a paragraph with marks", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html = "<h1>Title</h1><h2>Subtitle</h2>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("# Title")
-        expect(markdown).toContain("## Subtitle")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const md = yield* converter.adfToMarkdown(
+          minimalDoc([{
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Hello " },
+              { type: "text", text: "world", marks: [{ type: "strong" }] }
+            ]
+          }])
+        )
+        expect(md).toContain("Hello")
+        expect(md).toContain("**world**")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts lists", () =>
+    it.effect("converts a bullet list", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html = "<ul><li>Item 1</li><li>Item 2</li></ul>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        // AST-based serializer uses - for unordered lists
-        expect(markdown).toContain("- Item 1")
-        expect(markdown).toContain("- Item 2")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const md = yield* converter.adfToMarkdown(
+          minimalDoc([{
+            type: "bulletList",
+            content: [
+              {
+                type: "listItem",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "one" }] }]
+              },
+              {
+                type: "listItem",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "two" }] }]
+              }
+            ]
+          }])
+        )
+        expect(md).toContain("- one")
+        expect(md).toContain("- two")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts links", () =>
+    it.effect("converts a code block with language", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html = "<a href=\"https://example.com\">Link</a>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("[Link](https://example.com)")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const md = yield* converter.adfToMarkdown(
+          minimalDoc([{
+            type: "codeBlock",
+            attrs: { language: "ts" },
+            content: [{ type: "text", text: "const x = 1" }]
+          }])
+        )
+        expect(md).toContain("```ts")
+        expect(md).toContain("const x = 1")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts code blocks", () =>
+    it.effect("converts a panel to a GitHub admonition", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html = "<pre><code>const x = 1;</code></pre>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("```")
-        expect(markdown).toContain("const x = 1;")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const md = yield* converter.adfToMarkdown(
+          minimalDoc([{
+            type: "panel",
+            attrs: { panelType: "info" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "heads up" }] }]
+          }])
+        )
+        expect(md).toContain("[!NOTE]")
+        expect(md).toContain("heads up")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("strips Confluence macros with rich-text-body", () =>
+    it.effect("fails with ConversionError on invalid JSON", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html =
-          "<ac:structured-macro ac:name=\"info\"><ac:rich-text-body><p>Content</p></ac:rich-text-body></ac:structured-macro>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("Content")
-        expect(markdown).not.toContain("ac:structured-macro")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const result = yield* Effect.either(converter.adfToMarkdown("not json"))
+        expect(result._tag).toBe("Left")
+        if (result._tag === "Left") {
+          expect(result.left._tag).toBe("ConversionError")
+          expect(result.left.direction).toBe("adfToMarkdown")
+        }
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts Confluence code macros to code blocks", () =>
+    it.effect("treats schema-invalid incoming ADF as advisory and still converts", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const html =
-          "<ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[const x = 1;]]></ac:plain-text-body></ac:structured-macro>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("const x = 1;")
-        expect(markdown).toContain("```")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        // Missing `version`, and `attrs.level` should be a number — both are
+        // schema violations Confluence would never produce, but representative
+        // of the schema drift we tolerate on the incoming side.
+        const md = yield* converter.adfToMarkdown(JSON.stringify({
+          type: "doc",
+          content: [{
+            type: "heading",
+            attrs: { level: "1" },
+            content: [{ type: "text", text: "Hello" }]
+          }]
+        }))
+        expect(md).toContain("Hello")
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("still fails on input too malformed to walk", () =>
+      Effect.gen(function*() {
+        // Advisory validation tolerates schema drift, not non-documents:
+        // walking `null` is a defect, `{}`/arrays silently produce an empty
+        // page that could overwrite a real local file.
+        const converter = yield* MarkdownConverter
+        for (const bad of ["null", "{}", "[1,2]", `{"type":"doc","content":"not an array"}`]) {
+          const result = yield* Effect.either(converter.adfToMarkdown(bad))
+          expect(result._tag).toBe("Left")
+          if (result._tag === "Left") {
+            expect(result.left._tag).toBe("ConversionError")
+          }
+        }
+      }).pipe(Effect.provide(TestLayer)))
   })
 
-  describe("markdownToHtml", () => {
-    it.effect("converts basic markdown to HTML", () =>
+  describe("markdownToAdf", () => {
+    it.effect("produces a valid ADF doc for a heading", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const markdown = "Hello **world**"
-        const html = yield* converter.markdownToHtml(markdown)
-        expect(html).toContain("<strong>world</strong>")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
+        const adf = yield* converter.markdownToAdf("# Title\n\nBody")
+        const parsed = JSON.parse(adf) as { type: string; version: number; content: ReadonlyArray<{ type: string }> }
+        expect(parsed.type).toBe("doc")
+        expect(parsed.version).toBe(1)
+        expect(parsed.content[0]?.type).toBe("heading")
+      }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts headings", () =>
+    it.effect("round-trips a heading + paragraph through both directions", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const markdown = "# Title\n\n## Subtitle"
-        const html = yield* converter.markdownToHtml(markdown)
-        expect(html).toContain("<h1>Title</h1>")
-        expect(html).toContain("<h2>Subtitle</h2>")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
-
-    it.effect("converts GFM tables", () =>
-      Effect.gen(function*() {
-        const converter = yield* MarkdownConverter
-        const markdown = "| A | B |\n|---|---|\n| 1 | 2 |"
-        const html = yield* converter.markdownToHtml(markdown)
-        expect(html).toContain("<table>")
-        expect(html).toContain("<th>A</th>")
-        expect(html).toContain("<td>1</td>")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
-
-    it.effect("converts task lists", () =>
-      Effect.gen(function*() {
-        const converter = yield* MarkdownConverter
-        const markdown = "- [ ] Todo\n- [x] Done"
-        const html = yield* converter.markdownToHtml(markdown)
-        expect(html).toContain("checkbox")
-      }).pipe(Effect.provide(MarkdownConverterLayer)))
-  })
-
-  describe("schemaBasedLayer", () => {
-    it.effect("htmlToMarkdown converts basic HTML", () =>
-      Effect.gen(function*() {
-        const converter = yield* MarkdownConverter
-        const html = "<h1>Title</h1><p>Hello world</p>"
-        const markdown = yield* converter.htmlToMarkdown(html)
-        expect(markdown).toContain("# Title")
-        expect(markdown).toContain("Hello world")
-      }).pipe(Effect.provide(schemaBasedLayer)))
-
-    it.effect("htmlToAst parses HTML to Document", () =>
-      Effect.gen(function*() {
-        const converter = yield* MarkdownConverter
-        const html = "<h1>Title</h1><p>Content</p>"
-        const doc = yield* converter.htmlToAst(html)
-        expect(doc.version).toBe(1)
-        expect(doc.children.length).toBe(2)
-        expect(doc.children[0]?._tag).toBe("Heading")
-        expect(doc.children[1]?._tag).toBe("Paragraph")
-      }).pipe(Effect.provide(schemaBasedLayer)))
-
-    it.effect("markdownToAst parses Markdown to Document", () =>
-      Effect.gen(function*() {
-        const converter = yield* MarkdownConverter
-        const md = "# Title\n\nContent"
-        const doc = yield* converter.markdownToAst(md)
-        expect(doc.version).toBe(1)
-        expect(doc.children.length).toBe(2)
-        expect(doc.children[0]?._tag).toBe("Heading")
-        expect(doc.children[1]?._tag).toBe("Paragraph")
-      }).pipe(Effect.provide(schemaBasedLayer)))
+        const md1 = "# Title\n\nHello **world**"
+        const adf = yield* converter.markdownToAdf(md1)
+        const md2 = yield* converter.adfToMarkdown(adf)
+        expect(md2).toContain("# Title")
+        expect(md2).toContain("**world**")
+      }).pipe(Effect.provide(TestLayer)))
   })
 })

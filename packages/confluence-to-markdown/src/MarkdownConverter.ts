@@ -1,26 +1,30 @@
 /**
- * HTML to Markdown conversion service using AST-based approach.
+ * ADF ↔ Markdown conversion facade.
+ *
+ * Push (markdown → ADF) routes through the official `@atlaskit` markdown
+ * + JSON transformers and is strictly validated by `AdfSchemaValidator` —
+ * we author that side, so schema failures are bugs. Pull (ADF → markdown)
+ * routes through the in-package `AdfWalker`; incoming validation is advisory
+ * (logged, not thrown) because Confluence Cloud routinely emits documents the
+ * canonical schema lags behind.
  *
  * @module
  */
+import type { DocNode } from "@atlaskit/adf-schema"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import type { Document } from "./ast/Document.js"
+import { revertPlaceholders } from "./AdfPlaceholders.js"
+import { AdfSchemaValidator } from "./AdfSchemaValidator.js"
+import { walk, type WalkerWarning } from "./AdfWalker.js"
+import { AtlaskitTransformers } from "./AtlaskitTransformers.js"
+import type { AdfSchemaError, AtlaskitTransformersError } from "./ConfluenceError.js"
 import { ConversionError } from "./ConfluenceError.js"
-import { parseConfluenceHtml } from "./parsers/ConfluenceParser.js"
-import { parseMarkdown } from "./parsers/MarkdownParser.js"
-import { ParseError, type SerializeError } from "./SchemaConverterError.js"
-import { ConfluenceToMarkdown, DocumentFromHast, DocumentFromMdast } from "./schemas/ConversionSchema.js"
-import { HastFromHtml } from "./schemas/hast/index.js"
-import { MdastFromMarkdown } from "./schemas/mdast/index.js"
-import { PreprocessedHtmlFromConfluence } from "./schemas/preprocessing/index.js"
-import { serializeToConfluence } from "./serializers/ConfluenceSerializer.js"
-import { type SerializeOptions, serializeToMarkdown } from "./serializers/MarkdownSerializer.js"
 
 /**
- * Markdown conversion service for HTML <-> GFM conversion.
+ * Markdown conversion service. Public surface is two delegating methods —
+ * `adfToMarkdown` (pull) and `markdownToAdf` (push).
  *
  * @example
  * ```typescript
@@ -29,13 +33,8 @@ import { type SerializeOptions, serializeToMarkdown } from "./serializers/Markdo
  *
  * const program = Effect.gen(function* () {
  *   const converter = yield* MarkdownConverter
- *   const md = yield* converter.htmlToMarkdown("<h1>Hello</h1><p>World</p>")
- *   console.log(md) // # Hello\n\nWorld
+ *   const md = yield* converter.adfToMarkdown(adfJson)
  * })
- *
- * Effect.runPromise(
- *   program.pipe(Effect.provide(MarkdownConverter.layer))
- * )
  * ```
  *
  * @category Conversion
@@ -46,146 +45,114 @@ export class MarkdownConverter extends Context.Tag(
   MarkdownConverter,
   {
     /**
-     * Convert Confluence storage format (HTML) to GitHub Flavored Markdown.
+     * Convert an ADF JSON document (as wire-format string) to GitHub Flavored
+     * Markdown. Checks against the canonical @atlaskit/adf-schema before
+     * walking; violations are logged as warnings (remote drift), and only a
+     * document too malformed to walk at all fails with ConversionError.
      */
-    readonly htmlToMarkdown: (
-      html: string,
-      options?: SerializeOptions
-    ) => Effect.Effect<string, ConversionError>
+    readonly adfToMarkdown: (adfJson: string) => Effect.Effect<string, ConversionError>
 
     /**
-     * Convert GitHub Flavored Markdown to HTML (Confluence storage format).
+     * Convert GitHub Flavored Markdown to a JSON-stringified ADF document.
+     * Routes through the official @atlaskit transformers; validates the
+     * produced ADF against the canonical schema before stringification.
      */
-    readonly markdownToHtml: (markdown: string) => Effect.Effect<string, ConversionError>
-
-    /**
-     * Parse Confluence HTML to Document AST.
-     */
-    readonly htmlToAst: (html: string) => Effect.Effect<Document, ParseError>
-
-    /**
-     * Parse Markdown to Document AST.
-     */
-    readonly markdownToAst: (markdown: string) => Effect.Effect<Document, ParseError>
-
-    /**
-     * Serialize Document AST to Confluence HTML.
-     */
-    readonly astToHtml: (doc: Document) => Effect.Effect<string, SerializeError>
-
-    /**
-     * Serialize Document AST to Markdown.
-     */
-    readonly astToMarkdown: (doc: Document) => Effect.Effect<string, SerializeError>
+    readonly markdownToAdf: (markdown: string) => Effect.Effect<string, ConversionError>
   }
 >() {}
+
+const warningSummary = (w: WalkerWarning): string => {
+  switch (w._tag) {
+    case "UnsupportedNode":
+      return `${w._tag} ${w.nodeType}`
+    case "LossyMark":
+      return `${w._tag} ${w.mark}`
+    case "MediaWithoutUrl":
+      return `${w._tag} ${w.mediaId}`
+    case "UnsupportedExtension":
+      return `${w._tag} ${w.nodeType} ${w.extensionKey || "?"}`
+  }
+}
+
+const toConversionError = (
+  direction: "adfToMarkdown" | "markdownToAdf"
+) =>
+(cause: AdfSchemaError | AtlaskitTransformersError | { readonly cause: unknown }): ConversionError =>
+  new ConversionError({ direction, cause })
+
+// The least structure the walker needs: a doc node with a content array.
+// Anything failing this isn't "schema drift", it's not an ADF document —
+// advisory validation must not let it through (walking `null` is a defect;
+// walking `{}` silently produces an empty page).
+const isWalkableDoc = Schema.is(Schema.Struct({
+  type: Schema.Literal("doc"),
+  content: Schema.Array(Schema.Unknown)
+}))
 
 /**
  * Layer that provides the MarkdownConverter service.
  *
  * @category Layers
  */
-export const layer: Layer.Layer<MarkdownConverter> = Layer.succeed(
+export const layer: Layer.Layer<
   MarkdownConverter,
-  MarkdownConverter.of({
-    htmlToMarkdown: (html, options) =>
-      Effect.gen(function*() {
-        // Use AST-based approach to preserve colors, underlines, etc.
-        const doc = yield* parseConfluenceHtml(html).pipe(
-          Effect.mapError((e) => new ConversionError({ direction: "htmlToMarkdown", cause: e.message }))
-        )
-        return yield* serializeToMarkdown(doc, options).pipe(
-          Effect.mapError((e) => new ConversionError({ direction: "htmlToMarkdown", cause: e.message }))
-        )
-      }),
-
-    markdownToHtml: (markdown) =>
-      Effect.gen(function*() {
-        // Use AST-based approach for consistency
-        const doc = yield* parseMarkdown(markdown).pipe(
-          Effect.mapError((e) => new ConversionError({ direction: "markdownToHtml", cause: e.message }))
-        )
-        return yield* serializeToConfluence(doc).pipe(
-          Effect.mapError((e) => new ConversionError({ direction: "markdownToHtml", cause: e.message }))
-        )
-      }),
-
-    htmlToAst: (html) => parseConfluenceHtml(html),
-
-    markdownToAst: (markdown) => parseMarkdown(markdown),
-
-    astToHtml: (doc) => serializeToConfluence(doc),
-
-    astToMarkdown: (doc) => serializeToMarkdown(doc)
-  })
-)
-
-/**
- * Schema-based layer for MarkdownConverter using Effect Schema transforms.
- *
- * This is an alternative implementation that uses the new Schema-based
- * conversion pipeline. It provides the same API as the default layer.
- *
- * Note: For full fidelity, continue to use the default layer. This schema-based
- * layer is useful for simpler use cases or when you want to leverage Schema
- * composition.
- *
- * @example
- * ```typescript
- * import { MarkdownConverter, schemaBasedLayer } from "@knpkv/confluence-to-markdown/MarkdownConverter"
- * import { Effect } from "effect"
- *
- * const program = Effect.gen(function* () {
- *   const converter = yield* MarkdownConverter
- *   const md = yield* converter.htmlToMarkdown("<h1>Hello</h1>")
- * })
- *
- * Effect.runPromise(
- *   program.pipe(Effect.provide(schemaBasedLayer))
- * )
- * ```
- *
- * @category Layers
- */
-export const schemaBasedLayer: Layer.Layer<MarkdownConverter> = Layer.succeed(
+  never,
+  AtlaskitTransformers | AdfSchemaValidator
+> = Layer.effect(
   MarkdownConverter,
-  MarkdownConverter.of({
-    // Note: Schema-based layer doesn't support includeRawSource option yet
-    htmlToMarkdown: (html, options) =>
+  Effect.gen(function*() {
+    const transformers = yield* AtlaskitTransformers
+    const validator = yield* AdfSchemaValidator
+
+    const adfToMarkdown = (adfJson: string): Effect.Effect<string, ConversionError> =>
       Effect.gen(function*() {
-        if (options?.includeRawSource !== undefined) {
-          yield* Effect.logWarning("schemaBasedLayer: includeRawSource option is not supported, use default layer")
+        const raw = yield* Effect.try({
+          try: () => JSON.parse(adfJson),
+          catch: (cause) => new ConversionError({ direction: "adfToMarkdown", cause })
+        })
+        // Incoming validation is advisory: the canonical @atlaskit schema is
+        // routinely stricter than what Confluence Cloud actually emits (old
+        // revisions, experimental nodes), so a failure here usually means
+        // "schema drift", not "broken document". Log + continue. Outgoing
+        // validation stays strict because we control that side.
+        const doc = yield* validator.check(raw, "incoming").pipe(
+          Effect.catchTag("AdfSchemaError", (err) =>
+            isWalkableDoc(raw)
+              ? Effect.gen(function*() {
+                yield* Effect.logWarning(
+                  `adf schema (incoming): ${err.issues.length} issue(s); first: ${
+                    err.issues.slice(0, 3).map((i) =>
+                      `${i.instancePath ?? "?"} ${i.keyword ?? "?"} ${i.message ?? ""}`.trim()
+                    ).join(" | ")
+                  }`
+                )
+                return raw as DocNode
+              })
+              : Effect.fail(toConversionError("adfToMarkdown")(err)))
+        )
+        const { markdown, warnings } = walk(doc)
+        for (const w of warnings) {
+          yield* Effect.logWarning(`adf walker: ${warningSummary(w)}`, w)
         }
-        return yield* Schema.decode(ConfluenceToMarkdown)(html)
-      }).pipe(
-        Effect.mapError((e) => new ConversionError({ direction: "htmlToMarkdown", cause: e.message }))
-      ),
+        return markdown
+      })
 
-    markdownToHtml: (markdown) =>
-      Schema.encode(ConfluenceToMarkdown)(markdown).pipe(
-        Effect.mapError((e) => new ConversionError({ direction: "markdownToHtml", cause: e.message }))
-      ),
-
-    htmlToAst: (html) =>
+    const markdownToAdf = (markdown: string): Effect.Effect<string, ConversionError> =>
       Effect.gen(function*() {
-        const preprocessed = yield* Schema.decode(PreprocessedHtmlFromConfluence)(html)
-        const hast = yield* Schema.decode(HastFromHtml)(preprocessed)
-        return yield* Schema.decode(DocumentFromHast)(hast)
-      }).pipe(
-        Effect.mapError((e) => new ParseError({ source: "confluence", message: e.message }))
-      ),
+        const adf = yield* transformers.use(({ json, md }) => json.encode(md.parse(markdown))).pipe(
+          Effect.mapError(toConversionError("markdownToAdf"))
+        )
+        // The walker emits HTML/comment placeholders for Confluence-only nodes
+        // (status, extension). @atlaskit's markdown transformer doesn't know
+        // these, so they come through as plain text. Rewrite them back into
+        // the structured nodes Confluence expects before validation.
+        const reverted = revertPlaceholders(adf)
+        const validated = yield* validator.check(reverted, "outgoing").pipe(
+          Effect.mapError(toConversionError("markdownToAdf"))
+        )
+        return JSON.stringify(validated)
+      })
 
-    markdownToAst: (markdown) =>
-      Effect.gen(function*() {
-        const mdast = yield* Schema.decode(MdastFromMarkdown)(markdown)
-        return yield* Schema.decode(DocumentFromMdast)(mdast)
-      }).pipe(
-        Effect.mapError((e) => new ParseError({ source: "markdown", message: e.message }))
-      ),
-
-    // For serialization, continue using the existing serializers for full fidelity
-    astToHtml: (doc) => serializeToConfluence(doc),
-
-    astToMarkdown: (doc) => serializeToMarkdown(doc)
+    return MarkdownConverter.of({ adfToMarkdown, markdownToAdf })
   })
 )
