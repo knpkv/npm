@@ -189,6 +189,16 @@ describe("MarkdownConverter round-trip", () => {
       ])
     }).pipe(Effect.provide(TestLayer)))
 
+  // Regression: `|` in a cell was escaped twice (escapeText + the table-cell
+  // pass), emitting `\\|` — GFM reads that as literal backslash + bare pipe,
+  // which opens a phantom column and breaks the row.
+  it.effect("escapes a pipe inside a table cell exactly once", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip("| A |\n| --- |\n| a\\|b |\n")
+      expect(md).toContain("a\\|b")
+      expect(md).not.toContain("a\\\\|b")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Regression: a code fence *quoting* the placeholder syntax got structured
   // nodes injected into the codeBlock, failing outgoing schema validation.
   it.effect("does not expand placeholder-looking text inside a code fence", () =>

@@ -52,6 +52,22 @@ interface Ctx {
 const ESCAPE_RE = /[\\`*_[\]<|]/g
 const escapeText = (s: string): string => s.replace(ESCAPE_RE, "\\$&")
 const escapeAttr = (s: string): string => s.replace(/[\\"]/g, "\\$&")
+// For text inside HTML *blocks* (`<details>`/`<summary>`): CommonMark treats
+// everything up to the closing blank line as raw HTML, so backslash escapes
+// would render literally — entity-escape instead.
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+// `(`/`)`/space/`<`/`>`/`\` in a destination break `[text](url)` — wrap in
+// angle brackets, percent-encoding the characters that would terminate or
+// escape the wrapper itself.
+const safeHref = (href: string): string =>
+  /[() <>\\]/.test(href) ? `<${href.replace(/[<>\\]/g, (c) => encodeURIComponent(c))}>` : href
+// Alt text is substituted rather than escaped: @atlaskit's media markdown
+// plugin throws on `\[`/`\]` in alt (making the page un-pushable), and
+// newlines split the construct outright.
+const sanitizeAlt = (s: string): string =>
+  s.replace(/\[/g, "(").replace(/\]/g, ")").replace(/\\/g, "/").replace(/\s+/g, " ").trim()
+
 // ESCAPE_RE deliberately skips characters that are only special at line
 // start, so lines assembled from paragraph text (including after hardBreak)
 // must neutralize leading block markers: ATX headings, blockquotes, list
@@ -150,7 +166,13 @@ const inlineNode = (n: AdfNode, ctx: Ctx): string => {
     }
     case "inlineCard": {
       const url = attrStr(n, "url")
-      return url ? `<${url}>` : ""
+      if (!url) {
+        // data-payload smart links have no URL to render — losing one must
+        // at least be visible in the logs.
+        ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: "inlineCard" })
+        return ""
+      }
+      return `<${url}>`
     }
     case "date": {
       const ts = attrStr(n, "timestamp")
@@ -237,9 +259,8 @@ const applyMarks = (text: string, marks: ReadonlyArray<AdfNode>, ctx: Ctx): stri
       case "link": {
         const href = attrStr(m, "href") ?? ""
         const title = attrStr(m, "title")
-        const safeHref = /[() ]/.test(href) ? `<${href.replace(/>/g, "%3E")}>` : href
         const titlePart = title ? ` "${escapeAttr(title)}"` : ""
-        out = `[${out}](${safeHref}${titlePart})`
+        out = `[${out}](${safeHref(href)}${titlePart})`
         break
       }
       case "underline":
@@ -322,9 +343,16 @@ const blockquote = (content: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): stri
 }
 
 const codeBlock = (n: AdfNode): string => {
-  const lang = attrStr(n, "language") ?? ""
+  // A fence's info string may not contain backticks (CommonMark) and a
+  // newline would inject lines into the code content — the editor UI uses a
+  // fixed language list, but the REST API accepts arbitrary strings.
+  const lang = (attrStr(n, "language") ?? "").replace(/[`\s]+/g, "")
   const text = (n.content ?? []).map((c) => c.text ?? "").join("")
-  return "```" + lang + "\n" + text + "\n```"
+  // A fixed ``` fence would be terminated early by code that itself contains
+  // a triple-backtick run — use one backtick more than the longest run inside.
+  const runs = text.match(/`+/g) ?? []
+  const fence = "`".repeat(Math.max(3, runs.reduce((max, r) => Math.max(max, r.length), 0) + 1))
+  return fence + lang + "\n" + text + "\n" + fence
 }
 
 const listItemBlocks = (item: AdfNode, ctx: Ctx): string => {
@@ -366,7 +394,14 @@ const tableCellInline = (cell: AdfNode, ctx: Ctx): string => {
     if (b.type === "paragraph") parts.push(inline(b.content, cellCtx))
     else parts.push(block(b, cellCtx).replace(/\n/g, "<br>"))
   }
-  return parts.join("<br>").replace(/\|/g, "\\|")
+  // Escape `|` so it can't open a new column — but only pipes that aren't
+  // already escaped (inline() escapes them in plain text; code spans, URLs
+  // and <br>-flattened blocks don't). A pipe is escaped iff it's preceded by
+  // an odd run of backslashes, so count the run rather than peek one char.
+  return parts.join("<br>").replace(
+    /(\\*)\|/g,
+    (match, backslashes: string) => backslashes.length % 2 === 0 ? `${backslashes}\\|` : match
+  )
 }
 
 const table = (n: AdfNode, ctx: Ctx): string => {
@@ -399,8 +434,13 @@ const panel = (n: AdfNode, ctx: Ctx): string => {
 
 const expand = (n: AdfNode, ctx: Ctx): string => {
   const title = attrStr(n, "title") ?? ""
+  // At block level <details> is a CommonMark type-6 HTML block, so the title
+  // needs entity escaping. Inside a table cell the flattened output becomes
+  // *inline* HTML where the text between tags is still markdown — there the
+  // backslash escapes are the correct (and only working) form.
+  const safeTitle = ctx.inTable ? escapeText(title) : escapeHtml(title)
   const inner = (n.content ?? []).map((c) => block(c, ctx)).join("\n\n")
-  return `<details><summary>${escapeText(title)}</summary>\n\n${inner}\n\n</details>`
+  return `<details><summary>${safeTitle}</summary>\n\n${inner}\n\n</details>`
 }
 
 const taskList = (n: AdfNode, ctx: Ctx): string => {
@@ -435,12 +475,22 @@ const renderMedia = (media: AdfNode | undefined, ctx: Ctx): string => {
   const id = (media && attrStr(media, "id")) ?? ""
   const alt = (media && attrStr(media, "alt")) ?? ""
   const url = media && attrStr(media, "url")
-  if (url) return `![${alt}](${url})`
+  if (url) return `![${sanitizeAlt(alt)}](${safeHref(url)})`
   ctx.warnings.push({ _tag: "MediaWithoutUrl", mediaId: id })
   return `<!-- adf:media id=${id} -->`
 }
 
-const mediaSingle = (n: AdfNode, ctx: Ctx): string => renderMedia((n.content ?? [])[0], ctx)
+const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
+  const children = n.content ?? []
+  const rendered = renderMedia(children.find((c) => c.type === "media"), ctx)
+  const caption = children.find((c) => c.type === "caption")
+  const captionText = caption ? inline(caption.content, ctx).trim() : ""
+  if (captionText.length === 0) return rendered
+  // An em-marked caption already renders as `_…_`; wrapping again would make
+  // `__…__` (strong). Leave captions that touch an underscore unwrapped.
+  const line = captionText.startsWith("_") || captionText.endsWith("_") ? captionText : `_${captionText}_`
+  return `${rendered}\n${line}`
+}
 
 const mediaGroup = (n: AdfNode, ctx: Ctx): string =>
   (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n")

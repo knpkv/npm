@@ -329,6 +329,101 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("<!-- adf:bodiedExtension key=details type=com.example")
   })
 
+  it("escapes a pipe in a table cell exactly once", () => {
+    const cell = (content: ReadonlyArray<unknown>) => ({
+      type: "tableCell",
+      content: [{ type: "paragraph", content }]
+    })
+    const r = walk(doc([{
+      type: "table",
+      content: [{
+        type: "tableRow",
+        content: [
+          cell([{ type: "text", text: "a|b" }]),
+          // Code spans skip escapeText, so this pipe is only caught by the
+          // table-cell pass — both cells must end up single-escaped.
+          cell([{ type: "text", text: "x|y", marks: [{ type: "code" }] }])
+        ]
+      }]
+    }]))
+    expect(r.markdown).toContain("a\\|b")
+    expect(r.markdown).not.toContain("a\\\\|b")
+    expect(r.markdown).toContain("`x\\|y`")
+  })
+
+  it("renders a mediaSingle caption as an italic line under the media", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [
+        { type: "media", attrs: { id: "m1", alt: "diagram", url: "https://x.test/d.png" } },
+        { type: "caption", content: [{ type: "text", text: "Figure 1" }] }
+      ]
+    }]))
+    expect(r.markdown).toContain("![diagram](https://x.test/d.png)\n_Figure 1_")
+  })
+
+  it("backslash-escapes nestedExpand titles inside table cells (inline HTML context)", () => {
+    const r = walk(doc([{
+      type: "table",
+      content: [{
+        type: "tableRow",
+        content: [{
+          type: "tableCell",
+          content: [{
+            type: "nestedExpand",
+            attrs: { title: "v2 *beta*" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "inner" }] }]
+          }]
+        }]
+      }]
+    }]))
+    expect(r.markdown).toContain("<summary>v2 \\*beta\\*</summary>")
+  })
+
+  it("entity-escapes expand titles instead of backslash-escaping them", () => {
+    const r = walk(doc([{
+      type: "expand",
+      attrs: { title: `v2 *beta* <a href="x">` },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "inner" }] }]
+    }]))
+    expect(r.markdown).toContain(`<summary>v2 *beta* &lt;a href=&quot;x&quot;&gt;</summary>`)
+    expect(r.markdown).not.toContain("\\*beta\\*")
+  })
+
+  it("lengthens the code-block fence when the code contains backtick runs", () => {
+    const r = walk(doc([{
+      type: "codeBlock",
+      attrs: { language: "md" },
+      content: [{ type: "text", text: "```js\ncode\n```" }]
+    }]))
+    expect(r.markdown).toContain("````md\n```js\ncode\n```\n````")
+  })
+
+  it("sanitizes media alt text and wraps unsafe media urls", () => {
+    // Brackets are substituted, not backslash-escaped: @atlaskit's media
+    // markdown plugin throws on `\[` in alt, which would make pushes fail.
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [{
+        type: "media",
+        attrs: { id: "m1", alt: "a [b]\nc", url: "https://x.test/a (1).png" }
+      }]
+    }]))
+    expect(r.markdown).toContain("![a (b) c](<https://x.test/a (1).png>)")
+  })
+
+  it("percent-encodes wrapper-breaking characters in unsafe urls", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{
+        type: "text",
+        text: "go",
+        marks: [{ type: "link", attrs: { href: "https://x.test/a b<c>d\\e" } }]
+      }]
+    }]))
+    expect(r.markdown).toContain("[go](<https://x.test/a b%3Cc%3Ed%5Ce>)")
+  })
+
   it("escapes block markers at line start so text cannot become structure", () => {
     const r = walk(doc([
       { type: "paragraph", content: [{ type: "text", text: "# not a heading" }] },
@@ -354,6 +449,60 @@ describe("AdfWalker", () => {
   it("does not escape mid-line hashes or list-like text after the first word", () => {
     const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "a #1 > #2 + b" }] }]))
     expect(r.markdown).toContain("a #1 > #2 + b")
+  })
+
+  it("strips backticks and whitespace from the code-block language", () => {
+    const r = walk(doc([{
+      type: "codeBlock",
+      attrs: { language: "c`x\ninjected" },
+      content: [{ type: "text", text: "hello" }]
+    }]))
+    expect(r.markdown).toContain("```cxinjected\nhello\n```")
+  })
+
+  it("warns when an inlineCard has no url to render", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "before " },
+        { type: "inlineCard", attrs: { data: { url: "https://hidden.test" } } },
+        { type: "text", text: " after" }
+      ]
+    }]))
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "inlineCard")).toBe(true)
+  })
+
+  it("does not double-wrap an em-marked caption", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [
+        { type: "media", attrs: { id: "m1", url: "https://x.test/d.png" } },
+        { type: "caption", content: [{ type: "text", text: "a caption", marks: [{ type: "em" }] }] }
+      ]
+    }]))
+    expect(r.markdown).toContain("_a caption_")
+    expect(r.markdown).not.toContain("__a caption__")
+  })
+
+  it("omits the caption line when the caption is only whitespace", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [
+        { type: "media", attrs: { id: "m1", url: "https://x.test/d.png" } },
+        { type: "caption", content: [{ type: "text", text: "   " }] }
+      ]
+    }]))
+    expect(r.markdown).toContain("![](https://x.test/d.png)")
+    expect(r.markdown).not.toContain("_")
+  })
+
+  it("never renders a caption as the media when the media child is missing", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [{ type: "caption", content: [{ type: "text", text: "orphan" }] }]
+    }]))
+    expect(r.markdown).toContain("<!-- adf:media id= -->")
+    expect(r.markdown).toContain("_orphan_")
   })
 
   it("ends output with exactly one newline", () => {
