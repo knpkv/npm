@@ -119,9 +119,20 @@ When `saveSource` is enabled, the raw ADF JSON is persisted as `<page>.source.js
 
 #### Known fidelity limitations
 
+Nodes that survive a pull → edit → push round-trip structurally intact: status (unless its text contains `<`), mentions (with an accountId), and macros (`extension` / `bodiedExtension` / `inlineExtension` — the placeholder comment carries the full macro attrs, including `parameters`, as a base64 blob, and a bodied macro's body is re-attached from the blocks between its `<!-- adf:bodiedExtension … -->` / `<!-- adf:/bodiedExtension -->` markers; a bodied macro inside a table cell keeps only the marker, its body is dropped). Everything below does **not** fully survive:
+
 - **Attachment media.** Pages with images or other attachments use ADF `mediaSingle` / `mediaInline` nodes that reference attachments by `id` + `collection`. Resolving these to download URLs requires a separate Confluence API call per attachment, which this package does not yet make. Such nodes are currently emitted as `<!-- adf:media id=… -->` placeholders plus a logged `MediaWithoutUrl` warning. A media-resolver hook is on the roadmap.
+- **Media captions.** A `mediaSingle` caption is rendered as an italic line under the media on pull, but pushes back as plain italic text — the structured `caption` node is lost.
 - **Link titles.** The official `@atlaskit/editor-markdown-transformer` does not retain link titles when parsing markdown, so `[text](url "title")` round-trips back as `[text](url)`.
 - **Decision lists.** Pulled as bulleted lists prefixed with 🔘 — there is no equivalent ADF construct emitted by the markdown transformer on push, so decision lists do not survive a markdown → ADF round-trip.
+- **Panels.** Pulled as GitHub admonition blockquotes (`> [!NOTE]` etc.); on push they become plain blockquotes — the `panel` node and its type are lost.
+- **Task lists.** Pulled as GFM checkboxes (`- [x]`); on push they become ordinary bullet lists — `taskList` state and item ids are lost.
+- **Expand sections.** Pulled as `<details><summary>` HTML; on push the HTML is plain text, not an `expand` node.
+- **Dates, emojis, inline cards.** Pulled as plain text (`2026-06-10`), shortnames (`:smile:`), and autolinks (`<url>`) respectively; none map back to their structured ADF nodes on push. An inline card carrying only a `data` payload (no `url`) cannot be rendered at all and is dropped with a warning.
+- **Lossy marks.** `underline`, `textColor`, `backgroundColor`, and `subsup` fall back to inline HTML on pull; on push that HTML comes back as literal text, not marks.
+- **Table cell merges.** `colspan`/`rowspan` are flattened — GFM tables have no merged cells.
+
+Editing and pushing a page that uses one of these constructs will downgrade it on the Confluence side. The pull side logs warnings for unknown node types, lossy marks, macro placeholders, and unresolvable media or inline cards; the structural conversions listed above (panels → admonitions, task lists → checkboxes, …) are deliberate and not warned per node.
 
 #### Migrating from earlier versions
 
