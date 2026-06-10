@@ -15,6 +15,67 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("\\*stars\\*")
   })
 
+  it("does not escape characters that are only special at line-start or in link syntax", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "text", text: "a (b) c+ d! {e} #1 > #2" }]
+    }]))
+    expect(r.markdown).toContain("a (b) c+ d! {e} #1 > #2")
+  })
+
+  it("escapes block markers at line start so text cannot become structure", () => {
+    const r = walk(doc([
+      { type: "paragraph", content: [{ type: "text", text: "# not a heading" }] },
+      { type: "paragraph", content: [{ type: "text", text: "> not a quote" }] },
+      { type: "paragraph", content: [{ type: "text", text: "+ not a list" }] },
+      { type: "paragraph", content: [{ type: "text", text: "1. not a list" }] },
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "a" },
+          { type: "hardBreak" },
+          { type: "text", text: "# b stays text" }
+        ]
+      }
+    ]))
+    expect(r.markdown).toContain("\\# not a heading")
+    expect(r.markdown).toContain("\\> not a quote")
+    expect(r.markdown).toContain("\\+ not a list")
+    expect(r.markdown).toContain("1\\. not a list")
+    expect(r.markdown).toContain("\\# b stays text")
+  })
+
+  it("does not escape mid-line hashes or list-like text after the first word", () => {
+    const r = walk(doc([{ type: "paragraph", content: [{ type: "text", text: "a #1 > #2 + b" }] }]))
+    expect(r.markdown).toContain("a #1 > #2 + b")
+  })
+
+  it("does not escape code-marked text", () => {
+    // Backslashes inside code spans are literal; escaping here made every
+    // pull/push round-trip double them (a\_b → a\\\_b → …).
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "text", text: "a_b (c*)", marks: [{ type: "code" }] }]
+    }]))
+    expect(r.markdown).toContain("`a_b (c*)`")
+  })
+
+  it("fences code spans containing backticks with a longer delimiter", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "text", text: "a `b` c", marks: [{ type: "code" }] }]
+    }]))
+    expect(r.markdown).toContain("``a `b` c``")
+  })
+
+  it("space-pads code spans that start or end with a backtick", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [{ type: "text", text: "`tick", marks: [{ type: "code" }] }]
+    }]))
+    expect(r.markdown).toContain("`` `tick ``")
+  })
+
   it("renders inline marks", () => {
     const r = walk(doc([{
       type: "paragraph",

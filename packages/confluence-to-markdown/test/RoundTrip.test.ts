@@ -101,6 +101,45 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).not.toContain("2026\\-05\\-03")
     }).pipe(Effect.provide(TestLayer)))
 
+  it.effect("does not escape parentheses or other line-start-only characters", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip("a (b) c+ d!\n")
+      expect(md).toContain("a (b) c+ d!")
+      expect(md).not.toContain("\\(")
+      expect(md).not.toContain("\\+")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Regression: '# x' / '> x' / '+ x' paragraph text became real headings,
+  // quotes, and lists after the ESCAPE_RE narrowing dropped those characters.
+  it.effect("keeps line-start block markers in paragraph text as text", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] })
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [paragraph("# not a heading"), paragraph("> not a quote"), paragraph("+ not a list")]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string }>
+      }
+      expect(adfOut.content.map((n) => n.type)).toEqual(["paragraph", "paragraph", "paragraph"])
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Regression: escaping inside code spans put literal backslashes into the
+  // ADF text, which the next pull re-escaped — doubling them on every
+  // round-trip (`a_b` → `a\_b` → `a\\\_b` → …).
+  it.effect("code spans with markdown-special characters are a round-trip fixed point", () =>
+    Effect.gen(function*() {
+      const source = "x `a_b` y `c()` (z)\n"
+      const once = yield* roundTrip(source)
+      const twice = yield* roundTrip(once)
+      expect(once).toContain("`a_b`")
+      expect(once).toContain("`c()`")
+      expect(once).not.toContain("\\")
+      expect(twice).toBe(once)
+    }).pipe(Effect.provide(TestLayer)))
+
   it.effect("preserves an inline status placeholder through round-trip", () =>
     Effect.gen(function*() {
       const md = yield* roundTrip(

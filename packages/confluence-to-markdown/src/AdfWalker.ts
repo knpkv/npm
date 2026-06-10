@@ -45,10 +45,30 @@ interface Ctx {
 // Mid-line characters that change inline parsing in GFM. We deliberately omit
 // `.` and `-` because they only carry meaning at line-start (numbered lists,
 // setext rules) and escaping them mid-line produces noisy output like
-// `v1\.0\.0` for ordinary version strings.
-const ESCAPE_RE = /[\\`*_{}[\]()#+!<>|]/g
+// `v1\.0\.0` for ordinary version strings. Same reasoning drops `#`, `+`, `>`
+// (line-start only), `(`/`)` (only meaningful right after `]`, which we
+// escape), `!` (only meaningful right before `[`, ditto) and `{`/`}` (not
+// special in GFM at all) — escaping those produced noise like `\(v2\)`.
+const ESCAPE_RE = /[\\`*_[\]<|]/g
 const escapeText = (s: string): string => s.replace(ESCAPE_RE, "\\$&")
 const escapeAttr = (s: string): string => s.replace(/[\\"]/g, "\\$&")
+
+// ESCAPE_RE deliberately skips characters that are only special at line
+// start, so lines assembled from paragraph text (including after hardBreak)
+// must neutralize leading block markers: ATX headings, blockquotes, list
+// bullets, ordered-list markers, thematic breaks, and setext underlines.
+// A superfluous escape is harmless when the line later lands mid-line
+// (after a list marker etc.) — backslash before punctuation always renders
+// as the bare character.
+const escapeLineStart = (line: string): string => {
+  if (/^(#{1,6}|[-+])(\s|$)/.test(line) || line.startsWith(">") || /^-{3,}\s*$/.test(line) || /^=+\s*$/.test(line)) {
+    return "\\" + line
+  }
+  const ordered = /^(\d+)([.)])(\s|$)/.exec(line)?.[1]
+  if (ordered) return `${ordered}\\${line.slice(ordered.length)}`
+  return line
+}
+const escapeLineStarts = (s: string): string => s.split("\n").map(escapeLineStart).join("\n")
 
 const attrStr = (n: AdfNode, key: string): string | undefined => {
   const v = n.attrs?.[key]
@@ -76,8 +96,15 @@ const inline = (nodes: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): string => 
 
 const inlineNode = (n: AdfNode, ctx: Ctx): string => {
   switch (n.type) {
-    case "text":
-      return applyMarks(escapeText(n.text ?? ""), n.marks ?? [], ctx)
+    case "text": {
+      const marks = n.marks ?? []
+      const text = n.text ?? ""
+      // Code spans render their content literally — backslash-escaping inside
+      // backticks would emit literal backslashes, which the push side then
+      // preserves verbatim, doubling them on every pull/push round-trip.
+      const hasCode = marks.some((m) => m.type === "code")
+      return applyMarks(hasCode ? text : escapeText(text), marks, ctx)
+    }
     case "hardBreak":
       return ctx.inTable ? "<br>" : "  \n"
     case "mention": {
@@ -141,9 +168,16 @@ const applyMarks = (text: string, marks: ReadonlyArray<AdfNode>, ctx: Ctx): stri
   let out = text
   for (const m of marks) {
     switch (m.type) {
-      case "code":
-        out = `\`${out}\``
+      case "code": {
+        // Code-span content is unescaped, so per GFM the delimiter must be a
+        // backtick run longer than any run inside, space-padded when the
+        // content starts/ends with a backtick (or is empty).
+        const runs = out.match(/`+/g) ?? []
+        const fence = "`".repeat(runs.reduce((max, r) => Math.max(max, r.length), 0) + 1)
+        const pad = out === "" || out.startsWith("`") || out.endsWith("`") ? " " : ""
+        out = `${fence}${pad}${out}${pad}${fence}`
         break
+      }
       case "strong":
         out = `**${out}**`
         break
@@ -195,7 +229,7 @@ const indentLines = (s: string, indent: string): string =>
 const block = (n: AdfNode, ctx: Ctx): string => {
   switch (n.type) {
     case "paragraph":
-      return inline(n.content, ctx)
+      return escapeLineStarts(inline(n.content, ctx))
     case "heading": {
       const level = Math.min(6, Math.max(1, attrNum(n, "level") ?? 1))
       return "#".repeat(level) + " " + inline(n.content, ctx)
@@ -251,7 +285,10 @@ const listItemBlocks = (item: AdfNode, ctx: Ctx): string => {
   const parts: Array<string> = []
   for (const b of blocks) {
     if (b.type === "paragraph") {
-      parts.push(inline(b.content, ctx))
+      // Continuation lines (after hardBreak) sit at line start once the
+      // item is indented, so they need the same leading-marker escapes as
+      // top-level paragraphs.
+      parts.push(escapeLineStarts(inline(b.content, ctx)))
     } else {
       parts.push(block(b, ctx))
     }
