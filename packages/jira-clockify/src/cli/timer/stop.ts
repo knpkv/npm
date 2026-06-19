@@ -8,7 +8,10 @@ import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Duration, Effect, Option, SubscriptionRef } from "effect"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
+import type { TimerError } from "../../services/TimerService.js"
 import { TimerService } from "../../services/TimerService.js"
+import { formatDuration, parseDuration, parseStartTime } from "../../utils/time.js"
+import { fetchTicketByKey } from "../fetchTicket.js"
 
 export const stop = Command.make(
   "stop",
@@ -27,14 +30,103 @@ export const stop = Command.make(
   ({ billable, project }) =>
     Effect.gen(function*() {
       const timer = yield* TimerService
+
+      const flagProjectId = Option.isSome(project) ? project.value : undefined
+      const flagBillable = Option.isSome(billable) ? billable.value : undefined
+
+      // Correction flow: log a completed interval when no timer was ever started.
+      // TODO(review #20): correction can't pick project/billable interactively —
+      // it only forwards --project/--billable flags. Deferred: reusing the rich
+      // project-selection + save-as-default prompts (the normal stop branch
+      // below) needs them extracted into a shared helper, a larger refactor.
+      const runCorrection = Effect.gen(function*() {
+        const proceed = yield* Prompt.select({
+          message: "No active timer. Add a correction interval instead?",
+          choices: [
+            { title: "Yes", value: true },
+            { title: "No", value: false }
+          ]
+        })
+        if (!proceed) {
+          yield* Console.log("No active timer.")
+          return
+        }
+
+        const key = (yield* Prompt.text({ message: "Ticket key (e.g. PROJ-123):" })).trim()
+        if (!key) {
+          yield* Console.log("No ticket key given.")
+          return
+        }
+        const fetched = yield* fetchTicketByKey(key)
+        if (fetched._tag === "NotFound") {
+          yield* Console.log(`Ticket ${key} not found in Jira.`)
+          return
+        }
+        if (fetched._tag === "FetchError") {
+          yield* Console.log(`Failed to fetch ticket ${key}: ${fetched.message}`)
+          return
+        }
+        const ticket = fetched.ticket
+
+        const durationStr = yield* Prompt.text({ message: "Duration (e.g. 45m, 1h30m):" })
+        const durationSeconds = parseDuration(durationStr)
+        if (durationSeconds === null || durationSeconds < 60) {
+          yield* Console.log("Invalid duration. Use format: 45m, 1h30m (minimum 1m).")
+          return
+        }
+
+        const whenStr = (yield* Prompt.text({
+          message: "Started at (HH:MM today or ISO, empty = ends now):"
+        })).trim()
+        let start: Date
+        if (!whenStr) {
+          start = new Date(Date.now() - durationSeconds * 1000)
+        } else {
+          const parsed = parseStartTime(whenStr)
+          if (!parsed) {
+            yield* Console.log("Invalid start time. Use HH:MM (today) or an ISO timestamp.")
+            return
+          }
+          start = parsed
+        }
+
+        const correctionComment = (yield* Prompt.text({ message: "Comment (empty to skip):" })).trim()
+
+        yield* Console.log(`Correction: ${ticket.key} — ${ticket.summary}`)
+        yield* Console.log(`  Duration: ${formatDuration(durationSeconds)}`)
+        yield* Console.log(`  Started:  ${start.toISOString()}`)
+
+        const result = yield* timer.logManual(ticket, {
+          start,
+          durationSeconds,
+          projectId: flagProjectId,
+          billable: flagBillable,
+          comment: correctionComment || undefined
+        }).pipe(
+          Effect.catchAll((e: TimerError) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
+        )
+
+        if (result) {
+          yield* Console.log(`  Clockify:     ${result.clockifyLogged ? "✓" : "✗"}`)
+          yield* Console.log(`  Jira worklog: ${result.jiraWorklogLogged ? "✓" : "✗"}`)
+        }
+      })
+
       yield* timer.detectRunning
+
+      // No running timer: offer to log a correction interval (forgot to start it).
+      const detected = yield* SubscriptionRef.get(timer.state)
+      if (!detected.active) {
+        yield* runCorrection
+        return
+      }
 
       // Check if project/billable need to be set
       const currentTimer = yield* SubscriptionRef.get(timer.state)
       const current = { projectId: currentTimer.projectId, billable: currentTimer.billable }
 
-      let stopProjectId: string | undefined = Option.isSome(project) ? project.value : undefined
-      let stopBillable: boolean | undefined = Option.isSome(billable) ? billable.value : undefined
+      let stopProjectId: string | undefined = flagProjectId
+      let stopBillable: boolean | undefined = flagBillable
 
       // Prompt for project if not set on start and not provided via flag
       if (!current.projectId && !stopProjectId) {
@@ -106,7 +198,7 @@ export const stop = Command.make(
         billable: stopBillable,
         comment: comment.trim() || undefined
       }).pipe(
-        Effect.catchAll((e: { readonly message: string }) =>
+        Effect.catchAll((e: TimerError) =>
           Console.log(`Error: ${e.message}`).pipe(Effect.flatMap(() => Effect.succeed(null)))
         )
       )
