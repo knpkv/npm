@@ -11,7 +11,28 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { JiraApiError } from "../JiraCliError.js"
+import type { Person, Version } from "../VersionService.js"
 import { VersionService } from "../VersionService.js"
+
+/**
+ * Return a copy of `version` with every resolved {@link Person.emailAddress}
+ * (PII) set to null — covering driver, contributors, approvers[].person and
+ * tickets[].assignee. Used to keep emails out of `--json` output unless the
+ * caller opts in with `--emails`.
+ */
+export const stripEmails = (version: Version): Version => {
+  const stripPerson = <P extends Person>(person: P): P => ({ ...person, emailAddress: null })
+  return {
+    ...version,
+    driver: version.driver ? stripPerson(version.driver) : null,
+    contributors: version.contributors.map(stripPerson),
+    approvers: version.approvers.map((a) => ({ ...a, person: stripPerson(a.person) })),
+    tickets: version.tickets.map((t) => ({
+      ...t,
+      assignee: t.assignee ? stripPerson(t.assignee) : null
+    }))
+  }
+}
 
 /**
  * Jira version ids are numeric (e.g. `10042`). Passing a name/key 404s with an
@@ -43,6 +64,10 @@ const jsonOption = Options.boolean("json").pipe(
   Options.withDescription("Output as JSON"),
   Options.withDefault(false)
 )
+const emailsOption = Options.boolean("emails").pipe(
+  Options.withDescription("Include resolved user email addresses in --json output"),
+  Options.withDefault(false)
+)
 const customFieldOption = Options.text("custom-field").pipe(
   Options.withDescription(
     "Custom field display name to include on each ticket (repeatable, e.g. " +
@@ -65,8 +90,9 @@ const listCommand = Command.make("list", {
   unreleased: unreleasedOption,
   customFields: customFieldOption,
   max: maxOption,
-  json: jsonOption
-}, ({ customFields, json, max, project, released, unreleased }) =>
+  json: jsonOption,
+  emails: emailsOption
+}, ({ customFields, emails, json, max, project, released, unreleased }) =>
   Effect.gen(function*() {
     if (released && unreleased) {
       return yield* Effect.fail(
@@ -83,7 +109,8 @@ const listCommand = Command.make("list", {
       customFieldNames: customFields
     })
     if (json) {
-      yield* Console.log(JSON.stringify(versions, null, 2))
+      const output = emails ? versions : versions.map(stripEmails)
+      yield* Console.log(JSON.stringify(output, null, 2))
       return
     }
     const sep = "  "
@@ -101,28 +128,46 @@ const listCommand = Command.make("list", {
     }
   })).pipe(Command.withDescription("List versions for a Jira project"))
 
-const viewCommand = Command.make("view", { id: idArg, json: jsonOption }, ({ id, json }) =>
-  Effect.gen(function*() {
-    yield* ensureNumericId(id)
-    const service = yield* VersionService
-    const version = yield* service.getVersion(id)
-    if (json) {
-      // TODO(review #24): `version` here includes Person.emailAddress (PII) in the
-      // JSON. Deferred: gate behind a --emails flag before emitting by default.
-      yield* Console.log(JSON.stringify(version, null, 2))
-      return
-    }
-    yield* Console.log(`# ${version.name} (${version.id})`)
-    yield* Console.log(`released: ${version.released}`)
-    yield* Console.log(`releaseDate: ${version.releaseDate ?? "-"}`)
-    yield* Console.log(`driver: ${version.driver?.displayName ?? "-"}`)
-    yield* Console.log(`contributors: ${version.contributors.map((c) => c.displayName).join(", ") || "-"}`)
-    yield* Console.log(
-      `approvers: ${version.approvers.map((a) => `${a.person.displayName}:${a.status}`).join(", ") || "-"}`
-    )
-    // TODO(review #28): version.tickets is collected but never surfaced in the human
-    // view (only via --json). Deferred: render a ticket count/summary line here.
-  })).pipe(Command.withDescription("Show a single Jira version"))
+/** Cap on the number of ticket keys listed in the human `view` output. */
+const TICKET_KEYS_LIMIT = 20
+
+const viewCommand = Command.make(
+  "view",
+  { id: idArg, json: jsonOption, emails: emailsOption },
+  ({ emails, id, json }) =>
+    Effect.gen(function*() {
+      yield* ensureNumericId(id)
+      const service = yield* VersionService
+      const version = yield* service.getVersion(id)
+      if (json) {
+        const output = emails ? version : stripEmails(version)
+        yield* Console.log(JSON.stringify(output, null, 2))
+        return
+      }
+      yield* Console.log(`# ${version.name} (${version.id})`)
+      yield* Console.log(`released: ${version.released}`)
+      yield* Console.log(`releaseDate: ${version.releaseDate ?? "-"}`)
+      yield* Console.log(`driver: ${version.driver?.displayName ?? "-"}`)
+      yield* Console.log(`contributors: ${version.contributors.map((c) => c.displayName).join(", ") || "-"}`)
+      yield* Console.log(
+        `approvers: ${version.approvers.map((a) => `${a.person.displayName}:${a.status}`).join(", ") || "-"}`
+      )
+      yield* Console.log(`tickets (${version.tickets.length}): ${formatTicketKeys(version.tickets)}`)
+    })
+).pipe(Command.withDescription("Show a single Jira version"))
+
+/**
+ * Render a version's ticket keys for the human `view`: the first
+ * {@link TICKET_KEYS_LIMIT} keys, with a `(+M more)` suffix when truncated, or
+ * `-` when there are none.
+ */
+const formatTicketKeys = (tickets: Version["tickets"]): string => {
+  if (tickets.length === 0) return "-"
+  const keys = tickets.map((t) => t.key)
+  const shown = keys.slice(0, TICKET_KEYS_LIMIT).join(", ")
+  const remaining = keys.length - TICKET_KEYS_LIMIT
+  return remaining > 0 ? `${shown} (+${remaining} more)` : shown
+}
 
 const descriptionOption = Options.text("description").pipe(
   Options.withAlias("d"),

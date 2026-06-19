@@ -41,8 +41,7 @@ import { JiraApiError } from "./JiraCliError.js"
 export interface Person {
   readonly accountId: string
   readonly displayName: string
-  // TODO(review #24): emailAddress is PII and is currently emitted in `version --json`.
-  // Deferred: gate behind an explicit --emails flag (product decision) before exposing by default.
+  /** Resolved email address (PII). Stripped from `version --json` unless `--emails` is passed. */
   readonly emailAddress: string | null
 }
 

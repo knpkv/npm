@@ -2,6 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { stripEmails } from "../src/commands/version.js"
+import type { Version } from "../src/VersionService.js"
 import {
   extractContributorIds,
   layer as VersionServiceLayer,
@@ -132,6 +134,70 @@ describe("toRelatedWork", () => {
       category: "",
       url: null
     })
+  })
+})
+
+describe("stripEmails", () => {
+  const versionWithEmails: Version = {
+    id: "10",
+    name: "1.0.0",
+    description: null,
+    released: true,
+    archived: false,
+    startDate: null,
+    releaseDate: "2026-01-01",
+    driver: { accountId: "d", displayName: "Dana", emailAddress: "dana@example.com" },
+    contributors: [
+      { accountId: "c1", displayName: "Cara", emailAddress: "cara@example.com" },
+      { accountId: "c2", displayName: "Cliff", emailAddress: "cliff@example.com" }
+    ],
+    approvers: [
+      {
+        person: { accountId: "a1", displayName: "Amy", emailAddress: "amy@example.com" },
+        status: "APPROVED",
+        declineReason: null,
+        description: null
+      }
+    ],
+    tickets: [
+      {
+        key: "PROJ-1",
+        summary: "Do thing",
+        assignee: { accountId: "t1", displayName: "Tom", emailAddress: "tom@example.com" },
+        labels: [],
+        customFields: {}
+      },
+      { key: "PROJ-2", summary: null, assignee: null, labels: [], customFields: {} }
+    ],
+    url: "https://x/version/10"
+  }
+
+  it("nulls every Person.emailAddress across driver, contributors, approvers and assignees", () => {
+    const stripped = stripEmails(versionWithEmails)
+    expect(stripped.driver?.emailAddress).toBeNull()
+    expect(stripped.contributors.map((c) => c.emailAddress)).toEqual([null, null])
+    expect(stripped.approvers.map((a) => a.person.emailAddress)).toEqual([null])
+    expect(stripped.tickets.map((t) => t.assignee?.emailAddress ?? null)).toEqual([null, null])
+  })
+
+  it("preserves non-email fields and overall shape", () => {
+    const stripped = stripEmails(versionWithEmails)
+    expect(stripped.driver?.displayName).toBe("Dana")
+    expect(stripped.contributors.map((c) => c.accountId)).toEqual(["c1", "c2"])
+    expect(stripped.approvers[0].status).toBe("APPROVED")
+    expect(stripped.tickets.map((t) => t.key)).toEqual(["PROJ-1", "PROJ-2"])
+  })
+
+  it("leaves emails intact when callers keep the original (opt-in path)", () => {
+    // The command emits the unmodified version when --emails is set; assert the
+    // original is untouched (stripEmails returns a copy, never mutating input).
+    expect(versionWithEmails.driver?.emailAddress).toBe("dana@example.com")
+    expect(versionWithEmails.tickets[0].assignee?.emailAddress).toBe("tom@example.com")
+  })
+
+  it("handles a null driver and null assignees without throwing", () => {
+    const stripped = stripEmails({ ...versionWithEmails, driver: null })
+    expect(stripped.driver).toBeNull()
   })
 })
 
