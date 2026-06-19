@@ -152,6 +152,10 @@ const prList = Command.make("list", {
       // Resolve caller identity once per profile (deduped per profile within this run,
       // not cached across runs) for presets that compare against "me".
       const callerByProfile = new Map<string, string>()
+      // Profiles whose caller-identity didn't resolve (lookup failed or returned
+      // no username). For the identity-comparing presets this means their PRs
+      // can't be matched, so we surface a warning rather than silently dropping them.
+      const unresolvedCallerProfiles: Array<string> = []
       if (preset === "mine" || preset === "needs-my-review") {
         const uniqueProfiles = [...new Map(targets.map((t) => [t.profile, t])).values()]
         const callers = yield* Effect.forEach(
@@ -168,6 +172,7 @@ const prList = Command.make("list", {
         )
         for (const { profile: p, username } of callers) {
           if (username) callerByProfile.set(p, username)
+          else unresolvedCallerProfiles.push(p)
         }
       }
 
@@ -197,13 +202,25 @@ const prList = Command.make("list", {
       )
       const failures = collected.flatMap((r) => (r.failed === null ? [] : [r.failed]))
 
-      if (prs.length === 0) {
-        if (json) yield* Console.log("[]")
-        else yield* Console.error(`No PRs match filter '${preset}'.`)
+      // Warn (on stderr, so `--json` stdout stays clean) when caller identity
+      // couldn't be resolved for an identity-comparing preset — those accounts'
+      // results may be incomplete because no PR can match an unknown "me".
+      const reportWarnings = Effect.gen(function*() {
+        for (const p of unresolvedCallerProfiles) {
+          yield* Console.error(
+            `⚠ could not resolve caller identity for profile ${p}; '${preset}' results for it may be incomplete`
+          )
+        }
         if (failures.length > 0) {
           yield* Console.error(`\n⚠ ${failures.length} account(s) failed:`)
           for (const f of failures) yield* Console.error(`  ${f}`)
         }
+      })
+
+      if (prs.length === 0) {
+        if (json) yield* Console.log("[]")
+        else yield* Console.error(`No PRs match filter '${preset}'.`)
+        yield* reportWarnings
         return
       }
 
@@ -223,6 +240,7 @@ const prList = Command.make("list", {
           yield* Console.log("")
         }
       }
+      yield* reportWarnings
       return
     }
 
