@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer"
 import { IssueService, layer as IssueServiceLayer, SiteUrl } from "../IssueService.js"
 import { JiraAuth, layer as JiraAuthLayer } from "../JiraAuth.js"
 import { layer as MarkdownWriterLayer, MarkdownWriter } from "../MarkdownWriter.js"
+import { layer as VersionServiceLayer, VersionService } from "../VersionService.js"
 
 // Dummy services for auth-only commands
 const DummyIssueServiceLayer = Layer.succeed(
@@ -35,6 +36,17 @@ const DummyMarkdownWriterLayer = Layer.succeed(
   MarkdownWriter.of({
     writeMulti: () => Effect.dieMessage("Not configured"),
     writeSingle: () => Effect.dieMessage("Not configured")
+  })
+)
+
+const DummyVersionServiceLayer = Layer.succeed(
+  VersionService,
+  VersionService.of({
+    listProjectVersions: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
+    getVersion: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
+    updateVersion: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
+    listRelatedWork: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
+    addRelatedWork: () => Effect.dieMessage("Not configured - run 'jira auth login' first")
   })
 )
 
@@ -95,6 +107,7 @@ const SiteUrlLive = Layer.unwrapEffect(
  */
 export const AppLayer = MarkdownWriterLayer.pipe(
   Layer.provideMerge(IssueServiceLayer),
+  Layer.provideMerge(VersionServiceLayer),
   Layer.provideMerge(SiteUrlLive),
   Layer.provideMerge(JiraClientLive),
   Layer.provideMerge(AuthLive),
@@ -109,6 +122,7 @@ export const AppLayer = MarkdownWriterLayer.pipe(
  */
 export const AuthOnlyLayer = DummyIssueServiceLayer.pipe(
   Layer.provideMerge(DummyMarkdownWriterLayer),
+  Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(AuthLive),
   Layer.provideMerge(NodeHttpClient.layer),
   Layer.provideMerge(NodeContext.layer)
@@ -121,6 +135,7 @@ export const AuthOnlyLayer = DummyIssueServiceLayer.pipe(
  */
 export const MinimalLayer = DummyIssueServiceLayer.pipe(
   Layer.provideMerge(DummyMarkdownWriterLayer),
+  Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(DummyJiraAuthLayer),
   Layer.provideMerge(NodeContext.layer)
 )

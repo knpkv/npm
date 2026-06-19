@@ -26,8 +26,16 @@ Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 
 **Permissions:**
 
-- Jira API: `read:jira-work`, `read:jira-user`
+- Jira API: `read:jira-work`, `write:jira-work`, `manage:jira-project`, `read:jira-user`
 - User Identity API: `read:me`
+- Plus `offline_access` (issued automatically) so the CLI stays logged in across runs.
+
+`write:jira-work` and `manage:jira-project` are required by the `version` command
+(editing a version's description and managing its "Related work" links).
+
+> **Upgrading?** If you authenticated before the `version` command was added, the
+> new scopes are not yet granted to your token. Re-run `jira auth login` to
+> re-consent and pick up `write:jira-work` + `manage:jira-project`.
 
 **Callback URL:**
 
@@ -89,6 +97,60 @@ jira search --by-version "1.0.0" --project PROJ
 ./jira-tickets/
 └── jira-export.md
 ```
+
+## Versions
+
+Inspect and edit Jira project versions (releases) with Driver, Contributors and
+Approver fields resolved to display names.
+
+### List versions
+
+```bash
+jira version list --project PROJ
+jira version list --project PROJ --released
+jira version list --project PROJ --unreleased --max 10
+jira version list --project PROJ --json
+```
+
+| Option           | Alias | Description                                                     | Default |
+| ---------------- | ----- | --------------------------------------------------------------- | ------- |
+| `--project`      | `-p`  | Jira project key (e.g. `PROJ`)                                  | -       |
+| `--released`     |       | Only released versions (mutually exclusive with `--unreleased`) | `false` |
+| `--unreleased`   |       | Only unreleased versions (mutually exclusive with `--released`) | `false` |
+| `--max`          | `-m`  | Maximum number of versions to fetch                             | all     |
+| `--custom-field` |       | Custom field display name to include per ticket (repeatable)    | -       |
+| `--json`         |       | Output as JSON                                                  | `false` |
+
+### View a version
+
+```bash
+jira version view 10042
+jira version view 10042 --json
+```
+
+The version id is the **numeric** id (e.g. `10042`); use `version list` to find it.
+
+### Set the description
+
+```bash
+jira version set 10042 --description "Q3 release"
+```
+
+Requires the `manage:jira-project` scope.
+
+### Related work
+
+Manage the "Related work" links (e.g. Confluence pages surfaced on a release report).
+
+```bash
+jira version relatedwork list 10042
+jira version relatedwork add 10042 \
+  --title "Release notes" \
+  --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
+  --category Communication
+```
+
+`relatedwork add` requires the `manage:jira-project` scope.
 
 ## Auth Commands
 

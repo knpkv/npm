@@ -20,7 +20,8 @@ import {
   getLayerType,
   handleError,
   MinimalLayer,
-  searchCommand
+  searchCommand,
+  versionCommand
 } from "./commands/index.js"
 
 // === Main command ===
@@ -29,7 +30,8 @@ const jira = Command.make("jira").pipe(
   Command.withSubcommands([
     authCommand,
     getCommand,
-    searchCommand
+    searchCommand,
+    versionCommand
   ])
 )
 
