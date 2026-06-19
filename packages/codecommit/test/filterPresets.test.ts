@@ -18,7 +18,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
-import { matchesPreset } from "../src/filterPresets.js"
+import { identityMatches, matchesPreset } from "../src/filterPresets.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -84,6 +84,55 @@ describe("matchesPreset / mine", () => {
       const pr = yield* mkPR({ profile: "prod", author: "alice" })
       expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
     }))
+
+  // SSO: caller resolved to a full assumed-role ARN whose session segment is the author → match.
+  it.effect("matches when the caller is an ARN whose final segment is the author (SSO)", () =>
+    Effect.gen(function*() {
+      const pr = yield* mkPR({ profile: "dev", author: "alice" })
+      const me = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc123/alice"
+      expect(matchesPreset("mine", pr, callers([["dev", me]]), NOW)).toBe(true)
+    }))
+})
+
+// ── identityMatches (robust SSO/ARN comparison) ──────────────────────
+
+describe("identityMatches", () => {
+  // Exact match still works (superset of the original strict comparison).
+  it("matches identical usernames", () => {
+    expect(identityMatches("alice", "alice")).toBe(true)
+  })
+
+  // Case-insensitive: IAM/SSO identities differ only in case.
+  it("matches case-insensitively", () => {
+    expect(identityMatches("Alice", "alice")).toBe(true)
+    expect(identityMatches("ALICE@CORP.COM", "alice@corp.com")).toBe(true)
+  })
+
+  // Caller is a full assumed-role ARN; author is the bare session-name/username.
+  it("matches an ARN whose final segment equals the author", () => {
+    expect(
+      identityMatches("arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice", "alice")
+    ).toBe(true)
+  })
+
+  // Author is the AWSReservedSSO role-session form; caller is the bare username.
+  it("matches when the author carries the role-session-name form", () => {
+    expect(identityMatches("alice", "AWSReservedSSO_Admin_abc/alice")).toBe(true)
+  })
+
+  // A clearly-different user must NOT match, even with shared ARN structure.
+  it("does not match a different user", () => {
+    expect(identityMatches("alice", "bob")).toBe(false)
+    expect(
+      identityMatches("arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice", "bob")
+    ).toBe(false)
+  })
+
+  // Empty inputs never match (guards against null/empty identity resolving to a match).
+  it("does not match on empty inputs", () => {
+    expect(identityMatches("", "alice")).toBe(false)
+    expect(identityMatches("alice", "")).toBe(false)
+  })
 })
 
 // ── needs-my-review ──────────────────────────────────────────────────
