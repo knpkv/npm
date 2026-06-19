@@ -57,15 +57,16 @@ codecommit web [--port 3000] [--hostname 127.0.0.1]
 codecommit pr list [options]
 ```
 
-| Option      | Alias | Description             | Default     |
-| ----------- | ----- | ----------------------- | ----------- |
-| `--profile` | `-p`  | AWS profile             | `default`   |
-| `--region`  | `-r`  | AWS region              | `us-east-1` |
-| `--status`  | `-s`  | PR status (OPEN/CLOSED) | `OPEN`      |
-| `--all`     | `-a`  | Show all PRs            | `false`     |
-| `--repo`    |       | Filter by repository    | -           |
-| `--author`  |       | Filter by author        | -           |
-| `--json`    |       | Output as JSON          | `false`     |
+| Option      | Alias | Description                                    | Default     |
+| ----------- | ----- | ---------------------------------------------- | ----------- |
+| `--profile` | `-p`  | AWS profile (ignored with --filter)            | `default`   |
+| `--region`  | `-r`  | AWS region (ignored with --filter)             | `us-east-1` |
+| `--status`  | `-s`  | PR status, OPEN/CLOSED (ignored with --filter) | `OPEN`      |
+| `--all`     | `-a`  | Show all PRs (ignored with --filter)           | `false`     |
+| `--repo`    |       | Filter by repository                           | -           |
+| `--author`  |       | Filter by author                               | -           |
+| `--filter`  |       | Named preset, OPEN-only (see below)            | -           |
+| `--json`    |       | Output as JSON                                 | `false`     |
 
 ```bash
 codecommit pr list
@@ -74,6 +75,31 @@ codecommit pr list --all
 codecommit pr list --repo my-repo
 codecommit pr list --author jane
 codecommit pr list --json
+```
+
+#### Filter presets (`--filter`)
+
+When `--filter` is set, the command fans out across **every enabled account**
+in `~/.codecommit/config.json` (set up via `codecommit tui`) and returns the
+merged list, sorted by last-modified-date. Presets operate on **OPEN PRs only**,
+so `--profile`, `--region`, `--status`, and `--all` are all ignored when
+`--filter` is set. Combine with `--json`, `--repo`, or `--author` for further
+narrowing. If any account fails (e.g. an expired SSO session), a
+`⚠ N account(s) failed` summary is printed to stderr and the PRs from the
+accounts that succeeded are still returned.
+
+| Preset            | Matches                                                                  |
+| ----------------- | ------------------------------------------------------------------------ |
+| `mine`            | Open PRs you authored (matched against `getCallerIdentity` per profile)  |
+| `needs-my-review` | Open PRs awaiting your approval (you're in an unsatisfied approval pool) |
+| `stale`           | Open PRs with no activity for more than 7 days                           |
+| `conflicting`     | Open PRs with merge conflicts                                            |
+
+```bash
+codecommit pr list --filter mine --json          # all my open PRs everywhere
+codecommit pr list --filter needs-my-review      # what I need to review
+codecommit pr list --filter stale --repo my-repo # stale PRs in one repo
+codecommit pr list --filter conflicting --json
 ```
 
 Output:
