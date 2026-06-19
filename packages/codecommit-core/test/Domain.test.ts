@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Account, ApprovalRule, needsMyReview, PRComment, PullRequest } from "../src/Domain.js"
+import { Account, ApprovalRule, identityMatches, needsMyReview, PRComment, PullRequest } from "../src/Domain.js"
 
 describe("Domain", () => {
   describe("Account", () => {
@@ -195,6 +195,94 @@ describe("Domain", () => {
         const pr = yield* Schema.decode(PullRequest)(basePR)
         expect(pr.approvalRules).toEqual([])
       }))
+
+    // SSO/ARN robustness: caller identity differs from the pool member only by
+    // case — must still match (identityMatches is a superset of exact match).
+    it.effect("matches a pool member differing only by case", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["Alice"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(true)
+      }))
+
+    // Caller is a full assumed-role ARN whose final segment is the bare pool member.
+    it.effect("matches when the caller is an ARN whose final segment is the pool member", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+        })
+        const me = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice"
+        expect(needsMyReview(pr, me)).toBe(true)
+      }))
+
+    // Pool member carries the AWSReservedSSO role-session form; caller is the bare username.
+    it.effect("matches when the pool member carries the role-session-name form", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{
+            ruleName: "R1",
+            requiredApprovals: 1,
+            poolMembers: ["AWSReservedSSO_Admin_abc/alice"],
+            satisfied: false
+          }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(true)
+      }))
+
+    // Already approved under a divergent identity form → no match.
+    it.effect("returns false when caller already approved under an ARN form", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvedBy: ["arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice"],
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+        })
+        expect(needsMyReview(pr, "alice")).toBe(false)
+      }))
+
+    // A clearly-different user must NOT match, even with shared ARN structure.
+    it.effect("does not match an unrelated user sharing ARN structure", () =>
+      Effect.gen(function*() {
+        const pr = yield* Schema.decode(PullRequest)({
+          ...basePR,
+          approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["bob"], satisfied: false }]
+        })
+        const me = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice"
+        expect(needsMyReview(pr, me)).toBe(false)
+      }))
+  })
+
+  describe("identityMatches", () => {
+    it("matches identical usernames", () => {
+      expect(identityMatches("alice", "alice")).toBe(true)
+    })
+
+    it("matches case-insensitively", () => {
+      expect(identityMatches("Alice", "alice")).toBe(true)
+    })
+
+    it("matches an ARN whose final segment equals the other side", () => {
+      expect(
+        identityMatches("arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice", "alice")
+      ).toBe(true)
+    })
+
+    it("matches the role-session-name form against a bare username", () => {
+      expect(identityMatches("alice", "AWSReservedSSO_Admin_abc/alice")).toBe(true)
+    })
+
+    it("does not match a different user", () => {
+      expect(identityMatches("alice", "bob")).toBe(false)
+    })
+
+    it("does not match on empty inputs", () => {
+      expect(identityMatches("", "alice")).toBe(false)
+      expect(identityMatches("alice", "")).toBe(false)
+    })
   })
 
   describe("PRComment", () => {

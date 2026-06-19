@@ -16,9 +16,9 @@
  * Uses `@effect/vitest` for consistency with the rest of the codebase.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { identityMatches, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
-import { identityMatches, matchesPreset } from "../src/filterPresets.js"
+import { matchesPreset } from "../src/filterPresets.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
