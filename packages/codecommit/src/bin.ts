@@ -9,7 +9,8 @@ import { makeServer } from "@knpkv/codecommit-web"
 import { Console, Effect, Layer, Stream } from "effect"
 import open from "open"
 import pkg from "../package.json"
-import { FILTER_PRESETS, type FilterPreset, matchesPreset, matchesRepoAuthor } from "./filterPresets.js"
+import { FILTER_PRESETS, type FilterPreset, matchesRepoAuthor } from "./filterPresets.js"
+import { FilterService, FilterServiceLive } from "./FilterService.js"
 
 // TUI Command
 const tui = Command.make("tui", {}, () =>
@@ -135,11 +136,8 @@ const prList = Command.make("list", {
     // ── Filter-preset path: fan out across all enabled accounts ──────────────
     if (filter._tag === "Some") {
       const preset = filter.value
-      const cs = yield* ConfigService.ConfigService
-      const config = yield* cs.load
-      const targets = config.accounts
-        .filter((a) => a.enabled)
-        .flatMap((a) => a.regions.map((r) => ({ profile: a.profile, region: r })))
+      const fs = yield* FilterService
+      const targets = yield* fs.resolveTargets
 
       if (targets.length === 0) {
         yield* Console.log("No enabled accounts in ~/.codecommit/config.json. Enable some with `codecommit tui`.")
@@ -149,58 +147,8 @@ const prList = Command.make("list", {
       // Progress/status text goes to stderr so `--json` emits only the JSON document on stdout.
       if (!json) yield* Console.error(`Scanning ${targets.length} account(s) with filter '${preset}'...`)
 
-      // Resolve caller identity once per profile (deduped per profile within this run,
-      // not cached across runs) for presets that compare against "me".
-      const callerByProfile = new Map<string, string>()
-      // Profiles whose caller-identity didn't resolve (lookup failed or returned
-      // no username). For the identity-comparing presets this means their PRs
-      // can't be matched, so we surface a warning rather than silently dropping them.
-      const unresolvedCallerProfiles: Array<string> = []
-      if (preset === "mine" || preset === "needs-my-review") {
-        const uniqueProfiles = [...new Map(targets.map((t) => [t.profile, t])).values()]
-        const callers = yield* Effect.forEach(
-          uniqueProfiles,
-          (acct) =>
-            aws.getCallerIdentity(acct).pipe(
-              Effect.map((id): { profile: string; username: string | null } => ({
-                profile: acct.profile,
-                username: id.username
-              })),
-              Effect.catchAll(() => Effect.succeed({ profile: acct.profile, username: null as string | null }))
-            ),
-          { concurrency: 4 }
-        )
-        for (const { profile: p, username } of callers) {
-          if (username) callerByProfile.set(p, username)
-          else unresolvedCallerProfiles.push(p)
-        }
-      }
-
-      const now = new Date()
-      const collected = yield* Effect.forEach(
-        targets,
-        (acct) =>
-          aws.getPullRequests(acct, { status: "OPEN" }).pipe(
-            Stream.filter((pr) =>
-              matchesPreset(preset, pr, callerByProfile, now) && matchesRepoAuthor(pr, repo, author)
-            ),
-            Stream.runCollect,
-            Effect.map((chunk) => ({ ok: Array.from(chunk), failed: null as string | null })),
-            // Don't silently coalesce auth/permission failures to "no matches" —
-            // collect the failure so it can be surfaced after the results.
-            Effect.catchAll((e) =>
-              Effect.succeed({
-                ok: [] as Array<Domain.PullRequest>,
-                failed: `${acct.profile}/${acct.region}: ${e.message}`
-              })
-            )
-          ),
-        { concurrency: 4 }
-      )
-      const prs = collected.flatMap((r) => r.ok).sort((a, b) =>
-        b.lastModifiedDate.getTime() - a.lastModifiedDate.getTime()
-      )
-      const failures = collected.flatMap((r) => (r.failed === null ? [] : [r.failed]))
+      const { failures, prs, unresolvedProfiles } = yield* fs.collect(preset, targets, { repo, author })
+      const unresolvedCallerProfiles = unresolvedProfiles
 
       // Warn (on stderr, so `--json` stdout stays clean) when caller identity
       // couldn't be resolved for an identity-comparing preset — those accounts'
@@ -291,11 +239,17 @@ const prList = Command.make("list", {
       }
     }
   }).pipe(
-    Effect.provide(Layer.mergeAll(
-      AwsClient.AwsClientLive,
-      NodeHttpClient.layer,
-      ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
-    ))
+    Effect.provide(
+      // FilterService draws AwsClient/ConfigService from the base layers, which
+      // are also merged into the output so the single-account path keeps them.
+      FilterServiceLive.pipe(
+        Layer.provideMerge(Layer.mergeAll(
+          AwsClient.AwsClientLive,
+          NodeHttpClient.layer,
+          ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
+        ))
+      )
+    )
   )).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))
 
 // Helper to render comment threads as markdown
