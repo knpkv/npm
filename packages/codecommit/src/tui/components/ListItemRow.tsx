@@ -1,10 +1,10 @@
-import { parseColor } from "@opentui/core"
-import { useTheme } from "../context/theme.js"
-import type { ListItem } from "../ListBuilder.js"
 import { DateUtils, type Domain } from "@knpkv/codecommit-core"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
+import { parseColor } from "@opentui/core"
 import { Option } from "effect"
 import { useMemo } from "react"
+import { useTheme } from "../context/theme.js"
+import type { ListItem } from "../ListBuilder.js"
 import { Badge } from "./Badge.js"
 
 interface ListItemRowProps {
@@ -75,9 +75,9 @@ export function ListItemRow({ isFirst, item, selected }: ListItemRowProps) {
 }
 
 function PRItemRow({
-  pr,
   bg,
-  fg
+  fg,
+  pr
 }: {
   readonly pr: Domain.PullRequest
   readonly bg: string | undefined

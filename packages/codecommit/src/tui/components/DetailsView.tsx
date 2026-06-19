@@ -1,12 +1,12 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { parseColor, SyntaxStyle } from "@opentui/core"
 import type { Domain } from "@knpkv/codecommit-core"
 import { DateUtils } from "@knpkv/codecommit-core"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
+import { parseColor, SyntaxStyle } from "@opentui/core"
 import { Option } from "effect"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { type AppState, appStateAtom } from "../atoms/app.js"
 import { fetchPrCommentsAtom } from "../atoms/actions.js"
+import { type AppState, appStateAtom } from "../atoms/app.js"
 import { selectedPrIdAtom, showDetailsCommentsAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { Badge } from "./Badge.js"
@@ -36,9 +36,9 @@ const earliestLocDate = (loc: Domain.PRCommentLocation): number =>
 const countThread = (t: Domain.CommentThread): number => 1 + t.replies.reduce((sum, r) => sum + countThread(r), 0)
 
 function CommentThread({
-  thread,
   depth,
-  syntaxStyle
+  syntaxStyle,
+  thread
 }: {
   readonly thread: Domain.CommentThread
   readonly depth: number
@@ -52,9 +52,9 @@ function CommentThread({
 
   return (
     <box flexDirection="column" style={{ paddingLeft: indent }}>
-      <text
-        fg={theme.textMuted}
-      >{`${prefix}${thread.root.author} \u00B7 ${formatRelativeDate(thread.root.creationDate)}`}</text>
+      <text fg={theme.textMuted}>
+        {`${prefix}${thread.root.author} \u00B7 ${formatRelativeDate(thread.root.creationDate)}`}
+      </text>
       {syntaxStyle ? (
         <markdown
           style={{ width: "100%", paddingLeft: indent + 2 }}

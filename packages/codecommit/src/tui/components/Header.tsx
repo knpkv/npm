@@ -1,11 +1,11 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { DateUtils } from "@knpkv/codecommit-core"
+import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { useEffect, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom } from "../atoms/app.js"
-import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { creatingPrAtom, viewAtom } from "../atoms/ui.js"
 import { SPINNER_FRAMES, VIEW_TITLES } from "../Constants.js"
 import { useTheme } from "../context/theme.js"
-import { DateUtils } from "@knpkv/codecommit-core"
 
 const defaultState: AppState = {
   status: "loading",

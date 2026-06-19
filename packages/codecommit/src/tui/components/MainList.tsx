@@ -17,7 +17,7 @@ import {
 } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { useListNavigation } from "../hooks/useListNavigation.js"
-import { type ListItem, type TuiView, buildListItems } from "../ListBuilder.js"
+import { buildListItems, type ListItem, type TuiView } from "../ListBuilder.js"
 import { ListItemRow } from "./ListItemRow.js"
 import { applySettingsFilter, computeItemPositions, findGroupHeader, findStableIndex } from "./mainlist-utils.js"
 import { NotificationsTable } from "./NotificationsTable.js"
