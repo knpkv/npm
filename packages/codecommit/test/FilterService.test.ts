@@ -9,8 +9,8 @@
  * These tests drive the service through stub `AwsClient` and `ConfigService`
  * layers (no network, no real config file) so the orchestration — failure
  * collection, unresolved-identity tracking, and sort order — is verified
- * deterministically. PRs are built via `Schema.decode(PullRequest)` so the
- * fixtures are real, branded domain objects (no `as any` on the domain side).
+ * deterministically. PRs are built with `Schema.decodeSync(PullRequest)` so the
+ * fixtures are real, branded domain objects (no casts).
  *
  * `bin.ts` is intentionally NOT imported — it boots the CLI/Bun runtime on load.
  */
@@ -35,8 +35,8 @@ interface PROverrides {
   readonly isMergeable?: boolean
 }
 
-const mkPR = (o: PROverrides = {}): Effect.Effect<PullRequest> =>
-  Schema.decode(PullRequest)({
+const mkPR = (o: PROverrides = {}): PullRequest =>
+  Schema.decodeSync(PullRequest)({
     id: o.id ?? "123",
     title: "Add feature",
     author: o.author ?? "alice",
@@ -45,7 +45,7 @@ const mkPR = (o: PROverrides = {}): Effect.Effect<PullRequest> =>
     lastModifiedDate: o.lastModifiedDate ?? NOW,
     link: "https://console.aws.amazon.com",
     account: { profile: o.profile ?? "dev", region: o.region ?? "us-east-1" },
-    status: "OPEN" as const,
+    status: "OPEN",
     sourceBranch: "feature/x",
     destinationBranch: "main",
     isMergeable: o.isMergeable ?? true,
@@ -53,7 +53,7 @@ const mkPR = (o: PROverrides = {}): Effect.Effect<PullRequest> =>
     approvedBy: [],
     commentedBy: [],
     approvalRules: []
-  }) as Effect.Effect<PullRequest>
+  })
 
 const target = (profile: string, region = "us-east-1"): FilterTarget => ({
   profile: profile as AwsProfileName,
@@ -191,18 +191,14 @@ describe("FilterService / collect — preset matching", () => {
       expect(failures).toEqual([])
       expect(unresolvedProfiles).toEqual([])
     }).pipe(
-      Effect.provide(
-        Effect.runSync(
-          Effect.gen(function*() {
-            const merge = yield* mkPR({ id: "1", isMergeable: true })
-            const conflict = yield* mkPR({ id: "2", isMergeable: false })
-            return provide(
-              awsStub({ prsByTarget: { "dev/us-east-1": [merge, conflict] } }),
-              configStub([{ profile: "dev", regions: ["us-east-1"], enabled: true }])
-            )
-          })
-        )
-      )
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: {
+            "dev/us-east-1": [mkPR({ id: "1", isMergeable: true }), mkPR({ id: "2", isMergeable: false })]
+          }
+        }),
+        configStub([{ profile: "dev", regions: ["us-east-1"], enabled: true }])
+      ))
     ))
 
   // `mine` matches only PRs whose author equals the resolved caller for the profile.
@@ -213,21 +209,15 @@ describe("FilterService / collect — preset matching", () => {
       expect(prs.map((p) => p.id)).toEqual(["mine"])
       expect(unresolvedProfiles).toEqual([])
     }).pipe(
-      Effect.provide(
-        Effect.runSync(
-          Effect.gen(function*() {
-            const mine = yield* mkPR({ id: "mine", author: "alice" })
-            const theirs = yield* mkPR({ id: "theirs", author: "bob" })
-            return provide(
-              awsStub({
-                prsByTarget: { "dev/us-east-1": [mine, theirs] },
-                callerByProfile: { dev: "alice" }
-              }),
-              configStub([{ profile: "dev", regions: ["us-east-1"], enabled: true }])
-            )
-          })
-        )
-      )
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: {
+            "dev/us-east-1": [mkPR({ id: "mine", author: "alice" }), mkPR({ id: "theirs", author: "bob" })]
+          },
+          callerByProfile: { dev: "alice" }
+        }),
+        configStub([{ profile: "dev", regions: ["us-east-1"], enabled: true }])
+      ))
     ))
 })
 
@@ -249,23 +239,16 @@ describe("FilterService / collect — failure collection", () => {
       expect(failures).toHaveLength(1)
       expect(failures[0]).toMatch(/^prod\/us-east-1: /)
     }).pipe(
-      Effect.provide(
-        Effect.runSync(
-          Effect.gen(function*() {
-            const ok = yield* mkPR({ id: "ok", profile: "dev", isMergeable: false })
-            return provide(
-              awsStub({
-                prsByTarget: { "dev/us-east-1": [ok] },
-                failTargets: ["prod/us-east-1"]
-              }),
-              configStub([
-                { profile: "dev", regions: ["us-east-1"], enabled: true },
-                { profile: "prod", regions: ["us-east-1"], enabled: true }
-              ])
-            )
-          })
-        )
-      )
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: { "dev/us-east-1": [mkPR({ id: "ok", profile: "dev", isMergeable: false })] },
+          failTargets: ["prod/us-east-1"]
+        }),
+        configStub([
+          { profile: "dev", regions: ["us-east-1"], enabled: true },
+          { profile: "prod", regions: ["us-east-1"], enabled: true }
+        ])
+      ))
     ))
 })
 
@@ -288,27 +271,19 @@ describe("FilterService / collect — unresolved identity", () => {
       // The fetch itself did not fail — only identity resolution did.
       expect(failures).toEqual([])
     }).pipe(
-      Effect.provide(
-        Effect.runSync(
-          Effect.gen(function*() {
-            const devMine = yield* mkPR({ id: "dev-mine", profile: "dev", author: "alice" })
-            const prodPr = yield* mkPR({ id: "prod-pr", profile: "prod", author: "carol" })
-            return provide(
-              awsStub({
-                prsByTarget: {
-                  "dev/us-east-1": [devMine],
-                  "prod/us-east-1": [prodPr]
-                },
-                callerByProfile: { dev: "alice", prod: null }
-              }),
-              configStub([
-                { profile: "dev", regions: ["us-east-1"], enabled: true },
-                { profile: "prod", regions: ["us-east-1"], enabled: true }
-              ])
-            )
-          })
-        )
-      )
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: {
+            "dev/us-east-1": [mkPR({ id: "dev-mine", profile: "dev", author: "alice" })],
+            "prod/us-east-1": [mkPR({ id: "prod-pr", profile: "prod", author: "carol" })]
+          },
+          callerByProfile: { dev: "alice", prod: null }
+        }),
+        configStub([
+          { profile: "dev", regions: ["us-east-1"], enabled: true },
+          { profile: "prod", regions: ["us-east-1"], enabled: true }
+        ])
+      ))
     ))
 })
 
@@ -327,41 +302,22 @@ describe("FilterService / collect — sort order", () => {
       )
       expect(prs.map((p) => p.id)).toEqual(["newest", "middle", "oldest"])
     }).pipe(
-      Effect.provide(
-        Effect.runSync(
-          Effect.gen(function*() {
-            const oldest = yield* mkPR({
-              id: "oldest",
-              profile: "dev",
-              isMergeable: false,
-              lastModifiedDate: new Date("2024-01-01")
-            })
-            const middle = yield* mkPR({
-              id: "middle",
-              profile: "prod",
-              isMergeable: false,
-              lastModifiedDate: new Date("2024-03-01")
-            })
-            const newest = yield* mkPR({
-              id: "newest",
-              profile: "dev",
-              isMergeable: false,
-              lastModifiedDate: new Date("2024-06-01")
-            })
-            return provide(
-              awsStub({
-                prsByTarget: {
-                  "dev/us-east-1": [oldest, newest],
-                  "prod/us-east-1": [middle]
-                }
-              }),
-              configStub([
-                { profile: "dev", regions: ["us-east-1"], enabled: true },
-                { profile: "prod", regions: ["us-east-1"], enabled: true }
-              ])
-            )
-          })
-        )
-      )
+      Effect.provide(provide(
+        awsStub({
+          prsByTarget: {
+            "dev/us-east-1": [
+              mkPR({ id: "oldest", profile: "dev", isMergeable: false, lastModifiedDate: new Date("2024-01-01") }),
+              mkPR({ id: "newest", profile: "dev", isMergeable: false, lastModifiedDate: new Date("2024-06-01") })
+            ],
+            "prod/us-east-1": [
+              mkPR({ id: "middle", profile: "prod", isMergeable: false, lastModifiedDate: new Date("2024-03-01") })
+            ]
+          }
+        }),
+        configStub([
+          { profile: "dev", regions: ["us-east-1"], enabled: true },
+          { profile: "prod", regions: ["us-east-1"], enabled: true }
+        ])
+      ))
     ))
 })

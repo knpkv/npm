@@ -10,14 +10,15 @@
  * - `stale`            — last activity strictly older than the 7-day boundary
  * - `conflicting`      — PR is not mergeable
  *
- * PRs are built via `Schema.decode(PullRequest)` (the canonical constructor)
- * so the fixtures are real, branded domain objects — no `as any`.
+ * Fixtures are built with `Schema.decodeSync(PullRequest)` — the synchronous
+ * decoder for the `PullRequest` Schema.Class — so they are real branded domain
+ * objects (no casts), and `mkPR` is a plain synchronous helper.
  *
  * Uses `@effect/vitest` for consistency with the rest of the codebase.
  */
 import { describe, expect, it } from "@effect/vitest"
 import { identityMatches, PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import { Effect, Schema } from "effect"
+import { Schema } from "effect"
 import { matchesPreset } from "../src/filterPresets.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
@@ -39,8 +40,8 @@ interface Overrides {
   }>
 }
 
-const mkPR = (o: Overrides = {}): Effect.Effect<PullRequest> =>
-  Schema.decode(PullRequest)({
+const mkPR = (o: Overrides = {}): PullRequest =>
+  Schema.decodeSync(PullRequest)({
     id: "123",
     title: "Add feature",
     author: o.author ?? "alice",
@@ -49,7 +50,7 @@ const mkPR = (o: Overrides = {}): Effect.Effect<PullRequest> =>
     lastModifiedDate: o.lastModifiedDate ?? NOW,
     link: "https://console.aws.amazon.com",
     account: { profile: o.profile ?? "dev", region: "us-east-1" },
-    status: "OPEN" as const,
+    status: "OPEN",
     sourceBranch: "feature/x",
     destinationBranch: "main",
     isMergeable: o.isMergeable ?? true,
@@ -57,7 +58,7 @@ const mkPR = (o: Overrides = {}): Effect.Effect<PullRequest> =>
     approvedBy: o.approvedBy ?? [],
     commentedBy: [],
     approvalRules: o.approvalRules ?? []
-  }) as Effect.Effect<PullRequest>
+  })
 
 const callers = (entries: ReadonlyArray<readonly [string, string]>) => new Map<string, string>(entries)
 
@@ -65,33 +66,29 @@ const callers = (entries: ReadonlyArray<readonly [string, string]>) => new Map<s
 
 describe("matchesPreset / mine", () => {
   // Author equals the resolved caller for the PR's profile → match.
-  it.effect("matches a PR authored by the resolved caller", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ profile: "dev", author: "alice" })
-      expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(true)
-    }))
+  it("matches a PR authored by the resolved caller", () => {
+    const pr = mkPR({ profile: "dev", author: "alice" })
+    expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(true)
+  })
 
   // Author differs from the caller → no match.
-  it.effect("does not match a PR authored by someone else", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ profile: "dev", author: "bob" })
-      expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
-    }))
+  it("does not match a PR authored by someone else", () => {
+    const pr = mkPR({ profile: "dev", author: "bob" })
+    expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
+  })
 
   // No resolved caller for the PR's profile (e.g. identity lookup failed) → no match.
-  it.effect("does not match when the profile has no resolved caller", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ profile: "prod", author: "alice" })
-      expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
-    }))
+  it("does not match when the profile has no resolved caller", () => {
+    const pr = mkPR({ profile: "prod", author: "alice" })
+    expect(matchesPreset("mine", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
+  })
 
   // SSO: caller resolved to a full assumed-role ARN whose session segment is the author → match.
-  it.effect("matches when the caller is an ARN whose final segment is the author (SSO)", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ profile: "dev", author: "alice" })
-      const me = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc123/alice"
-      expect(matchesPreset("mine", pr, callers([["dev", me]]), NOW)).toBe(true)
-    }))
+  it("matches when the caller is an ARN whose final segment is the author (SSO)", () => {
+    const pr = mkPR({ profile: "dev", author: "alice" })
+    const me = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc123/alice"
+    expect(matchesPreset("mine", pr, callers([["dev", me]]), NOW)).toBe(true)
+  })
 })
 
 // ── identityMatches (robust SSO/ARN comparison) ──────────────────────
@@ -139,86 +136,77 @@ describe("identityMatches", () => {
 
 describe("matchesPreset / needs-my-review", () => {
   // Caller is in an unsatisfied approval pool and has not approved → match.
-  it.effect("matches when caller is in an unsatisfied approval pool", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({
-        profile: "dev",
-        approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
-      })
-      expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(true)
-    }))
+  it("matches when caller is in an unsatisfied approval pool", () => {
+    const pr = mkPR({
+      profile: "dev",
+      approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+    })
+    expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(true)
+  })
 
   // Caller already approved → no match.
-  it.effect("does not match when caller already approved", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({
-        profile: "dev",
-        approvedBy: ["alice"],
-        approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
-      })
-      expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
-    }))
+  it("does not match when caller already approved", () => {
+    const pr = mkPR({
+      profile: "dev",
+      approvedBy: ["alice"],
+      approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+    })
+    expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
+  })
 
   // Caller is not in any pool → no match.
-  it.effect("does not match when caller is not in any approval pool", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({
-        profile: "dev",
-        approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["bob"], satisfied: false }]
-      })
-      expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
-    }))
+  it("does not match when caller is not in any approval pool", () => {
+    const pr = mkPR({
+      profile: "dev",
+      approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["bob"], satisfied: false }]
+    })
+    expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
+  })
 
   // No resolved caller for the profile → no match (needsMyReview returns false for undefined).
-  it.effect("does not match when the profile has no resolved caller", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({
-        profile: "prod",
-        approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
-      })
-      expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
-    }))
+  it("does not match when the profile has no resolved caller", () => {
+    const pr = mkPR({
+      profile: "prod",
+      approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
+    })
+    expect(matchesPreset("needs-my-review", pr, callers([["dev", "alice"]]), NOW)).toBe(false)
+  })
 })
 
 // ── stale (7-day boundary) ───────────────────────────────────────────
 
 describe("matchesPreset / stale", () => {
   // Just over 7 days (7 days + 1ms) of inactivity → stale.
-  it.effect("matches a PR just past the 7-day boundary", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ lastModifiedDate: new Date(NOW.getTime() - (7 * STALE_MS + 1)) })
-      expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(true)
-    }))
+  it("matches a PR just past the 7-day boundary", () => {
+    const pr = mkPR({ lastModifiedDate: new Date(NOW.getTime() - (7 * STALE_MS + 1)) })
+    expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(true)
+  })
 
   // Exactly 7 days is NOT stale — the predicate is strictly greater than 7.
-  it.effect("does not match a PR at exactly the 7-day boundary", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ lastModifiedDate: new Date(NOW.getTime() - 7 * STALE_MS) })
-      expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(false)
-    }))
+  it("does not match a PR at exactly the 7-day boundary", () => {
+    const pr = mkPR({ lastModifiedDate: new Date(NOW.getTime() - 7 * STALE_MS) })
+    expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(false)
+  })
 
   // Recently modified → not stale.
-  it.effect("does not match a freshly modified PR", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ lastModifiedDate: NOW })
-      expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(false)
-    }))
+  it("does not match a freshly modified PR", () => {
+    const pr = mkPR({ lastModifiedDate: NOW })
+    expect(matchesPreset("stale", pr, callers([]), NOW)).toBe(false)
+  })
 })
 
 // ── conflicting ──────────────────────────────────────────────────────
 
 describe("matchesPreset / conflicting", () => {
   // Not mergeable → conflicting.
-  it.effect("matches a non-mergeable PR", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ isMergeable: false })
-      expect(matchesPreset("conflicting", pr, callers([]), NOW)).toBe(true)
-    }))
+  it("matches a non-mergeable PR", () => {
+    const pr = mkPR({ isMergeable: false })
+    expect(matchesPreset("conflicting", pr, callers([]), NOW)).toBe(true)
+  })
 
   // Mergeable → not conflicting.
-  it.effect("does not match a mergeable PR", () =>
-    Effect.gen(function*() {
-      const pr = yield* mkPR({ isMergeable: true })
-      expect(matchesPreset("conflicting", pr, callers([]), NOW)).toBe(false)
-    }))
+  it("does not match a mergeable PR", () => {
+    const pr = mkPR({ isMergeable: true })
+    expect(matchesPreset("conflicting", pr, callers([]), NOW)).toBe(false)
+  })
 })
