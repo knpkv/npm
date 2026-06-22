@@ -1,11 +1,3 @@
-# NPM Publishing Workflow
-#
-# This workflow automates the release process for packages in this monorepo.
-# It uses changesets for version management and publishes to npm when ready.
-#
-# Security: Only runs for repository owner 'knpkv' with minimal required permissions
-# Process: Creates release PRs → Merges PRs → Publishes to npm → Creates GitHub releases
-
 name: Release
 on:
   push:
@@ -18,27 +10,38 @@ permissions: {}
 
 jobs:
   release:
-    # Security: Only run for repository owner to prevent unauthorized publishing
-    if: github.repository_owner == 'knpkv'
+    if: github.repository_owner == 'Effect-Ts'
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write # For creating releases and tags
-      id-token: write # For npm provenance
-      pull-requests: write # For creating release PRs
+      contents: write
+      pull-requests: write
+      id-token: write
+      packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          # This is required to ensure the `GITHUB_TOKEN` we provide below is
+          # **always** used when pushing updates to the changesets release branch.
+          # Otherwise the default token will be used, and actions on that versioned
+          # release branch will not be triggered.
+          persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+      - name: Set strip internals config
+        run: |
+          sed -i 's/"stripInternal": false/"stripInternal": true/' tsconfig.base.json
       - name: Create Release Pull Request or Publish
         uses: changesets/action@v1
         with:
-          # Version packages based on changeset files
-          version: pnpm changeset:version
-          # Build and publish packages to npm registry
-          publish: pnpm changeset:publish
+          version: pnpm changeset-version
+          publish: pnpm changeset-publish
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
-          NPM_TOKEN: ${{ secrets.TOKEN_NPM }}
-          HUSKY: 0
+          # Use a personal access token instead of the one that GitHub generates
+          # automatically to ensure workflows get triggered on the changesets
+          # release branch.
+          GITHUB_TOKEN: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
