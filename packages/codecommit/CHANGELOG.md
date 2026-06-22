@@ -1,5 +1,16 @@
 # @knpkv/codecommit
 
+## 0.6.0
+
+### Minor Changes
+
+- [#69](https://github.com/knpkv/npm/pull/69) [`ebe2800`](https://github.com/knpkv/npm/commit/ebe280079863e7236de20bf06c0db6446215dab1) Thanks @konopkov! - Add `--filter` preset option to `codecommit pr list` that fans out across all
+  enabled accounts in `~/.codecommit/config.json`. Presets: `mine` (PRs you
+  authored), `needs-my-review` (PRs awaiting your approval), `stale` (no activity
+  for >7d), `conflicting` (merge conflicts). Caller identity is resolved per
+  profile via `getCallerIdentity`. `--profile`/`--region` are ignored when
+  `--filter` is set; `--repo`/`--author`/`--json` still compose normally.
+
 ## 0.5.5
 
 ### Patch Changes
