@@ -395,6 +395,12 @@ export const layer = Layer.effect(
             new TimerError({ message: "Start time is in the future. Pick a time at or before now." })
           )
         }
+        const end = new Date(options.start.getTime() + options.durationSeconds * 1000)
+        if (end.getTime() > Date.now()) {
+          return yield* Effect.fail(
+            new TimerError({ message: "End time is in the future. Shorten the duration or pick an earlier start." })
+          )
+        }
 
         const auth = yield* getAuth
         const cfg = yield* config.get
@@ -402,8 +408,6 @@ export const layer = Layer.effect(
         const projectId = yield* resolveProjectId(ticket, auth.workspaceId, options.projectId ?? null)
         const billable = options.billable ?? cfg.defaultBillable ?? null
         const tagIds = yield* resolveTagIds(ticket, auth.workspaceId)
-
-        const end = new Date(options.start.getTime() + options.durationSeconds * 1000)
 
         let clockifyLogged = false
         yield* clockify.createTimeEntry(auth.workspaceId, {

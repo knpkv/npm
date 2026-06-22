@@ -14,6 +14,6 @@ backed by a new `VersionService`.
 - `jira version relatedwork list|add <id>` manages "Related work" links (the
   Confluence pages surfaced on a release report).
 
-Mutations (`set`, `relatedwork add`) require the `manage:jira-project` OAuth
-scope; the requested scopes now also include `read/write:project-version:jira`
-for version entity properties. Re-run `jira auth login` to grant them.
+`version set` requires the new `manage:jira-project` OAuth scope. `relatedwork
+add` uses the existing `write:jira-work` scope. Re-run `jira auth login` to
+grant the new scope.

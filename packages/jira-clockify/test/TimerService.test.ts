@@ -592,6 +592,22 @@ describe("TimerService", () => {
         // No Clockify entry should have been created.
         expect(createdEntries).toHaveLength(0)
       }).pipe(Effect.provide(TestLayer)))
+
+    // The whole manual interval must be in the past; otherwise Clockify/Jira
+    // would receive a worklog whose end time has not happened yet.
+    it.effect("fails when the manual interval would end in the future", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+        const error = yield* svc.logManual(makeTicket(), {
+          start: fiveMinutesAgo,
+          durationSeconds: 10 * 60
+        }).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(TimerError)
+        expect(error.message).toMatch(/end time is in the future/i)
+        expect(createdEntries).toHaveLength(0)
+      }).pipe(Effect.provide(TestLayer)))
   })
 
   describe("start backdating", () => {

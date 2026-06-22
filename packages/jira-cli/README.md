@@ -30,12 +30,12 @@ Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 - User Identity API: `read:me`
 - Plus `offline_access` (issued automatically) so the CLI stays logged in across runs.
 
-`write:jira-work` and `manage:jira-project` are required by the `version` command
-(editing a version's description and managing its "Related work" links).
+`manage:jira-project` is required to edit a version's description.
+`write:jira-work` is required to manage a version's "Related work" links.
 
 > **Upgrading?** If you authenticated before the `version` command was added, the
 > new scopes are not yet granted to your token. Re-run `jira auth login` to
-> re-consent and pick up `write:jira-work` + `manage:jira-project`.
+> re-consent and pick up `manage:jira-project`.
 
 **Callback URL:**
 
@@ -150,7 +150,7 @@ jira version relatedwork add 10042 \
   --category Communication
 ```
 
-`relatedwork add` requires the `manage:jira-project` scope.
+`relatedwork add` requires the `write:jira-work` scope.
 
 ## Auth Commands
 
