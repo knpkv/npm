@@ -3,12 +3,14 @@ import { Args, Command, Options } from "@effect/cli"
 import { FileSystem } from "@effect/platform"
 import { BunContext, BunRuntime } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
-import { AwsClient, AwsClientConfig, type Domain } from "@knpkv/codecommit-core"
+import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { makeServer } from "@knpkv/codecommit-web"
 import { Console, Effect, Layer, Stream } from "effect"
 import open from "open"
 import pkg from "../package.json"
+import { FILTER_PRESETS, type FilterPreset, matchesRepoAuthor } from "./filterPresets.js"
+import { FilterService, FilterServiceLive } from "./FilterService.js"
 
 // TUI Command
 const tui = Command.make("tui", {}, () =>
@@ -80,26 +82,32 @@ const prCreate = Command.make("create", {
     Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
   )).pipe(Command.withDescription("Create a pull request"))
 
+// Filter presets (FILTER_PRESETS, matchesPreset, matchesRepoAuthor) live in
+// ./filterPresets.ts — a side-effect-free module so they can be unit-tested
+// without importing this CLI entrypoint (which boots the TUI/Bun runtime).
+
 // PR List Command
 const prList = Command.make("list", {
   profile: Options.text("profile").pipe(
     Options.withAlias("p"),
-    Options.withDescription("AWS profile"),
+    Options.withDescription("AWS profile (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("default")
   ),
   region: Options.text("region").pipe(
     Options.withAlias("r"),
-    Options.withDescription("AWS region"),
+    Options.withDescription("AWS region (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("us-east-1")
   ),
   status: Options.choice("status", ["OPEN", "CLOSED"]).pipe(
     Options.withAlias("s"),
-    Options.withDescription("Filter by PR status"),
+    Options.withDescription("Filter by PR status (ignored when --filter is set — presets are OPEN-only)"),
     Options.withDefault("OPEN" as const)
   ),
   all: Options.boolean("all").pipe(
     Options.withAlias("a"),
-    Options.withDescription("Show all PRs (both OPEN and CLOSED)"),
+    Options.withDescription(
+      "Show all PRs (both OPEN and CLOSED; ignored when --filter is set — presets are OPEN-only)"
+    ),
     Options.withDefault(false)
   ),
   repo: Options.text("repo").pipe(
@@ -110,13 +118,81 @@ const prList = Command.make("list", {
     Options.withDescription("Filter by author"),
     Options.optional
   ),
+  filter: Options.choice<FilterPreset, typeof FILTER_PRESETS>("filter", FILTER_PRESETS).pipe(
+    Options.withDescription(
+      "Named preset (fans out across all enabled accounts, OPEN PRs only — ignores --status/--all): " +
+        "mine | needs-my-review | stale | conflicting"
+    ),
+    Options.optional
+  ),
   json: Options.boolean("json").pipe(
     Options.withDescription("Output as JSON"),
     Options.withDefault(false)
   )
-}, ({ all, author, json, profile, region, repo, status }) =>
+}, ({ all, author, filter, json, profile, region, repo, status }) =>
   Effect.gen(function*() {
     const aws = yield* AwsClient.AwsClient
+
+    // ── Filter-preset path: fan out across all enabled accounts ──────────────
+    if (filter._tag === "Some") {
+      const preset = filter.value
+      const fs = yield* FilterService
+      const targets = yield* fs.resolveTargets
+
+      if (targets.length === 0) {
+        yield* Console.log("No enabled accounts in ~/.codecommit/config.json. Enable some with `codecommit tui`.")
+        return
+      }
+
+      // Progress/status text goes to stderr so `--json` emits only the JSON document on stdout.
+      if (!json) yield* Console.error(`Scanning ${targets.length} account(s) with filter '${preset}'...`)
+
+      const { failures, prs, unresolvedProfiles } = yield* fs.collect(preset, targets, { repo, author })
+      const unresolvedCallerProfiles = unresolvedProfiles
+
+      // Warn (on stderr, so `--json` stdout stays clean) when caller identity
+      // couldn't be resolved for an identity-comparing preset — those accounts'
+      // results may be incomplete because no PR can match an unknown "me".
+      const reportWarnings = Effect.gen(function*() {
+        for (const p of unresolvedCallerProfiles) {
+          yield* Console.error(
+            `⚠ could not resolve caller identity for profile ${p}; '${preset}' results for it may be incomplete`
+          )
+        }
+        if (failures.length > 0) {
+          yield* Console.error(`\n⚠ ${failures.length} account(s) failed:`)
+          for (const f of failures) yield* Console.error(`  ${f}`)
+        }
+      })
+
+      if (prs.length === 0) {
+        if (json) yield* Console.log("[]")
+        else yield* Console.error(`No PRs match filter '${preset}'.`)
+        yield* reportWarnings
+        return
+      }
+
+      if (json) {
+        yield* Console.log(JSON.stringify(prs, null, 2))
+      } else {
+        yield* Console.log(`\nFound ${prs.length} PR(s) matching filter '${preset}':\n`)
+        for (const pr of prs) {
+          const flags = [
+            pr.isApproved ? "approved" : "",
+            pr.isMergeable ? "mergeable" : "conflicts"
+          ].filter(Boolean).join(" ")
+          yield* Console.log(`${pr.id}  ${pr.repositoryName}  [${pr.account.profile}/${pr.account.region}]`)
+          yield* Console.log(`    ${pr.title}`)
+          yield* Console.log(`    ${pr.sourceBranch} -> ${pr.destinationBranch}`)
+          yield* Console.log(`    by ${pr.author}  ${flags}`)
+          yield* Console.log("")
+        }
+      }
+      yield* reportWarnings
+      return
+    }
+
+    // ── Single-account path (original behaviour) ─────────────────────────────
     const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
 
     const statusLabel = all ? "all" : status.toLowerCase()
@@ -124,11 +200,7 @@ const prList = Command.make("list", {
 
     const filterPRs = (prStream: Stream.Stream<Domain.PullRequest, AwsClient.AwsClientError>) =>
       prStream.pipe(
-        Stream.filter((pr) => {
-          if (repo._tag === "Some" && pr.repositoryName !== repo.value) return false
-          if (author._tag === "Some" && pr.author !== author.value) return false
-          return true
-        }),
+        Stream.filter((pr) => matchesRepoAuthor(pr, repo, author)),
         Stream.runCollect,
         Effect.map((chunk) => Array.from(chunk))
       )
@@ -167,8 +239,18 @@ const prList = Command.make("list", {
       }
     }
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
-  )).pipe(Command.withDescription("List open pull requests"))
+    Effect.provide(
+      // FilterService draws AwsClient/ConfigService from the base layers, which
+      // are also merged into the output so the single-account path keeps them.
+      FilterServiceLive.pipe(
+        Layer.provideMerge(Layer.mergeAll(
+          AwsClient.AwsClientLive,
+          NodeHttpClient.layer,
+          ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
+        ))
+      )
+    )
+  )).pipe(Command.withDescription("List pull requests (use --filter for cross-account presets)"))
 
 // Helper to render comment threads as markdown
 const renderThread = (thread: Domain.CommentThread, indent: number = 0): string => {

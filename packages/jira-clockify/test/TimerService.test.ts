@@ -3,7 +3,7 @@ import * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import { describe, expect, it } from "@effect/vitest"
 import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient } from "@knpkv/jira-api-client"
+import { FetchClientError, JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -180,6 +180,22 @@ const MockHttpClientLayer = Layer.succeed(
   )
 )
 
+// HttpClient that returns a 400 for any Jira worklog POST (simulates Jira failure)
+const MockHttpClientFailLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(JSON.stringify({ errorMessages: ["nope"] }), {
+          status: 400,
+          headers: { "content-type": "application/json" }
+        })
+      )
+    )
+  )
+)
+
 const TestLayer = timerLayer.pipe(
   Layer.provide(MockClockifyLayer),
   Layer.provide(MockJiraApiClientLayer),
@@ -189,6 +205,21 @@ const TestLayer = timerLayer.pipe(
   Layer.provide(MockJiraAuthLayer),
   Layer.provide(MockHttpClientLayer)
 )
+
+// Build a TimerService layer with overridden Clockify / HttpClient mocks.
+const makeTestLayer = (
+  clockify: ClockifyApiClientShape = mockClockify,
+  httpLayer: Layer.Layer<HttpClient.HttpClient> = MockHttpClientLayer
+) =>
+  timerLayer.pipe(
+    Layer.provide(Layer.succeed(ClockifyApiClient, clockify)),
+    Layer.provide(MockJiraApiClientLayer),
+    Layer.provide(MockClockifyAuthLayer),
+    Layer.provide(MockConfigLayer),
+    Layer.provide(MockStateWriterLayer),
+    Layer.provide(MockJiraAuthLayer),
+    Layer.provide(httpLayer)
+  )
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -448,6 +479,151 @@ describe("TimerService", () => {
         yield* svc.start(makeTicket())
         const result = yield* svc.stop()
         expect(result.needsProjectId).toBe(true)
+      }).pipe(Effect.provide(TestLayer)))
+  })
+
+  describe("logManual (correction interval)", () => {
+    // Logging a forgotten interval writes a closed Clockify entry (start + end) and a Jira worklog
+    it.effect("creates a closed Clockify entry and posts a Jira worklog", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        writtenStates = []
+        cleared = false
+        const svc = yield* TimerService
+        const start = new Date("2025-01-01T09:00:00.000Z")
+        const result = yield* svc.logManual(makeTicket(), { start, durationSeconds: 1800 })
+
+        expect(result.clockifyLogged).toBe(true)
+        expect(result.jiraWorklogLogged).toBe(true)
+        expect(createdEntries).toHaveLength(1)
+        const params = createdEntries[0]!.params as { start: string; end: string; description: string }
+        expect(params.start).toBe(start.toISOString())
+        expect(params.end).toBe(new Date(start.getTime() + 1800 * 1000).toISOString())
+        expect(params.description).toBe("[PROJ-123] Fix the widget")
+      }).pipe(Effect.provide(TestLayer)))
+
+    // A correction must never disturb the running-timer state (there was no running timer)
+    it.effect("leaves timer state inactive", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        writtenStates = []
+        cleared = false
+        const svc = yield* TimerService
+        yield* svc.logManual(makeTicket(), { start: new Date("2025-01-01T09:00:00.000Z"), durationSeconds: 600 })
+        const state = yield* SubscriptionRef.get(svc.state)
+        expect(state.active).toBe(false)
+        expect(state.ticketKey).toBeNull()
+      }).pipe(Effect.provide(TestLayer)))
+
+    // Explicit projectId/billable options flow through to the Clockify entry
+    it.effect("honours explicit projectId and billable options", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        writtenStates = []
+        cleared = false
+        const svc = yield* TimerService
+        const result = yield* svc.logManual(makeTicket(), {
+          start: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 600,
+          projectId: "proj-x",
+          billable: false
+        })
+        expect(result.projectId).toBe("proj-x")
+        expect(result.billable).toBe(false)
+        const params = createdEntries[0]!.params as { projectId?: string; billable?: boolean }
+        expect(params.projectId).toBe("proj-x")
+        expect(params.billable).toBe(false)
+      }).pipe(Effect.provide(TestLayer)))
+
+    // A failing Clockify createTimeEntry must flip clockifyLogged to false (not crash)
+    it.effect("clockifyLogged is false when the Clockify entry fails", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const result = yield* svc.logManual(makeTicket(), {
+          start: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 600
+        })
+        // Jira worklog still succeeds via the 201 mock; only Clockify failed.
+        expect(result.clockifyLogged).toBe(false)
+        expect(result.jiraWorklogLogged).toBe(true)
+      }).pipe(Effect.provide(
+        makeTestLayer({
+          ...mockClockify,
+          createTimeEntry: () => Effect.fail(new FetchClientError({ error: "boom", status: 500, message: "boom" }))
+        }, MockHttpClientLayer)
+      )))
+
+    // A failing Jira worklog POST must flip jiraWorklogLogged to false (not crash)
+    it.effect("jiraWorklogLogged is false when the Jira worklog POST fails", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const result = yield* svc.logManual(makeTicket(), {
+          start: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 600
+        })
+        expect(result.clockifyLogged).toBe(true)
+        expect(result.jiraWorklogLogged).toBe(false)
+      }).pipe(Effect.provide(makeTestLayer(mockClockify, MockHttpClientFailLayer))))
+
+    // The 60s Jira floor applies to backdated/manual logs too: a <60s duration
+    // must still post a worklog (floored), so jiraWorklogLogged stays true.
+    it.effect("applies the 60s worklog floor on a sub-minute manual log", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const result = yield* svc.logManual(makeTicket(), {
+          start: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 30
+        })
+        expect(result.jiraWorklogLogged).toBe(true)
+      }).pipe(Effect.provide(TestLayer)))
+
+    // Future start times are rejected by the shared guard in logManual
+    it.effect("fails when the start time is in the future", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const future = new Date(Date.now() + 60 * 60 * 1000)
+        const error = yield* svc.logManual(makeTicket(), { start: future, durationSeconds: 600 }).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(TimerError)
+        expect(error.message).toMatch(/future/i)
+        // No Clockify entry should have been created.
+        expect(createdEntries).toHaveLength(0)
+      }).pipe(Effect.provide(TestLayer)))
+
+    // The whole manual interval must be in the past; otherwise Clockify/Jira
+    // would receive a worklog whose end time has not happened yet.
+    it.effect("fails when the manual interval would end in the future", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+        const error = yield* svc.logManual(makeTicket(), {
+          start: fiveMinutesAgo,
+          durationSeconds: 10 * 60
+        }).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(TimerError)
+        expect(error.message).toMatch(/end time is in the future/i)
+        expect(createdEntries).toHaveLength(0)
+      }).pipe(Effect.provide(TestLayer)))
+  })
+
+  describe("start backdating", () => {
+    // A backdated start records the corrected start time on the Clockify entry and state
+    it.effect("uses the provided startedAt instead of now", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        writtenStates = []
+        cleared = false
+        const svc = yield* TimerService
+        const startedAt = new Date("2025-01-01T08:30:00.000Z")
+        yield* svc.start(makeTicket(), { startedAt })
+        const params = createdEntries[0]!.params as { start: string }
+        expect(params.start).toBe(startedAt.toISOString())
+        const state = yield* SubscriptionRef.get(svc.state)
+        expect(state.startedAt?.toISOString()).toBe(startedAt.toISOString())
       }).pipe(Effect.provide(TestLayer)))
   })
 })

@@ -5,12 +5,13 @@
  */
 import { Args, Command, Options, Prompt } from "@effect/cli"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
 import { Console, Effect, Option, SubscriptionRef } from "effect"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import { TicketService } from "../../services/TicketService.js"
 import { TimerService } from "../../services/TimerService.js"
+import { formatElapsed, parseDuration, parseStartTime } from "../../utils/time.js"
+import { fetchTicketByKey } from "../fetchTicket.js"
 import { fuzzySelect } from "../fuzzySelect.js"
 
 export const start = Command.make(
@@ -30,15 +31,50 @@ export const start = Command.make(
     saveDefaults: Options.boolean("save-defaults").pipe(
       Options.withDescription("Save project/billable as defaults"),
       Options.withDefault(false)
+    ),
+    ago: Options.text("ago").pipe(
+      Options.withAlias("a"),
+      Options.withDescription("Backdate the start by a duration (e.g. 15m, 1h30m) — corrects a forgotten start"),
+      Options.optional
+    ),
+    since: Options.text("since").pipe(
+      Options.withDescription("Backdate the start to a past time today (HH:MM) or an ISO timestamp"),
+      Options.optional
     )
   },
-  ({ billable, key, project, saveDefaults }) =>
+  ({ ago, billable, key, project, saveDefaults, since }) =>
     Effect.gen(function*() {
       const timer = yield* TimerService
       const ticketService = yield* TicketService
       const cfg = yield* ConfigService
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
+
+      // Resolve a backdated start, if requested. --ago wins over --since.
+      let startedAt: Date | undefined
+      if (Option.isSome(ago)) {
+        const secs = parseDuration(ago.value)
+        if (secs === null) {
+          yield* Console.log("Invalid --ago. Use a duration like 15m, 1h, 1h30m.")
+          return
+        }
+        if (secs <= 0) {
+          yield* Console.log("--ago must be greater than zero (e.g. 15m, 1h).")
+          return
+        }
+        startedAt = new Date(Date.now() - secs * 1000)
+      } else if (Option.isSome(since)) {
+        const parsed = parseStartTime(since.value)
+        if (!parsed) {
+          yield* Console.log("Invalid --since. Use HH:MM (today) or an ISO timestamp.")
+          return
+        }
+        if (parsed.getTime() > Date.now()) {
+          yield* Console.log("--since is in the future. Pick a time at or before now.")
+          return
+        }
+        startedAt = parsed
+      }
 
       // Check for running timer
       yield* timer.detectRunning
@@ -92,38 +128,16 @@ export const start = Command.make(
         ticket = found
       } else {
         // Key provided — fetch from Jira to validate and get title
-        const jira = yield* JiraApiClient
-        const issue = yield* toEffect(jira.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
-          params: {
-            path: { issueIdOrKey: key.value },
-            query: { fields: ["summary", "status", "priority", "assignee", "issuetype", "labels"] }
-          }
-        })).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-        if (!issue) {
+        const fetched = yield* fetchTicketByKey(key.value)
+        if (fetched._tag === "NotFound") {
           yield* Console.log(`Ticket ${key.value} not found in Jira.`)
           return
         }
-        const fields = issue.fields as Record<string, unknown> | null | undefined
-        const nested = (k: string, n: string) => {
-          const v = fields?.[k]
-          return v && typeof v === "object" && n in v ? (v as Record<string, unknown>)[n] : null
+        if (fetched._tag === "FetchError") {
+          yield* Console.log(`Failed to fetch ticket ${key.value}: ${fetched.message}`)
+          return
         }
-        ticket = {
-          key: issue.key ?? key.value,
-          summary: (typeof fields?.["summary"] === "string" ? fields["summary"] : null) ?? key.value,
-          status: (typeof nested("status", "name") === "string" ? nested("status", "name") as string : null) ??
-            "Unknown",
-          priority: typeof nested("priority", "name") === "string" ? nested("priority", "name") as string : null,
-          assignee: typeof nested("assignee", "displayName") === "string"
-            ? nested("assignee", "displayName") as string
-            : null,
-          type: (typeof nested("issuetype", "name") === "string" ? nested("issuetype", "name") as string : null) ??
-            "Task",
-          labels: Array.isArray(fields?.["labels"]) ? fields["labels"] as Array<string> : [],
-          updated: (typeof fields?.["updated"] === "string" ? fields["updated"] : null) ?? new Date().toISOString()
-        }
+        ticket = fetched.ticket
         yield* Console.log(`${ticket.key}: ${ticket.summary} [${ticket.status}]`)
       }
 
@@ -180,10 +194,13 @@ export const start = Command.make(
         yield* Console.log("Defaults saved to ~/.jcf/config.json")
       }
 
-      yield* timer.start(ticket, { projectId, billable: billableVal }).pipe(
+      yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(
         Effect.catchAll((e) => Console.log(`Error: ${e.message}`))
       )
 
-      yield* Console.log(`Timer started: ${ticket.key} — ${ticket.summary}`)
+      const startedSuffix = startedAt
+        ? ` (started ${formatElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000))} ago)`
+        : ""
+      yield* Console.log(`Timer started: ${ticket.key} — ${ticket.summary}${startedSuffix}`)
     })
 )

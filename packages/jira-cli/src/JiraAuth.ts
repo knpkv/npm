@@ -65,12 +65,20 @@ import { startCallbackServer } from "./internal/oauthServer.js"
 import type { AuthMissingError } from "./JiraCliError.js"
 import { authMissing } from "./JiraCliError.js"
 
-/** Scopes for Jira CLI (includes write:jira-work for worklog) */
+/** OAuth scopes for the Jira CLI. Granular scopes must also be enabled on the app in the developer console. */
 const JIRA_CLI_SCOPES = [
+  // Read issues, search, and read versions.
   "read:jira-work",
+  // Edit issues and write worklogs.
   "write:jira-work",
+  // Edit a version (e.g. its description) via `PUT /rest/api/3/version/{id}` and
+  // manage version "Related work" links (`/rest/api/3/version/{id}/relatedwork`).
+  "manage:jira-project",
+  // Resolve account IDs to display names for Driver/Contributors/Approvers.
   "read:jira-user",
+  // Read the authenticated user's own profile (`/rest/api/3/myself`).
   "read:me",
+  // Issue a refresh token so the CLI stays logged in across runs.
   "offline_access"
 ]
 

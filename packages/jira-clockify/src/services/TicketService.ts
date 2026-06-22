@@ -79,6 +79,26 @@ const extractNested = (
   return null
 }
 
+/**
+ * Shape a raw Jira issue (from `/rest/api/3/issue` or `/search/jql`) into a
+ * {@link JiraTicket}. Single source of truth for the nested-field extraction —
+ * reused by {@link fetchTicketByKey} so the two never drift.
+ */
+export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: string): JiraTicket => {
+  const fields = issue["fields"] as Record<string, unknown> | null | undefined
+  const key = typeof issue["key"] === "string" ? issue["key"] : (fallbackKey ?? "?")
+  return {
+    key,
+    summary: extractString(fields, "summary") ?? (fallbackKey ?? "(no summary)"),
+    status: extractNested(fields, "status", "name") ?? "Unknown",
+    priority: extractNested(fields, "priority", "name"),
+    assignee: extractNested(fields, "assignee", "displayName"),
+    type: extractNested(fields, "issuetype", "name") ?? "Task",
+    labels: Array.isArray(fields?.["labels"]) ? (fields["labels"] as Array<string>) : [],
+    updated: extractString(fields, "updated") ?? new Date().toISOString()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -116,19 +136,9 @@ export const layer = Layer.effect(
         Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e }))
       )
 
-      const tickets: Array<JiraTicket> = (result.issues ?? []).map((issue) => {
-        const fields = (issue as Record<string, unknown>).fields as Record<string, unknown> | null | undefined
-        return {
-          key: String((issue as Record<string, unknown>).key ?? "?"),
-          summary: extractString(fields, "summary") ?? "(no summary)",
-          status: extractNested(fields, "status", "name") ?? "Unknown",
-          priority: extractNested(fields, "priority", "name"),
-          assignee: extractNested(fields, "assignee", "displayName"),
-          type: extractNested(fields, "issuetype", "name") ?? "Task",
-          labels: Array.isArray(fields?.["labels"]) ? (fields["labels"] as Array<string>) : [],
-          updated: extractString(fields, "updated") ?? new Date().toISOString()
-        }
-      })
+      const tickets: Array<JiraTicket> = (result.issues ?? []).map((issue) =>
+        mapIssueToTicket(issue as Record<string, unknown>)
+      )
 
       yield* SubscriptionRef.set(ref, {
         tickets,

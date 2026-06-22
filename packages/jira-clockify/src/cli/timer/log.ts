@@ -1,16 +1,19 @@
 /**
- * Timer `log` command — add activity manually.
+ * Timer `log` command — add a completed interval manually (no running timer).
  *
  * @module
  */
 import { Args, Command, Options } from "@effect/cli"
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Option, Redacted } from "effect"
-import { ClockifyAuth } from "../../services/ClockifyAuth.js"
+import { Console, Effect, Option } from "effect"
+import { TimerService } from "../../services/TimerService.js"
+import { formatDuration, isFullIsoTimestamp, parseDuration, parseStartTime } from "../../utils/time.js"
+import { fetchTicketByKey } from "../fetchTicket.js"
+
+/** Today's calendar day in the user's *local* timezone as `YYYY-MM-DD`. */
+const localToday = (): string => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
 
 export const log = Command.make(
   "log",
@@ -22,115 +25,70 @@ export const log = Command.make(
       Options.withDescription("Date (YYYY-MM-DD, default today)"),
       Options.optional
     ),
+    at: Options.text("at").pipe(
+      Options.withDescription("Start time on that date (HH:MM, default 09:00)"),
+      Options.optional
+    ),
     comment: Options.text("comment").pipe(
       Options.withAlias("c"),
       Options.withDescription("Worklog comment"),
       Options.optional
     )
   },
-  ({ comment, date, key, time }) =>
+  ({ at, comment, date, key, time }) =>
     Effect.gen(function*() {
-      // Parse duration string like "1h30m", "2h", "45m"
-      const durationMatch = time.match(/(?:(\d+)h)?(?:(\d+)m)?/)
-      if (!durationMatch || (!durationMatch[1] && !durationMatch[2])) {
-        yield* Console.log("Invalid duration. Use format: 1h30m, 2h, 45m")
+      const totalSeconds = parseDuration(time)
+      if (totalSeconds === null || totalSeconds < 60) {
+        yield* Console.log("Invalid duration. Use format: 1h30m, 2h, 45m (minimum 1m).")
         return
       }
-      const hours = parseInt(durationMatch[1] ?? "0", 10)
-      const minutes = parseInt(durationMatch[2] ?? "0", 10)
-      const totalSeconds = Math.max(60, hours * 3600 + minutes * 60)
 
-      // Parse date
-      const dateStr = Option.isSome(date) ? date.value : new Date().toISOString().slice(0, 10)
-      const started = new Date(`${dateStr}T09:00:00.000Z`)
-      if (isNaN(started.getTime())) {
-        yield* Console.log("Invalid date. Use format: YYYY-MM-DD")
+      // A full ISO `--at` carries its own date — combining it with `--date` is
+      // ambiguous (which date wins?), so reject the conflict explicitly.
+      if (Option.isSome(at) && isFullIsoTimestamp(at.value) && Option.isSome(date)) {
+        yield* Console.log("--at is a full ISO timestamp; drop --date (it conflicts).")
+        return
+      }
+
+      // Parse date + start time → start instant. Default date is the *local*
+      // calendar day, and the date base is parsed at local midnight so the
+      // HH:MM `--at` lands on the intended local clock time.
+      const dateStr = Option.isSome(date) ? date.value : localToday()
+      const timeStr = Option.isSome(at) ? at.value : "09:00"
+      const started = parseStartTime(timeStr, new Date(`${dateStr}T00:00:00`))
+      if (!started || isNaN(started.getTime())) {
+        yield* Console.log("Invalid date/time. Use --date YYYY-MM-DD and --at HH:MM.")
         return
       }
 
       // Validate ticket exists
-      const jira = yield* JiraApiClient
-      const issue = yield* toEffect(jira.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
-        params: {
-          path: { issueIdOrKey: key },
-          query: { fields: ["summary", "issuetype", "labels"] }
-        }
-      })).pipe(
-        Effect.catchAll(() => Effect.succeed(null))
-      )
-      if (!issue) {
+      const fetched = yield* fetchTicketByKey(key)
+      if (fetched._tag === "NotFound") {
         yield* Console.log(`Ticket ${key} not found in Jira.`)
         return
       }
-      const fields = issue.fields as Record<string, unknown> | null | undefined
-      const summary = typeof fields?.["summary"] === "string" ? fields["summary"] : key
-
-      yield* Console.log(`Logging: ${key} — ${summary}`)
-      yield* Console.log(`  Duration: ${hours}h ${minutes}m (${totalSeconds}s)`)
-      yield* Console.log(`  Date: ${dateStr}`)
-
-      // Create Clockify entry (completed)
-      const clockifyAuth = yield* ClockifyAuth
-      const clockifyClient = yield* ClockifyApiClient
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
-
-      let clockifyOk = false
-      if (auth) {
-        const end = new Date(started.getTime() + totalSeconds * 1000)
-        yield* clockifyClient.createTimeEntry(auth.workspaceId, {
-          description: `[${key}] ${summary}`,
-          start: started.toISOString(),
-          end: end.toISOString()
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              clockifyOk = true
-            })
-          ),
-          Effect.catchAll(() => Effect.void)
-        )
+      if (fetched._tag === "FetchError") {
+        yield* Console.log(`Failed to fetch ticket ${key}: ${fetched.message}`)
+        return
       }
+      const ticket = fetched.ticket
 
-      // Create Jira worklog via raw HTTP
-      const jiraAuthSvc = yield* JiraAuth
-      const accessToken = yield* jiraAuthSvc.getAccessToken().pipe(
-        Effect.map((t) => Redacted.value(t)),
-        Effect.catchAll(() => Effect.succeed(""))
+      yield* Console.log(`Logging: ${ticket.key} — ${ticket.summary}`)
+      yield* Console.log(`  Duration: ${formatDuration(totalSeconds)} (${totalSeconds}s)`)
+      yield* Console.log(`  Started:  ${started.toISOString()}`)
+
+      const timer = yield* TimerService
+      const result = yield* timer.logManual(ticket, {
+        start: started,
+        durationSeconds: totalSeconds,
+        comment: Option.isSome(comment) ? comment.value : undefined
+      }).pipe(
+        Effect.catchAll((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
       )
-      const cloudId = yield* jiraAuthSvc.getCloudId().pipe(Effect.catchAll(() => Effect.succeed("")))
 
-      let jiraOk = false
-      if (accessToken && cloudId) {
-        const httpClient = yield* HttpClient.HttpClient
-        const commentText = Option.isSome(comment) ? comment.value : undefined
-        const response = yield* httpClient.execute(
-          HttpClientRequest.post(
-            `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${key}/worklog`
-          ).pipe(
-            HttpClientRequest.setHeader("Authorization", `Bearer ${accessToken}`),
-            HttpClientRequest.setHeader("Content-Type", "application/json"),
-            HttpClientRequest.bodyUnsafeJson({
-              started: started.toISOString().replace("Z", "+0000"),
-              timeSpentSeconds: totalSeconds,
-              ...(commentText ?
-                {
-                  comment: {
-                    type: "doc",
-                    version: 1,
-                    content: [{ type: "paragraph", content: [{ type: "text", text: commentText }] }]
-                  }
-                } :
-                {})
-            })
-          )
-        ).pipe(Effect.catchAll(() => Effect.succeed(null)))
-
-        if (response && response.status >= 200 && response.status < 300) {
-          jiraOk = true
-        }
+      if (result) {
+        yield* Console.log(`  Clockify:     ${result.clockifyLogged ? "✓" : "✗"}`)
+        yield* Console.log(`  Jira worklog: ${result.jiraWorklogLogged ? "✓" : "✗"}`)
       }
-
-      yield* Console.log(`  Clockify: ${clockifyOk ? "✓" : "✗"}`)
-      yield* Console.log(`  Jira worklog: ${jiraOk ? "✓" : "✗"}`)
     })
 )

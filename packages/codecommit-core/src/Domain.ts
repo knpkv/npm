@@ -203,17 +203,52 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
 }
 
 /**
+ * Robust identity comparison for matching a caller against an author or
+ * approval-pool member.
+ *
+ * Both sides normally arrive already normalised by `normalizeAuthor`
+ * (ARN → trailing `/`-segment), so the happy path is a plain equality. Under
+ * cross-account SSO / assumed-role setups the two strings can still diverge —
+ * e.g. one side is a full ARN or `AWSReservedSSO_<perm>_<id>/<user>` form while
+ * the other is the bare username, or they differ only in case. This is a
+ * SUPERSET of exact match: it still matches when the strings are equal, and
+ * additionally matches when, after case-folding and reducing each side to its
+ * final `/`- or `:`-segment (the username), the username segments are equal.
+ * It deliberately anchors on the username segment so unrelated users never match.
+ *
+ * @category Domain
+ */
+export const identityMatches = (callerUsername: string, prAuthor: string): boolean => {
+  const norm = (s: string) => s.trim().toLowerCase()
+  const tail = (s: string) => {
+    const segments = norm(s).split(/[/:]/).filter((seg) => seg.length > 0)
+    return segments[segments.length - 1] ?? ""
+  }
+  const a = norm(callerUsername)
+  const b = norm(prAuthor)
+  if (a === "" || b === "") return false
+  if (a === b) return true
+  const ta = tail(callerUsername)
+  const tb = tail(prAuthor)
+  return ta !== "" && ta === tb
+}
+
+/**
  * Check if a PR needs review from the given user.
  * Standalone function so it works with both Schema.Class instances and plain wire objects.
+ *
+ * Uses {@link identityMatches} (a superset of exact equality) for the
+ * caller-vs-pool-member and caller-vs-approver comparisons so SSO/ARN identity
+ * forms still match when they refer to the same user.
  */
 export const needsMyReview = (
   pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
   currentUser: string | undefined
 ): boolean => {
   if (!currentUser) return false
-  if (pr.approvedBy.includes(currentUser)) return false
+  if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
-    (rule) => !rule.satisfied && rule.poolMembers.includes(currentUser)
+    (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))
   )
 }
 
