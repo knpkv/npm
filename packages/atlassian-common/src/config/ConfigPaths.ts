@@ -18,15 +18,15 @@
  *
  * @module
  */
-import type * as Error from "@effect/platform/Error"
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 
 /**
  * Error when home directory cannot be determined.
@@ -56,10 +56,10 @@ export interface HomeDirectory {
  *
  * @category Services
  */
-export class HomeDirectoryTag extends Context.Tag("@knpkv/atlassian-common/HomeDirectory")<
+export class HomeDirectoryTag extends Context.Service<
   HomeDirectoryTag,
   HomeDirectory
->() {}
+>()("@knpkv/atlassian-common/HomeDirectory") {}
 
 const HomeConfig = Config.option(Config.string("HOME")).pipe(
   Config.orElse(() => Config.option(Config.string("USERPROFILE")))
@@ -145,7 +145,7 @@ export const ensureConfigDir = (
   toolName: string
 ): Effect.Effect<
   string,
-  HomeDirectoryError | Error.PlatformError,
+  HomeDirectoryError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {
@@ -168,7 +168,7 @@ export const ensureConfigDir = (
 export const writeSecureFile = (
   filePath: string,
   content: string
-): Effect.Effect<void, Error.PlatformError, FileSystem.FileSystem> =>
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
 

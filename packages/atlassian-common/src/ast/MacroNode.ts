@@ -10,6 +10,7 @@
  *
  * @module
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { RawSource, SchemaVersion, SimpleBlockNode } from "./BlockNode.js"
 
@@ -25,7 +26,7 @@ export const PanelTypes = ["info", "warning", "note", "tip", "error", "panel"] a
  *
  * @category MacroNode
  */
-export const PanelType = Schema.Literal(...PanelTypes)
+export const PanelType = Schema.Literals(PanelTypes)
 
 /**
  * Type for panel type.
@@ -118,8 +119,8 @@ export const CodeMacro = Schema.Struct({
   language: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
   code: Schema.String,
-  lineNumbers: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-  collapse: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  lineNumbers: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  collapse: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   firstLine: Schema.optional(Schema.Number),
   rawSource: RawSource
 })
@@ -140,7 +141,7 @@ export const StatusMacro = Schema.Struct({
   _tag: Schema.Literal("StatusMacro"),
   version: SchemaVersion,
   text: Schema.String,
-  color: Schema.Literal("Grey", "Red", "Yellow", "Green", "Blue"),
+  color: Schema.Literals(["Grey", "Red", "Yellow", "Green", "Blue"]),
   rawSource: RawSource
 })
 
@@ -156,13 +157,13 @@ export type StatusMacro = Schema.Schema.Type<typeof StatusMacro>
  *
  * @category MacroNode
  */
-export const MacroNode = Schema.Union(
+export const MacroNode = Schema.Union([
   InfoPanel,
   ExpandMacro,
   TocMacro,
   CodeMacro,
   StatusMacro
-)
+])
 
 /**
  * Type for macro nodes.

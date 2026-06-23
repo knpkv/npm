@@ -6,19 +6,15 @@
  * 2. Applies local patches (.specs/clockify-v1.patch.json) to fix incomplete DTOs
  * 3. Generates TypeScript types via openapi-typescript
  */
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import { execSync } from "node:child_process"
-import * as fs from "node:fs"
-import * as path from "node:path"
-import { fileURLToPath } from "node:url"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as PlatformError from "effect/PlatformError"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SPECS_DIR = path.join(__dirname, "..", ".specs")
-const SPEC_FILE = path.join(SPECS_DIR, "clockify-v1.json")
-const PATCH_FILE = path.join(SPECS_DIR, "clockify-v1.patch.json")
-const OUTPUT_FILE = path.join(__dirname, "..", "src", "generated", "schema.d.ts")
-const VERSION_FILE = path.join(SPECS_DIR, "VERSION")
 const SPEC_URL = "https://docs.clockify.me/openapi.json"
 
 interface SpecInfo {
@@ -26,7 +22,57 @@ interface SpecInfo {
   title: string
 }
 
-const fetchSpecInfo = (): Effect.Effect<SpecInfo, Error> =>
+interface ScriptPaths {
+  readonly packageDir: string
+  readonly specsDir: string
+  readonly specFile: string
+  readonly patchFile: string
+  readonly outputFile: string
+  readonly versionFile: string
+}
+
+interface ClockifySchema {
+  properties?: Record<string, unknown>
+  required?: unknown
+}
+
+interface ClockifySpec {
+  components?: {
+    schemas?: Record<string, ClockifySchema>
+  }
+}
+
+interface ClockifySchemaPatch {
+  readonly renameProperties?: Record<string, string>
+  readonly addProperties?: Record<string, unknown>
+  readonly patchProperties?: Record<string, unknown>
+  readonly required?: unknown
+}
+
+interface ClockifyPatches {
+  readonly schemas?: Record<string, ClockifySchemaPatch>
+}
+
+const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(function*() {
+  const path = yield* Path.Path
+  const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
+    Effect.mapError((e) => new Error(`Script path resolution failed: ${e.message}`))
+  )
+  const scriptDir = path.dirname(scriptFile)
+  const packageDir = path.join(scriptDir, "..")
+  const specsDir = path.join(packageDir, ".specs")
+
+  return {
+    packageDir,
+    specsDir,
+    specFile: path.join(specsDir, "clockify-v1.json"),
+    patchFile: path.join(specsDir, "clockify-v1.patch.json"),
+    outputFile: path.join(packageDir, "src", "generated", "schema.d.ts"),
+    versionFile: path.join(specsDir, "VERSION")
+  }
+})
+
+const fetchSpecInfo: Effect.Effect<SpecInfo, Error> =
   Effect.tryPromise({
     try: async () => {
       const response = await fetch(SPEC_URL)
@@ -37,102 +83,157 @@ const fetchSpecInfo = (): Effect.Effect<SpecInfo, Error> =>
     catch: (e) => new Error(`Fetch failed: ${e}`)
   })
 
-const fetchAndSaveSpec = (): Effect.Effect<void, Error> =>
-  Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(SPEC_URL)
-      if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
-      fs.writeFileSync(SPEC_FILE, await response.text(), "utf-8")
-    },
-    catch: (e) => new Error(`Fetch/save failed: ${e}`)
+const fetchAndSaveSpec = (outputFile: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const spec = yield* Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(SPEC_URL)
+        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+        return await response.text()
+      },
+      catch: (e) => new Error(`Fetch failed: ${e}`)
+    })
+    yield* fs.writeFileString(outputFile, spec).pipe(
+      Effect.mapError((e) => new Error(`Save failed: ${e.message}`))
+    )
   })
 
 /**
  * Apply patches from clockify-v1.patch.json to the spec in-place.
  * Keeps original spec clean — patches add missing fields and required arrays.
  */
-const applyPatches = (): Effect.Effect<void, Error> =>
-  Effect.try({
-    try: () => {
-      if (!fs.existsSync(PATCH_FILE)) return
+const applyPatches = (specFile: string, patchFile: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const patchExists = yield* fs.exists(patchFile).pipe(
+      Effect.mapError((e) => new Error(`Patch lookup failed: ${e.message}`))
+    )
+    if (!patchExists) return
 
-      const spec = JSON.parse(fs.readFileSync(SPEC_FILE, "utf-8"))
-      const patches = JSON.parse(fs.readFileSync(PATCH_FILE, "utf-8"))
-      const schemas = spec.components?.schemas ?? {}
+    const [specText, patchText] = yield* Effect.all([
+      fs.readFileString(specFile),
+      fs.readFileString(patchFile)
+    ]).pipe(
+      Effect.mapError((e) => new Error(`Patch read failed: ${e.message}`))
+    )
 
-      for (const [schemaName, patch] of Object.entries(patches.schemas ?? {}) as Array<[string, Record<string, unknown>]>) {
-        const schema = schemas[schemaName]
-        if (!schema) continue
+    const { patches, spec } = yield* Effect.try({
+      try: () => ({
+        spec: JSON.parse(specText) as ClockifySpec,
+        patches: JSON.parse(patchText) as ClockifyPatches
+      }),
+      catch: (e) => new Error(`Patch parse failed: ${e}`)
+    })
 
-        // Rename properties (e.g. get_id → id)
-        if (patch.renameProperties) {
-          for (const [from, to] of Object.entries(patch.renameProperties as Record<string, string>)) {
-            if (schema.properties?.[from]) {
-              schema.properties[to] = schema.properties[from]
-              delete schema.properties[from]
+    yield* Effect.try({
+      try: () => {
+        const schemas = spec.components?.schemas ?? {}
+
+        for (const [schemaName, patch] of Object.entries(patches.schemas ?? {})) {
+          const schema = schemas[schemaName]
+          if (!schema) continue
+
+          // Rename properties (e.g. get_id -> id)
+          if (patch.renameProperties) {
+            for (const [from, to] of Object.entries(patch.renameProperties)) {
+              if (schema.properties?.[from]) {
+                schema.properties[to] = schema.properties[from]
+                delete schema.properties[from]
+              }
             }
           }
-        }
 
-        // Add new properties
-        if (patch.addProperties) {
-          schema.properties = { ...schema.properties, ...patch.addProperties }
-        }
+          // Add new properties
+          if (patch.addProperties) {
+            schema.properties = { ...schema.properties, ...patch.addProperties }
+          }
 
-        // Patch existing properties (overwrite)
-        if (patch.patchProperties) {
-          for (const [name, value] of Object.entries(patch.patchProperties as Record<string, unknown>)) {
-            schema.properties[name] = value
+          // Patch existing properties (overwrite)
+          if (patch.patchProperties) {
+            schema.properties = { ...schema.properties }
+            for (const [name, value] of Object.entries(patch.patchProperties)) {
+              schema.properties[name] = value
+            }
+          }
+
+          // Set required fields
+          if (patch.required) {
+            schema.required = patch.required
           }
         }
+      },
+      catch: (e) => new Error(`Patch failed: ${e}`)
+    })
 
-        // Set required fields
-        if (patch.required) {
-          schema.required = patch.required
-        }
-      }
-
-      fs.writeFileSync(SPEC_FILE, JSON.stringify(spec, null, 2), "utf-8")
-    },
-    catch: (e) => new Error(`Patch failed: ${e}`)
+    yield* fs.writeFileString(specFile, JSON.stringify(spec, null, 2)).pipe(
+      Effect.mapError((e) => new Error(`Patch write failed: ${e.message}`))
+    )
   })
 
-const generateTypes = (): Effect.Effect<void, Error> =>
-  Effect.try({
-    try: () => {
-      execSync(`npx openapi-typescript "${SPEC_FILE}" -o "${OUTPUT_FILE}"`, {
-        cwd: path.join(__dirname, ".."),
-        stdio: "inherit"
-      })
-    },
-    catch: (e) => new Error(`Generation failed: ${e}`)
+const commandExitCode = (
+  command: ChildProcess.Command
+): Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError, ChildProcessSpawner.ChildProcessSpawner> =>
+  ChildProcessSpawner.ChildProcessSpawner.pipe(
+    Effect.flatMap((spawner) => spawner.exitCode(command))
+  )
+
+const generateTypes = (paths: ScriptPaths): Effect.Effect<void, Error, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function*() {
+    const command = ChildProcess.make("npx", ["openapi-typescript", paths.specFile, "-o", paths.outputFile], {
+      cwd: paths.packageDir,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+    const exitCode = yield* commandExitCode(command).pipe(
+      Effect.mapError((e) => new Error(`Generation failed: ${e.message}`))
+    )
+
+    if (exitCode !== 0) {
+      return yield* Effect.fail(new Error(`Generation failed with exit code ${exitCode}`))
+    }
   })
 
 const program = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* scriptPaths
+
   yield* Console.log("Fetching Clockify API spec version...")
 
-  const info = yield* fetchSpecInfo()
-  const current = fs.existsSync(VERSION_FILE) ? fs.readFileSync(VERSION_FILE, "utf-8").trim() : null
+  const info = yield* fetchSpecInfo
+  const current = yield* fs.exists(paths.versionFile).pipe(
+    Effect.flatMap((exists) => exists ? fs.readFileString(paths.versionFile) : Effect.succeed(null)),
+    Effect.map((content) => content?.trim() ?? null),
+    Effect.mapError((e) => new Error(`Version read failed: ${e.message}`))
+  )
 
   yield* Console.log(`Current: ${current ?? "none"}, Remote: ${info.version}`)
 
   if (current === info.version) {
     yield* Console.log("Spec up to date, regenerating types...")
   } else {
-    if (!fs.existsSync(SPECS_DIR)) fs.mkdirSync(SPECS_DIR, { recursive: true })
+    yield* fs.makeDirectory(paths.specsDir, { recursive: true }).pipe(
+      Effect.mapError((e) => new Error(`Spec directory creation failed: ${e.message}`))
+    )
 
     yield* Console.log(`Fetching spec (${info.version})...`)
-    yield* fetchAndSaveSpec()
-    fs.writeFileSync(VERSION_FILE, info.version, "utf-8")
+    yield* fetchAndSaveSpec(paths.specFile)
+    yield* fs.writeFileString(paths.versionFile, info.version).pipe(
+      Effect.mapError((e) => new Error(`Version write failed: ${e.message}`))
+    )
   }
 
   yield* Console.log("Applying patches...")
-  yield* applyPatches()
+  yield* applyPatches(paths.specFile, paths.patchFile)
 
   yield* Console.log("Generating types...")
-  yield* generateTypes()
+  yield* generateTypes(paths)
 
   yield* Console.log("Done.")
 })
 
-Effect.runPromise(program).catch(console.error)
+program.pipe(
+  Effect.provide(NodeServices.layer),
+  NodeRuntime.runMain
+)

@@ -132,12 +132,12 @@ describe("JiraApiClient", () => {
             const result = yield* toEffect(client.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
               params: { path: { issueIdOrKey: "NOPE-999" } }
             }))
-              .pipe(Effect.either)
+              .pipe(Effect.result)
 
-            expect(result._tag).toBe("Left")
-            if (result._tag === "Left") {
-              expect(result.left).toBeInstanceOf(FetchClientError)
-              expect((result.left as FetchClientError).status).toBe(404)
+            expect(result._tag).toBe("Failure")
+            if (result._tag === "Failure") {
+              expect(result.failure).toBeInstanceOf(FetchClientError)
+              expect((result.failure as FetchClientError).status).toBe(404)
             }
           })
       ))

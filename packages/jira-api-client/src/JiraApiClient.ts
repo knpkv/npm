@@ -85,9 +85,9 @@ export interface JiraApiClientShape {
  *
  * @category Client
  */
-export class JiraApiClient extends Context.Tag(
+export class JiraApiClient extends Context.Service<JiraApiClient, JiraApiClientShape>()(
   "@knpkv/jira-api-client/JiraApiClient"
-)<JiraApiClient, JiraApiClientShape>() {
+) {
   /**
    * Layer that provides JiraApiClient.
    *

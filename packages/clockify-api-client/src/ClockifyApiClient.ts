@@ -102,9 +102,9 @@ export interface ClockifyApiClientShape {
 // Service tag + layer
 // ---------------------------------------------------------------------------
 
-export class ClockifyApiClient extends Context.Tag(
+export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientShape>()(
   "@knpkv/clockify-api-client/ClockifyApiClient"
-)<ClockifyApiClient, ClockifyApiClientShape>() {
+) {
   static readonly layer: Layer.Layer<ClockifyApiClient, never, ClockifyApiConfig> = Layer.effect(
     ClockifyApiClient,
     Effect.gen(function*() {

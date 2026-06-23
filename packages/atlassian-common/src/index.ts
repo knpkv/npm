@@ -19,7 +19,7 @@ export {
 } from "./Brand.js"
 
 // Hash utilities
-export { hashBuffer, hashContent, hashContentSync, hashEquals } from "./Hash.js"
+export { hashBuffer, hashContent, hashEquals } from "./Hash.js"
 
 // Error types
 export { ParseError, SerializeError } from "./SerializeError.js"

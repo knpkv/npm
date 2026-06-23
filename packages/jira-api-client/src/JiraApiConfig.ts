@@ -46,6 +46,6 @@ export interface JiraApiConfigShape {
  *
  * @category Config
  */
-export class JiraApiConfig extends Context.Tag(
+export class JiraApiConfig extends Context.Service<JiraApiConfig, JiraApiConfigShape>()(
   "@knpkv/jira-api-client/JiraApiConfig"
-)<JiraApiConfig, JiraApiConfigShape>() {}
+) {}

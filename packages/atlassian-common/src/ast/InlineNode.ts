@@ -82,7 +82,7 @@ export class LineBreak extends Schema.TaggedClass<LineBreak>()("LineBreak", {}) 
  */
 export class UnsupportedInline extends Schema.TaggedClass<UnsupportedInline>()("UnsupportedInline", {
   raw: Schema.String,
-  source: Schema.Literal("confluence", "markdown", "adf")
+  source: Schema.Literals(["confluence", "markdown", "adf"])
 }) {}
 
 /**
@@ -199,7 +199,7 @@ export class Highlight extends Schema.TaggedClass<Highlight>()("Highlight", {
 }) {}
 
 // Forward declaration for recursive types
-const InlineNodeBase = Schema.Union(
+const InlineNodeBase = Schema.Union([
   Text,
   InlineCode,
   LineBreak,
@@ -207,7 +207,7 @@ const InlineNodeBase = Schema.Union(
   UserMention,
   DateTime,
   UnsupportedInline
-)
+])
 
 /**
  * Inline node children schema - use this for recursive inline content.
@@ -278,7 +278,7 @@ export class Link extends Schema.TaggedClass<Link>()("Link", {
  *
  * @category InlineNode
  */
-export const InlineNode = Schema.Union(
+export const InlineNode = Schema.Union([
   Text,
   Strong,
   Emphasis,
@@ -295,7 +295,7 @@ export const InlineNode = Schema.Union(
   ColoredText,
   Highlight,
   UnsupportedInline
-)
+])
 
 /**
  * Type for inline nodes.
