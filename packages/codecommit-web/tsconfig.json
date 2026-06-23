@@ -6,7 +6,6 @@
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "types": ["vitest/globals"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/client/*"]
     }

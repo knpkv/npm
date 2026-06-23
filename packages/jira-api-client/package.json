@@ -53,15 +53,15 @@
     "effect": "4.0.0-beta.85"
   },
   "devDependencies": {
-    "@effect/platform-node": "latest",
+    "@effect/platform-node": "4.0.0-beta.85",
     "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
-    "effect": "latest",
+    "effect": "4.0.0-beta.85",
     "openapi-typescript": "^7.13.0",
     "openapi-typescript-helpers": "^0.1.0",
-    "tsx": "^4.19.4",
-    "typescript": "~5.9.0",
-    "vitest": "^4.0.13"
+    "tsx": "^4.22.4",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
   },
   "keywords": [
     "effect",

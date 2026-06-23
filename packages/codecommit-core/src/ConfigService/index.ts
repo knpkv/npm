@@ -61,14 +61,14 @@ const ConfigPathsLive = Layer.effect(
 
     const configPath = getConfigPath.pipe(
       Effect.catchIf(
-        (error): error is Config.ConfigError => true,
+        (_error): _error is Config.ConfigError => true,
         () => Effect.fail(new ConfigError({ message: "Could not determine home directory (HOME/USERPROFILE)" }))
       )
     )
 
     const homePath = getHomePath.pipe(
       Effect.catchIf(
-        (error): error is Config.ConfigError => true,
+        (_error): _error is Config.ConfigError => true,
         () => Effect.fail(new ProfileDetectionError({ message: "Could not determine home directory" }))
       )
     )

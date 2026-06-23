@@ -58,7 +58,7 @@
     "effect": "4.0.0-beta.85"
   },
   "dependencies": {
-    "@effect/platform-node": "latest",
+    "@effect/platform-node": "4.0.0-beta.85",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/jira-api-client": "workspace:*",
     "gray-matter": "^4.0.3"
@@ -66,9 +66,9 @@
   "devDependencies": {
     "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
-    "effect": "latest",
-    "typescript": "~5.9.0",
-    "vitest": "^4.0.13"
+    "effect": "4.0.0-beta.85",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
   },
   "keywords": [
     "effect",
