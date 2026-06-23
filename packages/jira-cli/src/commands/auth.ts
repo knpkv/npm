@@ -8,11 +8,11 @@
  *
  * @internal
  */
-import { Command, Options, Prompt } from "@effect/cli"
-import * as PlatformCommand from "@effect/platform/Command"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { openBrowser } from "../internal/openBrowser.js"
 import { JiraAuth } from "../JiraAuth.js"
 
 // === Auth create command ===
@@ -38,21 +38,15 @@ Creating OAuth app in Atlassian Developer Console...
 6. Run: jira auth configure --client-id <ID> --client-secret <SECRET>
 `)
     const url = "https://developer.atlassian.com/console/myapps/create-3lo-app/"
-    yield* PlatformCommand.make("open", url).pipe(
-      PlatformCommand.exitCode,
-      Effect.catchAll(() => PlatformCommand.make("xdg-open", url).pipe(PlatformCommand.exitCode)),
-      Effect.catchAll(() => PlatformCommand.make("cmd", "/c", "start", "", url).pipe(PlatformCommand.exitCode)),
-      Effect.asVoid,
-      Effect.catchAll(() => Effect.void)
-    )
+    yield* openBrowser(url).pipe(Effect.catch(() => Effect.void))
   })).pipe(Command.withDescription("Create OAuth app in Atlassian Developer Console"))
 
 // === Auth configure command ===
-const clientIdOption = Options.text("client-id").pipe(
+const clientIdOption = Options.string("client-id").pipe(
   Options.withDescription("OAuth client ID from Atlassian Developer Console"),
   Options.optional
 )
-const clientSecretOption = Options.text("client-secret").pipe(
+const clientSecretOption = Options.string("client-secret").pipe(
   Options.withDescription("OAuth client secret"),
   Options.optional
 )
@@ -77,7 +71,7 @@ const configureCommand = Command.make(
 ).pipe(Command.withDescription("Configure OAuth client credentials"))
 
 // === Auth login command ===
-const siteOption = Options.text("site").pipe(
+const siteOption = Options.string("site").pipe(
   Options.withDescription("Jira site URL to use (for accounts with multiple sites)"),
   Options.optional
 )

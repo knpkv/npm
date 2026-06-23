@@ -3,9 +3,9 @@
  *
  * @module
  */
-import { Args, Command, Prompt } from "@effect/cli"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect } from "effect"
+import { Argument as Args, Command, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService } from "../services/ConfigService.js"
 
@@ -42,13 +42,13 @@ const configSetProject = Command.make(
       const cfg = yield* ConfigService
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
       if (!auth) {
         yield* Console.log("Clockify not configured. Run: jcf auth clockify setup")
         return
       }
       const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-        Effect.catchAll(() => Effect.succeed([] as const))
+        Effect.catch(() => Effect.succeed([] as const))
       )
       if (projects.length === 0) {
         yield* Console.log("No projects found in Clockify workspace.")
@@ -92,7 +92,7 @@ const configSetBillable = Command.make(
 
 const configSetJql = Command.make(
   "jql",
-  { jql: Args.text({ name: "jql" }) },
+  { jql: Args.string("jql") },
   ({ jql }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService

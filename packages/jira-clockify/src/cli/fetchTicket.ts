@@ -39,7 +39,7 @@ export const fetchTicketByKey = (
         _tag: "Found",
         ticket: mapIssueToTicket(issue as Record<string, unknown>, key)
       })),
-      Effect.catchAll((e: FetchClientError) =>
+      Effect.catch((e: FetchClientError) =>
         Effect.succeed<FetchTicketResult>(
           e.status === 404
             ? { _tag: "NotFound" }

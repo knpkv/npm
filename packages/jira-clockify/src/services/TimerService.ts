@@ -19,8 +19,6 @@
  *
  * @module
  */
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
@@ -31,6 +29,8 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { StateWriter, type TimerStateFile } from "./StateWriter.js"
@@ -124,7 +124,7 @@ export interface TimerServiceShape {
   readonly detectRunning: Effect.Effect<void, TimerError>
 }
 
-export class TimerService extends Context.Tag("jcf/TimerService")<TimerService, TimerServiceShape>() {}
+export class TimerService extends Context.Service<TimerService, TimerServiceShape>()("jcf/TimerService") {}
 
 export const layer = Layer.effect(
   TimerService,
@@ -166,7 +166,7 @@ export const layer = Layer.effect(
           const jiraProject = ticket.key.split("-")[0] ?? ""
           const clockifyProjectName = cfg.projectMap[jiraProject] ?? jiraProject
           const project = yield* clockify.getProjectByName(workspaceId, clockifyProjectName).pipe(
-            Effect.catchAll(() => Effect.succeed(null))
+            Effect.catch(() => Effect.succeed(null))
           )
           if (project) projectId = project.id
         }
@@ -185,7 +185,7 @@ export const layer = Layer.effect(
             continue
           }
           const tag = yield* clockify.findOrCreateTag(workspaceId, tagName).pipe(
-            Effect.catchAll(() => Effect.succeed(null))
+            Effect.catch(() => Effect.succeed(null))
           )
           if (tag) {
             tagIds.push(tag.id)
@@ -206,9 +206,9 @@ export const layer = Layer.effect(
 
         const accessToken = yield* jiraAuth.getAccessToken().pipe(
           Effect.tapError((e) => Effect.logDebug(`Jira getAccessToken failed: ${String(e)}`)),
-          Effect.catchAll(() => Effect.succeed(Redacted.make("")))
+          Effect.catch(() => Effect.succeed(Redacted.make("")))
         )
-        const cloudId = yield* jiraAuth.getCloudId().pipe(Effect.catchAll(() => Effect.succeed("")))
+        const cloudId = yield* jiraAuth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
 
         // Short-circuit: without a token or cloudId the request is guaranteed to
         // 401 against a malformed URL — fail fast locally instead.
@@ -223,7 +223,7 @@ export const layer = Layer.effect(
           ).pipe(
             HttpClientRequest.setHeader("Authorization", `Bearer ${Redacted.value(accessToken)}`),
             HttpClientRequest.setHeader("Content-Type", "application/json"),
-            HttpClientRequest.bodyUnsafeJson({
+            HttpClientRequest.bodyJsonUnsafe({
               started,
               timeSpentSeconds: timeSpent,
               ...(comment ?
@@ -238,7 +238,7 @@ export const layer = Layer.effect(
             })
           )
         ).pipe(
-          Effect.catchAll((e) => Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(Effect.map(() => null)))
+          Effect.catch((e) => Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(Effect.map(() => null)))
         )
 
         if (response && response.status >= 200 && response.status < 300) {
@@ -246,7 +246,7 @@ export const layer = Layer.effect(
           return true
         }
         if (response) {
-          const body = yield* response.text.pipe(Effect.catchAll(() => Effect.succeed("")))
+          const body = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
           yield* Effect.logDebug(`Jira worklog failed (${response.status}): ${body.slice(0, 300)}`)
         }
         return false
@@ -265,7 +265,7 @@ export const layer = Layer.effect(
         const current = yield* SubscriptionRef.get(ref)
         if (current.active) {
           yield* internalStop(undefined, newStartedAt).pipe(
-            Effect.catchAll((e) => Effect.logWarning(`Auto-stop failed, Clockify entry may be orphaned: ${e.message}`))
+            Effect.catch((e) => Effect.logWarning(`Auto-stop failed, Clockify entry may be orphaned: ${e.message}`))
           )
         }
 
@@ -275,7 +275,7 @@ export const layer = Layer.effect(
         let projectName: string | null = cfg.defaultProjectName ?? null
         if (projectId && !projectName) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.catchAll(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed([] as const))
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
@@ -338,7 +338,7 @@ export const layer = Layer.effect(
         // Stop via PUT — preserve existing tagIds from the entry
         if (current.clockifyEntryId) {
           const existing = yield* clockify.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-            Effect.catchAll(() => Effect.succeed(null))
+            Effect.catch(() => Effect.succeed(null))
           )
           const tagIds = existing?.tagIds ?? []
 
@@ -423,7 +423,7 @@ export const layer = Layer.effect(
               clockifyLogged = true
             })
           ),
-          Effect.catchAll((e) => Effect.logDebug(`Clockify correction entry failed: ${e.message}`))
+          Effect.catch((e) => Effect.logDebug(`Clockify correction entry failed: ${e.message}`))
         )
 
         const jiraWorklogLogged = yield* postJiraWorklog(
@@ -439,7 +439,7 @@ export const layer = Layer.effect(
     const detectRunning = Effect.gen(function*() {
       const auth = yield* getAuth
       const running = yield* clockify.getRunningTimer(auth.workspaceId, auth.userId).pipe(
-        Effect.catchAll(() => Effect.succeed(null))
+        Effect.catch(() => Effect.succeed(null))
       )
 
       if (running && running.timeInterval.start) {
@@ -461,7 +461,7 @@ export const layer = Layer.effect(
         let resolvedProjectName: string | null = null
         if (running.projectId) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.catchAll(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed([] as const))
           )
           resolvedProjectName = projects.find((p) => p.id === running.projectId)?.name ?? null
         }

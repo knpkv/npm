@@ -9,12 +9,12 @@
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import { homedir } from "node:os"
+import * as Path from "effect/Path"
+import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface JcfConfig {
   readonly defaultJql: string
@@ -42,7 +42,7 @@ export interface ConfigServiceShape {
   readonly configDir: Effect.Effect<string>
 }
 
-export class ConfigService extends Context.Tag("jcf/ConfigService")<ConfigService, ConfigServiceShape>() {}
+export class ConfigService extends Context.Service<ConfigService, ConfigServiceShape>()("jcf/ConfigService") {}
 
 const CONFIG_DIR = ".jcf"
 const CONFIG_FILE = "config.json"
@@ -52,7 +52,7 @@ export const layer = Layer.effect(
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const home = yield* Effect.sync(() => homedir())
+    const home = (yield* HomeDirectory).path
     const dir = path.join(home, CONFIG_DIR)
     const filePath = path.join(dir, CONFIG_FILE)
 
@@ -70,7 +70,7 @@ export const layer = Layer.effect(
         catch: () => ({}) as Partial<JcfConfig>
       })
       return { ...defaultConfig, ...parsed }
-    }).pipe(Effect.catchAll(() => Effect.succeed(defaultConfig)))
+    }).pipe(Effect.catch(() => Effect.succeed(defaultConfig)))
 
     const write = (config: JcfConfig) =>
       Effect.gen(function*() {
@@ -84,7 +84,7 @@ export const layer = Layer.effect(
         Effect.gen(function*() {
           const current = yield* read
           yield* write({ ...current, ...patch })
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       configDir: Effect.succeed(dir)
     }
   })

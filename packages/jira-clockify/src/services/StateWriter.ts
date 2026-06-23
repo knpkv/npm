@@ -10,12 +10,12 @@
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import { homedir } from "node:os"
+import * as Path from "effect/Path"
+import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface TimerStateFile {
   readonly active: boolean
@@ -45,7 +45,7 @@ export interface StateWriterShape {
   readonly clear: Effect.Effect<void>
 }
 
-export class StateWriter extends Context.Tag("jcf/StateWriter")<StateWriter, StateWriterShape>() {}
+export class StateWriter extends Context.Service<StateWriter, StateWriterShape>()("jcf/StateWriter") {}
 
 const STATE_DIR = ".jcf"
 const STATE_FILE = "state.json"
@@ -55,7 +55,7 @@ export const layer = Layer.effect(
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const home = yield* Effect.sync(() => homedir())
+    const home = (yield* HomeDirectory).path
     const dir = path.join(home, STATE_DIR)
     const filePath = path.join(dir, STATE_FILE)
 
@@ -71,7 +71,7 @@ export const layer = Layer.effect(
           const tmpPath = `${filePath}.tmp`
           yield* fs.writeFileString(tmpPath, JSON.stringify(state, null, 2))
           yield* fs.rename(tmpPath, filePath)
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
 
       read: Effect.gen(function*() {
         const exists = yield* fs.exists(filePath)
@@ -81,14 +81,14 @@ export const layer = Layer.effect(
           try: () => JSON.parse(content) as TimerStateFile,
           catch: () => emptyState
         })
-      }).pipe(Effect.catchAll(() => Effect.succeed(emptyState))),
+      }).pipe(Effect.catch(() => Effect.succeed(emptyState))),
 
       clear: Effect.gen(function*() {
         yield* ensureDir
         const tmpPath = `${filePath}.tmp`
         yield* fs.writeFileString(tmpPath, JSON.stringify(emptyState, null, 2))
         yield* fs.rename(tmpPath, filePath)
-      }).pipe(Effect.catchAll(() => Effect.void))
+      }).pipe(Effect.catch(() => Effect.void))
     }
   })
 )

@@ -3,7 +3,8 @@
  *
  * @internal
  */
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useRef } from "react"
 import type { TimerState } from "../../services/TimerService.js"
 import { elapsedAtom, timerStateAtom } from "../atoms/timer.js"
@@ -14,7 +15,7 @@ export function useElapsedTimer(): { timerState: TimerState | null; elapsed: num
   const setElapsed = useAtomSet(elapsedAtom)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const timerState: TimerState | null = Result.isSuccess(timerResult) ? timerResult.value : null
+  const timerState: TimerState | null = AsyncResult.isSuccess(timerResult) ? timerResult.value : null
 
   useEffect(() => {
     if (timerState?.active && timerState.startedAt) {

@@ -3,9 +3,9 @@
  *
  * @module
  */
-import { Command } from "@effect/cli"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect } from "effect"
+import { Command } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { StateWriter } from "../../services/StateWriter.js"
 
@@ -21,7 +21,7 @@ export const statusCmd = Command.make(
       if (state.active) {
         const clockifyAuth = yield* ClockifyAuth
         const clockifyClient = yield* ClockifyApiClient
-        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         if (auth) {
           let apiReachable = false
           const running = yield* clockifyClient.getRunningTimer(auth.workspaceId, auth.userId).pipe(
@@ -30,7 +30,7 @@ export const statusCmd = Command.make(
                 apiReachable = true
               })
             ),
-            Effect.catchAll(() => Effect.succeed(null))
+            Effect.catch(() => Effect.succeed(null))
           )
           // Only clear if API was reachable and confirmed no running timer
           if (apiReachable && !running) {
@@ -69,16 +69,16 @@ export const statusCmd = Command.make(
       // Show project/billable from Clockify entry
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
       if (auth && state.clockifyEntryId) {
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, state.clockifyEntryId).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
+          Effect.catch(() => Effect.succeed(null))
         )
         if (entry) {
           let projectName = "none"
           if (entry.projectId) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-              Effect.catchAll(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed([] as const))
             )
             projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
           }
@@ -88,7 +88,7 @@ export const statusCmd = Command.make(
           // Show tags
           if (entry.tagIds && entry.tagIds.length > 0) {
             const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
-              Effect.catchAll(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed([] as const))
             )
             const tagNames = entry.tagIds
               .map((id) => allTags.find((t) => t.id === id)?.name ?? id)

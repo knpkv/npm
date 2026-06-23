@@ -1,18 +1,19 @@
 /**
- * Terminal-based fuzzy selection prompt using `@effect/platform` Terminal service.
+ * Terminal-based fuzzy selection prompt using Effect's Terminal service.
  *
  * **Mental model**
  *
  * - **Terminal.readInput**: Acquires a scoped `Mailbox<UserInput>` for key events
  *   (replaces raw stdin). Terminal handles raw mode internally.
- * - **Terminal.display**: Writes ANSI output (replaces `process.stdout.write`).
+ * - **Terminal.display**: Writes ANSI output through the platform service.
  * - **Filter as you type**: Narrows choices by substring match, vim-style j/k navigation.
  *
  * @internal
  */
-import { Terminal } from "@effect/platform"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
+import * as Terminal from "effect/Terminal"
 
 export interface SelectChoice<A> {
   readonly title: string
@@ -111,7 +112,7 @@ export const fuzzySelect = <A>(options: {
 
     let renderedLines = 0
 
-    const display = (s: string) => terminal.display(s).pipe(Effect.catchAll(() => Effect.void))
+    const display = (s: string) => terminal.display(s).pipe(Effect.catch(() => Effect.void))
 
     const redraw = Effect.gen(function*() {
       if (renderedLines > 0) {
@@ -140,7 +141,7 @@ export const fuzzySelect = <A>(options: {
         let selected: A | null = null
 
         while (selected === null) {
-          const input = yield* mailbox.take
+          const input = yield* Queue.take(mailbox)
           const char: string = Option.getOrElse(input.input, () => "")
           const key = input.key
 

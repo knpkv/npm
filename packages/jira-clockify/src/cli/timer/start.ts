@@ -3,9 +3,9 @@
  *
  * @module
  */
-import { Args, Command, Options, Prompt } from "@effect/cli"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect, Option, SubscriptionRef } from "effect"
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import { TicketService } from "../../services/TicketService.js"
@@ -17,8 +17,8 @@ import { fuzzySelect } from "../fuzzySelect.js"
 export const start = Command.make(
   "start",
   {
-    key: Args.text({ name: "key" }).pipe(Args.optional),
-    project: Options.text("project").pipe(
+    key: Args.string("key").pipe(Args.optional),
+    project: Options.string("project").pipe(
       Options.withAlias("p"),
       Options.withDescription("Clockify project ID"),
       Options.optional
@@ -32,12 +32,12 @@ export const start = Command.make(
       Options.withDescription("Save project/billable as defaults"),
       Options.withDefault(false)
     ),
-    ago: Options.text("ago").pipe(
+    ago: Options.string("ago").pipe(
       Options.withAlias("a"),
       Options.withDescription("Backdate the start by a duration (e.g. 15m, 1h30m) — corrects a forgotten start"),
       Options.optional
     ),
-    since: Options.text("since").pipe(
+    since: Options.string("since").pipe(
       Options.withDescription("Backdate the start to a past time today (HH:MM) or an ISO timestamp"),
       Options.optional
     )
@@ -120,7 +120,7 @@ export const start = Command.make(
             title: `${t.key.padEnd(12)} ${t.summary.slice(0, 45).padEnd(45)} [${t.status}]`,
             value: t.key
           }))
-        }).pipe(Effect.catchAll(() => Effect.succeed(null as string | null)))
+        }).pipe(Effect.catch(() => Effect.succeed(null as string | null)))
 
         if (!selectedKey) return
         const found = allTickets.find((t) => t.key === selectedKey)
@@ -150,10 +150,10 @@ export const start = Command.make(
           yield* Console.log(`Using default project: ${config.defaultProjectName ?? config.defaultProjectId}`)
         } else {
           // Prompt: list projects
-          const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+          const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
           if (auth) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-              Effect.catchAll(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed([] as const))
             )
             if (projects.length > 0) {
               const selected = yield* Prompt.select({
@@ -179,11 +179,11 @@ export const start = Command.make(
 
       // Save defaults if requested
       if (saveDefaults && (projectId || billableVal !== undefined)) {
-        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         let projectName: string | null = null
         if (projectId && auth) {
           const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-            Effect.catchAll(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed([] as const))
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
@@ -195,7 +195,7 @@ export const start = Command.make(
       }
 
       yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(
-        Effect.catchAll((e) => Console.log(`Error: ${e.message}`))
+        Effect.catch((e) => Console.log(`Error: ${e.message}`))
       )
 
       const startedSuffix = startedAt

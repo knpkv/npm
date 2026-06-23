@@ -3,27 +3,27 @@
  *
  * @internal
  */
-import { Args, Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { buildByVersionJql } from "../internal/jqlBuilder.js"
 import { IssueService } from "../IssueService.js"
 import { MarkdownWriter } from "../MarkdownWriter.js"
 
 // === Options ===
-const jqlArg = Args.text({ name: "jql" }).pipe(
+const jqlArg = Args.string("jql").pipe(
   Args.withDescription("JQL query to search for issues"),
   Args.optional
 )
 
-const byVersionOption = Options.text("by-version").pipe(
+const byVersionOption = Options.string("by-version").pipe(
   Options.withAlias("v"),
   Options.withDescription("Search by fix version (pre-defined query)"),
   Options.optional
 )
 
-const projectOption = Options.text("project").pipe(
+const projectOption = Options.string("project").pipe(
   Options.withAlias("p"),
   Options.withDescription("Filter by project key"),
   Options.optional

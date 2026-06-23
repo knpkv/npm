@@ -3,9 +3,9 @@
  *
  * @module
  */
-import { Command, Prompt } from "@effect/cli"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect, SubscriptionRef } from "effect"
+import { Command, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { TimerService } from "../../services/TimerService.js"
 
@@ -28,7 +28,7 @@ export const edit = Command.make(
 
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
       if (!auth || !current.clockifyEntryId) {
         yield* Console.log("Cannot edit: missing Clockify auth or entry ID.")
         return
@@ -53,7 +53,7 @@ export const edit = Command.make(
 
       if (what === "project") {
         const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-          Effect.catchAll(() => Effect.succeed([] as const))
+          Effect.catch(() => Effect.succeed([] as const))
         )
         const selected = yield* Prompt.select({
           message: "Select project:",
@@ -65,13 +65,13 @@ export const edit = Command.make(
         if (!current.startedAt) return
         // Fetch existing entry to preserve tags
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
+          Effect.catch(() => Effect.succeed(null))
         )
         yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
           start: current.startedAt.toISOString(),
           ...(selected ? { projectId: selected } : {}),
           ...(entry?.tagIds && entry.tagIds.length > 0 ? { tagIds: [...entry.tagIds] } : {})
-        }).pipe(Effect.catchAll((e) => Console.log(`Error: ${e.message}`)))
+        }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         const name = projects.find((p) => p.id === selected)?.name ?? null
         yield* Console.log(`Project updated: ${name ?? "(none)"}`)
@@ -87,24 +87,24 @@ export const edit = Command.make(
         })
         if (!current.startedAt) return
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
+          Effect.catch(() => Effect.succeed(null))
         )
         yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
           start: current.startedAt.toISOString(),
           billable: val,
           ...(entry?.projectId ? { projectId: entry.projectId } : {}),
           ...(entry?.tagIds && entry.tagIds.length > 0 ? { tagIds: [...entry.tagIds] } : {})
-        }).pipe(Effect.catchAll((e) => Console.log(`Error: ${e.message}`)))
+        }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         yield* Console.log(`Billable updated: ${val ? "yes" : "no"}`)
       }
 
       if (what === "tags") {
         const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
-          Effect.catchAll(() => Effect.succeed([] as const))
+          Effect.catch(() => Effect.succeed([] as const))
         )
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
+          Effect.catch(() => Effect.succeed(null))
         )
         const currentTagIds = new Set(entry?.tagIds ?? [])
 
@@ -138,7 +138,7 @@ export const edit = Command.make(
             tagIds: newTagIds,
             ...(entry?.projectId ? { projectId: entry.projectId } : {}),
             ...(entry?.billable !== undefined ? { billable: entry.billable } : {})
-          }).pipe(Effect.catchAll((e) => Console.log(`Error: ${e.message}`)))
+          }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
           yield* Console.log(`Tag added: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
 
@@ -159,7 +159,7 @@ export const edit = Command.make(
             tagIds: newTagIds,
             ...(entry?.projectId ? { projectId: entry.projectId } : {}),
             ...(entry?.billable !== undefined ? { billable: entry.billable } : {})
-          }).pipe(Effect.catchAll((e) => Console.log(`Error: ${e.message}`)))
+          }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
           yield* Console.log(`Tag removed: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
       }

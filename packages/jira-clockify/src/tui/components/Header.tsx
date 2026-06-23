@@ -3,13 +3,14 @@
  *
  * @internal
  */
-import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import type { TimerState } from "../../services/TimerService.js"
 import { timerStateAtom } from "../atoms/timer.js"
 
 export function Header() {
   const timerResult = useAtomValue(timerStateAtom)
-  const timerState: TimerState | null = Result.isSuccess(timerResult) ? timerResult.value : null
+  const timerState: TimerState | null = AsyncResult.isSuccess(timerResult) ? timerResult.value : null
 
   const statusIcon = timerState?.active ? "●" : "○"
   const statusColor = timerState?.active ? "#00CC66" : "#888888"

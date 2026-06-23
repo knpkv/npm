@@ -3,10 +3,10 @@
  *
  * @module
  */
-import { Command, Options, Prompt } from "@effect/cli"
-import type { QuitException, Terminal } from "@effect/platform/Terminal"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Duration, Effect, Option, SubscriptionRef } from "effect"
+import type { QuitError } from "effect/Terminal"
+import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import type { TimerError } from "../../services/TimerService.js"
@@ -27,17 +27,21 @@ import { fetchTicketByKey } from "../fetchTicket.js"
 export const resolveStopProject = (params: {
   readonly currentProjectId: string | null
   readonly flagProjectId: string | undefined
-}): Effect.Effect<string | undefined, QuitException, ClockifyAuth | ClockifyApiClient | ConfigService | Terminal> =>
+}): Effect.Effect<
+  string | undefined,
+  QuitError,
+  ClockifyAuth | ClockifyApiClient | ConfigService | Prompt.Environment
+> =>
   Effect.gen(function*() {
     if (params.currentProjectId || params.flagProjectId) return params.flagProjectId
 
     const clockifyAuth = yield* ClockifyAuth
     const clockifyClient = yield* ClockifyApiClient
-    const auth = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+    const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
     if (!auth) return undefined
 
     const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-      Effect.catchAll(() => Effect.succeed([] as const))
+      Effect.catch(() => Effect.succeed([] as const))
     )
     if (projects.length === 0) return undefined
 
@@ -80,7 +84,7 @@ export const resolveStopProject = (params: {
 export const resolveStopBillable = (params: {
   readonly currentBillable: boolean | null
   readonly flagBillable: boolean | undefined
-}): Effect.Effect<boolean | undefined, QuitException, ConfigService | Terminal> =>
+}): Effect.Effect<boolean | undefined, QuitError, ConfigService | Prompt.Environment> =>
   Effect.gen(function*() {
     if (params.currentBillable !== null || params.flagBillable !== undefined) return params.flagBillable
 
@@ -110,7 +114,7 @@ export const resolveStopBillable = (params: {
 export const stop = Command.make(
   "stop",
   {
-    project: Options.text("project").pipe(
+    project: Options.string("project").pipe(
       Options.withAlias("p"),
       Options.withDescription("Clockify project ID"),
       Options.optional
@@ -199,7 +203,7 @@ export const stop = Command.make(
           billable: correctionBillable,
           comment: correctionComment || undefined
         }).pipe(
-          Effect.catchAll((e: TimerError) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
+          Effect.catch((e: TimerError) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
         )
 
         if (result) {
@@ -235,7 +239,7 @@ export const stop = Command.make(
         billable: stopBillable,
         comment: comment.trim() || undefined
       }).pipe(
-        Effect.catchAll((e: TimerError) =>
+        Effect.catch((e: TimerError) =>
           Console.log(`Error: ${e.message}`).pipe(Effect.flatMap(() => Effect.succeed(null)))
         )
       )

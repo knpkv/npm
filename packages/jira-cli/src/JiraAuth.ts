@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **Service pattern**: {@link JiraAuth} is a `Context.Tag` whose layer requires `HttpClient`
- *   and `CommandExecutor`. All token storage operations are pre-bound to
+ *   and `ChildProcessSpawner`. All token storage operations are pre-bound to
  *   `@knpkv/atlassian-common/config` with a `"jira-cli"` tool name.
  * - **Refresh lock**: A `Ref<Option<Deferred>>` prevents concurrent token refreshes — the
  *   first caller refreshes, others await the same Deferred.
@@ -21,10 +21,6 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import * as Command from "@effect/platform/Command"
-import * as CommandExecutor from "@effect/platform/CommandExecutor"
-import type * as Error from "@effect/platform/Error"
-import * as HttpClient from "@effect/platform/HttpClient"
 import {
   buildAuthUrl,
   buildOAuthToken,
@@ -58,10 +54,14 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import type * as PlatformError from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
 import { startCallbackServer } from "./internal/oauthServer.js"
+import { openBrowser } from "./internal/openBrowser.js"
 import type { AuthMissingError } from "./JiraCliError.js"
 import { authMissing } from "./JiraCliError.js"
 
@@ -129,40 +129,46 @@ export interface JiraAuthService {
   /** Configure OAuth client credentials */
   readonly configure: (
     config: OAuthConfig
-  ) => Effect.Effect<void, FileSystemError | HomeDirectoryError | Error.PlatformError>
+  ) => Effect.Effect<void, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
   /** Check if OAuth is configured */
-  readonly isConfigured: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | Error.PlatformError>
+  readonly isConfigured: () => Effect.Effect<
+    boolean,
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  >
   /** Start OAuth login flow. Returns list of sites if multiple are available. */
   readonly login: (
     options?: LoginOptions
   ) => Effect.Effect<
     ReadonlyArray<AccessibleSite> | void,
-    OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
   /** Remove stored authentication */
-  readonly logout: () => Effect.Effect<void, OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError>
+  readonly logout: () => Effect.Effect<
+    void,
+    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  >
   /** Get access token, refreshing if needed */
   readonly getAccessToken: () => Effect.Effect<
     Redacted.Redacted<string>,
-    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
   /** Get cloud ID from stored token */
   readonly getCloudId: () => Effect.Effect<
     string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
   /** Get site URL from stored token */
   readonly getSiteUrl: () => Effect.Effect<
     string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
   /** Get current user info from stored token */
   readonly getCurrentUser: () => Effect.Effect<
     OAuthUser | null,
-    FileSystemError | HomeDirectoryError | Error.PlatformError
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
   /** Check if user is logged in */
-  readonly isLoggedIn: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | Error.PlatformError>
+  readonly isLoggedIn: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
 }
 
 /**
@@ -184,37 +190,33 @@ export interface JiraAuthService {
  *
  * @category Services
  */
-export class JiraAuth extends Context.Tag("@knpkv/jira-cli/JiraAuth")<
+export class JiraAuth extends Context.Service<
   JiraAuth,
   JiraAuthService
->() {}
+>()("@knpkv/jira-cli/JiraAuth") {}
 
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
-  const commandExecutor = yield* CommandExecutor.CommandExecutor
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   // Ref to track ongoing refresh operation to prevent concurrent refreshes
   const refreshLock = yield* Ref.make<
     Option.Option<
-      Deferred.Deferred<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError>
+      Deferred.Deferred<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
     >
   >(
     Option.none()
   )
 
   const openBrowserImpl = (url: string): Effect.Effect<void, OAuthError> =>
-    Command.make("open", url).pipe(
-      Command.exitCode,
-      Effect.catchAll(() => Command.make("xdg-open", url).pipe(Command.exitCode)),
-      Effect.catchAll(() => Command.make("cmd", "/c", "start", "", url).pipe(Command.exitCode)),
-      Effect.provide(Layer.succeed(CommandExecutor.CommandExecutor, commandExecutor)),
-      Effect.asVoid,
+    openBrowser(url).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
       Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
     )
 
   const getConfig = (): Effect.Effect<
     OAuthConfig,
-    OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const config = yield* loadOAuthConfigOp()
@@ -232,7 +234,7 @@ const make = Effect.gen(function*() {
   const refreshTokenImpl = (
     token: OAuthToken,
     config: OAuthConfig
-  ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError> =>
+  ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
     Effect.gen(function*() {
       const updated = yield* refreshToken(token, config).pipe(
         Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
@@ -251,9 +253,10 @@ const make = Effect.gen(function*() {
 
   const configure = (
     config: OAuthConfig
-  ): Effect.Effect<void, FileSystemError | HomeDirectoryError | Error.PlatformError> => saveOAuthConfigOp(config)
+  ): Effect.Effect<void, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
+    saveOAuthConfigOp(config)
 
-  const isConfigured = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | Error.PlatformError> =>
+  const isConfigured = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
     Effect.gen(function*() {
       const config = yield* loadOAuthConfigOp()
       return config !== null
@@ -263,7 +266,7 @@ const make = Effect.gen(function*() {
     options?: LoginOptions
   ): Effect.Effect<
     ReadonlyArray<AccessibleSite> | void,
-    OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const config = yield* getConfig()
@@ -284,7 +287,7 @@ const make = Effect.gen(function*() {
       const code = yield* codePromise.pipe(
         Effect.timeout("5 minutes"),
         Effect.catchTag(
-          "TimeoutException",
+          "TimeoutError",
           () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
         ),
         Effect.ensuring(shutdown)
@@ -348,7 +351,10 @@ const make = Effect.gen(function*() {
       return undefined
     })
 
-  const logout = (): Effect.Effect<void, OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError> =>
+  const logout = (): Effect.Effect<
+    void,
+    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  > =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
@@ -360,7 +366,7 @@ const make = Effect.gen(function*() {
       if (config !== null) {
         yield* revokeTokenImpl(token, config).pipe(
           Effect.tap(() => Effect.log("Token revoked with Atlassian")),
-          Effect.catchAll((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
+          Effect.catch((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
         )
       }
 
@@ -369,7 +375,7 @@ const make = Effect.gen(function*() {
 
   const getAccessToken = (): Effect.Effect<
     Redacted.Redacted<string>,
-    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
@@ -384,7 +390,7 @@ const make = Effect.gen(function*() {
       // Atomically check-then-set refresh lock to avoid TOCTOU race
       const deferred = yield* Deferred.make<
         OAuthToken,
-        OAuthError | FileSystemError | HomeDirectoryError | Error.PlatformError
+        OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
       >()
       const existing = yield* Ref.modify(refreshLock, (current) =>
         Option.isSome(current)
@@ -426,7 +432,7 @@ const make = Effect.gen(function*() {
 
   const getCloudId = (): Effect.Effect<
     string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
@@ -438,7 +444,7 @@ const make = Effect.gen(function*() {
 
   const getSiteUrl = (): Effect.Effect<
     string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | Error.PlatformError
+    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
@@ -450,14 +456,14 @@ const make = Effect.gen(function*() {
 
   const getCurrentUser = (): Effect.Effect<
     OAuthUser | null,
-    FileSystemError | HomeDirectoryError | Error.PlatformError
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   > =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       return token?.user ?? null
     })
 
-  const isLoggedIn = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | Error.PlatformError> =>
+  const isLoggedIn = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       return token !== null

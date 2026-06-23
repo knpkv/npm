@@ -3,8 +3,8 @@
  *
  * @module
  */
-import { Command, Prompt } from "@effect/cli"
 import { Console, Effect, SubscriptionRef } from "effect"
+import { Command, Prompt } from "effect/unstable/cli"
 import { TimerService } from "../../services/TimerService.js"
 
 export const discard = Command.make(
@@ -38,7 +38,7 @@ export const discard = Command.make(
       }
 
       yield* timer.discard.pipe(
-        Effect.catchAll((e: { readonly message: string }) => Console.log(`Error: ${e.message}`))
+        Effect.catch((e: { readonly message: string }) => Console.log(`Error: ${e.message}`))
       )
 
       yield* Console.log("Timer discarded. Clockify entry deleted.")

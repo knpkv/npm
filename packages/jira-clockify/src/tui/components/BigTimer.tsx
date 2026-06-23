@@ -3,8 +3,8 @@
  *
  * @internal
  */
-import nodeProcess from "node:process"
 import { useElapsedTimer } from "../hooks/useElapsedTimer.js"
+import { useTerminalSize } from "../hooks/useTerminalSize.js"
 
 // 5-line tall digit font (each digit is 5 rows × 5 cols)
 const DIGITS: Record<string, ReadonlyArray<string>> = {
@@ -48,7 +48,7 @@ export function BigTimer() {
   const s = elapsed % 60
   const rows = renderBigTime(h, m, s)
 
-  const cols = nodeProcess.stdout.columns ?? 80
+  const cols = useTerminalSize()
 
   // Progress bar
   const barWidth = 40

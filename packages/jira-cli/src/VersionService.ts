@@ -189,10 +189,10 @@ export interface VersionServiceShape {
  *
  * @category Services
  */
-export class VersionService extends Context.Tag("@knpkv/jira-cli/VersionService")<
+export class VersionService extends Context.Service<
   VersionService,
   VersionServiceShape
->() {}
+>()("@knpkv/jira-cli/VersionService") {}
 
 const EXPAND = "approvers,driver,operations,issuesstatus,contributors"
 
@@ -295,27 +295,28 @@ const make = Effect.gen(function*() {
   // Cached lookup of all custom field IDs sharing a given display name.
   const fieldIdsByName = new Map<string, ReadonlyArray<string>>()
 
-  const resolveFieldIds = (name: string): Effect.Effect<ReadonlyArray<string>, JiraApiError> =>
-    Effect.gen(function*() {
-      const cached = fieldIdsByName.get(name)
-      if (cached !== undefined) return cached
-      const result = yield* toEffect(
-        client.v3.client.GET("/rest/api/3/field")
-      ).pipe(Effect.mapError((cause) => new JiraApiError({ message: `Failed to list Jira fields`, cause })))
-      const matches: Array<string> = []
-      if (Array.isArray(result)) {
-        for (const f of result) {
-          if (f && typeof f === "object") {
-            const obj = f as Raw
-            if (obj["name"] === name && typeof obj["id"] === "string") {
-              matches.push(obj["id"] as string)
-            }
+  const resolveFieldIds = (
+    name: string
+  ): Effect.Effect<ReadonlyArray<string>, JiraApiError> => (Effect.gen(function*() {
+    const cached = fieldIdsByName.get(name)
+    if (cached !== undefined) return cached
+    const result = yield* toEffect(
+      client.v3.client.GET("/rest/api/3/field")
+    ).pipe(Effect.mapError((cause) => new JiraApiError({ message: `Failed to list Jira fields`, cause })))
+    const matches: Array<string> = []
+    if (Array.isArray(result)) {
+      for (const f of result) {
+        if (f && typeof f === "object") {
+          const obj = f as Raw
+          if (obj["name"] === name && typeof obj["id"] === "string") {
+            matches.push(obj["id"] as string)
           }
         }
       }
-      fieldIdsByName.set(name, matches)
-      return matches
-    })
+    }
+    fieldIdsByName.set(name, matches)
+    return matches
+  }) as Effect.Effect<ReadonlyArray<string>, JiraApiError>)
 
   const fetchUser = (accountId: string): Effect.Effect<Person, never> =>
     toEffect(
@@ -331,7 +332,7 @@ const make = Effect.gen(function*() {
         userCache.set(accountId, person)
         return person
       }),
-      Effect.catchAll(() => {
+      Effect.catch(() => {
         // User may be deleted / inaccessible — fall back to bare account id.
         const fallback: Person = { accountId, displayName: accountId, emailAddress: null }
         userCache.set(accountId, fallback)
@@ -378,96 +379,95 @@ const make = Effect.gen(function*() {
     versionName: string,
     customFieldNames: ReadonlyArray<string>,
     projectKey?: string
-  ): Effect.Effect<ReadonlyArray<VersionTicket>, JiraApiError> =>
-    Effect.gen(function*() {
-      const nameToIds = new Map<string, ReadonlyArray<string>>()
-      for (const name of customFieldNames) {
-        const ids = yield* resolveFieldIds(name)
-        nameToIds.set(name, ids)
-      }
-      const allFieldIds = new Set<string>()
-      for (const ids of nameToIds.values()) for (const id of ids) allFieldIds.add(id)
-      const requestedFields = ["assignee", "labels", "summary", ...allFieldIds]
+  ): Effect.Effect<ReadonlyArray<VersionTicket>, JiraApiError> => (Effect.gen(function*() {
+    const nameToIds = new Map<string, ReadonlyArray<string>>()
+    for (const name of customFieldNames) {
+      const ids = yield* resolveFieldIds(name)
+      nameToIds.set(name, ids)
+    }
+    const allFieldIds = new Set<string>()
+    for (const ids of nameToIds.values()) for (const id of ids) allFieldIds.add(id)
+    const requestedFields = ["assignee", "labels", "summary", ...allFieldIds]
 
-      const raws: Array<RawTicket> = []
-      const PAGE = 100
-      const MAX_PAGES = 100
-      let nextPageToken: string | undefined = undefined
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const result = yield* toEffect(
-          client.v3.client.GET("/rest/api/3/search/jql", {
-            params: {
-              query: {
-                jql: buildByVersionJql(versionName, projectKey),
-                fields: requestedFields,
-                maxResults: PAGE,
-                ...(nextPageToken ? { nextPageToken } : {})
-              }
+    const raws: Array<RawTicket> = []
+    const PAGE = 100
+    const MAX_PAGES = 100
+    let nextPageToken: string | undefined = undefined
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = yield* toEffect(
+        client.v3.client.GET("/rest/api/3/search/jql", {
+          params: {
+            query: {
+              jql: buildByVersionJql(versionName, projectKey),
+              fields: requestedFields,
+              maxResults: PAGE,
+              ...(nextPageToken ? { nextPageToken } : {})
             }
-          })
-        ).pipe(
-          Effect.mapError((cause) =>
-            new JiraApiError({ message: `Failed to fetch tickets for fixVersion "${versionName}"`, cause })
-          )
+          }
+        })
+      ).pipe(
+        Effect.mapError((cause) =>
+          new JiraApiError({ message: `Failed to fetch tickets for fixVersion "${versionName}"`, cause })
         )
+      )
 
-        const resObj = asRaw(result)
-        const issues = (Array.isArray(resObj["issues"]) ? resObj["issues"] : []) as Array<Raw>
-        for (const issue of issues) {
-          const key = typeof issue["key"] === "string" ? issue["key"] as string : ""
-          const fields = asRaw(issue["fields"])
-          const assignee = fields["assignee"]
-          let assigneeId: string | null = null
-          if (assignee && typeof assignee === "object") {
-            const accountId = (assignee as Raw)["accountId"]
-            if (typeof accountId === "string" && accountId.length > 0) assigneeId = accountId
-          }
-          const labelsRaw = fields["labels"]
-          const labels: Array<string> = []
-          if (Array.isArray(labelsRaw)) {
-            for (const l of labelsRaw) if (typeof l === "string" && l.length > 0) labels.push(l)
-          }
-          const customFields: Record<string, string | null> = {}
-          for (const name of customFieldNames) {
-            const ids = nameToIds.get(name) ?? []
-            let resolved: string | null = null
-            for (const id of ids) {
-              const v = renderCustomFieldValue(fields[id])
-              if (v !== null) {
-                resolved = v
-                break
-              }
-            }
-            customFields[name] = resolved
-          }
-          raws.push({
-            key,
-            summary: stringOrNull(fields["summary"]),
-            assigneeId,
-            labels,
-            customFields
-          })
+      const resObj = asRaw(result)
+      const issues = (Array.isArray(resObj["issues"]) ? resObj["issues"] : []) as Array<Raw>
+      for (const issue of issues) {
+        const key = typeof issue["key"] === "string" ? issue["key"] as string : ""
+        const fields = asRaw(issue["fields"])
+        const assignee = fields["assignee"]
+        let assigneeId: string | null = null
+        if (assignee && typeof assignee === "object") {
+          const accountId = (assignee as Raw)["accountId"]
+          if (typeof accountId === "string" && accountId.length > 0) assigneeId = accountId
         }
-
-        const isLast = resObj["isLast"]
-        const next = resObj["nextPageToken"]
-        if (isLast === true || typeof next !== "string" || next.length === 0) break
-        nextPageToken = next
+        const labelsRaw = fields["labels"]
+        const labels: Array<string> = []
+        if (Array.isArray(labelsRaw)) {
+          for (const l of labelsRaw) if (typeof l === "string" && l.length > 0) labels.push(l)
+        }
+        const customFields: Record<string, string | null> = {}
+        for (const name of customFieldNames) {
+          const ids = nameToIds.get(name) ?? []
+          let resolved: string | null = null
+          for (const id of ids) {
+            const v = renderCustomFieldValue(fields[id])
+            if (v !== null) {
+              resolved = v
+              break
+            }
+          }
+          customFields[name] = resolved
+        }
+        raws.push({
+          key,
+          summary: stringOrNull(fields["summary"]),
+          assigneeId,
+          labels,
+          customFields
+        })
       }
 
-      const uniqueAssignees = Array.from(
-        new Set(raws.map((t) => t.assigneeId).filter((id): id is string => !!id))
-      )
-      yield* Effect.forEach(uniqueAssignees, (id) => resolveUser(id), { concurrency: 4 })
+      const isLast = resObj["isLast"]
+      const next = resObj["nextPageToken"]
+      if (isLast === true || typeof next !== "string" || next.length === 0) break
+      nextPageToken = next
+    }
 
-      return raws.map((t) => ({
-        key: t.key,
-        summary: t.summary,
-        assignee: t.assigneeId ? userCache.get(t.assigneeId) ?? null : null,
-        labels: t.labels,
-        customFields: t.customFields
-      }))
-    })
+    const uniqueAssignees = Array.from(
+      new Set(raws.map((t) => t.assigneeId).filter((id): id is string => !!id))
+    )
+    yield* Effect.forEach(uniqueAssignees, (id) => resolveUser(id), { concurrency: 4 })
+
+    return raws.map((t) => ({
+      key: t.key,
+      summary: t.summary,
+      assignee: t.assigneeId ? userCache.get(t.assigneeId) ?? null : null,
+      labels: t.labels,
+      customFields: t.customFields
+    }))
+  }) as Effect.Effect<ReadonlyArray<VersionTicket>, JiraApiError>)
 
   const mapVersion = (
     raw: Raw,
@@ -548,39 +548,38 @@ const make = Effect.gen(function*() {
   const listProjectVersions = (
     projectKey: string,
     options?: ListVersionsOptions
-  ): Effect.Effect<ReadonlyArray<Version>, JiraApiError> =>
-    Effect.gen(function*() {
-      const all: Array<Raw> = []
-      let startAt = 0
-      const cap = options?.maxResults
-      const customFieldNames = options?.customFieldNames ?? []
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const result = yield* toEffect(
-          client.v3.client.GET("/rest/api/3/project/{projectIdOrKey}/version", {
-            params: {
-              path: { projectIdOrKey: projectKey },
-              query: { startAt, maxResults: PAGE_SIZE, expand: EXPAND, orderBy: "-releaseDate" }
-            }
-          })
-        ).pipe(
-          Effect.mapError((cause) => new JiraApiError({ message: `Failed to list versions for ${projectKey}`, cause }))
-        )
+  ): Effect.Effect<ReadonlyArray<Version>, JiraApiError> => (Effect.gen(function*() {
+    const all: Array<Raw> = []
+    let startAt = 0
+    const cap = options?.maxResults
+    const customFieldNames = options?.customFieldNames ?? []
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = yield* toEffect(
+        client.v3.client.GET("/rest/api/3/project/{projectIdOrKey}/version", {
+          params: {
+            path: { projectIdOrKey: projectKey },
+            query: { startAt, maxResults: PAGE_SIZE, expand: EXPAND, orderBy: "-releaseDate" }
+          }
+        })
+      ).pipe(
+        Effect.mapError((cause) => new JiraApiError({ message: `Failed to list versions for ${projectKey}`, cause }))
+      )
 
-        const resObj = asRaw(result)
-        const values = (Array.isArray(resObj["values"]) ? resObj["values"] : []) as Array<Raw>
-        for (const v of values) {
-          if (options?.released === true && v["released"] !== true) continue
-          if (options?.unreleased === true && v["released"] === true) continue
-          all.push(v)
-          if (cap !== undefined && all.length >= cap) break
-        }
+      const resObj = asRaw(result)
+      const values = (Array.isArray(resObj["values"]) ? resObj["values"] : []) as Array<Raw>
+      for (const v of values) {
+        if (options?.released === true && v["released"] !== true) continue
+        if (options?.unreleased === true && v["released"] === true) continue
+        all.push(v)
         if (cap !== undefined && all.length >= cap) break
-        const isLast = resObj["isLast"]
-        if (isLast === true || values.length < PAGE_SIZE) break
-        startAt += values.length
       }
-      return yield* Effect.forEach(all, (r) => mapVersion(r, customFieldNames, projectKey), { concurrency: 4 })
-    })
+      if (cap !== undefined && all.length >= cap) break
+      const isLast = resObj["isLast"]
+      if (isLast === true || values.length < PAGE_SIZE) break
+      startAt += values.length
+    }
+    return yield* Effect.forEach(all, (r) => mapVersion(r, customFieldNames, projectKey), { concurrency: 4 })
+  }) as Effect.Effect<ReadonlyArray<Version>, JiraApiError>)
 
   const getVersion = (id: string): Effect.Effect<Version, JiraApiError> =>
     toEffect(

@@ -5,15 +5,15 @@
  *
  * - **Two output modes**: {@link MarkdownWriterShape.writeMulti} creates one `.md` per issue;
  *   {@link MarkdownWriterShape.writeSingle} combines all into `jira-export.md`.
- * - **Effect service**: Requires `FileSystem` and `Path` from `@effect/platform`.
+ * - **Effect service**: Requires `FileSystem` and `Path` from `effect`.
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import { buildCombinedMarkdown, serializeIssue } from "./internal/frontmatter.js"
 import type { Issue } from "./IssueService.js"
 import { WriteError } from "./JiraCliError.js"
@@ -53,10 +53,10 @@ export interface MarkdownWriterShape {
  *
  * @category Services
  */
-export class MarkdownWriter extends Context.Tag("@knpkv/jira-cli/MarkdownWriter")<
+export class MarkdownWriter extends Context.Service<
   MarkdownWriter,
   MarkdownWriterShape
->() {}
+>()("@knpkv/jira-cli/MarkdownWriter") {}
 
 const make = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -64,16 +64,12 @@ const make = Effect.gen(function*() {
 
   const ensureDir = (dir: string): Effect.Effect<void, WriteError> =>
     fs.makeDirectory(dir, { recursive: true }).pipe(
-      Effect.catchAll((cause) =>
-        Effect.fail(new WriteError({ path: dir, message: "Failed to create directory", cause }))
-      )
+      Effect.catch((cause) => Effect.fail(new WriteError({ path: dir, message: "Failed to create directory", cause })))
     )
 
   const writeFile = (filePath: string, content: string): Effect.Effect<void, WriteError> =>
     fs.writeFileString(filePath, content).pipe(
-      Effect.catchAll((cause) =>
-        Effect.fail(new WriteError({ path: filePath, message: "Failed to write file", cause }))
-      )
+      Effect.catch((cause) => Effect.fail(new WriteError({ path: filePath, message: "Failed to write file", cause })))
     )
 
   const writeMulti: MarkdownWriterShape["writeMulti"] = (issues, outputDir) =>

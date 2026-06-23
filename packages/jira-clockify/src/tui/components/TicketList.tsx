@@ -3,7 +3,8 @@
  *
  * @internal
  */
-import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import type { TicketState } from "../../services/TicketService.js"
 import { ticketsAtom } from "../atoms/tickets.js"
 import { filterTextAtom, isFilteringAtom, selectedIndexAtom } from "../atoms/ui.js"
@@ -15,7 +16,7 @@ export function TicketList() {
   const filterText = useAtomValue(filterTextAtom)
   const isFiltering = useAtomValue(isFilteringAtom)
 
-  const ticketState: TicketState | null = Result.isSuccess(ticketResult) ? ticketResult.value : null
+  const ticketState: TicketState | null = AsyncResult.isSuccess(ticketResult) ? ticketResult.value : null
 
   if (!ticketState || ticketState.loading) {
     return (

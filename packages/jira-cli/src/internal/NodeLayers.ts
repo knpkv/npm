@@ -4,7 +4,6 @@
  * @internal
  */
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
-import { createServer } from "node:http"
 import { makeHttpServerFactory } from "./oauthServer.js"
 
 /**
@@ -13,5 +12,5 @@ import { makeHttpServerFactory } from "./oauthServer.js"
  * @category Layers
  */
 export const HttpServerFactoryLive = makeHttpServerFactory(
-  (port) => NodeHttpServer.layerServer(createServer, { port })
+  () => NodeHttpServer.layerTest
 )
