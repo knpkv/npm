@@ -1,4 +1,4 @@
-import { useAtom, useAtomValue } from "@effect-atom/atom-react"
+import { useAtom, useAtomValue } from "@effect/atom-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { NotificationItem } from "../atoms/app.js"
 import { appStateAtom, loadMoreNotificationsAtom } from "../atoms/app.js"
@@ -52,7 +52,7 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
   useEffect(() => {
     if (!useRest) return
     let cancelled = false
-    loadMore({ urlParams: restParams }).then((result) => {
+    loadMore({ query: restParams }).then((result) => {
       if (cancelled) return
       setRestFirstPage({
         items: result.items,
@@ -77,7 +77,7 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
     if (!hasMore || isLoading || lastCursor === undefined) return
     try {
       const result = await loadMore({
-        urlParams: { ...restParams, cursor: lastCursor }
+        query: { ...restParams, cursor: lastCursor }
       })
       const page: Page = {
         items: result.items,

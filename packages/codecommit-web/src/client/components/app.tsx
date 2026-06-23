@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { useCallback } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router"
 import { Toaster } from "sonner"

@@ -16,7 +16,6 @@
  *
  * @module
  */
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
 import {
   Account,
   AwsProfileName,
@@ -29,9 +28,10 @@ import {
 } from "@knpkv/codecommit-core/Domain.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 // API error returned to clients for AWS failures
-export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
+export class ApiError extends Schema.TaggedErrorClass<ApiError>()("ApiError", {
   message: Schema.String
 }) {}
 
@@ -72,115 +72,117 @@ export const NotificationResponse = Schema.Struct({
 
 // PR endpoints
 export class PrsGroup extends HttpApiGroup.make("prs")
-  .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Chunk(PullRequest)))
-  .add(HttpApiEndpoint.post("refresh", "/refresh").addSuccess(Schema.String))
   .add(
-    HttpApiEndpoint.get("search", "/search")
-      .setUrlParams(Schema.Struct({
+    HttpApiEndpoint.get("list", "/", { success: Schema.Chunk(PullRequest) })
+  )
+  .add(
+    HttpApiEndpoint.post("refresh", "/refresh", { success: Schema.String })
+  )
+  .add(
+    HttpApiEndpoint.get("search", "/search", {
+      query: Schema.Struct({
         q: Schema.String,
-        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 50))),
-        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.greaterThanOrEqualTo(0)))
-      }))
-      .addSuccess(Schema.Struct({
+        limit: Schema.optional(
+          Schema.NumberFromString.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 50 })))
+        ),
+        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))))
+      }),
+      success: Schema.Struct({
         items: Schema.Array(CachedPullRequestResponse),
         total: Schema.Number,
         hasMore: Schema.Boolean
-      }))
-      .addError(ApiError)
+      }),
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh")
-      .setPath(Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
+      params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("create", "/")
-      .setPayload(
-        Schema.Struct({
-          repositoryName: Schema.String,
-          title: Schema.String,
-          description: Schema.optional(Schema.String),
-          sourceBranch: Schema.String,
-          destinationBranch: Schema.String,
-          account: Account
-        })
-      )
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("create", "/", {
+      payload: Schema.Struct({
+        repositoryName: Schema.String,
+        title: Schema.String,
+        description: Schema.optional(Schema.String),
+        sourceBranch: Schema.String,
+        destinationBranch: Schema.String,
+        account: Account
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("open", "/open")
-      .setPayload(
-        Schema.Struct({
-          profile: Schema.String,
-          link: Schema.String.pipe(
-            Schema.filter((s) => /^https:\/\/[\w-]+\.console\.aws\.amazon\.com\//.test(s))
-          )
-        })
-      )
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("open", "/open", {
+      payload: Schema.Struct({
+        profile: Schema.String,
+        link: Schema.String.pipe(
+          Schema.check(Schema.makeFilter((s) => /^https:\/\/[\w-]+\.console\.aws\.amazon\.com\//.test(s)))
+        )
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.get("comments", "/comments")
-      .setUrlParams(
-        Schema.Struct({
-          pullRequestId: Schema.String,
-          repositoryName: Schema.String,
-          profile: AwsProfileName,
-          region: AwsRegion
-        })
-      )
-      .addSuccess(Schema.Array(PRCommentLocationJson))
-      .addError(ApiError)
+    HttpApiEndpoint.get("comments", "/comments", {
+      query: Schema.Struct({
+        pullRequestId: Schema.String,
+        repositoryName: Schema.String,
+        profile: AwsProfileName,
+        region: AwsRegion
+      }),
+      success: Schema.Array(PRCommentLocationJson),
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("createApprovalRule", "/approval-rules")
-      .setPayload(
-        Schema.Struct({
-          pullRequestId: Schema.String,
-          approvalRuleName: Schema.String,
-          requiredApprovals: Schema.Number,
-          poolMembers: Schema.Array(Schema.String),
-          account: Account
-        })
-      )
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("createApprovalRule", "/approval-rules", {
+      payload: Schema.Struct({
+        pullRequestId: Schema.String,
+        approvalRuleName: Schema.String,
+        requiredApprovals: Schema.Number,
+        poolMembers: Schema.Array(Schema.String),
+        account: Account
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.put("updateApprovalRule", "/approval-rules")
-      .setPayload(
-        Schema.Struct({
-          pullRequestId: Schema.String,
-          approvalRuleName: Schema.String,
-          requiredApprovals: Schema.Number,
-          poolMembers: Schema.Array(Schema.String),
-          account: Account
-        })
-      )
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.put("updateApprovalRule", "/approval-rules", {
+      payload: Schema.Struct({
+        pullRequestId: Schema.String,
+        approvalRuleName: Schema.String,
+        requiredApprovals: Schema.Number,
+        poolMembers: Schema.Array(Schema.String),
+        account: Account
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.del("deleteApprovalRule", "/approval-rules")
-      .setPayload(
-        Schema.Struct({
-          pullRequestId: Schema.String,
-          approvalRuleName: Schema.String,
-          account: Account
-        })
-      )
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.delete("deleteApprovalRule", "/approval-rules", {
+      payload: Schema.Struct({
+        pullRequestId: Schema.String,
+        approvalRuleName: Schema.String,
+        account: Account
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .prefix("/api/prs")
 {}
 
 // SSE events
 export class EventsGroup extends HttpApiGroup.make("events")
-  .add(HttpApiEndpoint.get("stream", "/").addSuccess(Schema.String))
+  .add(HttpApiEndpoint.get("stream", "/", { success: Schema.String }))
   .prefix("/api/events")
 {}
 
@@ -195,8 +197,7 @@ const SandboxSettingsResponse = Schema.Struct({
   image: Schema.String,
   extensions: Schema.Array(Schema.String),
   setupCommands: Schema.Array(Schema.String),
-  env: Schema.Record({ key: Schema.String, value: Schema.String }),
-  enableClaudeCode: Schema.Boolean,
+  env: Schema.Record(Schema.String, Schema.String),
   volumeMounts: Schema.Array(VolumeMount),
   cloneDepth: Schema.Number
 })
@@ -230,7 +231,7 @@ const DatabaseInfoResponse = Schema.Struct({
 })
 
 const ConfigValidationResponse = Schema.Struct({
-  status: Schema.Literal("valid", "missing", "corrupted"),
+  status: Schema.Literals(["valid", "missing", "corrupted"]),
   path: Schema.String,
   errors: Schema.Array(Schema.String)
 })
@@ -255,18 +256,18 @@ const ConfigResetResponse = Schema.Struct({
 })
 
 export class ConfigGroup extends HttpApiGroup.make("config")
-  .add(HttpApiEndpoint.get("list", "/").addSuccess(ConfigResponse))
-  .add(HttpApiEndpoint.get("path", "/path").addSuccess(ConfigPathResponse).addError(ApiError))
-  .add(HttpApiEndpoint.get("database", "/database").addSuccess(DatabaseInfoResponse).addError(ApiError))
-  .add(HttpApiEndpoint.get("validate", "/validate").addSuccess(ConfigValidationResponse).addError(ApiError))
-  .add(HttpApiEndpoint.post("save", "/save").setPayload(ConfigSavePayload).addSuccess(Schema.String).addError(ApiError))
-  .add(HttpApiEndpoint.post("reset", "/reset").addSuccess(ConfigResetResponse).addError(ApiError))
+  .add(HttpApiEndpoint.get("list", "/", { success: ConfigResponse }))
+  .add(HttpApiEndpoint.get("path", "/path", { success: ConfigPathResponse, error: ApiError }))
+  .add(HttpApiEndpoint.get("database", "/database", { success: DatabaseInfoResponse, error: ApiError }))
+  .add(HttpApiEndpoint.get("validate", "/validate", { success: ConfigValidationResponse, error: ApiError }))
+  .add(HttpApiEndpoint.post("save", "/save", { payload: ConfigSavePayload, success: Schema.String, error: ApiError }))
+  .add(HttpApiEndpoint.post("reset", "/reset", { success: ConfigResetResponse, error: ApiError }))
   .prefix("/api/config")
 {}
 
 // Accounts endpoints
 export class AccountsGroup extends HttpApiGroup.make("accounts")
-  .add(HttpApiEndpoint.get("list", "/").addSuccess(Schema.Chunk(Account)))
+  .add(HttpApiEndpoint.get("list", "/", { success: Schema.Chunk(Account) }))
   .prefix("/api/accounts")
 {}
 
@@ -283,20 +284,21 @@ const SubscriptionResponse = Schema.Struct({
 
 export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
   .add(
-    HttpApiEndpoint.post("subscribe", "/subscribe")
-      .setPayload(SubscriptionPayload)
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("subscribe", "/subscribe", {
+      payload: SubscriptionPayload,
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("unsubscribe", "/unsubscribe")
-      .setPayload(SubscriptionPayload)
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("unsubscribe", "/unsubscribe", {
+      payload: SubscriptionPayload,
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.get("list", "/")
-      .addSuccess(Schema.Array(SubscriptionResponse))
+    HttpApiEndpoint.get("list", "/", { success: Schema.Array(SubscriptionResponse) })
   )
   .prefix("/api/subscriptions")
 {}
@@ -309,43 +311,45 @@ const PaginatedNotifications = Schema.Struct({
 
 export class NotificationsGroup extends HttpApiGroup.make("notifications")
   .add(
-    HttpApiEndpoint.get("list", "/")
-      .setUrlParams(Schema.Struct({
-        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 100))),
+    HttpApiEndpoint.get("list", "/", {
+      query: Schema.Struct({
+        limit: Schema.optional(
+          Schema.NumberFromString.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 100 })))
+        ),
         cursor: Schema.optional(Schema.NumberFromString),
-        filter: Schema.optional(Schema.Literal("system", "prs")),
+        filter: Schema.optional(Schema.Literals(["system", "prs"])),
         unreadOnly: Schema.optional(Schema.NumberFromString)
-      }))
-      .addSuccess(PaginatedNotifications)
+      }),
+      success: PaginatedNotifications
+    })
   )
   .add(
-    HttpApiEndpoint.get("count", "/count")
-      .addSuccess(Schema.Struct({ unread: Schema.Number }))
+    HttpApiEndpoint.get("count", "/count", { success: Schema.Struct({ unread: Schema.Number }) })
   )
   .add(
-    HttpApiEndpoint.post("markRead", "/read")
-      .setPayload(Schema.Struct({ id: Schema.Number }))
-      .addSuccess(Schema.String)
+    HttpApiEndpoint.post("markRead", "/read", {
+      payload: Schema.Struct({ id: Schema.Number }),
+      success: Schema.String
+    })
   )
   .add(
-    HttpApiEndpoint.post("markUnread", "/unread")
-      .setPayload(Schema.Struct({ id: Schema.Number }))
-      .addSuccess(Schema.String)
+    HttpApiEndpoint.post("markUnread", "/unread", {
+      payload: Schema.Struct({ id: Schema.Number }),
+      success: Schema.String
+    })
   )
   .add(
-    HttpApiEndpoint.post("markAllRead", "/read-all")
-      .addSuccess(Schema.String)
+    HttpApiEndpoint.post("markAllRead", "/read-all", { success: Schema.String })
   )
   .add(
-    HttpApiEndpoint.post("ssoLogin", "/sso-login")
-      .setPayload(Schema.Struct({ profile: AwsProfileName }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("ssoLogin", "/sso-login", {
+      payload: Schema.Struct({ profile: AwsProfileName }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("ssoLogout", "/sso-logout")
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("ssoLogout", "/sso-logout", { success: Schema.String, error: ApiError })
   )
   .prefix("/api/notifications")
 {}
@@ -380,39 +384,42 @@ const SandboxIdPath = Schema.Struct({ sandboxId: SandboxId })
 
 export class SandboxGroup extends HttpApiGroup.make("sandbox")
   .add(
-    HttpApiEndpoint.post("create", "/")
-      .setPayload(CreateSandboxPayload)
-      .addSuccess(SandboxResponse)
-      .addError(ApiError)
+    HttpApiEndpoint.post("create", "/", {
+      payload: CreateSandboxPayload,
+      success: SandboxResponse,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.get("list", "/")
-      .addSuccess(Schema.Array(SandboxResponse))
-      .addError(ApiError)
+    HttpApiEndpoint.get("list", "/", { success: Schema.Array(SandboxResponse), error: ApiError })
   )
   .add(
-    HttpApiEndpoint.get("get", "/:sandboxId")
-      .setPath(SandboxIdPath)
-      .addSuccess(SandboxResponse)
-      .addError(ApiError)
+    HttpApiEndpoint.get("get", "/:sandboxId", {
+      params: SandboxIdPath,
+      success: SandboxResponse,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("stop", "/:sandboxId/stop")
-      .setPath(SandboxIdPath)
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("stop", "/:sandboxId/stop", {
+      params: SandboxIdPath,
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("restart", "/:sandboxId/restart")
-      .setPath(SandboxIdPath)
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("restart", "/:sandboxId/restart", {
+      params: SandboxIdPath,
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.del("delete", "/:sandboxId")
-      .setPath(SandboxIdPath)
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.delete("delete", "/:sandboxId", {
+      params: SandboxIdPath,
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .prefix("/api/sandbox")
 {}
@@ -422,32 +429,34 @@ export { WeeklyStats }
 
 export class StatsGroup extends HttpApiGroup.make("stats")
   .add(
-    HttpApiEndpoint.get("get", "/")
-      .setUrlParams(Schema.Struct({
-        week: Schema.String.pipe(Schema.pattern(/^\d{4}-W\d{2}$/)),
+    HttpApiEndpoint.get("get", "/", {
+      query: Schema.Struct({
+        week: Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4}-W\d{2}$/))),
         repo: Schema.optional(Schema.String),
         author: Schema.optional(Schema.String),
         account: Schema.optional(Schema.String)
-      }))
-      .addSuccess(WeeklyStats)
-      .addError(ApiError)
+      }),
+      success: WeeklyStats,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("sync", "/sync")
-      .setPayload(Schema.Struct({ week: Schema.String.pipe(Schema.pattern(/^\d{4}-W\d{2}$/)) }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+    HttpApiEndpoint.post("sync", "/sync", {
+      payload: Schema.Struct({ week: Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4}-W\d{2}$/))) }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .prefix("/api/stats")
 {}
 
 // Permission endpoints
-const PermissionStateSchema = Schema.Literal("always_allow", "allow", "deny")
+const PermissionStateSchema = Schema.Literals(["always_allow", "allow", "deny"])
 
 const PermissionEntry = Schema.Struct({
   operation: Schema.String,
   state: PermissionStateSchema,
-  category: Schema.Literal("read", "write"),
+  category: Schema.Literals(["read", "write"]),
   description: Schema.String
 })
 
@@ -464,46 +473,48 @@ export const AuditLogEntryResponse = Schema.Struct({
 
 export class PermissionsGroup extends HttpApiGroup.make("permissions")
   .add(
-    HttpApiEndpoint.post("respond", "/respond")
-      .setPayload(Schema.Struct({
+    HttpApiEndpoint.post("respond", "/respond", {
+      payload: Schema.Struct({
         id: Schema.String,
-        response: Schema.Literal("allow_once", "always_allow", "deny")
-      }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+        response: Schema.Literals(["allow_once", "always_allow", "deny"])
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.get("list", "/")
-      .addSuccess(Schema.Array(PermissionEntry))
+    HttpApiEndpoint.get("list", "/", { success: Schema.Array(PermissionEntry) })
   )
   .add(
-    HttpApiEndpoint.post("update", "/update")
-      .setPayload(Schema.Struct({
+    HttpApiEndpoint.post("update", "/update", {
+      payload: Schema.Struct({
         operation: Schema.String,
         state: PermissionStateSchema
-      }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.post("reset", "/reset")
-      .addSuccess(Schema.String)
+    HttpApiEndpoint.post("reset", "/reset", { success: Schema.String })
   )
   .add(
-    HttpApiEndpoint.get("auditSettings", "/audit")
-      .addSuccess(Schema.Struct({
+    HttpApiEndpoint.get("auditSettings", "/audit", {
+      success: Schema.Struct({
         enabled: Schema.Boolean,
         retentionDays: Schema.Number
-      }))
+      })
+    })
   )
   .add(
-    HttpApiEndpoint.post("updateAuditSettings", "/audit")
-      .setPayload(Schema.Struct({
+    HttpApiEndpoint.post("updateAuditSettings", "/audit", {
+      payload: Schema.Struct({
         enabled: Schema.optional(Schema.Boolean),
         retentionDays: Schema.optional(Schema.Number)
-      }))
-      .addSuccess(Schema.String)
-      .addError(ApiError)
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .prefix("/api/permissions")
 {}
@@ -511,37 +522,42 @@ export class PermissionsGroup extends HttpApiGroup.make("permissions")
 // Audit log endpoints
 export class AuditGroup extends HttpApiGroup.make("audit")
   .add(
-    HttpApiEndpoint.get("list", "/")
-      .setUrlParams(Schema.Struct({
-        limit: Schema.optional(Schema.NumberFromString.pipe(Schema.between(1, 200))),
-        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.greaterThanOrEqualTo(0))),
+    HttpApiEndpoint.get("list", "/", {
+      query: Schema.Struct({
+        limit: Schema.optional(
+          Schema.NumberFromString.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 200 })))
+        ),
+        offset: Schema.optional(Schema.NumberFromString.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
         operation: Schema.optional(Schema.String),
         accountProfile: Schema.optional(Schema.String),
         permissionState: Schema.optional(Schema.String),
         from: Schema.optional(Schema.String),
         to: Schema.optional(Schema.String),
         search: Schema.optional(Schema.String)
-      }))
-      .addSuccess(Schema.Struct({
+      }),
+      success: Schema.Struct({
         items: Schema.Array(AuditLogEntryResponse),
         total: Schema.Number,
         nextCursor: Schema.optional(Schema.Number)
-      }))
-      .addError(ApiError)
+      }),
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.get("export", "/export")
-      .setUrlParams(Schema.Struct({
+    HttpApiEndpoint.get("export", "/export", {
+      query: Schema.Struct({
         from: Schema.optional(Schema.String),
         to: Schema.optional(Schema.String)
-      }))
-      .addSuccess(Schema.Array(AuditLogEntryResponse))
-      .addError(ApiError)
+      }),
+      success: Schema.Array(AuditLogEntryResponse),
+      error: ApiError
+    })
   )
   .add(
-    HttpApiEndpoint.del("clear", "/")
-      .addSuccess(Schema.Struct({ deleted: Schema.Number }))
-      .addError(ApiError)
+    HttpApiEndpoint.delete("clear", "/", {
+      success: Schema.Struct({ deleted: Schema.Number }),
+      error: ApiError
+    })
   )
   .prefix("/api/audit")
 {}

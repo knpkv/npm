@@ -10,8 +10,8 @@
  *
  * @module
  */
-import { Atom } from "@effect-atom/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Atom from "effect/unstable/reactivity/Atom"
 import { ApiClient } from "./runtime.js"
 
 /**
@@ -162,7 +162,7 @@ export const unsubscribeAtom = ApiClient.mutation("subscriptions", "unsubscribe"
 
 // Notifications (unified)
 export const notificationsQueryAtom = ApiClient.query("notifications", "list", {
-  urlParams: {},
+  query: {},
   reactivityKeys: ["notifications"],
   timeToLive: "10 seconds"
 })

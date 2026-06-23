@@ -13,11 +13,12 @@
  *
  * @module
  */
-import { HttpApiBuilder, HttpServerResponse } from "@effect/platform"
 import { CacheService, PRService } from "@knpkv/codecommit-core"
 import { AppStatus, needsMyReview, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
+import { HttpServerResponse } from "effect/unstable/http"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CodeCommitApi, NotificationResponse, SandboxResponse } from "../Api.js"
 import { encodeSandbox } from "./sandbox-live.js"
 
@@ -33,14 +34,14 @@ const SsePayload = Schema.Struct({
   status: AppStatus,
   statusDetail: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
-  lastUpdated: Schema.optional(Schema.DateFromSelf),
+  lastUpdated: Schema.optional(Schema.Date),
   currentUser: Schema.optional(Schema.String),
   unreadNotificationCount: Schema.Number,
   notifications: Schema.Struct({
     items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
   }),
-  pendingReviewCount: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+  pendingReviewCount: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   sandboxes: Schema.Array(SandboxResponse),
   permissionPrompt: Schema.optional(Schema.Struct({
     id: Schema.String,
@@ -50,7 +51,7 @@ const SsePayload = Schema.Struct({
   }))
 })
 
-const encode = Schema.encode(SsePayload)
+const encode = Schema.encodeEffect(SsePayload)
 
 const encoder = new TextEncoder()
 
@@ -70,10 +71,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const permGate = yield* PermissionGateLiveTag
 
     // Cache unread count + notifications — re-query on relevant triggers
-    const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchAll(() => Effect.succeed(0)))
+    const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     const lastUnreadRef = yield* Ref.make(initialCount)
     const initialNotifications = yield* notificationRepo.findAll({ limit: 20 }).pipe(
-      Effect.catchAll(() => Effect.succeed({ items: [] as ReadonlyArray<typeof NotificationResponse.Type> }))
+      Effect.catchIf(() => true, () => Effect.succeed({ items: [] as ReadonlyArray<typeof NotificationResponse.Type> }))
     )
     const lastNotificationsRef = yield* Ref.make(initialNotifications)
 
@@ -83,28 +84,28 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         const prState = yield* SubscriptionRef.get(prService.state)
         const pullRequests = yield* prRepo.findAll().pipe(
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-          Effect.catchAllCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+          Effect.catchCause(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
         )
         const unreadCount = refreshNotifs
           ? yield* notificationRepo.unreadCount().pipe(
             Effect.tap((c) => Ref.set(lastUnreadRef, c)),
-            Effect.catchAllCause(() => Ref.get(lastUnreadRef))
+            Effect.catchCause(() => Ref.get(lastUnreadRef))
           )
           : yield* Ref.get(lastUnreadRef)
         const notifications = refreshNotifs
           ? yield* notificationRepo.findAll({ limit: 20 }).pipe(
             Effect.tap((p) => Ref.set(lastNotificationsRef, p)),
-            Effect.catchAllCause(() => Ref.get(lastNotificationsRef))
+            Effect.catchCause(() => Ref.get(lastNotificationsRef))
           )
           : yield* Ref.get(lastNotificationsRef)
 
         const sandboxes = yield* sandboxRepo.findAll().pipe(
           Effect.map((rows) => rows.map(encodeSandbox)),
-          Effect.catchAllCause(() => Effect.succeed([] as ReadonlyArray<typeof SandboxResponse.Type>))
+          Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<typeof SandboxResponse.Type>))
         )
 
         const pendingPrompt = yield* permGate.getFirstPending().pipe(
-          Effect.catchAll(() => Effect.succeed(undefined))
+          Effect.catchIf(() => true, () => Effect.succeed(undefined))
         )
 
         const pendingReviewCount = prState.currentUser
@@ -128,7 +129,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
 
         return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
       }).pipe(
-        Effect.catchAllCause((cause) =>
+        Effect.catchCause((cause) =>
           Effect.logWarning("SSE payload failed", cause).pipe(
             Effect.map(() => encoder.encode(":\n\n"))
           )
@@ -141,7 +142,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         const initialChunk = yield* buildPayload(true)
 
         // Watch SubscriptionRef changes directly (no bridge daemon)
-        const stateChanges = prService.state.changes.pipe(
+        const stateChanges = SubscriptionRef.changes(prService.state).pipe(
           Stream.map((): boolean => false)
         )
         // Repo changes via hub (PR upserts, notification adds, etc.)

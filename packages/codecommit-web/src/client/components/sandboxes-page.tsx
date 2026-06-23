@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { BoxIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
 import { useNavigate } from "react-router"
@@ -120,7 +120,7 @@ export function SandboxesPage() {
                   size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation()
-                    stopSandbox({ path: { sandboxId: SandboxId.make(s.id) } })
+                    stopSandbox({ params: { sandboxId: SandboxId.make(s.id) } })
                   }}
                 >
                   <SquareIcon className="size-3" />
@@ -132,7 +132,7 @@ export function SandboxesPage() {
                   size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation()
-                    restartSandbox({ path: { sandboxId: SandboxId.make(s.id) } })
+                    restartSandbox({ params: { sandboxId: SandboxId.make(s.id) } })
                   }}
                 >
                   <PlayIcon className="size-3.5" />
@@ -144,7 +144,7 @@ export function SandboxesPage() {
                   size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation()
-                    deleteSandbox({ path: { sandboxId: SandboxId.make(s.id) } })
+                    deleteSandbox({ params: { sandboxId: SandboxId.make(s.id) } })
                   }}
                 >
                   <Trash2Icon className="size-3.5" />

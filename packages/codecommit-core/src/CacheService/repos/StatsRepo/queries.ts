@@ -6,8 +6,8 @@
  *
  * @category CacheService
  */
-import type * as SqlClient from "@effect/sql/SqlClient"
 import { Effect } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import {
   type ActivePRRow,
   type AvgDiffRow,

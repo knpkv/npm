@@ -7,10 +7,10 @@
  *
  * @module
  */
-import { FileSystem } from "@effect/platform"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
 import { Config, Effect, Layer } from "effect"
+import * as FileSystem from "effect/FileSystem"
 import migration0001 from "./migrations/0001_initial.js"
 import migration0002 from "./migrations/0002_indexes.js"
 import migration0003 from "./migrations/0003_add_health_score.js"
@@ -38,12 +38,12 @@ const EnsureDbDir = Layer.effectDiscard(
     const fs = yield* FileSystem.FileSystem
     const h = yield* homeDir
     yield* fs.makeDirectory(`${h}/.codecommit`, { recursive: true }).pipe(
-      Effect.catchAll(() => Effect.void)
+      Effect.catchIf(() => true, () => Effect.void)
     )
   })
 )
 
-export const LibsqlLive = Layer.unwrapEffect(
+export const LibsqlLive = Layer.unwrap(
   Effect.map(dbUrl, (url) =>
     LibsqlClient.layer({
       url,

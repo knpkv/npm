@@ -3,10 +3,10 @@
  *
  * @module
  */
-import { HttpApiBuilder } from "@effect/platform"
 import { PermissionService } from "@knpkv/codecommit-core"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Effect } from "effect"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const PermissionsLive = HttpApiBuilder.group(

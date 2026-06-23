@@ -1,6 +1,7 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -88,9 +89,8 @@ export function SettingsAccounts() {
         <p className="text-sm text-muted-foreground">AWS profiles configured for CodeCommit</p>
       </div>
       <Separator />
-      {Result.builder(config)
+      {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onError(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => (
           <AccountsList

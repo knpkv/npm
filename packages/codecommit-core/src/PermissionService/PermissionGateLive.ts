@@ -20,7 +20,7 @@
  *
  * @module
  */
-import { Deferred, Effect, Layer, Ref } from "effect"
+import { Context, Deferred, Effect, Layer, Ref } from "effect"
 import { EventsHub, RepoChange } from "../CacheService/EventsHub.js"
 import { PermissionDeniedError } from "../Errors.js"
 import { PermissionGate, type PermissionPrompt, type PermissionResponse } from "./PermissionGate.js"
@@ -36,75 +36,81 @@ export interface PermissionGateLive {
   readonly getFirstPending: () => Effect.Effect<PermissionPrompt | undefined>
 }
 
-export const PermissionGateLiveTag = Effect.Service<PermissionGateLive>()("PermissionGateLive", {
-  // EventsHub needed to publish PermissionRequired/Resolved events
-  // that trigger SSE payload rebuilds
-  dependencies: [EventsHub.Default],
-  effect: Effect.gen(function*() {
-    const hub = yield* EventsHub
-    // Map<promptId, { deferred, prompt }>. Concurrent-safe via Ref.
-    // Multiple prompts can be pending simultaneously (e.g. initial
-    // refresh triggers getCallerIdentity + listRepositories at once).
-    const pending = yield* Ref.make(new Map<string, PendingEntry>())
+const makePermissionGateLive = Effect.gen(function*() {
+  const hub = yield* EventsHub
+  // Map<promptId, { deferred, prompt }>. Concurrent-safe via Ref.
+  // Multiple prompts can be pending simultaneously (e.g. initial
+  // refresh triggers getCallerIdentity + listRepositories at once).
+  const pending = yield* Ref.make(new Map<string, PendingEntry>())
 
-    const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
-      Effect.gen(function*() {
-        const deferred = yield* Deferred.make<PermissionResponse>()
-        yield* Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt }))
-        yield* hub.publish(RepoChange.PermissionRequired())
+  const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
+    Effect.gen(function*() {
+      const deferred = yield* Deferred.make<PermissionResponse>()
+      yield* Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt }))
+      yield* hub.publish(RepoChange.PermissionRequired())
 
-        const response = yield* Deferred.await(deferred).pipe(
-          Effect.timeout("30 seconds"),
-          Effect.catchTag("TimeoutException", () => {
-            return Effect.gen(function*() {
-              yield* Ref.update(pending, (m) => {
-                const n = new Map(m)
-                n.delete(prompt.id)
-                return n
-              })
-              yield* hub.publish(RepoChange.PermissionResolved())
-              return yield* new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" })
+      const response = yield* Deferred.await(deferred).pipe(
+        Effect.timeout("30 seconds"),
+        Effect.catchTag("TimeoutError", () => {
+          return Effect.gen(function*() {
+            yield* Ref.update(pending, (m) => {
+              const n = new Map(m)
+              n.delete(prompt.id)
+              return n
             })
+            yield* hub.publish(RepoChange.PermissionResolved())
+            return yield* Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
           })
-        )
-
-        yield* Ref.update(pending, (m) => {
-          const n = new Map(m)
-          n.delete(prompt.id)
-          return n
         })
-        yield* hub.publish(RepoChange.PermissionResolved())
+      )
 
-        if (response === "deny") {
-          return yield* new PermissionDeniedError({ operation: prompt.operation, reason: "denied" })
-        }
-        return response
+      yield* Ref.update(pending, (m) => {
+        const n = new Map(m)
+        n.delete(prompt.id)
+        return n
       })
+      yield* hub.publish(RepoChange.PermissionResolved())
 
-    // Called by POST /api/permissions/respond handler.
-    // Deferred.succeed is idempotent — second call is a no-op.
-    // This is how multi-tab "first responder wins" works.
-    const resolve = (promptId: string, response: PermissionResponse): Effect.Effect<void> =>
-      Ref.get(pending).pipe(
-        Effect.flatMap((m) => {
-          const entry = m.get(promptId)
-          return entry ? Deferred.succeed(entry.deferred, response) : Effect.void
-        })
-      )
+      if (response === "deny") {
+        return yield* Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "denied" }))
+      }
+      return response
+    })
 
-    // For SSE payload builder — shows one prompt at a time (FIFO).
-    // Remaining prompts queue behind; they'll surface as each resolves.
-    const getFirstPending = (): Effect.Effect<PermissionPrompt | undefined> =>
-      Ref.get(pending).pipe(
-        Effect.map((m) => {
-          const first = m.values().next()
-          return first.done ? undefined : first.value.prompt
-        })
-      )
+  // Called by POST /api/permissions/respond handler.
+  // Deferred.succeed is idempotent — second call is a no-op.
+  // This is how multi-tab "first responder wins" works.
+  const resolve = (promptId: string, response: PermissionResponse): Effect.Effect<void> =>
+    Ref.get(pending).pipe(
+      Effect.flatMap((m) => {
+        const entry = m.get(promptId)
+        return entry ? Deferred.succeed(entry.deferred, response) : Effect.void
+      })
+    )
 
-    return { request, resolve, getFirstPending } satisfies PermissionGateLive
-  })
+  // For SSE payload builder — shows one prompt at a time (FIFO).
+  // Remaining prompts queue behind; they'll surface as each resolves.
+  const getFirstPending = (): Effect.Effect<PermissionPrompt | undefined> =>
+    Ref.get(pending).pipe(
+      Effect.map((m) => {
+        const first = m.values().next()
+        return first.done ? undefined : first.value.prompt
+      })
+    )
+
+  return { request, resolve, getFirstPending } satisfies PermissionGateLive
 })
+
+export class PermissionGateLiveTag extends Context.Service<
+  PermissionGateLiveTag,
+  PermissionGateLive
+>()("PermissionGateLive") {
+  // EventsHub needed to publish PermissionRequired/Resolved events
+  // that trigger SSE payload rebuilds.
+  static readonly Default = Layer.effect(PermissionGateLiveTag, makePermissionGateLive).pipe(
+    Layer.provide(EventsHub.Default)
+  )
+}
 
 // Bridge: concrete service → abstract Context.Tag.
 // Handlers use PermissionGateLiveTag (for resolve/getFirstPending),

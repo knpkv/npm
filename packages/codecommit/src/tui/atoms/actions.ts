@@ -1,6 +1,6 @@
-import { Command } from "@effect/platform"
 import { AwsClient, CacheService, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { runtimeAtom } from "./runtime.js"
 
 // ---------------------------------------------------------------------------
@@ -21,8 +21,6 @@ export interface ListBranchesInput {
   readonly account: Domain.Account
 }
 
-const isDarwin = process.platform === "darwin"
-
 const notifyError = (title: string, error: Errors.AwsClientError) =>
   Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
@@ -33,17 +31,21 @@ const notifyError = (title: string, error: Errors.AwsClientError) =>
     })
   })
 
+const exitCode = (command: ChildProcess.Command) =>
+  Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
+
 const copyToClipboard = (text: string) =>
   Effect.gen(function*() {
-    const cmd = isDarwin
-      ? Command.make("pbcopy")
-      : Command.make("xclip", "-selection", "clipboard")
+    const copyWith = (command: string, args: ReadonlyArray<string> = []) =>
+      exitCode(ChildProcess.make(command, args, {
+        stdin: Stream.make(text).pipe(Stream.encodeText)
+      }))
 
-    yield* Command.exitCode(
-      Command.stdin(cmd, Stream.make(text).pipe(Stream.encodeText))
+    yield* copyWith("pbcopy").pipe(
+      Effect.catchIf(() => true, () => copyWith("xclip", ["-selection", "clipboard"]))
     )
   }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catchIf(() => true, (error) =>
       Effect.gen(function*() {
         const notificationRepo = yield* CacheService.NotificationRepo
         yield* notificationRepo.addSystem({
@@ -51,8 +53,7 @@ const copyToClipboard = (text: string) =>
           title: "Clipboard",
           message: error instanceof Error ? error.message : String(error)
         })
-      })
-    ),
+      })),
     Effect.withSpan("copyToClipboard")
   )
 
@@ -64,8 +65,8 @@ const copyToClipboard = (text: string) =>
  * Log in to AWS SSO
  * @category atoms
  */
-export const loginToAwsAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(profile: Domain.AwsProfileName) {
+export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
+  Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
 
     if (!profile || profile.trim() === "") {
@@ -83,13 +84,11 @@ export const loginToAwsAtom = runtimeAtom.fn(
       message: `Opening browser for ${profile}...`
     })
 
-    const cmd = Command.make("aws", "sso", "login", "--profile", profile).pipe(
-      Command.stdout("inherit"),
-      Command.stderr("inherit")
-    )
-
-    yield* Effect.forkDaemon(
-      Command.exitCode(cmd).pipe(
+    yield* Effect.forkDetach(
+      exitCode(ChildProcess.make("aws", ["sso", "login", "--profile", profile], {
+        stdout: "inherit",
+        stderr: "inherit"
+      })).pipe(
         Effect.tap(() =>
           notificationRepo.addSystem({
             type: "success",
@@ -97,13 +96,12 @@ export const loginToAwsAtom = runtimeAtom.fn(
             message: `Login complete for ${profile}`
           })
         ),
-        Effect.catchAll((e) =>
+        Effect.catchIf(() => true, (e) =>
           notificationRepo.addSystem({
             type: "error",
             title: "SSO Login Failed",
             message: e instanceof Error ? e.message : String(e)
-          })
-        ),
+          })),
         Effect.withSpan("loginToAws", { attributes: { profile } })
       )
     )
@@ -114,8 +112,8 @@ export const loginToAwsAtom = runtimeAtom.fn(
  * Copies PR link and runs assume -c for the profile
  * @category atoms
  */
-export const openPrAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(pr: Domain.PullRequest) {
+export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
+  Effect.gen(function*() {
     const notificationRepo = yield* CacheService.NotificationRepo
     const profile = pr.account.profile
 
@@ -127,14 +125,12 @@ export const openPrAtom = runtimeAtom.fn(
       message: `Opening ${profile} → PR console...`
     })
 
-    const cmd = Command.make("assume", "-cd", pr.link, profile).pipe(
-      Command.stdout("inherit"),
-      Command.stderr("inherit"),
-      Command.env({ GRANTED_ALIAS_CONFIGURED: "true" })
-    )
-
-    yield* Effect.forkDaemon(
-      Command.exitCode(cmd).pipe(
+    yield* Effect.forkDetach(
+      exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
+        stdout: "inherit",
+        stderr: "inherit",
+        env: { GRANTED_ALIAS_CONFIGURED: "true" }
+      })).pipe(
         Effect.tap(() =>
           notificationRepo.addSystem({
             type: "success",
@@ -142,13 +138,12 @@ export const openPrAtom = runtimeAtom.fn(
             message: `Assumed ${profile}`
           })
         ),
-        Effect.catchAll((e) =>
+        Effect.catchIf(() => true, (e) =>
           notificationRepo.addSystem({
             type: "error",
             title: "Assume Failed",
             message: e instanceof Error ? e.message : String(e)
-          })
-        ),
+          })),
         Effect.withSpan("openPr", { attributes: { profile, prId: pr.id } })
       )
     )
@@ -159,16 +154,18 @@ export const openPrAtom = runtimeAtom.fn(
  * Opens a URL in the default browser
  * @category atoms
  */
-export const openBrowserAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(link: string) {
-    const openCmd = isDarwin ? "open" : "xdg-open"
-    const cmd = Command.make(openCmd, link).pipe(
-      Command.stdout("pipe"),
-      Command.stderr("pipe")
-    )
+export const openBrowserAtom = runtimeAtom.fn((link: string) =>
+  Effect.gen(function*() {
+    const openWith = (command: string, args: ReadonlyArray<string>) =>
+      exitCode(ChildProcess.make(command, args, {
+        stdout: "pipe",
+        stderr: "pipe"
+      }))
 
-    yield* Command.exitCode(cmd).pipe(
-      Effect.catchAll((error) =>
+    yield* openWith("open", [link]).pipe(
+      Effect.catchIf(() => true, () => openWith("xdg-open", [link])),
+      Effect.catchIf(() => true, () => openWith("cmd", ["/c", "start", "", link])),
+      Effect.catchIf(() => true, (error) =>
         Effect.gen(function*() {
           const notificationRepo = yield* CacheService.NotificationRepo
           yield* notificationRepo.addSystem({
@@ -176,9 +173,8 @@ export const openBrowserAtom = runtimeAtom.fn(
             title: "Open Browser",
             message: error instanceof Error ? error.message : String(error)
           })
-        })
-      ),
-      Effect.fork,
+        })),
+      Effect.forkDetach,
       Effect.asVoid,
       Effect.withSpan("openBrowser")
     )
@@ -189,8 +185,8 @@ export const openBrowserAtom = runtimeAtom.fn(
  * Create a new pull request
  * @category atoms
  */
-export const createPrAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(input: CreatePRInput) {
+export const createPrAtom = runtimeAtom.fn((input: CreatePRInput) =>
+  Effect.gen(function*() {
     const service = yield* PRService.PRService
     const awsClient = yield* AwsClient.AwsClient
     const notificationRepo = yield* CacheService.NotificationRepo
@@ -233,8 +229,8 @@ export const createPrAtom = runtimeAtom.fn(
  * Fetch comments for a specific PR and return them
  * @category atoms
  */
-export const fetchPrCommentsAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(pr: Domain.PullRequest) {
+export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
+  Effect.gen(function*() {
     const awsClient = yield* AwsClient.AwsClient
 
     return yield* awsClient.getCommentsForPullRequest({
@@ -255,8 +251,8 @@ export const fetchPrCommentsAtom = runtimeAtom.fn(
  * List branches for a repository
  * @category atoms
  */
-export const listBranchesAtom = runtimeAtom.fn(
-  Effect.fnUntraced(function*(input: ListBranchesInput) {
+export const listBranchesAtom = runtimeAtom.fn((input: ListBranchesInput) =>
+  Effect.gen(function*() {
     const awsClient = yield* AwsClient.AwsClient
 
     const branches: Array<string> = yield* awsClient.listBranches({

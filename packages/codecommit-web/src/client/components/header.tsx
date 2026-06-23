@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import {
   BarChart3Icon,

@@ -38,7 +38,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
 
     const { accountIdMap, currentUser, enabledAccounts, subscribedRef } = resolved
     const staleNow = yield* Clock.currentTimeMillis
-    const staleThreshold = DateTime.toDate(DateTime.unsafeMake(staleNow)).toISOString().slice(0, 19) + "Z"
+    const staleThreshold = DateTime.toDate(DateTime.makeUnsafe(staleNow)).toISOString().slice(0, 19) + "Z"
 
     yield* hub.batch(
       Effect.gen(function*() {
@@ -54,7 +54,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
       status: "idle" as const,
-      lastUpdated: DateTime.toDate(DateTime.unsafeMake(now))
+      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now))
     }))
 
     // Sync metadata
@@ -69,12 +69,12 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
         )
       },
       { discard: true }
-    ).pipe(Effect.catchAll(() => Effect.void))
+    ).pipe(Effect.catchIf(() => true, () => Effect.void))
   },
   (effect, state) =>
     effect.pipe(
       Effect.timeout("120 seconds"),
-      Effect.catchAllCause((cause) => {
+      Effect.catchCause((cause) => {
         const squashed = Cause.squash(cause)
         const errorStr = (squashed instanceof Error ? squashed.message : String(squashed)) || "Unknown error"
         return SubscriptionRef.update(state, (s) => ({ ...s, status: "error" as const, error: errorStr }))

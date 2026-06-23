@@ -1,8 +1,9 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { Effect } from "effect"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPrAtom, type CreatePRInput, listBranchesAtom } from "../atoms/actions.js"
 import { appStateAtom } from "../atoms/app.js"
@@ -28,7 +29,7 @@ export function DialogCreatePR() {
   const { theme } = useTheme()
   const dialog = useDialog()
   const appStateResult = useAtomValue(appStateAtom)
-  const appState = Result.getOrElse(appStateResult, () => defaultState)
+  const appState = AsyncResult.getOrElse(appStateResult, () => defaultState)
   const createPr = useAtomSet(createPrAtom)
   const setCreatingPr = useAtomSet(creatingPrAtom)
   const fetchBranches = useAtomSet(listBranchesAtom)
@@ -101,8 +102,8 @@ export function DialogCreatePR() {
 
   // Update branches when result changes
   useEffect(() => {
-    if (Result.isInitial(branchesResult)) return
-    const value = Result.getOrElse(branchesResult, () => [])
+    if (AsyncResult.isInitial(branchesResult)) return
+    const value = AsyncResult.getOrElse(branchesResult, () => [])
     setBranches(value)
     setBranchesLoading(false)
   }, [branchesResult])

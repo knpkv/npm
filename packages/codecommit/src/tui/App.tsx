@@ -1,4 +1,5 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect } from "react"
 import { createPrAtom, openPrAtom } from "./atoms/actions.js"
 import { refreshAtom } from "./atoms/app.js"
@@ -27,7 +28,7 @@ function AppContent({ onQuit }: AppProps) {
 
   // Clear creating PR state when result comes in
   useEffect(() => {
-    if (!Result.isInitial(createPrResult)) {
+    if (!AsyncResult.isInitial(createPrResult)) {
       setCreatingPr(null)
     }
   }, [createPrResult, setCreatingPr])

@@ -8,13 +8,17 @@
  *
  * @module
  */
-import { Command, HttpApiBuilder } from "@effect/platform"
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import type { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Duration, Effect, SubscriptionRef } from "effect"
+import { Duration, Effect, Semaphore, SubscriptionRef } from "effect"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 const SSO_TIMEOUT = Duration.minutes(3)
+
+const exitCode = (cmd: ChildProcess.Command) =>
+  Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
 
 export const NotificationsLive = HttpApiBuilder.group(
   CodeCommitApi,
@@ -24,15 +28,15 @@ export const NotificationsLive = HttpApiBuilder.group(
       const prService = yield* PRService.PRService
       const awsClient = yield* AwsClient.AwsClient
       const notificationRepo = yield* CacheService.NotificationRepo
-      const ssoSemaphore = yield* Effect.makeSemaphore(1)
+      const ssoSemaphore = yield* Semaphore.make(1)
 
       return handlers
-        .handle("list", ({ urlParams }) =>
+        .handle("list", ({ query }) =>
           notificationRepo.findAll({
-            limit: urlParams.limit ?? 20,
-            ...(urlParams.cursor !== undefined ? { cursor: urlParams.cursor } : {}),
-            ...(urlParams.filter !== undefined ? { filter: urlParams.filter } : {}),
-            ...(urlParams.unreadOnly ? { unreadOnly: true } : {})
+            limit: query.limit ?? 20,
+            ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+            ...(query.filter !== undefined ? { filter: query.filter } : {}),
+            ...(query.unreadOnly ? { unreadOnly: true } : {})
           }).pipe(Effect.orDie))
         .handle("count", () =>
           notificationRepo.unreadCount().pipe(
@@ -56,13 +60,13 @@ export const NotificationsLive = HttpApiBuilder.group(
           ))
         .handle("ssoLogin", ({ payload }) =>
           Effect.gen(function*() {
-            const cmd = Command.make("aws", "sso", "login", "--profile", payload.profile).pipe(
-              Command.stdout("inherit"),
-              Command.stderr("inherit")
-            )
-            yield* Effect.forkDaemon(
+            const cmd = ChildProcess.make("aws", ["sso", "login", "--profile", payload.profile], {
+              stdout: "inherit",
+              stderr: "inherit"
+            })
+            yield* Effect.forkDetach(
               ssoSemaphore.withPermits(1)(
-                Command.exitCode(cmd).pipe(
+                exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
                   Effect.tap(() =>
                     Effect.gen(function*() {
@@ -72,7 +76,7 @@ export const NotificationsLive = HttpApiBuilder.group(
                       const identity = yield* awsClient.getCallerIdentity({
                         profile: payload.profile,
                         region
-                      }).pipe(Effect.catchAll(() => Effect.succeed(undefined)))
+                      }).pipe(Effect.catchIf(() => true, () => Effect.succeed(undefined)))
                       if (identity) {
                         yield* SubscriptionRef.update(prService.state, (s) => ({
                           ...s,
@@ -90,16 +94,15 @@ export const NotificationsLive = HttpApiBuilder.group(
                     })
                   ),
                   Effect.tap(() => prService.refresh),
-                  Effect.catchAll((e) =>
+                  Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO login failed", e).pipe(
-                      Effect.zipRight(notificationRepo.addSystem({
+                      Effect.andThen(notificationRepo.addSystem({
                         type: "error",
                         title: "SSO Login Failed",
                         message: "SSO login failed — check credentials",
                         profile: payload.profile
                       }))
-                    )
-                  )
+                    ))
                 )
               )
             )
@@ -109,24 +112,23 @@ export const NotificationsLive = HttpApiBuilder.group(
           ))
         .handle("ssoLogout", () =>
           Effect.gen(function*() {
-            const cmd = Command.make("aws", "sso", "logout").pipe(
-              Command.stdout("inherit"),
-              Command.stderr("inherit")
-            )
-            yield* Effect.forkDaemon(
+            const cmd = ChildProcess.make("aws", ["sso", "logout"], {
+              stdout: "inherit",
+              stderr: "inherit"
+            })
+            yield* Effect.forkDetach(
               ssoSemaphore.withPermits(1)(
-                Command.exitCode(cmd).pipe(
+                exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
                   Effect.tap(() => SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)),
-                  Effect.catchAll((e) =>
+                  Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
-                      Effect.zipRight(notificationRepo.addSystem({
+                      Effect.andThen(notificationRepo.addSystem({
                         type: "error",
                         title: "SSO Logout Failed",
                         message: "SSO logout failed"
                       }))
-                    )
-                  )
+                    ))
                 )
               )
             )

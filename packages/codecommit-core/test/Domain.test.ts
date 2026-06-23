@@ -7,7 +7,7 @@
  * all rules satisfied, no rules, approvalRules defaults to []).
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, SchemaParser } from "effect"
 import { Account, ApprovalRule, identityMatches, needsMyReview, PRComment, PullRequest } from "../src/Domain.js"
 
 describe("Domain", () => {
@@ -15,7 +15,7 @@ describe("Domain", () => {
     // Schema.Class decode must enforce branded AwsProfileName on id field
     it.effect("decodes valid account", () =>
       Effect.gen(function*() {
-        const account = yield* Schema.decode(Account)({ profile: "dev", region: "us-east-1" })
+        const account = yield* SchemaParser.decodeUnknownEffect(Account)({ profile: "dev", region: "us-east-1" })
         expect(account.profile).toBe("dev")
         expect(account.region).toBe("us-east-1")
       }))
@@ -43,7 +43,7 @@ describe("Domain", () => {
     // Ensures Schema.Class roundtrips and all fields are preserved
     it.effect("decodes valid pull request with all fields", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)(validPR)
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)(validPR)
         expect(pr.id).toBe("123")
         expect(pr.title).toBe("Add feature")
         expect(pr.status).toBe("OPEN")
@@ -53,7 +53,7 @@ describe("Domain", () => {
     // consoleUrl getter must construct correct AWS Console deep-link
     it.effect("computes consoleUrl from account region and PR id", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)(validPR)
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)(validPR)
         expect(pr.consoleUrl).toContain("us-east-1.console.aws.amazon.com")
         expect(pr.consoleUrl).toContain("/pull-requests/123")
         expect(pr.consoleUrl).toContain("my-repo")
@@ -62,14 +62,14 @@ describe("Domain", () => {
     // description is optional — must accept absent value
     it.effect("allows missing description", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)(validPR)
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)(validPR)
         expect(pr.description).toBeUndefined()
       }))
 
     // Status must only accept OPEN or CLOSED literals
     it.effect("rejects invalid status", () =>
       Effect.gen(function*() {
-        const result = yield* Schema.decode(PullRequest)({ ...validPR, status: "INVALID" }).pipe(
+        const result = yield* SchemaParser.decodeUnknownEffect(PullRequest)({ ...validPR, status: "INVALID" }).pipe(
           Effect.flip
         )
         expect(result).toBeDefined()
@@ -79,7 +79,7 @@ describe("Domain", () => {
   describe("ApprovalRule", () => {
     it.effect("decodes valid approval rule", () =>
       Effect.gen(function*() {
-        const rule = yield* Schema.decode(ApprovalRule)({
+        const rule = yield* SchemaParser.decodeUnknownEffect(ApprovalRule)({
           ruleName: "Require 2 approvers",
           requiredApprovals: 2,
           poolMembers: ["alice", "bob"],
@@ -94,7 +94,7 @@ describe("Domain", () => {
 
     it.effect("decodes with optional fromTemplate", () =>
       Effect.gen(function*() {
-        const rule = yield* Schema.decode(ApprovalRule)({
+        const rule = yield* SchemaParser.decodeUnknownEffect(ApprovalRule)({
           ruleName: "Template rule",
           requiredApprovals: 1,
           poolMembers: ["alice"],
@@ -113,8 +113,8 @@ describe("Domain", () => {
           poolMemberArns: ["arn:aws:iam::123:user/alice"],
           satisfied: false
         }
-        const decoded = yield* Schema.decode(ApprovalRule)(input)
-        const encoded = yield* Schema.encode(ApprovalRule)(decoded)
+        const decoded = yield* SchemaParser.decodeUnknownEffect(ApprovalRule)(input)
+        const encoded = yield* SchemaParser.encodeEffect(ApprovalRule)(decoded)
         expect(encoded).toEqual(input)
       }))
   })
@@ -140,7 +140,7 @@ describe("Domain", () => {
 
     it.effect("returns false when no currentUser", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
         })
@@ -149,7 +149,7 @@ describe("Domain", () => {
 
     it.effect("returns false when user not in any pool", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
         })
@@ -158,7 +158,7 @@ describe("Domain", () => {
 
     it.effect("returns true when user is in unsatisfied rule pool", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice", "bob"], satisfied: false }]
         })
@@ -167,7 +167,7 @@ describe("Domain", () => {
 
     it.effect("returns false when user already approved", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvedBy: ["alice"],
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
@@ -177,7 +177,7 @@ describe("Domain", () => {
 
     it.effect("returns false when all rules satisfied", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: true }]
         })
@@ -186,13 +186,13 @@ describe("Domain", () => {
 
     it.effect("returns false when no approval rules", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)(basePR)
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)(basePR)
         expect(needsMyReview(pr, "alice")).toBe(false)
       }))
 
     it.effect("defaults approvalRules to empty array", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)(basePR)
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)(basePR)
         expect(pr.approvalRules).toEqual([])
       }))
 
@@ -200,7 +200,7 @@ describe("Domain", () => {
     // case — must still match (identityMatches is a superset of exact match).
     it.effect("matches a pool member differing only by case", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["Alice"], satisfied: false }]
         })
@@ -210,7 +210,7 @@ describe("Domain", () => {
     // Caller is a full assumed-role ARN whose final segment is the bare pool member.
     it.effect("matches when the caller is an ARN whose final segment is the pool member", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
         })
@@ -221,7 +221,7 @@ describe("Domain", () => {
     // Pool member carries the AWSReservedSSO role-session form; caller is the bare username.
     it.effect("matches when the pool member carries the role-session-name form", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{
             ruleName: "R1",
@@ -236,7 +236,7 @@ describe("Domain", () => {
     // Already approved under a divergent identity form → no match.
     it.effect("returns false when caller already approved under an ARN form", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvedBy: ["arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_Admin_abc/alice"],
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false }]
@@ -247,7 +247,7 @@ describe("Domain", () => {
     // A clearly-different user must NOT match, even with shared ARN structure.
     it.effect("does not match an unrelated user sharing ARN structure", () =>
       Effect.gen(function*() {
-        const pr = yield* Schema.decode(PullRequest)({
+        const pr = yield* SchemaParser.decodeUnknownEffect(PullRequest)({
           ...basePR,
           approvalRules: [{ ruleName: "R1", requiredApprovals: 1, poolMembers: ["bob"], satisfied: false }]
         })
@@ -289,7 +289,7 @@ describe("Domain", () => {
     // Verifies Schema.Class decode with branded CommentId
     it.effect("decodes valid comment", () =>
       Effect.gen(function*() {
-        const comment = yield* Schema.decode(PRComment)({
+        const comment = yield* SchemaParser.decodeUnknownEffect(PRComment)({
           id: "c-1",
           content: "Looks good",
           author: "jane",
@@ -303,7 +303,7 @@ describe("Domain", () => {
     // Optional fields (inReplyTo, filePath, lineNumber) must be absent-safe
     it.effect("allows optional fields to be absent", () =>
       Effect.gen(function*() {
-        const comment = yield* Schema.decode(PRComment)({
+        const comment = yield* SchemaParser.decodeUnknownEffect(PRComment)({
           id: "c-2",
           content: "LGTM",
           author: "bob",

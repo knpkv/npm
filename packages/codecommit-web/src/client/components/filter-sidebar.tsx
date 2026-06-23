@@ -8,7 +8,7 @@
  *
  * @module
  */
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { CheckIcon, ChevronDownIcon, EyeIcon, FlameIcon, LayoutListIcon, UserIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"

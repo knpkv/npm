@@ -1,7 +1,8 @@
-import { FileSystem, HttpApiBuilder } from "@effect/platform"
 import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Config, Effect, Option, Schema, SubscriptionRef } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
@@ -13,15 +14,14 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
       .handle("list", () =>
         Effect.gen(function*() {
           const config = yield* configService.load.pipe(
-            Effect.catchAll(() =>
+            Effect.catchIf(() => true, () =>
               Effect.succeed({
                 accounts: [] as Array<{ profile: string; regions: Array<string>; enabled: boolean }>,
                 autoDetect: true,
                 autoRefresh: true,
                 refreshIntervalSeconds: 300,
                 sandbox: ConfigService.defaultSandboxConfig
-              })
-            )
+              }))
           )
           const state = yield* SubscriptionRef.get(prService.state)
           return {
@@ -41,30 +41,30 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const path = yield* configService.getConfigPath
-          const exists = yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))
+          const exists = yield* fs.exists(path).pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
           const modifiedAt = exists
             ? yield* fs.stat(path).pipe(
               Effect.map((s) =>
                 Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               ),
-              Effect.catchAll(() => Effect.succeed(undefined))
+              Effect.catchIf(() => true, () => Effect.succeed(undefined))
             )
             : undefined
           return { path, exists, modifiedAt }
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: e instanceof Error ? e.message : String(e) }))))
       .handle("database", () =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const home = yield* Config.string("HOME").pipe(Config.orElse(() => Config.string("USERPROFILE")))
           const path = `${home}/.codecommit/cache.db`
-          const exists = yield* fs.exists(path).pipe(Effect.catchAll(() => Effect.succeed(false)))
+          const exists = yield* fs.exists(path).pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
           const stat = exists
             ? yield* fs.stat(path).pipe(
               Effect.map((s) => ({
                 size: Number(s.size),
                 modifiedAt: Option.map(s.mtime, (d) => new Date(Number(d)).toISOString()).pipe(Option.getOrUndefined)
               })),
-              Effect.catchAll(() => Effect.succeed(undefined))
+              Effect.catchIf(() => true, () => Effect.succeed(undefined))
             )
             : undefined
           return { path, sizeBytes: stat?.size ?? 0, exists, modifiedAt: stat?.modifiedAt }
@@ -73,16 +73,16 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const result = yield* configService.validate
           return { status: result.status, path: result.path, errors: result.errors }
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e.message }))))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: e instanceof Error ? e.message : String(e) }))))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const existing = yield* configService.load.pipe(
-            Effect.catchAll(() => Effect.succeed({ sandbox: ConfigService.defaultSandboxConfig }))
+            Effect.catchIf(() => true, () => Effect.succeed({ sandbox: ConfigService.defaultSandboxConfig }))
           )
           const accounts = yield* Effect.forEach(payload.accounts, (a) =>
             Effect.all({
-              profile: Schema.decode(AwsProfileName)(a.profile),
-              regions: Effect.forEach(a.regions, (r) => Schema.decode(AwsRegion)(r)),
+              profile: Schema.decodeEffect(AwsProfileName)(a.profile),
+              regions: Effect.forEach(a.regions, (r) => Schema.decodeEffect(AwsRegion)(r)),
               enabled: Effect.succeed(a.enabled)
             }))
           yield* configService.save({
@@ -93,7 +93,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             sandbox: payload.sandbox ?? existing.sandbox
           })
           yield* prService.refresh.pipe(
-            Effect.catchAll((e) => Effect.logWarning("refresh after config save failed", e))
+            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config save failed", e))
           )
           return "ok"
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
@@ -101,11 +101,11 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const backupPath = yield* configService.backup.pipe(
             Effect.map((p): string | undefined => p),
-            Effect.catchAll(() => Effect.succeed(undefined as string | undefined))
+            Effect.catchIf(() => true, () => Effect.succeed(undefined as string | undefined))
           )
           const config = yield* configService.reset
           yield* prService.refresh.pipe(
-            Effect.catchAll((e) => Effect.logWarning("refresh after config reset failed", e))
+            Effect.catchIf(() => true, (e) => Effect.logWarning("refresh after config reset failed", e))
           )
           const state = yield* SubscriptionRef.get(prService.state)
           return {

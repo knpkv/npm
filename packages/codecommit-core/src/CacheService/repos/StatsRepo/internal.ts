@@ -6,8 +6,8 @@
  *
  * @category CacheService
  */
-import type * as SqlClient from "@effect/sql/SqlClient"
 import { Effect, Schema } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { PRCommentLocationJson } from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
 
@@ -120,12 +120,12 @@ export interface CommentInfo {
 // Helpers
 // ---------------------------------------------------------------------------
 
-export const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
+export const LocationsFromJson = Schema.fromJsonString(Schema.Array(PRCommentLocationJson))
 
 export const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `StatsRepo.${op}`, cause })),
-    Effect.withSpan(`StatsRepo.${op}`, { captureStackTrace: false })
+    Effect.withSpan(`StatsRepo.${op}`)
   )
 
 export const extractComments = (

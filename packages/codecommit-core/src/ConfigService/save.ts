@@ -1,8 +1,9 @@
 /**
  * @internal
  */
-import { FileSystem, Path } from "@effect/platform"
 import { Effect } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import { ConfigError } from "../Errors.js"
 import { ConfigPaths, type TuiConfig } from "./internal.js"
 

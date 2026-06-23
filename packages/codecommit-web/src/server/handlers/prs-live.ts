@@ -10,20 +10,20 @@
  *
  * @module
  */
-import { Command, HttpApiBuilder } from "@effect/platform"
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Schema, Stream, SubscriptionRef } from "effect"
-import { platform } from "node:os"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 const copyToClipboard = (text: string) => {
-  const cmd = platform() === "darwin"
-    ? Command.make("pbcopy")
-    : Command.make("xclip", "-selection", "clipboard")
+  const stdin = Stream.make(text).pipe(Stream.encodeText)
+  const copyWith = (cmd: ChildProcess.Command) =>
+    Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
 
-  return Command.exitCode(
-    Command.stdin(cmd, Stream.make(text).pipe(Stream.encodeText))
+  return copyWith(ChildProcess.make("pbcopy", { stdin })).pipe(
+    Effect.catchIf(() => true, () => copyWith(ChildProcess.make("xclip", ["-selection", "clipboard"], { stdin })))
   )
 }
 
@@ -68,24 +68,24 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         ))
       .handle("refresh", () =>
         prService.refresh.pipe(
-          Effect.forkDaemon,
+          Effect.forkDetach,
           Effect.map(() => "ok")
         ))
-      .handle("search", ({ urlParams }) =>
+      .handle("search", ({ query }) =>
         Effect.gen(function*() {
-          const result = yield* prService.searchPullRequests(urlParams.q, {
-            limit: urlParams.limit ?? 20,
-            offset: urlParams.offset ?? 0
+          const result = yield* prService.searchPullRequests(query.q, {
+            limit: query.limit ?? 20,
+            offset: query.offset ?? 0
           })
           const items = yield* Effect.forEach(
             result.items,
-            (row) => Schema.encode(CacheService.CachedPullRequest)(row)
+            (row) => Schema.encodeEffect(CacheService.CachedPullRequest)(row)
           )
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
-      .handle("refreshSingle", ({ path }) =>
-        prService.refreshSinglePR(path.awsAccountId, path.prId).pipe(
-          Effect.forkDaemon,
+      .handle("refreshSingle", ({ params }) =>
+        prService.refreshSinglePR(params.awsAccountId, params.prId).pipe(
+          Effect.forkDetach,
           Effect.map(() => "ok")
         ))
       .handle("create", ({ payload }) =>
@@ -99,11 +99,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
         }).pipe(
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
-      .handle("comments", ({ urlParams }) =>
+      .handle("comments", ({ query }) =>
         awsClient.getCommentsForPullRequest({
-          account: { profile: urlParams.profile, region: urlParams.region },
-          pullRequestId: urlParams.pullRequestId,
-          repositoryName: urlParams.repositoryName
+          account: { profile: query.profile, region: query.region },
+          pullRequestId: query.pullRequestId,
+          repositoryName: query.repositoryName
         }).pipe(
           Effect.map(encodeCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
@@ -111,24 +111,23 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
       .handle("open", ({ payload }) =>
         Effect.gen(function*() {
           yield* copyToClipboard(payload.link).pipe(
-            Effect.catchAll(() => Effect.void)
+            Effect.catchIf(() => true, () => Effect.void)
           )
 
           // -c: console login, -d: open URL in default browser
-          const cmd = Command.make("assume", "-cd", payload.link, payload.profile).pipe(
-            Command.stdout("inherit"),
-            Command.stderr("inherit"),
-            Command.env({ GRANTED_ALIAS_CONFIGURED: "true" })
-          )
-          yield* Effect.forkDaemon(
-            Command.exitCode(cmd).pipe(
-              Effect.catchAll((e) =>
+          const cmd = ChildProcess.make("assume", ["-cd", payload.link, payload.profile], {
+            stdout: "inherit",
+            stderr: "inherit",
+            env: { GRANTED_ALIAS_CONFIGURED: "true" }
+          })
+          yield* Effect.forkDetach(
+            Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd)).pipe(
+              Effect.catchIf(() => true, (e) =>
                 notificationRepo.addSystem({
                   type: "error",
                   title: "Assume Failed",
                   message: e instanceof Error ? e.message : String(e)
-                })
-              )
+                }))
             )
           )
           return payload.link

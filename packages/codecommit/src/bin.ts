@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
-import { Args, Command, Options } from "@effect/cli"
-import { FileSystem } from "@effect/platform"
-import { BunContext, BunRuntime } from "@effect/platform-bun"
+import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { makeServer } from "@knpkv/codecommit-web"
 import { Console, Effect, Layer, Stream } from "effect"
-import open from "open"
+import * as FileSystem from "effect/FileSystem"
+import * as Stdio from "effect/Stdio"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import pkg from "../package.json"
-import { FILTER_PRESETS, type FilterPreset, matchesRepoAuthor } from "./filterPresets.js"
+import { FILTER_PRESETS, matchesRepoAuthor } from "./filterPresets.js"
 import { FilterService, FilterServiceLive } from "./FilterService.js"
 
 // TUI Command
@@ -21,13 +22,20 @@ const tui = Command.make("tui", {}, () =>
 // Web Command
 const web = Command.make("web", {
   port: Options.integer("port").pipe(Options.withDefault(3000)),
-  hostname: Options.text("hostname").pipe(Options.withDefault("127.0.0.1"))
+  hostname: Options.string("hostname").pipe(Options.withDefault("127.0.0.1"))
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* Effect.logInfo(`Starting web server at http://${hostname}:${port}`)
 
     // Open browser
-    yield* Effect.promise(() => open(`http://${hostname}:${port}`))
+    const url = `http://${hostname}:${port}`
+    const exitCode = (command: ChildProcess.Command) =>
+      Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
+    yield* exitCode(ChildProcess.make("open", [url])).pipe(
+      Effect.catchIf(() => true, () => exitCode(ChildProcess.make("xdg-open", [url]))),
+      Effect.catchIf(() => true, () => exitCode(ChildProcess.make("cmd", ["/c", "start", "", url]))),
+      Effect.catchIf(() => true, () => Effect.void)
+    )
 
     // Run server with configured port/hostname
     return yield* Layer.launch(makeServer({ port, hostname }))
@@ -35,27 +43,27 @@ const web = Command.make("web", {
 
 // PR Create Command
 const prCreate = Command.make("create", {
-  repo: Args.text({ name: "repository" }).pipe(Args.withDescription("Repository name")),
-  title: Args.text({ name: "title" }).pipe(Args.withDescription("PR title")),
-  source: Options.text("source").pipe(
+  repo: Args.string("repository").pipe(Args.withDescription("Repository name")),
+  title: Args.string("title").pipe(Args.withDescription("PR title")),
+  source: Options.string("source").pipe(
     Options.withAlias("s"),
     Options.withDescription("Source branch")
   ),
-  destination: Options.text("destination").pipe(
+  destination: Options.string("destination").pipe(
     Options.withAlias("d"),
     Options.withDescription("Destination branch"),
     Options.withDefault("main")
   ),
-  description: Options.text("description").pipe(
+  description: Options.string("description").pipe(
     Options.withDescription("PR description"),
     Options.optional
   ),
-  profile: Options.text("profile").pipe(
+  profile: Options.string("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile"),
     Options.withDefault("default")
   ),
-  region: Options.text("region").pipe(
+  region: Options.string("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region"),
     Options.withDefault("us-east-1")
@@ -79,7 +87,7 @@ const prCreate = Command.make("create", {
     yield* Console.log(`Created PR: ${prId}`)
     yield* Console.log(link)
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
   )).pipe(Command.withDescription("Create a pull request"))
 
 // Filter presets (FILTER_PRESETS, matchesPreset, matchesRepoAuthor) live in
@@ -88,12 +96,12 @@ const prCreate = Command.make("create", {
 
 // PR List Command
 const prList = Command.make("list", {
-  profile: Options.text("profile").pipe(
+  profile: Options.string("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("default")
   ),
-  region: Options.text("region").pipe(
+  region: Options.string("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("us-east-1")
@@ -110,15 +118,15 @@ const prList = Command.make("list", {
     ),
     Options.withDefault(false)
   ),
-  repo: Options.text("repo").pipe(
+  repo: Options.string("repo").pipe(
     Options.withDescription("Filter by repository name"),
     Options.optional
   ),
-  author: Options.text("author").pipe(
+  author: Options.string("author").pipe(
     Options.withDescription("Filter by author"),
     Options.optional
   ),
-  filter: Options.choice<FilterPreset, typeof FILTER_PRESETS>("filter", FILTER_PRESETS).pipe(
+  filter: Options.choice("filter", FILTER_PRESETS).pipe(
     Options.withDescription(
       "Named preset (fans out across all enabled accounts, OPEN PRs only — ignores --status/--all): " +
         "mine | needs-my-review | stale | conflicting"
@@ -245,7 +253,7 @@ const prList = Command.make("list", {
       FilterServiceLive.pipe(
         Layer.provideMerge(Layer.mergeAll(
           AwsClient.AwsClientLive,
-          NodeHttpClient.layer,
+          NodeHttpClient.layerUndici,
           ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
         ))
       )
@@ -272,19 +280,19 @@ const renderLocation = (loc: Domain.PRCommentLocation): string => {
 
 // PR Export Command
 const prExport = Command.make("export", {
-  prId: Args.text({ name: "pr-id" }).pipe(Args.withDescription("Pull request ID")),
-  repo: Args.text({ name: "repository" }).pipe(Args.withDescription("Repository name")),
+  prId: Args.string("pr-id").pipe(Args.withDescription("Pull request ID")),
+  repo: Args.string("repository").pipe(Args.withDescription("Repository name")),
   output: Options.file("output").pipe(
     Options.withAlias("o"),
     Options.withDescription("Output file path"),
     Options.optional
   ),
-  profile: Options.text("profile").pipe(
+  profile: Options.string("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile"),
     Options.withDefault("default")
   ),
-  region: Options.text("region").pipe(
+  region: Options.string("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region"),
     Options.withDefault("us-east-1")
@@ -341,28 +349,28 @@ const prExport = Command.make("export", {
       yield* Console.log(markdown)
     }
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
   )).pipe(Command.withDescription("Export PR comments as markdown"))
 
 // PR Update Command
 const prUpdate = Command.make("update", {
-  prId: Args.text({ name: "pr-id" }).pipe(Args.withDescription("Pull request ID")),
-  title: Options.text("title").pipe(
+  prId: Args.string("pr-id").pipe(Args.withDescription("Pull request ID")),
+  title: Options.string("title").pipe(
     Options.withAlias("t"),
     Options.withDescription("New PR title"),
     Options.optional
   ),
-  description: Options.text("description").pipe(
+  description: Options.string("description").pipe(
     Options.withAlias("d"),
     Options.withDescription("New PR description"),
     Options.optional
   ),
-  profile: Options.text("profile").pipe(
+  profile: Options.string("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile"),
     Options.withDefault("default")
   ),
-  region: Options.text("region").pipe(
+  region: Options.string("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region"),
     Options.withDefault("us-east-1")
@@ -389,7 +397,7 @@ const prUpdate = Command.make("update", {
 
     yield* Console.log(`Updated PR ${prId}`)
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layer))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
   )).pipe(Command.withDescription("Update PR title or description"))
 
 // PR Command (parent)
@@ -404,12 +412,21 @@ const command = Command.make("codecommit", {}, () =>
     Command.withSubcommands([tui, web, pr])
   )
 
-const cli = Command.run(command, {
-  name: pkg.name,
+const cli = Command.runWith(command, {
   version: pkg.version
 })
 
-Effect.suspend(() => cli(process.argv)).pipe(
-  Effect.provide(Layer.mergeAll(BunContext.layer, NodeHttpClient.layer, AwsClientConfig.Default)),
-  BunRuntime.runMain
+const RuntimeLayer = Layer.mergeAll(
+  BunServices.layer,
+  BunStdio.layer,
+  NodeHttpClient.layerUndici,
+  AwsClientConfig.Default
 )
+
+const program = Effect.gen(function*() {
+  const stdio = yield* Stdio.Stdio
+  const args = yield* stdio.args
+  return yield* cli(args)
+})
+
+BunRuntime.runMain(Effect.provide(program, RuntimeLayer))

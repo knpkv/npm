@@ -1,6 +1,6 @@
-import { HttpApiBuilder } from "@effect/platform"
 import { PRService } from "@knpkv/codecommit-core"
 import { Effect } from "effect"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const SubscriptionsLive = HttpApiBuilder.group(

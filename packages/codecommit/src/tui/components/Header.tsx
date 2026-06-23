@@ -1,6 +1,7 @@
-import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { DateUtils } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom } from "../atoms/app.js"
 import { creatingPrAtom, viewAtom } from "../atoms/ui.js"
@@ -26,8 +27,8 @@ export function Header() {
   const [, setTick] = useState(0)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
 
-  const state = Result.getOrElse(result, () => defaultState)
-  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const state = AsyncResult.getOrElse(result, () => defaultState)
+  const notifications: PaginatedNotifications = AsyncResult.getOrElse(notificationsResult, () => ({ items: [] }))
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 10000)

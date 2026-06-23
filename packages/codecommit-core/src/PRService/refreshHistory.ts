@@ -32,7 +32,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       const configService = yield* ConfigService
 
       const config = yield* configService.load.pipe(
-        Effect.catchAll(() => Effect.succeed(undefined))
+        Effect.catchIf(() => true, () => Effect.succeed(undefined))
       )
       if (!config) {
         yield* Effect.logWarning("syncWeek: no config found")
@@ -67,7 +67,7 @@ export const syncWeek = Effect.fn("syncWeek")(
             const identity = yield* awsClient
               .getCallerIdentity({ profile: account.profile, region })
               .pipe(
-                Effect.catchAll(() => Effect.succeed({ accountId: account.profile as string, arn: "" }))
+                Effect.catchIf(() => true, () => Effect.succeed({ accountId: account.profile as string, arn: "" }))
               )
             const awsAccountId = identity.accountId
 
@@ -86,10 +86,10 @@ export const syncWeek = Effect.fn("syncWeek")(
                         )
                       )
                     ),
-                    Effect.catchAll(() => Effect.void)
+                    Effect.catchIf(() => true, () => Effect.void)
                   )
                 ),
-                Effect.catchAll((e) => Effect.logWarning("sync fetch error", e))
+                Effect.catchIf(() => true, (e) => Effect.logWarning("sync fetch error", e))
               )
           }),
         { discard: true }
@@ -105,7 +105,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       }))
 
       const openPRs = yield* prRepo.findStaleOpen("9999-12-31T23:59:59Z").pipe(
-        Effect.catchAll(() => Effect.succeed([]))
+        Effect.catchIf(() => true, () => Effect.succeed([]))
       )
 
       const transitionedRef = yield* Ref.make(0)
@@ -144,7 +144,7 @@ export const syncWeek = Effect.fn("syncWeek")(
                 }
                 return Effect.void
               }),
-              Effect.catchAll(() => Effect.void)
+              Effect.catchIf(() => true, () => Effect.void)
             ),
         { concurrency: 5, discard: true }
       )
@@ -158,13 +158,13 @@ export const syncWeek = Effect.fn("syncWeek")(
         statusDetail: `syncing ${week} — computing commenters`
       }))
       yield* prRepo.refreshCommentedBy().pipe(
-        Effect.catchAll((e) => Effect.logWarning("refreshCommentedBy failed", e))
+        Effect.catchIf(() => true, (e) => Effect.logWarning("refreshCommentedBy failed", e))
       )
 
       // Reload PRs from DB so SSE clients get fresh data (incl. approvedBy, commentedBy)
       const freshPRs = yield* prRepo.findAll().pipe(
         Effect.map((rows) => rows.map((r) => decodeCachedPR(r))),
-        Effect.catchAll(() => Effect.succeed([] as Array<ReturnType<typeof decodeCachedPR>>))
+        Effect.catchIf(() => true, () => Effect.succeed([] as Array<ReturnType<typeof decodeCachedPR>>))
       )
 
       yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
@@ -173,7 +173,7 @@ export const syncWeek = Effect.fn("syncWeek")(
         pullRequests: freshPRs
       }))
     }).pipe(
-      Effect.catchAll((e) =>
+      Effect.catchIf(() => true, (e) =>
         Effect.gen(function*() {
           yield* Effect.logWarning("syncWeek failed", e)
           yield* SubscriptionRef.update(state, (s) => ({
@@ -181,8 +181,7 @@ export const syncWeek = Effect.fn("syncWeek")(
             status: "error" as const,
             error: `History sync failed: ${String(e)}`
           }))
-        })
-      )
+        }))
     )
   }
 )

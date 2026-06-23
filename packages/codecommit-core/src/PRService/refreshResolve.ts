@@ -37,7 +37,7 @@ const resolveIdentity = (
     const identity = yield* awsClient.getCallerIdentity({
       profile: account.profile,
       region: region as AwsRegion
-    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)))
+    }).pipe(Effect.catchIf(() => true, () => Effect.succeed(undefined)))
 
     if (!identity) {
       yield* notificationRepo.addSystem({
@@ -62,7 +62,7 @@ export const resolveAccounts = (state: PRState) =>
     const subscriptionRepo = yield* SubscriptionRepo
 
     // --- Phase 1: Load cached PRs immediately ---
-    const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+    const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
 
     yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
       ...s,
@@ -72,7 +72,7 @@ export const resolveAccounts = (state: PRState) =>
     }))
 
     const config = yield* configService.load.pipe(Effect.orDie)
-    const detected = yield* configService.detectProfiles.pipe(Effect.catchAll(() => Effect.succeed([])))
+    const detected = yield* configService.detectProfiles.pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
 
     const accountsState = detected.map((d) => {
       const configured = config.accounts.find((a) => a.profile === d.name)
@@ -91,7 +91,7 @@ export const resolveAccounts = (state: PRState) =>
       const now = yield* Clock.currentTimeMillis
       yield* SubscriptionRef.update(
         state,
-        (s) => ({ ...s, status: "idle" as const, lastUpdated: DateTime.toDate(DateTime.unsafeMake(now)) })
+        (s) => ({ ...s, status: "idle" as const, lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)) })
       )
       return undefined
     }
@@ -117,13 +117,13 @@ export const resolveAccounts = (state: PRState) =>
         const region = account.regions?.[0] ?? ("us-east-1" as AwsRegion)
         return resolveIdentity(accountIdRef, account, region)
       },
-      { concurrency: 3 }
+      { concurrency: 3, discard: true }
     )
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 
     // Load subscriptions for diff
-    const subscriptions = yield* subscriptionRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+    const subscriptions = yield* subscriptionRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
     const subscribedRef = yield* Ref.make(new Set(subscriptions.map((s) => `${s.awsAccountId}:${s.pullRequestId}`)))
     const currentUser = (yield* SubscriptionRef.get(state)).currentUser
 

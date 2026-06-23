@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { createContext, useContext } from "react"
 import { themeAtom } from "../atoms/ui.js"
 import { defaultTheme, type Theme } from "../theme/default.js"

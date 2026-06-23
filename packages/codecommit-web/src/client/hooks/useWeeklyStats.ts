@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { useMemo } from "react"
 import { ApiClient } from "../atoms/runtime.js"
 
@@ -7,7 +7,7 @@ const makeStatsQuery = (
   filters: { repo?: string | undefined; author?: string | undefined; account?: string | undefined }
 ) =>
   ApiClient.query("stats", "get", {
-    urlParams: { week, ...filters },
+    query: { week, ...filters },
     timeToLive: "30 seconds"
   })
 

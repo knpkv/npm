@@ -57,7 +57,7 @@ const mockStatsRepo = (overrides: Partial<{
 }> = {}) =>
   Layer.succeed(
     StatsRepo,
-    StatsRepo.make({
+    StatsRepo.of({
       weeklyVolume: () => Effect.succeed(overrides.volume ?? { prsCreated: 0, prsMerged: 0, prsClosed: 0 }),
       topContributors: () => Effect.succeed(overrides.contributors ?? []),
       mostActivePRs: () => Effect.succeed([]),

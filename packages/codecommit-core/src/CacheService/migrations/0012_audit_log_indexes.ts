@@ -1,5 +1,5 @@
-import * as SqlClient from "@effect/sql/SqlClient"
 import * as Effect from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 
 export default Effect.flatMap(
   SqlClient.SqlClient,
@@ -7,5 +7,5 @@ export default Effect.flatMap(
     Effect.all([
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_permission_state ON audit_log(permission_state)`,
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_account_profile ON audit_log(account_profile)`
-    ]).pipe(Effect.asVoid, Effect.catchAll(() => Effect.void))
+    ]).pipe(Effect.asVoid, Effect.catchIf(() => true, () => Effect.void))
 )

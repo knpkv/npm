@@ -1,10 +1,10 @@
 /**
  * @internal
  */
-import type { Path } from "@effect/platform"
-import { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
-import type { ConfigError, ProfileDetectionError } from "../Errors.js"
+import * as FileSystem from "effect/FileSystem"
+import type * as Path from "effect/Path"
+import type { ProfileDetectionError } from "../Errors.js"
 import { backup } from "./backup.js"
 import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, type TuiConfig } from "./internal.js"
 import { save } from "./save.js"
@@ -15,24 +15,22 @@ export const makeReset = (
     ProfileDetectionError,
     FileSystem.FileSystem | Path.Path | ConfigPaths
   >
-): Effect.Effect<TuiConfig, ConfigError, FileSystem.FileSystem | Path.Path | ConfigPaths> =>
+): Effect.Effect<TuiConfig, unknown, unknown> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const paths = yield* ConfigPaths
     const configPath = yield* paths.configPath
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
 
     if (exists) {
-      yield* backup.pipe(
-        Effect.catchAll((e) => e.message.includes("does not exist") ? Effect.void : Effect.fail(e))
-      )
+      yield* backup
     }
 
     const detected = yield* detectProfiles.pipe(
-      Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+      Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
     )
 
     const config: TuiConfig = {

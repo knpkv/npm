@@ -1,6 +1,7 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -418,7 +419,7 @@ export function StatsPage() {
         </Button>
 
         <div className="ml-auto flex items-center gap-2">
-          {Result.builder(statsResult)
+          {AsyncResult.builder(statsResult)
             .onSuccess((data) => <StatsFilters data={data} repo={repo} author={author} setFilter={setFilter} />)
             .render()}
 
@@ -456,7 +457,7 @@ export function StatsPage() {
 
       <Separator />
 
-      {Result.builder(statsResult)
+      {AsyncResult.builder(statsResult)
         .onInitialOrWaiting(() => (
           <div className="flex items-center justify-center py-12">
             <LoaderIcon className="size-5 animate-spin text-muted-foreground" />

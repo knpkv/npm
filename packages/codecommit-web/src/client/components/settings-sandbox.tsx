@@ -1,4 +1,5 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
@@ -17,7 +18,6 @@ interface SandboxSettings {
   readonly extensions: ReadonlyArray<string>
   readonly setupCommands: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
-  readonly enableClaudeCode: boolean
   readonly volumeMounts: ReadonlyArray<VolumeMount>
   readonly cloneDepth: number
 }
@@ -27,7 +27,6 @@ const DEFAULTS: SandboxSettings = {
   extensions: [],
   setupCommands: [],
   env: {},
-  enableClaudeCode: true,
   volumeMounts: [],
   cloneDepth: 0
 }
@@ -42,7 +41,7 @@ export function SettingsSandbox() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (Result.isSuccess(config)) {
+    if (AsyncResult.isSuccess(config)) {
       configRef.current = config.value
       if (!local) {
         const initial = config.value.sandbox ?? DEFAULTS
@@ -102,9 +101,8 @@ export function SettingsSandbox() {
         )}
       </div>
       <Separator />
-      {Result.builder(config)
+      {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onError(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess(() => local && <SandboxForm settings={local} onChange={update} />)
         .render()}
@@ -416,7 +414,6 @@ function SandboxForm({
 }
 
 const EXTENSION_PRESETS: ReadonlyArray<{ label: string; id: string }> = [
-  { label: "Claude Code", id: "anthropic.claude-code" },
   { label: "ESLint", id: "dbaeumer.vscode-eslint" },
   { label: "Prettier", id: "esbenp.prettier-vscode" },
   { label: "GitLens", id: "eamodio.gitlens" },
@@ -460,7 +457,6 @@ const COMMAND_PRESETS: ReadonlyArray<{ label: string; cmd: string }> = [
     label: "Node 22",
     cmd: "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
   },
-  { label: "Claude Code", cmd: "sudo npm i -g @anthropic-ai/claude-code" },
   { label: "pnpm", cmd: "sudo npm i -g pnpm" },
   {
     label: "Bun",
@@ -504,10 +500,6 @@ const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
   {
     label: "AWS Credentials",
     mount: { hostPath: "~/.aws", containerPath: "/home/coder/.aws", readonly: true }
-  },
-  {
-    label: "Claude Config",
-    mount: { hostPath: "~/.claude", containerPath: "/home/coder/.claude", readonly: false }
   }
 ]
 

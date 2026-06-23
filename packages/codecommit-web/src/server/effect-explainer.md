@@ -93,7 +93,7 @@ CodeCommitApi
 AllRoutes (Layer.orDie — remaining service construction errors)
 │
 ├── ApiLive
-│   ├── HttpLayerRouter.addHttpApi(CodeCommitApi)  ← registers the API
+│   ├── HttpApiBuilder.layer(CodeCommitApi)        ← registers the API
 │   ├── HandlersLive (PrsLive, ConfigLive, etc.)   ← implements endpoints
 │   ├── AutoRefresh                                ← daemon: initial + recurring refresh
 │   └── AllServicesLive
@@ -104,7 +104,7 @@ AllRoutes (Layer.orDie — remaining service construction errors)
 │   ├── PullRequestRepo.Default, CommentRepo.Default, ...
 ├── StaticRouter                                   ← SPA file serving
 ├── CORS middleware (allowedOrigins: localhost only)
-└── Platform (BunHttpServer, BunContext, idleTimeout: 0 for SSE)
+└── Platform (BunHttpServer, BunServices, idleTimeout: 0 for SSE)
 ```
 
 `Layer.orDie` is scoped: `ReposLive.pipe(Layer.orDie)` for DB/migration errors specifically,
@@ -161,7 +161,7 @@ const mimeTypes: Record<string, string> = {
 ### CORS as Layer
 
 ```typescript
-HttpLayerRouter.cors({
+HttpRouter.cors({
   allowedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
   allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
@@ -249,7 +249,7 @@ No HTTP server needed for unit tests — handlers are just Effects.
 
 1. **Handler names must match Api.ts** — `HttpApiBuilder.handle("lst", ...)` compiles but fails at runtime if the endpoint name is `"list"`. (TypeScript catches most of these.)
 2. **Layer order** — Handler layers must be provided before service layers in the composition chain.
-3. **Async FileSystem** — Server.ts now uses `@effect/platform FileSystem` (async, no sync node:fs).
+3. **Async FileSystem** — Server.ts now uses `effect/FileSystem` (async, no sync node:fs).
 4. **SSE content type** — SSE endpoints must set `Content-Type: text/event-stream`. With HttpApi, this needs explicit header configuration.
 
 ## Further Reading

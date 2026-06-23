@@ -10,7 +10,7 @@ import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
-import type { AwsProfileName, AwsRegion } from "../Domain.js"
+import type { AwsProfileName, AwsRegion, PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 
 const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>) =>
@@ -29,24 +29,24 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
-    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)))
+    }).pipe(Effect.catchCause(() => Effect.succeed<Array<PRCommentLocation> | undefined>(undefined)))
 
     if (locs && awsAccountId) {
       // Diff comments for subscribed PRs
       if (subscribedSnapshot.has(`${awsAccountId}:${prId}`)) {
         const cachedComments = yield* commentRepo.find(awsAccountId, prId).pipe(
-          Effect.catchAll(() => Effect.succeed(Option.none()))
+          Effect.catchCause(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )
         if (Option.isSome(cachedComments)) {
           const notifications = diffComments(cachedComments.value, locs, prId, awsAccountId)
           yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
-            Effect.catchAll(() => Effect.void)
+            Effect.catchCause(() => Effect.void)
           )
         }
       }
       // Cache comments
       yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs)).pipe(
-        Effect.catchAll(() => Effect.void)
+        Effect.catchCause(() => Effect.void)
       )
     }
 
@@ -54,7 +54,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     let commentCount = locs ? countAllComments(locs) : 0
     if (!locs && awsAccountId) {
       const cached = yield* commentRepo.find(awsAccountId, prId).pipe(
-        Effect.catchAll(() => Effect.succeed(Option.none()))
+        Effect.catchCause(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cached)) {
         commentCount = countAllComments(cached.value)
@@ -67,13 +67,13 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
 export const enrichComments = (params: {
   readonly state: PRState
   readonly subscribedRef: Ref.Ref<Set<string>>
-}): Effect.Effect<void, never, AwsClient | PullRequestRepo | CommentRepo | NotificationRepo> =>
+}): Effect.Effect<void, unknown, unknown> =>
   Effect.gen(function*() {
     const prRepo = yield* PullRequestRepo
 
     const { state, subscribedRef } = params
 
-    const freshPRs = yield* prRepo.findAll().pipe(Effect.catchAll(() => Effect.succeed([])))
+    const freshPRs = yield* prRepo.findAll().pipe(Effect.catchCause(() => Effect.succeed<Array<CachedPullRequest>>([])))
     const subscribedSnapshot = yield* Ref.get(subscribedRef)
     const enrichedRef = yield* Ref.make(0)
 
@@ -104,7 +104,7 @@ export const enrichComments = (params: {
           onNone: () => Effect.void,
           onSome: ({ awsAccountId, commentCount, id }) =>
             prRepo.updateCommentCount(awsAccountId, id, commentCount).pipe(
-              Effect.catchAll(() => Effect.void)
+              Effect.catchCause(() => Effect.void)
             )
         }),
       { discard: true }
@@ -112,6 +112,6 @@ export const enrichComments = (params: {
 
     // Derive commented_by from cached pr_comments
     yield* prRepo.refreshCommentedBy().pipe(
-      Effect.catchAll(() => Effect.void)
+      Effect.catchCause(() => Effect.void)
     )
-  })
+  }).pipe(Effect.ignoreCause({ log: "Warn", message: "enrichComments failed" }))

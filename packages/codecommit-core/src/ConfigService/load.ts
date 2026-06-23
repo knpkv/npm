@@ -1,9 +1,9 @@
 /**
  * @internal
  */
-import type { Path } from "@effect/platform"
-import { FileSystem } from "@effect/platform"
 import { Effect, Schema } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import type * as Path from "effect/Path"
 import { ConfigError, ConfigParseError } from "../Errors.js"
 import type { ProfileDetectionError } from "../Errors.js"
 import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, TuiConfig } from "./internal.js"
@@ -26,7 +26,7 @@ export const makeLoad = (
 
     if (!exists) {
       const detected = yield* detectProfiles.pipe(
-        Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+        Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
       )
       if (detected.length > 0) {
         return {
@@ -54,13 +54,13 @@ export const makeLoad = (
       Effect.mapError((e) => new ConfigError({ message: "Failed to read config file", cause: e }))
     )
 
-    const config = yield* Schema.decodeUnknown(Schema.parseJson(TuiConfig))(content).pipe(
+    const config = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TuiConfig))(content).pipe(
       Effect.mapError((cause) => new ConfigParseError({ path: configPath, cause }))
     )
 
     if (config.autoDetect && config.accounts.length === 0) {
       const detected = yield* detectProfiles.pipe(
-        Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+        Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
       )
       if (detected.length > 0) {
         return {

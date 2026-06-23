@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { Atom } from "@effect-atom/atom-react"
+import * as Atom from "effect/unstable/reactivity/Atom"
 
 /**
  * Multi-filter key — each maps to a PR field

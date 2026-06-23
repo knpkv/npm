@@ -6,7 +6,7 @@ import { Effect, Option, Stream } from "effect"
 import { type ListBranchesParams, makeApiError, withAwsContext } from "./internal.js"
 
 const fetchBranchPages = (repositoryName: string) =>
-  Stream.paginateEffect(
+  Stream.paginate(
     undefined as string | undefined,
     (nextToken) =>
       codecommit.listBranches({

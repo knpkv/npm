@@ -146,8 +146,14 @@ const configStub = (accounts: ReadonlyArray<AccountStub>): Layer.Layer<ConfigSer
   )
 }
 
-const provide = (aws: Layer.Layer<AwsClient.AwsClient>, config: Layer.Layer<ConfigService.ConfigService>) =>
-  FilterServiceLive.pipe(Layer.provideMerge(Layer.mergeAll(aws, config)))
+const provide = (
+  aws: Layer.Layer<AwsClient.AwsClient>,
+  config: Layer.Layer<ConfigService.ConfigService>
+): Layer.Layer<FilterService> =>
+  FilterServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(aws, config)),
+    Layer.orDie
+  )
 
 // ── resolveTargets ───────────────────────────────────────────────────
 

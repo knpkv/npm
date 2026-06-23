@@ -1,8 +1,8 @@
 /**
  * @internal
  */
-import { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
+import * as FileSystem from "effect/FileSystem"
 import { ConfigError } from "../Errors.js"
 import { ConfigPaths } from "./internal.js"
 

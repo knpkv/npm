@@ -26,9 +26,10 @@
  * @internal
  */
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import { HttpClient } from "@effect/platform"
-import { Credentials, Region } from "distilled-aws"
-import { Effect, Layer, Schedule, Schema } from "effect"
+import * as DistilledCredentials from "distilled-aws/Credentials"
+import * as DistilledRegion from "distilled-aws/Region"
+import { Duration, Effect, Layer, Schedule, Schema } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig, type AwsClientConfigShape } from "../AwsClientConfig.js"
 import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
@@ -54,11 +55,28 @@ export const isThrottlingError = (error: unknown): boolean => {
     || message.includes("too many requests")
 }
 
+interface AwsCredentialIdentity {
+  readonly accessKeyId: string
+  readonly secretAccessKey: string
+  readonly sessionToken?: string
+  readonly expiration?: Date
+}
+
+type AwsRuntimeEnv =
+  | AwsClientConfig
+  | DistilledCredentials.Credentials
+  | DistilledRegion.Region
+  | HttpClient.HttpClient
+
 const makeThrottleSchedule = (config: AwsClientConfigShape) =>
-  Schedule.intersect(
+  Schedule.both(
     Schedule.exponential(config.retryBaseDelay, 2).pipe(Schedule.jittered),
     Schedule.recurs(config.maxRetries)
-  ).pipe(Schedule.upTo(config.maxRetryDelay))
+  ).pipe(
+    Schedule.modifyDelay((_output, delay) =>
+      Effect.succeed(Duration.min(delay, Duration.fromInputUnsafe(config.maxRetryDelay)))
+    )
+  )
 
 /**
  * Pipe-friendly throttle retry. Reads schedule config from AwsClientConfig context.
@@ -68,11 +86,7 @@ export const throttleRetry = <A, E, R>(
 ): Effect.Effect<A, E, R | AwsClientConfig> =>
   Effect.flatMap(AwsClientConfig, (config) =>
     effect.pipe(
-      Effect.retry(
-        makeThrottleSchedule(config).pipe(
-          Schedule.whileInput((error: E) => isThrottlingError(error))
-        )
-      )
+      Effect.retry({ schedule: makeThrottleSchedule(config), while: isThrottlingError })
     ))
 
 /**
@@ -91,15 +105,17 @@ export const normalizeAuthor = (arn: string): string => {
  * Acquire AWS credentials for a profile.
  * Reads credential timeout from AwsClientConfig context.
  */
-export const acquireCredentials = (profile: AwsProfileName, region: AwsRegion) =>
+export const acquireCredentials = (
+  profile: AwsProfileName,
+  region: AwsRegion
+): Effect.Effect<AwsCredentialIdentity, AwsCredentialError, AwsClientConfig> =>
   Effect.flatMap(AwsClientConfig, (config) =>
     Effect.tryPromise({
-      try: () => fromNodeProviderChain(profile === "default" ? {} : { profile })(),
+      try: async () => await fromNodeProviderChain(profile === "default" ? {} : { profile })() as AwsCredentialIdentity,
       catch: (cause) => new AwsCredentialError({ profile, region, cause })
     }).pipe(
-      Effect.map(Credentials.fromAwsCredentialIdentity),
       Effect.timeout(config.credentialTimeout),
-      Effect.catchTag("TimeoutException", (cause) => new AwsCredentialError({ profile, region, cause }))
+      Effect.catchTag("TimeoutError", (cause) => new AwsCredentialError({ profile, region, cause }))
     ))
 
 /**
@@ -120,9 +136,9 @@ export type AccountParams = Pick<Account, "profile" | "region">
 export const withAwsContext = <A, E>(
   operation: string,
   account: AccountParams,
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Region.Region | Credentials.Credentials | AwsClientConfig>,
+  effect: Effect.Effect<A, E, AwsRuntimeEnv>,
   options?: { readonly timeout?: "stream" }
-) =>
+): Effect.Effect<A, E | AwsCredentialError | AwsApiError, AwsClientConfig | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const config = yield* AwsClientConfig
     const httpClient = yield* HttpClient.HttpClient
@@ -132,16 +148,18 @@ export const withAwsContext = <A, E>(
     return yield* Effect.provide(
       effect,
       Layer.mergeAll(
+        DistilledCredentials.fromCredentials(credentials as never),
         Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(Region.Region, account.region),
-        Layer.succeed(Credentials.Credentials, credentials),
+        Layer.succeed(DistilledRegion.Region as never, account.region),
         Layer.succeed(AwsClientConfig, config)
       )
     ).pipe(
       throttleRetry,
       Effect.timeout(timeout),
-      Effect.catchTag("TimeoutException", (cause) =>
-        Effect.fail(makeApiError(operation, account.profile, account.region, cause)))
+      Effect.catchTag(
+        "TimeoutError",
+        (cause) => Effect.fail(makeApiError(operation, account.profile, account.region, cause))
+      )
     )
   })
 
@@ -228,23 +246,20 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
-  creationDate: Schema.DateFromSelf,
-  lastActivityDate: Schema.DateFromSelf,
+  creationDate: Schema.Date,
+  lastActivityDate: Schema.Date,
   mergedBy: Schema.optional(Schema.String),
   approvedBy: Schema.Array(Schema.String),
-  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   repoAccountId: Schema.optional(Schema.String),
   // Inline struct instead of Domain.ApprovalRule — Schema.Class constructors reject plain objects
   // from buildApprovalRules(). PullRequestDetail is an internal transport type, not a domain boundary.
-  approvalRules: Schema.optionalWith(
-    Schema.Array(Schema.Struct({
-      ruleName: Schema.String,
-      requiredApprovals: Schema.Number,
-      poolMembers: Schema.Array(Schema.String),
-      poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
-      satisfied: Schema.Boolean,
-      fromTemplate: Schema.optional(Schema.String)
-    })),
-    { default: () => [] }
-  )
+  approvalRules: Schema.Array(Schema.Struct({
+    ruleName: Schema.String,
+    requiredApprovals: Schema.Number,
+    poolMembers: Schema.Array(Schema.String),
+    poolMemberArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+    satisfied: Schema.Boolean,
+    fromTemplate: Schema.optional(Schema.String)
+  })).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
 }) {}

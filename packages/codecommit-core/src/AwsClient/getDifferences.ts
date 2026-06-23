@@ -9,10 +9,10 @@
  *
  * @internal
  */
-import type { HttpClient } from "@effect/platform"
 import type { Credentials, Region } from "distilled-aws"
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import type { DiffStats, GetDifferencesParams } from "./internal.js"
 import { makeApiError, withAwsContext } from "./internal.js"
 

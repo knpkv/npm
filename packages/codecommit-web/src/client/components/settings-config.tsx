@@ -1,5 +1,6 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { CheckCircleIcon, CopyIcon, RotateCcwIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 import { configPathQueryAtom, configResetAtom, configValidateQueryAtom, databaseInfoQueryAtom } from "../atoms/app.js"
@@ -87,12 +88,12 @@ export function SettingsConfig() {
       <Separator />
 
       <div className="space-y-1">
-        {Result.builder(configPath)
+        {AsyncResult.builder(configPath)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading config path...</p>)
           .onError(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
           .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
           .onSuccess((data) => {
-            const validationDetail = Result.isSuccess(validation) ? ` · ${validation.value.status}` : ""
+            const validationDetail = AsyncResult.isSuccess(validation) ? ` · ${validation.value.status}` : ""
             const detail = data.exists
               ? `${fmtModified(data.modifiedAt)}${validationDetail}`
               : `Not created yet${validationDetail}`
@@ -109,7 +110,7 @@ export function SettingsConfig() {
           })
           .render()}
 
-        {Result.builder(validation)
+        {AsyncResult.builder(validation)
           .onInitialOrWaiting(() => null)
           .onError(() => null)
           .onDefect(() => null)
@@ -126,7 +127,7 @@ export function SettingsConfig() {
 
         <Separator />
 
-        {Result.builder(databaseInfo)
+        {AsyncResult.builder(databaseInfo)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading database info...</p>)
           .onError(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
           .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)

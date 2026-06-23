@@ -8,8 +8,8 @@
  *
  * @category CacheService
  */
-import type * as SqlClient from "@effect/sql/SqlClient"
 import { Effect, Schema } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import {
   cacheError,
   type CommentRow,
@@ -105,8 +105,8 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           const prInfo = prAuthors.get(key)
           if (!prInfo) continue
 
-          const parsed = yield* Schema.decodeUnknown(LocationsFromJson)(row.locationsJson).pipe(
-            Effect.catchAll(() => Effect.succeed([]))
+          const parsed = yield* Schema.decodeUnknownEffect(LocationsFromJson)(row.locationsJson).pipe(
+            Effect.catchIf(() => true, () => Effect.succeed([]))
           )
           const allComments = extractComments(parsed)
           const sorted = [...allComments].sort((a, b) => a.creationDate.getTime() - b.creationDate.getTime())

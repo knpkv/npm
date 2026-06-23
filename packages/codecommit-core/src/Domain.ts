@@ -40,7 +40,7 @@
  * @category Domain
  * @module
  */
-import { Data, Schema } from "effect"
+import { Data, Effect, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -103,7 +103,7 @@ export type SandboxId = typeof SandboxId.Type
  *
  * @category Domain
  */
-export const PullRequestStatus = Schema.Literal("OPEN", "CLOSED", "MERGED")
+export const PullRequestStatus = Schema.Literals(["OPEN", "CLOSED", "MERGED"])
 export type PullRequestStatus = typeof PullRequestStatus.Type
 
 /**
@@ -111,7 +111,7 @@ export type PullRequestStatus = typeof PullRequestStatus.Type
  *
  * @category Domain
  */
-export const NotificationType = Schema.Literal("error", "info", "warning", "success")
+export const NotificationType = Schema.Literals(["error", "info", "warning", "success"])
 export type NotificationType = typeof NotificationType.Type
 
 /**
@@ -119,7 +119,7 @@ export type NotificationType = typeof NotificationType.Type
  *
  * @category Domain
  */
-export const AppStatus = Schema.Literal("idle", "loading", "error")
+export const AppStatus = Schema.Literals(["idle", "loading", "error"])
 export type AppStatus = typeof AppStatus.Type
 
 /**
@@ -127,7 +127,7 @@ export type AppStatus = typeof AppStatus.Type
  *
  * @category Domain
  */
-export const SandboxStatus = Schema.Literal(
+export const SandboxStatus = Schema.Literals([
   "creating",
   "cloning",
   "starting",
@@ -135,7 +135,7 @@ export const SandboxStatus = Schema.Literal(
   "stopping",
   "stopped",
   "error"
-)
+])
 export type SandboxStatus = typeof SandboxStatus.Type
 
 // ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ export class ApprovalRule extends Schema.Class<ApprovalRule>("ApprovalRule")({
   ruleName: Schema.String,
   requiredApprovals: Schema.Number,
   poolMembers: Schema.Array(Schema.String),
-  poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  poolMemberArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   satisfied: Schema.Boolean,
   fromTemplate: Schema.optional(Schema.String)
 }) {}
@@ -179,8 +179,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   description: Schema.optional(Schema.String),
   author: Schema.String,
   repositoryName: RepositoryName,
-  creationDate: Schema.DateFromSelf,
-  lastModifiedDate: Schema.DateFromSelf,
+  creationDate: Schema.Date,
+  lastModifiedDate: Schema.Date,
   link: Schema.String,
   account: Account,
   status: PullRequestStatus,
@@ -190,12 +190,12 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   isApproved: Schema.Boolean,
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
-  fetchedAt: Schema.optional(Schema.DateFromSelf),
+  fetchedAt: Schema.optional(Schema.Date),
   approvedBy: Schema.Array(Schema.String),
-  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   commentedBy: Schema.Array(Schema.String),
   filesChanged: Schema.optional(Schema.Number),
-  approvalRules: Schema.optionalWith(Schema.Array(ApprovalRule), { default: () => [] })
+  approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
 }) {
   get consoleUrl(): string {
     return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
@@ -271,8 +271,8 @@ export class Sandbox extends Schema.Class<Sandbox>("Sandbox")({
   workspacePath: Schema.String,
   status: SandboxStatus,
   error: Schema.optional(Schema.String),
-  createdAt: Schema.DateFromSelf,
-  lastActivityAt: Schema.DateFromSelf
+  createdAt: Schema.Date,
+  lastActivityAt: Schema.Date
 }) {}
 
 /**
@@ -284,7 +284,7 @@ export class PRComment extends Schema.Class<PRComment>("PRComment")({
   id: CommentId,
   content: Schema.String,
   author: Schema.String,
-  creationDate: Schema.DateFromSelf,
+  creationDate: Schema.Date,
   inReplyTo: Schema.optional(CommentId),
   deleted: Schema.Boolean,
   filePath: Schema.optional(Schema.String),
@@ -386,7 +386,7 @@ export const encodeCommentLocations = (
 // Persistent Notification Types
 // ---------------------------------------------------------------------------
 
-export const PersistentNotificationType = Schema.Literal(
+export const PersistentNotificationType = Schema.Literals([
   "new_comment",
   "comment_edited",
   "comment_deleted",
@@ -399,7 +399,7 @@ export const PersistentNotificationType = Schema.Literal(
   "pr_merged",
   "pr_closed",
   "pr_reopened"
-)
+])
 export type PersistentNotificationType = typeof PersistentNotificationType.Type
 
 export class PersistentNotification extends Schema.Class<PersistentNotification>("PersistentNotification")({
@@ -408,7 +408,7 @@ export class PersistentNotification extends Schema.Class<PersistentNotification>
   awsAccountId: Schema.String,
   type: PersistentNotificationType,
   message: Schema.String,
-  createdAt: Schema.DateFromSelf,
+  createdAt: Schema.Date,
   read: Schema.Boolean
 }) {}
 
@@ -433,8 +433,8 @@ export class NotificationItem extends Schema.Class<NotificationItem>("Notificati
   type: NotificationType,
   title: Schema.String,
   message: Schema.String,
-  timestamp: Schema.DateFromSelf,
-  profile: Schema.optionalWith(Schema.String, { exact: true })
+  timestamp: Schema.Date,
+  profile: Schema.optionalKey(Schema.String)
 }) {}
 
 /**

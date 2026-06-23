@@ -14,7 +14,7 @@
  *
  * @category Service
  */
-import { Data, Effect, Layer, Option, type SubscriptionRef } from "effect"
+import { Context, Data, Effect, Layer, Option, type SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { StatsRepo } from "../CacheService/repos/StatsRepo/index.js"
@@ -35,152 +35,163 @@ class InvalidISOWeek extends Data.TaggedError("InvalidISOWeek")<{
 // Service
 // ---------------------------------------------------------------------------
 
-export class StatsService extends Effect.Service<StatsService>()("@knpkv/codecommit-core/StatsService", {
-  effect: Effect.gen(function*() {
-    const statsRepo = yield* StatsRepo
-    const prRepo = yield* PullRequestRepo
-    const configService = yield* ConfigService
-    const awsClient = yield* AwsClient
+const makeStatsService = Effect.gen(function*() {
+  const statsRepo = yield* StatsRepo
+  const prRepo = yield* PullRequestRepo
+  const configService = yield* ConfigService
+  const awsClient = yield* AwsClient
 
-    const depsLayer = Layer.mergeAll(
-      Layer.succeed(ConfigService, configService),
-      Layer.succeed(AwsClient, awsClient),
-      Layer.succeed(PullRequestRepo, prRepo)
-    )
+  const depsLayer = Layer.mergeAll(
+    Layer.succeed(ConfigService, configService),
+    Layer.succeed(AwsClient, awsClient),
+    Layer.succeed(PullRequestRepo, prRepo)
+  )
 
-    const getWeeklyStats = Effect.fn("StatsService.getWeeklyStats")(
-      function*(week: string, filters: StatsRepo.Filters) {
-        const range = yield* Option.match(parseISOWeek(week), {
-          onNone: () => Effect.fail(new InvalidISOWeek({ week })),
-          onSome: Effect.succeed
-        })
-        const weekStart = range.start.toISOString()
-        const weekEnd = range.end.toISOString()
-        const nowISO = new Date().toISOString()
+  const getWeeklyStats = Effect.fn("StatsService.getWeeklyStats")(
+    function*(week: string, filters: StatsRepo.Filters) {
+      const range = yield* Option.match(parseISOWeek(week), {
+        onNone: () => Effect.fail(new InvalidISOWeek({ week })),
+        onSome: Effect.succeed
+      })
+      const weekStart = range.start.toISOString()
+      const weekEnd = range.end.toISOString()
+      const nowISO = new Date().toISOString()
 
-        const [
-          volume,
-          topContributors,
-          mostActivePRs,
-          prSizeDistribution,
-          avgDiffSize,
-          diffSizeByContributor,
-          stalePRs,
-          health,
-          filterOptions,
-          totalComments,
-          reviewerData,
-          mergeTimeDetails,
-          dataAvailableSince
-        ] = yield* Effect.all([
-          statsRepo.weeklyVolume(weekStart, weekEnd, filters),
-          statsRepo.topContributors(weekStart, weekEnd, filters),
-          statsRepo.mostActivePRs(weekStart, weekEnd, filters),
-          statsRepo.prSizeDistribution(weekStart, weekEnd, filters),
-          statsRepo.avgDiffSize(weekStart, weekEnd, filters),
-          statsRepo.diffSizeByContributor(weekStart, weekEnd, filters),
-          statsRepo.stalePRs(nowISO, filters),
-          statsRepo.healthIndicators(weekStart, weekEnd, filters),
-          statsRepo.filterOptions(),
-          statsRepo.totalComments(weekStart, weekEnd, filters),
-          statsRepo.reviewerData(weekStart, weekEnd, filters),
-          statsRepo.mergeTimeDetails(weekStart, weekEnd, filters),
-          statsRepo.dataAvailableSince()
-        ], { concurrency: "unbounded" })
+      const [
+        volume,
+        topContributors,
+        mostActivePRs,
+        prSizeDistribution,
+        avgDiffSize,
+        diffSizeByContributor,
+        stalePRs,
+        health,
+        filterOptions,
+        totalComments,
+        reviewerData,
+        mergeTimeDetails,
+        dataAvailableSince
+      ] = yield* Effect.all([
+        statsRepo.weeklyVolume(weekStart, weekEnd, filters),
+        statsRepo.topContributors(weekStart, weekEnd, filters),
+        statsRepo.mostActivePRs(weekStart, weekEnd, filters),
+        statsRepo.prSizeDistribution(weekStart, weekEnd, filters),
+        statsRepo.avgDiffSize(weekStart, weekEnd, filters),
+        statsRepo.diffSizeByContributor(weekStart, weekEnd, filters),
+        statsRepo.stalePRs(nowISO, filters),
+        statsRepo.healthIndicators(weekStart, weekEnd, filters),
+        statsRepo.filterOptions(),
+        statsRepo.totalComments(weekStart, weekEnd, filters),
+        statsRepo.reviewerData(weekStart, weekEnd, filters),
+        statsRepo.mergeTimeDetails(weekStart, weekEnd, filters),
+        statsRepo.dataAvailableSince()
+      ], { concurrency: "unbounded" })
 
-        const reviewCoverage = health.total > 0 ? health.withComments / health.total : null
-        const approvalRate = health.total > 0 ? health.approved / health.total : null
+      const reviewCoverage = health.total > 0 ? health.withComments / health.total : null
+      const approvalRate = health.total > 0 ? health.approved / health.total : null
 
-        const busFactor = topContributors.length > 0
-          ? {
-            topContributorShare: volume.prsCreated > 0 ? topContributors[0]!.prCount / volume.prsCreated : 0,
-            uniqueContributors: topContributors.length
-          }
-          : null
-
-        return {
-          week,
-          weekStart,
-          weekEnd,
-          dataAvailableSince,
-          prsCreated: volume.prsCreated,
-          prsMerged: volume.prsMerged,
-          prsClosed: volume.prsClosed,
-          totalComments,
-          topContributors: [...topContributors],
-          topReviewers: reviewerData.topReviewers,
-          topApprovers: reviewerData.topApprovers,
-          medianTimeToMerge: median(mergeTimeDetails.map((d) => d.durationMs)),
-          medianTimeToFirstReview: median(reviewerData.firstReviewDetails.map((d) => d.durationMs)),
-          medianTimeToAddressFeedback: median(reviewerData.feedbackDetails.map((d) => d.durationMs)),
-          mergeTimeDetails: [...mergeTimeDetails].sort((a, b) => b.durationMs - a.durationMs),
-          firstReviewDetails: [...reviewerData.firstReviewDetails].sort((a, b) => b.durationMs - a.durationMs),
-          feedbackDetails: [...reviewerData.feedbackDetails].sort((a, b) => b.durationMs - a.durationMs),
-          mostActivePRs: mostActivePRs.map((p) => ({
-            ...p,
-            commentCount: p.commentCount ?? 0
-          })),
-          prSizeDistribution,
-          avgDiffSize,
-          diffSizeByContributor: [...diffSizeByContributor],
-          stalePRs: [...stalePRs],
-          reviewCoverage,
-          approvalRate,
-          busFactor,
-          availableRepos: filterOptions.repos,
-          availableAuthors: filterOptions.authors,
-          availableAccounts: filterOptions.accounts
-        } satisfies WeeklyStats
-      }
-    )
-
-    return {
-      getWeeklyStats: (week: string, filters: StatsRepo.Filters): Effect.Effect<WeeklyStats> => {
-        const fallback: WeeklyStats = {
-          week,
-          weekStart: "",
-          weekEnd: "",
-          dataAvailableSince: null,
-          prsCreated: 0,
-          prsMerged: 0,
-          prsClosed: 0,
-          totalComments: 0,
-          topContributors: [],
-          topReviewers: [],
-          topApprovers: [],
-          medianTimeToMerge: null,
-          medianTimeToFirstReview: null,
-          medianTimeToAddressFeedback: null,
-          mergeTimeDetails: [],
-          firstReviewDetails: [],
-          feedbackDetails: [],
-          mostActivePRs: [],
-          prSizeDistribution: { small: 0, medium: 0, large: 0, extraLarge: 0 },
-          avgDiffSize: null,
-          diffSizeByContributor: [],
-          stalePRs: [],
-          reviewCoverage: null,
-          approvalRate: null,
-          busFactor: null,
-          availableRepos: [],
-          availableAuthors: [],
-          availableAccounts: []
+      const busFactor = topContributors.length > 0
+        ? {
+          topContributorShare: volume.prsCreated > 0 ? topContributors[0]!.prCount / volume.prsCreated : 0,
+          uniqueContributors: topContributors.length
         }
-        return getWeeklyStats(week, filters).pipe(
-          Effect.catchTags({
-            CacheError: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback)),
-            InvalidISOWeek: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback))
-          })
+        : null
+
+      return {
+        week,
+        weekStart,
+        weekEnd,
+        dataAvailableSince,
+        prsCreated: volume.prsCreated,
+        prsMerged: volume.prsMerged,
+        prsClosed: volume.prsClosed,
+        totalComments,
+        topContributors: [...topContributors],
+        topReviewers: reviewerData.topReviewers,
+        topApprovers: reviewerData.topApprovers,
+        medianTimeToMerge: median(mergeTimeDetails.map((d) => d.durationMs)),
+        medianTimeToFirstReview: median(reviewerData.firstReviewDetails.map((d) => d.durationMs)),
+        medianTimeToAddressFeedback: median(reviewerData.feedbackDetails.map((d) => d.durationMs)),
+        mergeTimeDetails: [...mergeTimeDetails].sort((a, b) => b.durationMs - a.durationMs),
+        firstReviewDetails: [...reviewerData.firstReviewDetails].sort((a, b) => b.durationMs - a.durationMs),
+        feedbackDetails: [...reviewerData.feedbackDetails].sort((a, b) => b.durationMs - a.durationMs),
+        mostActivePRs: mostActivePRs.map((p) => ({
+          ...p,
+          commentCount: p.commentCount ?? 0
+        })),
+        prSizeDistribution,
+        avgDiffSize,
+        diffSizeByContributor: [...diffSizeByContributor],
+        stalePRs: [...stalePRs],
+        reviewCoverage,
+        approvalRate,
+        busFactor,
+        availableRepos: filterOptions.repos,
+        availableAuthors: filterOptions.authors,
+        availableAccounts: filterOptions.accounts
+      } satisfies WeeklyStats
+    }
+  )
+
+  return {
+    getWeeklyStats: (week: string, filters: StatsRepo.Filters): Effect.Effect<WeeklyStats> => {
+      const fallback: WeeklyStats = {
+        week,
+        weekStart: "",
+        weekEnd: "",
+        dataAvailableSince: null,
+        prsCreated: 0,
+        prsMerged: 0,
+        prsClosed: 0,
+        totalComments: 0,
+        topContributors: [],
+        topReviewers: [],
+        topApprovers: [],
+        medianTimeToMerge: null,
+        medianTimeToFirstReview: null,
+        medianTimeToAddressFeedback: null,
+        mergeTimeDetails: [],
+        firstReviewDetails: [],
+        feedbackDetails: [],
+        mostActivePRs: [],
+        prSizeDistribution: { small: 0, medium: 0, large: 0, extraLarge: 0 },
+        avgDiffSize: null,
+        diffSizeByContributor: [],
+        stalePRs: [],
+        reviewCoverage: null,
+        approvalRate: null,
+        busFactor: null,
+        availableRepos: [],
+        availableAuthors: [],
+        availableAccounts: []
+      }
+      return getWeeklyStats(week, filters).pipe(
+        Effect.catchTags({
+          CacheError: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback)),
+          InvalidISOWeek: (e) => Effect.logWarning("StatsService.getWeeklyStats failed", e).pipe(Effect.as(fallback))
+        }),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("StatsService.getWeeklyStats failed", cause).pipe(Effect.as(fallback))
         )
-      },
+      ) as Effect.Effect<WeeklyStats>
+    },
 
-      syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>): Effect.Effect<void> =>
-        syncWeekImpl(state, week).pipe(Effect.provide(depsLayer)),
+    syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>): Effect.Effect<void> =>
+      syncWeekImpl(state, week).pipe(
+        Effect.provide(depsLayer),
+        Effect.catchCause((cause) => Effect.logWarning("StatsService.syncWeek failed", cause))
+      ) as Effect.Effect<void>,
 
-      currentWeek: () => toISOWeek(new Date())
-    } as const
-  })
-}) {}
+    currentWeek: () => toISOWeek(new Date())
+  } satisfies StatsService.Service
+})
+
+export class StatsService extends Context.Service<
+  StatsService,
+  StatsService.Service
+>()("@knpkv/codecommit-core/StatsService") {
+  static readonly Default = Layer.effect(StatsService, makeStatsService)
+}
 
 export declare namespace StatsService {
   /**

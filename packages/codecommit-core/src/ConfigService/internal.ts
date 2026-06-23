@@ -1,8 +1,7 @@
 /**
  * @internal
  */
-import type { Effect } from "effect"
-import { Array as Arr, Context, Either, pipe, Schema } from "effect"
+import { Array as Arr, Context, Effect, Option, pipe, Schema } from "effect"
 import { AwsProfileName, AwsRegion } from "../Domain.js"
 import type { ConfigError, ProfileDetectionError } from "../Errors.js"
 
@@ -10,53 +9,67 @@ import type { ConfigError, ProfileDetectionError } from "../Errors.js"
 // Schemas
 // ---------------------------------------------------------------------------
 
+const decodingDefault = <A>(value: A): Effect.Effect<A, Schema.SchemaError, never> => Effect.succeed(value)
+
 export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProfile")({
-  name: AwsProfileName.pipe(Schema.nonEmptyString()),
-  region: Schema.optionalWith(AwsRegion, { exact: true })
+  name: Schema.NonEmptyString.pipe(Schema.brand("AwsProfileName")),
+  region: Schema.optionalKey(AwsRegion)
 }) {}
 
 export const SandboxConfig = Schema.Struct({
-  image: Schema.String.pipe(Schema.optionalWith({ default: () => "codercom/code-server:latest" })),
-  extensions: Schema.Array(Schema.String).pipe(Schema.optionalWith({ default: () => [] as Array<string> })),
-  setupCommands: Schema.Array(Schema.String).pipe(Schema.optionalWith({ default: () => [] as Array<string> })),
-  env: Schema.Record({ key: Schema.String, value: Schema.String }).pipe(
-    Schema.optionalWith({ default: () => ({}) as Record<string, string> })
+  image: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault("codercom/code-server:latest"))),
+  extensions: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(decodingDefault([] as Array<string>))),
+  setupCommands: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefaultTypeKey(decodingDefault([] as Array<string>))
   ),
-  enableClaudeCode: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
+  env: Schema.Record(Schema.String, Schema.String).pipe(
+    Schema.withDecodingDefaultTypeKey(decodingDefault({} as Record<string, string>))
+  ),
   volumeMounts: Schema.Array(
     Schema.Struct({
       hostPath: Schema.String,
       containerPath: Schema.String,
-      readonly: Schema.Boolean.pipe(Schema.optionalWith({ default: () => false }))
+      readonly: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(false)))
     })
   ).pipe(
-    Schema.optionalWith({ default: () => [] as Array<{ hostPath: string; containerPath: string; readonly: boolean }> })
+    Schema.withDecodingDefaultTypeKey(
+      decodingDefault([] as Array<{ hostPath: string; containerPath: string; readonly: boolean }>)
+    )
   ),
-  cloneDepth: Schema.Number.pipe(
-    Schema.int(),
-    Schema.greaterThanOrEqualTo(0),
-    Schema.optionalWith({ default: () => 0 })
+  cloneDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+    Schema.withDecodingDefaultTypeKey(decodingDefault(0))
   )
 })
 
 export type SandboxConfig = typeof SandboxConfig.Type
 
-export const defaultSandboxConfig = Schema.decodeSync(SandboxConfig)({})
+export const defaultSandboxConfig: SandboxConfig = {
+  image: "codercom/code-server:latest",
+  extensions: [],
+  setupCommands: [],
+  env: {},
+  volumeMounts: [],
+  cloneDepth: 0
+}
 
 export const AccountConfig = Schema.Struct({
   profile: AwsProfileName,
-  regions: Schema.Array(AwsRegion).pipe(Schema.optionalWith({ default: () => ["us-east-1" as AwsRegion] })),
-  enabled: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true }))
+  regions: Schema.Array(AwsRegion).pipe(
+    Schema.withDecodingDefaultTypeKey(decodingDefault(["us-east-1" as AwsRegion]))
+  ),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(true)))
 })
 
 export type AccountConfig = typeof AccountConfig.Type
 
 export const TuiConfig = Schema.Struct({
   accounts: Schema.Array(AccountConfig),
-  autoDetect: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
-  autoRefresh: Schema.Boolean.pipe(Schema.optionalWith({ default: () => true })),
-  refreshIntervalSeconds: Schema.Number.pipe(Schema.optionalWith({ default: () => 300 })),
-  sandbox: SandboxConfig.pipe(Schema.optionalWith({ default: () => Schema.decodeSync(SandboxConfig)({}) }))
+  autoDetect: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(true))),
+  autoRefresh: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(true))),
+  refreshIntervalSeconds: Schema.Number.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(300))),
+  sandbox: SandboxConfig.pipe(
+    Schema.withDecodingDefaultTypeKey(decodingDefault(defaultSandboxConfig))
+  )
 })
 
 export type TuiConfig = typeof TuiConfig.Type
@@ -65,7 +78,7 @@ export type TuiConfig = typeof TuiConfig.Type
 // INI Parsing (Schema-validated)
 // ---------------------------------------------------------------------------
 
-const decodeDetectedProfile = Schema.decodeUnknownEither(DetectedProfile)
+const decodeDetectedProfile = Schema.decodeUnknownOption(DetectedProfile)
 
 interface RawSection {
   readonly name: string
@@ -99,7 +112,9 @@ const parseIniSections = (content: string): Array<RawSection> => {
 export const parseAwsConfig = (content: string): ReadonlyArray<DetectedProfile> =>
   pipe(
     parseIniSections(content),
-    Arr.filterMap((section) => Either.getRight(decodeDetectedProfile(section))),
+    Arr.map((section) => decodeDetectedProfile(section)),
+    Arr.filter(Option.isSome),
+    Arr.map((profile) => profile.value),
     Arr.dedupeWith((a, b) => a.name === b.name)
   )
 
@@ -107,10 +122,10 @@ export const parseAwsConfig = (content: string): ReadonlyArray<DetectedProfile> 
 // Internal service: resolved config paths
 // ---------------------------------------------------------------------------
 
-export class ConfigPaths extends Context.Tag("@knpkv/codecommit-core/ConfigPaths")<
+export class ConfigPaths extends Context.Service<
   ConfigPaths,
   {
     readonly configPath: Effect.Effect<string, ConfigError>
     readonly homePath: Effect.Effect<string, ProfileDetectionError>
   }
->() {}
+>()("@knpkv/codecommit-core/ConfigPaths") {}
