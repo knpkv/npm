@@ -4,11 +4,11 @@
  * Interactive mode: select page from tree, delete local file only.
  * Push to actually delete from Confluence.
  */
-import { Command, Prompt } from "@effect/cli"
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import { Command, Prompt } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { LocalFileSystem } from "../LocalFileSystem.js"
 import { flattenPageTree } from "./pageTree.js"
@@ -20,7 +20,8 @@ export const deleteCommand = Command.make("delete", {}, () =>
     const pathService = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
 
-    const docsPath = pathService.join(process.cwd(), config.docsPath)
+    const cwd = pathService.resolve(".")
+    const docsPath = pathService.join(cwd, config.docsPath)
 
     // Interactive mode - show page tree, delete local file
     yield* Console.log("Scanning page structure...")

@@ -49,21 +49,21 @@ export const parseMarkdown = (
     }
 
     // Try to parse as existing page front-matter
-    const existingResult = yield* Schema.decodeUnknown(PageFrontMatterSchema)(parsed.data).pipe(
+    const existingResult = yield* Schema.decodeUnknownEffect(PageFrontMatterSchema)(parsed.data).pipe(
       Effect.map((fm) => ({
         frontMatter: fm,
         content: parsed.content.trim(),
         isNew: false
       })),
-      Effect.catchAll(() =>
+      Effect.catchCause(() =>
         // Try to parse as new page front-matter
-        Schema.decodeUnknown(NewPageFrontMatterSchema)(parsed.data).pipe(
+        Schema.decodeUnknownEffect(NewPageFrontMatterSchema)(parsed.data).pipe(
           Effect.map((fm) => ({
             frontMatter: fm as NewPageFrontMatter,
             content: parsed.content.trim(),
             isNew: true
           })),
-          Effect.catchAll((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
+          Effect.catchCause((cause) => Effect.fail(new FrontMatterError({ path: filePath, cause })))
         )
       )
     )

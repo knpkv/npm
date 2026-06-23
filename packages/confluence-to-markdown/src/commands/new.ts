@@ -1,10 +1,10 @@
 /**
  * New page command for Confluence CLI.
  */
-import { Command, Prompt } from "@effect/cli"
-import * as Path from "@effect/platform/Path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import * as Path from "effect/Path"
+import { Command, Prompt } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { LocalFileSystem } from "../LocalFileSystem.js"
 import { flattenPageTree } from "./pageTree.js"
@@ -24,7 +24,8 @@ export const newCommand = Command.make("new", {}, () =>
     const config = yield* ConfluenceConfig
     const pathService = yield* Path.Path
 
-    const docsPath = pathService.join(process.cwd(), config.docsPath)
+    const cwd = pathService.resolve(".")
+    const docsPath = pathService.join(cwd, config.docsPath)
 
     // Build page tree
     yield* Console.log("Scanning page structure...")
@@ -89,7 +90,7 @@ export const newCommand = Command.make("new", {}, () =>
       "\n<!-- Write your page content here -->\n"
     )
 
-    const relativePath = pathService.relative(process.cwd(), filePath)
+    const relativePath = pathService.relative(cwd, filePath)
     yield* Console.log(`Created new page: ${relativePath}`)
     yield* Console.log("")
     yield* Console.log("Next steps:")

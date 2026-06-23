@@ -14,7 +14,7 @@ import type { AtlassianUser } from "../Schemas.js"
  *
  * @category Cache
  */
-export class UserCache extends Context.Tag("@knpkv/confluence-to-markdown/UserCache")<
+export class UserCache extends Context.Service<
   UserCache,
   {
     /**
@@ -40,7 +40,7 @@ export class UserCache extends Context.Tag("@knpkv/confluence-to-markdown/UserCa
      */
     readonly clear: () => Effect.Effect<void>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/UserCache") {}
 
 /**
  * Create the user cache service.

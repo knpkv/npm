@@ -3,11 +3,11 @@
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { PageId } from "./Brand.js"
 import { ConfigNotFoundError, ConfigParseError } from "./ConfluenceError.js"
@@ -31,9 +31,7 @@ import { ConfluenceConfigFileSchema } from "./Schemas.js"
  *
  * @category Config
  */
-export class ConfluenceConfig extends Context.Tag(
-  "@knpkv/confluence-to-markdown/ConfluenceConfig"
-)<
+export class ConfluenceConfig extends Context.Service<
   ConfluenceConfig,
   {
     /** Root page ID to sync from */
@@ -51,7 +49,7 @@ export class ConfluenceConfig extends Context.Tag(
     /** Glob patterns for files to track in git */
     readonly trackedPaths: ReadonlyArray<string>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/ConfluenceConfig") {}
 
 /**
  * Default config directory.
@@ -73,7 +71,7 @@ const loadConfig = (
     const fs = yield* FileSystem.FileSystem
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
     if (!exists) {
       return yield* Effect.fail(new ConfigNotFoundError({ path: configPath }))
@@ -88,7 +86,7 @@ const loadConfig = (
       catch: (cause) => new ConfigParseError({ path: configPath, cause })
     })
 
-    return yield* Schema.decodeUnknown(ConfluenceConfigFileSchema)(json).pipe(
+    return yield* Schema.decodeUnknownEffect(ConfluenceConfigFileSchema)(json).pipe(
       Effect.mapError((cause) => new ConfigParseError({ path: configPath, cause }))
     )
   })
@@ -99,7 +97,7 @@ const loadConfig = (
  * @example
  * ```typescript
  * import { ConfluenceConfig } from "@knpkv/confluence-to-markdown/ConfluenceConfig"
- * import { NodeFileSystem } from "@effect/platform-node"
+ * import { NodeContext } from "@effect/platform-node"
  * import { Effect } from "effect"
  *
  * const program = Effect.gen(function* () {
@@ -110,7 +108,7 @@ const loadConfig = (
  * Effect.runPromise(
  *   program.pipe(
  *     Effect.provide(ConfluenceConfig.layer()),
- *     Effect.provide(NodeFileSystem.layer)
+ *     Effect.provide(NodeContext.layer)
  *   )
  * )
  * ```
@@ -153,7 +151,8 @@ export const layer = (
     ConfluenceConfig,
     Effect.gen(function*() {
       const path = yield* Path.Path
-      const resolvedPath = configPath ?? path.join(process.cwd(), CONFIG_DIR, CONFIG_FILE_NAME)
+      const cwd = path.resolve(".")
+      const resolvedPath = configPath ?? path.join(cwd, CONFIG_DIR, CONFIG_FILE_NAME)
       const config = yield* loadConfig(resolvedPath)
 
       // Validate docsPath
@@ -206,7 +205,8 @@ export const createConfigFile = (
     const fs = yield* FileSystem.FileSystem
     const pathService = yield* Path.Path
 
-    const configDir = pathService.join(process.cwd(), CONFIG_DIR)
+    const cwd = pathService.resolve(".")
+    const configDir = pathService.join(cwd, CONFIG_DIR)
     const resolvedPath = configPath ?? pathService.join(configDir, CONFIG_FILE_NAME)
 
     const config: ConfluenceConfigFile = {
@@ -219,12 +219,12 @@ export const createConfigFile = (
     }
 
     // Validate the config
-    yield* Schema.decodeUnknown(ConfluenceConfigFileSchema)(config).pipe(
+    yield* Schema.decodeUnknownEffect(ConfluenceConfigFileSchema)(config).pipe(
       Effect.mapError((cause) => new ConfigParseError({ path: resolvedPath, cause }))
     )
 
     // Create .confluence directory if it doesn't exist
-    const dirExists = yield* fs.exists(configDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
+    const dirExists = yield* fs.exists(configDir).pipe(Effect.catchCause(() => Effect.succeed(false)))
     if (!dirExists) {
       yield* fs.makeDirectory(configDir, { recursive: true }).pipe(
         Effect.mapError((cause) => new ConfigParseError({ path: configDir, cause }))

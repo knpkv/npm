@@ -23,12 +23,12 @@ describe("AdfSchemaValidator", () => {
         type: "doc",
         content: [{ type: "paragraph", content: [{ type: "text", text: 42 }] }]
       }
-      const result = yield* Effect.either(v.check(doc, "incoming"))
-      expect(result._tag).toBe("Left")
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("AdfSchemaError")
-        expect(result.left.direction).toBe("incoming")
-        expect(result.left.issues.length).toBeGreaterThan(0)
+      const result = yield* Effect.result(v.check(doc, "incoming"))
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("AdfSchemaError")
+        expect(result.failure.direction).toBe("incoming")
+        expect(result.failure.issues.length).toBeGreaterThan(0)
       }
     }).pipe(Effect.provide(AdfSchemaValidatorLayer)))
 })

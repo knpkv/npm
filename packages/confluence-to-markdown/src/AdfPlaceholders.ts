@@ -24,7 +24,7 @@
  * @module
  */
 
-import * as Either from "effect/Either"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 interface AdfNode {
@@ -65,14 +65,14 @@ const fromBase64 = (b64: string): string => {
 }
 
 // JSON string → free-form attrs record; rejects null/arrays/primitives.
-const AttrsBlob = Schema.parseJson(Schema.Record({ key: Schema.String, value: Schema.Unknown }))
-const decodeAttrsBlob = Schema.decodeUnknownEither(AttrsBlob)
+const AttrsBlob = Schema.Record(Schema.String, Schema.Unknown)
+const decodeAttrsBlob = Schema.decodeUnknownOption(AttrsBlob)
 
 const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null => {
   if (!b64) return null
   try {
-    const decoded = decodeAttrsBlob(fromBase64(b64))
-    return Either.isRight(decoded) ? decoded.right : null
+    const decoded = decodeAttrsBlob(JSON.parse(fromBase64(b64)) as unknown)
+    return Option.isSome(decoded) ? decoded.value : null
   } catch {
     // Invalid base64 (hand-edited file?) — fall back to the readable key/type.
     return null

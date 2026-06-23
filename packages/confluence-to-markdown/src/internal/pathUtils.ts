@@ -4,8 +4,8 @@
  * @module
  * @internal
  */
-import * as Path from "@effect/platform/Path"
 import * as Effect from "effect/Effect"
+import * as Path from "effect/Path"
 
 /**
  * Convert a page title to a URL-safe slug.

@@ -27,9 +27,7 @@ const validate = ajv.compile(adfJsonSchema as object)
  *
  * @category Service
  */
-export class AdfSchemaValidator extends Context.Tag(
-  "@knpkv/confluence-to-markdown/AdfSchemaValidator"
-)<
+export class AdfSchemaValidator extends Context.Service<
   AdfSchemaValidator,
   {
     readonly check: (
@@ -37,7 +35,7 @@ export class AdfSchemaValidator extends Context.Tag(
       direction: "incoming" | "outgoing"
     ) => Effect.Effect<DocNode, AdfSchemaError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/AdfSchemaValidator") {}
 
 /**
  * Live Layer for `AdfSchemaValidator`. The Ajv validator is compiled once at

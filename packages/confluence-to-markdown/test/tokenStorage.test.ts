@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Either from "effect/Either"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { OAuthConfigSchema, OAuthTokenSchema } from "../src/Schemas.js"
 
@@ -18,8 +18,8 @@ describe("tokenStorage schemas", () => {
         cloud_id: "test_cloud_id",
         site_url: "https://test.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("validates token with user info", () => {
@@ -36,10 +36,10 @@ describe("tokenStorage schemas", () => {
           email: "test@example.com"
         }
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isRight(result)).toBe(true)
-      if (Either.isRight(result)) {
-        expect(result.right.user?.name).toBe("Test User")
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isSuccess(result)).toBe(true)
+      if (Result.isSuccess(result)) {
+        expect(result.success.user?.name).toBe("Test User")
       }
     })
 
@@ -52,8 +52,8 @@ describe("tokenStorage schemas", () => {
         cloud_id: "test",
         site_url: "https://test.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isFailure(result)).toBe(true)
     })
 
     it("rejects token with invalid expires_at type", () => {
@@ -65,8 +65,8 @@ describe("tokenStorage schemas", () => {
         cloud_id: "test",
         site_url: "https://test.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -76,24 +76,24 @@ describe("tokenStorage schemas", () => {
         clientId: "test_client_id",
         clientSecret: "test_client_secret"
       }
-      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthConfigSchema)(config)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("rejects config missing clientSecret", () => {
       const config = {
         clientId: "test_client_id"
       }
-      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthConfigSchema)(config)
+      expect(Result.isFailure(result)).toBe(true)
     })
 
     it("rejects config missing clientId", () => {
       const config = {
         clientSecret: "test_client_secret"
       }
-      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthConfigSchema)(config)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 })

@@ -2,10 +2,10 @@
 /**
  * CLI entry point for confluence-to-markdown.
  */
-import { Command } from "@effect/cli"
+import { NodeRuntime, NodeStdio, NodeTerminal } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
-import * as Logger from "effect/Logger"
-import * as LogLevel from "effect/LogLevel"
+import * as Stdio from "effect/Stdio"
+import { Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
 import { handleError } from "./commands/errorHandler.js"
 import {
@@ -40,31 +40,31 @@ const confluence = Command.make("confluence").pipe(
 )
 
 // === Run CLI ===
-const cli = Command.run(confluence, {
-  name: pkg.name,
+const cli = Command.runWith(confluence, {
   version: pkg.version
 })
 
-const layerType = getLayerType()
-const layer = layerType === "full"
-  ? AppLayer
-  : layerType === "auth"
-  ? AuthOnlyLayer
-  : layerType === "clone"
-  ? CloneLayer
-  : MinimalLayer
+const layerForArgv = (argv: ReadonlyArray<string>) => {
+  const layerType = getLayerType(argv)
+  return layerType === "full"
+    ? AppLayer
+    : layerType === "auth"
+    ? AuthOnlyLayer
+    : layerType === "clone"
+    ? CloneLayer
+    : MinimalLayer
+}
 
 // Suppress verbose Effect logs (e.g. token refresh messages)
-const SilentLogger = Logger.replace(Logger.defaultLogger, Logger.none)
-
-Effect.suspend(() => cli(process.argv)).pipe(
-  Effect.provide(layer),
-  Effect.provide(SilentLogger),
-  Logger.withMinimumLogLevel(LogLevel.None),
-  Effect.runPromiseExit
-).then((exit) => {
-  if (exit._tag === "Failure") {
-    handleError(exit.cause)
-    process.exit(1)
-  }
-})
+Effect.gen(function*() {
+  const stdio = yield* Stdio.Stdio
+  const args = yield* stdio.args
+  return yield* cli(args).pipe(
+    Effect.provide(layerForArgv(args))
+  )
+}).pipe(
+  Effect.provide(NodeTerminal.layer),
+  Effect.provide(NodeStdio.layer),
+  Effect.catchCause((cause) => handleError(cause)),
+  NodeRuntime.runMain({ disableErrorReporting: true })
+)

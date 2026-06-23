@@ -3,17 +3,13 @@
  *
  * @module
  */
-import * as NodeCommandExecutor from "@effect/platform-node/NodeCommandExecutor"
-import * as NodeContext from "@effect/platform-node/NodeContext"
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
-import * as CommandExecutor from "@effect/platform/CommandExecutor"
-import type * as PlatformError from "@effect/platform/Error"
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   GitError,
   GitMergeConflictError,
@@ -249,10 +245,10 @@ export interface GitServiceShape {
  *
  * @category Service
  */
-export class GitService extends Context.Tag("@knpkv/confluence-to-markdown/GitService")<
+export class GitService extends Context.Service<
   GitService,
   GitServiceShape
->() {}
+>()("@knpkv/confluence-to-markdown/GitService") {}
 
 /**
  * Map PlatformError to GitError.
@@ -260,13 +256,15 @@ export class GitService extends Context.Tag("@knpkv/confluence-to-markdown/GitSe
 const mapFsError = (error: PlatformError.PlatformError): GitError =>
   new GitError({ command: "filesystem", message: error.message })
 
-// Dependencies layer for git operations (CommandExecutor + FileSystem + Path + NodeContext)
-// NodeCommandExecutor requires FileSystem, so use provideMerge to satisfy its dependencies
-const GitDepsLive = NodeCommandExecutor.layer.pipe(
-  Layer.provideMerge(NodeFileSystem.layer),
-  Layer.provideMerge(NodePath.layer),
-  Layer.provideMerge(NodeContext.layer)
-)
+const existsOrFalse = (
+  effect: Effect.Effect<boolean, PlatformError.PlatformError>
+): Effect.Effect<boolean> =>
+  effect.pipe(
+    Effect.catchIf(
+      (error): error is PlatformError.PlatformError => error._tag === "PlatformError",
+      () => Effect.succeed(false)
+    )
+  )
 
 /**
  * Copy a single file, creating parent directories as needed.
@@ -279,7 +277,7 @@ const copyFileFn = (
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function*() {
     const destDir = pathService.dirname(dest)
-    yield* fs.makeDirectory(destDir, { recursive: true }).pipe(Effect.catchAll(() => Effect.void))
+    yield* fs.makeDirectory(destDir, { recursive: true }).pipe(Effect.mapError(mapFsError))
     yield* fs.copyFile(source, dest).pipe(Effect.mapError(mapFsError))
   })
 
@@ -293,7 +291,7 @@ const copyDirectoryFn = (
   dest: string
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function*() {
-    yield* fs.makeDirectory(dest, { recursive: true }).pipe(Effect.catchAll(() => Effect.void))
+    yield* fs.makeDirectory(dest, { recursive: true }).pipe(Effect.mapError(mapFsError))
 
     const entries = yield* fs.readDirectory(source).pipe(Effect.mapError(mapFsError))
 
@@ -321,7 +319,7 @@ const copyMarkdownFilesFn = (
   dest: string
 ): Effect.Effect<void, GitError> =>
   Effect.gen(function*() {
-    const exists = yield* fs.exists(source).pipe(Effect.catchAll(() => Effect.succeed(false)))
+    const exists = yield* existsOrFalse(fs.exists(source))
     if (!exists) {
       return
     }
@@ -349,7 +347,7 @@ const copyMarkdownFilesFn = (
 
 // Get paths helper - takes pathService as param
 const getPaths = (pathService: Path.Path) => {
-  const cwd = process.cwd()
+  const cwd = pathService.resolve(".")
   const confluenceDir = pathService.join(cwd, ".confluence")
   const gitDir = pathService.join(confluenceDir, ".git")
   return { cwd, confluenceDir, gitDir, pathService }
@@ -358,7 +356,7 @@ const getPaths = (pathService: Path.Path) => {
 // Ensure initialized helper - takes fs and gitDir
 const ensureInitializedFn = (fs: FileSystem.FileSystem, gitDir: string) =>
   Effect.gen(function*() {
-    const initialized = yield* fs.exists(gitDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
+    const initialized = yield* existsOrFalse(fs.exists(gitDir))
     if (!initialized) {
       return yield* Effect.fail(new GitNotInitializedError())
     }
@@ -368,17 +366,18 @@ const ensureInitializedFn = (fs: FileSystem.FileSystem, gitDir: string) =>
 const make = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const pathService = yield* Path.Path
-  const commandExecutor = yield* CommandExecutor.CommandExecutor
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const paths = getPaths(pathService)
   const { confluenceDir, cwd, gitDir } = paths
 
   // Create context with captured services for providing to returned Effects
-  const depsContext: Context.Context<FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor> = Context
-    .empty().pipe(
-      Context.add(FileSystem.FileSystem, fs),
-      Context.add(Path.Path, pathService),
-      Context.add(CommandExecutor.CommandExecutor, commandExecutor)
-    )
+  const depsContext: Context.Context<FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner> =
+    Context
+      .empty().pipe(
+        Context.add(FileSystem.FileSystem, fs),
+        Context.add(Path.Path, pathService),
+        Context.add(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
+      )
 
   // Helper to provide deps to an effect - uses any for R since we know depsContext covers all needs
   const provideDeps = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E> =>
@@ -396,11 +395,7 @@ const make = Effect.gen(function*() {
       )
     )
 
-  const isInitialized = () =>
-    Effect.succeed(fs).pipe(
-      Effect.flatMap((f) => f.exists(gitDir)),
-      Effect.catchAll(() => Effect.succeed(false))
-    )
+  const isInitialized = () => existsOrFalse(fs.exists(gitDir))
 
   const init = () =>
     provideDeps(
@@ -410,12 +405,12 @@ const make = Effect.gen(function*() {
           Effect.catchTag("GitError", () => Effect.fail(new GitNotInstalledError({ message: "Git not found" })))
         )
 
-        const exists = yield* fs.exists(confluenceDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
+        const exists = yield* existsOrFalse(fs.exists(confluenceDir))
         if (!exists) {
           yield* fs.makeDirectory(confluenceDir, { recursive: true }).pipe(Effect.mapError(mapFsError))
         }
 
-        const gitExists = yield* fs.exists(gitDir).pipe(Effect.catchAll(() => Effect.succeed(false)))
+        const gitExists = yield* existsOrFalse(fs.exists(gitDir))
         if (!gitExists) {
           yield* runGit(["init"], confluenceDir)
           // Configure local git user for commits (needed in CI environments)
@@ -583,7 +578,7 @@ const make = Effect.gen(function*() {
             const sourcePath = pathService.join(absoluteDocsPath, pattern)
             const destPath = pathService.join(confluenceDir, pattern)
 
-            const exists = yield* fs.exists(sourcePath).pipe(Effect.catchAll(() => Effect.succeed(false)))
+            const exists = yield* existsOrFalse(fs.exists(sourcePath))
             if (exists) {
               const stat = yield* fs.stat(sourcePath).pipe(Effect.mapError(mapFsError))
               if (stat.type === "Directory") {
@@ -614,7 +609,7 @@ const make = Effect.gen(function*() {
             const sourcePath = pathService.join(confluenceDir, pattern)
             const destPath = pathService.join(absoluteDocsPath, pattern)
 
-            const exists = yield* fs.exists(sourcePath).pipe(Effect.catchAll(() => Effect.succeed(false)))
+            const exists = yield* existsOrFalse(fs.exists(sourcePath))
             if (exists) {
               const stat = yield* fs.stat(sourcePath).pipe(Effect.mapError(mapFsError))
               if (stat.type === "Directory") {
@@ -842,18 +837,13 @@ const make = Effect.gen(function*() {
   })
 })
 
-// Layer with deps - requires FileSystem, Path, CommandExecutor
-const layerWithDeps: Layer.Layer<
-  GitService,
-  never,
-  FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
-> = Layer.effect(GitService, make)
-
 /**
- * Create GitService layer with all platform dependencies.
+ * Create GitService layer.
  *
  * @category Layers
  */
-export const layer = layerWithDeps.pipe(
-  Layer.provide(GitDepsLive)
-)
+export const layer: Layer.Layer<
+  GitService,
+  never,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> = Layer.effect(GitService, make)

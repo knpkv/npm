@@ -11,12 +11,7 @@
  *
  * @module
  */
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
-import * as Command from "@effect/platform/Command"
-import * as CommandExecutor from "@effect/platform/CommandExecutor"
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -25,6 +20,9 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { FileSystemError } from "./ConfluenceError.js"
 import { AuthMissingError, OAuthError } from "./ConfluenceError.js"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
@@ -41,8 +39,7 @@ import type { OAuthConfig, OAuthToken, OAuthUser } from "./Schemas.js"
 
 // Layer for token storage operations (FileSystem + Path + HomeDirectory)
 const TokenStorageLive = Layer.mergeAll(
-  NodeFileSystem.layer,
-  NodePath.layer,
+  NodeServices.layer,
   HomeDirectoryLive
 )
 
@@ -168,10 +165,10 @@ export interface ConfluenceAuthService {
  *
  * @category Services
  */
-export class ConfluenceAuth extends Context.Tag("@knpkv/confluence-to-markdown/ConfluenceAuth")<
+export class ConfluenceAuth extends Context.Service<
   ConfluenceAuth,
   ConfluenceAuthService
->() {}
+>()("@knpkv/confluence-to-markdown/ConfluenceAuth") {}
 
 const buildAuthUrl = (clientId: string, state: string, port: number): string => {
   const params = new URLSearchParams({
@@ -195,7 +192,7 @@ const saveOAuthConfigOp = (config: OAuthConfig) => saveOAuthConfig(config).pipe(
 
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
-  const commandExecutor = yield* CommandExecutor.CommandExecutor
+  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   // Ref to track ongoing refresh operation to prevent concurrent refreshes
   const refreshLock = yield* Ref.make<Option.Option<Deferred.Deferred<OAuthToken, OAuthError | FileSystemError>>>(
@@ -204,19 +201,14 @@ const make = Effect.gen(function*() {
 
   const openBrowserImpl = (url: string): Effect.Effect<void, OAuthError> =>
     Effect.gen(function*() {
-      const platform = process.platform
-      let command: Command.Command
+      const run = (command: ChildProcess.Command) =>
+        childProcessSpawner.exitCode(command).pipe(
+          Effect.flatMap((code) => code === 0 ? Effect.void : Effect.fail(code))
+        )
 
-      if (platform === "darwin") {
-        command = Command.make("open", url)
-      } else if (platform === "win32") {
-        command = Command.make("cmd", "/c", "start", "", url)
-      } else {
-        command = Command.make("xdg-open", url)
-      }
-
-      yield* Command.exitCode(command).pipe(
-        Effect.provide(Layer.succeed(CommandExecutor.CommandExecutor, commandExecutor))
+      yield* run(ChildProcess.make("open", [url])).pipe(
+        Effect.catchIf(() => true, () => run(ChildProcess.make("xdg-open", [url]))),
+        Effect.catchIf(() => true, () => run(ChildProcess.make("cmd", ["/c", "start", "", url])))
       )
     }).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
@@ -256,7 +248,7 @@ const make = Effect.gen(function*() {
       const response = yield* httpClient.execute(request)
       const body = yield* response.json
 
-      return yield* Schema.decodeUnknown(TokenResponseSchema)(body)
+      return yield* Schema.decodeUnknownEffect(TokenResponseSchema)(body)
     }).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "token", cause }))
     )
@@ -273,7 +265,7 @@ const make = Effect.gen(function*() {
       const response = yield* httpClient.execute(request)
       const body = yield* response.json
 
-      return yield* Schema.decodeUnknown(Schema.Array(AccessibleResourceSchema))(body)
+      return yield* Schema.decodeUnknownEffect(Schema.Array(AccessibleResourceSchema))(body)
     }).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
     )
@@ -290,7 +282,7 @@ const make = Effect.gen(function*() {
       const response = yield* httpClient.execute(request)
       const body = yield* response.json
 
-      return yield* Schema.decodeUnknown(UserInfoSchema)(body)
+      return yield* Schema.decodeUnknownEffect(UserInfoSchema)(body)
     }).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
     )
@@ -317,7 +309,7 @@ const make = Effect.gen(function*() {
       const body = yield* response.json.pipe(
         Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
       )
-      const tokenResponse = yield* Schema.decodeUnknown(TokenResponseSchema)(body).pipe(
+      const tokenResponse = yield* Schema.decodeUnknownEffect(TokenResponseSchema)(body).pipe(
         Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
       )
 
@@ -389,7 +381,7 @@ const make = Effect.gen(function*() {
 
       const code = yield* codePromise.pipe(
         Effect.timeout("5 minutes"),
-        Effect.catchTag("TimeoutException", () =>
+        Effect.catchTag("TimeoutError", () =>
           Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" })))
       )
 
@@ -476,7 +468,7 @@ const make = Effect.gen(function*() {
       if (config !== null) {
         yield* revokeToken(token, config).pipe(
           Effect.tap(() => Effect.log("Token revoked with Atlassian")),
-          Effect.catchAll((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
+          Effect.catchIf(() => true, (error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
         )
       }
 
@@ -577,5 +569,5 @@ const make = Effect.gen(function*() {
 export const layer: Layer.Layer<
   ConfluenceAuth,
   never,
-  HttpClient.HttpClient | CommandExecutor.CommandExecutor
+  HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner
 > = Layer.effect(ConfluenceAuth, make)

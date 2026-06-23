@@ -1,15 +1,15 @@
 /**
  * Git commands (commit, log, diff) for Confluence CLI.
  */
-import { Args, Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { GitService } from "../GitService.js"
 
 // === Commit command ===
-const commitMessageOption = Options.text("message").pipe(
+const commitMessageOption = Options.string("message").pipe(
   Options.withAlias("m"),
   Options.withDescription("Commit message"),
   Options.optional
@@ -44,12 +44,12 @@ const logOnelineOption = Options.boolean("oneline").pipe(
   Options.withDescription("Show compact one-line format")
 )
 
-const logSinceOption = Options.text("since").pipe(
+const logSinceOption = Options.string("since").pipe(
   Options.withDescription("Show commits since date (e.g., '2024-01-01')"),
   Options.optional
 )
 
-const logFileArg = Args.text({ name: "file" }).pipe(Args.optional) as Args.Args<Option.Option<string>>
+const logFileArg = Args.string("file").pipe(Args.optional)
 
 export const logCommand = Command.make(
   "log",
@@ -86,12 +86,12 @@ const diffStagedOption = Options.boolean("staged").pipe(
   Options.withDescription("Show staged changes")
 )
 
-const diffCommitOption = Options.text("commit").pipe(
+const diffCommitOption = Options.string("commit").pipe(
   Options.withDescription("Compare with specific commit"),
   Options.optional
 )
 
-const diffFileArg = Args.text({ name: "file" }).pipe(Args.optional) as Args.Args<Option.Option<string>>
+const diffFileArg = Args.string("file").pipe(Args.optional)
 
 export const diffCommand = Command.make(
   "diff",

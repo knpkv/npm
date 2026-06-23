@@ -24,10 +24,10 @@ export interface HashService {
  *
  * @category Services
  */
-export class HashServiceTag extends Context.Tag("@knpkv/confluence-to-markdown/HashService")<
+export class HashServiceTag extends Context.Service<
   HashServiceTag,
   HashService
->() {}
+>()("@knpkv/confluence-to-markdown/HashService") {}
 
 /**
  * Create a HashService layer from a hash function.

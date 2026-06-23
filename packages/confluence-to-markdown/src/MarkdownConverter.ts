@@ -39,9 +39,7 @@ import { ConversionError } from "./ConfluenceError.js"
  *
  * @category Conversion
  */
-export class MarkdownConverter extends Context.Tag(
-  "@knpkv/confluence-to-markdown/MarkdownConverter"
-)<
+export class MarkdownConverter extends Context.Service<
   MarkdownConverter,
   {
     /**
@@ -59,7 +57,7 @@ export class MarkdownConverter extends Context.Tag(
      */
     readonly markdownToAdf: (markdown: string) => Effect.Effect<string, ConversionError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/MarkdownConverter") {}
 
 const warningSummary = (w: WalkerWarning): string => {
   switch (w._tag) {

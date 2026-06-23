@@ -14,12 +14,12 @@ describe("AtlaskitTransformers", () => {
   it.effect("surfaces synchronous throws as AtlaskitTransformersError", () =>
     Effect.gen(function*() {
       const t = yield* AtlaskitTransformers
-      const result = yield* Effect.either(t.use(() => {
+      const result = yield* Effect.result(t.use(() => {
         throw new Error("boom")
       }))
-      expect(result._tag).toBe("Left")
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("AtlaskitTransformersError")
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("AtlaskitTransformersError")
       }
     }).pipe(Effect.provide(AtlaskitTransformersLayer)))
 })
