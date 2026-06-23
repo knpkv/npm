@@ -20,19 +20,19 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./src/index.ts"
     },
     "./JiraApiClient": {
       "import": "./dist/JiraApiClient.js",
-      "types": "./dist/JiraApiClient.d.ts"
+      "types": "./src/JiraApiClient.ts"
     },
     "./JiraApiConfig": {
       "import": "./dist/JiraApiConfig.js",
-      "types": "./dist/JiraApiConfig.d.ts"
+      "types": "./src/JiraApiConfig.ts"
     },
     "./v3": {
       "import": "./dist/generated/v3/index.js",
-      "types": "./dist/generated/v3/index.d.ts"
+      "types": "./src/generated/v3/index.ts"
     }
   },
   "publishConfig": {
@@ -50,12 +50,11 @@
     "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": "^3.19.3"
+    "effect": "4.0.0-beta.85"
   },
   "devDependencies": {
-    "@effect/cli": "latest",
     "@effect/platform-node": "latest",
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
     "effect": "latest",
     "openapi-typescript": "^7.13.0",

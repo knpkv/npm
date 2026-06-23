@@ -1,0 +1,28 @@
+{
+  "name": "@effect/platform",
+  "version": "4.0.0-beta.85",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./Error": {
+      "import": "./src/Error.ts",
+      "types": "./src/Error.ts"
+    },
+    "./HttpClientError": {
+      "import": "./src/HttpClientError.ts",
+      "types": "./src/HttpClientError.ts"
+    },
+    "./PlatformConfigProvider": {
+      "import": "./src/PlatformConfigProvider.ts",
+      "types": "./src/PlatformConfigProvider.ts"
+    }
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.85"
+  }
+}

@@ -1,0 +1,120 @@
+diff --git a/lib/client/response-parser.d.ts b/lib/client/response-parser.d.ts
+--- a/lib/client/response-parser.d.ts
++++ b/lib/client/response-parser.d.ts
+@@ -10,7 +10,6 @@
+  * This is independently testable without making HTTP requests.
+  */
+ import * as Effect from "effect/Effect";
+-import * as ParseResult from "effect/ParseResult";
+ import * as Schema from "effect/Schema";
+ import type { Operation } from "./operation.ts";
+ import type { Protocol } from "./protocol.ts";
+@@ -21,7 +20,7 @@ export interface ResponseParserOptions {
+     /** Skip schema validation - returns raw deserialized response */
+     skipValidation?: boolean;
+ }
+-export type ResponseParser<A, R> = (response: Response) => Effect.Effect<A, ParseResult.ParseError, R>;
++export type ResponseParser<A, R> = (response: Response) => Effect.Effect<A, unknown, R>;
+ /**
+  * Create a response parser for a given operation.
+  *
+diff --git a/lib/client/response-parser.js b/lib/client/response-parser.js
+--- a/lib/client/response-parser.js
++++ b/lib/client/response-parser.js
+@@ -10,7 +10,6 @@
+  * This is independently testable without making HTTP requests.
+  */
+ import * as Effect from "effect/Effect";
+-import * as ParseResult from "effect/ParseResult";
+ import * as Schema from "effect/Schema";
+ import { COMMON_ERRORS, UnknownAwsError } from "../errors.js";
+ import { getAwsQueryError, getHttpHeader, getProtocol } from "../traits.js";
+diff --git a/lib/credentials.d.ts b/lib/credentials.d.ts
+--- a/lib/credentials.d.ts
++++ b/lib/credentials.d.ts
+@@ -10,14 +10,13 @@ export interface AwsCredentials {
+ import { FileSystem, HttpClient } from "@effect/platform";
+ import { type AwsCredentialIdentity } from "@smithy/types";
+ import * as Redacted from "effect/Redacted";
+-declare const Credentials_base: Context.TagClass<Credentials, "AWS::Credentials", {
++export declare const Credentials: Context.Service<Credentials, {
+     accessKeyId: Redacted.Redacted<string>;
+     secretAccessKey: Redacted.Redacted<string>;
+     sessionToken: Redacted.Redacted<string> | undefined;
+     expiration?: number | undefined;
+ }>;
+-export declare class Credentials extends Credentials_base {
+-}
++export type Credentials = typeof Credentials;
+ export declare const mock: Layer.Layer<Credentials, never, never>;
+ export declare const fromAwsCredentialIdentity: (identity: AwsCredentialIdentity) => {
+     accessKeyId: Redacted.Redacted<string>;
+@@ -36,12 +35,10 @@ export declare const fromHttp: () => Layer.Layer<Credentials, AwsCredentialProvi
+ export declare const fromProcess: () => Layer.Layer<Credentials, AwsCredentialProviderError, never>;
+ export declare const fromTokenFile: () => Layer.Layer<Credentials, AwsCredentialProviderError, never>;
+ export declare const ssoRegion: (region: string) => Layer.Layer<SsoRegion, never, never>;
+-declare const SsoRegion_base: Context.TagClass<SsoRegion, "AWS::SsoRegion", string>;
+-export declare class SsoRegion extends SsoRegion_base {
+-}
+-declare const SsoStartUrl_base: Context.TagClass<SsoStartUrl, "AWS::SsoStartUrl", string>;
+-export declare class SsoStartUrl extends SsoStartUrl_base {
+-}
++export declare const SsoRegion: Context.Service<SsoRegion, string>;
++export type SsoRegion = typeof SsoRegion;
++export declare const SsoStartUrl: Context.Service<SsoStartUrl, string>;
++export type SsoStartUrl = typeof SsoStartUrl;
+ declare const ProfileNotFound_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => import("effect/Cause").YieldableError & {
+     readonly _tag: "Alchemy::AWS::ProfileNotFound";
+ } & Readonly<A>;
+diff --git a/lib/credentials.js b/lib/credentials.js
+--- a/lib/credentials.js
++++ b/lib/credentials.js
+@@ -26,8 +26,7 @@ import * as Redacted from "effect/Redacted";
+ import { createHash } from "node:crypto";
+ import * as path from "node:path";
+ import { parseIni, parseSSOSessionData } from "./util/parse-ini.js";
+-export class Credentials extends Context.Tag("AWS::Credentials")() {
+-}
++export const Credentials = Context.Service("AWS::Credentials");
+ export const mock = Layer.succeed(Credentials, {
+     accessKeyId: Redacted.make("test"),
+     secretAccessKey: Redacted.make("test"),
+@@ -101,8 +100,6 @@ export const ssoRegion = (region) => Layer.succeed(SsoRegion, region);
+ const EXPIRE_WINDOW_MS = 5 * 60 * 1000;
+ const REFRESH_MESSAGE = `To refresh this SSO session run 'aws sso login' with the corresponding profile.`;
+-export class SsoRegion extends Context.Tag("AWS::SsoRegion")() {
+-}
+-export class SsoStartUrl extends Context.Tag("AWS::SsoStartUrl")() {
+-}
++export const SsoRegion = Context.Service("AWS::SsoRegion");
++export const SsoStartUrl = Context.Service("AWS::SsoStartUrl");
+ export class ProfileNotFound extends Data.TaggedError("Alchemy::AWS::ProfileNotFound") {
+ }
+diff --git a/lib/region.d.ts b/lib/region.d.ts
+--- a/lib/region.d.ts
++++ b/lib/region.d.ts
+@@ -1,9 +1,8 @@
+ import * as Context from "effect/Context";
+ import * as Layer from "effect/Layer";
+-declare const Region_base: Context.TagClass<Region, "distilled-aws/Region", RegionName>;
+-export declare class Region extends Region_base {
+-}
+-export declare const fromEnv: () => Layer.Layer<Region, import("effect/ConfigError").ConfigError, never>;
+ export type RegionName = "us-east-1" | "us-east-2" | "us-west-1" | "us-west-2" | "af-south-1" | "ap-east-1" | "ap-south-2" | "ap-southeast-3" | "ap-southeast-5" | "ap-southeast-4" | "ap-south-1" | "ap-southeast-6" | "ap-northeast-3" | "ap-northeast-2" | "ap-southeast-1" | "ap-southeast-2" | "ap-east-2" | "ap-southeast-7" | "ap-northeast-1" | "ca-central-1" | "ca-west-1" | "eu-central-1" | "eu-west-1" | "eu-west-2" | "eu-south-1" | "eu-west-3" | "eu-south-2" | "eu-north-1" | "eu-central-2" | "il-central-1" | "mx-central-1" | "me-south-1" | "me-central-1" | "sa-east-1" | (string & {});
++export declare const Region: Context.Service<Region, RegionName>;
++export type Region = typeof Region;
++export declare const fromEnv: () => Layer.Layer<Region, import("effect/ConfigError").ConfigError, never>;
+ export {};
+ //# sourceMappingURL=region.d.ts.map
+diff --git a/lib/region.js b/lib/region.js
+--- a/lib/region.js
++++ b/lib/region.js
+@@ -1,7 +1,6 @@
+ import * as Config from "effect/Config";
+ import * as Context from "effect/Context";
+ import * as Layer from "effect/Layer";
+-export class Region extends Context.Tag("distilled-aws/Region")() {
+-}
++export const Region = Context.Service("distilled-aws/Region");
+ export const fromEnv = () => Layer.effect(Region, Config.string("AWS_REGION").pipe(Config.orElse(() => Config.string("AWS_DEFAULT_REGION"))));
+ //# sourceMappingURL=region.js.map

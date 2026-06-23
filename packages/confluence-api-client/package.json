@@ -54,15 +54,14 @@
     "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.85"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
-    "@effect/cli": "latest",
     "@effect/platform-node": "latest",
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
     "effect": "latest",
     "openapi-typescript": "^7.13.0",

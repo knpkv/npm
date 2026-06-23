@@ -33,12 +33,8 @@
   },
   "dependencies": {
     "@aws-sdk/credential-providers": "^3.974.0",
-    "@effect-atom/atom": "latest",
-    "@effect/experimental": "latest",
-    "@effect/platform": "latest",
-    "@effect/schema": "latest",
-    "@effect/sql": "latest",
-    "@effect/sql-libsql": "latest",
+    "@effect/platform": "workspace:*",
+    "@effect/sql-libsql": "4.0.0-beta.85",
     "@libsql/client": "^0.14.0",
     "distilled-aws": "0.0.21",
     "effect": "latest"

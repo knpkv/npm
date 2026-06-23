@@ -15,8 +15,7 @@
     "format:fix": "prettier --write .",
     "changeset:version": "changeset version",
     "changeset:publish": "pnpm build && changeset publish",
-    "prepare": "ts-patch install -s && husky",
-    "effect-solutions": "effect-solutions"
+    "prepare": "ts-patch install -s && husky"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",
@@ -24,11 +23,11 @@
     "@effect/build-utils": "^0.8.9",
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.45.1",
-    "@effect/vitest": "^0.27.0",
+    "@effect/platform": "workspace:*",
+    "@effect/vitest": "4.0.0-beta.85",
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.8.1",
     "@vitest/coverage-v8": "^4.0.13",
-    "effect-solutions": "^0.4.13",
     "eslint": "^9.36.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.1",
@@ -51,14 +50,16 @@
   "pnpm": {
     "patchedDependencies": {
       "@changesets/get-github-info@0.6.0": "patches/@changesets__get-github-info@0.6.0.patch",
-      "@changesets/assemble-release-plan": "patches/@changesets__assemble-release-plan.patch"
+      "@changesets/assemble-release-plan": "patches/@changesets__assemble-release-plan.patch",
+      "distilled-aws@0.0.21": "patches/distilled-aws@0.0.21.patch"
     },
     "overrides": {
       "distilled-aws>fast-xml-parser": "^5.3.4",
       "vitest": "$vitest",
-      "@effect/platform": "0.95.0",
-      "@effect/platform-node": "0.105.0",
-      "effect": "3.21.0"
+      "@effect/vitest": "4.0.0-beta.85",
+      "@effect/platform-bun": "4.0.0-beta.85",
+      "@effect/platform-node": "4.0.0-beta.85",
+      "effect": "4.0.0-beta.85"
     }
   }
 }

@@ -23,23 +23,23 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./src/index.ts"
     },
     "./JiraAuth": {
       "import": "./dist/JiraAuth.js",
-      "types": "./dist/JiraAuth.d.ts"
+      "types": "./src/JiraAuth.ts"
     },
     "./IssueService": {
       "import": "./dist/IssueService.js",
-      "types": "./dist/IssueService.d.ts"
+      "types": "./src/IssueService.ts"
     },
     "./MarkdownWriter": {
       "import": "./dist/MarkdownWriter.js",
-      "types": "./dist/MarkdownWriter.d.ts"
+      "types": "./src/MarkdownWriter.ts"
     },
     "./JiraCliError": {
       "import": "./dist/JiraCliError.js",
-      "types": "./dist/JiraCliError.d.ts"
+      "types": "./src/JiraCliError.ts"
     }
   },
   "publishConfig": {
@@ -55,19 +55,16 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@effect/platform": ">=0.93.0 <0.96.0",
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.85"
   },
   "dependencies": {
-    "@effect/cli": "latest",
     "@effect/platform-node": "latest",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/jira-api-client": "workspace:*",
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@effect/platform": "latest",
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
     "effect": "latest",
     "typescript": "~5.9.0",

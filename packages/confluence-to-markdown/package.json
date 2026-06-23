@@ -97,14 +97,12 @@
     "link": "npm link"
   },
   "peerDependencies": {
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.85"
   },
   "dependencies": {
     "@atlaskit/adf-schema": "^52.7.1",
     "@atlaskit/editor-json-transformer": "^8.31.8",
     "@atlaskit/editor-markdown-transformer": "^5.20.6",
-    "@effect/cli": "latest",
-    "@effect/platform": "latest",
     "@effect/platform-node": "latest",
     "@knpkv/confluence-api-client": "workspace:^",
     "ajv": "^8.20.0",
@@ -112,9 +110,9 @@
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.27.0",
+    "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "^22.15.21",
-    "effect": "^3.21.0",
+    "effect": "4.0.0-beta.85",
     "typescript": "~5.9.0",
     "vitest": "^4.0.13"
   },

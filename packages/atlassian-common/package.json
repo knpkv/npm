@@ -20,27 +20,27 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./src/index.ts"
     },
     "./ast": {
       "import": "./dist/ast/index.js",
-      "types": "./dist/ast/index.d.ts"
+      "types": "./src/ast/index.ts"
     },
     "./serializers": {
       "import": "./dist/serializers/index.js",
-      "types": "./dist/serializers/index.d.ts"
+      "types": "./src/serializers/index.ts"
     },
     "./parsers": {
       "import": "./dist/parsers/index.js",
-      "types": "./dist/parsers/index.d.ts"
+      "types": "./src/parsers/index.ts"
     },
     "./auth": {
       "import": "./dist/auth/index.js",
-      "types": "./dist/auth/index.d.ts"
+      "types": "./src/auth/index.ts"
     },
     "./config": {
       "import": "./dist/config/index.js",
-      "types": "./dist/config/index.d.ts"
+      "types": "./src/config/index.ts"
     }
   },
   "publishConfig": {
@@ -56,8 +56,7 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@effect/platform": ">=0.93.0 <0.96.0",
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.85"
   },
   "dependencies": {
     "remark-gfm": "^4.0.1",
@@ -66,9 +65,8 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
-    "@effect/platform": "latest",
     "@effect/platform-node": "latest",
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.85",
     "@types/node": "latest",
     "effect": "latest",
     "typescript": "~5.9.0",
