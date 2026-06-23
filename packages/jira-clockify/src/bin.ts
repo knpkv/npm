@@ -37,4 +37,4 @@ const program = processArgv.pipe(
   Effect.provide(NodeStdio.layer)
 )
 
-NodeRuntime.runMain(program as Effect.Effect<void, unknown, never>)
+NodeRuntime.runMain(program)

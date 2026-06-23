@@ -6,12 +6,14 @@
  */
 import { Command, Flag as Options } from "effect/unstable/cli"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as Stdio from "effect/Stdio"
+import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import pkg from "../package.json" with { type: "json" }
@@ -32,6 +34,26 @@ interface ScriptPaths {
   readonly generatedDir: string
 }
 
+const fetchText = (url: string): Effect.Effect<string, Error, HttpClient.HttpClient> =>
+  HttpClient.get(url).pipe(
+    Effect.flatMap((response) =>
+      response.status >= 200 && response.status < 300
+        ? response.text
+        : Effect.fail(new Error(`Failed to fetch ${url}: ${response.status}`))
+    ),
+    Effect.mapError((e) => e instanceof Error ? e : new Error(`Fetch failed: ${e}`))
+  )
+
+const fetchJson = <A>(url: string): Effect.Effect<A, Error, HttpClient.HttpClient> =>
+  fetchText(url).pipe(
+    Effect.flatMap((text) =>
+      Effect.try({
+        try: () => JSON.parse(text) as A,
+        catch: (e) => new Error(`JSON parse failed: ${e}`)
+      })
+    )
+  )
+
 const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(function*() {
   const path = yield* Path.Path
   const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
@@ -49,32 +71,18 @@ const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(fun
   }
 })
 
-const fetchSpecInfo = (url: string): Effect.Effect<SpecInfo, Error> =>
-  Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${url}: ${response.status}`)
-      }
-      const spec = await response.json() as { info: { version: string; title: string } }
-      return { version: spec.info.version, title: spec.info.title }
-    },
-    catch: (e) => new Error(`Fetch failed: ${e}`)
-  })
+const fetchSpecInfo = (url: string): Effect.Effect<SpecInfo, Error, HttpClient.HttpClient> =>
+  fetchJson<{ info: { version: string; title: string } }>(url).pipe(
+    Effect.map((spec) => ({ version: spec.info.version, title: spec.info.title }))
+  )
 
-const fetchAndSaveSpec = (url: string, outputPath: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+const fetchAndSaveSpec = (
+  url: string,
+  outputPath: string
+): Effect.Effect<void, Error, FileSystem.FileSystem | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const spec = yield* Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(url)
-        if (!response.ok) {
-          throw new Error(`Failed to fetch ${url}: ${response.status}`)
-        }
-        return await response.text()
-      },
-      catch: (e) => new Error(`Fetch failed: ${e}`)
-    })
+    const spec = yield* fetchText(url)
     yield* fs.writeFileString(outputPath, spec).pipe(
       Effect.mapError((e) => new Error(`Save failed: ${e.message}`))
     )
@@ -201,6 +209,7 @@ Effect.gen(function*() {
   const argv = yield* readArgv
   yield* cli(argv)
 }).pipe(
+  Effect.provide(NodeHttpClient.layerFetch),
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain
 )

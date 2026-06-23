@@ -57,4 +57,4 @@ const program = Effect.gen(function*() {
   Effect.catchCause((cause) => handleError(cause))
 )
 
-NodeRuntime.runMain(program as unknown as Effect.Effect<void, unknown, never>)
+NodeRuntime.runMain(program)
