@@ -55,18 +55,18 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.85"
+    "effect": "4.0.0-beta.87"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.85",
+    "@effect/platform-node": "4.0.0-beta.87",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/jira-api-client": "workspace:*",
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.85",
+    "@effect/vitest": "4.0.0-beta.87",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.85",
+    "effect": "4.0.0-beta.87",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   },

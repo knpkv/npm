@@ -27,5 +27,5 @@ export const openBrowser = (
 ): Effect.Effect<void, PlatformError.PlatformError, ChildProcessSpawner.ChildProcessSpawner> =>
   run("open", [url]).pipe(
     Effect.catch(() => run("xdg-open", [url])),
-    Effect.catch(() => run("cmd", ["/c", "start", "", url]))
+    Effect.catch(() => run("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
   )

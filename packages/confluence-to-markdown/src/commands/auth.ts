@@ -18,7 +18,7 @@ const openBrowser = (url: string) => {
 
   return run(ChildProcess.make("open", [url])).pipe(
     Effect.catchIf(() => true, () => run(ChildProcess.make("xdg-open", [url]))),
-    Effect.catchIf(() => true, () => run(ChildProcess.make("cmd", ["/c", "start", "", url]))),
+    Effect.catchIf(() => true, () => run(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))),
     Effect.asVoid
   )
 }

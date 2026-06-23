@@ -5,9 +5,8 @@ export type CommentLocationJson = typeof PRCommentLocationJson.Type
 export type CommentThreadJson = CommentLocationJson["comments"][number]
 
 export const CommentLocationsFromJson = Schema.fromJsonString(Schema.Array(PRCommentLocationJson))
-const CommentLocationsDecoder = CommentLocationsFromJson as unknown as Schema.Decoder<
-  ReadonlyArray<CommentLocationJson>,
-  never
+const CommentLocationsDecoder = CommentLocationsFromJson as unknown as Schema.ConstraintDecoder<
+  ReadonlyArray<CommentLocationJson>
 >
 const decodeCommentLocationsOption = Schema.decodeUnknownOption(CommentLocationsDecoder)
 

@@ -47,16 +47,16 @@
     "regenerate": "tsx scripts/regenerate.ts"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.85"
+    "effect": "4.0.0-beta.87"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.85",
-    "@effect/vitest": "4.0.0-beta.85",
+    "@effect/platform-node": "4.0.0-beta.87",
+    "@effect/vitest": "4.0.0-beta.87",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.85",
+    "effect": "4.0.0-beta.87",
     "openapi-typescript": "^7.13.0",
     "openapi-typescript-helpers": "^0.1.0",
     "tsx": "^4.22.4",

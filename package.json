@@ -23,7 +23,7 @@
     "@effect/build-utils": "^0.8.9",
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.86.2",
-    "@effect/vitest": "4.0.0-beta.85",
+    "@effect/vitest": "4.0.0-beta.87",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.9",
@@ -54,11 +54,11 @@
     "overrides": {
       "distilled-aws>fast-xml-parser": "^5.3.4",
       "vitest": "$vitest",
-      "@effect/vitest": "4.0.0-beta.85",
-      "@effect/platform-bun": "4.0.0-beta.85",
-      "@effect/platform-node": "4.0.0-beta.85",
+      "@effect/vitest": "4.0.0-beta.87",
+      "@effect/platform-bun": "4.0.0-beta.87",
+      "@effect/platform-node": "4.0.0-beta.87",
       "@atlaskit/react-ufo": "7.1.0",
-      "effect": "4.0.0-beta.85"
+      "effect": "4.0.0-beta.87"
     }
   }
 }

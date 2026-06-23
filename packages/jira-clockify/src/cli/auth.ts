@@ -41,7 +41,7 @@ Create OAuth app in Atlassian Developer Console:
 
       yield* exitCode(ChildProcess.make("open", [url])).pipe(
         Effect.catch(() => exitCode(ChildProcess.make("xdg-open", [url]))),
-        Effect.catch(() => exitCode(ChildProcess.make("cmd", ["/c", "start", "", url]))),
+        Effect.catch(() => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))),
         Effect.asVoid,
         Effect.catch(() => Effect.void)
       )

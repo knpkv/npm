@@ -56,7 +56,7 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.85"
+    "effect": "4.0.0-beta.87"
   },
   "dependencies": {
     "remark-gfm": "^4.0.1",
@@ -65,10 +65,10 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.85",
-    "@effect/vitest": "4.0.0-beta.85",
+    "@effect/platform-node": "4.0.0-beta.87",
+    "@effect/vitest": "4.0.0-beta.87",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.85",
+    "effect": "4.0.0-beta.87",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   },

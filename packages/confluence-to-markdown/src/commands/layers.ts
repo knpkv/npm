@@ -201,7 +201,7 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
  * Determine which layer to use based on command.
  */
 export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "minimal" => {
-  const cmd = argv[2]
+  const cmd = argv[0]
   // auth commands need auth layer only
   if (cmd === "auth") {
     return "auth"

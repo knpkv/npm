@@ -33,7 +33,10 @@ const web = Command.make("web", {
       Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
     yield* exitCode(ChildProcess.make("open", [url])).pipe(
       Effect.catchIf(() => true, () => exitCode(ChildProcess.make("xdg-open", [url]))),
-      Effect.catchIf(() => true, () => exitCode(ChildProcess.make("cmd", ["/c", "start", "", url]))),
+      Effect.catchIf(
+        () => true,
+        () => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
+      ),
       Effect.catchIf(() => true, () => Effect.void)
     )
 

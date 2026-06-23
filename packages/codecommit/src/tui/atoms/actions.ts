@@ -164,7 +164,7 @@ export const openBrowserAtom = runtimeAtom.fn((link: string) =>
 
     yield* openWith("open", [link]).pipe(
       Effect.catchIf(() => true, () => openWith("xdg-open", [link])),
-      Effect.catchIf(() => true, () => openWith("cmd", ["/c", "start", "", link])),
+      Effect.catchIf(() => true, () => openWith("rundll32.exe", ["url.dll,FileProtocolHandler", link])),
       Effect.catchIf(() => true, (error) =>
         Effect.gen(function*() {
           const notificationRepo = yield* CacheService.NotificationRepo
