@@ -17,7 +17,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Stream } from "effect"
+import { Clock, Context, Effect, Layer, Stream } from "effect"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
@@ -70,15 +70,19 @@ export const AwsClientGatedLive: Layer.Layer<
       permService.isAuditEnabled().pipe(
         Effect.flatMap((enabled) =>
           enabled
-            ? auditLog.log({
-              timestamp: new Date().toISOString(),
-              operation: params.operation,
-              accountProfile: params.accountProfile,
-              region: params.region,
-              permissionState,
-              context: params.context,
-              durationMs
-            })
+            ? Clock.currentTimeMillis.pipe(
+              Effect.flatMap((nowMs) =>
+                auditLog.log({
+                  timestamp: new Date(nowMs).toISOString(),
+                  operation: params.operation,
+                  accountProfile: params.accountProfile,
+                  region: params.region,
+                  permissionState,
+                  context: params.context,
+                  durationMs
+                })
+              )
+            )
             : Effect.void
         ),
         Effect.catchCause(() => Effect.void)
@@ -135,9 +139,10 @@ export const AwsClientGatedLive: Layer.Layer<
       const g: GateParams = { operation: op, context: ctx(params), accountProfile: a.profile, region: a.region }
       return Effect.gen(function*() {
         const ps = yield* checkPermission(g)
-        const start = Date.now()
+        const start = yield* Clock.currentTimeMillis
         const result = yield* method(params)
-        yield* logAudit(g, ps, Date.now() - start)
+        const end = yield* Clock.currentTimeMillis
+        yield* logAudit(g, ps, end - start)
         return result
       })
     }
@@ -153,12 +158,21 @@ export const AwsClientGatedLive: Layer.Layer<
       const g: GateParams = { operation: op, context: ctx(params), accountProfile: a.profile, region: a.region }
       return Stream.unwrap(
         checkPermission(g).pipe(
-          Effect.map((ps) => {
-            const start = Date.now()
-            return method(params).pipe(
-              Stream.onEnd(logAudit(g, ps, Date.now() - start))
+          Effect.flatMap((ps) =>
+            Clock.currentTimeMillis.pipe(Effect.map((start) => ({
+              ps,
+              start
+            })))
+          ),
+          Effect.map(({ ps, start }) =>
+            method(params).pipe(
+              Stream.onEnd(
+                Clock.currentTimeMillis.pipe(
+                  Effect.flatMap((end) => logAudit(g, ps, end - start))
+                )
+              )
             )
-          })
+          )
         )
       )
     }

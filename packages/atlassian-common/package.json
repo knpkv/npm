@@ -20,27 +20,27 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./src/index.ts"
+      "types": "./dist/index.d.ts"
     },
     "./ast": {
       "import": "./dist/ast/index.js",
-      "types": "./src/ast/index.ts"
+      "types": "./dist/ast/index.d.ts"
     },
     "./serializers": {
       "import": "./dist/serializers/index.js",
-      "types": "./src/serializers/index.ts"
+      "types": "./dist/serializers/index.d.ts"
     },
     "./parsers": {
       "import": "./dist/parsers/index.js",
-      "types": "./src/parsers/index.ts"
+      "types": "./dist/parsers/index.d.ts"
     },
     "./auth": {
       "import": "./dist/auth/index.js",
-      "types": "./src/auth/index.ts"
+      "types": "./dist/auth/index.d.ts"
     },
     "./config": {
       "import": "./dist/config/index.js",
-      "types": "./src/config/index.ts"
+      "types": "./dist/config/index.d.ts"
     }
   },
   "publishConfig": {

@@ -1,4 +1,4 @@
-import { Array as Arr, Context, Effect, Layer, Option, Schema } from "effect"
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import type { Success } from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
@@ -100,11 +100,15 @@ const makeNotificationRepo = Effect.gen(function*() {
   })
 
   const add_ = (n: NewNotification) =>
-    sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile, created_at)
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((nowMs) =>
+        sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile, created_at)
           VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${
-      n.profile ?? ""
-    }, ${new Date().toISOString()})`
-      .pipe(Effect.asVoid)
+          n.profile ?? ""
+        }, ${new Date(nowMs).toISOString()})`
+      ),
+      Effect.asVoid
+    )
 
   const markRead_ = (id: number) => sql`UPDATE notifications SET read = 1 WHERE id = ${id}`.pipe(Effect.asVoid)
 

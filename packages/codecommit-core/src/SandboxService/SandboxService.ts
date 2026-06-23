@@ -6,30 +6,12 @@
  *
  * @module
  */
-import {
-  Cause,
-  Clock,
-  Config,
-  Context,
-  Duration,
-  Effect,
-  Layer,
-  Option,
-  Random,
-  Schedule,
-  Schema,
-  Stream
-} from "effect"
+import { Cause, Clock, Config, Context, Duration, Effect, Layer, Option, Random, Schedule, Stream } from "effect"
 import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
-import {
-  ConfigService,
-  defaultSandboxConfig,
-  type SandboxConfig,
-  SandboxConfig as SandboxConfigSchema
-} from "../ConfigService/index.js"
+import { ConfigService, defaultSandboxConfig, type SandboxConfig } from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
 import { type ContainerConfig, DockerService } from "./DockerService.js"
@@ -85,9 +67,6 @@ const makeContainerConfig = (
   }
 })
 
-const sandboxConfigDecoder = SandboxConfigSchema as unknown as Schema.Decoder<SandboxConfig, never>
-const sandboxConfigDefault = defaultSandboxConfig as unknown as SandboxConfig
-
 const makeSandboxService = Effect.gen(function*() {
   const repo = yield* SandboxRepo
   const docker = yield* DockerService
@@ -97,9 +76,9 @@ const makeSandboxService = Effect.gen(function*() {
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
-    Effect.flatMap((config) => Schema.decodeUnknownEffect(sandboxConfigDecoder)(config.sandbox)),
-    Effect.catchCause(() => Effect.succeed(sandboxConfigDefault))
-  ) as Effect.Effect<SandboxConfig>
+    Effect.map((config) => config.sandbox),
+    Effect.catchCause(() => Effect.succeed(defaultSandboxConfig))
+  )
 
   const updateStatus = (
     id: SandboxId,

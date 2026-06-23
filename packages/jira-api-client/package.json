@@ -20,19 +20,19 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./src/index.ts"
+      "types": "./dist/index.d.ts"
     },
     "./JiraApiClient": {
       "import": "./dist/JiraApiClient.js",
-      "types": "./src/JiraApiClient.ts"
+      "types": "./dist/JiraApiClient.d.ts"
     },
     "./JiraApiConfig": {
       "import": "./dist/JiraApiConfig.js",
-      "types": "./src/JiraApiConfig.ts"
+      "types": "./dist/JiraApiConfig.d.ts"
     },
     "./v3": {
       "import": "./dist/generated/v3/index.js",
-      "types": "./src/generated/v3/index.ts"
+      "types": "./dist/generated/v3/index.d.ts"
     }
   },
   "publishConfig": {

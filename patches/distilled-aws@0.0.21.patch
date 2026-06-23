@@ -37,15 +37,15 @@ diff --git a/lib/credentials.d.ts b/lib/credentials.d.ts
  import { type AwsCredentialIdentity } from "@smithy/types";
  import * as Redacted from "effect/Redacted";
 -declare const Credentials_base: Context.TagClass<Credentials, "AWS::Credentials", {
-+export declare const Credentials: Context.Service<Credentials, {
++export interface Credentials {
      accessKeyId: Redacted.Redacted<string>;
      secretAccessKey: Redacted.Redacted<string>;
      sessionToken: Redacted.Redacted<string> | undefined;
      expiration?: number | undefined;
- }>;
+-}>;
 -export declare class Credentials extends Credentials_base {
--}
-+export type Credentials = typeof Credentials;
+ }
++export declare const Credentials: Context.Service<Credentials, Credentials>;
  export declare const mock: Layer.Layer<Credentials, never, never>;
  export declare const fromAwsCredentialIdentity: (identity: AwsCredentialIdentity) => {
      accessKeyId: Redacted.Redacted<string>;
@@ -60,9 +60,9 @@ diff --git a/lib/credentials.d.ts b/lib/credentials.d.ts
 -export declare class SsoStartUrl extends SsoStartUrl_base {
 -}
 +export declare const SsoRegion: Context.Service<SsoRegion, string>;
-+export type SsoRegion = typeof SsoRegion;
++export type SsoRegion = string;
 +export declare const SsoStartUrl: Context.Service<SsoStartUrl, string>;
-+export type SsoStartUrl = typeof SsoStartUrl;
++export type SsoStartUrl = string;
  declare const ProfileNotFound_base: new <A extends Record<string, any> = {}>(args: import("effect/Types").Equals<A, {}> extends true ? void : { readonly [P in keyof A as P extends "_tag" ? never : P]: A[P]; }) => import("effect/Cause").YieldableError & {
      readonly _tag: "Alchemy::AWS::ProfileNotFound";
  } & Readonly<A>;
@@ -102,7 +102,7 @@ diff --git a/lib/region.d.ts b/lib/region.d.ts
 -export declare const fromEnv: () => Layer.Layer<Region, import("effect/ConfigError").ConfigError, never>;
  export type RegionName = "us-east-1" | "us-east-2" | "us-west-1" | "us-west-2" | "af-south-1" | "ap-east-1" | "ap-south-2" | "ap-southeast-3" | "ap-southeast-5" | "ap-southeast-4" | "ap-south-1" | "ap-southeast-6" | "ap-northeast-3" | "ap-northeast-2" | "ap-southeast-1" | "ap-southeast-2" | "ap-east-2" | "ap-southeast-7" | "ap-northeast-1" | "ca-central-1" | "ca-west-1" | "eu-central-1" | "eu-west-1" | "eu-west-2" | "eu-south-1" | "eu-west-3" | "eu-south-2" | "eu-north-1" | "eu-central-2" | "il-central-1" | "mx-central-1" | "me-south-1" | "me-central-1" | "sa-east-1" | (string & {});
 +export declare const Region: Context.Service<Region, RegionName>;
-+export type Region = typeof Region;
++export type Region = RegionName;
 +export declare const fromEnv: () => Layer.Layer<Region, import("effect/ConfigError").ConfigError, never>;
  export {};
  //# sourceMappingURL=region.d.ts.map

@@ -90,9 +90,7 @@ export const ConfigServiceLive = Layer.effect(
     const detectProfilesLive = detectProfiles.pipe(
       Effect.mapError((cause) => new ProfileDetectionError({ message: "Failed to detect AWS profiles", cause }))
     )
-    const load = makeLoad(detectProfilesLive).pipe(
-      Effect.map((config) => config as TuiConfig)
-    )
+    const load = makeLoad(detectProfilesLive)
     const reset = makeReset(detectProfilesLive)
 
     return {
@@ -101,7 +99,7 @@ export const ConfigServiceLive = Layer.effect(
       detectProfiles: provide(detectProfilesLive),
       getConfigPath: provide(ConfigPaths.pipe(Effect.flatMap((p) => p.configPath))),
       backup: provide(backup),
-      reset: provide(reset as Effect.Effect<TuiConfig, unknown, FileSystem.FileSystem | Path.Path | ConfigPaths>),
+      reset: provide(reset),
       validate: provide(validate)
     }
   })

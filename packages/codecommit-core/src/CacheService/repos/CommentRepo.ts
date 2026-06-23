@@ -3,16 +3,14 @@ import type { Success } from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import type { PRCommentLocation } from "../../Domain.js"
-import { PRCommentLocationJson } from "../../Domain.js"
 import { CacheError } from "../CacheError.js"
 import { DatabaseLive } from "../Database.js"
 import { EventsHub, RepoChange } from "../EventsHub.js"
+import { decodeCommentLocations } from "./commentLocations.js"
 
 const CommentRow = Schema.Struct({
   locationsJson: Schema.String
 })
-
-const LocationsFromJson = Schema.fromJsonString(Schema.Array(PRCommentLocationJson))
 
 const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
@@ -48,10 +46,9 @@ const makeCommentRepo = Effect.gen(function*() {
           Option.match({
             onNone: () => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()),
             onSome: (r) =>
-              Schema.decodeUnknownEffect(LocationsFromJson)(r.locationsJson).pipe(
+              decodeCommentLocations(r.locationsJson).pipe(
                 // PRCommentLocationJson is structurally compatible with PRCommentLocation for diff/count
-                Effect.map((decoded) => Option.some(decoded as unknown as ReadonlyArray<PRCommentLocation>)),
-                Effect.catchIf(() => true, () => Effect.succeed(Option.some<ReadonlyArray<PRCommentLocation>>([])))
+                Effect.map((decoded) => Option.some(decoded as unknown as ReadonlyArray<PRCommentLocation>))
               )
           })
         ),

@@ -16,23 +16,23 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./src/index.ts"
+      "types": "./dist/index.d.ts"
     },
     "./ClockifyApiClient": {
       "import": "./dist/ClockifyApiClient.js",
-      "types": "./src/ClockifyApiClient.ts"
+      "types": "./dist/ClockifyApiClient.d.ts"
     },
     "./ClockifyApiConfig": {
       "import": "./dist/ClockifyApiConfig.js",
-      "types": "./src/ClockifyApiConfig.ts"
+      "types": "./dist/ClockifyApiConfig.d.ts"
     },
     "./ClockifyApiError": {
       "import": "./dist/ClockifyApiError.js",
-      "types": "./src/ClockifyApiError.ts"
+      "types": "./dist/ClockifyApiError.d.ts"
     },
     "./generated": {
       "import": "./dist/generated/index.js",
-      "types": "./src/generated/index.ts"
+      "types": "./dist/generated/index.d.ts"
     }
   },
   "publishConfig": {

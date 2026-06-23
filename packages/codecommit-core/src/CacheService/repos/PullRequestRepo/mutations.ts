@@ -18,7 +18,7 @@
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
-import { PRCommentLocationJson } from "../../../Domain.js"
+import { type CommentThreadJson, decodeCommentLocations } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 
 export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>) => {
@@ -150,7 +150,6 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     refreshCommentedBy: () =>
       sql.withTransaction(
         Effect.gen(function*() {
-          const LocationsFromJson = Schema.fromJsonString(Schema.Array(PRCommentLocationJson))
           const rows = yield* sql<
             { awsAccountId: string; pullRequestId: string; author: string; locationsJson: string }
           >`
@@ -159,11 +158,9 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
           `
           for (const row of rows) {
-            const parsed = yield* Schema.decodeUnknownEffect(LocationsFromJson)(row.locationsJson).pipe(
-              Effect.catchIf(() => true, () => Effect.succeed([]))
-            )
+            const parsed = yield* decodeCommentLocations(row.locationsJson)
             const commenters = new Set<string>()
-            const walk = (threads: ReadonlyArray<typeof PRCommentLocationJson.Type["comments"][number]>) => {
+            const walk = (threads: ReadonlyArray<CommentThreadJson>) => {
               for (const t of threads) {
                 if (t.root.author !== row.author) commenters.add(t.root.author)
                 walk(t.replies)

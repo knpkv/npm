@@ -14,7 +14,7 @@
  *
  * @category Service
  */
-import { Context, Data, Effect, Layer, Option, type SubscriptionRef } from "effect"
+import { Clock, Context, Data, Effect, Layer, Option, type SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { StatsRepo } from "../CacheService/repos/StatsRepo/index.js"
@@ -55,7 +55,8 @@ const makeStatsService = Effect.gen(function*() {
       })
       const weekStart = range.start.toISOString()
       const weekEnd = range.end.toISOString()
-      const nowISO = new Date().toISOString()
+      const nowMs = yield* Clock.currentTimeMillis
+      const nowISO = new Date(nowMs).toISOString()
 
       const [
         volume,

@@ -351,9 +351,9 @@ export const getPullRequests = (
       )
 
       return stream.pipe(
-        Stream.provide(DistilledCredentials.fromCredentials(credentials as never)),
+        Stream.provide(DistilledCredentials.fromCredentials(credentials)),
         Stream.provideService(HttpClient.HttpClient, httpClient),
-        Stream.provideService(DistilledRegion.Region as never, account.region),
+        Stream.provideService(DistilledRegion.Region, account.region),
         Stream.timeout(config.streamTimeout)
       )
     })

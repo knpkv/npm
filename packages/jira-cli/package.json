@@ -23,23 +23,23 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./src/index.ts"
+      "types": "./dist/index.d.ts"
     },
     "./JiraAuth": {
       "import": "./dist/JiraAuth.js",
-      "types": "./src/JiraAuth.ts"
+      "types": "./dist/JiraAuth.d.ts"
     },
     "./IssueService": {
       "import": "./dist/IssueService.js",
-      "types": "./src/IssueService.ts"
+      "types": "./dist/IssueService.d.ts"
     },
     "./MarkdownWriter": {
       "import": "./dist/MarkdownWriter.js",
-      "types": "./src/MarkdownWriter.ts"
+      "types": "./dist/MarkdownWriter.d.ts"
     },
     "./JiraCliError": {
       "import": "./dist/JiraCliError.js",
-      "types": "./src/JiraCliError.ts"
+      "types": "./dist/JiraCliError.d.ts"
     }
   },
   "publishConfig": {

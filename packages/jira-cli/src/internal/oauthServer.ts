@@ -22,6 +22,8 @@ import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http
 import type * as HttpServerError from "effect/unstable/http/HttpServerError"
 
 const DEFAULT_PORT = 8585
+const MAX_PORT = 8594
+type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
 /**
  * Factory service for creating HTTP servers.
  * This allows mocking the server creation in tests.
@@ -89,11 +91,20 @@ export const startCallbackServer = (
     const factory = yield* HttpServerFactoryTag
     const deferred = yield* Deferred.make<string, OAuthError>()
     const serverScope = yield* Scope.make()
-    const serverLayer = factory.createServerLayer(DEFAULT_PORT)
-    const serverContext = yield* Layer.buildWithScope(serverLayer, serverScope).pipe(
-      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-    )
-    const server = Context.get(serverContext, HttpServer.HttpServer)
+    const buildServerContext = (port: number): Effect.Effect<
+      { readonly context: Context.Context<HttpServer.HttpServer>; readonly port: number },
+      OAuthError
+    > =>
+      Layer.buildWithScope(factory.createServerLayer(port), serverScope).pipe(
+        Effect.map((context) => ({ context, port })),
+        Effect.catchCause((cause) =>
+          port < MAX_PORT
+            ? buildServerContext(port + 1)
+            : Effect.fail(new OAuthError({ step: "authorize", cause }))
+        )
+      )
+    const { context: serverContext } = yield* buildServerContext(DEFAULT_PORT)
+    const server: HttpServerInstance = Context.get(serverContext, HttpServer.HttpServer)
     const port = yield* (server.address._tag === "TcpAddress"
       ? Effect.succeed(server.address.port)
       : Effect.fail(new OAuthError({ step: "authorize", cause: "OAuth callback server must listen on a TCP port" })))

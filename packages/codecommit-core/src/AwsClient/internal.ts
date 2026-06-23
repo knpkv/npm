@@ -148,9 +148,9 @@ export const withAwsContext = <A, E>(
     return yield* Effect.provide(
       effect,
       Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials as never),
+        DistilledCredentials.fromCredentials(credentials),
         Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(DistilledRegion.Region as never, account.region),
+        Layer.succeed(DistilledRegion.Region, account.region),
         Layer.succeed(AwsClientConfig, config)
       )
     ).pipe(

@@ -16,7 +16,7 @@ describe("oauthServer", () => {
         const expectedState = "test-state-123"
         const result = yield* startCallbackServer(expectedState)
 
-        expect(result.port).toBeGreaterThan(0)
+        expect(result.port).toBe(8585)
         expect(typeof result.codePromise).toBe("object")
         expect(typeof result.shutdown).toBe("object")
 

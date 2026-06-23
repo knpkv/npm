@@ -14,6 +14,10 @@ import type { HttpServerError } from "effect/unstable/http"
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { OAuthError } from "../ConfluenceError.js"
 
+const DEFAULT_PORT = 8585
+const MAX_PORT = 8594
+type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
+
 /**
  * Factory service for creating HTTP servers.
  * This allows mocking the server creation in tests.
@@ -21,7 +25,7 @@ import { OAuthError } from "../ConfluenceError.js"
  * @category Services
  */
 export interface HttpServerFactory {
-  readonly createServerLayer: () => Layer.Layer<
+  readonly createServerLayer: (port: number) => Layer.Layer<
     HttpServer.HttpServer,
     HttpServerError.ServeError,
     never
@@ -48,7 +52,7 @@ export class HttpServerFactoryTag extends Context.Service<
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: () => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
+  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
@@ -81,14 +85,20 @@ export const startCallbackServer = (
     const factory = yield* HttpServerFactoryTag
     const deferred = yield* Deferred.make<string, OAuthError>()
     const readyDeferred = yield* Deferred.make<void, OAuthError>()
-    const serverLayer = factory.createServerLayer()
     const scope = yield* Scope.make()
 
-    const server = yield* Layer.build(serverLayer).pipe(
-      Scope.provide(scope),
-      Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
-      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-    )
+    const buildServer = (port: number): Effect.Effect<HttpServerInstance, OAuthError> =>
+      Layer.build(factory.createServerLayer(port)).pipe(
+        Scope.provide(scope),
+        Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
+        Effect.catchCause((cause) =>
+          port < MAX_PORT
+            ? buildServer(port + 1)
+            : Effect.fail(new OAuthError({ step: "authorize", cause }))
+        )
+      )
+
+    const server = yield* buildServer(DEFAULT_PORT)
 
     if (server.address._tag !== "TcpAddress") {
       return yield* Effect.fail(

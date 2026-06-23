@@ -6,7 +6,7 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
 import type { ProfileDetectionError } from "../Errors.js"
 import { backup } from "./backup.js"
-import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, type TuiConfig } from "./internal.js"
+import { ConfigPaths, type DetectedProfile, makeDefaultConfig } from "./internal.js"
 import { save } from "./save.js"
 
 export const makeReset = (
@@ -15,7 +15,7 @@ export const makeReset = (
     ProfileDetectionError,
     FileSystem.FileSystem | Path.Path | ConfigPaths
   >
-): Effect.Effect<TuiConfig, unknown, unknown> =>
+) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const paths = yield* ConfigPaths
@@ -33,17 +33,7 @@ export const makeReset = (
       Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
     )
 
-    const config: TuiConfig = {
-      accounts: detected.map((p) => ({
-        profile: p.name,
-        regions: p.region ? [p.region] : [],
-        enabled: false
-      })),
-      autoDetect: true,
-      autoRefresh: true,
-      refreshIntervalSeconds: 300,
-      sandbox: defaultSandboxConfig
-    }
+    const config = makeDefaultConfig(detected)
 
     yield* save(config)
     return config

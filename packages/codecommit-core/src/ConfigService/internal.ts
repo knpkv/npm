@@ -43,14 +43,7 @@ export const SandboxConfig = Schema.Struct({
 
 export type SandboxConfig = typeof SandboxConfig.Type
 
-export const defaultSandboxConfig: SandboxConfig = {
-  image: "codercom/code-server:latest",
-  extensions: [],
-  setupCommands: [],
-  env: {},
-  volumeMounts: [],
-  cloneDepth: 0
-}
+export const defaultSandboxConfig: SandboxConfig = Schema.decodeSync(SandboxConfig)({})
 
 export const AccountConfig = Schema.Struct({
   profile: AwsProfileName,
@@ -73,6 +66,21 @@ export const TuiConfig = Schema.Struct({
 })
 
 export type TuiConfig = typeof TuiConfig.Type
+
+export const accountsFromDetected = (detected: ReadonlyArray<DetectedProfile>): TuiConfig["accounts"] =>
+  detected.map((profile) => ({
+    profile: profile.name,
+    regions: profile.region ? [profile.region] : [],
+    enabled: false
+  }))
+
+export const makeDefaultConfig = (detected: ReadonlyArray<DetectedProfile> = []): TuiConfig => ({
+  accounts: accountsFromDetected(detected),
+  autoDetect: true,
+  autoRefresh: true,
+  refreshIntervalSeconds: 300,
+  sandbox: defaultSandboxConfig
+})
 
 // ---------------------------------------------------------------------------
 // INI Parsing (Schema-validated)

@@ -20,7 +20,7 @@ patchedDependencies:
     hash: 1387c42d40315dc7805094fb3085da092ec802de277560db46fb53567ba583ec
     path: patches/@changesets__get-github-info@0.6.0.patch
   distilled-aws@0.0.21:
-    hash: e65c81687e08c42297cfd727cc04ebd1db1ed1ff8f02c675dfdbb779067ffcf3
+    hash: 53aece7a363f5c5f95516213d73832b3efe8fac5c5747ec2755db97896da571b
     path: patches/distilled-aws@0.0.21.patch
 
 importers:
@@ -248,7 +248,7 @@ importers:
         version: 0.14.0
       distilled-aws:
         specifier: 0.0.21
-        version: 0.0.21(patch_hash=e65c81687e08c42297cfd727cc04ebd1db1ed1ff8f02c675dfdbb779067ffcf3)(@effect/platform@packages+effect-platform)(effect@4.0.0-beta.85)
+        version: 0.0.21(patch_hash=53aece7a363f5c5f95516213d73832b3efe8fac5c5747ec2755db97896da571b)(@effect/platform@packages+effect-platform)(effect@4.0.0-beta.85)
       effect:
         specifier: 4.0.0-beta.85
         version: 4.0.0-beta.85
@@ -9648,7 +9648,7 @@ snapshots:
     dependencies:
       path-type: 4.0.0
 
-  distilled-aws@0.0.21(patch_hash=e65c81687e08c42297cfd727cc04ebd1db1ed1ff8f02c675dfdbb779067ffcf3)(@effect/platform@packages+effect-platform)(effect@4.0.0-beta.85):
+  distilled-aws@0.0.21(patch_hash=53aece7a363f5c5f95516213d73832b3efe8fac5c5747ec2755db97896da571b)(@effect/platform@packages+effect-platform)(effect@4.0.0-beta.85):
     dependencies:
       '@aws-crypto/crc32': 5.2.0
       '@aws-sdk/credential-providers': 3.1011.0

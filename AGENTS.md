@@ -105,16 +105,18 @@ This project adheres to a strict set of development standards to ensure code qua
 4.  The CI will create a version PR automatically.
 5.  Merge the version PR to publish the changes.
 
-<!-- effect-solutions:start -->
+<!-- effect-reference:start -->
 
-## Effect Solutions Usage
+## Effect Source Reference
 
-The Effect Solutions CLI provides curated best practices and patterns for Effect TypeScript. Before working on Effect code, check if there's a relevant topic that covers your use case.
+The Effect beta source is available in this workspace under `repos/effect`. Before changing Effect code, use `rg` there to verify current beta APIs and local idioms.
 
-- `pnpm effect-solutions list` - List all available topics
-- `pnpm effect-solutions show <slug...>` - Read one or more topics
-- `pnpm effect-solutions search <term>` - Search topics by keyword
+Recommended checks:
 
-**Local Effect Source:** The Effect repository is cloned to `~/.local/share/effect-solutions/effect` for reference. Use this to explore APIs, find usage examples, and understand implementation details when the documentation isn't enough.
+- `rg "Context.Service" repos/effect/packages`
+- `rg "NodeHttpServer" repos/effect/packages`
+- `rg "Clock.currentTimeMillis" repos/effect/packages`
 
-<!-- effect-solutions:end -->
+Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
+
+<!-- effect-reference:end -->

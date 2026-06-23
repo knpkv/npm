@@ -6,7 +6,7 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
 import { ConfigError, ConfigParseError } from "../Errors.js"
 import type { ProfileDetectionError } from "../Errors.js"
-import { ConfigPaths, defaultSandboxConfig, type DetectedProfile, TuiConfig } from "./internal.js"
+import { accountsFromDetected, ConfigPaths, type DetectedProfile, makeDefaultConfig, TuiConfig } from "./internal.js"
 
 export const makeLoad = (
   detectProfiles: Effect.Effect<
@@ -29,25 +29,9 @@ export const makeLoad = (
         Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
       )
       if (detected.length > 0) {
-        return {
-          accounts: detected.map((p) => ({
-            profile: p.name,
-            regions: p.region ? [p.region] : [],
-            enabled: false
-          })),
-          autoDetect: true,
-          autoRefresh: true,
-          refreshIntervalSeconds: 300,
-          sandbox: defaultSandboxConfig
-        }
+        return makeDefaultConfig(detected)
       }
-      return {
-        accounts: [],
-        autoDetect: true,
-        autoRefresh: true,
-        refreshIntervalSeconds: 300,
-        sandbox: defaultSandboxConfig
-      }
+      return makeDefaultConfig()
     }
 
     const content = yield* fs.readFileString(configPath).pipe(
@@ -65,11 +49,7 @@ export const makeLoad = (
       if (detected.length > 0) {
         return {
           ...config,
-          accounts: detected.map((p) => ({
-            profile: p.name,
-            regions: p.region ? [p.region] : [],
-            enabled: false
-          }))
+          accounts: accountsFromDetected(detected)
         }
       }
     }
