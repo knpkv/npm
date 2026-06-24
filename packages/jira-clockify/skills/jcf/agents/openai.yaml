@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jira Clockify CLI"
+  short_description: "Track Jira work in Clockify"
+  default_prompt: "Use $jcf to start, stop, log, or inspect Jira Clockify timers."

@@ -5,7 +5,9 @@
  * @module
  */
 import { NodeRuntime, NodeStdio } from "@effect/platform-node"
+import { makeInstallCommand } from "@knpkv/agent-skills"
 import { Effect } from "effect"
+import * as Console from "effect/Console"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
 import { auth } from "./cli/auth.js"
@@ -23,8 +25,18 @@ const processArgv = Effect.gen(function*() {
 
 const tui = Command.make("tui", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup)))
 
+const skillsInstall = makeInstallCommand({
+  description: "Install the Jira Clockify agent skill",
+  name: "install",
+  skills: ["jcf"]
+})
+
+const skills = Command.make("skills", {}, () => Console.log("Usage: jcf skills install")).pipe(
+  Command.withSubcommands([skillsInstall])
+)
+
 const root = Command.make("jcf", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))).pipe(
-  Command.withSubcommands([tui, auth, start, stop, discard, log, statusCmd, list, config, edit])
+  Command.withSubcommands([tui, auth, start, stop, discard, log, statusCmd, list, config, edit, skills])
 )
 
 const cli = Command.runWith(root, {

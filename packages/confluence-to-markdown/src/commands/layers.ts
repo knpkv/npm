@@ -211,7 +211,7 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
     return "clone"
   }
   // --help, -h, --version don't need config
-  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {
+  if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
     return "minimal"
   }
   return "full"

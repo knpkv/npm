@@ -1,0 +1,53 @@
+{
+  "name": "@knpkv/agent-skills",
+  "version": "0.1.0",
+  "description": "Installer for @knpkv agent skills",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/agent-skills"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "knpkv-skills": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "start": "tsx src/bin.ts",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.87",
+    "effect": "4.0.0-beta.87"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "^4.22.4",
+    "typescript": "~6.0.3"
+  },
+  "keywords": [
+    "agent",
+    "skills",
+    "codex",
+    "claude",
+    "cli"
+  ]
+}

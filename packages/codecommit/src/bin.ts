@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-import { BunRuntime, BunServices, BunStdio } from "@effect/platform-bun"
+import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
+import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { makeServer } from "@knpkv/codecommit-web"
@@ -411,27 +412,36 @@ const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <comma
   Command.withDescription("Pull request commands")
 )
 
+const skillsInstall = makeInstallCommand({
+  description: "Install the CodeCommit agent skill",
+  name: "install",
+  skills: ["codecommit"]
+})
+
+const skills = Command.make("skills", {}, () => Console.log("Usage: codecommit skills install")).pipe(
+  Command.withSubcommands([skillsInstall]),
+  Command.withDescription("Agent skill commands")
+)
+
 const command = Command.make("codecommit", {}, () =>
   // Default to TUI if no subcommand
   launchTui).pipe(
-    Command.withSubcommands([tui, web, pr])
+    Command.withSubcommands([tui, web, pr, skills])
   )
 
 const cli = Command.runWith(command, {
   version: pkg.version
 })
 
-const RuntimeLayer = Layer.mergeAll(
-  BunServices.layer,
-  BunStdio.layer,
-  NodeHttpClient.layerUndici,
-  AwsClientConfig.Default
-)
+const AppRuntimeLayer = Layer.mergeAll(NodeHttpClient.layerUndici, AwsClientConfig.Default)
+
+const needsAppRuntime = (args: ReadonlyArray<string>): boolean => args[0] !== "skills"
 
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  return yield* cli(args)
+  const runCli = needsAppRuntime(args) ? cli(args).pipe(Effect.provide(AppRuntimeLayer)) : cli(args)
+  return yield* runCli
 })
 
-BunRuntime.runMain(Effect.provide(program, RuntimeLayer))
+BunRuntime.runMain(Effect.provide(program, BunServices.layer))
