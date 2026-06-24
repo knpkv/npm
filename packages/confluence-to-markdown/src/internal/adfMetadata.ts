@@ -42,6 +42,30 @@ const markerType = (line: string): string => {
   return match?.[1] ?? "metadata"
 }
 
+const fromBase64 = (b64: string): string => {
+  const bin = atob(b64)
+  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))
+}
+
+const parseMetadataValue = (raw: string): unknown | null => {
+  const trimmed = raw.trim()
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.parse(trimmed) as unknown
+    } catch {
+      return null
+    }
+  }
+
+  try {
+    const decoded = fromBase64(trimmed)
+    if (!decoded.startsWith("{") && !decoded.startsWith("[")) return null
+    return JSON.parse(decoded) as unknown
+  } catch {
+    return null
+  }
+}
+
 const externalizeLine = (
   line: string,
   sidecarHref: string,
@@ -59,16 +83,12 @@ const externalizeLine = (
 
     const valueStart = keyStart + needle.length
     const raw = line.slice(valueStart, end).trim()
-    if (!raw.startsWith("{") && !raw.startsWith("[")) return line
+    const value = parseMetadataValue(raw)
+    if (value === null) return line
 
-    try {
-      const value = JSON.parse(raw) as unknown
-      const id = nextId(markerType(line))
-      entries[id] = { kind, value }
-      return `${line.slice(0, keyStart)} ref=${sidecarHref}#${id} ${line.slice(end)}`
-    } catch {
-      return line
-    }
+    const id = nextId(markerType(line))
+    entries[id] = { kind, value }
+    return `${line.slice(0, keyStart)} ref=${sidecarHref}#${id} ${line.slice(end)}`
   }
 
   return line
