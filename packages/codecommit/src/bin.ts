@@ -93,7 +93,7 @@ const prCreate = Command.make("create", {
     yield* Console.log(`Created PR: ${prId}`)
     yield* Console.log(link)
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
   )).pipe(Command.withDescription("Create a pull request"))
 
 // Filter presets (FILTER_PRESETS, matchesPreset, matchesRepoAuthor) live in
@@ -259,7 +259,7 @@ const prList = Command.make("list", {
       FilterServiceLive.pipe(
         Layer.provideMerge(Layer.mergeAll(
           AwsClient.AwsClientLive,
-          NodeHttpClient.layerUndici,
+          NodeHttpClient.layerFetch,
           ConfigService.ConfigServiceLive.pipe(Layer.provide(CacheService.EventsHub.Default))
         ))
       )
@@ -355,7 +355,7 @@ const prExport = Command.make("export", {
       yield* Console.log(markdown)
     }
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
   )).pipe(Command.withDescription("Export PR comments as markdown"))
 
 // PR Update Command
@@ -403,7 +403,7 @@ const prUpdate = Command.make("update", {
 
     yield* Console.log(`Updated PR ${prId}`)
   }).pipe(
-    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerUndici))
+    Effect.provide(Layer.merge(AwsClient.AwsClientLive, NodeHttpClient.layerFetch))
   )).pipe(Command.withDescription("Update PR title or description"))
 
 // PR Command (parent)
@@ -433,7 +433,7 @@ const cli = Command.runWith(command, {
   version: pkg.version
 })
 
-const AppRuntimeLayer = Layer.mergeAll(NodeHttpClient.layerUndici, AwsClientConfig.Default)
+const AppRuntimeLayer = Layer.mergeAll(NodeHttpClient.layerFetch, AwsClientConfig.Default)
 
 const needsAppRuntime = (args: ReadonlyArray<string>): boolean => args[0] !== "skills"
 
