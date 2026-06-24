@@ -424,7 +424,11 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
       typeof attrs === "object" &&
       !Array.isArray(attrs)
     ) {
-      evidence.attrSignatures.add(`${type}:${stableJson(normalizeAttrs(attrs))}`)
+      const normalized = normalizeAttrs(attrs)
+      const extensionKey = (normalized as Record<string, unknown>)["extensionKey"]
+      if (!(type === "extension" && extensionKey === "toc")) {
+        evidence.attrSignatures.add(`${type}:${stableJson(normalized)}`)
+      }
     }
     if (type === "inlineCard") {
       if (attrs !== null && typeof attrs === "object" && !Array.isArray(attrs)) {
