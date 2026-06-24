@@ -8,8 +8,8 @@
  * - CONFLUENCE_ROOT_PAGE_ID: Test page ID
  * - OAuth tokens in ~/.confluence/ or CONFLUENCE_API_KEY + CONFLUENCE_EMAIL env vars
  */
-import { NodeServices } from "@effect/platform-node"
-import { Config, Effect } from "effect"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { Config, Effect, Option } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 let CLI_PATH = ""
 let BASE_URL = ""
 let ROOT_PAGE_ID = ""
+let HAS_INTEGRATION_CONFIG = false
 
 // Test state
 interface TestState {
@@ -100,8 +101,15 @@ const initializeTestEnvironment = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   CLI_PATH = yield* path.fromFileUrl(new URL("../dist/bin.js", import.meta.url))
-  BASE_URL = yield* Config.string("CONFLUENCE_BASE_URL")
-  ROOT_PAGE_ID = yield* Config.string("CONFLUENCE_ROOT_PAGE_ID")
+  const baseUrl = yield* Config.option(Config.string("CONFLUENCE_BASE_URL"))
+  const rootPageId = yield* Config.option(Config.string("CONFLUENCE_ROOT_PAGE_ID"))
+  if (Option.isNone(baseUrl) || Option.isNone(rootPageId)) {
+    HAS_INTEGRATION_CONFIG = false
+    return
+  }
+  BASE_URL = baseUrl.value
+  ROOT_PAGE_ID = rootPageId.value
+  HAS_INTEGRATION_CONFIG = true
   state.testDir = yield* fs.makeTempDirectory({ prefix: "confluence-test-" })
 })
 
@@ -256,6 +264,10 @@ describe("CLI Integration - Page Creation Flow", () => {
   })
 
   it("full cycle: clone -> create -> push -> pull -> modify -> push -> re-clone -> delete -> verify", async () => {
+    if (!HAS_INTEGRATION_CONFIG) {
+      return
+    }
+
     await runPlatform(Effect.gen(function*() {
       // 1. Clone pages from Confluence
       yield* clonePages
