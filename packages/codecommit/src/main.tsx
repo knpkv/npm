@@ -31,8 +31,13 @@ const program = Effect.gen(function* makeProgram() {
 
   const onQuit = () => {
     // Abort pending HTTP requests
-    Effect.runFork(cleanup.pipe(Effect.ignoreCause))
-    Effect.runSync(Deferred.succeed(exitSignal, void 0))
+    Effect.runFork(
+      Effect.gen(function* quit() {
+        yield* cleanup.pipe(Effect.ignoreCause)
+        yield* Effect.sleep("100 millis")
+        yield* Deferred.succeed(exitSignal, void 0)
+      })
+    )
   }
 
   // Mount React app

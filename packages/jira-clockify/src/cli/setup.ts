@@ -145,6 +145,7 @@ export const launchTui = (args: ReadonlyArray<string>) =>
       const scriptPath = path.join(thisDir, "../bin.js")
       const cliArgs = args.slice(2)
       yield* exitCode(ChildProcess.make("bun", [scriptPath, ...cliArgs], {
+        stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit"
       })).pipe(

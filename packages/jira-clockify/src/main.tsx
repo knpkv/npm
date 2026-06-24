@@ -8,20 +8,37 @@ import { createRoot } from "@opentui/react"
 import { Deferred, Effect } from "effect"
 import { App } from "./tui/App.js"
 
-const program = Effect.gen(function* () {
+const escape = "\u001b"
+
+const isTerminalCapabilityResponse = (sequence: string) =>
+  (sequence.startsWith(`${escape}P>|`) && sequence.includes(`${escape}\\`)) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("$y")) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("u")) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("c")) ||
+  sequence.includes("|ghostty ")
+
+const program = Effect.gen(function* makeProgram() {
   const exitSignal = yield* Deferred.make<void>()
 
   const renderer = yield* Effect.acquireRelease(
     Effect.promise(() =>
       createCliRenderer({
-        exitOnCtrlC: false
+        exitOnCtrlC: false,
+        prependInputHandlers: [isTerminalCapabilityResponse],
+        useKittyKeyboard: null,
+        useThread: false
       })
     ),
     (renderer) => Effect.sync(() => renderer.destroy())
   )
 
   const onQuit = () => {
-    Effect.runSync(Deferred.succeed(exitSignal, void 0))
+    Effect.runFork(
+      Effect.gen(function* quit() {
+        yield* Effect.sleep("100 millis")
+        yield* Deferred.succeed(exitSignal, void 0)
+      })
+    )
   }
 
   const root = createRoot(renderer)
