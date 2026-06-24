@@ -19,7 +19,7 @@ const program = Effect.gen(function* () {
 
   const onQuit = () => {
     // Abort pending HTTP requests
-    Effect.runFork(cleanup)
+    Effect.runFork(cleanup.pipe(Effect.ignoreCause))
     Effect.runSync(Deferred.succeed(exitSignal, void 0))
   }
 
@@ -31,4 +31,4 @@ const program = Effect.gen(function* () {
   yield* Deferred.await(exitSignal)
 }).pipe(Effect.scoped)
 
-Effect.runFork(program)
+export default program
