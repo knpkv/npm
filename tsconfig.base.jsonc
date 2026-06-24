@@ -25,6 +25,19 @@
     // Miscellaneoaus
     "skipLibCheck": true, // Skip type checking of third party libraries.
     "noErrorTruncation": true, // Do not truncate error messages.
-    "types": [] // Disable automatic loading of `@types/*` packages.
+    "types": [], // Disable automatic loading of `@types/*` packages.
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "overriddenschemaconstructor": "off"
+        },
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": true,
+        "ignoreEffectWarningsInTscExitCode": true,
+        "ignoreEffectErrorsInTscExitCode": true
+      }
+    ]
   }
 }

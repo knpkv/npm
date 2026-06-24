@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-bare-new-error-in-effect
+language: tsx
+severity: error
+message: "Use a tagged/domain error instead of bare new Error inside Effect code"
+
+rule:
+  any:
+    - pattern: new Error($$$ARGS)
+    - pattern: new TypeError($$$ARGS)
+    - pattern: new RangeError($$$ARGS)
+    - pattern: new ReferenceError($$$ARGS)
+    - pattern: new SyntaxError($$$ARGS)
+    - pattern: new URIError($$$ARGS)
+    - pattern: new EvalError($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "packages/*-api-client/scripts/regenerate.ts"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Known failures should have identity and typed fields.
+
+  Define a Data.TaggedError close to the package's error module and fail with it:
+
+  export class MissingConfigError extends Data.TaggedError("MissingConfigError")<{
+    readonly path: string
+  }> {}
+
+  return yield* Effect.fail(new MissingConfigError({ path }))

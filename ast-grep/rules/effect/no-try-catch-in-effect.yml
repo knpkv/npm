@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-try-catch-in-effect
+language: tsx
+severity: error
+message: "Avoid try/catch inside Effect.gen - wrap throwing code with Effect.try or recover with Effect.catchTag"
+
+rule:
+  kind: try_statement
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Effect code should keep failures in the typed error channel.
+
+  Use Effect.try for synchronous code that can throw:
+
+  const parsed = yield* Effect.try({
+    try: () => JSON.parse(content) as unknown,
+    catch: (cause) => new ConfigParseError({ cause })
+  })
+
+  Use Effect.catchTag or Effect.catchTags when recovering from domain errors.

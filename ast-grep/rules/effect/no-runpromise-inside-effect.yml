@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-runpromise-inside-effect
+language: tsx
+severity: error
+message: "Do not run an Effect from inside Effect code - yield it instead"
+
+rule:
+  any:
+    - pattern: Effect.runPromise($$$ARGS)
+    - pattern: Effect.runSync($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/main.tsx"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Effect.runPromise and Effect.runSync belong at process, framework, or test boundaries.
+  Inside Effect.gen, compose with yield*:
+
+  const value = yield* someEffect

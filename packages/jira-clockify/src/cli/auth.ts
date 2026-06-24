@@ -6,10 +6,16 @@
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Option } from "effect"
+import { Console, Data, Effect, Option } from "effect"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
+
+class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKeyError")<{}> {
+  override get message(): string {
+    return "Invalid API key — check the value and try again"
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Jira OAuth
@@ -153,7 +159,7 @@ export const clockifySetup = Command.make(
       })
 
       const user = yield* toEffect(client.GET("/v1/user")).pipe(
-        Effect.catch(() => Effect.fail(new Error("Invalid API key — check the value and try again")))
+        Effect.catch(() => Effect.fail(new InvalidClockifyApiKeyError()))
       )
       yield* Console.log(`Authenticated as: ${(user as { name: string }).name} (${(user as { email: string }).email})`)
 

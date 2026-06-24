@@ -27,6 +27,14 @@ import { type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js
 import { ensureConfigDir, getAuthPath, getOAuthConfigPath, writeSecureFile } from "./ConfigPaths.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
 
+const parseJsonOrNull = (content: string): unknown | null => {
+  try {
+    return JSON.parse(content) as unknown
+  } catch {
+    return null
+  }
+}
+
 /**
  * Error during file system operations.
  *
@@ -72,13 +80,7 @@ export const loadToken = (
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: tokenPath, cause }))
     )
 
-    const parsed = yield* Effect.sync(() => {
-      try {
-        return JSON.parse(content) as unknown
-      } catch {
-        return null
-      }
-    })
+    const parsed = yield* Effect.sync(() => parseJsonOrNull(content))
     if (parsed === null) {
       yield* Effect.logWarning(`Corrupted auth.json at ${tokenPath} — could not parse JSON`)
       return null
@@ -168,13 +170,7 @@ export const loadOAuthConfig = (
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: configPath, cause }))
     )
 
-    const parsed = yield* Effect.sync(() => {
-      try {
-        return JSON.parse(content) as unknown
-      } catch {
-        return null
-      }
-    })
+    const parsed = yield* Effect.sync(() => parseJsonOrNull(content))
     if (parsed === null) {
       yield* Effect.logWarning(`Corrupted oauth config at ${configPath} — could not parse JSON`)
       return null

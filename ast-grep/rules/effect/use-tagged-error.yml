@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: use-tagged-error
+language: tsx
+severity: error
+message: "Use Data.TaggedError instead of extending native Error"
+
+rule:
+  pattern: class $NAME extends Error { $$$BODY }
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Tagged errors give Effect code a stable _tag for catchTag/catchTags and searchable domain failures.
+
+  Prefer:
+
+  export class SomeError extends Data.TaggedError("SomeError")<{
+    readonly cause: unknown
+  }> {}

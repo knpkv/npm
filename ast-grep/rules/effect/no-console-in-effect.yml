@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-console-in-effect
+language: tsx
+severity: error
+message: "Use Effect logging instead of console methods inside Effect.gen"
+
+rule:
+  any:
+    - pattern: console.log($$$ARGS)
+    - pattern: console.warn($$$ARGS)
+    - pattern: console.error($$$ARGS)
+    - pattern: console.info($$$ARGS)
+    - pattern: console.debug($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Effect logs participate in fibers, runtime log levels, structured annotations, and tests.
+
+  Replace console methods with Effect.log, Effect.logDebug, Effect.logWarning, or Effect.logError.

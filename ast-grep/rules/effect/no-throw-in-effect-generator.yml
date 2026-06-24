@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-throw-in-effect-generator
+language: tsx
+severity: error
+message: "Use Effect.fail instead of throw inside Effect.gen"
+
+rule:
+  pattern: throw $ERROR
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Throwing in an Effect generator bypasses the typed error channel.
+
+  Use a tagged/domain error and yield it:
+
+  if (!value) {
+    return yield* Effect.fail(new MissingValueError())
+  }

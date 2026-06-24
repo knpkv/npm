@@ -38,11 +38,7 @@ export class AwsCredentialError extends Schema.TaggedErrorClass<AwsCredentialErr
     region: AwsRegion,
     cause: Schema.Defect()
   }
-) {
-  constructor(args: { readonly profile: AwsProfileName; readonly region: AwsRegion; readonly cause: unknown }) {
-    super({ _tag: "AwsCredentialError", ...args })
-  }
-}
+) {}
 
 /**
  * AWS API throttling / rate limiting.
@@ -56,11 +52,7 @@ export class AwsThrottleError extends Schema.TaggedErrorClass<AwsThrottleError>(
     retryCount: Schema.Number,
     cause: Schema.Defect()
   }
-) {
-  constructor(args: { readonly operation: string; readonly retryCount: number; readonly cause: unknown }) {
-    super({ _tag: "AwsThrottleError", ...args })
-  }
-}
+) {}
 
 /**
  * AWS API call failure.
@@ -75,16 +67,7 @@ export class AwsApiError extends Schema.TaggedErrorClass<AwsApiError>()(
     region: AwsRegion,
     cause: Schema.Defect()
   }
-) {
-  constructor(args: {
-    readonly operation: string
-    readonly profile: AwsProfileName
-    readonly region: AwsRegion
-    readonly cause: unknown
-  }) {
-    super({ _tag: "AwsApiError", ...args })
-  }
-}
+) {}
 
 /**
  * Configuration load/save failure.
@@ -97,11 +80,7 @@ export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()(
     message: Schema.String,
     cause: Schema.optional(Schema.Defect())
   }
-) {
-  constructor(args: { readonly message: string; readonly cause?: unknown }) {
-    super({ _tag: "ConfigError", ...args })
-  }
-}
+) {}
 
 /**
  * Configuration file parse failure (JSON or Schema validation).
@@ -114,11 +93,7 @@ export class ConfigParseError extends Schema.TaggedErrorClass<ConfigParseError>(
     path: Schema.String,
     cause: Schema.Defect()
   }
-) {
-  constructor(args: { readonly path: string; readonly cause: unknown }) {
-    super({ _tag: "ConfigParseError", ...args })
-  }
-}
+) {}
 
 /**
  * AWS profile detection failure.
@@ -131,11 +106,7 @@ export class ProfileDetectionError extends Schema.TaggedErrorClass<ProfileDetect
     message: Schema.String,
     cause: Schema.optional(Schema.Defect())
   }
-) {
-  constructor(args: { readonly message: string; readonly cause?: unknown }) {
-    super({ _tag: "ProfileDetectionError", ...args })
-  }
-}
+) {}
 
 /**
  * Refresh orchestration failure — one or more accounts failed.
@@ -148,11 +119,7 @@ export class RefreshError extends Schema.TaggedErrorClass<RefreshError>()(
     failedAccounts: Schema.Array(Schema.String),
     cause: Schema.optional(Schema.Defect())
   }
-) {
-  constructor(args: { readonly failedAccounts: ReadonlyArray<string>; readonly cause?: unknown }) {
-    super({ _tag: "RefreshError", ...args })
-  }
-}
+) {}
 
 /**
  * Docker Engine interaction failure.
@@ -165,11 +132,7 @@ export class DockerError extends Schema.TaggedErrorClass<DockerError>()(
     operation: Schema.String,
     cause: Schema.optional(Schema.Defect())
   }
-) {
-  constructor(args: { readonly operation: string; readonly cause?: unknown }) {
-    super({ _tag: "DockerError", ...args })
-  }
-}
+) {}
 
 /**
  * Sandbox lifecycle failure.
@@ -183,11 +146,7 @@ export class SandboxError extends Schema.TaggedErrorClass<SandboxError>()(
     message: Schema.String,
     cause: Schema.optional(Schema.Defect())
   }
-) {
-  constructor(args: { readonly sandboxId?: SandboxId; readonly message: string; readonly cause?: unknown }) {
-    super({ _tag: "SandboxError", ...args })
-  }
-}
+) {}
 
 /**
  * API call blocked by permission gate.
@@ -200,11 +159,7 @@ export class PermissionDeniedError extends Schema.TaggedErrorClass<PermissionDen
     operation: Schema.String,
     reason: Schema.Literals(["denied", "timeout"])
   }
-) {
-  constructor(args: { readonly operation: string; readonly reason: "denied" | "timeout" }) {
-    super({ _tag: "PermissionDeniedError", ...args })
-  }
-}
+) {}
 
 /**
  * Union of errors from AwsClient methods.

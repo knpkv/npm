@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-fs-import
+language: tsx
+severity: error
+message: "Use Effect's FileSystem service instead of direct node:fs imports"
+
+rule:
+  any:
+    - pattern: import $NAME from "node:fs"
+    - pattern: import $NAME from "fs"
+    - pattern: import $NAME from "node:fs/promises"
+    - pattern: import $NAME from "fs/promises"
+    - pattern: import * as $NAME from "node:fs"
+    - pattern: import * as $NAME from "fs"
+    - pattern: import * as $NAME from "node:fs/promises"
+    - pattern: import * as $NAME from "fs/promises"
+    - pattern: import { $$$IMPORTS } from "node:fs"
+    - pattern: import { $$$IMPORTS } from "fs"
+    - pattern: import { $$$IMPORTS } from "node:fs/promises"
+    - pattern: import { $$$IMPORTS } from "fs/promises"
+    - pattern: require("node:fs")
+    - pattern: require("fs")
+    - pattern: require("node:fs/promises")
+    - pattern: require("fs/promises")
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Direct fs imports are hard to test and bypass Effect's platform errors.
+
+  Use the Effect FileSystem service:
+
+  const fs = yield* FileSystem.FileSystem
+  const content = yield* fs.readFileString(path)
