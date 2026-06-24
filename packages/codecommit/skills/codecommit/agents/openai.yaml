@@ -1,0 +1,4 @@
+interface:
+  display_name: "CodeCommit CLI"
+  short_description: "Use AWS CodeCommit PR CLI workflows"
+  default_prompt: "Use $codecommit to list, inspect, or update AWS CodeCommit pull requests."

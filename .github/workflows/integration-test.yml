@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - "packages/*/test/integration.test.ts"
+      - "packages/agent-skills/**"
       - "packages/confluence-to-markdown/src/**"
       - "packages/confluence-to-markdown/package.json"
       - ".github/workflows/integration-test.yml"
@@ -32,7 +33,7 @@ jobs:
           node-version: "24.10.0"
 
       - name: Build packages
-        run: pnpm --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
+        run: pnpm --filter @knpkv/agent-skills --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
 
       - name: Run integration tests
         env:

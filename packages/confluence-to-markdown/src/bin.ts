@@ -3,6 +3,8 @@
  * CLI entry point for confluence-to-markdown.
  */
 import { NodeRuntime, NodeStdio, NodeTerminal } from "@effect/platform-node"
+import { makeInstallCommand } from "@knpkv/agent-skills"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
@@ -22,6 +24,17 @@ import {
 } from "./commands/index.js"
 import { AppLayer, AuthOnlyLayer, CloneLayer, getLayerType, MinimalLayer } from "./commands/layers.js"
 
+const skillsInstall = makeInstallCommand({
+  description: "Install the Confluence agent skill",
+  name: "install",
+  skills: ["confluence"]
+})
+
+const skillsCommand = Command.make("skills", {}, () => Console.log("Usage: confluence skills install")).pipe(
+  Command.withDescription("Agent skill commands"),
+  Command.withSubcommands([skillsInstall])
+)
+
 // === Main command ===
 const confluence = Command.make("confluence").pipe(
   Command.withDescription("Sync Confluence pages to local markdown"),
@@ -35,7 +48,8 @@ const confluence = Command.make("confluence").pipe(
     logCommand,
     diffCommand,
     newCommand,
-    deleteCommand
+    deleteCommand,
+    skillsCommand
   ])
 )
 

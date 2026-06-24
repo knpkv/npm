@@ -7,6 +7,8 @@
  * @module
  */
 import { NodeRuntime, NodeStdio } from "@effect/platform-node"
+import { makeInstallCommand } from "@knpkv/agent-skills"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
@@ -23,6 +25,17 @@ import {
   versionCommand
 } from "./commands/index.js"
 
+const skillsInstall = makeInstallCommand({
+  description: "Install the Jira agent skill",
+  name: "install",
+  skills: ["jira"]
+})
+
+const skillsCommand = Command.make("skills", {}, () => Console.log("Usage: jira skills install")).pipe(
+  Command.withDescription("Agent skill commands"),
+  Command.withSubcommands([skillsInstall])
+)
+
 // === Main command ===
 const jira = Command.make("jira").pipe(
   Command.withDescription("Fetch Jira tickets and export to markdown"),
@@ -30,6 +43,7 @@ const jira = Command.make("jira").pipe(
     authCommand,
     getCommand,
     searchCommand,
+    skillsCommand,
     versionCommand
   ])
 )

@@ -150,7 +150,7 @@ export const getLayerType = (args: ReadonlyArray<string>): "full" | "auth" | "mi
   if (cmd === "auth") {
     return "auth"
   }
-  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {
+  if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
     return "minimal"
   }
   return "full"

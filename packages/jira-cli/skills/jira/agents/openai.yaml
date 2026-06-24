@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jira CLI"
+  short_description: "Search Jira and manage releases"
+  default_prompt: "Use $jira to search Jira issues, export markdown, or update release metadata."

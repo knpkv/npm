@@ -123,6 +123,25 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.0.0)(@vitest/coverage-v8@4.1.9)(vite@8.1.0(@types/node@26.0.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.44.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/agent-skills:
+    dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.87
+        version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
+      effect:
+        specifier: 4.0.0-beta.87
+        version: 4.0.0-beta.87
+    devDependencies:
+      '@types/node':
+        specifier: latest
+        version: 26.0.0
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   packages/atlassian-common:
     dependencies:
       remark-gfm:
@@ -202,6 +221,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.87
         version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
+      '@knpkv/agent-skills':
+        specifier: workspace:^
+        version: link:../agent-skills
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
@@ -415,6 +437,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.87
         version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
+      '@knpkv/agent-skills':
+        specifier: workspace:^
+        version: link:../agent-skills
       '@knpkv/confluence-api-client':
         specifier: workspace:^
         version: link:../confluence-api-client
@@ -486,6 +511,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.87
         version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
+      '@knpkv/agent-skills':
+        specifier: workspace:^
+        version: link:../agent-skills
       '@knpkv/atlassian-common':
         specifier: workspace:*
         version: link:../atlassian-common
@@ -520,6 +548,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.87
         version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
+      '@knpkv/agent-skills':
+        specifier: workspace:^
+        version: link:../agent-skills
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common
