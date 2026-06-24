@@ -14,13 +14,16 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Install Socket Firewall
+      uses: SocketDev/action@2d3f25590c6ed6ba11a9a14c064d962a3a04698f # v1.3.1
+      with:
+        mode: firewall-free
     - name: Install pnpm
       uses: pnpm/action-setup@v6
     - name: Install node
       uses: actions/setup-node@v6
       if: ${{ inputs.node-version != '' }}
       with:
-        cache: pnpm
         node-version: ${{ inputs.node-version }}
     - name: Install deno
       uses: denoland/setup-deno@v2
@@ -34,4 +37,4 @@ runs:
         bun-version: ${{ inputs.bun-version }}
     - name: Install dependencies
       shell: bash
-      run: pnpm install
+      run: sfw pnpm install --frozen-lockfile
