@@ -1,0 +1,18 @@
+version: 2
+
+projectIgnorePaths:
+  - "/repos/**"
+  - "/scratchpad/**"
+
+triggerPaths:
+  - "/package.json"
+  - "/pnpm-lock.yaml"
+  - "/pnpm-workspace.yaml"
+  - "/packages/**/package.json"
+  - "/patches/**"
+
+githubApp:
+  enabled: true
+  pullRequestAlertsEnabled: true
+  dependencyOverviewEnabled: true
+  projectReportsEnabled: true

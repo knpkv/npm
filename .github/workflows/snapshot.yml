@@ -31,4 +31,4 @@ jobs:
       - name: Build
         run: pnpm build
       - name: Publish
-        run: pnpx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*
+        run: sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*

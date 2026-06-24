@@ -77,7 +77,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Publishes to temporary registry for testing
 - **Commands**:
   - `pnpm build` - Build all packages
-  - `pnpx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
+  - `sfw pnpm dlx pkg-pr-new@0.0.28 publish --pnpm --comment=off ./packages/*`
 - **Timeout**: 10 minutes
 - **Node Version**: 24.10.0
 
@@ -134,6 +134,19 @@ concurrency:
 ```
 
 This prevents resource waste and speeds up CI feedback.
+
+## Dependency Install Protection
+
+Dependency installs run through Socket Firewall in `.github/actions/setup`.
+The Socket action is pinned to an immutable commit SHA and kept current by
+Dependabot. The setup action intentionally does not restore a pnpm dependency
+cache, because Socket Firewall can only block package artifacts that are fetched
+through the network.
+
+Socket for GitHub is configured by `socket.yml` at the repository root. The
+Socket GitHub App still needs to be installed for the `knpkv` repository or
+organization in GitHub, and its check should be added to branch protection once
+it is reporting reliably.
 
 ## Customization Guide
 

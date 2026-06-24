@@ -189,7 +189,7 @@ const commandExitCode = (
 
 const generateTypes = (paths: ScriptPaths): Effect.Effect<void, Error, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function*() {
-    const command = ChildProcess.make("npx", ["openapi-typescript", paths.specFile, "-o", paths.outputFile], {
+    const command = ChildProcess.make("pnpm", ["exec", "openapi-typescript", paths.specFile, "-o", paths.outputFile], {
       cwd: paths.packageDir,
       stdin: "inherit",
       stdout: "inherit",
