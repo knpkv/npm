@@ -119,7 +119,7 @@ const DummyConfluenceAuthLayer = Layer.succeed(
 )
 
 // Auth layer with HTTP client
-const AuthLive = ConfluenceAuthLayer.pipe(Layer.provide(NodeHttpClient.layerUndici))
+const AuthLive = ConfluenceAuthLayer.pipe(Layer.provide(NodeHttpClient.layerFetch))
 
 // Build client layer dynamically based on auth
 const ConfluenceClientLive = Layer.unwrap(
@@ -147,7 +147,7 @@ export const AppLayer = SyncEngineLayer.pipe(
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(ConfluenceConfigLayer()),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
   Layer.provideMerge(NodeServices.layer)
 )
 
@@ -162,7 +162,7 @@ export const AuthOnlyLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
-  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
   Layer.provideMerge(NodeServices.layer)
 )
 
@@ -192,7 +192,7 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
-  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
   Layer.provideMerge(NodeTerminal.layer),
   Layer.provideMerge(NodeServices.layer)
 )

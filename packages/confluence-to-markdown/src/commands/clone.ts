@@ -116,7 +116,7 @@ export const cloneCommand = Command.make(
       })
 
       const clientLayer = ConfluenceClientLayer(clientConfig).pipe(
-        Layer.provide(NodeHttpClient.layerUndici)
+        Layer.provide(NodeHttpClient.layerFetch)
       )
 
       const cloneLayer = SyncEngineLayer.pipe(

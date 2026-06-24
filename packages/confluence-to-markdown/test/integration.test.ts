@@ -21,6 +21,13 @@ let BASE_URL = ""
 let ROOT_PAGE_ID = ""
 let HAS_INTEGRATION_CONFIG = false
 
+const SHOULD_RUN_INTEGRATION = Effect.runSync(
+  Effect.all([
+    Config.option(Config.string("CONFLUENCE_BASE_URL")),
+    Config.option(Config.string("CONFLUENCE_ROOT_PAGE_ID"))
+  ]).pipe(Effect.map(([baseUrl, rootPageId]) => Option.isSome(baseUrl) && Option.isSome(rootPageId)))
+)
+
 // Test state
 interface TestState {
   testDir: string
@@ -263,79 +270,82 @@ describe("CLI Integration - Page Creation Flow", () => {
     await runPlatform(cleanupTestEnvironment)
   })
 
-  it("full cycle: clone -> create -> push -> pull -> modify -> push -> re-clone -> delete -> verify", async () => {
-    if (!HAS_INTEGRATION_CONFIG) {
-      return
+  it.skipIf(!SHOULD_RUN_INTEGRATION)(
+    "full cycle: clone -> create -> push -> pull -> modify -> push -> re-clone -> delete -> verify",
+    async () => {
+      if (!HAS_INTEGRATION_CONFIG) {
+        throw new Error("Confluence integration config was available at test definition but missing at setup")
+      }
+
+      await runPlatform(Effect.gen(function*() {
+        // 1. Clone pages from Confluence
+        yield* clonePages
+
+        // 2. Create new page from template
+        const { file, slug } = yield* createPageFromTemplate
+
+        // 3. Commit and push new page
+        yield* commitChanges("Add integration test page")
+
+        const statusBefore = yield* runCli(["status"])
+        expect(statusBefore).toContain("Local Only:")
+
+        const pushResult1 = yield* pushChanges
+        expect(pushResult1.created).toBe(1)
+
+        // Verify file has pageId after push
+        const contentAfterPush = yield* readText(file)
+        expect(contentAfterPush).toMatch(/pageId:\s*["']?\d+/)
+        expect(contentAfterPush).toMatch(/version:\s*\d+/)
+        expect(contentAfterPush).toMatch(/contentHash:/)
+
+        const pageId = yield* extractPageId(file)
+        expect(pageId).not.toBeNull()
+        state.pageId = pageId
+
+        // 4. Pull should be no-op (already in sync)
+        const contentBeforePull = yield* readText(file)
+        yield* pullChanges
+        const contentAfterPull = yield* readText(file)
+        expect(contentAfterPull).toBe(contentBeforePull)
+
+        // 5. Modify page, commit, and push
+        const modifyMarker = `Modified at ${Date.now()}`
+        yield* modifyPage(file, modifyMarker)
+        yield* commitChanges("Modify integration test page")
+
+        const pushResult2 = yield* pushChanges
+        expect(pushResult2.pushed).toBe(1)
+
+        const contentAfterModify = yield* readText(file)
+        expect(contentAfterModify).toContain(modifyMarker)
+
+        // 6. Remove and re-clone - verify idempotency
+        const contentBeforeReclone = yield* readText(file)
+        yield* removeConfluenceDir
+        yield* clonePages
+
+        const reclonedFile = yield* findPageBySlug(slug)
+        expect(reclonedFile).not.toBeNull()
+        expect(yield* pathExists(reclonedFile!)).toBe(true)
+
+        const contentAfterReclone = yield* readText(reclonedFile!)
+        expect(contentAfterReclone).toBe(contentBeforeReclone)
+
+        // 7. Delete page via git workflow
+        yield* deleteLocalFile(reclonedFile!)
+        yield* commitChanges("Delete integration test page")
+
+        const pushResult3 = yield* pushChanges
+        expect(pushResult3.deleted).toBe(1)
+
+        // 8. Verify deletion - re-clone should not include the page
+        yield* removeConfluenceDir
+        yield* clonePages
+
+        const deletedFile = yield* findPageBySlug(slug)
+        expect(deletedFile).toBeNull()
+      }))
     }
-
-    await runPlatform(Effect.gen(function*() {
-      // 1. Clone pages from Confluence
-      yield* clonePages
-
-      // 2. Create new page from template
-      const { file, slug } = yield* createPageFromTemplate
-
-      // 3. Commit and push new page
-      yield* commitChanges("Add integration test page")
-
-      const statusBefore = yield* runCli(["status"])
-      expect(statusBefore).toContain("Local Only:")
-
-      const pushResult1 = yield* pushChanges
-      expect(pushResult1.created).toBe(1)
-
-      // Verify file has pageId after push
-      const contentAfterPush = yield* readText(file)
-      expect(contentAfterPush).toMatch(/pageId:\s*["']?\d+/)
-      expect(contentAfterPush).toMatch(/version:\s*\d+/)
-      expect(contentAfterPush).toMatch(/contentHash:/)
-
-      const pageId = yield* extractPageId(file)
-      expect(pageId).not.toBeNull()
-      state.pageId = pageId
-
-      // 4. Pull should be no-op (already in sync)
-      const contentBeforePull = yield* readText(file)
-      yield* pullChanges
-      const contentAfterPull = yield* readText(file)
-      expect(contentAfterPull).toBe(contentBeforePull)
-
-      // 5. Modify page, commit, and push
-      const modifyMarker = `Modified at ${Date.now()}`
-      yield* modifyPage(file, modifyMarker)
-      yield* commitChanges("Modify integration test page")
-
-      const pushResult2 = yield* pushChanges
-      expect(pushResult2.pushed).toBe(1)
-
-      const contentAfterModify = yield* readText(file)
-      expect(contentAfterModify).toContain(modifyMarker)
-
-      // 6. Remove and re-clone - verify idempotency
-      const contentBeforeReclone = yield* readText(file)
-      yield* removeConfluenceDir
-      yield* clonePages
-
-      const reclonedFile = yield* findPageBySlug(slug)
-      expect(reclonedFile).not.toBeNull()
-      expect(yield* pathExists(reclonedFile!)).toBe(true)
-
-      const contentAfterReclone = yield* readText(reclonedFile!)
-      expect(contentAfterReclone).toBe(contentBeforeReclone)
-
-      // 7. Delete page via git workflow
-      yield* deleteLocalFile(reclonedFile!)
-      yield* commitChanges("Delete integration test page")
-
-      const pushResult3 = yield* pushChanges
-      expect(pushResult3.deleted).toBe(1)
-
-      // 8. Verify deletion - re-clone should not include the page
-      yield* removeConfluenceDir
-      yield* clonePages
-
-      const deletedFile = yield* findPageBySlug(slug)
-      expect(deletedFile).toBeNull()
-    }))
-  })
+  )
 })

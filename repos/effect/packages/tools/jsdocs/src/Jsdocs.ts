@@ -525,17 +525,22 @@ function readPackageMetadata(root: string): Result<PackageMetadata, string> {
     return cached
   }
   const packageJsonPath = path.join(normalizedRoot, "package.json")
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
-  } catch (error) {
+  const parsedResult = Effect.runSync(Effect.try({
+    try: () => JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as unknown,
+    catch: (error) => String(error)
+  }).pipe(Effect.match({
+    onFailure: (error) => ({ _tag: "Failure", error } as const),
+    onSuccess: (value) => ({ _tag: "Success", value } as const)
+  })))
+  if (parsedResult._tag === "Failure") {
     const result = {
       _tag: "Failure",
-      error: `unable to read package.json at ${packageJsonPath}: ${String(error)}`
+      error: `unable to read package.json at ${packageJsonPath}: ${parsedResult.error}`
     } as const
     packageMetadataCache.set(normalizedRoot, result)
     return result
   }
+  const parsed = parsedResult.value
   if (!isRecord(parsed)) {
     const result = { _tag: "Failure", error: `package.json at ${packageJsonPath} must be an object` } as const
     packageMetadataCache.set(normalizedRoot, result)
@@ -573,17 +578,22 @@ function parseBarrelExports(indexPath: string): Result<ParsedBarrelExports, stri
   if (cached !== undefined) {
     return cached
   }
-  let source: string
-  try {
-    source = fs.readFileSync(normalizedIndexPath, "utf8")
-  } catch (error) {
+  const sourceResult = Effect.runSync(Effect.try({
+    try: () => fs.readFileSync(normalizedIndexPath, "utf8"),
+    catch: (error) => String(error)
+  }).pipe(Effect.match({
+    onFailure: (error) => ({ _tag: "Failure", error } as const),
+    onSuccess: (value) => ({ _tag: "Success", value } as const)
+  })))
+  if (sourceResult._tag === "Failure") {
     const result = {
       _tag: "Failure",
-      error: `unable to read barrel file ${normalizedIndexPath}: ${String(error)}`
+      error: `unable to read barrel file ${normalizedIndexPath}: ${sourceResult.error}`
     } as const
     barrelExportCache.set(normalizedIndexPath, result)
     return result
   }
+  const source = sourceResult.value
   const sourceFile = ts.createSourceFile(normalizedIndexPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const namespace = new Map<string, string>()
   const flat = new Set<string>()
@@ -3287,15 +3297,22 @@ export function writeJSDocModel(cwd: string, output: string, model: JSDocModel) 
 
 export function readJSDocModel(filename: string): Result<JSDocModel, string> {
   if (!fs.existsSync(filename)) return { _tag: "Failure", error: "missing" }
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filename, "utf8")) as JSDocModel
-    if (parsed.version !== 2) return { _tag: "Failure", error: "Unsupported jsdocs model version" }
-    if (!Array.isArray(parsed.files)) return { _tag: "Failure", error: "Invalid jsdocs model: files must be an array" }
-    if (!Array.isArray(parsed.apis)) return { _tag: "Failure", error: "Invalid jsdocs model: apis must be an array" }
-    return { _tag: "Success", value: parsed }
-  } catch (error) {
-    return { _tag: "Failure", error: `Invalid jsdocs model: ${error instanceof Error ? error.message : String(error)}` }
-  }
+  return Effect.runSync(Effect.try({
+    try: () => JSON.parse(fs.readFileSync(filename, "utf8")) as JSDocModel,
+    catch: (error) => error
+  }).pipe(Effect.match({
+    onFailure: (error) =>
+      ({
+        _tag: "Failure",
+        error: `Invalid jsdocs model: ${error instanceof Error ? error.message : String(error)}`
+      } as const),
+    onSuccess: (parsed) => {
+      if (parsed.version !== 2) return { _tag: "Failure", error: "Unsupported jsdocs model version" }
+      if (!Array.isArray(parsed.files)) return { _tag: "Failure", error: "Invalid jsdocs model: files must be an array" }
+      if (!Array.isArray(parsed.apis)) return { _tag: "Failure", error: "Invalid jsdocs model: apis must be an array" }
+      return { _tag: "Success", value: parsed }
+    }
+  })))
 }
 
 export function sourceHash(source: string): string {
