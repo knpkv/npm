@@ -14,10 +14,12 @@ import { FILTER_PRESETS, matchesRepoAuthor } from "./filterPresets.js"
 import { FilterService, FilterServiceLive } from "./FilterService.js"
 
 // TUI Command
-const tui = Command.make("tui", {}, () =>
-  Effect.gen(function*() {
-    yield* Effect.promise(() => import("./main.js"))
-  }))
+const launchTui = Effect.gen(function*() {
+  const { default: program } = yield* Effect.promise(() => import("./main.js"))
+  yield* program
+})
+
+const tui = Command.make("tui", {}, () => launchTui)
 
 // Web Command
 const web = Command.make("web", {
@@ -411,7 +413,7 @@ const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <comma
 
 const command = Command.make("codecommit", {}, () =>
   // Default to TUI if no subcommand
-  Effect.promise(() => import("./main.js"))).pipe(
+  launchTui).pipe(
     Command.withSubcommands([tui, web, pr])
   )
 
