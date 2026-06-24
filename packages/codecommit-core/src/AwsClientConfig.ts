@@ -29,13 +29,13 @@ import { Context, Layer } from "effect"
  * @category Config
  */
 export interface AwsClientConfigShape {
-  readonly credentialTimeout: Duration.DurationInput
-  readonly operationTimeout: Duration.DurationInput
-  readonly streamTimeout: Duration.DurationInput
-  readonly refreshTimeout: Duration.DurationInput
+  readonly credentialTimeout: Duration.Input
+  readonly operationTimeout: Duration.Input
+  readonly streamTimeout: Duration.Input
+  readonly refreshTimeout: Duration.Input
   readonly maxRetries: number
-  readonly retryBaseDelay: Duration.DurationInput
-  readonly maxRetryDelay: Duration.DurationInput
+  readonly retryBaseDelay: Duration.Input
+  readonly maxRetryDelay: Duration.Input
 }
 
 /**
@@ -45,10 +45,10 @@ export interface AwsClientConfigShape {
  *
  * @category Config
  */
-export class AwsClientConfig extends Context.Tag("@knpkv/codecommit-core/AwsClientConfig")<
+export class AwsClientConfig extends Context.Service<
   AwsClientConfig,
   AwsClientConfigShape
->() {}
+>()("@knpkv/codecommit-core/AwsClientConfig") {}
 
 const defaults: AwsClientConfigShape = {
   credentialTimeout: "5 seconds",

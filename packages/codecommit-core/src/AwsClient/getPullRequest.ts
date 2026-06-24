@@ -24,7 +24,8 @@
  * @internal
  */
 import * as codecommit from "distilled-aws/codecommit"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, SchemaGetter } from "effect"
+import type { AwsClientError } from "../Errors.js"
 import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
@@ -52,16 +53,14 @@ const RawGetPullRequestResponse = Schema.Struct({
         mergedBy: Schema.optional(Schema.String)
       }))
     }))),
-    creationDate: Schema.optional(Schema.DateFromSelf),
-    lastActivityDate: Schema.optional(Schema.DateFromSelf)
+    creationDate: Schema.optional(Schema.Date),
+    lastActivityDate: Schema.optional(Schema.Date)
   }))
 })
 
-const RawToPullRequestDetail = Schema.transform(
-  RawGetPullRequestResponse,
-  PullRequestDetail,
-  {
-    decode: (raw) => {
+const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
+  Schema.decodeTo(PullRequestDetail, {
+    decode: SchemaGetter.transform((raw) => {
       const pr = raw.pullRequest
       const target = pr?.pullRequestTargets?.[0]
       const isMerged = target?.mergeMetadata?.isMerged === true
@@ -79,8 +78,8 @@ const RawToPullRequestDetail = Schema.transform(
         approvedBy: [],
         mergedBy: mergedByArn ? normalizeAuthor(mergedByArn) : undefined
       }
-    },
-    encode: (detail) => ({
+    }),
+    encode: SchemaGetter.transform((detail) => ({
       pullRequest: {
         title: detail.title,
         description: detail.description,
@@ -94,12 +93,12 @@ const RawToPullRequestDetail = Schema.transform(
         creationDate: detail.creationDate,
         lastActivityDate: detail.lastActivityDate
       }
-    })
-  }
+    }))
+  })
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknown(RawToPullRequestDetail)(raw)
+const decodePullRequestDetail = (raw: unknown) => Schema.decodeUnknownEffect(RawToPullRequestDetail)(raw)
 
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {
@@ -125,4 +124,8 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
   )
 
 export const getPullRequest = (params: GetPullRequestParams) =>
-  withAwsContext("getPullRequest", params.account, callGetPullRequest(params))
+  withAwsContext(
+    "getPullRequest",
+    params.account,
+    callGetPullRequest(params) as Effect.Effect<PullRequestDetail, unknown, never>
+  ) as Effect.Effect<PullRequestDetail, AwsClientError>

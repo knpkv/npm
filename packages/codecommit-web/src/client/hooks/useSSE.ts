@@ -21,7 +21,7 @@
  * @module
  */
 import { AppStatus, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import type { AppState } from "../atoms/app.js"
@@ -49,21 +49,20 @@ const PullRequestWire = Schema.Struct({
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.DateFromString),
-  approvedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
-  approvedByArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
-  commentedBy: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  approvedBy: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
+  approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
+  commentedBy: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
   filesChanged: Schema.optional(Schema.Number),
-  approvalRules: Schema.optionalWith(
-    Schema.Array(Schema.Struct({
+  approvalRules: Schema.Array(
+    Schema.Struct({
       ruleName: Schema.String,
       requiredApprovals: Schema.Number,
       poolMembers: Schema.Array(Schema.String),
-      poolMemberArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+      poolMemberArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
       satisfied: Schema.Boolean,
       fromTemplate: Schema.optional(Schema.String)
-    })),
-    { default: () => [] }
-  )
+    })
+  ).pipe(Schema.withDecodingDefaultType(Effect.succeed([])))
 })
 
 const NotificationWire = Schema.Struct({
@@ -106,7 +105,7 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
-  pendingReviewCount: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+  pendingReviewCount: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   unreadNotificationCount: Schema.optional(Schema.Number),
   notifications: Schema.optional(Schema.Struct({
     items: Schema.Array(NotificationWire),
@@ -121,7 +120,7 @@ const SsePayload = Schema.Struct({
   }))
 })
 
-const decode = Schema.decodeUnknownSync(Schema.parseJson(SsePayload))
+const decode = Schema.decodeUnknownSync(Schema.fromJsonString(SsePayload))
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected"
 
@@ -156,7 +155,7 @@ export function useSSE(
 
       es.onmessage = (event) => {
         try {
-          const state = decode(event.data) as AppState
+          const state = decode(event.data) as unknown as AppState
 
           // Toast for genuinely new notifications
           const notifications = state.notifications?.items ?? []
@@ -193,7 +192,7 @@ export function useSSE(
 
           callbackRef.current(state)
         } catch (e) {
-          if (process.env.NODE_ENV !== "production") {
+          if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.warn("SSE decode error:", e)
           }

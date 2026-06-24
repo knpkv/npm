@@ -97,26 +97,24 @@
     "link": "npm link"
   },
   "peerDependencies": {
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.87"
   },
   "dependencies": {
-    "@atlaskit/adf-schema": "^52.7.1",
-    "@atlaskit/editor-json-transformer": "^8.31.8",
-    "@atlaskit/editor-markdown-transformer": "^5.20.6",
-    "@effect/cli": "latest",
-    "@effect/platform": "latest",
-    "@effect/platform-node": "latest",
+    "@atlaskit/adf-schema": "^56.0.4",
+    "@atlaskit/editor-json-transformer": "^9.0.1",
+    "@atlaskit/editor-markdown-transformer": "^6.0.1",
+    "@effect/platform-node": "4.0.0-beta.87",
     "@knpkv/confluence-api-client": "workspace:^",
     "ajv": "^8.20.0",
     "ajv-draft-04": "^1.0.0",
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.27.0",
-    "@types/node": "^22.15.21",
-    "effect": "^3.21.0",
-    "typescript": "~5.9.0",
-    "vitest": "^4.0.13"
+    "@effect/vitest": "4.0.0-beta.87",
+    "@types/node": "^26.0.0",
+    "effect": "4.0.0-beta.87",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
   },
   "keywords": [
     "effect",

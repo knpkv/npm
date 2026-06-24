@@ -3,7 +3,8 @@
  *
  * @internal
  */
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
@@ -45,11 +46,11 @@ function AppContent({ onQuit }: AppProps) {
   } | null>(null)
 
   const ticketsResult = useAtomValue(ticketsAtom)
-  const ticketState: TicketState | null = Result.isSuccess(ticketsResult) ? ticketsResult.value : null
+  const ticketState: TicketState | null = AsyncResult.isSuccess(ticketsResult) ? ticketsResult.value : null
   const tickets = ticketState?.tickets ?? []
 
   const timerResult = useAtomValue(timerStateAtom)
-  const timerState: TimerState | null = Result.isSuccess(timerResult) ? timerResult.value : null
+  const timerState: TimerState | null = AsyncResult.isSuccess(timerResult) ? timerResult.value : null
   const timerActive = timerState?.active ?? false
 
   // Auto-switch views — frozen while popup is showing
@@ -83,7 +84,7 @@ function AppContent({ onQuit }: AppProps) {
   const stopResult = useAtomValue(stopTimerAtom)
   useEffect(() => {
     if (!frozenOnTimer || isStopping) return
-    if (Result.isSuccess(stopResult)) {
+    if (AsyncResult.isSuccess(stopResult)) {
       const jiraOk = stopResult.value.jiraWorklogLogged
       setResultMsg({
         title: "Timer stopped",
@@ -95,7 +96,7 @@ function AppContent({ onQuit }: AppProps) {
         ],
         type: jiraOk ? "success" : "error"
       })
-    } else if (Result.isFailure(stopResult)) {
+    } else if (AsyncResult.isFailure(stopResult)) {
       setResultMsg({
         title: "Timer stop failed",
         lines: [{ text: "Could not stop timer", color: "#FF6666" }],

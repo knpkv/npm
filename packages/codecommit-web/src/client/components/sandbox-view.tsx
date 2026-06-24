@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { ArrowLeftIcon, CodeIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -78,7 +78,7 @@ export function SandboxView() {
 
   const handleStop = useCallback(() => {
     if (!sandboxId) return
-    stopSandbox({ path: { sandboxId: SandboxId.make(sandboxId) } })
+    stopSandbox({ params: { sandboxId: SandboxId.make(sandboxId) } })
   }, [sandboxId, stopSandbox])
 
   const backUrl = sandbox ? `/accounts/${sandbox.awsAccountId}/prs/${sandbox.pullRequestId}` : "/"
@@ -131,7 +131,7 @@ export function SandboxView() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => sandboxId && restartSandbox({ path: { sandboxId: SandboxId.make(sandboxId) } })}
+              onClick={() => sandboxId && restartSandbox({ params: { sandboxId: SandboxId.make(sandboxId) } })}
             >
               <PlayIcon className="size-3" />
               Restart
@@ -144,7 +144,7 @@ export function SandboxView() {
               className="text-destructive hover:text-destructive"
               onClick={() => {
                 if (!sandboxId) return
-                deleteSandbox({ path: { sandboxId: SandboxId.make(sandboxId) } })
+                deleteSandbox({ params: { sandboxId: SandboxId.make(sandboxId) } })
                 navigate("/sandboxes")
               }}
             >

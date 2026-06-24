@@ -55,23 +55,20 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@effect/platform": ">=0.93.0 <0.96.0",
-    "effect": ">=3.19.3"
+    "effect": "4.0.0-beta.87"
   },
   "dependencies": {
-    "@effect/cli": "latest",
-    "@effect/platform-node": "latest",
+    "@effect/platform-node": "4.0.0-beta.87",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/jira-api-client": "workspace:*",
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@effect/platform": "latest",
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.87",
     "@types/node": "latest",
-    "effect": "latest",
-    "typescript": "~5.9.0",
-    "vitest": "^4.0.13"
+    "effect": "4.0.0-beta.87",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.9"
   },
   "keywords": [
     "effect",

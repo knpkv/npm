@@ -3,7 +3,8 @@
  *
  * @module
  */
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router"
 import { auditClearAtom, auditSettingsQueryAtom, updateAuditSettingsAtom } from "../atoms/app.js"
@@ -20,7 +21,7 @@ export function SettingsAudit() {
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
-    if (Result.isSuccess(result)) {
+    if (AsyncResult.isSuccess(result)) {
       setEnabled(result.value.enabled)
       setRetentionDays(result.value.retentionDays)
       setDirty(false)
@@ -36,7 +37,7 @@ export function SettingsAudit() {
 
   // Clear dirty only when server confirms the change (query result updates)
   useEffect(() => {
-    if (saving && Result.isSuccess(result)) {
+    if (saving && AsyncResult.isSuccess(result)) {
       setSaving(false)
       setDirty(false)
     }

@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Atom } from "@effect-atom/atom-react"
+import * as Atom from "effect/unstable/reactivity/Atom"
 
 export type DisplayMode = "minimal" | "compact" | "full"
 

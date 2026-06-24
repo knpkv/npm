@@ -312,18 +312,18 @@ Two-level concurrency: repos fan out at 2, PR details at 3. Keeps AWS throttling
 
 ```typescript
 // Parse AWS config INI -> validate each section through Schema
-const decoded = Schema.decodeUnknownEither(DetectedProfile)(section)
-if (Either.isRight(decoded)) result.push(decoded.right)
+const decoded = Schema.decodeUnknownOption(DetectedProfile)(section)
+if (Option.isSome(decoded)) result.push(decoded.value)
 // Invalid sections silently filtered — no crashes on malformed config
 ```
 
-### Schema.parseJson — Replace JSON.parse
+### Schema.fromJsonString — Replace JSON.parse
 
 ```typescript
-const config = Schema.decodeUnknown(Schema.parseJson(TuiConfig))(content)
+const config = Schema.decodeUnknownEffect(Schema.fromJsonString(TuiConfig))(content)
 ```
 
-`Schema.parseJson` combines JSON parsing and schema validation in a single step — typed end-to-end, no untyped intermediate.
+`Schema.fromJsonString` combines JSON parsing and schema validation in a single step — typed end-to-end, no untyped intermediate.
 
 ## PRService/ — Orchestration
 
@@ -465,12 +465,12 @@ const findAll_ = SqlSchema.findAll({
 })
 ```
 
-### CommentRepo — Schema.parseJson on Read
+### CommentRepo — Schema.fromJsonString on Read
 
-Cached comments are stored as JSON strings. On read, `Schema.parseJson` combines JSON parsing + Schema validation in one step:
+Cached comments are stored as JSON strings. On read, `Schema.fromJsonString` combines JSON parsing + Schema validation in one step:
 
 ```typescript
-const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
+const LocationsFromJson = Schema.fromJsonString(Schema.Array(PRCommentLocationJson))
 
 find: (awsAccountId, prId) =>
   find_({ awsAccountId, pullRequestId: prId }).pipe(
@@ -478,9 +478,12 @@ find: (awsAccountId, prId) =>
       Option.match({
         onNone: () => Effect.succeed(Option.none()),
         onSome: (r) =>
-          Schema.decodeUnknown(LocationsFromJson)(r.locationsJson).pipe(
+          Schema.decodeUnknownEffect(LocationsFromJson)(r.locationsJson).pipe(
             Effect.map((decoded) => Option.some(decoded)),
-            Effect.catchAll(() => Effect.succeed(Option.some([]))) // corrupt data → empty
+            Effect.catchIf(
+              () => true,
+              () => Effect.succeed(Option.some([]))
+            ) // corrupt data → empty
           )
       })
     ),
@@ -595,7 +598,7 @@ const TestLayer = ConfigServiceLive.pipe(Layer.provide(Layer.merge(MockFS, Path.
 1. **exactOptionalPropertyTypes** — `filePath: string | undefined` != `filePath?: string`. Use conditional spread: `...(x != null ? { filePath: x } : {})`
 2. **module: NodeNext** — directory imports need explicit `/index.js`
 3. **Linter + type imports** — ESLint may incorrectly change value imports to `import type`. Split into separate import statements if needed.
-4. **Schema.Class context** — `Schema.decodeUnknownEither(MyClass)` requires `Context = never`. If you see context type errors, check your Schema fields.
+4. **Schema.Class context** — `Schema.decodeUnknownExit(MyClass)` requires `Context = never`. If you see context type errors, check your Schema fields.
 
 ## Further Reading
 

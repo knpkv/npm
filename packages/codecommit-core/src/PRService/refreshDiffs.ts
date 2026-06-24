@@ -34,14 +34,16 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
 
     return { awsAccountId: row.awsAccountId, id: row.id, ...stats }
   },
-  Effect.catchAll((e) => Effect.logDebug("enrichSingleDiff failed", e).pipe(Effect.as(undefined)))
+  Effect.catchIf(() => true, (e) => Effect.logDebug("enrichSingleDiff failed", e).pipe(Effect.as(undefined)))
 )
 
 export const enrichDiffs = Effect.fn("enrichDiffs")(
   function*(state: PRState) {
     const prRepo = yield* PullRequestRepo
 
-    const needsEnrichment = yield* prRepo.findMissingDiffStats().pipe(Effect.catchAll(() => Effect.succeed([])))
+    const needsEnrichment = yield* prRepo.findMissingDiffStats().pipe(
+      Effect.catchIf(() => true, () => Effect.succeed([]))
+    )
 
     if (needsEnrichment.length === 0) return
 
@@ -72,7 +74,7 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
       (r) => {
         if (!r) return Effect.void
         return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted).pipe(
-          Effect.catchAll(() => Effect.void)
+          Effect.catchIf(() => true, () => Effect.void)
         )
       },
       { discard: true }

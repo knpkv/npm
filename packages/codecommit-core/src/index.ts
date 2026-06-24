@@ -26,5 +26,4 @@ export * as SandboxService from "./SandboxService/index.js"
 export * as StatsService from "./StatsService/index.js"
 
 // Re-export Effect dependencies for convenience
-export { Registry } from "@effect-atom/atom"
-export { Reactivity } from "@effect/experimental"
+export { AtomRegistry as Registry, Reactivity } from "effect/unstable/reactivity"

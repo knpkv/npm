@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, Stdio } from "effect"
 import { TestConsole } from "effect/testing"
 import { CliOutput, Command, Flag } from "effect/unstable/cli"
@@ -29,6 +29,11 @@ const TestLayer = Layer.mergeAll(
   Stdio.layerTest({})
 )
 
+const inlineSnapshot = (value: string): string => {
+  const normalized = value.replace(/^\n/, "").replace(/\n\s*$/, "").replace(/^        /gm, "")
+  return normalized.slice(1, -1)
+}
+
 const runCommand = Effect.fnUntraced(
   function*(command: ReadonlyArray<string>) {
     yield* Cli.run(command)
@@ -38,11 +43,11 @@ const runCommand = Effect.fnUntraced(
 )
 
 describe("Command help output", () => {
-  it.effect("root command help", () =>
+  it.effect("renders root command help", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           A comprehensive CLI tool demonstrating all features
 
@@ -55,10 +60,10 @@ describe("Command help output", () => {
           --quiet, -q          Suppress non-error output
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           admin            Administrative commands
@@ -71,7 +76,7 @@ describe("Command help output", () => {
           test-failing     Test command that always fails
           app              Application management
           app-nested       Application with nested services"
-      `)
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("aligns flag descriptions when flag names are long", () =>
@@ -91,12 +96,138 @@ describe("Command help output", () => {
       const shortLine = lines.find((line) => line.includes("--short"))
       const longLine = lines.find((line) => line.includes("--this-is-a-very-very-long-flag-name"))
 
-      expect(shortLine).toBeDefined()
-      expect(longLine).toBeDefined()
-      expect(shortLine!.indexOf("Short flag description")).toBe(longLine!.indexOf("Long flag description"))
+      assert.isDefined(shortLine)
+      assert.isDefined(longLine)
+      assert.strictEqual(shortLine.indexOf("Short flag description"), longLine.indexOf("Long flag description"))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("command help renders examples", () =>
+  it.effect("hides flags marked with withHidden from help output", () =>
+    Effect.gen(function*() {
+      const command = Command.make("tool", {
+        visible: Flag.string("visible").pipe(Flag.withDescription("Visible flag")),
+        secret: Flag.string("experimental-foo").pipe(
+          Flag.withDescription("Should not appear"),
+          Flag.withHidden
+        )
+      })
+      const run = Command.runWith(command, { version: "1.0.0" })
+
+      yield* run(["--help"])
+
+      const helpText = (yield* TestConsole.logLines).join("\n")
+      assert.include(helpText, "--visible")
+      assert.notInclude(helpText, "--experimental-foo")
+      assert.notInclude(helpText, "Should not appear")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hidden flag still parses on the command line", () =>
+    Effect.gen(function*() {
+      let captured: string | undefined
+      const command = Command.make("tool", {
+        secret: Flag.string("experimental-foo").pipe(Flag.withHidden)
+      }, (config) =>
+        Effect.sync(() => {
+          captured = config.secret
+        }))
+      const run = Command.runWith(command, { version: "1.0.0" })
+
+      yield* run(["--experimental-foo", "value"])
+
+      assert.strictEqual(captured, "value")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hidden flag name does not leak through unrecognized-flag suggestions", () =>
+    Effect.gen(function*() {
+      const command = Command.make("tool", {
+        secret: Flag.string("experimental-foo").pipe(Flag.withHidden)
+      }, () => Effect.void)
+      const run = Command.runWith(command, { version: "1.0.0" })
+
+      yield* run(["--experimental-fo", "value"]).pipe(
+        Effect.catchTag("ShowHelp", () => Effect.void)
+      )
+
+      const errorText = (yield* TestConsole.errorLines).join("\n")
+      const helpText = (yield* TestConsole.logLines).join("\n")
+      assert.notInclude(errorText + helpText, "experimental-foo")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hides subcommands marked with withHidden from help output", () =>
+    Effect.gen(function*() {
+      const visible = Command.make("visible").pipe(
+        Command.withDescription("A visible subcommand")
+      )
+      const secret = Command.make("experimental-foo").pipe(
+        Command.withDescription("Should not appear"),
+        Command.withHidden
+      )
+      const root = Command.make("tool").pipe(
+        Command.withSubcommands([visible, secret])
+      )
+      const run = Command.runWith(root, { version: "1.0.0" })
+
+      yield* run(["--help"])
+
+      const helpText = (yield* TestConsole.logLines).join("\n")
+      assert.include(helpText, "visible")
+      assert.notInclude(helpText, "experimental-foo")
+      assert.notInclude(helpText, "Should not appear")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hidden subcommand still parses on the command line", () =>
+    Effect.gen(function*() {
+      let invoked = false
+      const secret = Command.make("experimental-foo").pipe(
+        Command.withHidden,
+        Command.withHandler(() =>
+          Effect.sync(() => {
+            invoked = true
+          })
+        )
+      )
+      const root = Command.make("tool").pipe(
+        Command.withSubcommands([secret])
+      )
+      const run = Command.runWith(root, { version: "1.0.0" })
+
+      yield* run(["experimental-foo"])
+
+      assert.isTrue(invoked)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hidden subcommand name does not leak through unknown-subcommand suggestions", () =>
+    Effect.gen(function*() {
+      const secret = Command.make("experimental-foo").pipe(Command.withHidden)
+      const root = Command.make("tool").pipe(
+        Command.withSubcommands([secret])
+      )
+      const run = Command.runWith(root, { version: "1.0.0" })
+
+      yield* run(["experimental-fo"]).pipe(
+        Effect.catchTag("ShowHelp", () => Effect.void)
+      )
+
+      const errorText = (yield* TestConsole.errorLines).join("\n")
+      const helpText = (yield* TestConsole.logLines).join("\n")
+      assert.notInclude(errorText + helpText, "experimental-foo")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("subcommand group with only hidden commands disappears entirely", () =>
+    Effect.gen(function*() {
+      const secret = Command.make("experimental-foo").pipe(Command.withHidden)
+      const root = Command.make("tool").pipe(
+        Command.withSubcommands([secret])
+      )
+      const run = Command.runWith(root, { version: "1.0.0" })
+
+      yield* run(["--help"])
+
+      const helpText = (yield* TestConsole.logLines).join("\n")
+      assert.notInclude(helpText, "SUBCOMMANDS")
+      assert.notInclude(helpText, "<subcommand>")
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("renders command examples", () =>
     Effect.gen(function*() {
       const command = Command.make("login").pipe(
         Command.withDescription("Authenticate with Supabase"),
@@ -113,7 +244,7 @@ describe("Command help output", () => {
       yield* runLogin(["--help"])
 
       const output = (yield* TestConsole.logLines).join("\n")
-      expect(output).toMatchInlineSnapshot(`
+      assert.strictEqual(output, inlineSnapshot(`
         "DESCRIPTION
           Authenticate with Supabase
 
@@ -121,10 +252,10 @@ describe("Command help output", () => {
           login [flags]
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         EXAMPLES
           # Log in with browser OAuth
@@ -138,14 +269,14 @@ describe("Command help output", () => {
 
           # Log in with browser OAuth
           myapp login"
-      `)
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("file operation command with positional args", () =>
+  it.effect("renders file command positional arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["copy", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           Copy files or directories
 
@@ -165,18 +296,18 @@ describe("Command help output", () => {
           --buffer-size integer    Buffer size in KB
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("variadic arguments command", () =>
+  it.effect("renders variadic arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["remove", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           Remove files or directories
 
@@ -195,18 +326,18 @@ describe("Command help output", () => {
           --verbose, -v        Explain what is being done
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("deeply nested subcommand", () =>
+  it.effect("renders deeply nested subcommand help", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "users", "list", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           List all users in the system
 
@@ -223,18 +354,18 @@ describe("Command help output", () => {
           --verbose, -v        Show detailed information
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("command with mixed positional args", () =>
+  it.effect("renders mixed required and optional positional arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "users", "create", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           Create a new user account
 
@@ -254,18 +385,18 @@ describe("Command help output", () => {
           --notify, -n         Send notification email
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("intermediate subcommand with options", () =>
+  it.effect("renders intermediate subcommand shared flags and children", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "config", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           Manage application configuration
 
@@ -280,22 +411,22 @@ describe("Command help output", () => {
           --profile, -p string    Configuration profile to use
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           set    Set configuration values
           get    Get configuration value"
-      `)
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("variadic with minimum count", () =>
+  it.effect("renders variadic arguments with a minimum count", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "config", "set", "--help"])
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "DESCRIPTION
           Set configuration values
 
@@ -314,11 +445,11 @@ describe("Command help output", () => {
           --config-file, -f file    Write to specific config file
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("shared flags are visible in subcommand help while local flags stay local", () =>
@@ -340,18 +471,18 @@ describe("Command help output", () => {
 
       yield* runRoot(["--help"])
       const rootHelp = yield* TestConsole.logLines
-      expect(rootHelp.some((line) => String(line).includes("--workspace"))).toBe(true)
-      expect(rootHelp.some((line) => String(line).includes("--model"))).toBe(true)
+      assert.isTrue(rootHelp.some((line) => String(line).includes("--workspace")))
+      assert.isTrue(rootHelp.some((line) => String(line).includes("--model")))
 
       yield* runRoot(["chat", "--help"])
       const allHelp = yield* TestConsole.logLines
       const chatHelp = allHelp.slice(rootHelp.length)
-      expect(chatHelp.some((line) => String(line).includes("--workspace"))).toBe(false)
-      expect(chatHelp.some((line) => String(line).includes("--model"))).toBe(true)
-      expect(chatHelp.some((line) => String(line).includes("--topic"))).toBe(true)
+      assert.isFalse(chatHelp.some((line) => String(line).includes("--workspace")))
+      assert.isTrue(chatHelp.some((line) => String(line).includes("--model")))
+      assert.isTrue(chatHelp.some((line) => String(line).includes("--topic")))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("grouped subcommands", () =>
+  it.effect("renders grouped subcommands", () =>
     Effect.gen(function*() {
       const ungrouped = Command.make("ungrouped").pipe(
         Command.withDescription("This command is not in a group")
@@ -387,15 +518,15 @@ describe("Command help output", () => {
 
       const helpText = (yield* TestConsole.logLines).join("\n")
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "USAGE
           tool <subcommand> [flags]
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           ungrouped    This command is not in a group
@@ -412,10 +543,10 @@ describe("Command help output", () => {
         Management APIs:
           projects     Manage cloud projects
           functions    Manage edge functions"
-      `)
+      `))
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("subcommand aliases in listings", () =>
+  it.effect("renders subcommand aliases in listings", () =>
     Effect.gen(function*() {
       const plan = Command.make("plan").pipe(
         Command.withAlias("p"),
@@ -429,18 +560,18 @@ describe("Command help output", () => {
 
       const helpText = (yield* TestConsole.logLines).join("\n")
 
-      expect(helpText).toMatchInlineSnapshot(`
+      assert.strictEqual(helpText, inlineSnapshot(`
         "USAGE
           tool <subcommand> [flags]
 
         GLOBAL FLAGS
-          --help, -h              Show help information
-          --version               Show version information
-          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
-          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+          --help, -h                                                          Show help information
+          --version, -v                                                       Show version information
+          --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           plan, p    Draft a plan in your editor"
-      `)
+      `))
     }).pipe(Effect.provide(TestLayer)))
 })

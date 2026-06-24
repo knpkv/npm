@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -55,19 +55,15 @@ const MessageFields = Schema.Struct({
   message: Schema.optional(Schema.String)
 })
 
-/** Structured JSON format (new notifications) */
-const JsonMessage = Schema.parseJson(MessageFields)
+type Message = typeof MessageFields.Type
 
-/** Plain text format (old notifications) — wrap in cause field */
-const PlainMessage = Schema.transform(Schema.String, MessageFields, {
-  decode: (s) => ({ cause: s }),
-  encode: (m) => m.cause ?? ""
-})
-
-const decodeMessage = Schema.decodeOption(Schema.Union(JsonMessage, PlainMessage))
+const decodeJsonMessage: (message: string) => Option.Option<Message> = Schema.decodeOption(
+  Schema.fromJsonString(MessageFields)
+)
 
 /** Try to parse message as structured notification */
-const parseStructured = (message: string) => decodeMessage(message)
+const parseStructured = (message: string): Option.Option<Message> =>
+  Option.orElse(decodeJsonMessage(message), () => Option.some({ cause: message }))
 
 /** Extract a human-readable summary */
 const formatMessage = (message: string): string => {

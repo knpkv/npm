@@ -3,11 +3,12 @@
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
+import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { FileSystemError } from "../ConfluenceError.js"
 import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema } from "../Schemas.js"
@@ -31,21 +32,31 @@ export interface HomeDirectory {
  *
  * @category Services
  */
-export class HomeDirectoryTag extends Context.Tag("@knpkv/confluence-to-markdown/HomeDirectory")<
+export class HomeDirectoryTag extends Context.Service<
   HomeDirectoryTag,
   HomeDirectory
->() {}
+>()("@knpkv/confluence-to-markdown/HomeDirectory") {}
 
 /**
- * Default implementation using process.env.HOME.
+ * Default implementation using Effect Config.
  *
  * @category Layers
  */
-export const HomeDirectoryLive: Layer.Layer<HomeDirectoryTag> = Layer.succeed(
+const homeDirectoryPath = Config.string("HOME").pipe(
+  Config.orElse(() => Config.string("USERPROFILE")),
+  Config.orElse(() => Config.succeed("/"))
+)
+
+export const HomeDirectoryLive: Layer.Layer<HomeDirectoryTag> = Layer.effect(
   HomeDirectoryTag,
-  {
-    get: () => Effect.sync(() => process.env.HOME ?? process.env.USERPROFILE ?? "/")
-  }
+  homeDirectoryPath.pipe(
+    Effect.catchCause(() => Effect.succeed("/")),
+    Effect.map((home) =>
+      HomeDirectoryTag.of({
+        get: () => Effect.succeed(home)
+      })
+    )
+  )
 )
 
 /**
@@ -96,7 +107,7 @@ export const loadToken = (): Effect.Effect<
     const tokenPath = yield* getTokenPath()
 
     const exists = yield* fs.exists(tokenPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -113,8 +124,8 @@ export const loadToken = (): Effect.Effect<
       return null
     }
 
-    const decoded = yield* Schema.decodeUnknown(OAuthTokenSchema)(parsed).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
+    const decoded = yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
+      Effect.catchCause(() => Effect.succeed(null))
     )
 
     return decoded
@@ -164,8 +175,7 @@ export const deleteToken = (): Effect.Effect<
     const tokenPath = yield* getTokenPath()
 
     yield* fs.remove(tokenPath).pipe(
-      Effect.catchAll(() => Effect.void),
-      Effect.mapError((cause) => new FileSystemError({ operation: "delete", path: tokenPath, cause }))
+      Effect.catchCause(() => Effect.void)
     )
   })
 
@@ -186,7 +196,7 @@ export const loadOAuthConfig = (): Effect.Effect<
     const configPath = yield* getConfigPath()
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -203,8 +213,8 @@ export const loadOAuthConfig = (): Effect.Effect<
       return null
     }
 
-    const decoded = yield* Schema.decodeUnknown(OAuthConfigSchema)(parsed).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
+    const decoded = yield* Schema.decodeUnknownEffect(OAuthConfigSchema)(parsed).pipe(
+      Effect.catchCause(() => Effect.succeed(null))
     )
 
     return decoded

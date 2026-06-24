@@ -11,51 +11,46 @@
  *
  * @category CacheService
  */
-import * as Model from "@effect/sql/Model"
-import { Effect, Schema } from "effect"
-import {
-  ApprovalRule,
-  AwsProfileName,
-  AwsRegion,
-  PullRequestId,
-  PullRequestStatus,
-  RepositoryName
-} from "../../../Domain.js"
+import { Effect, Schema, SchemaGetter } from "effect"
+import { ApprovalRule, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
 
 /** DB column `TEXT` (comma-separated) <-> `readonly string[]` */
-export const CommaSeparatedArray = Schema.transform(
-  Schema.NullOr(Schema.String),
-  Schema.Array(Schema.String),
-  {
-    decode: (s) => (s ? s.split(",").filter(Boolean) : []),
-    encode: (arr) => (arr.length > 0 ? arr.join(",") : null)
-  }
+export const CommaSeparatedArray = Schema.NullOr(Schema.String).pipe(
+  Schema.decodeTo(Schema.Array(Schema.String), {
+    decode: SchemaGetter.transform((s) => (s ? s.split(",").filter(Boolean) : [])),
+    encode: SchemaGetter.transform((arr) => (arr.length > 0 ? arr.join(",") : null))
+  })
+)
+
+const BooleanFromNumber = Schema.Number.pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((n) => n !== 0),
+    encode: SchemaGetter.transform((b) => b ? 1 : 0)
+  })
 )
 
 /** DB column `TEXT` (JSON) <-> `readonly ApprovalRule[]` */
-const ApprovalRulesFromJson = Schema.transform(
-  Schema.NullOr(Schema.String),
-  Schema.Array(ApprovalRule),
-  {
-    decode: (s) => {
+const ApprovalRulesFromJson = Schema.NullOr(Schema.String).pipe(
+  Schema.decodeTo(Schema.Array(ApprovalRule), {
+    decode: SchemaGetter.transform((s) => {
       if (!s) return []
       try {
         return Schema.decodeUnknownSync(Schema.Array(ApprovalRule))(JSON.parse(s))
       } catch {
         return []
       }
-    },
-    encode: (arr) => (arr.length > 0 ? JSON.stringify(arr) : null)
-  }
+    }),
+    encode: SchemaGetter.transform((arr) => (arr.length > 0 ? JSON.stringify(arr) : null))
+  })
 )
 
 export const CachedPullRequest = Schema.Struct({
   id: PullRequestId,
   awsAccountId: Schema.String,
   repoAccountId: Schema.NullOr(Schema.String),
-  accountProfile: AwsProfileName,
-  accountRegion: AwsRegion,
+  accountProfile: Schema.String,
+  accountRegion: Schema.String,
   title: Schema.String,
   description: Schema.NullOr(Schema.String),
   author: Schema.String,
@@ -65,8 +60,8 @@ export const CachedPullRequest = Schema.Struct({
   status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
-  isMergeable: Model.BooleanFromNumber,
-  isApproved: Model.BooleanFromNumber,
+  isMergeable: BooleanFromNumber,
+  isApproved: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
@@ -102,7 +97,7 @@ export const UpsertInput = Schema.Struct({
   repositoryName: Schema.String,
   creationDate: Schema.String,
   lastModifiedDate: Schema.String,
-  status: Schema.String,
+  status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
@@ -111,7 +106,7 @@ export const UpsertInput = Schema.Struct({
   link: Schema.String,
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String),
-  approvalRules: Schema.optionalWith(Schema.Array(ApprovalRule), { default: () => [] })
+  approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
 })
 
 export type UpsertInput = typeof UpsertInput.Type
@@ -120,7 +115,7 @@ export type UpsertInput = typeof UpsertInput.Type
 export const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `PullRequestRepo.${op}`, cause })),
-    Effect.withSpan(`PullRequestRepo.${op}`, { captureStackTrace: false })
+    Effect.withSpan(`PullRequestRepo.${op}`)
   )
 
 /** Join a string array for the approved_by TEXT column. */

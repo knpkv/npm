@@ -6,9 +6,9 @@
  *
  * @category CacheService
  */
-import type * as SqlClient from "@effect/sql/SqlClient"
-import * as SqlSchema from "@effect/sql/SqlSchema"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import { AwsProfileName, AwsRegion } from "../../../Domain.js"
 import type { CacheError } from "../../CacheError.js"
 import {
@@ -17,6 +17,11 @@ import {
   cacheError,
   type SearchResult
 } from "./internal.js"
+
+type NoServices<T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
+  Effect.Success<T>,
+  Effect.Error<T>
+>
 
 const StaleOpenRow = Schema.Struct({
   id: Schema.String,
@@ -78,17 +83,17 @@ export const search = (sql: SqlClient.SqlClient) => {
   return (
     query: string,
     opts?: { readonly limit?: number; readonly offset?: number }
-  ): Effect.Effect<SearchResult, CacheError> => {
+  ): Effect.Effect<SearchResult, CacheError, never> => {
     const limit = opts?.limit ?? 20
     const offset = opts?.offset ?? 0
     const stripped = query.replace(/[*^"]/g, "").replace(/\b(NEAR|OR|NOT|AND)\b/gi, "")
     const escaped = stripped.replace(/"/g, `""`)
     const ftsQuery = `"${escaped}"`
     return Effect.all({
-      items: search_({ query: ftsQuery, limit, offset }),
+      items: search_({ query: ftsQuery, limit, offset }) as NoServices<ReturnType<typeof search_>>,
       total: searchCount_({ query: ftsQuery }).pipe(
-        Effect.map((r) => r.pipe(Option.getOrElse(() => ({ count: 0 }))).count)
-      )
+        Effect.map((r) => r.count)
+      ) as Effect.Effect<number, Effect.Error<ReturnType<typeof searchCount_>>>
     }).pipe(
       Effect.map(({ items, total }) => ({ items, total, hasMore: offset + items.length < total })),
       Effect.catchTag("SqlError", () =>

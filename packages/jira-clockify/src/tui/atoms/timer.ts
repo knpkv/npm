@@ -3,13 +3,13 @@
  *
  * @internal
  */
-import { Atom } from "@effect-atom/atom-react"
 import { Effect } from "effect"
+import * as Atom from "effect/unstable/reactivity/Atom"
 import type { JiraTicket } from "../../services/TicketService.js"
 import { type StopOptions, TimerService } from "../../services/TimerService.js"
 import { runtimeAtom } from "./runtime.js"
 
-export const timerStateAtom = runtimeAtom.subscribable(
+export const timerStateAtom = runtimeAtom.subscriptionRef(
   Effect.gen(function*() {
     const service = yield* TimerService
     return service.state

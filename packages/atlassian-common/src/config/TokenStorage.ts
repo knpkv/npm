@@ -6,7 +6,7 @@
  * - **Load returns null, not error**: {@link loadToken} and {@link loadOAuthConfig} return
  *   `null` for missing/corrupt files — callers decide whether absence is an error.
  * - **Save is atomic**: Writes go through {@link writeSecureFile} with `0o600` permissions.
- * - **Schema-gated reads**: JSON is parsed then validated via `Schema.decodeUnknown` —
+ * - **Schema-gated reads**: JSON is parsed then validated via `Schema.decodeUnknownEffect` —
  *   corrupt data is treated as absent rather than crashing.
  *
  * **Common tasks**
@@ -17,11 +17,11 @@
  *
  * @module
  */
-import type * as Error from "@effect/platform/Error"
-import * as FileSystem from "@effect/platform/FileSystem"
-import type * as Path from "@effect/platform/Path"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import type * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js"
 import { ensureConfigDir, getAuthPath, getOAuthConfigPath, writeSecureFile } from "./ConfigPaths.js"
@@ -62,7 +62,7 @@ export const loadToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     const exists = yield* fs.exists(tokenPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -84,8 +84,8 @@ export const loadToken = (
       return null
     }
 
-    return yield* Schema.decodeUnknown(OAuthTokenSchema)(parsed).pipe(
-      Effect.catchAll((e) =>
+    return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
+      Effect.catchCause((e) =>
         Effect.logWarning(`Invalid token schema in ${tokenPath}: ${e}`).pipe(
           Effect.map(() => null)
         )
@@ -106,7 +106,7 @@ export const saveToken = (
   token: OAuthToken
 ): Effect.Effect<
   void,
-  FileSystemError | HomeDirectoryError | Error.PlatformError,
+  FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {
@@ -134,7 +134,7 @@ export const deleteToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     yield* fs.remove(tokenPath).pipe(
-      Effect.catchAll(() => Effect.void)
+      Effect.catchCause(() => Effect.void)
     )
   })
 
@@ -158,7 +158,7 @@ export const loadOAuthConfig = (
     const configPath = yield* getOAuthConfigPath(toolName)
 
     const exists = yield* fs.exists(configPath).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
+      Effect.catchCause(() => Effect.succeed(false))
     )
     if (!exists) {
       return null
@@ -180,8 +180,8 @@ export const loadOAuthConfig = (
       return null
     }
 
-    return yield* Schema.decodeUnknown(OAuthConfigSchema)(parsed).pipe(
-      Effect.catchAll((e) =>
+    return yield* Schema.decodeUnknownEffect(OAuthConfigSchema)(parsed).pipe(
+      Effect.catchCause((e) =>
         Effect.logWarning(`Invalid OAuth config schema in ${configPath}: ${e}`).pipe(
           Effect.map(() => null)
         )
@@ -202,7 +202,7 @@ export const saveOAuthConfig = (
   config: OAuthConfig
 ): Effect.Effect<
   void,
-  FileSystemError | HomeDirectoryError | Error.PlatformError,
+  FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {

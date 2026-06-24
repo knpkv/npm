@@ -3,16 +3,16 @@
  *
  * **Mental model**
  *
- * - **Lazy layer selection**: {@link getLayerType} inspects `process.argv[2]` to pick
+ * - **Lazy layer selection**: {@link getLayerType} inspects CLI arguments from `Stdio` to pick
  *   the smallest layer needed — `"minimal"` for help/version, `"auth"` for auth commands,
  *   `"full"` for search/get (which needs API client + issue service).
- * - **Dummy services**: Auth-only and minimal layers provide `Effect.dieMessage` stubs
+ * - **Dummy services**: Auth-only and minimal layers provide dying stubs
  *   for unused services to satisfy the type system without initialization cost.
  *
  * @internal
  */
-import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -25,51 +25,51 @@ import { layer as VersionServiceLayer, VersionService } from "../VersionService.
 const DummyIssueServiceLayer = Layer.succeed(
   IssueService,
   IssueService.of({
-    getByKey: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    search: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    searchAll: () => Effect.dieMessage("Not configured - run 'jira auth login' first")
+    getByKey: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    search: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    searchAll: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 
 const DummyMarkdownWriterLayer = Layer.succeed(
   MarkdownWriter,
   MarkdownWriter.of({
-    writeMulti: () => Effect.dieMessage("Not configured"),
-    writeSingle: () => Effect.dieMessage("Not configured")
+    writeMulti: () => Effect.die(new Error("Not configured")),
+    writeSingle: () => Effect.die(new Error("Not configured"))
   })
 )
 
 const DummyVersionServiceLayer = Layer.succeed(
   VersionService,
   VersionService.of({
-    listProjectVersions: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    getVersion: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    updateVersion: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    listRelatedWork: () => Effect.dieMessage("Not configured - run 'jira auth login' first"),
-    addRelatedWork: () => Effect.dieMessage("Not configured - run 'jira auth login' first")
+    listProjectVersions: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    getVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    updateVersion: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    listRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
+    addRelatedWork: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 
 const DummyJiraAuthLayer = Layer.succeed(
   JiraAuth,
   JiraAuth.of({
-    configure: () => Effect.dieMessage("Not configured"),
+    configure: () => Effect.die(new Error("Not configured")),
     isConfigured: () => Effect.succeed(false),
-    login: () => Effect.dieMessage("Not configured"),
-    logout: () => Effect.dieMessage("Not configured"),
-    getAccessToken: () => Effect.dieMessage("Not configured"),
-    getCloudId: () => Effect.dieMessage("Not configured"),
-    getSiteUrl: () => Effect.dieMessage("Not configured"),
+    login: () => Effect.die(new Error("Not configured")),
+    logout: () => Effect.die(new Error("Not configured")),
+    getAccessToken: () => Effect.die(new Error("Not configured")),
+    getCloudId: () => Effect.die(new Error("Not configured")),
+    getSiteUrl: () => Effect.die(new Error("Not configured")),
     getCurrentUser: () => Effect.succeed(null),
     isLoggedIn: () => Effect.succeed(false)
   })
 )
 
 // Auth layer with HTTP client
-const AuthLive = JiraAuthLayer.pipe(Layer.provide(NodeHttpClient.layer))
+const AuthLive = JiraAuthLayer.pipe(Layer.provide(Layer.mergeAll(NodeHttpClient.layerUndici, NodeServices.layer)))
 
 // Build Jira API config layer dynamically based on auth
-const JiraConfigLive = Layer.unwrapEffect(
+const JiraConfigLive = Layer.unwrap(
   Effect.gen(function*() {
     const auth = yield* JiraAuth
     const accessToken = yield* auth.getAccessToken()
@@ -92,7 +92,7 @@ const JiraClientLive = JiraApiClient.layer.pipe(
 )
 
 // Build SiteUrl layer from auth
-const SiteUrlLive = Layer.unwrapEffect(
+const SiteUrlLive = Layer.unwrap(
   Effect.gen(function*() {
     const auth = yield* JiraAuth
     const siteUrl = yield* auth.getSiteUrl()
@@ -111,8 +111,8 @@ export const AppLayer = MarkdownWriterLayer.pipe(
   Layer.provideMerge(SiteUrlLive),
   Layer.provideMerge(JiraClientLive),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(NodeHttpClient.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -124,8 +124,8 @@ export const AuthOnlyLayer = DummyIssueServiceLayer.pipe(
   Layer.provideMerge(DummyMarkdownWriterLayer),
   Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(NodeHttpClient.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -137,7 +137,7 @@ export const MinimalLayer = DummyIssueServiceLayer.pipe(
   Layer.provideMerge(DummyMarkdownWriterLayer),
   Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(DummyJiraAuthLayer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -145,8 +145,8 @@ export const MinimalLayer = DummyIssueServiceLayer.pipe(
  *
  * @category Utilities
  */
-export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "minimal" => {
-  const cmd = argv[2]
+export const getLayerType = (args: ReadonlyArray<string>): "full" | "auth" | "minimal" => {
+  const cmd = args[0]
   if (cmd === "auth") {
     return "auth"
   }

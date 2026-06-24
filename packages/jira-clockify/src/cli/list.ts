@@ -3,8 +3,8 @@
  *
  * @module
  */
-import { Command, Options } from "@effect/cli"
 import { Console, Effect, SubscriptionRef } from "effect"
+import { Command, Flag as Options } from "effect/unstable/cli"
 import { TicketService } from "../services/TicketService.js"
 
 /** `list` command — prints assigned tickets. */

@@ -4,11 +4,10 @@
  * @module
  * @internal
  */
-import * as Command from "@effect/platform/Command"
-import type * as CommandExecutor from "@effect/platform/CommandExecutor"
-import type * as PlatformError from "@effect/platform/Error"
 import * as Effect from "effect/Effect"
-import * as String from "effect/String"
+import * as EffectString from "effect/String"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { GitError, GitNotInstalledError } from "../GitError.js"
 
 /**
@@ -48,17 +47,26 @@ export interface GitLogEntry {
  * Convert PlatformError to GitError or GitNotInstalledError.
  */
 const mapPlatformError = (
-  error: PlatformError.PlatformError,
+  error: unknown,
   commandStr: string
 ): GitError | GitNotInstalledError => {
-  if (error._tag === "SystemError" && error.reason === "NotFound") {
+  if (
+    typeof error === "object"
+    && error !== null
+    && "_tag" in error
+    && "reason" in error
+    && error._tag === "SystemError"
+    && error.reason === "NotFound"
+  ) {
+    const message = "message" in error ? globalThis.String(error.message) : "command not found"
     return new GitNotInstalledError({
-      message: `Git not found: ${error.message}. Please install git.`
+      message: `Git not found: ${message}. Please install git.`
     })
   }
+  const message = error instanceof Error ? error.message : globalThis.String(error)
   return new GitError({
     command: commandStr,
-    message: error.message
+    message
   })
 }
 
@@ -74,15 +82,13 @@ const mapPlatformError = (
 export const runGit = (
   args: ReadonlyArray<string>,
   cwd: string
-): Effect.Effect<string, GitError | GitNotInstalledError, CommandExecutor.CommandExecutor> =>
+): Effect.Effect<string, GitError | GitNotInstalledError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function*() {
-    const command = Command.make("git", ...args).pipe(
-      Command.workingDirectory(cwd)
-    )
-
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const command = ChildProcess.make("git", ["-C", cwd, ...args])
     const commandStr = `git ${args.join(" ")}`
 
-    const result = yield* Command.string(command).pipe(
+    const result = yield* spawner.string(command).pipe(
       Effect.mapError((error) => mapPlatformError(error, commandStr))
     )
 
@@ -98,7 +104,7 @@ export const runGit = (
 export const runGitAllowEmpty = (
   args: ReadonlyArray<string>,
   cwd: string
-): Effect.Effect<string, GitError | GitNotInstalledError, CommandExecutor.CommandExecutor> =>
+): Effect.Effect<string, GitError | GitNotInstalledError, ChildProcessSpawner.ChildProcessSpawner> =>
   runGit(args, cwd).pipe(
     Effect.catchIf(
       (e): e is GitError => e._tag === "GitError",
@@ -115,7 +121,7 @@ export const runGitAllowEmpty = (
  * @internal
  */
 export const parseGitStatus = (output: string): ReadonlyArray<GitStatusEntry> => {
-  if (String.isEmpty(output.trim())) {
+  if (EffectString.isEmpty(output.trim())) {
     return []
   }
 
@@ -171,7 +177,7 @@ const parseStatusCode = (code: string): GitFileStatus => {
  * @internal
  */
 export const parseGitLog = (output: string): ReadonlyArray<GitLogEntry> => {
-  if (String.isEmpty(output.trim())) {
+  if (EffectString.isEmpty(output.trim())) {
     return []
   }
 

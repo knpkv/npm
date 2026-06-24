@@ -1,7 +1,7 @@
 /**
  * @title PermissionGate — abstract "ask the user" interface
  *
- * Context.Tag (not Effect.Service) so different environments can
+ * Context.Service so different environments can
  * provide different implementations:
  *   - Web: Deferred + SSE push (PermissionGateLive.ts)
  *   - TUI: stdin prompt (future)
@@ -21,7 +21,7 @@ import type { PermissionDeniedError } from "../Errors.js"
 export class PermissionPrompt extends Schema.Class<PermissionPrompt>("PermissionPrompt")({
   id: Schema.String,
   operation: Schema.String,
-  category: Schema.Literal("read", "write"),
+  category: Schema.Literals(["read", "write"]),
   context: Schema.String
 }) {}
 
@@ -29,9 +29,9 @@ export type PermissionResponse = "allow_once" | "always_allow" | "deny"
 
 // Blocks the calling fiber until user responds or 30s timeout.
 // Returns the response, or fails with PermissionDeniedError.
-export class PermissionGate extends Context.Tag("@knpkv/codecommit-core/PermissionGate")<
+export class PermissionGate extends Context.Service<
   PermissionGate,
   {
     readonly request: (prompt: PermissionPrompt) => Effect.Effect<PermissionResponse, PermissionDeniedError>
   }
->() {}
+>()("@knpkv/codecommit-core/PermissionGate") {}

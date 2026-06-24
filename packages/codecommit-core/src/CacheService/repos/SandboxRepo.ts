@@ -1,6 +1,7 @@
-import * as SqlClient from "@effect/sql/SqlClient"
-import * as SqlSchema from "@effect/sql/SqlSchema"
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import type { Success } from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import type { SandboxId, SandboxStatus } from "../../Domain.js"
 import { CacheError } from "../CacheError.js"
 import { DatabaseLive } from "../Database.js"
@@ -40,133 +41,141 @@ export interface InsertSandbox {
 const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `SandboxRepo.${op}`, cause })),
-    Effect.withSpan(`SandboxRepo.${op}`, { captureStackTrace: false })
+    Effect.withSpan(`SandboxRepo.${op}`)
   )
 
 const isoNow = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms).toISOString()))
 
-export class SandboxRepo extends Effect.Service<SandboxRepo>()("SandboxRepo", {
-  dependencies: [DatabaseLive, EventsHub.Default],
-  effect: Effect.gen(function*() {
-    const sql = yield* SqlClient.SqlClient
-    const hub = yield* EventsHub
+const makeSandboxRepo = Effect.gen(function*() {
+  const sql = yield* SqlClient.SqlClient
+  const hub = yield* EventsHub
 
-    const publish = hub.publish(RepoChange.Sandboxes())
+  const publish = hub.publish(RepoChange.Sandboxes())
 
-    const findById_ = SqlSchema.findOne({
-      Result: SandboxRow,
-      Request: Schema.Struct({ id: Schema.String }),
-      execute: (req) => sql`SELECT * FROM sandboxes WHERE id = ${req.id}`
-    })
+  const findById_ = SqlSchema.findOneOption({
+    Result: SandboxRow,
+    Request: Schema.Struct({ id: Schema.String }),
+    execute: (req) => sql`SELECT * FROM sandboxes WHERE id = ${req.id}`
+  })
 
-    const findByPr_ = SqlSchema.findOne({
-      Result: SandboxRow,
-      Request: Schema.Struct({ awsAccountId: Schema.String, pullRequestId: Schema.String }),
-      execute: (req) =>
-        sql`SELECT * FROM sandboxes
+  const findByPr_ = SqlSchema.findOneOption({
+    Result: SandboxRow,
+    Request: Schema.Struct({ awsAccountId: Schema.String, pullRequestId: Schema.String }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
               AND status NOT IN ('stopped', 'error')`
-    })
+  })
 
-    const findActive_ = SqlSchema.findAll({
-      Result: SandboxRow,
-      Request: Schema.Void,
-      execute: () =>
-        sql`SELECT * FROM sandboxes
+  const findActive_ = SqlSchema.findAll({
+    Result: SandboxRow,
+    Request: Schema.Void,
+    execute: () =>
+      sql`SELECT * FROM sandboxes
             WHERE status IN ('creating', 'cloning', 'starting', 'running')
             ORDER BY created_at DESC`
-    })
+  })
 
-    const findAll_ = SqlSchema.findAll({
-      Result: SandboxRow,
-      Request: Schema.Void,
-      execute: () => sql`SELECT * FROM sandboxes ORDER BY created_at DESC`
-    })
+  const findAll_ = SqlSchema.findAll({
+    Result: SandboxRow,
+    Request: Schema.Void,
+    execute: () => sql`SELECT * FROM sandboxes ORDER BY created_at DESC`
+  })
 
-    return {
-      insert: (sandbox: InsertSandbox) =>
-        sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, workspace_path, status, created_at, last_activity_at)
+  return {
+    insert: (sandbox: InsertSandbox) =>
+      sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, workspace_path, status, created_at, last_activity_at)
             VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.sourceBranch}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
-          .pipe(
-            Effect.tap(() => publish),
-            cacheError("insert")
-          ),
+        .pipe(
+          Effect.tap(() => publish),
+          cacheError("insert")
+        ),
 
-      updateStatus: (
-        id: SandboxId,
-        status: SandboxStatus,
-        extra?: { containerId?: string; port?: number; error?: string }
-      ) =>
-        isoNow.pipe(
-          Effect.flatMap((now) =>
-            sql`UPDATE sandboxes SET
+    updateStatus: (
+      id: SandboxId,
+      status: SandboxStatus,
+      extra?: { containerId?: string; port?: number; error?: string }
+    ) =>
+      isoNow.pipe(
+        Effect.flatMap((now) =>
+          sql`UPDATE sandboxes SET
                 status = ${status},
                 last_activity_at = ${now}
                 ${extra?.containerId ? sql`, container_id = ${extra.containerId}` : sql``}
                 ${extra?.port ? sql`, port = ${extra.port}` : sql``}
                 ${extra?.error ? sql`, error = ${extra.error}` : sql``}
                 WHERE id = ${id}`.pipe(
-              Effect.tap(() => publish)
-            )
-          ),
-          cacheError("updateStatus")
+            Effect.tap(() => publish)
+          )
         ),
+        cacheError("updateStatus")
+      ),
 
-      findById: (id: SandboxId) =>
-        findById_({ id }).pipe(
-          Effect.flatMap(Option.match({
-            onNone: () =>
-              Effect.fail(new CacheError({ operation: "SandboxRepo.findById", cause: `Sandbox ${id} not found` })),
-            onSome: Effect.succeed
-          })),
-          Effect.withSpan("SandboxRepo.findById", { captureStackTrace: false })
-        ),
+    findById: (id: SandboxId) =>
+      findById_({ id }).pipe(
+        Effect.flatMap(Option.match({
+          onNone: () =>
+            Effect.fail(new CacheError({ operation: "SandboxRepo.findById", cause: `Sandbox ${id} not found` })),
+          onSome: Effect.succeed
+        })),
+        Effect.withSpan("SandboxRepo.findById")
+      ),
 
-      findByPr: (awsAccountId: string, pullRequestId: string) =>
-        findByPr_({ awsAccountId, pullRequestId }).pipe(cacheError("findByPr")),
+    findByPr: (awsAccountId: string, pullRequestId: string) =>
+      findByPr_({ awsAccountId, pullRequestId }).pipe(cacheError("findByPr")),
 
-      findActive: () => findActive_(undefined as void).pipe(cacheError("findActive")),
+    findActive: () => findActive_(undefined as void).pipe(cacheError("findActive")),
 
-      findAll: () => findAll_(undefined as void).pipe(cacheError("findAll")),
+    findAll: () => findAll_(undefined as void).pipe(cacheError("findAll")),
 
-      delete: (id: SandboxId) =>
-        sql`DELETE FROM sandboxes WHERE id = ${id}`.pipe(
-          Effect.tap(() => publish),
-          cacheError("delete")
-        ),
+    delete: (id: SandboxId) =>
+      sql`DELETE FROM sandboxes WHERE id = ${id}`.pipe(
+        Effect.tap(() => publish),
+        cacheError("delete")
+      ),
 
-      updateDetail: (id: SandboxId, detail: string) =>
-        isoNow.pipe(
-          Effect.flatMap((now) =>
-            sql`UPDATE sandboxes SET
+    updateDetail: (id: SandboxId, detail: string) =>
+      isoNow.pipe(
+        Effect.flatMap((now) =>
+          sql`UPDATE sandboxes SET
                 status_detail = ${detail},
                 last_activity_at = ${now}
                 WHERE id = ${id}`.pipe(
-              Effect.tap(() => publish)
-            )
-          ),
-          cacheError("updateDetail")
+            Effect.tap(() => publish)
+          )
         ),
+        cacheError("updateDetail")
+      ),
 
-      appendLog: (id: SandboxId, line: string) =>
-        isoNow.pipe(
-          Effect.flatMap((now) =>
-            sql`UPDATE sandboxes SET
+    appendLog: (id: SandboxId, line: string) =>
+      isoNow.pipe(
+        Effect.flatMap((now) =>
+          sql`UPDATE sandboxes SET
                 logs = COALESCE(logs, '') || ${line + "\n"},
                 last_activity_at = ${now}
                 WHERE id = ${id}`.pipe(
-              Effect.tap(() => publish)
-            )
-          ),
-          cacheError("appendLog")
+            Effect.tap(() => publish)
+          )
         ),
+        cacheError("appendLog")
+      ),
 
-      updateActivity: (id: SandboxId) =>
-        isoNow.pipe(
-          Effect.flatMap((now) => sql`UPDATE sandboxes SET last_activity_at = ${now} WHERE id = ${id}`),
-          cacheError("updateActivity")
-        )
-    } as const
-  })
-}) {}
+    updateActivity: (id: SandboxId) =>
+      isoNow.pipe(
+        Effect.flatMap((now) => sql`UPDATE sandboxes SET last_activity_at = ${now} WHERE id = ${id}`),
+        cacheError("updateActivity")
+      )
+  } as const
+})
+
+export interface SandboxRepoShape extends Success<typeof makeSandboxRepo> {}
+
+export class SandboxRepo extends Context.Service<
+  SandboxRepo,
+  SandboxRepoShape
+>()("SandboxRepo") {
+  static readonly Default = Layer.effect(SandboxRepo, makeSandboxRepo).pipe(
+    Layer.provide(Layer.mergeAll(DatabaseLive, EventsHub.Default))
+  )
+}

@@ -30,14 +30,25 @@
  *
  * @internal
  */
-import { HttpClient } from "@effect/platform"
-import { Credentials, Region } from "distilled-aws"
+import type { Credentials, Region } from "distilled-aws"
+import type { ListPullRequestsInput, ListPullRequestsOutput } from "distilled-aws/codecommit"
 import * as codecommit from "distilled-aws/codecommit"
-import { Data, Effect, Schema, Stream } from "effect"
+import * as DistilledCredentials from "distilled-aws/Credentials"
+import * as DistilledRegion from "distilled-aws/Region"
+import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
-import { Account, ApprovalRule, AwsProfileName, AwsRegion, codecommitConsoleUrl, PullRequest } from "../Domain.js"
+import { Account, ApprovalRule, codecommitConsoleUrl, PullRequest } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
+import { parseRuleContent } from "./approvalRuleContent.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
+
+type AwsMethodEnv = AwsClientConfig | Credentials.Credentials | Region.Region | HttpClient.HttpClient
+type AwsStreamEnv = Credentials.Credentials | Region.Region | HttpClient.HttpClient
+
+const listPullRequestsPages = codecommit.listPullRequests.pages as (
+  input: ListPullRequestsInput
+) => Stream.Stream<ListPullRequestsOutput, unknown, AwsStreamEnv>
 
 // ---------------------------------------------------------------------------
 // Sub-helpers
@@ -48,68 +59,17 @@ class MissingPullRequestResponse extends Data.TaggedError("MissingPullRequestRes
 }> {}
 
 const decodeAccount = Schema.decodeSync(Account)
+const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const EpochFallback = new Date(0)
-
-// Schema is permissive on NumberOfApprovalsNeeded: AWS returns it as number or
-// string, and a malformed value must NOT discard ApprovalPoolMembers — the count
-// is coerced (with fallback) in the mapper below.
-const RuleStatement = Schema.Struct({
-  NumberOfApprovalsNeeded: Schema.optional(Schema.Unknown),
-  ApprovalPoolMembers: Schema.optional(Schema.Array(Schema.String))
-})
-
-const RuleContent = Schema.Struct({
-  Statements: Schema.optional(Schema.Array(RuleStatement))
-})
-
-const RuleContentFromJson = Schema.parseJson(RuleContent)
-const decodeRuleContent = Schema.decodeUnknownEither(RuleContentFromJson)
-
-interface ParsedRule {
-  readonly requiredApprovals: number
-  readonly poolMembers: Array<string>
-  readonly poolMemberArns: Array<string>
-}
-
-const ruleDefaults: ParsedRule = { requiredApprovals: 1, poolMembers: [], poolMemberArns: [] }
-
-const coerceApprovalCount = (raw: unknown): number => {
-  const n = Number(raw ?? 1)
-  return Number.isFinite(n) ? n : 1
-}
-
-/**
- * Parse AWS approval rule content JSON into pool members + required count.
- * Format: {"Version":"2018-11-08","Statements":[{"Type":"Approvers","NumberOfApprovalsNeeded":N,"ApprovalPoolMembers":["arn:..."]}]}
- *
- * Falls back to defaults on malformed JSON; logs a warning when content was provided.
- */
-export const parseRuleContent = (content?: string): Effect.Effect<ParsedRule> =>
-  decodeRuleContent(content ?? "{}").pipe(
-    Effect.map((parsed): ParsedRule => {
-      // Only first statement parsed — AWS rules typically have one statement per rule
-      const stmt = parsed.Statements?.[0]
-      const rawArns = stmt?.ApprovalPoolMembers ?? []
-      return {
-        requiredApprovals: coerceApprovalCount(stmt?.NumberOfApprovalsNeeded),
-        poolMembers: rawArns.map(normalizeAuthor),
-        poolMemberArns: [...rawArns]
-      }
-    }),
-    Effect.catchAll((e) =>
-      content
-        ? Effect.logWarning("Failed to parse approval rule content", { content, error: e }).pipe(
-          Effect.as(ruleDefaults)
-        )
-        : Effect.succeed(ruleDefaults)
-    )
-  )
 
 /**
  * Evaluate which approval rules are satisfied/not, returning just the boolean + satisfied rule names.
  */
-export const fetchApprovalEvaluation = (pullRequestId: string, revisionId: string) =>
+export const fetchApprovalEvaluation = (
+  pullRequestId: string,
+  revisionId: string
+): Effect.Effect<{ readonly isApproved: boolean; readonly satisfiedNames: Set<string> }, never, AwsMethodEnv> =>
   throttleRetry(
     codecommit.evaluatePullRequestApprovalRules({ pullRequestId, revisionId })
   ).pipe(
@@ -118,7 +78,7 @@ export const fetchApprovalEvaluation = (pullRequestId: string, revisionId: strin
       satisfiedNames: new Set(r.evaluation?.approvalRulesSatisfied ?? [])
     })),
     Effect.tapError((e) => Effect.logWarning("fetchApprovalEvaluation failed", e)),
-    Effect.catchAll(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
+    Effect.catchCause(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
   )
 
 /** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
@@ -191,7 +151,10 @@ const fetchPRDetails = (id: string, repoName: string) =>
 /**
  * Fetch who approved a PR (ARN list of approvers with APPROVE state).
  */
-export const fetchApprovers = (pullRequestId: string, revisionId: string) =>
+export const fetchApprovers = (
+  pullRequestId: string,
+  revisionId: string
+): Effect.Effect<{ readonly names: Array<string>; readonly arns: Array<string> }, never, AwsMethodEnv> =>
   throttleRetry(
     codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId })
   ).pipe(
@@ -203,7 +166,7 @@ export const fetchApprovers = (pullRequestId: string, revisionId: string) =>
         arns: approved.map((a) => a.userArn)
       }
     }),
-    Effect.catchAll(() => Effect.succeed({ names: [] as Array<string>, arns: [] as Array<string> }))
+    Effect.catchCause(() => Effect.succeed({ names: [] as Array<string>, arns: [] as Array<string> }))
   )
 
 /**
@@ -223,7 +186,7 @@ const fetchMergeStatus = (
     })
   ).pipe(
     Effect.map((r) => r.mergeable ?? false),
-    Effect.catchAll(() => Effect.succeed(false))
+    Effect.catchIf(() => true, () => Effect.succeed(false))
   )
 }
 
@@ -233,8 +196,8 @@ const RawPullRequest = Schema.Struct({
   title: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   authorArn: Schema.optional(Schema.String),
-  lastActivityDate: Schema.optional(Schema.DateFromSelf),
-  creationDate: Schema.optional(Schema.DateFromSelf),
+  lastActivityDate: Schema.optional(Schema.Date),
+  creationDate: Schema.optional(Schema.Date),
   pullRequestStatus: Schema.optional(Schema.String),
   pullRequestTargets: Schema.optional(Schema.Array(Schema.Struct({
     sourceReference: Schema.optional(Schema.String),
@@ -247,19 +210,16 @@ const RawPullRequest = Schema.Struct({
   isApproved: Schema.Boolean,
   isMergeable: Schema.Boolean,
   approvers: Schema.Array(Schema.String),
-  approverArns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
-  approvalRules: Schema.optionalWith(Schema.Array(ApprovalRule), { default: () => [] }),
-  accountProfile: AwsProfileName,
-  accountRegion: AwsRegion,
+  approverArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  accountProfile: Schema.String,
+  accountRegion: Schema.String,
   repoAccountId: Schema.optional(Schema.String)
 })
 
-const RawToPullRequest = Schema.transform(
-  RawPullRequest,
-  PullRequest,
-  {
-    strict: false,
-    decode: (raw) => {
+const RawToPullRequest = RawPullRequest.pipe(
+  Schema.decodeTo(PullRequest, {
+    decode: SchemaGetter.transform((raw) => {
       const target = raw.pullRequestTargets?.[0]
       const sourceBranch = target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "unknown"
       const destinationBranch = target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "unknown"
@@ -288,8 +248,8 @@ const RawToPullRequest = Schema.transform(
         commentedBy: [],
         approvalRules: raw.approvalRules
       }
-    },
-    encode: (pr) => ({
+    }),
+    encode: SchemaGetter.transform((pr) => ({
       pullRequestId: pr.id,
       title: pr.title,
       description: pr.description,
@@ -306,16 +266,16 @@ const RawToPullRequest = Schema.transform(
       isMergeable: pr.isMergeable,
       approvers: pr.approvedBy ?? [],
       approverArns: pr.approvedByArns ?? [],
-      approvalRules: pr.approvalRules ?? [],
+      approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule)),
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region,
       repoAccountId: pr.account.repoAccountId
-    })
-  }
+    }))
+  })
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
-const decodePullRequest = (raw: unknown) => Schema.decodeUnknown(RawToPullRequest)(raw)
+const decodePullRequest = (raw: unknown) => Schema.decodeUnknownEffect(RawToPullRequest)(raw)
 
 // ---------------------------------------------------------------------------
 // Stream builders
@@ -327,15 +287,20 @@ const listAllRepositories = () =>
     Stream.map((repo) => repo.repositoryName ?? "")
   )
 
-export const fetchRepoAccountId = (repoName: string) =>
+export const fetchRepoAccountId = (
+  repoName: string
+): Effect.Effect<string, unknown, unknown> =>
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
-    Effect.catchAll(() => Effect.succeed(""))
+    Effect.catchCause(() => Effect.succeed(""))
   )
 
-const listPullRequestIds = (repoName: string, status: "OPEN" | "CLOSED") =>
-  codecommit.listPullRequests.pages({ repositoryName: repoName, pullRequestStatus: status }).pipe(
+const listPullRequestIds = (
+  repoName: string,
+  status: "OPEN" | "CLOSED"
+): Stream.Stream<{ readonly id: string; readonly repoName: string }, unknown, AwsStreamEnv> =>
+  listPullRequestsPages({ repositoryName: repoName, pullRequestStatus: status }).pipe(
     Stream.flatMap((page) => Stream.fromIterable(page.pullRequestIds ?? [])),
     Stream.map((id) => ({ id, repoName }))
   )
@@ -386,10 +351,10 @@ export const getPullRequests = (
       )
 
       return stream.pipe(
+        Stream.provide(DistilledCredentials.fromCredentials(credentials)),
         Stream.provideService(HttpClient.HttpClient, httpClient),
-        Stream.provideService(Region.Region, account.region),
-        Stream.provideService(Credentials.Credentials, credentials),
+        Stream.provideService(DistilledRegion.Region, account.region),
         Stream.timeout(config.streamTimeout)
       )
     })
-  )
+  ) as Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient>

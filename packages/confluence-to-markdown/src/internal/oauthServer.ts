@@ -3,20 +3,20 @@
  *
  * @module
  */
-import * as HttpRouter from "@effect/platform/HttpRouter"
-import * as HttpServer from "@effect/platform/HttpServer"
-import type { ServeError } from "@effect/platform/HttpServerError"
-import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
-import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
+import type { HttpServerError } from "effect/unstable/http"
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { OAuthError } from "../ConfluenceError.js"
 
 const DEFAULT_PORT = 8585
-const MAX_PORT_ATTEMPTS = 10
+const MAX_PORT = 8594
+type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
 
 /**
  * Factory service for creating HTTP servers.
@@ -27,7 +27,7 @@ const MAX_PORT_ATTEMPTS = 10
 export interface HttpServerFactory {
   readonly createServerLayer: (port: number) => Layer.Layer<
     HttpServer.HttpServer,
-    ServeError,
+    HttpServerError.ServeError,
     never
   >
 }
@@ -37,10 +37,10 @@ export interface HttpServerFactory {
  *
  * @category Services
  */
-export class HttpServerFactoryTag extends Context.Tag("@knpkv/confluence-to-markdown/HttpServerFactory")<
+export class HttpServerFactoryTag extends Context.Service<
   HttpServerFactoryTag,
   HttpServerFactory
->() {}
+>()("@knpkv/confluence-to-markdown/HttpServerFactory") {}
 
 /**
  * Create a HttpServerFactory layer from a layer factory function.
@@ -52,49 +52,10 @@ export class HttpServerFactoryTag extends Context.Tag("@knpkv/confluence-to-mark
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, ServeError, never>
+  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
-  })
-
-/**
- * Check if a port is available by attempting to start a server.
- */
-const isPortAvailable = (port: number): Effect.Effect<boolean, never, HttpServerFactoryTag> =>
-  Effect.gen(function*() {
-    const factory = yield* HttpServerFactoryTag
-    const serverLayer = factory.createServerLayer(port)
-
-    // Try to acquire and immediately release
-    const result = yield* Layer.build(serverLayer).pipe(
-      Effect.scoped,
-      Effect.as(true),
-      Effect.catchAll(() => Effect.succeed(false))
-    )
-    return result
-  })
-
-/**
- * Find an available port starting from the default.
- */
-const findAvailablePort = (): Effect.Effect<number, OAuthError, HttpServerFactoryTag> =>
-  Effect.gen(function*() {
-    for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
-      const port = DEFAULT_PORT + attempt
-      const available = yield* isPortAvailable(port)
-      if (available) {
-        return port
-      }
-    }
-    return yield* Effect.fail(
-      new OAuthError({
-        step: "authorize",
-        cause: `Could not find available port (tried ${DEFAULT_PORT}-${
-          DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1
-        }). Close other applications using these ports.`
-      })
-    )
   })
 
 /**
@@ -122,70 +83,85 @@ export const startCallbackServer = (
 ): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag> =>
   Effect.gen(function*() {
     const factory = yield* HttpServerFactoryTag
-    const port = yield* findAvailablePort()
     const deferred = yield* Deferred.make<string, OAuthError>()
     const readyDeferred = yield* Deferred.make<void, OAuthError>()
+    const scope = yield* Scope.make()
 
-    const app = HttpRouter.empty.pipe(
-      HttpRouter.get(
-        "/callback",
-        Effect.gen(function*() {
-          const req = yield* HttpServerRequest.HttpServerRequest
-          const url = new URL(req.url, `http://localhost:${port}`)
-          const code = url.searchParams.get("code")
-          const state = url.searchParams.get("state")
-          const error = url.searchParams.get("error")
-          const errorDescription = url.searchParams.get("error_description")
-
-          if (error) {
-            yield* Deferred.fail(
-              deferred,
-              new OAuthError({ step: "authorize", cause: errorDescription || error })
-            )
-            return HttpServerResponse.html(
-              "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
-            )
-          }
-
-          if (state !== expectedState) {
-            yield* Deferred.fail(
-              deferred,
-              new OAuthError({ step: "authorize", cause: "State mismatch - possible CSRF attack" })
-            )
-            return HttpServerResponse.html(
-              "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
-            )
-          }
-
-          if (!code) {
-            yield* Deferred.fail(
-              deferred,
-              new OAuthError({ step: "authorize", cause: "No authorization code received" })
-            )
-            return HttpServerResponse.html(
-              "<html><body><h1>Error</h1><p>No authorization code received.</p></body></html>"
-            )
-          }
-
-          yield* Deferred.succeed(deferred, code)
-          return HttpServerResponse.html(
-            "<html><body><h1>Success!</h1><p>You can close this window and return to the terminal.</p></body></html>"
-          )
-        })
+    const buildServer = (port: number): Effect.Effect<HttpServerInstance, OAuthError> =>
+      Layer.build(factory.createServerLayer(port)).pipe(
+        Scope.provide(scope),
+        Effect.map((context) => Context.get(context, HttpServer.HttpServer)),
+        Effect.catchCause((cause) =>
+          port < MAX_PORT
+            ? buildServer(port + 1)
+            : Effect.fail(new OAuthError({ step: "authorize", cause }))
+        )
       )
+
+    const server = yield* buildServer(DEFAULT_PORT)
+
+    if (server.address._tag !== "TcpAddress") {
+      return yield* Effect.fail(
+        new OAuthError({ step: "authorize", cause: "OAuth callback server did not bind to a TCP address" })
+      )
+    }
+    const port = server.address.port
+
+    const router = yield* HttpRouter.make
+    yield* router.add(
+      "GET",
+      "/callback",
+      Effect.gen(function*() {
+        const req = yield* HttpServerRequest.HttpServerRequest
+        const url = new URL(req.url, `http://localhost:${port}`)
+        const code = url.searchParams.get("code")
+        const state = url.searchParams.get("state")
+        const error = url.searchParams.get("error")
+        const errorDescription = url.searchParams.get("error_description")
+
+        if (error) {
+          yield* Deferred.fail(
+            deferred,
+            new OAuthError({ step: "authorize", cause: errorDescription || error })
+          )
+          return HttpServerResponse.html(
+            "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
+          )
+        }
+
+        if (state !== expectedState) {
+          yield* Deferred.fail(
+            deferred,
+            new OAuthError({ step: "authorize", cause: "State mismatch - possible CSRF attack" })
+          )
+          return HttpServerResponse.html(
+            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
+          )
+        }
+
+        if (!code) {
+          yield* Deferred.fail(
+            deferred,
+            new OAuthError({ step: "authorize", cause: "No authorization code received" })
+          )
+          return HttpServerResponse.html(
+            "<html><body><h1>Error</h1><p>No authorization code received.</p></body></html>"
+          )
+        }
+
+        yield* Deferred.succeed(deferred, code)
+        return HttpServerResponse.html(
+          "<html><body><h1>Success!</h1><p>You can close this window and return to the terminal.</p></body></html>"
+        )
+      })
     )
 
-    const serverLayer = factory.createServerLayer(port)
-
-    const serverFiber = yield* HttpServer.serve(app).pipe(
-      Layer.provide(serverLayer),
-      Layer.build,
+    const serverFiber = yield* HttpServer.serveEffect(router.asHttpEffect()).pipe(
+      Effect.provideService(HttpServer.HttpServer, server),
+      Scope.provide(scope),
       Effect.tap(() => Deferred.succeed(readyDeferred, undefined)),
       Effect.tapError((err) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause: err }))),
-      // Keep the layer alive until fiber is interrupted
-      Effect.flatMap(() => Effect.never),
-      Effect.scoped,
-      Effect.fork
+      Effect.forkIn(scope)
     )
 
     // Wait for server to be ready (or fail)
@@ -193,7 +169,10 @@ export const startCallbackServer = (
 
     return {
       codePromise: Deferred.await(deferred),
-      shutdown: Fiber.interrupt(serverFiber).pipe(Effect.asVoid),
+      shutdown: Fiber.interrupt(serverFiber).pipe(
+        Effect.andThen(Scope.close(scope, Exit.void)),
+        Effect.asVoid
+      ),
       port
     }
   })

@@ -3,13 +3,13 @@
  *
  * @internal
  */
-import { Args, Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { IssueService } from "../IssueService.js"
 import { MarkdownWriter } from "../MarkdownWriter.js"
 
-const keyArg = Args.text({ name: "key" }).pipe(
+const keyArg = Args.string("key").pipe(
   Args.withDescription("Issue key (e.g., PROJ-123)")
 )
 

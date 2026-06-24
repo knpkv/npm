@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config"
 
-const isDeno = process.versions.deno !== undefined
-const isBun = process.versions.bun !== undefined
+const isDeno = "Deno" in globalThis
+const isBun = "Bun" in globalThis
 
 export default defineConfig({
   test: {

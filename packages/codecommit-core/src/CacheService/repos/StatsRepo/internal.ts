@@ -6,10 +6,12 @@
  *
  * @category CacheService
  */
-import type * as SqlClient from "@effect/sql/SqlClient"
-import { Effect, Schema } from "effect"
-import { PRCommentLocationJson } from "../../../Domain.js"
+import { Effect } from "effect"
+import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { CacheError } from "../../CacheError.js"
+import type { CommentLocationJson, CommentThreadJson } from "../commentLocations.js"
+
+export { CommentLocationsFromJson, decodeCommentLocations } from "../commentLocations.js"
 
 // ---------------------------------------------------------------------------
 // Row types for SQL query results
@@ -120,19 +122,17 @@ export interface CommentInfo {
 // Helpers
 // ---------------------------------------------------------------------------
 
-export const LocationsFromJson = Schema.parseJson(Schema.Array(PRCommentLocationJson))
-
 export const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `StatsRepo.${op}`, cause })),
-    Effect.withSpan(`StatsRepo.${op}`, { captureStackTrace: false })
+    Effect.withSpan(`StatsRepo.${op}`)
   )
 
 export const extractComments = (
-  locations: ReadonlyArray<typeof PRCommentLocationJson.Type>
+  locations: ReadonlyArray<CommentLocationJson>
 ): ReadonlyArray<CommentInfo> => {
   const result: Array<CommentInfo> = []
-  const walk = (threads: ReadonlyArray<typeof PRCommentLocationJson.Type["comments"][number]>) => {
+  const walk = (threads: ReadonlyArray<CommentThreadJson>) => {
     for (const t of threads) {
       result.push({ author: t.root.author, creationDate: new Date(t.root.creationDate) })
       walk(t.replies)

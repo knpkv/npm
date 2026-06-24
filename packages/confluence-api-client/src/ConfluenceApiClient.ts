@@ -82,9 +82,9 @@ export interface ConfluenceApiClientShape {
  *
  * @category Client
  */
-export class ConfluenceApiClient extends Context.Tag(
+export class ConfluenceApiClient extends Context.Service<ConfluenceApiClient, ConfluenceApiClientShape>()(
   "@knpkv/confluence-api-client/ConfluenceApiClient"
-)<ConfluenceApiClient, ConfluenceApiClientShape>() {
+) {
   /**
    * Layer that provides ConfluenceApiClient.
    *

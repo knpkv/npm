@@ -3,11 +3,11 @@
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import type { ContentHash } from "./Brand.js"
 import type { FrontMatterError } from "./ConfluenceError.js"
 import { FileSystemError } from "./ConfluenceError.js"
@@ -59,9 +59,7 @@ export interface PageTreeNode {
  *
  * @category FileSystem
  */
-export class LocalFileSystem extends Context.Tag(
-  "@knpkv/confluence-to-markdown/LocalFileSystem"
-)<
+export class LocalFileSystem extends Context.Service<
   LocalFileSystem,
   {
     /**
@@ -135,7 +133,7 @@ export class LocalFileSystem extends Context.Tag(
       content: string
     ) => Effect.Effect<void, FileSystemError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/LocalFileSystem") {}
 
 /**
  * Layer that provides LocalFileSystem.
@@ -180,7 +178,7 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
       Effect.gen(function*() {
         const dir = pathService.dirname(filePath)
         yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-          Effect.catchAll(() => Effect.void)
+          Effect.mapError((cause) => new FileSystemError({ operation: "mkdir", path: dir, cause }))
         )
 
         const serialized = serializeMarkdown(frontMatter, content)
@@ -257,7 +255,7 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
       Effect.gen(function*() {
         const dir = pathService.dirname(filePath)
         yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-          Effect.catchAll(() => Effect.void)
+          Effect.mapError((cause) => new FileSystemError({ operation: "mkdir", path: dir, cause }))
         )
 
         // Atomic write: write to temp file, then rename
@@ -289,7 +287,7 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
       Effect.gen(function*() {
         const dir = pathService.dirname(filePath)
         yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-          Effect.catchAll(() => Effect.void)
+          Effect.mapError((cause) => new FileSystemError({ operation: "mkdir", path: dir, cause }))
         )
 
         const serialized = serializeNewPageMarkdown(frontMatter, content)

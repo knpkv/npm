@@ -3,13 +3,14 @@
  *
  * @module
  */
-import { NodeContext, NodeHttpClient } from "@effect/platform-node"
+import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth, layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
 import { Effect, Layer, Redacted } from "effect"
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
+import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
 import { layer as TicketServiceLayer } from "../services/TicketService.js"
 import { layer as TimerServiceLayer } from "../services/TimerService.js"
@@ -18,15 +19,16 @@ import { layer as TimerServiceLayer } from "../services/TimerService.js"
 // Platform
 // ---------------------------------------------------------------------------
 
-export const PlatformLayer = Layer.mergeAll(NodeContext.layer, NodeHttpClient.layer)
+export const PlatformLayer = Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)
 
 // ---------------------------------------------------------------------------
 // Leaf layers
 // ---------------------------------------------------------------------------
 
-export const ClockifyAuthLive = ClockifyAuthLayer.pipe(Layer.provide(PlatformLayer))
-export const ConfigLive = ConfigLayer.pipe(Layer.provide(PlatformLayer))
-export const StateWriterLive = StateWriterLayer.pipe(Layer.provide(PlatformLayer))
+export const HomeDirectoryLive = HomeDirectoryLayer
+export const ClockifyAuthLive = ClockifyAuthLayer.pipe(Layer.provide(HomeDirectoryLive), Layer.provide(PlatformLayer))
+export const ConfigLive = ConfigLayer.pipe(Layer.provide(HomeDirectoryLive), Layer.provide(PlatformLayer))
+export const StateWriterLive = StateWriterLayer.pipe(Layer.provide(HomeDirectoryLive), Layer.provide(PlatformLayer))
 export const JiraAuthLive = JiraAuthLayer.pipe(Layer.provide(PlatformLayer))
 
 // ---------------------------------------------------------------------------
@@ -38,7 +40,7 @@ export const ClockifyApiConfigLive = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* ClockifyAuth
     return yield* auth.getConfig.pipe(
-      Effect.catchAll(() =>
+      Effect.catch(() =>
         Effect.succeed({
           apiKey: Redacted.make(""),
           workspaceId: "",
@@ -59,9 +61,9 @@ export const JiraApiConfigLive = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* JiraAuth
     const accessToken = yield* auth.getAccessToken().pipe(
-      Effect.catchAll(() => Effect.succeed(Redacted.make("")))
+      Effect.catch(() => Effect.succeed(Redacted.make("")))
     )
-    const cloudId = yield* auth.getCloudId().pipe(Effect.catchAll(() => Effect.succeed("")))
+    const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
     return {
       baseUrl: "",
       auth: { type: "oauth2" as const, accessToken, cloudId }

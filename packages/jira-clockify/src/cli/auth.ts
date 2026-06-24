@@ -3,13 +3,12 @@
  *
  * @module
  */
-import { Command, Options, Prompt } from "@effect/cli"
-import * as PlatformCommand from "@effect/platform/Command"
-import * as CommandExecutor from "@effect/platform/CommandExecutor"
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Layer, Option } from "effect"
+import { Console, Effect, Option } from "effect"
+import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 // ---------------------------------------------------------------------------
@@ -37,14 +36,14 @@ Create OAuth app in Atlassian Developer Console:
 6. Run: jcf auth jira configure
 `)
       const url = "https://developer.atlassian.com/console/myapps/create-3lo-app/"
-      const executor = yield* CommandExecutor.CommandExecutor
-      yield* PlatformCommand.make("open", url).pipe(
-        PlatformCommand.exitCode,
-        Effect.catchAll(() => PlatformCommand.make("xdg-open", url).pipe(PlatformCommand.exitCode)),
-        Effect.catchAll(() => PlatformCommand.make("cmd", "/c", "start", "", url).pipe(PlatformCommand.exitCode)),
-        Effect.provide(Layer.succeed(CommandExecutor.CommandExecutor, executor)),
+      const exitCode = (command: ChildProcess.Command) =>
+        Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
+
+      yield* exitCode(ChildProcess.make("open", [url])).pipe(
+        Effect.catch(() => exitCode(ChildProcess.make("xdg-open", [url]))),
+        Effect.catch(() => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))),
         Effect.asVoid,
-        Effect.catchAll(() => Effect.void)
+        Effect.catch(() => Effect.void)
       )
     })
 )
@@ -52,8 +51,8 @@ Create OAuth app in Atlassian Developer Console:
 const jiraConfigure = Command.make(
   "configure",
   {
-    clientId: Options.text("client-id").pipe(Options.withDescription("OAuth client ID"), Options.optional),
-    clientSecret: Options.text("client-secret").pipe(Options.withDescription("OAuth client secret"), Options.optional)
+    clientId: Options.string("client-id").pipe(Options.withDescription("OAuth client ID"), Options.optional),
+    clientSecret: Options.string("client-secret").pipe(Options.withDescription("OAuth client secret"), Options.optional)
   },
   ({ clientId, clientSecret }) =>
     Effect.gen(function*() {
@@ -74,7 +73,7 @@ const jiraConfigure = Command.make(
 
 const jiraLogin = Command.make(
   "login",
-  { site: Options.text("site").pipe(Options.withDescription("Jira site URL"), Options.optional) },
+  { site: Options.string("site").pipe(Options.withDescription("Jira site URL"), Options.optional) },
   ({ site }) =>
     Effect.gen(function*() {
       const auth = yield* JiraAuth
@@ -83,7 +82,7 @@ const jiraLogin = Command.make(
         yield* Console.log("\nRe-run with --site <url> to select a specific site.")
       }
     }).pipe(
-      Effect.catchAll((e) =>
+      Effect.catch((e) =>
         Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
       )
     )
@@ -97,7 +96,7 @@ const jiraLogout = Command.make(
       const auth = yield* JiraAuth
       yield* auth.logout()
       yield* Console.log("Logged out from Jira")
-    }).pipe(Effect.catchAll((e) =>
+    }).pipe(Effect.catch((e) =>
       Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
     ))
 )
@@ -115,7 +114,7 @@ const jiraStatus = Command.make(
         yield* Console.log("Jira: ✗ not logged in")
         yield* Console.log("  Run: jcf auth jira create → configure → login")
       }
-    }).pipe(Effect.catchAll(() => Console.log("Jira: ✗ not configured")))
+    }).pipe(Effect.catch(() => Console.log("Jira: ✗ not configured")))
 )
 
 const authJira = Command.make("jira", {}, () => Console.log("Jira auth: create, configure, login, logout, status"))
@@ -154,12 +153,12 @@ export const clockifySetup = Command.make(
       })
 
       const user = yield* toEffect(client.GET("/v1/user")).pipe(
-        Effect.catchAll(() => Effect.fail(new Error("Invalid API key — check the value and try again")))
+        Effect.catch(() => Effect.fail(new Error("Invalid API key — check the value and try again")))
       )
       yield* Console.log(`Authenticated as: ${(user as { name: string }).name} (${(user as { email: string }).email})`)
 
       const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
-        Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
+        Effect.catch(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
       )
 
       if (workspaces.length === 0) {
@@ -192,7 +191,7 @@ export const clockifySetup = Command.make(
       yield* Console.log("")
       yield* Console.log("Clockify configured! Saved to ~/.jcf/clockify.json")
     }).pipe(
-      Effect.catchAll((e) =>
+      Effect.catch((e) =>
         Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
       )
     )
@@ -211,12 +210,12 @@ const clockifyStatus = Command.make(
         return
       }
       const config = yield* auth.getConfig.pipe(
-        Effect.catchAll((e) => Console.log(`Clockify: error — ${e.message}`).pipe(Effect.flatMap(() => Effect.fail(e))))
+        Effect.catch((e) => Console.log(`Clockify: error — ${e.message}`).pipe(Effect.flatMap(() => Effect.fail(e))))
       )
       yield* Console.log("Clockify: ✓ authenticated")
       yield* Console.log(`  Workspace: ${config.workspaceId}`)
       yield* Console.log(`  User: ${config.userId}`)
-    }).pipe(Effect.catchAll(() => Effect.void))
+    }).pipe(Effect.catch(() => Effect.void))
 )
 
 const authClockify = Command.make("clockify", {}, () => Console.log("Clockify auth: setup, status")).pipe(
@@ -237,7 +236,7 @@ const authStatus = Command.make(
 
       // Jira
       const jira = yield* JiraAuth
-      const jiraUser = yield* jira.getCurrentUser().pipe(Effect.catchAll(() => Effect.succeed(null)))
+      const jiraUser = yield* jira.getCurrentUser().pipe(Effect.catch(() => Effect.succeed(null)))
       if (jiraUser) {
         yield* Console.log(`Jira:     ✓ ${jiraUser.name} (${jiraUser.email})`)
       } else {
@@ -248,7 +247,7 @@ const authStatus = Command.make(
       const clockifyAuth = yield* ClockifyAuth
       const clockifyOk = yield* clockifyAuth.isConfigured
       if (clockifyOk) {
-        const cfg = yield* clockifyAuth.getConfig.pipe(Effect.catchAll(() => Effect.succeed(null)))
+        const cfg = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         if (cfg) {
           yield* Console.log(`Clockify: ✓ workspace ${cfg.workspaceId}`)
         } else {

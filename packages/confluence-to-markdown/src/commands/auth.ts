@@ -1,11 +1,27 @@
 /**
  * Authentication commands for Confluence CLI.
  */
-import { Command, Options, Prompt } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ConfluenceAuth } from "../ConfluenceAuth.js"
+
+const openBrowser = (url: string) => {
+  const run = (command: ChildProcess.Command) =>
+    Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
+      spawner.exitCode(command).pipe(
+        Effect.flatMap((code) => code === 0 ? Effect.void : Effect.fail(code))
+      ))
+
+  return run(ChildProcess.make("open", [url])).pipe(
+    Effect.catchIf(() => true, () => run(ChildProcess.make("xdg-open", [url]))),
+    Effect.catchIf(() => true, () => run(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))),
+    Effect.asVoid
+  )
+}
 
 // === Auth create command ===
 const createCommand = Command.make("create", {}, () =>
@@ -24,28 +40,15 @@ Creating OAuth app in Atlassian Developer Console...
 6. Run: confluence auth configure --client-id <ID> --client-secret <SECRET>
 `)
     const url = "https://developer.atlassian.com/console/myapps/create-3lo-app/"
-    yield* Effect.promise(() =>
-      import("node:child_process").then((cp) =>
-        new Promise<void>((resolve, reject) => {
-          const platform = process.platform
-          if (platform === "darwin") {
-            cp.execFile("open", [url], (err) => err ? reject(err) : resolve())
-          } else if (platform === "win32") {
-            cp.execFile("cmd", ["/c", "start", "", url], (err) => err ? reject(err) : resolve())
-          } else {
-            cp.execFile("xdg-open", [url], (err) => err ? reject(err) : resolve())
-          }
-        })
-      )
-    )
+    yield* openBrowser(url)
   })).pipe(Command.withDescription("Create OAuth app in Atlassian Developer Console"))
 
 // === Auth configure command ===
-const clientIdOption = Options.text("client-id").pipe(
+const clientIdOption = Options.string("client-id").pipe(
   Options.withDescription("OAuth client ID from Atlassian Developer Console"),
   Options.optional
 )
-const clientSecretOption = Options.text("client-secret").pipe(
+const clientSecretOption = Options.string("client-secret").pipe(
   Options.withDescription("OAuth client secret"),
   Options.optional
 )
@@ -70,7 +73,7 @@ const configureCommand = Command.make(
 ).pipe(Command.withDescription("Configure OAuth client credentials"))
 
 // === Auth login command ===
-const siteOption = Options.text("site").pipe(
+const siteOption = Options.string("site").pipe(
   Options.withDescription("Confluence site URL to use (for accounts with multiple sites)"),
   Options.optional
 )

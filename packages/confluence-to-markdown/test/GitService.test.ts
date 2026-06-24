@@ -1,5 +1,7 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { GitService, layer as GitServiceLayer } from "../src/GitService.js"
 import { getConflictedFiles, GIT_LOG_FORMAT, parseGitLog, parseGitStatus } from "../src/internal/gitCommands.js"
 
@@ -7,6 +9,8 @@ import { getConflictedFiles, GIT_LOG_FORMAT, parseGitLog, parseGitStatus } from 
  * Tests for git parsing utilities and GitService.
  */
 describe("GitService", () => {
+  const TestLayer = Layer.provideMerge(GitServiceLayer, NodeServices.layer)
+
   describe("parseGitStatus", () => {
     it("parses empty status", () => {
       const entries = parseGitStatus("")
@@ -197,13 +201,13 @@ M  normal.ts`
         const git = yield* GitService
         const version = yield* git.validateGit()
         expect(version).toContain("git version")
-      }).pipe(Effect.provide(GitServiceLayer)))
+      }).pipe(Effect.provide(TestLayer)))
 
     it.effect("isInitialized returns boolean", () =>
       Effect.gen(function*() {
         const git = yield* GitService
         const initialized = yield* git.isInitialized()
         expect(typeof initialized).toBe("boolean")
-      }).pipe(Effect.provide(GitServiceLayer)))
+      }).pipe(Effect.provide(TestLayer)))
   })
 })

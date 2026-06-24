@@ -8,7 +8,7 @@
  *
  * @module
  */
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { LoaderIcon, LogInIcon } from "lucide-react"

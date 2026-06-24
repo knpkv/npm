@@ -1,5 +1,5 @@
-import { Atom } from "@effect-atom/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
+import * as Atom from "effect/unstable/reactivity/Atom"
 
 /**
  * TUI view type

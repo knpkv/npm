@@ -18,10 +18,9 @@
  *
  * @module
  */
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { type OAuthConfig, type OAuthToken } from "../config/OAuthSchemas.js"
 import { ME_URL, RESOURCES_URL, REVOKE_URL, TOKEN_URL } from "./OAuthEndpoints.js"
 import { OAuthError } from "./OAuthErrors.js"
@@ -83,7 +82,7 @@ export const exchangeCodeForTokens = (
 
     const body = yield* response.json
 
-    return yield* Schema.decodeUnknown(TokenResponseSchema)(body)
+    return yield* Schema.decodeUnknownEffect(TokenResponseSchema)(body)
   }).pipe(
     Effect.mapError((cause) => new OAuthError({ step: "token", cause }))
   )
@@ -117,7 +116,7 @@ export const getAccessibleResources = (
 
     const body = yield* response.json
 
-    return yield* Schema.decodeUnknown(Schema.Array(AccessibleResourceSchema))(body)
+    return yield* Schema.decodeUnknownEffect(Schema.Array(AccessibleResourceSchema))(body)
   }).pipe(
     Effect.mapError((cause) => new OAuthError({ step: "resources", cause }))
   )
@@ -151,7 +150,7 @@ export const getUserInfo = (
 
     const body = yield* response.json
 
-    return yield* Schema.decodeUnknown(UserInfoSchema)(body)
+    return yield* Schema.decodeUnknownEffect(UserInfoSchema)(body)
   }).pipe(
     Effect.mapError((cause) => new OAuthError({ step: "user-info", cause }))
   )
@@ -197,7 +196,7 @@ export const refreshToken = (
     const body = yield* response.json.pipe(
       Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
     )
-    const tokenResponse = yield* Schema.decodeUnknown(TokenResponseSchema)(body).pipe(
+    const tokenResponse = yield* Schema.decodeUnknownEffect(TokenResponseSchema)(body).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
     )
 

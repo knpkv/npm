@@ -39,6 +39,6 @@ export interface ConfluenceApiConfigShape {
  *
  * @category Config
  */
-export class ConfluenceApiConfig extends Context.Tag(
+export class ConfluenceApiConfig extends Context.Service<ConfluenceApiConfig, ConfluenceApiConfigShape>()(
   "@knpkv/confluence-api-client/ConfluenceApiConfig"
-)<ConfluenceApiConfig, ConfluenceApiConfigShape>() {}
+) {}

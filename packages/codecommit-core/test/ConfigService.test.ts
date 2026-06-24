@@ -1,7 +1,8 @@
-import { FileSystem, Path } from "@effect/platform"
-import { SystemError } from "@effect/platform/Error"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import { SystemError } from "effect/PlatformError"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { ConfigService, ConfigServiceLive } from "../src/ConfigService/index.js"
 
@@ -12,7 +13,7 @@ const configPath = `${TEST_HOME}/.codecommit/config.json`
 
 const fsError = (method: string) =>
   Effect.fail(
-    new SystemError({ reason: "NotFound", module: "FileSystem", method, description: "mock not found" })
+    new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
   )
 
 const makeMockFS = (files: Record<string, string>) => {
@@ -43,8 +44,8 @@ const makeMockFS = (files: Record<string, string>) => {
   }
 }
 
-const ConfigProviderLive = Layer.setConfigProvider(
-  ConfigProvider.fromMap(new Map([["HOME", TEST_HOME]]))
+const ConfigProviderLive = ConfigProvider.layer(
+  ConfigProvider.fromEnv({ env: { HOME: TEST_HOME } })
 )
 
 const makeTestLayer = (files: Record<string, string>) => {
@@ -178,8 +179,8 @@ describe("ConfigService", () => {
       {},
       Effect.gen(function*() {
         const service = yield* ConfigService
-        const result = yield* service.backup.pipe(Effect.either)
-        expect(result._tag).toBe("Left")
+        const result = yield* service.backup.pipe(Effect.result)
+        expect(result._tag).toBe("Failure")
       })
     ))
 

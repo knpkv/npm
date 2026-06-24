@@ -5,22 +5,22 @@
  *
  * - **Credential file**: Reads/writes `~/.jcf/clockify.json` containing API key, workspace ID,
  *   user ID, and base URL. The API key is wrapped in `Redacted` on read.
- * - **Schema-gated**: JSON is parsed then validated via `Schema.decodeUnknown(StoredAuth)` —
+ * - **Schema-gated**: JSON is parsed then validated via `Schema.decodeUnknownEffect(StoredAuth)` —
  *   corrupt data yields {@link ClockifyAuthMissingError} instead of a crash.
  * - **Config-based home dir**: Uses Effect `Config.string("HOME")` for testable env access.
  *
  * @module
  */
-import * as FileSystem from "@effect/platform/FileSystem"
-import * as Path from "@effect/platform/Path"
 import type { ClockifyApiConfigShape } from "@knpkv/clockify-api-client"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { homedir } from "node:os"
+import { HomeDirectory } from "./HomeDirectory.js"
 
 export class ClockifyAuthMissingError extends Data.TaggedError("ClockifyAuthMissingError")<{
   readonly message: string
@@ -40,7 +40,7 @@ export interface ClockifyAuthShape {
   readonly isConfigured: Effect.Effect<boolean>
 }
 
-export class ClockifyAuth extends Context.Tag("jcf/ClockifyAuth")<ClockifyAuth, ClockifyAuthShape>() {}
+export class ClockifyAuth extends Context.Service<ClockifyAuth, ClockifyAuthShape>()("jcf/ClockifyAuth") {}
 
 const AUTH_DIR = ".jcf"
 const AUTH_FILE = "clockify.json"
@@ -51,7 +51,7 @@ export const layer = Layer.effect(
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const home = yield* Effect.sync(() => homedir())
+    const home = (yield* HomeDirectory).path
     const dir = path.join(home, AUTH_DIR)
     const filePath = path.join(dir, AUTH_FILE)
 
@@ -60,7 +60,7 @@ export const layer = Layer.effect(
       if (!exists) yield* fs.makeDirectory(dir, { recursive: true })
     })
 
-    const decodeStoredAuth = Schema.decodeUnknown(StoredAuth)
+    const decodeStoredAuth = Schema.decodeUnknownEffect(StoredAuth)
 
     return {
       getConfig: Effect.gen(function*() {
@@ -89,13 +89,10 @@ export const layer = Layer.effect(
           baseUrl: stored.baseUrl ?? DEFAULT_BASE_URL
         }
       }).pipe(
-        Effect.catchTag(
-          "SystemError",
-          () => Effect.fail(new ClockifyAuthMissingError({ message: "Failed to read Clockify auth" }))
-        ),
-        Effect.catchTag(
-          "BadArgument",
-          () => Effect.fail(new ClockifyAuthMissingError({ message: "Invalid Clockify auth file" }))
+        Effect.catch((error) =>
+          error instanceof ClockifyAuthMissingError
+            ? Effect.fail(error)
+            : Effect.fail(new ClockifyAuthMissingError({ message: "Failed to read Clockify auth" }))
         )
       ),
 
@@ -103,12 +100,10 @@ export const layer = Layer.effect(
         Effect.gen(function*() {
           yield* ensureDir
           yield* fs.writeFileString(filePath, JSON.stringify(auth, null, 2))
-          yield* Effect.tryPromise(() => import("node:fs/promises").then((f) => f.chmod(filePath, 0o600))).pipe(
-            Effect.catchAll(() => Effect.void)
-          )
-        }).pipe(Effect.catchAll(() => Effect.void)),
+          yield* fs.chmod(filePath, 0o600).pipe(Effect.catch(() => Effect.void))
+        }).pipe(Effect.catch(() => Effect.void)),
 
-      isConfigured: fs.exists(filePath).pipe(Effect.catchAll(() => Effect.succeed(false)))
+      isConfigured: fs.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)))
     }
   })
 )

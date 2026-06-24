@@ -1,9 +1,10 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import { DateUtils } from "@knpkv/codecommit-core"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { parseColor, SyntaxStyle } from "@opentui/core"
 import { Option } from "effect"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { fetchPrCommentsAtom } from "../atoms/actions.js"
 import { type AppState, appStateAtom } from "../atoms/app.js"
@@ -91,8 +92,8 @@ function CommentsSection({
     fetchComments(pr)
   }, [pr, fetchComments])
 
-  const loading = Result.isInitial(commentsResult)
-  const comments = Result.getOrElse(commentsResult, () => [] as Array<Domain.PRCommentLocation>)
+  const loading = AsyncResult.isInitial(commentsResult)
+  const comments = AsyncResult.getOrElse(commentsResult, () => [] as Array<Domain.PRCommentLocation>)
   const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
 
   return (
@@ -123,7 +124,7 @@ export function DetailsView() {
   const { theme } = useTheme()
   const selectedPrId = useAtomValue(selectedPrIdAtom)
   const appStateResult = useAtomValue(appStateAtom)
-  const appState = Result.getOrElse(appStateResult, () => defaultState)
+  const appState = AsyncResult.getOrElse(appStateResult, () => defaultState)
   const showComments = useAtomValue(showDetailsCommentsAtom)
   const setShowComments = useAtomSet(showDetailsCommentsAtom)
 

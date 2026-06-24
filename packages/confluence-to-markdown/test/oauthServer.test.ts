@@ -1,14 +1,13 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
 import { startCallbackServer } from "../src/internal/oauthServer.js"
 
-const HttpClientLive = NodeHttpClient.layer
+const HttpClientLive = NodeHttpClient.layerUndici
 
 describe("oauthServer", () => {
   describe("startCallbackServer", () => {
@@ -17,7 +16,7 @@ describe("oauthServer", () => {
         const expectedState = "test-state-123"
         const result = yield* startCallbackServer(expectedState)
 
-        expect(result.port).toBeGreaterThanOrEqual(8585)
+        expect(result.port).toBe(8585)
         expect(typeof result.codePromise).toBe("object")
         expect(typeof result.shutdown).toBe("object")
 
@@ -31,7 +30,7 @@ describe("oauthServer", () => {
         const { codePromise, port, shutdown } = yield* startCallbackServer(expectedState)
 
         // Make callback request in background
-        const codeReceiver = yield* Effect.fork(codePromise)
+        const codeReceiver = yield* Effect.forkChild(codePromise)
 
         // Simulate OAuth callback using Effect HttpClient
         const client = yield* HttpClient.HttpClient

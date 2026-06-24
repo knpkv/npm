@@ -2,7 +2,7 @@
  * @internal
  */
 import * as codecommit from "distilled-aws/codecommit"
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
 import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"
 import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 
@@ -17,18 +17,16 @@ const RawComment = Schema.Struct({
   commentId: Schema.optional(Schema.String),
   content: Schema.optional(Schema.String),
   authorArn: Schema.optional(Schema.String),
-  creationDate: Schema.optional(Schema.DateFromSelf),
+  creationDate: Schema.optional(Schema.Date),
   inReplyTo: Schema.optional(Schema.String),
   deleted: Schema.optional(Schema.Boolean),
   filePath: Schema.optional(Schema.String),
   lineNumber: Schema.optional(Schema.Number)
 })
 
-const RawToPRComment = Schema.transform(
-  RawComment,
-  PRComment,
-  {
-    decode: (raw) => ({
+const RawToPRComment = RawComment.pipe(
+  Schema.decodeTo(PRComment, {
+    decode: SchemaGetter.transform((raw) => ({
       id: raw.commentId ?? "",
       content: raw.content ?? "",
       author: raw.authorArn ? normalizeAuthor(raw.authorArn) : "unknown",
@@ -37,8 +35,8 @@ const RawToPRComment = Schema.transform(
       deleted: raw.deleted ?? false,
       filePath: raw.filePath,
       lineNumber: raw.lineNumber
-    }),
-    encode: (comment) => ({
+    })),
+    encode: SchemaGetter.transform((comment) => ({
       commentId: comment.id,
       content: comment.content,
       authorArn: comment.author,
@@ -47,11 +45,11 @@ const RawToPRComment = Schema.transform(
       deleted: comment.deleted,
       filePath: comment.filePath,
       lineNumber: comment.lineNumber
-    })
-  }
+    }))
+  })
 )
 
-// Sync decode — used inside Schema.transform (sync context)
+// Sync decode — used inside Schema.decodeTo (sync context)
 const decodeComment = Schema.decodeSync(RawToPRComment)
 
 const buildThreads = (comments: ReadonlyArray<PRComment>): Array<CommentThread> => {
@@ -85,11 +83,9 @@ const PRCommentLocationSchema = Schema.Struct({
   comments: Schema.Array(Schema.Any)
 })
 
-const RawToCommentLocation = Schema.transform(
-  RawCommentLocation,
-  PRCommentLocationSchema,
-  {
-    decode: (raw) => ({
+const RawToCommentLocation = RawCommentLocation.pipe(
+  Schema.decodeTo(PRCommentLocationSchema, {
+    decode: SchemaGetter.transform((raw) => ({
       filePath: raw.location?.filePath,
       beforeCommitId: raw.beforeCommitId,
       afterCommitId: raw.afterCommitId,
@@ -100,26 +96,26 @@ const RawToCommentLocation = Schema.transform(
           lineNumber: raw.location?.filePosition
         })
       ))
-    }),
-    encode: (loc) => ({
+    })),
+    encode: SchemaGetter.transform((loc) => ({
       location: loc.filePath ? { filePath: loc.filePath } : undefined,
       beforeCommitId: loc.beforeCommitId,
       afterCommitId: loc.afterCommitId,
       comments: []
-    })
-  }
+    }))
+  })
 )
 
 // Effectful decode — ParseError in error channel instead of thrown defect
 const decodeCommentLocation = (raw: unknown) =>
-  Schema.decodeUnknown(RawToCommentLocation)(raw).pipe(
+  Schema.decodeUnknownEffect(RawToCommentLocation)(raw).pipe(
     Effect.map((result) => result as unknown as PRCommentLocation)
   )
 
 // NOTE: repositoryName is intentionally omitted — passing it without
 // beforeCommitId/afterCommitId triggers CommitIdRequiredException.
 const fetchCommentPages = (pullRequestId: string) =>
-  Stream.paginateEffect(
+  Stream.paginate(
     undefined as string | undefined,
     (nextToken) =>
       codecommit.getCommentsForPullRequest({
@@ -137,11 +133,13 @@ const fetchCommentPages = (pullRequestId: string) =>
           )
         )
       )
-  ).pipe(
-    Stream.flatMap((locations) => Stream.fromIterable(locations))
   )
 
-const runCommentPages = (pullRequestId: string) => fetchCommentPages(pullRequestId).pipe(Stream.runCollect)
+const runCommentPages = (pullRequestId: string) =>
+  fetchCommentPages(pullRequestId).pipe(
+    Stream.runCollect,
+    Effect.map((chunk) => Array.from(chunk))
+  )
 
 // ---------------------------------------------------------------------------
 // Main
@@ -159,4 +157,4 @@ export const getCommentsForPullRequest = (
       )
     ),
     { timeout: "stream" }
-  ).pipe(Effect.map((chunk) => Array.from(chunk)))
+  )

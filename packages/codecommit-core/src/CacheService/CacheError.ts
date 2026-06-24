@@ -10,10 +10,14 @@ import { Schema } from "effect"
  *
  * @category Errors
  */
-export class CacheError extends Schema.TaggedError<CacheError>()(
+export class CacheError extends Schema.TaggedErrorClass<CacheError>()(
   "CacheError",
   {
     operation: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
-) {}
+) {
+  constructor(args: { readonly operation: string; readonly cause: unknown }) {
+    super({ _tag: "CacheError", ...args })
+  }
+}

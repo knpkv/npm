@@ -1,13 +1,13 @@
 /**
  * Clone command for Confluence CLI.
  */
-import { Command, Options, Prompt } from "@effect/cli"
-import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
 import type { PageId } from "../Brand.js"
@@ -15,6 +15,7 @@ import { type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../
 import { createConfigFile, layerFromValues as ConfluenceConfigLayerFromValues } from "../ConfluenceConfig.js"
 import { ConfigError } from "../ConfluenceError.js"
 import { GitService, layer as GitServiceLayer } from "../GitService.js"
+import { writeStdout } from "../internal/stdio.js"
 import { UserCacheLayer } from "../internal/userCache.js"
 import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
@@ -26,12 +27,12 @@ const ConverterPipeline = MarkdownConverterLayer.pipe(
   Layer.provide(AdfSchemaValidatorLayer)
 )
 
-const rootPageIdOption = Options.text("root-page-id").pipe(
+const rootPageIdOption = Options.string("root-page-id").pipe(
   Options.withDescription("Confluence root page ID to sync from"),
   Options.optional
 )
 
-const baseUrlOption = Options.text("base-url").pipe(
+const baseUrlOption = Options.string("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)"),
   Options.optional
 )
@@ -115,7 +116,7 @@ export const cloneCommand = Command.make(
       })
 
       const clientLayer = ConfluenceClientLayer(clientConfig).pipe(
-        Layer.provide(NodeHttpClient.layer)
+        Layer.provide(NodeHttpClient.layerFetch)
       )
 
       const cloneLayer = SyncEngineLayer.pipe(
@@ -125,7 +126,7 @@ export const cloneCommand = Command.make(
         Layer.provideMerge(ConverterPipeline),
         Layer.provideMerge(LocalFileSystemLayer),
         Layer.provideMerge(configLayer),
-        Layer.provideMerge(NodeContext.layer)
+        Layer.provideMerge(NodeServices.layer)
       )
 
       const result = yield* Effect.gen(function*() {
@@ -134,9 +135,8 @@ export const cloneCommand = Command.make(
         const pullResult = yield* engine.pull({
           force: true,
           replayHistory: true,
-          onProgress: (current, total, message) => {
-            process.stdout.write(`\r  Replaying history: ${current}/${total} - ${message}`)
-          }
+          onProgress: (current, total, message) =>
+            writeStdout(`\r  Replaying history: ${current}/${total} - ${message}`)
         })
 
         // Create origin/confluence branch at HEAD to track remote state
@@ -146,7 +146,7 @@ export const cloneCommand = Command.make(
       }).pipe(Effect.provide(cloneLayer))
 
       // Clear progress line and print final result
-      process.stdout.write("\r" + " ".repeat(80) + "\r")
+      yield* writeStdout("\r" + " ".repeat(80) + "\r")
       yield* Console.log(`Cloned ${result.pulled} pages with ${result.commits} commits`)
     })
 ).pipe(Command.withDescription("Clone Confluence pages with full version history"))

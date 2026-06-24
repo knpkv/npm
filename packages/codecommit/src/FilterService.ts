@@ -19,7 +19,7 @@
  * @category Service
  * @module
  */
-import { AwsClient, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { AwsClient, ConfigService, type Domain, type Errors } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Context, Effect, Layer, type Option, Stream } from "effect"
 import { type FilterPreset, matchesPreset, matchesRepoAuthor } from "./filterPresets.js"
@@ -50,7 +50,28 @@ export interface FilterResult {
   readonly unresolvedProfiles: ReadonlyArray<string>
 }
 
-const make = Effect.gen(function*() {
+type FilterCollectError = Errors.AwsApiError | Errors.AwsCredentialError | Errors.AwsThrottleError
+
+/**
+ * Cross-account filter orchestration service.
+ *
+ * @category models
+ */
+export interface FilterServiceShape {
+  readonly resolveTargets: Effect.Effect<ReadonlyArray<FilterTarget>, unknown>
+  readonly collect: (
+    preset: FilterPreset,
+    targets: ReadonlyArray<FilterTarget>,
+    opts: FilterOptions,
+    now?: Date
+  ) => Effect.Effect<FilterResult, FilterCollectError>
+}
+
+const make: Effect.Effect<
+  FilterServiceShape,
+  Errors.AwsApiError | Errors.AwsCredentialError | Errors.AwsThrottleError,
+  AwsClient.AwsClient | ConfigService.ConfigService
+> = Effect.gen(function*() {
   const aws = yield* AwsClient.AwsClient
   const cs = yield* ConfigService.ConfigService
 
@@ -61,12 +82,7 @@ const make = Effect.gen(function*() {
       .flatMap((a) => a.regions.map((r): FilterTarget => ({ profile: a.profile, region: r })))
   })
 
-  const collect = (
-    preset: FilterPreset,
-    targets: ReadonlyArray<FilterTarget>,
-    opts: FilterOptions,
-    now: Date = new Date()
-  ): Effect.Effect<FilterResult> =>
+  const collect: FilterServiceShape["collect"] = (preset, targets, opts, now = new Date()) =>
     Effect.gen(function*() {
       // Resolve caller identity once per profile (deduped per profile within this
       // run, not cached across runs) for presets that compare against "me".
@@ -80,12 +96,14 @@ const make = Effect.gen(function*() {
         const callers = yield* Effect.forEach(
           uniqueProfiles,
           (acct) =>
-            aws.getCallerIdentity(acct).pipe(
-              Effect.map((id): { profile: string; username: string | null } => ({
+            Effect.catchIf(
+              Effect.map(aws.getCallerIdentity(acct), (id): { profile: string; username: string | null } => ({
                 profile: acct.profile,
                 username: id.username
               })),
-              Effect.catchAll(() => Effect.succeed({ profile: acct.profile, username: null as string | null }))
+              () => true,
+              () => Effect.succeed({ profile: acct.profile, username: null as string | null }),
+              () => Effect.succeed({ profile: acct.profile, username: null as string | null })
             ),
           { concurrency: 4 }
         )
@@ -98,20 +116,27 @@ const make = Effect.gen(function*() {
       const collected = yield* Effect.forEach(
         targets,
         (acct) =>
-          aws.getPullRequests(acct, { status: "OPEN" }).pipe(
-            Stream.filter((pr) =>
-              matchesPreset(preset, pr, callerByProfile, now) && matchesRepoAuthor(pr, opts.repo, opts.author)
+          Effect.catchIf(
+            aws.getPullRequests(acct, { status: "OPEN" }).pipe(
+              Stream.filter((pr) =>
+                matchesPreset(preset, pr, callerByProfile, now) && matchesRepoAuthor(pr, opts.repo, opts.author)
+              ),
+              Stream.runCollect,
+              Effect.map((chunk) => ({ ok: Array.from(chunk), failed: null as string | null }))
             ),
-            Stream.runCollect,
-            Effect.map((chunk) => ({ ok: Array.from(chunk), failed: null as string | null })),
+            () => true,
             // Don't silently coalesce auth/permission failures to "no matches" —
             // collect the failure so it can be surfaced after the results.
-            Effect.catchAll((e) =>
+            (e) =>
+              Effect.succeed({
+                ok: [] as Array<Domain.PullRequest>,
+                failed: `${acct.profile}/${acct.region}: ${e.message}`
+              }),
+            (e) =>
               Effect.succeed({
                 ok: [] as Array<Domain.PullRequest>,
                 failed: `${acct.profile}/${acct.region}: ${e.message}`
               })
-            )
           ),
         { concurrency: 4 }
       )
@@ -121,9 +146,9 @@ const make = Effect.gen(function*() {
       const failures = collected.flatMap((r) => (r.failed === null ? [] : [r.failed]))
 
       return { prs, failures, unresolvedProfiles: unresolvedCallerProfiles }
-    })
+    }) as Effect.Effect<FilterResult, FilterCollectError>
 
-  return { resolveTargets, collect } as const
+  return { resolveTargets, collect } as const satisfies FilterServiceShape
 })
 
 /**
@@ -131,17 +156,19 @@ const make = Effect.gen(function*() {
  *
  * @category models
  */
-export interface FilterServiceShape extends Effect.Effect.Success<typeof make> {}
+export declare namespace FilterService {
+  export interface Service extends FilterServiceShape {}
+}
 
 /**
  * Cross-account filter orchestration service.
  *
  * @category Service
  */
-export class FilterService extends Context.Tag("@knpkv/codecommit/FilterService")<
+export class FilterService extends Context.Service<
   FilterService,
   FilterServiceShape
->() {}
+>()("@knpkv/codecommit/FilterService") {}
 
 /**
  * Live layer. Requires {@link AwsClient.AwsClient} and

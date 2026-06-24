@@ -1,7 +1,8 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { type ScrollBoxRenderable } from "@opentui/core"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
 import {
@@ -28,12 +29,12 @@ import { SettingsView } from "./SettingsView.js"
 const defaultState: AppState = { status: "loading", pullRequests: [], accounts: [] }
 
 /** Caches last successful AppState to avoid flash during reloads */
-const useCachedAppState = (result: Result.Result<AppState>) => {
+const useCachedAppState = (result: AsyncResult.AsyncResult<AppState, unknown>) => {
   const [cached, setCached] = useState<AppState>(defaultState)
   useEffect(() => {
-    if (Result.isSuccess(result)) setCached(result.value)
+    if (AsyncResult.isSuccess(result)) setCached(result.value)
   }, [result])
-  return Result.isSuccess(result) ? result.value : cached
+  return AsyncResult.isSuccess(result) ? result.value : cached
 }
 
 /** Builds filtered list items from app state + view + filters */
@@ -44,7 +45,7 @@ const useFilteredItems = (state: AppState, view: TuiView): ReadonlyArray<ListIte
   const currentUser = useAtomValue(currentUserAtom)
   const settingsFilter = useAtomValue(settingsFilterAtom)
   const notificationsResult = useAtomValue(notificationsAtom)
-  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = AsyncResult.getOrElse(notificationsResult, () => ({ items: [] }))
 
   const quickFilter = useMemo(
     () => ({ type: quickFilterType, value: quickFilterValues[quickFilterType], currentUser }),

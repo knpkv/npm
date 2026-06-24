@@ -23,25 +23,22 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },
   "dependencies": {
-    "@effect-atom/atom": "latest",
-    "@effect-atom/atom-react": "latest",
-    "@effect/cli": "latest",
-    "@effect/platform": "latest",
-    "@effect/platform-node": "latest",
+    "@effect/atom-react": "4.0.0-beta.87",
+    "@effect/platform-node": "4.0.0-beta.87",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/jira-cli": "workspace:^",
     "@opentui/core": "https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e",
     "@opentui/react": "https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e",
-    "effect": "latest",
-    "react": "^19.1.0"
+    "effect": "4.0.0-beta.87",
+    "react": "^19.2.7"
   },
   "devDependencies": {
-    "@effect/vitest": "latest",
+    "@effect/vitest": "4.0.0-beta.87",
     "@types/node": "latest",
-    "@types/react": "^19.1.8",
-    "tsx": "^4.19.4",
-    "vitest": "latest"
+    "@types/react": "^19.2.17",
+    "tsx": "^4.22.4",
+    "vitest": "^4.1.9"
   }
 }

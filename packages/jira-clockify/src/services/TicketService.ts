@@ -109,7 +109,7 @@ export interface TicketServiceShape {
   readonly search: (text: string) => Effect.Effect<ReadonlyArray<JiraTicket>>
 }
 
-export class TicketService extends Context.Tag("jcf/TicketService")<TicketService, TicketServiceShape>() {}
+export class TicketService extends Context.Service<TicketService, TicketServiceShape>()("jcf/TicketService") {}
 
 export const layer = Layer.effect(
   TicketService,
@@ -147,7 +147,7 @@ export const layer = Layer.effect(
         lastRefreshed: new Date()
       })
     }).pipe(
-      Effect.catchAll((e: TicketError) => {
+      Effect.catch((e: TicketError) => {
         const msg = e._tag === "TicketError"
           ? e.message
           : `Failed to fetch tickets: ${String(e)}`

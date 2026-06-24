@@ -3,12 +3,13 @@
  *
  * Read-only SQL projection layer for the statistics dashboard.
  * Assembles query methods from `./queries` and `./reviewerData` into
- * a single Effect.Service.
+ * a single Context.Service.
  *
  * @category CacheService
  */
-import * as SqlClient from "@effect/sql/SqlClient"
-import { Effect } from "effect"
+import { Context, Effect, Layer } from "effect"
+import type { Success } from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { DatabaseLive } from "../../Database.js"
 import * as Q from "./queries.js"
 import { reviewerData } from "./reviewerData.js"
@@ -17,29 +18,37 @@ import { reviewerData } from "./reviewerData.js"
 // Service
 // ---------------------------------------------------------------------------
 
-export class StatsRepo extends Effect.Service<StatsRepo>()("StatsRepo", {
-  dependencies: [DatabaseLive],
-  effect: Effect.gen(function*() {
-    const sql = yield* SqlClient.SqlClient
+const makeStatsRepo = Effect.gen(function*() {
+  const sql = yield* SqlClient.SqlClient
 
-    return {
-      weeklyVolume: Q.weeklyVolume(sql),
-      topContributors: Q.topContributors(sql),
-      mostActivePRs: Q.mostActivePRs(sql),
-      prSizeDistribution: Q.prSizeDistribution(sql),
-      avgDiffSize: Q.avgDiffSize(sql),
-      diffSizeByContributor: Q.diffSizeByContributor(sql),
-      stalePRs: Q.stalePRs(sql),
-      healthIndicators: Q.healthIndicators(sql),
-      filterOptions: Q.filterOptions(sql),
-      totalComments: Q.totalComments(sql),
-      reviewerData: reviewerData(sql),
-      mergeTimeDetails: Q.mergeTimeDetails(sql),
-      avgTimeToMerge: Q.avgTimeToMerge(sql),
-      dataAvailableSince: Q.dataAvailableSince(sql)
-    } as const
-  })
-}) {}
+  return {
+    weeklyVolume: Q.weeklyVolume(sql),
+    topContributors: Q.topContributors(sql),
+    mostActivePRs: Q.mostActivePRs(sql),
+    prSizeDistribution: Q.prSizeDistribution(sql),
+    avgDiffSize: Q.avgDiffSize(sql),
+    diffSizeByContributor: Q.diffSizeByContributor(sql),
+    stalePRs: Q.stalePRs(sql),
+    healthIndicators: Q.healthIndicators(sql),
+    filterOptions: Q.filterOptions(sql),
+    totalComments: Q.totalComments(sql),
+    reviewerData: reviewerData(sql),
+    mergeTimeDetails: Q.mergeTimeDetails(sql),
+    avgTimeToMerge: Q.avgTimeToMerge(sql),
+    dataAvailableSince: Q.dataAvailableSince(sql)
+  } as const
+})
+
+export interface StatsRepoShape extends Success<typeof makeStatsRepo> {}
+
+export class StatsRepo extends Context.Service<
+  StatsRepo,
+  StatsRepoShape
+>()("StatsRepo") {
+  static readonly Default = Layer.effect(StatsRepo, makeStatsRepo).pipe(
+    Layer.provide(DatabaseLive)
+  )
+}
 
 export declare namespace StatsRepo {
   /**

@@ -3,8 +3,8 @@
  *
  * @module
  */
-import { Args, Command, Options } from "@effect/cli"
 import { Console, Effect, Option } from "effect"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { TimerService } from "../../services/TimerService.js"
 import { formatDuration, isFullIsoTimestamp, parseDuration, parseStartTime } from "../../utils/time.js"
 import { fetchTicketByKey } from "../fetchTicket.js"
@@ -18,18 +18,21 @@ const localToday = (): string => {
 export const log = Command.make(
   "log",
   {
-    key: Args.text({ name: "key" }),
-    time: Options.text("time").pipe(Options.withAlias("t"), Options.withDescription("Duration (e.g. 1h30m, 2h, 45m)")),
-    date: Options.text("date").pipe(
+    key: Args.string("key"),
+    time: Options.string("time").pipe(
+      Options.withAlias("t"),
+      Options.withDescription("Duration (e.g. 1h30m, 2h, 45m)")
+    ),
+    date: Options.string("date").pipe(
       Options.withAlias("d"),
       Options.withDescription("Date (YYYY-MM-DD, default today)"),
       Options.optional
     ),
-    at: Options.text("at").pipe(
+    at: Options.string("at").pipe(
       Options.withDescription("Start time on that date (HH:MM, default 09:00)"),
       Options.optional
     ),
-    comment: Options.text("comment").pipe(
+    comment: Options.string("comment").pipe(
       Options.withAlias("c"),
       Options.withDescription("Worklog comment"),
       Options.optional
@@ -83,7 +86,7 @@ export const log = Command.make(
         durationSeconds: totalSeconds,
         comment: Option.isSome(comment) ? comment.value : undefined
       }).pipe(
-        Effect.catchAll((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
+        Effect.catch((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
       )
 
       if (result) {

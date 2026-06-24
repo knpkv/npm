@@ -1,7 +1,8 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { useKeyboard } from "@opentui/react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useMemo, useRef } from "react"
 import { loginToAwsAtom } from "../atoms/actions.js"
 import { appStateAtom, markAllReadAtom, notificationsAtom, refreshAtom, setAllAccountsAtom } from "../atoms/app.js"
@@ -55,7 +56,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const refresh = useAtomSet(refreshAtom)
   const markAllRead = useAtomSet(markAllReadAtom)
   const notificationsResult = useAtomValue(notificationsAtom)
-  const notifications: PaginatedNotifications = Result.getOrElse(notificationsResult, () => ({ items: [] }))
+  const notifications: PaginatedNotifications = AsyncResult.getOrElse(notificationsResult, () => ({ items: [] }))
   const loginToAws = useAtomSet(loginToAwsAtom)
   const exitPending = useAtomValue(exitPendingAtom)
   const setExitPending = useAtomSet(exitPendingAtom)
@@ -76,7 +77,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
   const currentUser = useAtomValue(currentUserAtom)
   const setCurrentUser = useAtomSet(currentUserAtom)
   const appStateResult = useAtomValue(appStateAtom)
-  const appState = Result.getOrElse(appStateResult, () => defaultState)
+  const appState = AsyncResult.getOrElse(appStateResult, () => defaultState)
 
   // Settings state
   const settingsFilter = useAtomValue(settingsFilterAtom)

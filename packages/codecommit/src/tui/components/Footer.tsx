@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { exitPendingAtom, filterTextAtom, isFilteringAtom, uiErrorAtom, viewAtom } from "../atoms/ui.js"
 import { HINTS } from "../Constants.js"
 import { useTheme } from "../context/theme.js"

@@ -1,14 +1,4 @@
-import {
-  Etag,
-  FetchHttpClient,
-  FileSystem,
-  HttpLayerRouter,
-  HttpPlatform,
-  HttpServerRequest,
-  HttpServerResponse,
-  Path
-} from "@effect/platform"
-import { BunContext, BunFileSystem, BunHttpServer } from "@effect/platform-bun"
+import { BunFileSystem, BunHttpServer, BunServices } from "@effect/platform-bun"
 import {
   AwsClient,
   AwsClientConfig,
@@ -25,8 +15,18 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Cause, Config, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
-import { fileURLToPath } from "node:url"
+import { Cause, Config, Duration, Effect, Layer, Predicate, Ref } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import {
+  Etag,
+  FetchHttpClient,
+  HttpPlatform,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse
+} from "effect/unstable/http"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CodeCommitApi } from "./Api.js"
 import {
   AccountsLive,
@@ -74,7 +74,7 @@ const serveStatic = Effect.gen(function*() {
     filePath = "index.html"
   }
 
-  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  const __dirname = yield* path.fromFileUrl(new URL(".", import.meta.url))
   const staticDir = path.resolve(__dirname, "../../dist/client")
   const fullPath = path.resolve(staticDir, filePath)
 
@@ -125,8 +125,7 @@ const HandlersLive = Layer.mergeAll(
 
 // Platform dependencies
 const PlatformLive = Layer.mergeAll(
-  Path.layer,
-  BunFileSystem.layer,
+  BunServices.layer,
   FetchHttpClient.layer
 )
 
@@ -197,7 +196,7 @@ const PRServiceLive_ = PRService.PRServiceLive.pipe(Layer.provideMerge(PRService
 // AwsClient for handlers that call AWS directly (e.g., createPR)
 const AwsClientLive_ = GatedAwsClientLive
 
-// Sandbox services — DockerService uses `docker` CLI via Command, no HttpClient needed
+// Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
 const SandboxServicesLive = Layer.mergeAll(
   SandboxService.SandboxService.Default,
@@ -231,7 +230,7 @@ const AuditPrune = Layer.effectDiscard(
     const auditLog = yield* AuditLogRepo
     const permService = yield* PermissionService.PermissionService
     const retentionDays = yield* permService.getAuditRetention()
-    const deleted = yield* auditLog.prune(retentionDays).pipe(Effect.catchAll(() => Effect.succeed(0)))
+    const deleted = yield* auditLog.prune(retentionDays).pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     if (deleted > 0) yield* Effect.logInfo(`Pruned ${deleted} audit log entries older than ${retentionDays} days`)
   })
 )
@@ -244,7 +243,7 @@ const AutoRefresh = Layer.effectDiscard(
 
     const refreshIteration = Effect.gen(function*() {
       const config = yield* configService.load.pipe(
-        Effect.catchAll(() => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
+        Effect.catchIf(() => true, () => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
       )
       if (config.autoRefresh) {
         yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))
@@ -254,14 +253,14 @@ const AutoRefresh = Layer.effectDiscard(
         yield* Effect.sleep(Duration.seconds(30))
       }
     }).pipe(
-      Effect.catchAllCause((cause) =>
+      Effect.catchCause((cause) =>
         Effect.logError("Auto-refresh failed", cause).pipe(
-          Effect.zipRight(Effect.sleep(Duration.seconds(10)))
+          Effect.andThen(Effect.sleep(Duration.seconds(10)))
         )
       )
     )
 
-    yield* Effect.forkDaemon(
+    yield* Effect.forkDetach(
       Effect.gen(function*() {
         yield* prService.refresh
         yield* Effect.logInfo("Initial PR refresh complete")
@@ -285,13 +284,13 @@ const SandboxStartup = Layer.effectDiscard(
     yield* Effect.logInfo("Sandbox service ready")
 
     // GC daemon — stop idle sandboxes, cleanup stopped ones
-    yield* Effect.forkDaemon(
+    yield* Effect.forkDetach(
       Effect.forever(
         Effect.gen(function*() {
           yield* Effect.sleep(Duration.minutes(5))
           yield* sandboxService.gcIdle()
-        }).pipe(Effect.catchAllCause((c) =>
-          Cause.isInterruptedOnly(c)
+        }).pipe(Effect.catchCause((c) =>
+          Cause.hasInterruptsOnly(c)
             ? Effect.failCause(c)
             : Effect.logWarning("Sandbox GC failed", c)
         ))
@@ -302,7 +301,7 @@ const SandboxStartup = Layer.effectDiscard(
 
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.mergeAll(
-  HttpLayerRouter.addHttpApi(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
+  HttpApiBuilder.layer(CodeCommitApi).pipe(Layer.provide(HandlersLive)),
   AutoRefresh,
   AuditPrune,
   SandboxStartup
@@ -312,7 +311,7 @@ const ApiLive = Layer.mergeAll(
 )
 
 // Static file router - catches all non-API routes
-const StaticRouter = HttpLayerRouter.use((router) => router.add("GET", "/*", serveStatic))
+const StaticRouter = HttpRouter.use((router) => router.add("GET", "/*", serveStatic))
 
 const AllowedOrigins = Config.string("ALLOWED_ORIGINS").pipe(
   Config.map((s) => s.split(",")),
@@ -320,9 +319,9 @@ const AllowedOrigins = Config.string("ALLOWED_ORIGINS").pipe(
 )
 
 // CORS layer via Effect Config — consistent with Port config
-const CorsLive = Layer.unwrapEffect(
+const CorsLive = Layer.unwrap(
   Effect.map(AllowedOrigins, (allowedOrigins) =>
-    HttpLayerRouter.cors({
+    HttpRouter.cors({
       allowedOrigins,
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"]
@@ -339,17 +338,16 @@ const AllRoutes = Layer.mergeAll(ApiLive, StaticRouter).pipe(
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.layer))
 
 export const makeServer = (options: { port: number; hostname?: string }) =>
-  HttpLayerRouter.serve(AllRoutes).pipe(
+  HttpRouter.serve(AllRoutes).pipe(
     // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
     Layer.provide(BunHttpServer.layer({ ...options, idleTimeout: 0 })),
-    Layer.provide(BunContext.layer),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatformLive)
   )
 
 export const makeCodeCommitServer = (port: number) => makeServer({ port })
 
-export const Port = Config.integer("PORT").pipe(Config.withDefault(3000))
+export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
 
 const updatePortOnConflict = (
   portRef: Ref.Ref<number>,
@@ -357,15 +355,15 @@ const updatePortOnConflict = (
 ) =>
 <A, E, R>(self: Effect.Effect<A, E, R>) =>
   self.pipe(
-    Effect.catchSomeDefect((defect) =>
+    Effect.catchDefect((defect) =>
       Predicate.isError(defect) && defect.message.includes("port")
-        ? Option.some(Effect.gen(function*() {
+        ? Effect.gen(function*() {
           const remaining = yield* Ref.getAndUpdate(retriesRef, (r) => r - 1)
           if (remaining <= 0) return yield* Effect.die(defect)
           const p = yield* Ref.getAndUpdate(portRef, (prev) => prev + 1)
           yield* Effect.logWarning(`Port ${p} in use, trying ${p + 1}`)
-        }))
-        : Option.none()
+        })
+        : Effect.die(defect)
     )
   )
 

@@ -1,5 +1,3 @@
-import * as HttpClient from "@effect/platform/HttpClient"
-import * as HttpClientResponse from "@effect/platform/HttpClientResponse"
 import { describe, expect, it } from "@effect/vitest"
 import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
@@ -9,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService } from "../src/services/ConfigService.js"
 import { StateWriter } from "../src/services/StateWriter.js"
@@ -353,47 +352,37 @@ describe("TimerService", () => {
 
   describe("detectRunning", () => {
     // Detects externally-started Clockify timers with "[KEY] summary" format (jcf native format)
-    it.effect("parses bracket format [KEY] summary", () =>
-      Effect.gen(function*() {
+    it.effect("parses bracket format [KEY] summary", () => {
+      const runningEntry = makeTimeEntry(
+        "ext-1",
+        "[PROJ-42] Implement feature",
+        new Date("2025-01-01T10:00:00Z"),
+        "proj-id"
+      )
+
+      const clockifyWithRunning: ClockifyApiClientShape = {
+        ...mockClockify,
+        getRunningTimer: () => Effect.succeed(runningEntry),
+        getProjects: () =>
+          Effect.succeed([{
+            id: "proj-id",
+            name: "MyProject",
+            color: "",
+            archived: false,
+            billable: true,
+            public: true,
+            workspaceId: WORKSPACE_ID,
+            note: ""
+          }])
+      }
+
+      return Effect.gen(function*() {
         resetCaptures()
         writtenStates = []
         cleared = false
 
-        const runningEntry = makeTimeEntry(
-          "ext-1",
-          "[PROJ-42] Implement feature",
-          new Date("2025-01-01T10:00:00Z"),
-          "proj-id"
-        )
-
-        const clockifyWithRunning: ClockifyApiClientShape = {
-          ...mockClockify,
-          getRunningTimer: () => Effect.succeed(runningEntry),
-          getProjects: () =>
-            Effect.succeed([{
-              id: "proj-id",
-              name: "MyProject",
-              color: "",
-              archived: false,
-              billable: true,
-              public: true,
-              workspaceId: WORKSPACE_ID,
-              note: ""
-            }])
-        }
-
-        const layer = timerLayer.pipe(
-          Layer.provide(Layer.succeed(ClockifyApiClient, clockifyWithRunning)),
-          Layer.provide(MockJiraApiClientLayer),
-          Layer.provide(MockClockifyAuthLayer),
-          Layer.provide(MockConfigLayer),
-          Layer.provide(MockStateWriterLayer),
-          Layer.provide(MockJiraAuthLayer),
-          Layer.provide(MockHttpClientLayer)
-        )
-
-        const svc = yield* TimerService.pipe(Effect.provide(layer))
-        yield* svc.detectRunning.pipe(Effect.provide(layer))
+        const svc = yield* TimerService
+        yield* svc.detectRunning
 
         // State was updated via the layer's SubscriptionRef, so read from svc
         const state = yield* SubscriptionRef.get(svc.state)
@@ -403,40 +392,32 @@ describe("TimerService", () => {
         expect(state.projectId).toBe("proj-id")
         expect(state.projectName).toBe("MyProject")
         expect(state.startedViaJcf).toBe(false)
-      }).pipe(Effect.provide(TestLayer)))
+      }).pipe(Effect.provide(makeTestLayer(clockifyWithRunning)))
+    })
 
     // Also detects "KEY: summary" format — common when timers are started manually in Clockify
-    it.effect("parses colon format KEY: summary", () =>
-      Effect.gen(function*() {
+    it.effect("parses colon format KEY: summary", () => {
+      const runningEntry = makeTimeEntry("ext-2", "PROJ-99: Review PR", new Date("2025-01-01T10:00:00Z"))
+
+      const clockifyWithRunning: ClockifyApiClientShape = {
+        ...mockClockify,
+        getRunningTimer: () => Effect.succeed(runningEntry)
+      }
+
+      return Effect.gen(function*() {
         resetCaptures()
         writtenStates = []
 
-        const runningEntry = makeTimeEntry("ext-2", "PROJ-99: Review PR", new Date("2025-01-01T10:00:00Z"))
-
-        const clockifyWithRunning: ClockifyApiClientShape = {
-          ...mockClockify,
-          getRunningTimer: () => Effect.succeed(runningEntry)
-        }
-
-        const layer = timerLayer.pipe(
-          Layer.provide(Layer.succeed(ClockifyApiClient, clockifyWithRunning)),
-          Layer.provide(MockJiraApiClientLayer),
-          Layer.provide(MockClockifyAuthLayer),
-          Layer.provide(MockConfigLayer),
-          Layer.provide(MockStateWriterLayer),
-          Layer.provide(MockJiraAuthLayer),
-          Layer.provide(MockHttpClientLayer)
-        )
-
-        const svc = yield* TimerService.pipe(Effect.provide(layer))
-        yield* svc.detectRunning.pipe(Effect.provide(layer))
+        const svc = yield* TimerService
+        yield* svc.detectRunning
 
         const state = yield* SubscriptionRef.get(svc.state)
         expect(state.active).toBe(true)
         expect(state.ticketKey).toBe("PROJ-99")
         expect(state.summary).toBe("Review PR")
         expect(state.startedViaJcf).toBe(false)
-      }).pipe(Effect.provide(TestLayer)))
+      }).pipe(Effect.provide(makeTestLayer(clockifyWithRunning)))
+    })
 
     // No running timer in Clockify must leave local state unchanged — polling should be safe no-op
     it.effect("no running timer is a no-op", () =>

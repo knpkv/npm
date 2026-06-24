@@ -1,19 +1,36 @@
-import { FileSystem, Path } from "@effect/platform"
 import { CacheService, ConfigService } from "@knpkv/codecommit-core"
 import { Effect, Layer } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import { describe, expect, it } from "vitest"
 
 const MockPath = Path.layer
 
+const makeMockFileSystem = (partial: Partial<FileSystem.FileSystem>) =>
+  Layer.succeed(
+    FileSystem.FileSystem,
+    FileSystem.FileSystem.of(partial as FileSystem.FileSystem)
+  )
+
+const runWithConfig = <A>(
+  program: Effect.Effect<A, unknown, ConfigService.ConfigService>,
+  fileSystem: Layer.Layer<FileSystem.FileSystem>
+) =>
+  Effect.runPromise(
+    Effect.provide(
+      program,
+      ConfigService.ConfigServiceLive.pipe(
+        Layer.provide(Layer.mergeAll(fileSystem, MockPath, CacheService.EventsHub.Default))
+      )
+    ) as Effect.Effect<A, unknown>
+  )
+
 describe("ConfigService", () => {
   it("should return empty accounts if config file does not exist", async () => {
-    const MockFileSystem = Layer.succeed(
-      FileSystem.FileSystem,
-      FileSystem.FileSystem.of({
-        exists: () => Effect.succeed(false),
-        readFileString: () => Effect.succeed("")
-      } as any)
-    )
+    const MockFileSystem = makeMockFileSystem({
+      exists: () => Effect.succeed(false),
+      readFileString: () => Effect.succeed("")
+    })
 
     const program = Effect.gen(function*() {
       const configService = yield* ConfigService.ConfigService
@@ -21,15 +38,7 @@ describe("ConfigService", () => {
       return config
     })
 
-    const result = await Effect.runPromise(
-      program.pipe(
-        Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(
-            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
-          )
-        )
-      )
-    )
+    const result = await runWithConfig(program, MockFileSystem)
 
     expect(result.accounts).toEqual([])
   })
@@ -41,13 +50,10 @@ describe("ConfigService", () => {
       ]
     })
 
-    const MockFileSystem = Layer.succeed(
-      FileSystem.FileSystem,
-      FileSystem.FileSystem.of({
-        exists: () => Effect.succeed(true),
-        readFileString: () => Effect.succeed(mockContent)
-      } as any)
-    )
+    const MockFileSystem = makeMockFileSystem({
+      exists: () => Effect.succeed(true),
+      readFileString: () => Effect.succeed(mockContent)
+    })
 
     const program = Effect.gen(function*() {
       const configService = yield* ConfigService.ConfigService
@@ -55,15 +61,7 @@ describe("ConfigService", () => {
       return config
     })
 
-    const result = await Effect.runPromise(
-      program.pipe(
-        Effect.provide(
-          ConfigService.ConfigServiceLive.pipe(
-            Layer.provide(Layer.mergeAll(MockFileSystem, MockPath, CacheService.EventsHub.Default))
-          )
-        )
-      )
-    )
+    const result = await runWithConfig(program, MockFileSystem)
 
     expect(result.accounts).toHaveLength(1)
     expect(result.accounts[0]!.profile).toBe("work")

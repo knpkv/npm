@@ -11,6 +11,7 @@
  *
  * @module
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { InlineNode, type InlineNode as InlineNodeType } from "./InlineNode.js"
 
@@ -19,10 +20,9 @@ import { InlineNode, type InlineNode as InlineNodeType } from "./InlineNode.js"
  *
  * @category Version
  */
-export const SchemaVersion = Schema.Number.pipe(
-  Schema.int(),
-  Schema.positive(),
-  Schema.optionalWith({ default: () => 1 })
+export const SchemaVersion = Schema.Int.pipe(
+  Schema.check(Schema.isGreaterThan(0)),
+  Schema.withConstructorDefault(Effect.succeed(1))
 )
 
 /**
@@ -49,7 +49,7 @@ export const RawSource = Schema.optional(Schema.String)
  */
 export class Heading extends Schema.TaggedClass<Heading>()("Heading", {
   version: SchemaVersion,
-  level: Schema.Literal(1, 2, 3, 4, 5, 6),
+  level: Schema.Literals([1, 2, 3, 4, 5, 6]),
   children: Schema.Array(InlineNode),
   rawSource: RawSource
 }) {}
@@ -59,7 +59,7 @@ export class Heading extends Schema.TaggedClass<Heading>()("Heading", {
  *
  * @category BlockNode
  */
-export const TextAlignment = Schema.Literal("left", "center", "right")
+export const TextAlignment = Schema.Literals(["left", "center", "right"])
 
 /**
  * Type for TextAlignment.
@@ -187,7 +187,7 @@ export class Image extends Schema.TaggedClass<Image>()("Image", {
  * @category BlockNode
  */
 export class TableCell extends Schema.TaggedClass<TableCell>()("TableCell", {
-  isHeader: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  isHeader: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   children: Schema.Array(InlineNode),
   rawSource: RawSource
 }) {}
@@ -223,11 +223,11 @@ export class UnsupportedBlock extends Schema.TaggedClass<UnsupportedBlock>()("Un
   rawHtml: Schema.optional(Schema.String),
   rawMarkdown: Schema.optional(Schema.String),
   rawAdf: Schema.optional(Schema.String),
-  source: Schema.Literal("confluence", "markdown", "adf")
+  source: Schema.Literals(["confluence", "markdown", "adf"])
 }) {}
 
 // Non-recursive block nodes
-const SimpleBlockNode = Schema.Union(
+const SimpleBlockNode = Schema.Union([
   Heading,
   Paragraph,
   CodeBlock,
@@ -235,7 +235,7 @@ const SimpleBlockNode = Schema.Union(
   Image,
   Table,
   UnsupportedBlock
-)
+])
 
 /**
  * Block quote element with nested block content.
@@ -305,7 +305,7 @@ export const TaskItem = Schema.Struct({
   _tag: Schema.Literal("TaskItem"),
   id: Schema.String,
   uuid: Schema.String,
-  status: Schema.Literal("incomplete", "complete"),
+  status: Schema.Literals(["incomplete", "complete"]),
   body: Schema.Array(InlineNode),
   rawSource: RawSource
 })
@@ -341,7 +341,7 @@ export type TaskList = Schema.Schema.Type<typeof TaskList>
  *
  * @category BlockNode
  */
-export const BlockNode = Schema.Union(
+export const BlockNode = Schema.Union([
   Heading,
   Paragraph,
   CodeBlock,
@@ -352,7 +352,7 @@ export const BlockNode = Schema.Union(
   List,
   TaskList,
   UnsupportedBlock
-)
+])
 
 /**
  * Type for block nodes.

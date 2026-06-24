@@ -3,7 +3,8 @@
  *
  * @module
  */
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { permissionResetAtom, permissionsQueryAtom, permissionUpdateAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
@@ -14,7 +15,7 @@ export function SettingsPermissions() {
   const update = useAtomSet(permissionUpdateAtom)
   const reset = useAtomSet(permissionResetAtom)
 
-  const items = Result.isSuccess(result) ? result.value : []
+  const items = AsyncResult.isSuccess(result) ? result.value : []
   const reads = items.filter((p) => p.category === "read")
   const writes = items.filter((p) => p.category === "write")
 
@@ -76,7 +77,7 @@ export function SettingsPermissions() {
         </Button>
       </div>
 
-      {Result.isInitial(result) ? (
+      {AsyncResult.isInitial(result) ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
       ) : (
         <div className="space-y-6">

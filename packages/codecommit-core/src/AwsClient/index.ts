@@ -13,19 +13,12 @@
  * @category Client
  * @module
  */
-import { HttpClient } from "@effect/platform"
 import { Context, Effect, Layer, Stream } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import type { PRCommentLocation, PullRequest } from "../Domain.js"
 import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"
-import { createApprovalRule } from "./createApprovalRule.js"
-import { createPullRequest } from "./createPullRequest.js"
-import { deleteApprovalRule } from "./deleteApprovalRule.js"
-import { type CallerIdentity, getCallerIdentity } from "./getCallerIdentity.js"
-import { getCommentsForPullRequest } from "./getCommentsForPullRequest.js"
-import { getDifferences } from "./getDifferences.js"
-import { getPullRequest } from "./getPullRequest.js"
-import { getPullRequests } from "./getPullRequests.js"
+import type { CallerIdentity } from "./getCallerIdentity.js"
 import type {
   AccountParams,
   CreateApprovalRuleParams,
@@ -41,10 +34,6 @@ import type {
   UpdatePullRequestDescriptionParams,
   UpdatePullRequestTitleParams
 } from "./internal.js"
-import { listBranches } from "./listBranches.js"
-import { updateApprovalRule } from "./updateApprovalRule.js"
-import { updatePullRequestDescription } from "./updatePullRequestDescription.js"
-import { updatePullRequestTitle } from "./updatePullRequestTitle.js"
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -63,10 +52,10 @@ export type AwsClientError = AwsCredentialError | AwsThrottleError | AwsApiError
 // Service Definition
 // ---------------------------------------------------------------------------
 
-export class AwsClient extends Context.Tag("@knpkv/codecommit-core/AwsClient")<
+export class AwsClient extends Context.Service<
   AwsClient,
   AwsClient.Service
->() {}
+>()("@knpkv/codecommit-core/AwsClient") {}
 
 export declare namespace AwsClient {
   /**
@@ -122,18 +111,66 @@ export const AwsClientLive = Layer.effect(
       )
 
     return {
-      getPullRequests: (account, options) => provideStream(getPullRequests(account, options)),
-      getCallerIdentity: (account) => provide(getCallerIdentity(account)),
-      createPullRequest: (params) => provide(createPullRequest(params)),
-      listBranches: (params) => provide(listBranches(params)),
-      getCommentsForPullRequest: (params) => provide(getCommentsForPullRequest(params)),
-      updatePullRequestTitle: (params) => provide(updatePullRequestTitle(params)),
-      updatePullRequestDescription: (params) => provide(updatePullRequestDescription(params)),
-      getPullRequest: (params) => provide(getPullRequest(params)),
-      getDifferences: (params) => provide(getDifferences(params)),
-      createApprovalRule: (params) => provide(createApprovalRule(params)),
-      updateApprovalRule: (params) => provide(updateApprovalRule(params)),
-      deleteApprovalRule: (params) => provide(deleteApprovalRule(params))
+      getPullRequests: (account, options) =>
+        Stream.unwrap(
+          Effect.map(Effect.promise(() => import("./getPullRequests.js")), ({ getPullRequests }) =>
+            provideStream(getPullRequests(account, options)))
+        ),
+      getCallerIdentity: (account) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./getCallerIdentity.js")),
+          ({ getCallerIdentity }) => provide(getCallerIdentity(account))
+        ),
+      createPullRequest: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./createPullRequest.js")),
+          ({ createPullRequest }) => provide(createPullRequest(params))
+        ),
+      listBranches: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./listBranches.js")),
+          ({ listBranches }) => provide(listBranches(params))
+        ),
+      getCommentsForPullRequest: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./getCommentsForPullRequest.js")),
+          ({ getCommentsForPullRequest }) => provide(getCommentsForPullRequest(params))
+        ),
+      updatePullRequestTitle: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./updatePullRequestTitle.js")),
+          ({ updatePullRequestTitle }) => provide(updatePullRequestTitle(params))
+        ),
+      updatePullRequestDescription: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./updatePullRequestDescription.js")),
+          ({ updatePullRequestDescription }) => provide(updatePullRequestDescription(params))
+        ),
+      getPullRequest: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./getPullRequest.js")),
+          ({ getPullRequest }) => provide(getPullRequest(params))
+        ),
+      getDifferences: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./getDifferences.js")),
+          ({ getDifferences }) => provide(getDifferences(params))
+        ),
+      createApprovalRule: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./createApprovalRule.js")),
+          ({ createApprovalRule }) => provide(createApprovalRule(params))
+        ),
+      updateApprovalRule: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./updateApprovalRule.js")),
+          ({ updateApprovalRule }) => provide(updateApprovalRule(params))
+        ),
+      deleteApprovalRule: (params) =>
+        Effect.flatMap(
+          Effect.promise(() => import("./deleteApprovalRule.js")),
+          ({ deleteApprovalRule }) => provide(deleteApprovalRule(params))
+        )
     }
   })
 )

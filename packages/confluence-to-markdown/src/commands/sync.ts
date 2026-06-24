@@ -1,10 +1,12 @@
 /**
  * Sync commands (pull, push, status) for Confluence CLI.
  */
-import { Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
+import { Command, Flag as Options } from "effect/unstable/cli"
 import { GitService } from "../GitService.js"
+import { writeStdout } from "../internal/stdio.js"
+import type { ProgressCallback } from "../SyncEngine.js"
 import { SyncEngine } from "../SyncEngine.js"
 
 // === Pull command ===
@@ -24,16 +26,15 @@ export const pullCommand = Command.make(
     Effect.gen(function*() {
       const engine = yield* SyncEngine
       yield* Console.log("Pulling pages from Confluence...")
-      const onProgress = (current: number, total: number, message: string) => {
-        process.stdout.write(`\r  Replaying history: ${current}/${total} - ${message}`)
-      }
+      const onProgress: ProgressCallback = (current, total, message) =>
+        writeStdout(`\r  Replaying history: ${current}/${total} - ${message}`)
       const result = yield* engine.pull({
         force,
         replayHistory,
         ...(replayHistory ? { onProgress } : {})
       })
       if (replayHistory) {
-        process.stdout.write("\r" + " ".repeat(80) + "\r")
+        yield* writeStdout("\r" + " ".repeat(80) + "\r")
       }
       yield* Console.log(`Pulled ${result.pulled} pages`)
       if (result.commits > 0) {
@@ -91,7 +92,7 @@ export const statusCommand = Command.make("status", {}, () =>
       const gitStatus = yield* git.status()
       const commitCount = yield* git.log({ n: 1 }).pipe(
         Effect.map((commits) => commits.length > 0 ? "has commits" : "no commits"),
-        Effect.catchAll(() => Effect.succeed("unknown"))
+        Effect.catchIf(() => true, () => Effect.succeed("unknown"))
       )
       yield* Console.log(`Git: initialized (${commitCount})`)
       if (gitStatus.hasChanges) {

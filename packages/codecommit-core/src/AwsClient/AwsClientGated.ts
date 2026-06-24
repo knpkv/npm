@@ -17,7 +17,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Match, Stream } from "effect"
+import { Clock, Context, Effect, Layer, Stream } from "effect"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
@@ -27,10 +27,10 @@ import { PermissionGate } from "../PermissionService/PermissionGate.js"
 import { AwsClient, type AwsClientError } from "./index.js"
 
 // Layer composition: AwsClientLive → InnerAwsClient (rename) → AwsClientGated → AwsClient
-export class InnerAwsClient extends Context.Tag("@knpkv/codecommit-core/InnerAwsClient")<
+export class InnerAwsClient extends Context.Service<
   InnerAwsClient,
   AwsClient.Service
->() {}
+>()("@knpkv/codecommit-core/InnerAwsClient") {}
 
 interface GateParams {
   readonly operation: string
@@ -70,18 +70,22 @@ export const AwsClientGatedLive: Layer.Layer<
       permService.isAuditEnabled().pipe(
         Effect.flatMap((enabled) =>
           enabled
-            ? auditLog.log({
-              timestamp: new Date().toISOString(),
-              operation: params.operation,
-              accountProfile: params.accountProfile,
-              region: params.region,
-              permissionState,
-              context: params.context,
-              durationMs
-            })
+            ? Clock.currentTimeMillis.pipe(
+              Effect.flatMap((nowMs) =>
+                auditLog.log({
+                  timestamp: new Date(nowMs).toISOString(),
+                  operation: params.operation,
+                  accountProfile: params.accountProfile,
+                  region: params.region,
+                  permissionState,
+                  context: params.context,
+                  durationMs
+                })
+              )
+            )
             : Effect.void
         ),
-        Effect.catchAll(() => Effect.void)
+        Effect.catchCause(() => Effect.void)
       )
 
     const promptUser = (params: GateParams): Effect.Effect<"always_allowed" | "allowed", AwsClientError> =>
@@ -94,20 +98,16 @@ export const AwsClientGatedLive: Layer.Layer<
           context: params.context
         }).pipe(Effect.mapError(() => toDeniedError(params, "timeout")))
 
-        return yield* Match.value(response).pipe(
-          Match.when("always_allow", () =>
-            permService.set(params.operation, "always_allow").pipe(
-              Effect.as("always_allowed" as const)
-            )),
-          Match.when("deny", () =>
-            Effect.gen(function*() {
-              yield* permService.set(params.operation, "deny")
-              yield* logAudit(params, "denied", null)
-              return yield* toDeniedError(params, "denied")
-            })),
-          Match.when("allow_once", () => Effect.succeed("allowed" as const)),
-          Match.exhaustive
-        )
+        if (response === "always_allow") {
+          yield* permService.set(params.operation, "always_allow")
+          return "always_allowed" as const
+        }
+        if (response === "deny") {
+          yield* permService.set(params.operation, "deny")
+          yield* logAudit(params, "denied", null)
+          return yield* Effect.fail(toDeniedError(params, "denied"))
+        }
+        return "allowed" as const
       })
 
     const checkPermission = (
@@ -115,15 +115,14 @@ export const AwsClientGatedLive: Layer.Layer<
     ): Effect.Effect<"always_allowed" | "allowed", AwsClientError> =>
       Effect.gen(function*() {
         const state = yield* permService.check(params.operation)
-        return yield* Match.value(state).pipe(
-          Match.when("always_allow", () => Effect.succeed("always_allowed" as const)),
-          Match.when("deny", () =>
-            logAudit(params, "denied", null).pipe(
-              Effect.zipRight(toDeniedError(params, "denied"))
-            )),
-          Match.when("allow", () => promptUser(params)),
-          Match.exhaustive
-        )
+        if (state === "always_allow") {
+          return "always_allowed" as const
+        }
+        if (state === "deny") {
+          yield* logAudit(params, "denied", null)
+          return yield* Effect.fail(toDeniedError(params, "denied"))
+        }
+        return yield* promptUser(params)
       })
 
     // --- Declarative wrapping: gated(op, ctx, acct, method) → wrapped method ---
@@ -140,9 +139,10 @@ export const AwsClientGatedLive: Layer.Layer<
       const g: GateParams = { operation: op, context: ctx(params), accountProfile: a.profile, region: a.region }
       return Effect.gen(function*() {
         const ps = yield* checkPermission(g)
-        const start = Date.now()
+        const start = yield* Clock.currentTimeMillis
         const result = yield* method(params)
-        yield* logAudit(g, ps, Date.now() - start)
+        const end = yield* Clock.currentTimeMillis
+        yield* logAudit(g, ps, end - start)
         return result
       })
     }
@@ -158,12 +158,21 @@ export const AwsClientGatedLive: Layer.Layer<
       const g: GateParams = { operation: op, context: ctx(params), accountProfile: a.profile, region: a.region }
       return Stream.unwrap(
         checkPermission(g).pipe(
-          Effect.map((ps) => {
-            const start = Date.now()
-            return method(params).pipe(
-              Stream.onDone(() => logAudit(g, ps, Date.now() - start))
+          Effect.flatMap((ps) =>
+            Clock.currentTimeMillis.pipe(Effect.map((start) => ({
+              ps,
+              start
+            })))
+          ),
+          Effect.map(({ ps, start }) =>
+            method(params).pipe(
+              Stream.onEnd(
+                Clock.currentTimeMillis.pipe(
+                  Effect.flatMap((end) => logAudit(g, ps, end - start))
+                )
+              )
             )
-          })
+          )
         )
       )
     }

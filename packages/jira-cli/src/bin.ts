@@ -2,15 +2,14 @@
 /**
  * CLI entry point — assembles commands, selects layer by subcommand, runs via `NodeRuntime`.
  *
- * `process.argv` is read once at the edge and passed to Effect — no globals in effectful code.
+ * Arguments are read from Effect's `Stdio` service at the runtime edge.
  *
  * @module
  */
-import { Command } from "@effect/cli"
-import { NodeRuntime } from "@effect/platform-node"
+import { NodeRuntime, NodeStdio } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
-import * as Logger from "effect/Logger"
-import * as LogLevel from "effect/LogLevel"
+import * as Stdio from "effect/Stdio"
+import { Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
 import {
   AppLayer,
@@ -36,29 +35,26 @@ const jira = Command.make("jira").pipe(
 )
 
 // === Run CLI ===
-const cli = Command.run(jira, {
-  name: pkg.name,
+const cli = Command.runWith(jira, {
   version: pkg.version
 })
 
-// Read argv once at the edge
-const argv = globalThis.process.argv
+const program = Effect.gen(function*() {
+  const stdio = yield* Stdio.Stdio
+  const args = yield* stdio.args
+  const layerType = getLayerType(args)
+  const layer = layerType === "full"
+    ? AppLayer
+    : layerType === "auth"
+    ? AuthOnlyLayer
+    : MinimalLayer
 
-const layerType = getLayerType(argv)
-const layer = layerType === "full"
-  ? AppLayer
-  : layerType === "auth"
-  ? AuthOnlyLayer
-  : MinimalLayer
-
-// Suppress verbose Effect logs
-const SilentLogger = Logger.replace(Logger.defaultLogger, Logger.none)
-
-const program = cli(argv).pipe(
-  Effect.provide(layer),
-  Effect.provide(SilentLogger),
-  Logger.withMinimumLogLevel(LogLevel.None),
-  Effect.catchAllCause((cause) => handleError(cause))
+  return yield* cli(args).pipe(
+    Effect.provide(layer)
+  )
+}).pipe(
+  Effect.provide(NodeStdio.layer),
+  Effect.catchCause((cause) => handleError(cause))
 )
 
 NodeRuntime.runMain(program)

@@ -3,10 +3,15 @@
  *
  * @module
  */
-import * as Path from "@effect/platform/Path"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
+import * as Result from "effect/Result"
+import type * as Terminal from "effect/Terminal"
+import matter from "gray-matter"
 import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
@@ -40,7 +45,11 @@ export type SyncStatus =
 /**
  * Progress callback for version replay.
  */
-export type ProgressCallback = (current: number, total: number, message: string) => void
+export type ProgressCallback = (
+  current: number,
+  total: number,
+  message: string
+) => Effect.Effect<void, PlatformError.PlatformError, Terminal.Terminal>
 
 /**
  * Options for pull operation.
@@ -138,15 +147,15 @@ const hashBody = (markdown: string) => computeHash(markdown.trim()).pipe(Effect.
  *
  * @category Sync
  */
-export class SyncEngine extends Context.Tag(
-  "@knpkv/confluence-to-markdown/SyncEngine"
-)<
+export class SyncEngine extends Context.Service<
   SyncEngine,
   {
     /**
      * Pull pages from Confluence to local markdown.
      */
-    readonly pull: (options: PullOptions) => Effect.Effect<PullResult, SyncError>
+    readonly pull: (
+      options: PullOptions
+    ) => Effect.Effect<PullResult, SyncError | PlatformError.PlatformError, Terminal.Terminal>
 
     /**
      * Push local markdown changes to Confluence.
@@ -158,7 +167,7 @@ export class SyncEngine extends Context.Tag(
      */
     readonly status: () => Effect.Effect<StatusResult, SyncError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/SyncEngine") {}
 
 /**
  * Layer that provides SyncEngine.
@@ -168,7 +177,14 @@ export class SyncEngine extends Context.Tag(
 export const layer: Layer.Layer<
   SyncEngine,
   never,
-  ConfluenceClient | ConfluenceConfig | MarkdownConverter | LocalFileSystem | Path.Path | GitService | UserCache
+  | ConfluenceClient
+  | ConfluenceConfig
+  | MarkdownConverter
+  | LocalFileSystem
+  | Path.Path
+  | GitService
+  | UserCache
+  | FileSystem.FileSystem
 > = Layer.effect(
   SyncEngine,
   Effect.gen(function*() {
@@ -177,10 +193,12 @@ export const layer: Layer.Layer<
     const converter = yield* MarkdownConverter
     const localFs = yield* LocalFileSystem
     const pathService = yield* Path.Path
+    const fs = yield* FileSystem.FileSystem
     const git = yield* GitService
     const userCache = yield* UserCache
 
-    const docsPath = pathService.join(process.cwd(), config.docsPath)
+    const cwd = pathService.resolve(".")
+    const docsPath = pathService.join(cwd, config.docsPath)
 
     /**
      * Build a map of relative path (without .md) to pageId for resolving parents.
@@ -340,7 +358,7 @@ export const layer: Layer.Layer<
      */
     const getUser = (accountId: string): Effect.Effect<AtlassianUser | undefined, ApiError | RateLimitError> =>
       userCache.getOrFetch(accountId, client.getUser).pipe(
-        Effect.catchAll(() => Effect.succeed(undefined))
+        Effect.catchCause(() => Effect.succeed(undefined))
       )
 
     /**
@@ -387,7 +405,11 @@ export const layer: Layer.Layer<
       options: PullOptions,
       gitInitialized: boolean,
       knownParentId?: string
-    ): Effect.Effect<{ pulled: number; commits: number }, SyncError> =>
+    ): Effect.Effect<
+      { pulled: number; commits: number },
+      SyncError | PlatformError.PlatformError,
+      Terminal.Terminal
+    > =>
       Effect.gen(function*() {
         const pageId = page.id as PageId
         // Get children to determine if this is a folder
@@ -448,7 +470,7 @@ export const layer: Layer.Layer<
             versionIdx++
             // Report progress
             if (options.onProgress) {
-              options.onProgress(versionIdx, totalVersions, `${fullPage.title} v${versionInfo.number}`)
+              yield* options.onProgress(versionIdx, totalVersions, `${fullPage.title} v${versionInfo.number}`)
             }
 
             // Check if body content is available from the versions list
@@ -574,7 +596,9 @@ export const layer: Layer.Layer<
         return { pulled: 1 + childPulled, commits: totalCommits + childCommits }
       })
 
-    const pull = (options: PullOptions): Effect.Effect<PullResult, SyncError> =>
+    const pull = (
+      options: PullOptions
+    ): Effect.Effect<PullResult, SyncError | PlatformError.PlatformError, Terminal.Terminal> =>
       Effect.gen(function*() {
         yield* localFs.ensureDir(docsPath)
 
@@ -609,7 +633,7 @@ export const layer: Layer.Layer<
             yield* git.checkout(originalBranch)
             yield* git.merge("origin/confluence", {
               message: `Merge remote changes from Confluence`
-            }).pipe(Effect.catchAll(() => Effect.void)) // May fail if no changes
+            }).pipe(Effect.catchIf(() => true, () => Effect.void)) // May fail if no changes
           }
 
           return {
@@ -629,11 +653,11 @@ export const layer: Layer.Layer<
           Effect.ensuring(
             hasRemoteBranch && originalBranch
               ? git.checkout(originalBranch).pipe(
-                Effect.catchAll((error) =>
+                Effect.catchCause((cause) =>
                   Effect.logWarning(
                     `pull: could not restore branch '${originalBranch}' — the repo may still be on origin/confluence. ` +
                       `Restore manually with \`git checkout ${originalBranch}\` (stash local changes first if needed). Cause: ${
-                        String(error)
+                        String(cause)
                       }`
                   )
                 )
@@ -667,16 +691,11 @@ export const layer: Layer.Layer<
 
           // For new pages, re-parse front-matter to get title
           // The localFile only has the content (body), not the original front-matter
-          const title = yield* Effect.tryPromise({
-            try: async () => {
-              const fs = await import("node:fs/promises")
-              const matter = await import("gray-matter")
-              const rawFile = await fs.readFile(filePath, "utf-8")
-              const parsed = matter.default(rawFile)
-              return (parsed.data as { title?: string }).title ?? baseName
-            },
-            catch: (cause) => new FileSystemError({ operation: "read", path: filePath, cause })
-          })
+          const rawFile = yield* fs.readFileString(filePath).pipe(
+            Effect.mapError((cause) => new FileSystemError({ operation: "read", path: filePath, cause }))
+          )
+          const parsed = matter(rawFile)
+          const title = (parsed.data as { title?: string }).title ?? baseName
 
           // Resolve parent from directory structure
           const parentId = yield* resolveParent(filePath, pageIdMap)
@@ -697,7 +716,7 @@ export const layer: Layer.Layer<
 
           // Set editor version to v2 (new editor)
           yield* client.setEditorVersion(createdPage.id as PageId, "v2").pipe(
-            Effect.catchAll((error) => {
+            Effect.catchIf(() => true, (error) => {
               // Log warning but don't fail the push
               return Effect.logWarning(`Failed to set editor v2 for page ${createdPage.id}: ${error.message}`)
             })
@@ -874,13 +893,12 @@ export const layer: Layer.Layer<
               spaceId,
               pageIdMap
             ).pipe(
-              Effect.catchAll((error) =>
+              Effect.catchIf(() => true, (error) =>
                 Effect.succeed({
                   pushed: false,
                   created: false,
                   error: `Failed: ${error._tag}`
-                })
-              )
+                }))
             )
             if (result.error) errors.push(result.error)
             if (result.pushed) pushed++
@@ -937,13 +955,13 @@ export const layer: Layer.Layer<
                 const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
                 return match ? match[1] : null
               }),
-              Effect.catchAll(() => Effect.succeed(null))
+              Effect.catchIf(() => true, () => Effect.succeed(null))
             )
 
             if (pageIdFromOrigin) {
               yield* client.deletePage(PageId(pageIdFromOrigin)).pipe(
                 Effect.tap(() => Effect.sync(() => deleted++)),
-                Effect.catchAll((error) => {
+                Effect.catchIf(() => true, (error) => {
                   errors.push(`Failed to delete page ${pageIdFromOrigin}: ${error.message}`)
                   return Effect.void
                 })
@@ -954,13 +972,12 @@ export const layer: Layer.Layer<
 
         for (const filePath of sortedFiles) {
           const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap).pipe(
-            Effect.catchAll((error) =>
+            Effect.catchIf(() => true, (error) =>
               Effect.succeed({
                 pushed: false,
                 created: false,
                 error: `Failed to push ${filePath}: ${error._tag}`
-              })
-            )
+              }))
           )
           if (result.error) errors.push(result.error)
           if (result.pushed) pushed++
@@ -970,7 +987,7 @@ export const layer: Layer.Layer<
         // Amend the last commit with canonical content
         yield* git.addAll()
         yield* git.amend({ noEdit: true }).pipe(
-          Effect.catchAll(() => Effect.void)
+          Effect.catchIf(() => true, () => Effect.void)
         )
 
         // Two-branch model: update origin/confluence to match HEAD
@@ -1006,15 +1023,15 @@ export const layer: Layer.Layer<
           const currentHash = yield* computeHash(localFile.content).pipe(Effect.provide(HashServiceLive))
 
           // Fetch remote page
-          const remotePage = yield* Effect.either(client.getPage(fm.pageId))
+          const remotePage = yield* Effect.result(client.getPage(fm.pageId))
 
-          if (remotePage._tag === "Left") {
+          if (Result.isFailure(remotePage)) {
             statuses.push({ _tag: "LocalOnly", path: filePath, title: fm.title })
             localOnly++
             continue
           }
 
-          const page = remotePage.right
+          const page = remotePage.success
           const localChanged = currentHash !== fm.contentHash
           const remoteChanged = page.version.number > fm.version
 

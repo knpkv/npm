@@ -1,8 +1,8 @@
 /**
  * Layer definitions for CLI commands.
  */
-import * as NodeContext from "@effect/platform-node/NodeContext"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as NodeTerminal from "@effect/platform-node/NodeTerminal"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -42,16 +42,16 @@ const DummyConfigLayer = ConfluenceConfigLayerFromValues({
 const DummyConfluenceClientLayer = Layer.succeed(
   ConfluenceClient,
   ConfluenceClient.of({
-    getPage: () => Effect.dieMessage("Not configured"),
-    getChildren: () => Effect.dieMessage("Not configured"),
-    getAllChildren: () => Effect.dieMessage("Not configured"),
-    createPage: () => Effect.dieMessage("Not configured"),
-    updatePage: () => Effect.dieMessage("Not configured"),
-    deletePage: () => Effect.dieMessage("Not configured"),
-    getPageVersions: () => Effect.dieMessage("Not configured"),
-    getUser: () => Effect.dieMessage("Not configured"),
-    getSpaceId: () => Effect.dieMessage("Not configured"),
-    setEditorVersion: () => Effect.dieMessage("Not configured")
+    getPage: () => Effect.die("Not configured"),
+    getChildren: () => Effect.die("Not configured"),
+    getAllChildren: () => Effect.die("Not configured"),
+    createPage: () => Effect.die("Not configured"),
+    updatePage: () => Effect.die("Not configured"),
+    deletePage: () => Effect.die("Not configured"),
+    getPageVersions: () => Effect.die("Not configured"),
+    getUser: () => Effect.die("Not configured"),
+    getSpaceId: () => Effect.die("Not configured"),
+    setEditorVersion: () => Effect.die("Not configured")
   })
 )
 
@@ -59,15 +59,15 @@ const DummyConfluenceClientLayer = Layer.succeed(
 const DummySyncEngineLayer = Layer.succeed(
   SyncEngine,
   SyncEngine.of({
-    pull: () => Effect.dieMessage("Not configured - run 'confluence clone' first"),
+    pull: () => Effect.die("Not configured - run 'confluence clone' first"),
     push: (_options: { dryRun: boolean; message?: string }) =>
-      Effect.dieMessage("Not configured - run 'confluence clone' first"),
-    status: () => Effect.dieMessage("Not configured - run 'confluence clone' first")
+      Effect.die("Not configured - run 'confluence clone' first"),
+    status: () => Effect.die("Not configured - run 'confluence clone' first")
   })
 )
 
 // Dummy git layer for auth/minimal
-const notConfigured = () => Effect.dieMessage("Not configured - run 'confluence clone' first")
+const notConfigured = () => Effect.die("Not configured - run 'confluence clone' first")
 const DummyGitServiceLayer = Layer.succeed(
   GitService,
   GitService.of({
@@ -107,22 +107,22 @@ const DummyGitServiceLayer = Layer.succeed(
 const DummyConfluenceAuthLayer = Layer.succeed(
   ConfluenceAuth,
   ConfluenceAuth.of({
-    configure: () => Effect.dieMessage("Not configured"),
+    configure: () => Effect.die("Not configured"),
     isConfigured: () => Effect.succeed(false),
-    login: () => Effect.dieMessage("Not configured"),
-    logout: () => Effect.dieMessage("Not configured"),
-    getAccessToken: () => Effect.dieMessage("Not configured"),
-    getCloudId: () => Effect.dieMessage("Not configured"),
+    login: () => Effect.die("Not configured"),
+    logout: () => Effect.die("Not configured"),
+    getAccessToken: () => Effect.die("Not configured"),
+    getCloudId: () => Effect.die("Not configured"),
     getCurrentUser: () => Effect.succeed(null),
     isLoggedIn: () => Effect.succeed(false)
   })
 )
 
 // Auth layer with HTTP client
-const AuthLive = ConfluenceAuthLayer.pipe(Layer.provide(NodeHttpClient.layer))
+const AuthLive = ConfluenceAuthLayer.pipe(Layer.provide(NodeHttpClient.layerFetch))
 
 // Build client layer dynamically based on auth
-const ConfluenceClientLive = Layer.unwrapEffect(
+const ConfluenceClientLive = Layer.unwrap(
   Effect.gen(function*() {
     const auth = yield* getAuth()
     const config = yield* ConfluenceConfig
@@ -147,8 +147,8 @@ export const AppLayer = SyncEngineLayer.pipe(
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(ConfluenceConfigLayer()),
   Layer.provideMerge(AuthLive),
-  Layer.provideMerge(NodeHttpClient.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeHttpClient.layerFetch),
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -162,8 +162,8 @@ export const AuthOnlyLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
-  Layer.provideMerge(NodeHttpClient.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeHttpClient.layerFetch),
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -178,7 +178,7 @@ export const MinimalLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
   Layer.provideMerge(NodeTerminal.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
@@ -192,16 +192,16 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
   Layer.provideMerge(ConverterPipeline),
   Layer.provideMerge(LocalFileSystemLayer),
   Layer.provideMerge(DummyConfigLayer),
-  Layer.provideMerge(NodeHttpClient.layer),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
   Layer.provideMerge(NodeTerminal.layer),
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeServices.layer)
 )
 
 /**
  * Determine which layer to use based on command.
  */
-export const getLayerType = (): "full" | "auth" | "clone" | "minimal" => {
-  const cmd = process.argv[2]
+export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "minimal" => {
+  const cmd = argv[0]
   // auth commands need auth layer only
   if (cmd === "auth") {
     return "auth"

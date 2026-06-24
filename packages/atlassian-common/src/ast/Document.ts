@@ -23,7 +23,7 @@ import { MacroNode, type MacroNode as MacroNodeType } from "./MacroNode.js"
  *
  * @category Document
  */
-export const DocumentNode = Schema.Union(BlockNode, MacroNode)
+export const DocumentNode = Schema.Union([BlockNode, MacroNode])
 
 /**
  * Type for document nodes.

@@ -1,8 +1,7 @@
 /**
  * Node.js-specific layer implementations.
  *
- * This is the ONLY file that should import directly from node:* modules.
- * All other code should use Effect platform abstractions.
+ * This file wires package-specific Node runtime layers.
  *
  * @module
  * @internal

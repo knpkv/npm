@@ -6,7 +6,8 @@
  *
  * @module
  */
-import { Effect, Ref } from "effect"
+import { Context, Effect, Layer, Ref } from "effect"
+import type { Success } from "effect/Effect"
 import type { PullRequestId, RepositoryName, SandboxId } from "../Domain.js"
 
 export interface SandboxContext {
@@ -28,31 +29,38 @@ export interface SandboxPlugin {
   readonly onSandboxDestroy?: (ctx: SandboxContext) => Effect.Effect<void>
 }
 
-export class PluginService extends Effect.Service<PluginService>()("PluginService", {
-  effect: Effect.gen(function*() {
-    const plugins = yield* Ref.make<ReadonlyArray<SandboxPlugin>>([])
+const makePluginService = Effect.gen(function*() {
+  const plugins = yield* Ref.make<ReadonlyArray<SandboxPlugin>>([])
 
-    return {
-      register: (plugin: SandboxPlugin) =>
-        Ref.update(plugins, (ps) => [...ps, plugin]).pipe(
-          Effect.tap(() => Effect.logInfo(`Plugin registered: ${plugin.name}`))
+  return {
+    register: (plugin: SandboxPlugin) =>
+      Ref.update(plugins, (ps) => [...ps, plugin]).pipe(
+        Effect.tap(() => Effect.logInfo(`Plugin registered: ${plugin.name}`))
+      ),
+
+    executeHook: (hook: "onSandboxCreate" | "onSandboxReady" | "onSandboxDestroy", ctx: SandboxContext) =>
+      Ref.get(plugins).pipe(
+        Effect.flatMap((ps) =>
+          Effect.forEach(ps, (p) => {
+            const fn = p[hook]
+            if (!fn) return Effect.void
+            return fn(ctx).pipe(
+              Effect.catchCause((cause) => Effect.logWarning(`Plugin ${p.name} ${hook} failed`, cause))
+            )
+          }, { discard: true })
         ),
+        Effect.withSpan(`PluginService.${hook}`)
+      ),
 
-      executeHook: (hook: "onSandboxCreate" | "onSandboxReady" | "onSandboxDestroy", ctx: SandboxContext) =>
-        Ref.get(plugins).pipe(
-          Effect.flatMap((ps) =>
-            Effect.forEach(ps, (p) => {
-              const fn = p[hook]
-              if (!fn) return Effect.void
-              return fn(ctx).pipe(
-                Effect.catchAllCause((cause) => Effect.logWarning(`Plugin ${p.name} ${hook} failed`, cause))
-              )
-            }, { discard: true })
-          ),
-          Effect.withSpan(`PluginService.${hook}`, { captureStackTrace: false })
-        ),
+    listPlugins: () => Ref.get(plugins).pipe(Effect.map((ps) => ps.map((p) => p.name)))
+  } as const
+})
 
-      listPlugins: () => Ref.get(plugins).pipe(Effect.map((ps) => ps.map((p) => p.name)))
-    } as const
-  })
-}) {}
+export interface PluginServiceShape extends Success<typeof makePluginService> {}
+
+export class PluginService extends Context.Service<
+  PluginService,
+  PluginServiceShape
+>()("PluginService") {
+  static readonly Default = Layer.effect(PluginService, makePluginService)
+}

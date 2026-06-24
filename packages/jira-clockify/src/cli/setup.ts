@@ -3,11 +3,13 @@
  *
  * @module
  */
-import { Prompt } from "@effect/cli"
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Console, Effect } from "effect"
+import * as Path from "effect/Path"
+import { Prompt } from "effect/unstable/cli"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 // ---------------------------------------------------------------------------
@@ -43,11 +45,11 @@ export const checkAuthOrSetup = Effect.gen(function*() {
 
     yield* Console.log("Starting Jira login...")
     yield* jira.login().pipe(
-      Effect.catchAll((e) =>
+      Effect.catch((e) =>
         Console.log(`Jira login failed: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
       )
     )
-    const user = yield* jira.getCurrentUser().pipe(Effect.catchAll(() => Effect.succeed(null)))
+    const user = yield* jira.getCurrentUser().pipe(Effect.catch(() => Effect.succeed(null)))
     if (user) {
       yield* Console.log(`✓ Logged in as ${user.name} (${user.email})\n`)
     } else {
@@ -72,7 +74,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     })
 
     const user = yield* toEffect(client.GET("/v1/user")).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
+      Effect.catch(() => Effect.succeed(null))
     )
     if (!user) {
       yield* Console.log("✗ Invalid API key. Run: jcf auth clockify setup\n")
@@ -81,7 +83,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     yield* Console.log(`Authenticated as: ${(user as { name: string }).name} (${(user as { email: string }).email})`)
 
     const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
-      Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
+      Effect.catch(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
     )
     let workspaceId = ""
     let workspaceName = ""
@@ -123,10 +125,14 @@ export const launchTui = (args: ReadonlyArray<string>) =>
       yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
     } else {
       // Relaunch with Bun if available
-      const { execFileSync } = yield* Effect.promise(() => import("node:child_process"))
-      try {
-        execFileSync("bun", ["--version"], { stdio: "ignore" })
-      } catch {
+      const exitCode = (command: ChildProcess.Command) =>
+        Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
+
+      const hasBun = yield* exitCode(ChildProcess.make("bun", ["--version"])).pipe(
+        Effect.map((code) => code === 0),
+        Effect.catch(() => Effect.succeed(false))
+      )
+      if (!hasBun) {
         yield* Console.log("TUI requires Bun runtime (@opentui/react dependency).")
         yield* Console.log("Install Bun: curl -fsSL https://bun.sh/install | bash")
         yield* Console.log("")
@@ -134,20 +140,22 @@ export const launchTui = (args: ReadonlyArray<string>) =>
         return
       }
       // Re-exec with bun — must point to bin.ts, not this module
-      const thisDir = new URL(".", import.meta.url).pathname
-      const scriptPath = thisDir + "../bin.js"
+      const path = yield* Path.Path
+      const thisDir = yield* path.fromFileUrl(new URL(".", import.meta.url))
+      const scriptPath = path.join(thisDir, "../bin.js")
       const cliArgs = args.slice(2)
-      try {
-        execFileSync("bun", [scriptPath, ...cliArgs], { stdio: "inherit" })
-      } catch {
-        // bun process exited — normal
-      }
+      yield* exitCode(ChildProcess.make("bun", [scriptPath, ...cliArgs], {
+        stdout: "inherit",
+        stderr: "inherit"
+      })).pipe(
+        Effect.catch(() => Effect.void)
+      )
     }
   })
 
 export const launchTuiOrSetup = (args: ReadonlyArray<string>) =>
   Effect.gen(function*() {
-    const ready = yield* checkAuthOrSetup.pipe(Effect.catchAll(() => Effect.succeed(false)))
+    const ready = yield* checkAuthOrSetup.pipe(Effect.catch(() => Effect.succeed(false)))
     if (!ready) {
       yield* Console.log("Setup incomplete. Run 'jcf auth status' to check.")
       return

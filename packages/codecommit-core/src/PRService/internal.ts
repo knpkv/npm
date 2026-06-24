@@ -11,9 +11,19 @@
  * @internal
  */
 import type { SubscriptionRef } from "effect"
-import { Schema } from "effect"
+import { Schema, SchemaGetter } from "effect"
 import { CachedPullRequest, UpsertInput } from "../CacheService/repos/PullRequestRepo/index.js"
-import { type AppState, type CommentThread, type PRCommentLocation, PullRequest } from "../Domain.js"
+import {
+  ApprovalRule,
+  type AppState,
+  AwsProfileName,
+  AwsRegion,
+  type CommentThread,
+  type PRCommentLocation,
+  PullRequest,
+  PullRequestId,
+  RepositoryName
+} from "../Domain.js"
 
 export type PRState = SubscriptionRef.SubscriptionRef<AppState>
 
@@ -22,12 +32,15 @@ const sumFileChanges = (...counts: Array<number | null>): number | undefined => 
   return defined.length > 0 ? defined.reduce((a, b) => a + b, 0) : undefined
 }
 
-export const CachedPRToPullRequest = Schema.transform(
-  Schema.typeSchema(CachedPullRequest),
-  PullRequest,
-  {
-    strict: true,
-    decode: (row) => ({
+const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
+const decodePullRequestId = Schema.decodeSync(PullRequestId)
+const decodeRepositoryName = Schema.decodeSync(RepositoryName)
+
+export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
+  Schema.decodeTo(PullRequest, {
+    decode: SchemaGetter.transform((row) => ({
       id: row.id,
       title: row.title,
       description: row.description ?? undefined,
@@ -55,17 +68,17 @@ export const CachedPRToPullRequest = Schema.transform(
       commentedBy: row.commentedBy,
       approvalRules: row.approvalRules,
       filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
-    }),
-    encode: (_encoded, pr) => ({
-      id: pr.id,
+    })),
+    encode: SchemaGetter.transform((pr) => ({
+      id: decodePullRequestId(pr.id),
       awsAccountId: pr.account.awsAccountId ?? "",
       repoAccountId: pr.account.repoAccountId ?? null,
-      accountProfile: pr.account.profile,
-      accountRegion: pr.account.region,
+      accountProfile: decodeAwsProfileName(pr.account.profile),
+      accountRegion: decodeAwsRegion(pr.account.region),
       title: pr.title,
       description: pr.description ?? null,
       author: pr.author,
-      repositoryName: pr.repositoryName,
+      repositoryName: decodeRepositoryName(pr.repositoryName),
       creationDate: pr.creationDate,
       lastModifiedDate: pr.lastModifiedDate,
       status: pr.status,
@@ -83,21 +96,18 @@ export const CachedPRToPullRequest = Schema.transform(
       closedAt: null,
       mergedBy: null,
       approvedBy: pr.approvedBy,
-      approvedByArns: pr.approvedByArns,
+      approvedByArns: pr.approvedByArns ?? [],
       commentedBy: pr.commentedBy,
-      approvalRules: pr.approvalRules
-    })
-  }
+      approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule))
+    }))
+  })
 )
 
 export const decodeCachedPR = Schema.decodeSync(CachedPRToPullRequest)
 
-export const PullRequestToUpsertInput = Schema.transform(
-  UpsertInput,
-  PullRequest,
-  {
-    strict: false,
-    decode: (row) => ({
+export const PullRequestToUpsertInput = UpsertInput.pipe(
+  Schema.decodeTo(PullRequest, {
+    decode: SchemaGetter.transform((row) => ({
       id: row.id,
       title: row.title,
       description: row.description ?? undefined,
@@ -125,8 +135,8 @@ export const PullRequestToUpsertInput = Schema.transform(
       approvalRules: row.approvalRules ?? [],
       commentedBy: [],
       filesChanged: undefined
-    }),
-    encode: (_encoded, pr) => ({
+    })),
+    encode: SchemaGetter.transform((pr) => ({
       id: pr.id,
       awsAccountId: pr.account.awsAccountId ?? "",
       repoAccountId: pr.account.repoAccountId ?? null,
@@ -146,10 +156,10 @@ export const PullRequestToUpsertInput = Schema.transform(
       commentCount: pr.commentCount ?? null,
       link: pr.link,
       approvedBy: pr.approvedBy,
-      approvedByArns: pr.approvedByArns,
-      approvalRules: pr.approvalRules
-    })
-  }
+      approvedByArns: pr.approvedByArns ?? [],
+      approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule))
+    }))
+  })
 )
 
 const encodePRToUpsert = Schema.encodeSync(PullRequestToUpsertInput)
@@ -157,7 +167,7 @@ const encodePRToUpsert = Schema.encodeSync(PullRequestToUpsertInput)
 export const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertInput => ({
   ...encodePRToUpsert(pr),
   awsAccountId,
-  // Explicit: encodePRToUpsert's Encoded type makes approvalRules optional (Schema.optionalWith default),
+  // Explicit: encodePRToUpsert's Encoded type can omit approvalRules when decoding defaults are used,
   // but UpsertInput.Type requires it. Guarantee it's always present.
   approvalRules: pr.approvalRules
 })

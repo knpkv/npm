@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **Brand = runtime validation + compile-time narrowing**: Each brand combines
- *   an Effect `Brand.refined` (throws on invalid values) with an Effect `Schema`
+ *   an Effect `Brand.make` (throws on invalid values) with an Effect `Schema`
  *   (composable validation). The `Type` property exposes the branded type for use
  *   in type annotations.
  * - **Pattern-guarded strings**: `SpaceKey`, `IssueKey`, `ProjectKey` are regex-branded;
@@ -48,15 +48,9 @@ export const makeBrandedString = <B extends string>(
 ) => {
   type BrandedType = string & Brand.Brand<B>
 
-  const brand = Brand.refined<BrandedType>(
-    (s) => pattern.test(s),
-    (s) => Brand.error(`Invalid ${name}: ${s} does not match ${pattern}`)
-  )
+  const brand = Brand.make<BrandedType>((s) => pattern.test(s) || `Invalid ${name}: ${s} does not match ${pattern}`)
 
-  const schema = Schema.String.pipe(
-    Schema.pattern(pattern),
-    Schema.brand(name)
-  )
+  const schema = Schema.String.check(Schema.isPattern(pattern)).pipe(Schema.brand(name))
 
   return Object.assign(brand, {
     schema,
@@ -83,15 +77,9 @@ export const makeBrandedString = <B extends string>(
 export const makeBrandedNonEmptyString = <B extends string>(name: B) => {
   type BrandedType = string & Brand.Brand<B>
 
-  const brand = Brand.refined<BrandedType>(
-    (s) => s.length > 0,
-    (_s) => Brand.error(`${name} cannot be empty`)
-  )
+  const brand = Brand.make<BrandedType>((s) => s.length > 0 || `${name} cannot be empty`)
 
-  const schema = Schema.String.pipe(
-    Schema.nonEmptyString(),
-    Schema.brand(name)
-  )
+  const schema = Schema.NonEmptyString.pipe(Schema.brand(name))
 
   return Object.assign(brand, {
     schema,

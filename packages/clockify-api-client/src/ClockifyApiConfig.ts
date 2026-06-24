@@ -20,6 +20,6 @@ export interface ClockifyApiConfigShape {
   readonly baseUrl: string
 }
 
-export class ClockifyApiConfig extends Context.Tag(
+export class ClockifyApiConfig extends Context.Service<ClockifyApiConfig, ClockifyApiConfigShape>()(
   "@knpkv/clockify-api-client/ClockifyApiConfig"
-)<ClockifyApiConfig, ClockifyApiConfigShape>() {}
+) {}

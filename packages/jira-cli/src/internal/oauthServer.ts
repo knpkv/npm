@@ -10,21 +10,20 @@
  *
  * @internal
  */
-import * as HttpRouter from "@effect/platform/HttpRouter"
-import * as HttpServer from "@effect/platform/HttpServer"
-import type { ServeError } from "@effect/platform/HttpServerError"
-import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
-import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
 import { OAuthError } from "@knpkv/atlassian-common/auth"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Scope from "effect/Scope"
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
+import type * as HttpServerError from "effect/unstable/http/HttpServerError"
 
 const DEFAULT_PORT = 8585
-const MAX_PORT_ATTEMPTS = 10
-
+const MAX_PORT = 8594
+type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
 /**
  * Factory service for creating HTTP servers.
  * This allows mocking the server creation in tests.
@@ -34,7 +33,7 @@ const MAX_PORT_ATTEMPTS = 10
 export interface HttpServerFactory {
   readonly createServerLayer: (port: number) => Layer.Layer<
     HttpServer.HttpServer,
-    ServeError,
+    HttpServerError.ServeError,
     never
   >
 }
@@ -44,10 +43,10 @@ export interface HttpServerFactory {
  *
  * @category Services
  */
-export class HttpServerFactoryTag extends Context.Tag("@knpkv/jira-cli/HttpServerFactory")<
+export class HttpServerFactoryTag extends Context.Service<
   HttpServerFactoryTag,
   HttpServerFactory
->() {}
+>()("@knpkv/jira-cli/HttpServerFactory") {}
 
 /**
  * Create a HttpServerFactory layer from a layer factory function.
@@ -59,48 +58,10 @@ export class HttpServerFactoryTag extends Context.Tag("@knpkv/jira-cli/HttpServe
  * @category Layers
  */
 export const makeHttpServerFactory = (
-  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, ServeError, never>
+  createLayerFn: (port: number) => Layer.Layer<HttpServer.HttpServer, HttpServerError.ServeError, never>
 ): Layer.Layer<HttpServerFactoryTag> =>
   Layer.succeed(HttpServerFactoryTag, {
     createServerLayer: createLayerFn
-  })
-
-/**
- * Check if a port is available by attempting to start a server.
- */
-const isPortAvailable = (port: number): Effect.Effect<boolean, never, HttpServerFactoryTag> =>
-  Effect.gen(function*() {
-    const factory = yield* HttpServerFactoryTag
-    const serverLayer = factory.createServerLayer(port)
-
-    const result = yield* Layer.build(serverLayer).pipe(
-      Effect.scoped,
-      Effect.as(true),
-      Effect.catchAll(() => Effect.succeed(false))
-    )
-    return result
-  })
-
-/**
- * Find an available port starting from the default.
- */
-const findAvailablePort = (): Effect.Effect<number, OAuthError, HttpServerFactoryTag> =>
-  Effect.gen(function*() {
-    for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
-      const port = DEFAULT_PORT + attempt
-      const available = yield* isPortAvailable(port)
-      if (available) {
-        return port
-      }
-    }
-    return yield* Effect.fail(
-      new OAuthError({
-        step: "authorize",
-        cause: `Could not find available port (tried ${DEFAULT_PORT}-${
-          DEFAULT_PORT + MAX_PORT_ATTEMPTS - 1
-        }). Close other applications using these ports.`
-      })
-    )
   })
 
 /**
@@ -128,15 +89,32 @@ export const startCallbackServer = (
 ): Effect.Effect<CallbackServerResult, OAuthError, HttpServerFactoryTag> =>
   Effect.gen(function*() {
     const factory = yield* HttpServerFactoryTag
-    const port = yield* findAvailablePort()
     const deferred = yield* Deferred.make<string, OAuthError>()
-    const readyDeferred = yield* Deferred.make<void, OAuthError>()
+    const serverScope = yield* Scope.make()
+    const buildServerContext = (port: number): Effect.Effect<
+      { readonly context: Context.Context<HttpServer.HttpServer>; readonly port: number },
+      OAuthError
+    > =>
+      Layer.buildWithScope(factory.createServerLayer(port), serverScope).pipe(
+        Effect.map((context) => ({ context, port })),
+        Effect.catchCause((cause) =>
+          port < MAX_PORT
+            ? buildServerContext(port + 1)
+            : Effect.fail(new OAuthError({ step: "authorize", cause }))
+        )
+      )
+    const { context: serverContext } = yield* buildServerContext(DEFAULT_PORT)
+    const server: HttpServerInstance = Context.get(serverContext, HttpServer.HttpServer)
+    const port = yield* (server.address._tag === "TcpAddress"
+      ? Effect.succeed(server.address.port)
+      : Effect.fail(new OAuthError({ step: "authorize", cause: "OAuth callback server must listen on a TCP port" })))
 
-    const app = HttpRouter.empty.pipe(
-      HttpRouter.get(
-        "/callback",
+    const router = yield* HttpRouter.make
+    yield* router.add(
+      "GET",
+      "/callback",
+      (req) =>
         Effect.gen(function*() {
-          const req = yield* HttpServerRequest.HttpServerRequest
           const url = new URL(req.url, `http://localhost:${port}`)
           const code = url.searchParams.get("code")
           const state = url.searchParams.get("state")
@@ -178,26 +156,21 @@ export const startCallbackServer = (
             "<html><body><h1>Success!</h1><p>You can close this window and return to the terminal.</p></body></html>"
           )
         })
-      )
     )
+    const app = router.asHttpEffect()
 
-    const serverLayer = factory.createServerLayer(port)
-
-    const serverFiber = yield* HttpServer.serve(app).pipe(
-      Layer.provide(serverLayer),
-      Layer.build,
-      Effect.tap(() => Deferred.succeed(readyDeferred, undefined)),
-      Effect.tapError((err) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause: err }))),
-      Effect.flatMap(() => Effect.never),
-      Effect.scoped,
-      Effect.fork
+    const serverFiber = yield* HttpServer.serveEffect(app).pipe(
+      Effect.provide(serverContext),
+      Effect.provideService(Scope.Scope, serverScope),
+      Effect.forkIn(serverScope)
     )
-
-    yield* Deferred.await(readyDeferred)
 
     return {
       codePromise: Deferred.await(deferred),
-      shutdown: Fiber.interrupt(serverFiber).pipe(Effect.asVoid),
+      shutdown: Effect.gen(function*() {
+        yield* Fiber.interrupt(serverFiber)
+        yield* Scope.close(serverScope, Exit.void)
+      }),
       port
     }
   })

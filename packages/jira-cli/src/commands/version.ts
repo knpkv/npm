@@ -6,10 +6,10 @@
  *
  * @internal
  */
-import { Args, Command, Options } from "@effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { JiraApiError } from "../JiraCliError.js"
 import type { Person, Version } from "../VersionService.js"
 import { VersionService } from "../VersionService.js"
@@ -48,7 +48,7 @@ const ensureNumericId = (id: string): Effect.Effect<void, JiraApiError> =>
       })
     )
 
-const projectOption = Options.text("project").pipe(
+const projectOption = Options.string("project").pipe(
   Options.withAlias("p"),
   Options.withDescription("Jira project key (e.g. RPS)")
 )
@@ -68,13 +68,13 @@ const emailsOption = Options.boolean("emails").pipe(
   Options.withDescription("Include resolved user email addresses in --json output"),
   Options.withDefault(false)
 )
-const customFieldOption = Options.text("custom-field").pipe(
+const customFieldOption = Options.string("custom-field").pipe(
   Options.withDescription(
     "Custom field display name to include on each ticket (repeatable, e.g. " +
       "--custom-field \"Security & Compliance Impact\"). Values are exposed in " +
       "ticket.customFields[<name>]."
   ),
-  Options.repeated
+  Options.atLeast(0)
 )
 const maxOption = Options.integer("max").pipe(
   Options.withAlias("m"),
@@ -82,7 +82,7 @@ const maxOption = Options.integer("max").pipe(
   Options.optional
 )
 
-const idArg = Args.text({ name: "id" }).pipe(Args.withDescription("Version id (numeric)"))
+const idArg = Args.string("id").pipe(Args.withDescription("Version id (numeric)"))
 
 const listCommand = Command.make("list", {
   project: projectOption,
@@ -169,7 +169,7 @@ const formatTicketKeys = (tickets: Version["tickets"]): string => {
   return remaining > 0 ? `${shown} (+${remaining} more)` : shown
 }
 
-const descriptionOption = Options.text("description").pipe(
+const descriptionOption = Options.string("description").pipe(
   Options.withAlias("d"),
   Options.withDescription("New version description")
 )
@@ -195,15 +195,15 @@ const setCommand = Command.make("set", { id: idArg, description: descriptionOpti
 
 // === relatedwork ===
 
-const titleOption = Options.text("title").pipe(
+const titleOption = Options.string("title").pipe(
   Options.withAlias("t"),
   Options.withDescription("Related-work link title (e.g. \"Release notes\")")
 )
-const urlOption = Options.text("url").pipe(
+const urlOption = Options.string("url").pipe(
   Options.withAlias("u"),
   Options.withDescription("Related-work link URL (e.g. a Confluence page)")
 )
-const categoryOption = Options.text("category").pipe(
+const categoryOption = Options.string("category").pipe(
   Options.withAlias("c"),
   Options.withDescription("Related-work category (Jira groups by this; e.g. Communication, Testing, Design)"),
   Options.withDefault("Communication")

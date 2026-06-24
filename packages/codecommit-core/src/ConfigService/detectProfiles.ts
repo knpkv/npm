@@ -1,8 +1,9 @@
 /**
  * @internal
  */
-import { FileSystem, Path } from "@effect/platform"
 import { Array as Arr, Effect, HashMap, pipe } from "effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import { ConfigPaths, parseAwsConfig } from "./internal.js"
 
 export const detectProfiles = Effect.gen(function*() {
@@ -13,7 +14,7 @@ export const detectProfiles = Effect.gen(function*() {
   const configPath = path.join(home, ".aws", "config")
   const credsPath = path.join(home, ".aws", "credentials")
 
-  const read = (p: string) => fs.readFileString(p).pipe(Effect.catchAll(() => Effect.succeed("")))
+  const read = (p: string) => fs.readFileString(p).pipe(Effect.catchCause(() => Effect.succeed("")))
 
   const [configContent, credsContent] = yield* Effect.all([read(configPath), read(credsPath)])
 

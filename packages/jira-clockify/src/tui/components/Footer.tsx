@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { isFilteringAtom } from "../atoms/ui.js"
 
 export function Footer() {

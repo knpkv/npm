@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Either from "effect/Either"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type { ContentHash, PageId } from "../src/Brand.js"
 import {
@@ -17,11 +17,11 @@ describe("Schemas", () => {
         rootPageId: "123456",
         baseUrl: "https://mysite.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(ConfluenceConfigFileSchema)(config)
-      expect(Either.isRight(result)).toBe(true)
-      if (Either.isRight(result)) {
-        expect(result.right.docsPath).toBe(".confluence/docs")
-        expect(result.right.excludePatterns).toEqual([])
+      const result = Schema.decodeUnknownResult(ConfluenceConfigFileSchema)(config)
+      expect(Result.isSuccess(result)).toBe(true)
+      if (Result.isSuccess(result)) {
+        expect(result.success.docsPath).toBe(".confluence/docs")
+        expect(result.success.excludePatterns).toEqual([])
       }
     })
 
@@ -33,11 +33,11 @@ describe("Schemas", () => {
         docsPath: "docs",
         excludePatterns: ["*.tmp"]
       }
-      const result = Schema.decodeUnknownEither(ConfluenceConfigFileSchema)(config)
-      expect(Either.isRight(result)).toBe(true)
-      if (Either.isRight(result)) {
-        expect(result.right.spaceKey).toBe("DEV")
-        expect(result.right.docsPath).toBe("docs")
+      const result = Schema.decodeUnknownResult(ConfluenceConfigFileSchema)(config)
+      expect(Result.isSuccess(result)).toBe(true)
+      if (Result.isSuccess(result)) {
+        expect(result.success.spaceKey).toBe("DEV")
+        expect(result.success.docsPath).toBe("docs")
       }
     })
 
@@ -46,14 +46,14 @@ describe("Schemas", () => {
         rootPageId: "123456",
         baseUrl: "http://invalid.com"
       }
-      const result = Schema.decodeUnknownEither(ConfluenceConfigFileSchema)(config)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(ConfluenceConfigFileSchema)(config)
+      expect(Result.isFailure(result)).toBe(true)
     })
 
     it("rejects missing required fields", () => {
       const config = { baseUrl: "https://mysite.atlassian.net" }
-      const result = Schema.decodeUnknownEither(ConfluenceConfigFileSchema)(config)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(ConfluenceConfigFileSchema)(config)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -68,8 +68,8 @@ describe("Schemas", () => {
         updated: new Date().toISOString(),
         contentHash: validHash
       }
-      const result = Schema.decodeUnknownEither(PageFrontMatterSchema)(fm)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(PageFrontMatterSchema)(fm)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("decodes front matter with optional fields", () => {
@@ -82,11 +82,11 @@ describe("Schemas", () => {
         position: 0,
         contentHash: validHash
       }
-      const result = Schema.decodeUnknownEither(PageFrontMatterSchema)(fm)
-      expect(Either.isRight(result)).toBe(true)
-      if (Either.isRight(result)) {
-        expect(result.right.parentId).toBe("456")
-        expect(result.right.position).toBe(0)
+      const result = Schema.decodeUnknownResult(PageFrontMatterSchema)(fm)
+      expect(Result.isSuccess(result)).toBe(true)
+      if (Result.isSuccess(result)) {
+        expect(result.success.parentId).toBe("456")
+        expect(result.success.position).toBe(0)
       }
     })
 
@@ -98,8 +98,8 @@ describe("Schemas", () => {
         updated: new Date().toISOString(),
         contentHash: validHash
       }
-      const result = Schema.decodeUnknownEither(PageFrontMatterSchema)(fm)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(PageFrontMatterSchema)(fm)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -113,8 +113,8 @@ describe("Schemas", () => {
         cloud_id: "abc123",
         site_url: "https://mysite.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("decodes token with user info", () => {
@@ -131,10 +131,10 @@ describe("Schemas", () => {
           email: "test@example.com"
         }
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isRight(result)).toBe(true)
-      if (Either.isRight(result)) {
-        expect(result.right.user?.name).toBe("Test User")
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isSuccess(result)).toBe(true)
+      if (Result.isSuccess(result)) {
+        expect(result.success.user?.name).toBe("Test User")
       }
     })
 
@@ -147,8 +147,8 @@ describe("Schemas", () => {
         cloud_id: "abc123",
         site_url: "https://mysite.atlassian.net"
       }
-      const result = Schema.decodeUnknownEither(OAuthTokenSchema)(token)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthTokenSchema)(token)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -158,16 +158,16 @@ describe("Schemas", () => {
         clientId: "client_id_value",
         clientSecret: "client_secret_value"
       }
-      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthConfigSchema)(config)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("rejects missing clientSecret", () => {
       const config = {
         clientId: "client_id_value"
       }
-      const result = Schema.decodeUnknownEither(OAuthConfigSchema)(config)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthConfigSchema)(config)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -178,8 +178,8 @@ describe("Schemas", () => {
         name: "Test User",
         email: "test@example.com"
       }
-      const result = Schema.decodeUnknownEither(OAuthUserSchema)(user)
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthUserSchema)(user)
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("rejects missing email", () => {
@@ -187,8 +187,8 @@ describe("Schemas", () => {
         account_id: "user123",
         name: "Test User"
       }
-      const result = Schema.decodeUnknownEither(OAuthUserSchema)(user)
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(OAuthUserSchema)(user)
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 })

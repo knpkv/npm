@@ -12,14 +12,18 @@ import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import {
+  type CachedPullRequest,
+  PullRequestRepo,
+  type PullRequestRepoShape
+} from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 
 /** Resolve a stale OPEN PR: delete if still open, update status if merged/closed. */
 const resolveStaleStatus = (
-  prRepo: PullRequestRepo,
+  prRepo: PullRequestRepoShape,
   detail: PullRequestDetail,
   awsAccountId: string,
   id: string
@@ -42,11 +46,7 @@ export const fetchAndUpsertPRs = (params: {
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
   readonly staleThreshold: string
-}): Effect.Effect<
-  void,
-  never,
-  AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo
-> =>
+}): Effect.Effect<void, unknown, unknown> =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo
@@ -67,7 +67,7 @@ export const fetchAndUpsertPRs = (params: {
         const awsAccountId = accountIdMap.get(account.profile) ?? ""
         return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
           Stream.map((pr) => ({ awsAccountId, label, pr })),
-          Stream.catchAllCause((cause) => {
+          Stream.catchCause((cause) => {
             const squashed = Cause.squash(cause)
             const causeStr = squashed instanceof Error
               ? (squashed.name !== "Error" ? squashed.name : squashed.message)
@@ -79,7 +79,7 @@ export const fetchAndUpsertPRs = (params: {
               cause: causeStr
             })
             const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
-            return Stream.execute(
+            return Stream.fromEffectDrain(
               Effect.gen(function*() {
                 yield* notificationRepo.addSystem({
                   type: "error",
@@ -87,7 +87,7 @@ export const fetchAndUpsertPRs = (params: {
                   message,
                   profile: account.profile,
                   deduplicate: true
-                }).pipe(Effect.catchAll(() => Effect.void))
+                }).pipe(Effect.catchCause(() => Effect.void))
                 if (isAuthError) {
                   yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
                 }
@@ -105,7 +105,8 @@ export const fetchAndUpsertPRs = (params: {
           const subscribed = yield* Ref.get(subscribedRef)
           if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
             const cached = yield* prRepo.findByAccountAndId(awsAccountId, pr.id).pipe(
-              Effect.catchAll(() => Effect.succeed(Option.none()))
+              Effect.map((row) => Option.some(row)),
+              Effect.catchCause(() => Effect.succeed(Option.none<CachedPullRequest>()))
             )
             if (Option.isSome(cached)) {
               const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
@@ -121,7 +122,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
                 discard: true
               }).pipe(
-                Effect.catchAll(() => Effect.void)
+                Effect.catchCause(() => Effect.void)
               )
             }
           }
@@ -130,12 +131,12 @@ export const fetchAndUpsertPRs = (params: {
           if (awsAccountId) {
             yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
-              Effect.catchAll(() => Effect.void)
+              Effect.catchCause(() => Effect.void)
             )
             const isAuthor = currentUser && pr.author === currentUser
             const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
             if (isAuthor || isApprover) {
-              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchAll(() => Effect.void))
+              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
             }
           }
@@ -161,15 +162,16 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
-                Effect.catchAll(() => prRepo.deleteOne(pr.awsAccountId, pr.id)),
-                Effect.catchAll(() => Effect.void)
+                Effect.catchCause(() =>
+                  prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catchCause(() => Effect.void))
+                )
               ),
           { concurrency: 5, discard: true }
         )
       ),
-      Effect.catchAll(() => Effect.void)
+      Effect.catchCause(() => Effect.void)
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
-    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchAll(() => Effect.void))
-  })
+    yield* prRepo.propagateRepoAccountId().pipe(Effect.catchCause(() => Effect.void))
+  }).pipe(Effect.ignoreCause({ log: "Warn", message: "fetchAndUpsertPRs failed" }))

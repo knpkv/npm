@@ -3,10 +3,10 @@
  *
  * These cover the non-interactive (pass-through / early-return) branches of
  * {@link resolveStopProject} and {@link resolveStopBillable}, which require no
- * Terminal. The prompting branches drive @effect/cli Prompts and are exercised
+ * Terminal. The prompting branches drive Effect CLI Prompts and are exercised
  * end-to-end via the interactive `stop` command rather than here.
  */
-import { NodeTerminal } from "@effect/platform-node"
+import { NodeServices, NodeTerminal } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
@@ -56,12 +56,13 @@ const MockConfigLayer = Layer.succeed(ConfigService, {
 })
 
 // NodeTerminal.layer satisfies the Terminal requirement the resolvers carry
-// in their R channel for the (unexercised here) @effect/cli prompting branches.
+// in their R channel for the (unexercised here) Effect CLI prompting branches.
 // The non-interactive branches under test never touch it at runtime.
 const TestLayer = Layer.mergeAll(
   MockClockifyLayer,
   MockClockifyAuthLayer,
   MockConfigLayer,
+  NodeServices.layer,
   NodeTerminal.layer
 )
 

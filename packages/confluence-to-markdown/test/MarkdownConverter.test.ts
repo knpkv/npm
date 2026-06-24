@@ -92,11 +92,11 @@ describe("MarkdownConverter", () => {
     it.effect("fails with ConversionError on invalid JSON", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
-        const result = yield* Effect.either(converter.adfToMarkdown("not json"))
-        expect(result._tag).toBe("Left")
-        if (result._tag === "Left") {
-          expect(result.left._tag).toBe("ConversionError")
-          expect(result.left.direction).toBe("adfToMarkdown")
+        const result = yield* Effect.result(converter.adfToMarkdown("not json"))
+        expect(result._tag).toBe("Failure")
+        if (result._tag === "Failure") {
+          expect(result.failure._tag).toBe("ConversionError")
+          expect(result.failure.direction).toBe("adfToMarkdown")
         }
       }).pipe(Effect.provide(TestLayer)))
 
@@ -124,10 +124,10 @@ describe("MarkdownConverter", () => {
         // page that could overwrite a real local file.
         const converter = yield* MarkdownConverter
         for (const bad of ["null", "{}", "[1,2]", `{"type":"doc","content":"not an array"}`]) {
-          const result = yield* Effect.either(converter.adfToMarkdown(bad))
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left._tag).toBe("ConversionError")
+          const result = yield* Effect.result(converter.adfToMarkdown(bad))
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure._tag).toBe("ConversionError")
           }
         }
       }).pipe(Effect.provide(TestLayer)))

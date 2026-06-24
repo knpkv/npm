@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect-atom/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { settingsTabAtom, SettingsTabs } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import type { ListItem } from "../ListBuilder.js"

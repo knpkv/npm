@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { useAtom } from "@effect-atom/atom-react"
+import { useAtom } from "@effect/atom-react"
 import { ArrowLeftIcon, DownloadIcon, SearchIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
@@ -67,7 +67,7 @@ export function AuditLogPage() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    fetchLog({ urlParams })
+    fetchLog({ query: urlParams })
       .then((result) => {
         if (cancelled) return
         setEntries(result.items as ReadonlyArray<AuditEntry>)
@@ -83,7 +83,7 @@ export function AuditLogPage() {
   const hasMore = offset + PAGE_SIZE < total
 
   const exportJson = useCallback(() => {
-    fetchExport({ urlParams: {} })
+    fetchExport({ query: {} })
       .then((result) => {
         const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
         const url = URL.createObjectURL(blob)

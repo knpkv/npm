@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Either from "effect/Either"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { ContentHash, PageId, PageIdSchema, SpaceKey, SpaceKeySchema } from "../src/Brand.js"
 
@@ -17,13 +17,13 @@ describe("Brand", () => {
 
   describe("PageIdSchema", () => {
     it("decodes valid page IDs", () => {
-      const result = Schema.decodeEither(PageIdSchema)("123456")
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(PageIdSchema)("123456")
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("rejects empty strings", () => {
-      const result = Schema.decodeEither(PageIdSchema)("")
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(PageIdSchema)("")
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 
@@ -40,18 +40,18 @@ describe("Brand", () => {
 
   describe("SpaceKeySchema", () => {
     it("decodes uppercase alphanumeric keys", () => {
-      const result = Schema.decodeEither(SpaceKeySchema)("MYSPACE123")
-      expect(Either.isRight(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(SpaceKeySchema)("MYSPACE123")
+      expect(Result.isSuccess(result)).toBe(true)
     })
 
     it("rejects lowercase keys", () => {
-      const result = Schema.decodeEither(SpaceKeySchema)("myspace")
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(SpaceKeySchema)("myspace")
+      expect(Result.isFailure(result)).toBe(true)
     })
 
     it("rejects keys with special characters", () => {
-      const result = Schema.decodeEither(SpaceKeySchema)("MY-SPACE")
-      expect(Either.isLeft(result)).toBe(true)
+      const result = Schema.decodeUnknownResult(SpaceKeySchema)("MY-SPACE")
+      expect(Result.isFailure(result)).toBe(true)
     })
   })
 

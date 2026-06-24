@@ -3,6 +3,7 @@
  *
  * @module
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { ContentHashSchema, PageIdSchema, SpaceKeySchema } from "./Brand.js"
 
@@ -27,18 +28,18 @@ export const ConfluenceConfigFileSchema = Schema.Struct({
   rootPageId: PageIdSchema,
   /** Confluence Cloud base URL */
   baseUrl: Schema.String.pipe(
-    Schema.pattern(/^https:\/\/[a-z0-9-]+\.atlassian\.net$/)
+    Schema.check(Schema.isPattern(/^https:\/\/[a-z0-9-]+\.atlassian\.net$/))
   ),
   /** Optional space key */
   spaceKey: Schema.optional(SpaceKeySchema),
   /** Local docs path (default: .confluence/docs) */
-  docsPath: Schema.optionalWith(Schema.String, { default: () => ".confluence/docs" }),
+  docsPath: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(".confluence/docs"))),
   /** Glob patterns to exclude from sync */
-  excludePatterns: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  excludePatterns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   /** Save original Confluence HTML alongside markdown (default: false) */
-  saveSource: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  saveSource: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),
   /** Glob patterns for files to track in git */
-  trackedPaths: Schema.optionalWith(Schema.Array(Schema.String), { default: () => ["**/*.md"] })
+  trackedPaths: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(["**/*.md"])))
 })
 
 /**
@@ -71,9 +72,9 @@ export const PageFrontMatterSchema = Schema.Struct({
   /** Confluence page ID */
   pageId: PageIdSchema,
   /** Page version number */
-  version: Schema.Number.pipe(Schema.int(), Schema.positive()),
+  version: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   /** Page title */
-  title: Schema.String.pipe(Schema.nonEmptyString()),
+  title: Schema.NonEmptyString,
   /** Last updated timestamp (ISO8601) */
   updated: Schema.DateFromString,
   /** Parent page ID (optional) */
@@ -104,7 +105,7 @@ export type PageFrontMatter = Schema.Schema.Type<typeof PageFrontMatterSchema>
  */
 export const NewPageFrontMatterSchema = Schema.Struct({
   /** Page title */
-  title: Schema.String.pipe(Schema.nonEmptyString()),
+  title: Schema.NonEmptyString,
   /** Parent page ID (optional, determined by directory structure) */
   parentId: Schema.optional(PageIdSchema)
 })
@@ -125,9 +126,9 @@ export const SyncStateSchema = Schema.Struct({
   /** Last sync timestamp */
   lastSync: Schema.DateFromString,
   /** Map of page ID to sync info */
-  pages: Schema.Record({
-    key: Schema.String,
-    value: Schema.Struct({
+  pages: Schema.Record(
+    Schema.String,
+    Schema.Struct({
       /** Local file path */
       localPath: Schema.String,
       /** Last synced version */
@@ -135,7 +136,7 @@ export const SyncStateSchema = Schema.Struct({
       /** Content hash at last sync */
       contentHash: ContentHashSchema
     })
-  })
+  )
 })
 
 /**

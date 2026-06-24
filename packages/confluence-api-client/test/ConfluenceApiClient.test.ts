@@ -148,12 +148,12 @@ describe("ConfluenceApiClient", () => {
             )
 
             const result = yield* toEffect(client.v2.client.GET("/pages/{id}", { params: { path: { id: 999 } } }))
-              .pipe(Effect.either)
+              .pipe(Effect.result)
 
-            expect(result._tag).toBe("Left")
-            if (result._tag === "Left") {
-              expect(result.left).toBeInstanceOf(FetchClientError)
-              expect((result.left as FetchClientError).status).toBe(404)
+            expect(result._tag).toBe("Failure")
+            if (result._tag === "Failure") {
+              expect(result.failure).toBeInstanceOf(FetchClientError)
+              expect((result.failure as FetchClientError).status).toBe(404)
             }
           })
       ))

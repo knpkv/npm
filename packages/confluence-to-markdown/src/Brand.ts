@@ -26,9 +26,8 @@ export type PageId = string & Brand.Brand<"PageId">
  *
  * @category Brand
  */
-export const PageId = Brand.refined<PageId>(
-  (s): s is PageId => typeof s === "string" && s.length > 0,
-  (s) => Brand.error(`Invalid page ID: "${s}" (must be non-empty string)`)
+export const PageId = Brand.make<PageId>((s) =>
+  typeof s === "string" && s.length > 0 || `Invalid page ID: "${s}" (must be non-empty string)`
 )
 
 /**
@@ -36,10 +35,7 @@ export const PageId = Brand.refined<PageId>(
  *
  * @category Schema
  */
-export const PageIdSchema = Schema.String.pipe(
-  Schema.nonEmptyString(),
-  Schema.brand("PageId")
-)
+export const PageIdSchema = Schema.NonEmptyString.pipe(Schema.brand("PageId"))
 
 /**
  * Branded type for Confluence space keys.
@@ -60,9 +56,9 @@ export type SpaceKey = string & Brand.Brand<"SpaceKey">
  *
  * @category Brand
  */
-export const SpaceKey = Brand.refined<SpaceKey>(
-  (s): s is SpaceKey => typeof s === "string" && s.length > 0 && /^[A-Z0-9]+$/.test(s),
-  (s) => Brand.error(`Invalid space key: "${s}" (must be uppercase alphanumeric)`)
+export const SpaceKey = Brand.make<SpaceKey>((s) =>
+  typeof s === "string" && s.length > 0 && /^[A-Z0-9]+$/.test(s)
+  || `Invalid space key: "${s}" (must be uppercase alphanumeric)`
 )
 
 /**
@@ -71,8 +67,7 @@ export const SpaceKey = Brand.refined<SpaceKey>(
  * @category Schema
  */
 export const SpaceKeySchema = Schema.String.pipe(
-  Schema.nonEmptyString(),
-  Schema.pattern(/^[A-Z0-9]+$/),
+  Schema.check(Schema.isNonEmpty(), Schema.isPattern(/^[A-Z0-9]+$/)),
   Schema.brand("SpaceKey")
 )
 
@@ -88,9 +83,9 @@ export type ContentHash = string & Brand.Brand<"ContentHash">
  *
  * @category Brand
  */
-export const ContentHash = Brand.refined<ContentHash>(
-  (s): s is ContentHash => typeof s === "string" && /^[a-f0-9]{64}$/.test(s),
-  (s) => Brand.error(`Invalid content hash: "${s}" (must be 64-char hex string)`)
+export const ContentHash = Brand.make<ContentHash>((s) =>
+  typeof s === "string" && /^[a-f0-9]{64}$/.test(s)
+  || `Invalid content hash: "${s}" (must be 64-char hex string)`
 )
 
 /**
@@ -99,6 +94,6 @@ export const ContentHash = Brand.refined<ContentHash>(
  * @category Schema
  */
 export const ContentHashSchema = Schema.String.pipe(
-  Schema.pattern(/^[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   Schema.brand("ContentHash")
 )

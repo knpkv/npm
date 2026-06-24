@@ -67,9 +67,7 @@ export interface UpdatePageRequest {
  *
  * @category Client
  */
-export class ConfluenceClient extends Context.Tag(
-  "@knpkv/confluence-to-markdown/ConfluenceClient"
-)<
+export class ConfluenceClient extends Context.Service<
   ConfluenceClient,
   {
     /**
@@ -126,7 +124,7 @@ export class ConfluenceClient extends Context.Tag(
      */
     readonly setEditorVersion: (pageId: PageId, version: "v1" | "v2") => Effect.Effect<void, ApiError | RateLimitError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/ConfluenceClient") {}
 
 /**
  * Configuration for the Confluence client.
@@ -155,11 +153,17 @@ const VERSIONS_PAGE_SIZE = 50
 /**
  * Rate limit retry schedule with exponential backoff.
  */
-const rateLimitSchedule = Schedule.exponential("1 second").pipe(
-  Schedule.union(Schedule.spaced("30 seconds")),
-  Schedule.whileInput<RateLimitError | ApiError>((error) => error._tag === "RateLimitError"),
-  Schedule.intersect(Schedule.recurs(3))
-)
+const rateLimitRetry = {
+  schedule: Schedule.exponential("1 second").pipe(
+    Schedule.either(Schedule.spaced("30 seconds"))
+  ),
+  times: 3,
+  while: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    error._tag === "RateLimitError"
+} as const
 
 /**
  * Map API client errors to domain errors.
@@ -177,7 +181,7 @@ const mapApiError = (error: FetchClientError, endpoint: string, pageId?: string)
  */
 const make = (
   config: ConfluenceClientConfig
-): Effect.Effect<Context.Tag.Service<typeof ConfluenceClient>> =>
+): Effect.Effect<Context.Service.Shape<typeof ConfluenceClient>> =>
   Effect.gen(function*() {
     // Create underlying API client
     const apiConfigLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -197,7 +201,7 @@ const make = (
         params: { path: { id: Number(id) }, query: { "body-format": "atlas_doc_format" } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
@@ -205,7 +209,7 @@ const make = (
         params: { path: { id: Number(id) } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       ) as Effect.Effect<PageChildrenResponse, ApiError | RateLimitError>
 
     const getAllChildren = (id: PageId): Effect.Effect<ReadonlyArray<PageListItem>, ApiError | RateLimitError> =>
@@ -230,7 +234,7 @@ const make = (
             params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}) } }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-            Effect.retry(rateLimitSchedule)
+            Effect.retry(rateLimitRetry)
           )
 
           for (const child of (response as { results?: Array<PageListItem> }).results ?? []) {
@@ -260,7 +264,7 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, "/pages")),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
@@ -275,7 +279,7 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
@@ -284,7 +288,7 @@ const make = (
       })).pipe(
         Effect.map(() => void 0),
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       )
 
     const getPageVersions = (
@@ -319,7 +323,7 @@ const make = (
             }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
-            Effect.retry(rateLimitSchedule)
+            Effect.retry(rateLimitRetry)
           )
 
           for (const version of (response as { results?: Array<PageVersion> }).results ?? []) {
@@ -345,7 +349,7 @@ const make = (
         params: { query: { accountId } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
-        Effect.retry(rateLimitSchedule)
+        Effect.retry(rateLimitRetry)
       ) as Effect.Effect<AtlassianUser, ApiError | RateLimitError>
 
     const getSpaceId = (pageId: PageId): Effect.Effect<string, ApiError | RateLimitError> =>
@@ -401,7 +405,7 @@ const make = (
             Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         }
-      }).pipe(Effect.retry(rateLimitSchedule))
+      }).pipe(Effect.retry(rateLimitRetry))
 
     return ConfluenceClient.of({
       getPage,
@@ -438,7 +442,7 @@ const make = (
  *       auth: {
  *         type: "token",
  *         email: "you@example.com",
- *         token: process.env.CONFLUENCE_API_KEY
+ *         token: "<api-token>"
  *       }
  *     }))
  *   )

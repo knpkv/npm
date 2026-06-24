@@ -1,4 +1,5 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { RefreshCwIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
@@ -27,7 +28,7 @@ export function SettingsRefresh() {
   const [local, setLocal] = useState<Partial<RefreshConfig>>({})
 
   useEffect(() => {
-    if (Result.isSuccess(config)) {
+    if (AsyncResult.isSuccess(config)) {
       configRef.current = config.value
     }
   }, [config])
@@ -71,9 +72,8 @@ export function SettingsRefresh() {
         <p className="text-sm text-muted-foreground">Periodically fetch PR updates from AWS</p>
       </div>
       <Separator />
-      {Result.builder(config)
+      {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onError(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => {
           const autoRefresh = local.autoRefresh ?? data.autoRefresh

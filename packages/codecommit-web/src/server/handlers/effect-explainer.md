@@ -10,7 +10,7 @@ Handler patterns — Schema-encoded SSE via SubscriptionRef, typed error propaga
 | `config-live.ts`                   | `/api/config/*`                   | Load/save/validate/reset config, merge with runtime state                      |
 | `accounts-live.ts`                 | `/api/accounts`                   | Filter enabled accounts from state                                             |
 | `events-live.ts`                   | `/api/events/`                    | SSE — `handleRaw` + `HttpServerResponse.stream` from `SubscriptionRef.changes` |
-| `notifications-live.ts`            | `/api/notifications/*`            | List/clear notifications, SSO login/logout via `Command`                       |
+| `notifications-live.ts`            | `/api/notifications/*`            | List/clear notifications, SSO login/logout via `ChildProcess`                  |
 | `subscriptions-live.ts`            | `/api/subscriptions/*`            | Subscribe/unsubscribe PRs, list subscriptions                                  |
 | `persistent-notifications-live.ts` | `/api/notifications/persistent/*` | DB-backed notifications: list, count, mark read                                |
 

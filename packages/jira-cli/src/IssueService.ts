@@ -29,7 +29,7 @@ import { JiraApiError } from "./JiraCliError.js"
  *
  * @category Config
  */
-export class SiteUrl extends Context.Tag("@knpkv/jira-cli/SiteUrl")<SiteUrl, string>() {}
+export class SiteUrl extends Context.Service<SiteUrl, string>()("@knpkv/jira-cli/SiteUrl") {}
 
 /**
  * Attachment metadata.
@@ -104,6 +104,12 @@ export interface SearchResult {
   readonly maxResults: number
 }
 
+interface SearchJqlResponse {
+  readonly issues?: ReadonlyArray<unknown>
+  readonly isLast?: boolean
+  readonly nextPageToken?: string
+}
+
 /**
  * IssueService interface.
  *
@@ -138,10 +144,10 @@ export interface IssueServiceShape {
  *
  * @category Services
  */
-export class IssueService extends Context.Tag("@knpkv/jira-cli/IssueService")<
+export class IssueService extends Context.Service<
   IssueService,
   IssueServiceShape
->() {}
+>()("@knpkv/jira-cli/IssueService") {}
 
 const FIELDS = [
   "summary",
@@ -299,7 +305,7 @@ const make = Effect.gen(function*() {
     jql: string,
     maxResults: number,
     nextPageToken?: string
-  ) =>
+  ): Effect.Effect<SearchJqlResponse, JiraApiError> =>
     toEffect(client.v3.client.GET("/rest/api/3/search/jql", {
       params: {
         query: {
@@ -311,6 +317,7 @@ const make = Effect.gen(function*() {
         }
       }
     })).pipe(
+      Effect.map((result) => result as SearchJqlResponse),
       Effect.mapError((cause) => new JiraApiError({ message: "Failed to search issues", cause }))
     )
 
@@ -336,36 +343,35 @@ const make = Effect.gen(function*() {
   const searchAll = (
     jql: string,
     options?: { readonly maxResults?: number }
-  ): Effect.Effect<ReadonlyArray<Issue>, JiraApiError> =>
-    Effect.gen(function*() {
-      const allIssues: Array<Issue> = []
-      const maxResults = options?.maxResults ?? 100
-      let nextPageToken: string | undefined = undefined
-      let pageCount = 0
+  ): Effect.Effect<ReadonlyArray<Issue>, JiraApiError> => (Effect.gen(function*() {
+    const allIssues: Array<Issue> = []
+    const maxResults = options?.maxResults ?? 100
+    let nextPageToken: string | undefined = undefined
+    let pageCount = 0
 
-      // Fetch first page
-      let result = yield* searchJql(jql, maxResults, nextPageToken)
-      let issues = result.issues ?? []
+    // Fetch first page
+    let result = yield* searchJql(jql, maxResults, nextPageToken)
+    let issues = result.issues ?? []
+    pageCount++
+
+    for (const bean of issues) {
+      allIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
+    }
+
+    // Fetch remaining pages with iteration guard
+    while (!result.isLast && result.nextPageToken && pageCount < MAX_PAGES) {
+      nextPageToken = result.nextPageToken
+      result = yield* searchJql(jql, maxResults, nextPageToken)
+      issues = result.issues ?? []
       pageCount++
 
       for (const bean of issues) {
         allIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
       }
+    }
 
-      // Fetch remaining pages with iteration guard
-      while (!result.isLast && result.nextPageToken && pageCount < MAX_PAGES) {
-        nextPageToken = result.nextPageToken
-        result = yield* searchJql(jql, maxResults, nextPageToken)
-        issues = result.issues ?? []
-        pageCount++
-
-        for (const bean of issues) {
-          allIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
-        }
-      }
-
-      return allIssues
-    })
+    return allIssues
+  }) as Effect.Effect<ReadonlyArray<Issue>, JiraApiError>)
 
   return IssueService.of({ getByKey, search, searchAll })
 })

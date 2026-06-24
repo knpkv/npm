@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { parseRuleContent } from "../src/AwsClient/getPullRequests.js"
+import { parseRuleContent } from "../src/AwsClient/approvalRuleContent.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
 import type { AwsProfileName, AwsRegion } from "../src/Domain.js"
 

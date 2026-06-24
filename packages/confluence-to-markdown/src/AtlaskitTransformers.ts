@@ -40,16 +40,14 @@ const transformers: Transformers = { md, json }
  *
  * @category Service
  */
-export class AtlaskitTransformers extends Context.Tag(
-  "@knpkv/confluence-to-markdown/AtlaskitTransformers"
-)<
+export class AtlaskitTransformers extends Context.Service<
   AtlaskitTransformers,
   {
     readonly use: <A>(
       fn: (t: Transformers) => A
     ) => Effect.Effect<A, AtlaskitTransformersError>
   }
->() {}
+>()("@knpkv/confluence-to-markdown/AtlaskitTransformers") {}
 
 /**
  * Live Layer providing the wrapped @atlaskit transformers. The transformer

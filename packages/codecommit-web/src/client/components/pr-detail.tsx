@@ -22,7 +22,7 @@
  *
  * @module
  */
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
@@ -35,6 +35,7 @@ import {
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -208,7 +209,7 @@ function CommentsSection({ pr }: { readonly pr: Domain.PullRequest }) {
     region: pr.account.region
   })
 
-  return Result.builder(commentsResult)
+  return AsyncResult.builder(commentsResult)
     .onInitialOrWaiting(() => (
       <div className="pt-2">
         <p className="text-xs text-muted-foreground">Loading comments...</p>
@@ -262,7 +263,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
   const timeToMerge = pr.status === "MERGED" ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
 
   const { timeToAddressFeedback, timeToFirstReview } = useMemo(() => {
-    if (!Result.isSuccess(commentsResult)) return { timeToFirstReview: null, timeToAddressFeedback: null }
+    if (!AsyncResult.isSuccess(commentsResult)) return { timeToFirstReview: null, timeToAddressFeedback: null }
     const allComments: Array<{ author: string; date: Date }> = []
     for (const loc of commentsResult.value) {
       const walk = (threads: ReadonlyArray<CommentThreadJsonEncoded>) => {
@@ -601,7 +602,7 @@ export function PRDetail() {
     const key = `${accountId}:${prId}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({ path: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
+    refreshSingle({ params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
   }, [pr, accountId, prId, refreshSingle])
 
   const score: HealthScore | undefined = useMemo(
@@ -620,7 +621,7 @@ export function PRDetail() {
   const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
   const serverSubscribed = useMemo(
     () =>
-      Result.isSuccess(subscriptionsResult) && accountKey
+      AsyncResult.isSuccess(subscriptionsResult) && accountKey
         ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
         : false,
     [subscriptionsResult, accountKey, prId]
@@ -649,7 +650,7 @@ export function PRDetail() {
   const handleRefresh = useCallback(() => {
     if (!accountKey || !prId || isRefreshing) return
     setIsRefreshing(true)
-    refreshSingle({ path: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } })
+    refreshSingle({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } })
   }, [accountKey, isRefreshing, prId, refreshSingle])
 
   // Copy console URL
@@ -971,7 +972,7 @@ export function PRDetail() {
               })
             }
           }}
-          onRefresh={() => refreshSingle({ path: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
+          onRefresh={() => refreshSingle({ params: { awsAccountId: accountId!, prId: PullRequestId.make(pr.id) } })}
         />
       ))}
 

@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { KeyEvent } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useEffect } from "react"

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { useAtomSet } from "@effect-atom/atom-react"
+import { useAtomSet } from "@effect/atom-react"
 import { ShieldCheckIcon } from "lucide-react"
 import type { AppState } from "../atoms/app.js"
 import { permissionRespondAtom } from "../atoms/app.js"
