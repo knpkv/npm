@@ -41,6 +41,20 @@ jobs:
           node-version: 24.10.0
       - run: pnpm lint
 
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 24.10.0
+      - run: pnpm run audit
+
   types:
     name: Types
     runs-on: ubuntu-latest

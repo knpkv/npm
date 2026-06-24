@@ -32,6 +32,14 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - **Timeout**: 10 minutes
 - **Node Version**: 24.10.0
 
+#### Audit
+
+- Runs pnpm dependency vulnerability audit
+- Fails the workflow when audited dependencies include advisories
+- **Command**: `pnpm run audit`
+- **Timeout**: 10 minutes
+- **Node Version**: 24.10.0
+
 #### Types
 
 - Validates TypeScript compilation
