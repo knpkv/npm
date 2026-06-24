@@ -10,8 +10,8 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import type * as Terminal from "effect/Terminal"
-import matter from "gray-matter"
 import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
@@ -19,6 +19,14 @@ import type { ApiError, ConversionError, FrontMatterError, RateLimitError } from
 import { FileSystemError, StructureError } from "./ConfluenceError.js"
 import type { GitServiceError } from "./GitService.js"
 import { GitService } from "./GitService.js"
+import type { AdfMetadataSidecar } from "./internal/adfMetadata.js"
+import {
+  AdfMetadataSidecarSchema,
+  collectAdfMetadataHrefs,
+  externalizeAdfMetadata,
+  hydrateAdfMetadata
+} from "./internal/adfMetadata.js"
+import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { UserCache } from "./internal/userCache.js"
 import { LocalFileSystem } from "./LocalFileSystem.js"
@@ -200,6 +208,63 @@ export const layer: Layer.Layer<
     const cwd = pathService.resolve(".")
     const docsPath = pathService.join(cwd, config.docsPath)
 
+    const adfMetadataPath = (filePath: string, pageId?: string): string =>
+      pageId
+        ? pathService.join(pathService.dirname(filePath), `${pageId}.adf.json`)
+        : filePath.replace(/\.md$/, ".adf.json")
+
+    const adfMetadataHref = (filePath: string, pageId?: string): string =>
+      `./${pathService.basename(adfMetadataPath(filePath, pageId))}`
+
+    const prepareMarkdownForFile = (filePath: string, markdown: string, pageId?: string) =>
+      externalizeAdfMetadata(markdown, adfMetadataHref(filePath, pageId))
+
+    const writePreparedMarkdownWithAdfMetadata = (
+      filePath: string,
+      frontMatter: PageFrontMatter,
+      prepared: ReturnType<typeof externalizeAdfMetadata>
+    ): Effect.Effect<void, FileSystemError> =>
+      Effect.gen(function*() {
+        yield* localFs.writeMarkdownFile(filePath, frontMatter, prepared.markdown)
+        const sidecarPath = adfMetadataPath(filePath, frontMatter.pageId)
+        if (prepared.sidecar !== null) {
+          yield* localFs.writeFile(
+            sidecarPath,
+            JSON.stringify(prepared.sidecar, null, 2) + "\n"
+          )
+        } else if (yield* localFs.exists(sidecarPath)) {
+          yield* localFs.deleteFile(sidecarPath)
+        }
+      })
+
+    const readAdfMetadataSidecar = (sidecarPath: string): Effect.Effect<AdfMetadataSidecar | null, FileSystemError> =>
+      Effect.gen(function*() {
+        const exists = yield* localFs.exists(sidecarPath)
+        if (!exists) return null
+        const raw = yield* fs.readFileString(sidecarPath).pipe(
+          Effect.mapError((cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause }))
+        )
+        const parsed = yield* Effect.try({
+          try: () => JSON.parse(raw) as unknown,
+          catch: (cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause })
+        })
+        return yield* Schema.decodeUnknownEffect(AdfMetadataSidecarSchema)(parsed).pipe(
+          Effect.mapError((cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause }))
+        )
+      })
+
+    const hydrateMarkdownForFile = (filePath: string, markdown: string): Effect.Effect<string, FileSystemError> =>
+      Effect.gen(function*() {
+        const sidecars = new Map<string, AdfMetadataSidecar>()
+        const dir = pathService.dirname(filePath)
+        for (const href of collectAdfMetadataHrefs(markdown)) {
+          const sidecarPath = pathService.resolve(dir, href)
+          const sidecar = yield* readAdfMetadataSidecar(sidecarPath)
+          if (sidecar !== null) sidecars.set(href, sidecar)
+        }
+        return hydrateAdfMetadata(markdown, sidecars)
+      })
+
     /**
      * Build a map of relative path (without .md) to pageId for resolving parents.
      * e.g., "guide" -> pageId, "guide/getting-started" -> pageId
@@ -365,15 +430,22 @@ export const layer: Layer.Layer<
      * Convert version content to markdown and front-matter.
      */
     const versionToMarkdown = (
+      filePath: string,
       pageId: PageId,
       version: PageVersionContent,
       title: string,
       parentId?: string,
       position?: number
-    ): Effect.Effect<{ markdown: string; frontMatter: PageFrontMatter }, SyncError> =>
+    ): Effect.Effect<{
+      markdown: string
+      frontMatter: PageFrontMatter
+      prepared: ReturnType<typeof externalizeAdfMetadata>
+    }, SyncError> =>
       Effect.gen(function*() {
         const adfJson = version.body?.atlas_doc_format?.value ?? ""
-        const markdown = yield* converter.adfToMarkdown(adfJson)
+        const rawMarkdown = yield* converter.adfToMarkdown(adfJson)
+        const prepared = prepareMarkdownForFile(filePath, rawMarkdown, pageId)
+        const { markdown } = prepared
         const contentHash = yield* hashBody(markdown)
 
         // Get author info
@@ -392,7 +464,7 @@ export const layer: Layer.Layer<
           ...(author?.email ? { authorEmail: author.email } : {})
         }
 
-        return { markdown, frontMatter }
+        return { markdown, frontMatter, prepared }
       })
 
     /**
@@ -494,7 +566,8 @@ export const layer: Layer.Layer<
                 }
               }
             }
-            const { frontMatter, markdown } = yield* versionToMarkdown(
+            const { frontMatter, prepared } = yield* versionToMarkdown(
+              filePath,
               pageId,
               versionContent,
               versionInfo.page?.title ?? fullPage.title,
@@ -503,7 +576,7 @@ export const layer: Layer.Layer<
             )
 
             // Write file
-            yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
+            yield* writePreparedMarkdownWithAdfMetadata(filePath, frontMatter, prepared)
 
             // Save source ADF JSON if configured
             if (config.saveSource && versionContent.body?.atlas_doc_format?.value) {
@@ -542,7 +615,7 @@ export const layer: Layer.Layer<
 
           // Simple pull without history replay
           const adfJson = fullPage.body?.atlas_doc_format?.value ?? ""
-          let markdown = yield* converter.adfToMarkdown(adfJson)
+          let rawMarkdown = yield* converter.adfToMarkdown(adfJson)
 
           // Add child page links for index pages
           if (hasChildren && config.spaceKey) {
@@ -552,9 +625,11 @@ export const layer: Layer.Layer<
                 return `- [${child.title}](${pageUrl})`
               })
               .join("\n")
-            markdown = markdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
+            rawMarkdown = rawMarkdown.trim() + "\n\n## Child Pages\n\n" + childLinks + "\n"
           }
 
+          const prepared = prepareMarkdownForFile(filePath, rawMarkdown, pageId)
+          const { markdown } = prepared
           const contentHash = yield* hashBody(markdown)
 
           // Get author info
@@ -574,7 +649,7 @@ export const layer: Layer.Layer<
             ...(author?.email ? { authorEmail: author.email } : {})
           }
 
-          yield* localFs.writeMarkdownFile(filePath, frontMatter, markdown)
+          yield* writePreparedMarkdownWithAdfMetadata(filePath, frontMatter, prepared)
 
           // Save source ADF JSON if configured
           if (config.saveSource && adfJson) {
@@ -694,14 +769,15 @@ export const layer: Layer.Layer<
           const rawFile = yield* fs.readFileString(filePath).pipe(
             Effect.mapError((cause) => new FileSystemError({ operation: "read", path: filePath, cause }))
           )
-          const parsed = matter(rawFile)
-          const title = (parsed.data as { title?: string }).title ?? baseName
+          const parsed = yield* parseMarkdown(filePath, rawFile)
+          const title = parsed.frontMatter?.title ?? baseName
 
           // Resolve parent from directory structure
           const parentId = yield* resolveParent(filePath, pageIdMap)
 
           // Convert markdown to ADF
-          const adfValue = yield* converter.markdownToAdf(localFile.content)
+          const hydratedContent = yield* hydrateMarkdownForFile(filePath, localFile.content)
+          const adfValue = yield* converter.markdownToAdf(hydratedContent)
 
           // Create the page
           const createdPage = yield* client.createPage({
@@ -725,7 +801,9 @@ export const layer: Layer.Layer<
           // Fetch canonical content back from Confluence
           const canonicalPage = yield* client.getPage(createdPage.id as PageId)
           const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-          const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+          const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+          const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, createdPage.id)
+          const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
           const canonicalHash = yield* hashBody(canonicalMarkdown)
 
           // Write canonical content with full front-matter
@@ -737,7 +815,7 @@ export const layer: Layer.Layer<
             parentId: parentId as PageId,
             contentHash: canonicalHash
           }
-          yield* localFs.writeMarkdownFile(filePath, newFrontMatter, canonicalMarkdown)
+          yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)
 
           // Update pageIdMap with new page
           const key = relativePath.replace(/\.md$/, "")
@@ -755,7 +833,8 @@ export const layer: Layer.Layer<
 
         // Fetch current version to avoid conflicts
         const remotePage = yield* client.getPage(fm.pageId)
-        const adfValue = yield* converter.markdownToAdf(localFile.content)
+        const hydratedContent = yield* hydrateMarkdownForFile(filePath, localFile.content)
+        const adfValue = yield* converter.markdownToAdf(hydratedContent)
         const updatedPage = yield* client.updatePage({
           id: fm.pageId,
           title: fm.title,
@@ -773,7 +852,9 @@ export const layer: Layer.Layer<
         // Fetch canonical content back from Confluence
         const canonicalPage = yield* client.getPage(fm.pageId)
         const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-        const canonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+        const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+        const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, fm.pageId)
+        const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
         const canonicalHash = yield* hashBody(canonicalMarkdown)
 
         // Write canonical content with updated front-matter
@@ -783,7 +864,7 @@ export const layer: Layer.Layer<
           updated: new Date(canonicalPage.version.createdAt ?? new Date().toISOString()),
           contentHash: canonicalHash
         }
-        yield* localFs.writeMarkdownFile(filePath, newFrontMatter, canonicalMarkdown)
+        yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)
 
         return { pushed: true, created: false }
       })

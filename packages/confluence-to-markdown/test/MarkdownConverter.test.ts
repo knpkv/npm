@@ -75,7 +75,7 @@ describe("MarkdownConverter", () => {
         expect(md).toContain("const x = 1")
       }).pipe(Effect.provide(TestLayer)))
 
-    it.effect("converts a panel to a GitHub admonition", () =>
+    it.effect("converts a panel to a Confluence-preserving placeholder", () =>
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
         const md = yield* converter.adfToMarkdown(
@@ -85,8 +85,9 @@ describe("MarkdownConverter", () => {
             content: [{ type: "paragraph", content: [{ type: "text", text: "heads up" }] }]
           }])
         )
-        expect(md).toContain("[!NOTE]")
+        expect(md).toContain("<!-- adf:panel type=info attrs=")
         expect(md).toContain("heads up")
+        expect(md).toContain("<!-- adf:/panel -->")
       }).pipe(Effect.provide(TestLayer)))
 
     it.effect("fails with ConversionError on invalid JSON", () =>

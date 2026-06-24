@@ -3,6 +3,7 @@ import { revertPlaceholders } from "../src/AdfPlaceholders.js"
 
 const docOf = (content: ReadonlyArray<unknown>) => ({ version: 1, type: "doc", content })
 const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] })
+const b64 = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("revertPlaceholders", () => {
   it("rewrites a status span placeholder into a status node", () => {
@@ -85,6 +86,67 @@ describe("revertPlaceholders", () => {
     })
   })
 
+  it("rewrites fallback inline formatting HTML into native marks", () => {
+    const out = revertPlaceholders(
+      docOf([para(
+        `Plain <u>underline</u>, H<sub>2</sub>O, x<sup>2</sup>, ` +
+          `<span style="color:#ff5630">Colored text</span>, ` +
+          `<span style="background-color:#f8e6a0">highlighted text</span>.`
+      )])
+    ) as {
+      content: Array<{
+        content: Array<{ type: string; text?: string; marks?: ReadonlyArray<{ type: string; attrs?: unknown }> }>
+      }>
+    }
+
+    const inlineContent = out.content[0]!.content
+    expect(inlineContent).toContainEqual({
+      type: "text",
+      text: "underline",
+      marks: [{ type: "underline" }]
+    })
+    expect(inlineContent).toContainEqual({
+      type: "text",
+      text: "2",
+      marks: [{ type: "subsup", attrs: { type: "sub" } }]
+    })
+    expect(inlineContent).toContainEqual({
+      type: "text",
+      text: "2",
+      marks: [{ type: "subsup", attrs: { type: "sup" } }]
+    })
+    expect(inlineContent).toContainEqual({
+      type: "text",
+      text: "Colored text",
+      marks: [{ type: "textColor", attrs: { color: "#ff5630" } }]
+    })
+    expect(inlineContent).toContainEqual({
+      type: "text",
+      text: "highlighted text",
+      marks: [{ type: "backgroundColor", attrs: { color: "#f8e6a0" } }]
+    })
+  })
+
+  it("rewrites inlineCard placeholders into native smart-link nodes", () => {
+    const attrs = { url: "https://www.atlassian.com" }
+    const out = revertPlaceholders(
+      docOf([para(`Inline smart link: <!-- adf:inlineCard attrs=${b64(attrs)} -->.`)])
+    ) as { content: Array<{ content: Array<{ type: string; attrs?: Record<string, unknown> }> }> }
+
+    expect(out.content[0]!.content[1]).toEqual({ type: "inlineCard", attrs })
+  })
+
+  it("rewrites encoded date and emoji placeholders into native inline nodes", () => {
+    const date = { type: "date", attrs: { timestamp: "1782259200000" } }
+    const emoji = { type: "emoji", attrs: { shortName: ":white_check_mark:", text: "✅" } }
+    const out = revertPlaceholders(
+      docOf([para(`Example <!-- adf:date node=${b64(date)} --> <!-- adf:emoji node=${b64(emoji)} -->`)])
+    ) as { content: Array<{ content: Array<unknown> }> }
+
+    expect(out.content[0]!.content).toContainEqual(date)
+    expect(out.content[0]!.content).toContainEqual(emoji)
+  })
+
   it("restores the full attrs (parameters included) from an attrs blob", () => {
     const attrs = {
       extensionKey: "toc",
@@ -133,6 +195,110 @@ describe("revertPlaceholders", () => {
       content: [para("first body paragraph"), para("second body paragraph")]
     })
     expect(out.content[1]).toEqual(para("after"))
+  })
+
+  it("re-attaches the blocks between panel markers as a panel body", () => {
+    const attrs = { panelType: "warning" }
+    const blob = Buffer.from(JSON.stringify(attrs)).toString("base64")
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:panel type=warning attrs=${blob} -->`),
+        para("panel body"),
+        para(`<!-- adf:/panel -->`),
+        para("after")
+      ])
+    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+
+    expect(out.content).toHaveLength(2)
+    expect(out.content[0]).toEqual({
+      type: "panel",
+      attrs,
+      content: [para("panel body")]
+    })
+    expect(out.content[1]).toEqual(para("after"))
+  })
+
+  it("re-attaches paragraph-level marks from paragraph markers", () => {
+    const marks = [{ type: "alignment", attrs: { align: "center" } }]
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:paragraph marks=${b64(marks)} -->`),
+        para("Centered paragraph for alignment validation."),
+        para(`<!-- adf:/paragraph -->`)
+      ])
+    ) as { content: Array<{ type: string; marks?: unknown; content?: ReadonlyArray<unknown> }> }
+
+    expect(out.content).toEqual([{
+      type: "paragraph",
+      marks,
+      content: [{ type: "text", text: "Centered paragraph for alignment validation." }]
+    }])
+  })
+
+  it("restores encoded native block nodes", () => {
+    const taskList = {
+      type: "taskList",
+      attrs: { localId: "tasks-1" },
+      content: [{
+        type: "taskItem",
+        attrs: { localId: "task-1", state: "DONE" },
+        content: [{ type: "text", text: "Existing primitive coverage reviewed" }]
+      }]
+    }
+    const decisionList = {
+      type: "decisionList",
+      attrs: { localId: "decisions-1" },
+      content: [{
+        type: "decisionItem",
+        attrs: { localId: "decision-1", state: "DECIDED" },
+        content: [{ type: "text", text: "Decide whether to maintain a separate asset for advanced macros." }]
+      }]
+    }
+    const expand = {
+      type: "expand",
+      attrs: { title: "Expandable supplementary content" },
+      content: [para("This section can be expanded.")]
+    }
+    const table = {
+      type: "table",
+      content: [{ type: "tableRow", content: [{ type: "tableCell", content: [para("Date")] }] }]
+    }
+    const layoutSection = {
+      type: "layoutSection",
+      content: [{ type: "layoutColumn", attrs: { width: 50 }, content: [para("Left column")] }]
+    }
+    const blockCard = { type: "blockCard", attrs: { url: "https://www.atlassian.com/software/confluence" } }
+    const embedCard = {
+      type: "embedCard",
+      attrs: { url: "https://www.atlassian.com/software/confluence", layout: "center" }
+    }
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:taskList node=${b64(taskList)} -->`),
+        para("[x] Existing primitive coverage reviewed"),
+        para("<!-- adf:/taskList -->"),
+        para(`<!-- adf:decisionList node=${b64(decisionList)} -->`),
+        para("This page will act as the baseline integration test asset for editor primitive coverage."),
+        para("<!-- adf:/decisionList -->"),
+        para(`<!-- adf:expand node=${b64(expand)} -->`),
+        para("This section can be expanded."),
+        para("<!-- adf:/expand -->"),
+        para(`<!-- adf:table node=${b64(table)} -->`),
+        para("| Date |"),
+        para("<!-- adf:/table -->"),
+        para(`<!-- adf:layoutSection node=${b64(layoutSection)} -->`),
+        para("Left column"),
+        para("<!-- adf:/layoutSection -->"),
+        para(`<!-- adf:blockCard node=${b64(blockCard)} -->`),
+        para("https://www.atlassian.com/software/confluence"),
+        para("<!-- adf:/blockCard -->"),
+        para(`<!-- adf:embedCard node=${b64(embedCard)} -->`),
+        para("https://www.atlassian.com/software/confluence"),
+        para("<!-- adf:/embedCard -->")
+      ])
+    ) as { content: Array<unknown> }
+
+    expect(out.content).toEqual([taskList, decisionList, expand, table, layoutSection, blockCard, embedCard])
   })
 
   it("reverts an extension marker nested inside a bodiedExtension body", () => {

@@ -6,7 +6,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import matter from "gray-matter"
+import * as yaml from "js-yaml"
 import { FrontMatterError } from "../ConfluenceError.js"
 import type { NewPageFrontMatter, PageFrontMatter } from "../Schemas.js"
 import { NewPageFrontMatterSchema, PageFrontMatterSchema } from "../Schemas.js"
@@ -18,6 +18,33 @@ export interface ParsedMarkdown {
   readonly frontMatter: PageFrontMatter | NewPageFrontMatter | null
   readonly content: string
   readonly isNew: boolean
+}
+
+const parseRawMarkdown = (content: string): { readonly data: Record<string, unknown>; readonly content: string } => {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
+    return { data: {}, content }
+  }
+
+  const newline = content.startsWith("---\r\n") ? "\r\n" : "\n"
+  const headerStart = 3 + newline.length
+  const closingMarker = `${newline}---`
+  const closingStart = content.indexOf(closingMarker, headerStart)
+  if (closingStart === -1) {
+    return { data: {}, content }
+  }
+
+  const header = content.slice(headerStart, closingStart)
+  const afterClosingStart = closingStart + closingMarker.length
+  const afterClosing = content.startsWith("\r\n", afterClosingStart)
+    ? content.slice(afterClosingStart + 2)
+    : content.startsWith("\n", afterClosingStart)
+    ? content.slice(afterClosingStart + 1)
+    : content.slice(afterClosingStart)
+  const loaded = yaml.load(header)
+  const data = loaded !== null && typeof loaded === "object" && !Array.isArray(loaded)
+    ? loaded as Record<string, unknown>
+    : {}
+  return { data, content: afterClosing }
 }
 
 /**
@@ -35,7 +62,7 @@ export const parseMarkdown = (
 ): Effect.Effect<ParsedMarkdown, FrontMatterError> =>
   Effect.gen(function*() {
     const parsed = yield* Effect.try({
-      try: () => matter(content),
+      try: () => parseRawMarkdown(content),
       catch: (cause) => new FrontMatterError({ path: filePath, cause })
     })
 
@@ -94,7 +121,7 @@ export const serializeMarkdown = (
     contentHash: frontMatter.contentHash
   }
 
-  return matter.stringify(content, fm)
+  return stringifyFrontmatter(content, fm)
 }
 
 /**
@@ -115,5 +142,15 @@ export const serializeNewPageMarkdown = (
     ...(frontMatter.parentId !== undefined ? { parentId: frontMatter.parentId } : {})
   }
 
-  return matter.stringify(content, fm)
+  return stringifyFrontmatter(content, fm)
+}
+
+const stringifyFrontmatter = (content: string, frontMatter: Record<string, unknown>): string => {
+  const header = yaml.dump(frontMatter, {
+    lineWidth: -1,
+    noRefs: true,
+    sortKeys: false
+  }).trimEnd()
+  const body = content.endsWith("\n") ? content : `${content}\n`
+  return `---\n${header}\n---\n${body}`
 }

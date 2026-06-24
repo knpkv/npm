@@ -93,31 +93,15 @@ const attrNum = (n: AdfNode, key: string): number | undefined => {
   const v = n.attrs?.[key]
   return typeof v === "number" ? v : undefined
 }
-
-// Color-matched to GitHub's admonition palette: info/blue→NOTE, note/purple→
-// IMPORTANT, success/green→TIP, warning/yellow→WARNING, error/red→CAUTION.
-const PANEL_MAP: Record<string, string> = {
-  info: "NOTE",
-  note: "IMPORTANT",
-  warning: "WARNING",
-  success: "TIP",
-  error: "CAUTION"
+const attrRecord = (n: AdfNode, key: string): Record<string, unknown> | undefined => {
+  const v = n.attrs?.[key]
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : undefined
 }
 
-// btoa operates on byte strings; route through TextEncoder so non-ASCII attrs
-// survive. Web APIs only — this module is a standalone subpath export and
-// must not assume Node (same reasoning as internal/hashUtils' Web Crypto).
-const toBase64 = (s: string): string => {
-  const bytes = new TextEncoder().encode(s)
-  let bin = ""
-  for (const b of bytes) bin += String.fromCharCode(b)
-  return btoa(bin)
-}
-
-// Deterministic JSON for the placeholder attrs blob: object keys are sorted
-// recursively so the same attrs always produce the same base64, no matter
-// what order Confluence happens to serialize them in. Keeps pull → push →
-// pull a byte-level fixed point (and contentHash stable).
+// Deterministic JSON for placeholder metadata: object keys are sorted
+// recursively so the same attrs always produce the same marker/sidecar data,
+// no matter what order Confluence happens to serialize them in. Keeps pull →
+// push → pull a byte-level fixed point (and contentHash stable).
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
   if (v !== null && typeof v === "object") {
@@ -163,24 +147,21 @@ const inlineNode = (n: AdfNode, ctx: Ctx): string => {
       return id ? `[${display}](confluence-mention://${encodeURIComponent(id)})` : display
     }
     case "emoji": {
-      const short = attrStr(n, "shortName")
-      return short ? `:${short}:` : (attrStr(n, "text") ?? "")
+      return `<!-- adf:${n.type} node=${stableStringify(n)} -->`
     }
     case "inlineCard": {
-      const url = attrStr(n, "url")
+      const url = cardUrl(n)
       if (!url) {
         // data-payload smart links have no URL to render — losing one must
         // at least be visible in the logs.
         ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: "inlineCard" })
         return ""
       }
-      return `<${url}>`
+      const attrs = n.attrs ?? { url }
+      return `<!-- adf:inlineCard attrs=${stableStringify(attrs)} -->`
     }
     case "date": {
-      const ts = attrStr(n, "timestamp")
-      if (!ts) return ""
-      const d = new Date(Number(ts))
-      return Number.isNaN(d.getTime()) ? ts : d.toISOString().slice(0, 10)
+      return `<!-- adf:${n.type} node=${stableStringify(n)} -->`
     }
     case "status": {
       const text = attrStr(n, "text") ?? ""
@@ -215,7 +196,7 @@ const extensionPlaceholder = (
   // so macros survive a pull → push round-trip with their configuration.
   const attrs = n.attrs ?? {}
   const attrsPart = Object.keys(attrs).length > 0
-    ? ` attrs=${toBase64(stableStringify(attrs))}`
+    ? ` attrs=${stableStringify(attrs)}`
     : ""
   return `<!-- adf:${nodeType}${keyPart}${typePart}${attrsPart} -->`
 }
@@ -299,7 +280,7 @@ const indentLines = (s: string, indent: string): string =>
 const block = (n: AdfNode, ctx: Ctx): string => {
   switch (n.type) {
     case "paragraph":
-      return escapeLineStarts(inline(n.content, ctx))
+      return paragraph(n, ctx)
     case "heading": {
       const level = Math.min(6, Math.max(1, attrNum(n, "level") ?? 1))
       return "#".repeat(level) + " " + inline(n.content, ctx)
@@ -325,10 +306,17 @@ const block = (n: AdfNode, ctx: Ctx): string => {
       return taskList(n, ctx)
     case "decisionList":
       return decisionList(n, ctx)
+    case "layoutSection":
+      return layoutSection(n, ctx)
+    case "layoutColumn":
+      return layoutColumn(n, ctx)
     case "mediaSingle":
       return mediaSingle(n, ctx)
     case "mediaGroup":
       return mediaGroup(n, ctx)
+    case "blockCard":
+    case "embedCard":
+      return blockCard(n, ctx)
     case "extension":
       return extensionPlaceholder(n, "extension", ctx)
     case "bodiedExtension":
@@ -337,6 +325,14 @@ const block = (n: AdfNode, ctx: Ctx): string => {
       ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
       return `<!-- unsupported ADF node: ${n.type} -->`
   }
+}
+
+const paragraph = (n: AdfNode, ctx: Ctx): string => {
+  const body = escapeLineStarts(inline(n.content, ctx))
+  const marks = n.marks ?? []
+  if (marks.length === 0 || ctx.inTable) return body
+  const marksPart = ` marks=${stableStringify(marks)}`
+  return `<!-- adf:paragraph${marksPart} -->\n\n${body}\n\n<!-- adf:/paragraph -->`
 }
 
 const blockquote = (content: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): string => {
@@ -423,15 +419,25 @@ const table = (n: AdfNode, ctx: Ctx): string => {
   const separator = Array<string>(colCount).fill("---")
   const bodyRows = (firstIsHeader ? allRows.slice(1) : allRows).map(pad)
   const fmt = (cells: Array<string>): string => `| ${cells.join(" | ")} |`
-  return [fmt(header), fmt(separator), ...bodyRows.map(fmt)].join("\n")
+  return encodedBlockNode(n, [fmt(header), fmt(separator), ...bodyRows.map(fmt)].join("\n"), ctx)
 }
 
 const panel = (n: AdfNode, ctx: Ctx): string => {
   const panelType = attrStr(n, "panelType") ?? "info"
-  const tag = PANEL_MAP[panelType] ?? "NOTE"
+  const attrs = n.attrs ?? { panelType }
+  const attrsPart = Object.keys(attrs).length > 0 ? ` attrs=${stableStringify(attrs)}` : ""
+  const open = `<!-- adf:panel type=${panelType}${attrsPart} -->`
+  if (ctx.inTable) return open
   const inner = (n.content ?? []).map((c) => block(c, ctx)).join("\n\n")
-  const lines = [`[!${tag}]`, ...inner.split("\n")]
-  return lines.map((l) => (l.length === 0 ? ">" : `> ${l}`)).join("\n")
+  const parts = inner.length > 0 ? [open, inner] : [open]
+  return [...parts, "<!-- adf:/panel -->"].join("\n\n")
+}
+
+const encodedBlockNode = (n: AdfNode, body: string, ctx: Ctx): string => {
+  if (ctx.inTable) return body
+  const open = `<!-- adf:${n.type} node=${stableStringify(n)} -->`
+  const parts = body.length > 0 ? [open, body] : [open]
+  return [...parts, `<!-- adf:/${n.type} -->`].join("\n\n")
 }
 
 const expand = (n: AdfNode, ctx: Ctx): string => {
@@ -442,7 +448,8 @@ const expand = (n: AdfNode, ctx: Ctx): string => {
   // backslash escapes are the correct (and only working) form.
   const safeTitle = ctx.inTable ? escapeText(title) : escapeHtml(title)
   const inner = (n.content ?? []).map((c) => block(c, ctx)).join("\n\n")
-  return `<details><summary>${safeTitle}</summary>\n\n${inner}\n\n</details>`
+  if (ctx.inTable) return `<details><summary>${safeTitle}</summary>\n\n${inner}\n\n</details>`
+  return encodedBlockNode(n, `${title}\n\n${inner}`, ctx)
 }
 
 const taskList = (n: AdfNode, ctx: Ctx): string => {
@@ -457,7 +464,7 @@ const taskList = (n: AdfNode, ctx: Ctx): string => {
     const text = inline(item.content, ctx)
     lines.push(`- [${checked}] ${text}`)
   }
-  return lines.join("\n")
+  return encodedBlockNode(n, lines.join("\n"), ctx)
 }
 
 const decisionList = (n: AdfNode, ctx: Ctx): string => {
@@ -470,7 +477,34 @@ const decisionList = (n: AdfNode, ctx: Ctx): string => {
     }
     lines.push(`- 🔘 ${inline(item.content, ctx)}`)
   }
-  return lines.join("\n")
+  return encodedBlockNode(n, lines.join("\n"), ctx)
+}
+
+const layoutSection = (n: AdfNode, ctx: Ctx): string => {
+  const body = (n.content ?? [])
+    .map((column) => block(column, ctx))
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n")
+  return encodedBlockNode(n, body, ctx)
+}
+
+const layoutColumn = (n: AdfNode, ctx: Ctx): string => (n.content ?? []).map((child) => block(child, ctx)).join("\n\n")
+
+const cardUrl = (n: AdfNode): string | undefined => {
+  const url = attrStr(n, "url")
+  if (url) return url
+  const data = attrRecord(n, "data")
+  const dataUrl = data?.["url"]
+  return typeof dataUrl === "string" ? dataUrl : undefined
+}
+
+const blockCard = (n: AdfNode, ctx: Ctx): string => {
+  const url = cardUrl(n)
+  if (!url) {
+    ctx.warnings.push({ _tag: "UnsupportedNode", nodeType: n.type })
+    return `<!-- unsupported ADF node: ${n.type} -->`
+  }
+  return encodedBlockNode(n, `<${url}>`, ctx)
 }
 
 const renderMedia = (media: AdfNode | undefined, ctx: Ctx): string => {
