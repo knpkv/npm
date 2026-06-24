@@ -131,12 +131,20 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).toContain(`<span class="adf-status" data-color="blue">TESTING</span>`)
     }).pipe(Effect.provide(TestLayer)))
 
-  it.effect("upgrades a legacy block extension placeholder to the attrs form, then stays fixed", () =>
+  it.effect("upgrades a legacy generic block extension placeholder to the attrs form, then stays fixed", () =>
     Effect.gen(function*() {
       const md = yield* roundTrip(
-        `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->\n`
+        `<!-- adf:extension key=anchor type=com.atlassian.confluence.macro.core -->\n`
       )
-      expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=")
+      expect(md).toContain("<!-- adf:extension key=anchor type=com.atlassian.confluence.macro.core attrs=")
+      const again = yield* roundTrip(md)
+      expect(again).toBe(md)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips native TOC syntax as a fixed point", () =>
+    Effect.gen(function*() {
+      const md = yield* roundTrip("[[toc:min=2,max=4]]\n")
+      expect(md).toContain("[[toc:min=2,max=4]]")
       const again = yield* roundTrip(md)
       expect(again).toBe(md)
     }).pipe(Effect.provide(TestLayer)))

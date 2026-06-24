@@ -269,23 +269,51 @@ describe("AdfWalker", () => {
     expect(r.markdown).not.toContain("confluence-mention")
   })
 
-  it("preserves the full attrs (parameters included) in the extension placeholder", () => {
+  it("renders a representable TOC extension as readable native syntax", () => {
+    const r = walk(doc([{
+      type: "extension",
+      attrs: {
+        extensionKey: "toc",
+        extensionType: "com.atlassian.confluence.macro.core"
+      }
+    }]))
+    expect(r.markdown).toContain("[[toc]]")
+    expect(r.warnings).not.toContainEqual(
+      expect.objectContaining({ _tag: "UnsupportedExtension", extensionKey: "toc" })
+    )
+  })
+
+  it("renders representable TOC levels in readable native syntax", () => {
     const r = walk(doc([{
       type: "extension",
       attrs: {
         extensionType: "com.atlassian.confluence.macro.core",
         extensionKey: "toc",
-        parameters: { macroParams: { maxLevel: { value: "3" } } }
+        parameters: {
+          macroParams: {
+            minLevel: { value: "2" },
+            maxLevel: { value: "4" }
+          }
+        }
       }
     }]))
-    const attrs = stableStringify({
+    expect(r.markdown).toContain("[[toc:min=2,max=4]]")
+  })
+
+  it("falls back to a generic placeholder when TOC attrs are not fully representable", () => {
+    const rawAttrs = {
       extensionKey: "toc",
       extensionType: "com.atlassian.confluence.macro.core",
+      layout: "default",
+      localId: "abc-123",
       parameters: { macroParams: { maxLevel: { value: "3" } } }
-    })
+    }
+    const r = walk(doc([{ type: "extension", attrs: rawAttrs }]))
+    const attrs = stableStringify(rawAttrs)
     expect(r.markdown).toContain(
       `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=${attrs} -->`
     )
+    expect(r.markdown).not.toContain("[[toc")
     expect(
       r.warnings.some((w) =>
         w._tag === "UnsupportedExtension" && w.extensionKey === "toc" && w.nodeType === "extension"

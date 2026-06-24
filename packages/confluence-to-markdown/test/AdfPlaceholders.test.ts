@@ -32,6 +32,53 @@ describe("revertPlaceholders", () => {
     })
   })
 
+  it("rewrites native TOC syntax into a Confluence core extension node", () => {
+    const out = revertPlaceholders(docOf([para("[[toc]]")])) as {
+      content: Array<{ type: string; attrs?: Record<string, unknown> }>
+    }
+
+    expect(out.content[0]).toEqual({
+      type: "extension",
+      attrs: {
+        extensionKey: "toc",
+        extensionType: "com.atlassian.confluence.macro.core"
+      }
+    })
+  })
+
+  it("rewrites native TOC syntax with levels into macro parameters", () => {
+    const out = revertPlaceholders(docOf([para("[[toc:min=2,max=4]]")])) as {
+      content: Array<{ type: string; attrs?: Record<string, unknown> }>
+    }
+
+    expect(out.content[0]).toEqual({
+      type: "extension",
+      attrs: {
+        extensionKey: "toc",
+        extensionType: "com.atlassian.confluence.macro.core",
+        parameters: {
+          macroParams: {
+            minLevel: { value: "2" },
+            maxLevel: { value: "4" }
+          }
+        }
+      }
+    })
+  })
+
+  it("leaves invalid or code-marked native TOC syntax as text", () => {
+    const invalid = revertPlaceholders(docOf([para("[[toc:min=0]]")])) as {
+      content: Array<{ type: string; content?: ReadonlyArray<unknown> }>
+    }
+    const quoted = revertPlaceholders(docOf([{
+      type: "paragraph",
+      content: [{ type: "text", text: "[[toc]]", marks: [{ type: "code" }] }]
+    }])) as { content: Array<{ type: string; content?: ReadonlyArray<unknown> }> }
+
+    expect(invalid.content[0]!.type).toBe("paragraph")
+    expect(quoted.content[0]!.type).toBe("paragraph")
+  })
+
   it("rewrites status and extension placeholders inside table cells", () => {
     const cell = (text: string) => ({
       type: "tableCell",

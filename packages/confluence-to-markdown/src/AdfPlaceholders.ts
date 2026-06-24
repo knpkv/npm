@@ -32,6 +32,8 @@
  *      spans emitted for Confluence-only inline marks
  *  - `[@Name](confluence-mention://ACCOUNT_ID)`            (link mark with a
  *      custom scheme — the only way to round-trip mention accountIds)
+ *  - `[[toc]]`, `[[toc:min=1,max=3]]` (block-level native syntax for the
+ *      Confluence Table of Contents macro)
  *
  * @module
  */
@@ -83,6 +85,8 @@ const ENCODED_BLOCK_NODE_END_RE =
   /^\s*<!--\s*adf:\/(taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
 const PARAGRAPH_MARKS_RE = /^\s*<!--\s*adf:paragraph(?:\s+marks=([\s\S]*?))?\s*-->\s*$/
 const PARAGRAPH_MARKS_END_RE = /^\s*<!--\s*adf:\/paragraph\s*-->\s*$/
+const TOC_RE = /^\s*\[\[toc(?::([^\]]+))?\]\]\s*$/
+const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
 
 const textNode = (text: string, marks: ReadonlyArray<AdfNode> | undefined): AdfNode =>
   marks && marks.length > 0 ? { type: "text", text, marks } : { type: "text", text }
@@ -272,6 +276,47 @@ const parseBlockExtensionParagraph = (node: AdfNode): BlockExtensionMarker | nul
     kind: kind === "bodiedExtension" ? "bodiedExtension" : "extension",
     attrs: buildExtensionAttrs(key, type, attrsB64)
   }
+}
+
+const parseTocParagraph = (node: AdfNode): AdfNode | null => {
+  const child = soleTextChild(node)
+  if (!child || !child.text) return null
+  const match = TOC_RE.exec(child.text)
+  if (!match) return null
+
+  let minLevel: string | undefined
+  let maxLevel: string | undefined
+  const params = match[1]?.trim()
+
+  if (params && params.length > 0) {
+    const seen = new Set<string>()
+    for (const part of params.split(",")) {
+      const [rawKey, rawValue, ...rest] = part.split("=")
+      if (rest.length > 0) return null
+      const key = rawKey?.trim()
+      const value = rawValue?.trim()
+      if ((key !== "min" && key !== "max") || !value || !/^[1-6]$/.test(value) || seen.has(key)) return null
+      seen.add(key)
+      if (key === "min") minLevel = value
+      else maxLevel = value
+    }
+  } else if (params !== undefined) {
+    return null
+  }
+
+  const macroParams: Record<string, { readonly value: string }> = {}
+  if (minLevel) macroParams.minLevel = { value: minLevel }
+  if (maxLevel) macroParams.maxLevel = { value: maxLevel }
+
+  const attrs: Record<string, unknown> = {
+    extensionKey: "toc",
+    extensionType: CONFLUENCE_CORE_MACRO_TYPE
+  }
+  if (Object.keys(macroParams).length > 0) {
+    attrs.parameters = { macroParams }
+  }
+
+  return { type: "extension", attrs }
 }
 
 const isBodiedExtensionEnd = (node: AdfNode): boolean => {
@@ -483,6 +528,9 @@ const groupMarkedParagraphs = (children: ReadonlyArray<AdfNode>): ReadonlyArray<
   return out
 }
 
+const groupNativeMacros = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> =>
+  children.map((child) => parseTocParagraph(child) ?? child)
+
 const transform = (node: AdfNode): AdfNode => {
   // ADF codeBlock permits only plain text children — expanding placeholder-
   // looking text inside one would inject schema-invalid nodes and corrupt
@@ -505,7 +553,8 @@ const transform = (node: AdfNode): AdfNode => {
       newContent.push(transform(child))
     }
   }
-  const paragraphsRestored = groupMarkedParagraphs(newContent)
+  const nativeMacrosRestored = groupNativeMacros(newContent)
+  const paragraphsRestored = groupMarkedParagraphs(nativeMacrosRestored)
   const encodedBlocksRestored = groupEncodedBlockNodes(paragraphsRestored)
   return { ...node, content: groupPanels(groupBlockExtensions(encodedBlocksRestored, node.type)) }
 }

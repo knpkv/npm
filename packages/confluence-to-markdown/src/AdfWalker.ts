@@ -98,6 +98,8 @@ const attrRecord = (n: AdfNode, key: string): Record<string, unknown> | undefine
   return v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : undefined
 }
 
+const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
+
 // Deterministic JSON for placeholder metadata: object keys are sorted
 // recursively so the same attrs always produce the same marker/sidecar data,
 // no matter what order Confluence happens to serialize them in. Keeps pull →
@@ -199,6 +201,50 @@ const extensionPlaceholder = (
     ? ` attrs=${stableStringify(attrs)}`
     : ""
   return `<!-- adf:${nodeType}${keyPart}${typePart}${attrsPart} -->`
+}
+
+const objectKeys = (v: Record<string, unknown> | undefined): ReadonlyArray<string> => Object.keys(v ?? {})
+const isOnlyKeys = (v: Record<string, unknown> | undefined, keys: ReadonlyArray<string>): boolean => {
+  const allowed = new Set(keys)
+  return objectKeys(v).every((key) => allowed.has(key))
+}
+
+const tocLevel = (macroParams: Record<string, unknown> | undefined, key: "minLevel" | "maxLevel"): string | null => {
+  const param = macroParams?.[key]
+  if (param === undefined) return null
+  if (param === null || typeof param !== "object" || Array.isArray(param)) return null
+  const record = param as Record<string, unknown>
+  if (!isOnlyKeys(record, ["value"])) return null
+  const value = record["value"]
+  return typeof value === "string" && /^[1-6]$/.test(value) ? value : null
+}
+
+const tocMarkdown = (n: AdfNode): string | null => {
+  const attrs = n.attrs
+  if (!attrs) return null
+  if (attrStr(n, "extensionKey") !== "toc" || attrStr(n, "extensionType") !== CONFLUENCE_CORE_MACRO_TYPE) return null
+  if (!isOnlyKeys(attrs, ["extensionKey", "extensionType", "parameters"])) return null
+
+  const parameters = attrRecord(n, "parameters")
+  if (!parameters) return "[[toc]]"
+  if (!isOnlyKeys(parameters, ["macroParams"])) return null
+
+  const macroParams = parameters["macroParams"]
+  if (macroParams === null || typeof macroParams !== "object" || Array.isArray(macroParams)) return null
+  const macroParamRecord = macroParams as Record<string, unknown>
+  if (!isOnlyKeys(macroParamRecord, ["minLevel", "maxLevel"])) return null
+
+  const minLevel = tocLevel(macroParamRecord, "minLevel")
+  const maxLevel = tocLevel(macroParamRecord, "maxLevel")
+  if (macroParamRecord["minLevel"] !== undefined && minLevel === null) return null
+  if (macroParamRecord["maxLevel"] !== undefined && maxLevel === null) return null
+
+  const parts = [
+    minLevel ? `min=${minLevel}` : "",
+    maxLevel ? `max=${maxLevel}` : ""
+  ].filter((part) => part.length > 0)
+
+  return parts.length > 0 ? `[[toc:${parts.join(",")}]]` : "[[toc]]"
 }
 
 const bodiedExtension = (n: AdfNode, ctx: Ctx): string => {
@@ -318,7 +364,7 @@ const block = (n: AdfNode, ctx: Ctx): string => {
     case "embedCard":
       return blockCard(n, ctx)
     case "extension":
-      return extensionPlaceholder(n, "extension", ctx)
+      return tocMarkdown(n) ?? extensionPlaceholder(n, "extension", ctx)
     case "bodiedExtension":
       return bodiedExtension(n, ctx)
     default:
