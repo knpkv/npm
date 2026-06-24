@@ -321,6 +321,27 @@ describe("AdfWalker", () => {
     ).toBe(true)
   })
 
+  it("falls back to a generic placeholder for Confluence TOC macroMetadata", () => {
+    const rawAttrs = {
+      extensionKey: "toc",
+      extensionType: "com.atlassian.confluence.macro.core",
+      layout: "default",
+      parameters: {
+        macroMetadata: {
+          schemaVersion: { value: "1" },
+          title: "Table of Contents"
+        },
+        macroParams: {}
+      }
+    }
+    const r = walk(doc([{ type: "extension", attrs: rawAttrs }]))
+    const attrs = stableStringify(rawAttrs)
+    expect(r.markdown).toContain(
+      `<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=${attrs} -->`
+    )
+    expect(r.markdown).not.toContain("[[toc")
+  })
+
   it("emits the same attrs blob regardless of source key order", () => {
     const a = walk(doc([{ type: "extension", attrs: { extensionKey: "toc", extensionType: "t" } }]))
     const b = walk(doc([{ type: "extension", attrs: { extensionType: "t", extensionKey: "toc" } }]))

@@ -170,6 +170,34 @@ describe("MarkdownConverter round-trip", () => {
       expect(adfOut.content[0]).toEqual({ type: "extension", attrs })
     }).pipe(Effect.provide(TestLayer)))
 
+  it.effect("round-trips Confluence TOC macroMetadata through the placeholder attrs blob", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const attrs = {
+        extensionKey: "toc",
+        extensionType: "com.atlassian.confluence.macro.core",
+        layout: "default",
+        parameters: {
+          macroMetadata: {
+            schemaVersion: { value: "1" },
+            title: "Table of Contents"
+          },
+          macroParams: {}
+        }
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [{ type: "extension", attrs }]
+      }))
+      expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=")
+      expect(md).not.toContain("[[toc")
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string; attrs: Record<string, unknown> }>
+      }
+      expect(adfOut.content[0]).toEqual({ type: "extension", attrs })
+    }).pipe(Effect.provide(TestLayer)))
+
   it.effect("round-trips a bodiedExtension with its body re-attached", () =>
     Effect.gen(function*() {
       const converter = yield* MarkdownConverter

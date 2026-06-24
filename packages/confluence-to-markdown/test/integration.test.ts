@@ -366,7 +366,11 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
     if (Array.isArray(value)) return value.map(normalizeAttrs)
     if (value !== null && typeof value === "object") {
       const entries = Object.entries(value as Record<string, unknown>)
-        .filter(([key, v]) => key !== "localId" && !(key === "macroId" && v !== null && typeof v === "object"))
+        .filter(([key, v]) =>
+          key !== "localId" &&
+          key !== "macroMetadata" &&
+          !(key === "macroId" && v !== null && typeof v === "object")
+        )
         .map(([key, v]) => [key, normalizeAttrs(v)] as const)
       return Object.fromEntries(entries)
     }
