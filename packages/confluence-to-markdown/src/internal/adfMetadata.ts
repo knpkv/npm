@@ -10,16 +10,6 @@ import * as Schema from "effect/Schema"
 
 export type AdfMetadataKind = "attrs" | "marks" | "node"
 
-export interface AdfMetadataEntry {
-  readonly kind: AdfMetadataKind
-  readonly value: unknown
-}
-
-export interface AdfMetadataSidecar {
-  readonly version: 1
-  readonly entries: Readonly<Record<string, AdfMetadataEntry>>
-}
-
 export const AdfMetadataEntrySchema = Schema.Struct({
   kind: Schema.Literals(["attrs", "marks", "node"]),
   value: Schema.Unknown
@@ -29,6 +19,9 @@ export const AdfMetadataSidecarSchema = Schema.Struct({
   version: Schema.Literal(1),
   entries: Schema.Record(Schema.String, AdfMetadataEntrySchema)
 })
+
+export type AdfMetadataEntry = typeof AdfMetadataEntrySchema.Type
+export type AdfMetadataSidecar = typeof AdfMetadataSidecarSchema.Type
 
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
