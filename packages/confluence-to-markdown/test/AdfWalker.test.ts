@@ -4,9 +4,18 @@ import { walk } from "../src/AdfWalker.js"
 
 const doc = (content: ReadonlyArray<unknown>): DocNode => ({ version: 1, type: "doc", content } as unknown as DocNode)
 
-// Expected `attrs=` blob: base64 of the attrs JSON with keys sorted (write
-// the literal in sorted key order so JSON.stringify matches the walker).
-const b64 = (attrs: Record<string, unknown>): string => Buffer.from(JSON.stringify(attrs)).toString("base64")
+const stableStringify = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
+  if (v !== null && typeof v === "object") {
+    return `{${
+      Object.entries(v as Record<string, unknown>)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, value]) => `${JSON.stringify(k)}:${stableStringify(value)}`)
+        .join(",")
+    }}`
+  }
+  return JSON.stringify(v) ?? "null"
+}
 
 describe("AdfWalker", () => {
   it("emits a heading at the right level", () => {
@@ -159,34 +168,57 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("| 1 | 2 |")
   })
 
-  it("renders a panel as a GitHub admonition", () => {
+  it("renders a panel as a Confluence-preserving placeholder", () => {
     const r = walk(doc([{
       type: "panel",
       attrs: { panelType: "warning" },
       content: [{ type: "paragraph", content: [{ type: "text", text: "be careful" }] }]
     }]))
-    expect(r.markdown).toContain("[!WARNING]")
+    expect(r.markdown).toContain(
+      `<!-- adf:panel type=warning attrs=${stableStringify({ panelType: "warning" })} -->`
+    )
     expect(r.markdown).toContain("be careful")
+    expect(r.markdown).toContain("<!-- adf:/panel -->")
   })
 
   it("renders task lists with checkbox state", () => {
-    const r = walk(doc([{
+    const node = {
       type: "taskList",
+      attrs: { localId: "tasks-1" },
       content: [
         {
           type: "taskItem",
-          attrs: { state: "DONE" },
+          attrs: { localId: "task-1", state: "DONE" },
           content: [{ type: "text", text: "done" }]
         },
         {
           type: "taskItem",
-          attrs: { state: "TODO" },
+          attrs: { localId: "task-2", state: "TODO" },
           content: [{ type: "text", text: "todo" }]
         }
       ]
-    }]))
+    }
+    const r = walk(doc([node]))
+    expect(r.markdown).toContain(`<!-- adf:taskList node=${stableStringify(node)} -->`)
     expect(r.markdown).toContain("- [x] done")
     expect(r.markdown).toContain("- [ ] todo")
+    expect(r.markdown).toContain("<!-- adf:/taskList -->")
+  })
+
+  it("wraps decision lists so they survive push as native decisions", () => {
+    const node = {
+      type: "decisionList",
+      attrs: { localId: "decisions-1" },
+      content: [{
+        type: "decisionItem",
+        attrs: { localId: "decision-1", state: "DECIDED" },
+        content: [{ type: "text", text: "decide" }]
+      }]
+    }
+    const r = walk(doc([node]))
+    expect(r.markdown).toContain(`<!-- adf:decisionList node=${stableStringify(node)} -->`)
+    expect(r.markdown).toContain("- 🔘 decide")
+    expect(r.markdown).toContain("<!-- adf:/decisionList -->")
   })
 
   it("renders every child of a mediaGroup", () => {
@@ -246,7 +278,7 @@ describe("AdfWalker", () => {
         parameters: { macroParams: { maxLevel: { value: "3" } } }
       }
     }]))
-    const attrs = b64({
+    const attrs = stableStringify({
       extensionKey: "toc",
       extensionType: "com.atlassian.confluence.macro.core",
       parameters: { macroParams: { maxLevel: { value: "3" } } }
@@ -283,8 +315,8 @@ describe("AdfWalker", () => {
         content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }]
       }
     ]))
-    const inlineAttrs = b64({ extensionKey: "jira-issue", extensionType: "com.example" })
-    const bodiedAttrs = b64({ extensionKey: "details", extensionType: "com.example" })
+    const inlineAttrs = stableStringify({ extensionKey: "jira-issue", extensionType: "com.example" })
+    const bodiedAttrs = stableStringify({ extensionKey: "details", extensionType: "com.example" })
     expect(r.markdown).toContain(
       `<!-- adf:inlineExtension key=jira-issue type=com.example attrs=${inlineAttrs} -->`
     )
@@ -325,7 +357,7 @@ describe("AdfWalker", () => {
       }]
     }]))
     expect(r.markdown).not.toContain("adf:/bodiedExtension")
-    expect(r.markdown).not.toContain("body")
+    expect(r.markdown).not.toContain("\n\nbody\n\n")
     expect(r.markdown).toContain("<!-- adf:bodiedExtension key=details type=com.example")
   })
 
@@ -362,6 +394,42 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("![diagram](https://x.test/d.png)\n_Figure 1_")
   })
 
+  it("renders layout sections and columns as visible markdown content", () => {
+    const r = walk(doc([{
+      type: "layoutSection",
+      content: [
+        {
+          type: "layoutColumn",
+          attrs: { width: 50 },
+          content: [{ type: "paragraph", content: [{ type: "text", text: "left" }] }]
+        },
+        {
+          type: "layoutColumn",
+          attrs: { width: 50 },
+          content: [{ type: "paragraph", content: [{ type: "text", text: "right" }] }]
+        }
+      ]
+    }]))
+    expect(r.markdown).toContain("left\n\nright")
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "layoutSection")).toBe(false)
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "layoutColumn")).toBe(false)
+  })
+
+  it("renders block and embed smart cards from direct and nested urls", () => {
+    const blockCard = { type: "blockCard", attrs: { url: "https://x.test/block" } }
+    const embedCard = { type: "embedCard", attrs: { data: { url: "https://x.test/embed" } } }
+    const r = walk(doc([
+      blockCard,
+      embedCard
+    ]))
+    expect(r.markdown).toContain(`<!-- adf:blockCard node=${stableStringify(blockCard)} -->`)
+    expect(r.markdown).toContain("<https://x.test/block>")
+    expect(r.markdown).toContain(`<!-- adf:embedCard node=${stableStringify(embedCard)} -->`)
+    expect(r.markdown).toContain("<https://x.test/embed>")
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "blockCard")).toBe(false)
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "embedCard")).toBe(false)
+  })
+
   it("backslash-escapes nestedExpand titles inside table cells (inline HTML context)", () => {
     const r = walk(doc([{
       type: "table",
@@ -386,7 +454,8 @@ describe("AdfWalker", () => {
       attrs: { title: `v2 *beta* <a href="x">` },
       content: [{ type: "paragraph", content: [{ type: "text", text: "inner" }] }]
     }]))
-    expect(r.markdown).toContain(`<summary>v2 *beta* &lt;a href=&quot;x&quot;&gt;</summary>`)
+    expect(r.markdown).toContain(`<!-- adf:expand node=`)
+    expect(r.markdown).toContain(`v2 *beta* <a href="x">`)
     expect(r.markdown).not.toContain("\\*beta\\*")
   })
 
@@ -465,11 +534,37 @@ describe("AdfWalker", () => {
       type: "paragraph",
       content: [
         { type: "text", text: "before " },
-        { type: "inlineCard", attrs: { data: { url: "https://hidden.test" } } },
+        { type: "inlineCard", attrs: { data: { title: "hidden" } } },
         { type: "text", text: " after" }
       ]
     }]))
     expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "inlineCard")).toBe(true)
+  })
+
+  it("renders inline cards from nested data urls", () => {
+    const r = walk(doc([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "see " },
+        { type: "inlineCard", attrs: { data: { url: "https://x.test/inline" } } }
+      ]
+    }]))
+    expect(r.markdown).toContain(
+      `see <!-- adf:inlineCard attrs=${stableStringify({ data: { url: "https://x.test/inline" } })} -->`
+    )
+    expect(r.warnings.some((w) => w._tag === "UnsupportedNode" && w.nodeType === "inlineCard")).toBe(false)
+  })
+
+  it("wraps paragraph-level marks so alignment and indentation survive push", () => {
+    const marks = [{ type: "alignment", attrs: { align: "center" } }]
+    const r = walk(doc([{
+      type: "paragraph",
+      marks,
+      content: [{ type: "text", text: "centered" }]
+    }]))
+    expect(r.markdown).toContain(`<!-- adf:paragraph marks=${stableStringify(marks)} -->`)
+    expect(r.markdown).toContain("centered")
+    expect(r.markdown).toContain("<!-- adf:/paragraph -->")
   })
 
   it("does not double-wrap an em-marked caption", () => {
@@ -505,7 +600,7 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("_orphan_")
   })
 
-  it("maps note panels to IMPORTANT and success panels to TIP", () => {
+  it("preserves note and success panel types", () => {
     const r = walk(doc([
       {
         type: "panel",
@@ -518,8 +613,10 @@ describe("AdfWalker", () => {
         content: [{ type: "paragraph", content: [{ type: "text", text: "s" }] }]
       }
     ]))
-    expect(r.markdown).toContain("[!IMPORTANT]")
-    expect(r.markdown).toContain("[!TIP]")
+    expect(r.markdown).toContain(`<!-- adf:panel type=note attrs=${stableStringify({ panelType: "note" })} -->`)
+    expect(r.markdown).toContain(
+      `<!-- adf:panel type=success attrs=${stableStringify({ panelType: "success" })} -->`
+    )
   })
 
   it("ends output with exactly one newline", () => {

@@ -189,6 +189,225 @@ describe("MarkdownConverter round-trip", () => {
       ])
     }).pipe(Effect.provide(TestLayer)))
 
+  it.effect("round-trips a Confluence panel as a panel node", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const attrs = { panelType: "warning" }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "panel",
+          attrs,
+          content: [{ type: "paragraph", content: [{ type: "text", text: "watch this" }] }]
+        }]
+      }))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
+        content: Array<{ type: string; attrs: Record<string, unknown>; content: Array<unknown> }>
+      }
+      expect(adfOut.content[0]).toEqual({
+        type: "panel",
+        attrs,
+        content: [{ type: "paragraph", content: [{ type: "text", text: "watch this" }] }]
+      })
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips Confluence-only inline marks as native marks", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "underline", marks: [{ type: "underline" }] },
+            { type: "text", text: "2", marks: [{ type: "subsup", attrs: { type: "sub" } }] },
+            { type: "text", text: "2", marks: [{ type: "subsup", attrs: { type: "sup" } }] },
+            { type: "text", text: "Colored", marks: [{ type: "textColor", attrs: { color: "#ff5630" } }] },
+            { type: "text", text: "highlighted", marks: [{ type: "backgroundColor", attrs: { color: "#f8e6a0" } }] }
+          ]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips paragraph alignment and indentation marks", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            marks: [{ type: "alignment", attrs: { align: "center" } }],
+            content: [{ type: "text", text: "centered" }]
+          },
+          {
+            type: "paragraph",
+            marks: [{ type: "alignment", attrs: { align: "end" } }],
+            content: [{ type: "text", text: "right" }]
+          },
+          {
+            type: "paragraph",
+            marks: [{ type: "indentation", attrs: { level: 2 } }],
+            content: [{ type: "text", text: "indented" }]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content).toEqual(source.content)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips inline smart links as native inlineCard nodes", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Inline smart link: " },
+            { type: "inlineCard", attrs: { url: "https://www.atlassian.com" } },
+            { type: "text", text: "." }
+          ]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips task lists as native task nodes", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "taskList",
+          attrs: { localId: "tasks-1" },
+          content: [
+            {
+              type: "taskItem",
+              attrs: { localId: "task-1", state: "DONE" },
+              content: [{ type: "text", text: "Existing primitive coverage reviewed" }]
+            },
+            {
+              type: "taskItem",
+              attrs: { localId: "task-2", state: "TODO" },
+              content: [{ type: "text", text: "Insert real @mention in editor" }]
+            }
+          ]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips decision lists as native decision nodes", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "decisionList",
+          attrs: { localId: "decisions-1" },
+          content: [{
+            type: "decisionItem",
+            attrs: { localId: "decision-1", state: "DECIDED" },
+            content: [{ type: "text", text: "Decide whether to maintain a separate asset for advanced macros." }]
+          }]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips expand, table, layout, cards, date, and emoji as native nodes", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [
+          {
+            type: "expand",
+            attrs: { title: "Expandable supplementary content" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "This section can be expanded." }] }]
+          },
+          {
+            type: "table",
+            content: [{
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Primitive" }] }]
+                },
+                {
+                  type: "tableHeader",
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "Example" }] }]
+                }
+              ]
+            }, {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Date" }] }] },
+                {
+                  type: "tableCell",
+                  content: [{
+                    type: "paragraph",
+                    content: [{ type: "date", attrs: { timestamp: "1782259200000" } }]
+                  }]
+                }
+              ]
+            }, {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Emoji" }] }] },
+                {
+                  type: "tableCell",
+                  content: [{
+                    type: "paragraph",
+                    content: [{ type: "emoji", attrs: { shortName: ":white_check_mark:", text: "✅" } }]
+                  }]
+                }
+              ]
+            }]
+          },
+          {
+            type: "layoutSection",
+            content: [
+              {
+                type: "layoutColumn",
+                attrs: { width: 50 },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Left column" }] }]
+              },
+              {
+                type: "layoutColumn",
+                attrs: { width: 50 },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Right column" }] }]
+              }
+            ]
+          },
+          { type: "blockCard", attrs: { url: "https://www.atlassian.com/software/confluence" } },
+          { type: "embedCard", attrs: { url: "https://www.atlassian.com/software/confluence", layout: "center" } }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content).toEqual(source.content)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Regression: `|` in a cell was escaped twice (escapeText + the table-cell
   // pass), emitting `\\|` — GFM reads that as literal backslash + bare pipe,
   // which opens a phantom column and breaks the row.

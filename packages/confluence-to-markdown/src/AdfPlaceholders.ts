@@ -15,9 +15,21 @@
  *      the whole paragraph is just this comment; `attrs` is base64 JSON of
  *      the node's full attrs — parameters, localId, layout — and wins over
  *      the readable key/type parts; key/type-only is the legacy form)
+ *  - `<!-- adf:paragraph marks=BASE64 --> BODY <!-- adf:/paragraph -->`
+ *      (the body paragraph regains its paragraph-level marks)
  *  - `<!-- adf:bodiedExtension … --> BODY <!-- adf:/bodiedExtension -->`
  *      (the sibling blocks between the markers become the extension's body)
+ *  - `<!-- adf:inlineCard attrs=BASE64 -->` (inline)
  *  - `<!-- adf:inlineExtension key=KEY type=TYPE attrs=BASE64 -->` (inline)
+ *  - `<!-- adf:date node=BASE64 -->` and `<!-- adf:emoji node=BASE64 -->`
+ *      (inline)
+ *  - `<!-- adf:panel type=TYPE attrs=BASE64 --> BODY <!-- adf:/panel -->`
+ *      (the sibling blocks between the markers become the panel's body)
+ *  - `<!-- adf:TYPE node=BASE64 --> BODY <!-- adf:/TYPE -->` for selected
+ *      native block nodes such as task/decision lists, expands, layouts,
+ *      cards, and tables
+ *  - `<u>TEXT</u>`, `<sub>TEXT</sub>`, `<sup>TEXT</sup>`, and exact styled
+ *      spans emitted for Confluence-only inline marks
  *  - `[@Name](confluence-mention://ACCOUNT_ID)`            (link mark with a
  *      custom scheme — the only way to round-trip mention accountIds)
  *
@@ -36,16 +48,47 @@ interface AdfNode {
 }
 
 const STATUS_RE = /<span class="adf-status"\s+data-color="([^"]+)">([^<]*)<\/span>/g
+const INLINE_NODE_RE = /<!--\s*adf:(date|emoji)(?:\s+node=([\s\S]*?))?\s*-->/g
+const INLINE_CARD_RE = /<!--\s*adf:inlineCard(?:\s+attrs=([\s\S]*?))?\s*-->/g
 const INLINE_EXTENSION_RE =
-  /<!--\s*adf:inlineExtension(?:\s+key=(\S+?))?(?:\s+type=(\S+?))?(?:\s+attrs=([A-Za-z0-9+/=]+))?\s*-->/g
-const COMBINED_INLINE_RE = new RegExp(`${STATUS_RE.source}|${INLINE_EXTENSION_RE.source}`, "g")
+  /<!--\s*adf:inlineExtension(?:\s+key=(\S+?))?(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->/g
+const UNDERLINE_RE = /<u>([^<]*)<\/u>/g
+const SUBSCRIPT_RE = /<sub>([^<]*)<\/sub>/g
+const SUPERSCRIPT_RE = /<sup>([^<]*)<\/sup>/g
+const TEXT_COLOR_RE = /<span style="color:([^"<>]+)">([^<]*)<\/span>/g
+const BACKGROUND_COLOR_RE = /<span style="background-color:([^"<>]+)">([^<]*)<\/span>/g
+const COMBINED_INLINE_RE = new RegExp(
+  [
+    INLINE_NODE_RE.source,
+    STATUS_RE.source,
+    INLINE_CARD_RE.source,
+    INLINE_EXTENSION_RE.source,
+    UNDERLINE_RE.source,
+    SUBSCRIPT_RE.source,
+    SUPERSCRIPT_RE.source,
+    TEXT_COLOR_RE.source,
+    BACKGROUND_COLOR_RE.source
+  ].join("|"),
+  "g"
+)
 
 const BLOCK_EXTENSION_RE =
-  /^\s*<!--\s*adf:(extension|bodiedExtension)(?:\s+key=(\S+?))?(?:\s+type=(\S+?))?(?:\s+attrs=([A-Za-z0-9+/=]+))?\s*-->\s*$/
+  /^\s*<!--\s*adf:(extension|bodiedExtension)(?:\s+key=(\S+?))?(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->\s*$/
 const BODIED_EXTENSION_END_RE = /^\s*<!--\s*adf:\/bodiedExtension\s*-->\s*$/
+const PANEL_RE = /^\s*<!--\s*adf:panel(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->\s*$/
+const PANEL_END_RE = /^\s*<!--\s*adf:\/panel\s*-->\s*$/
+const ENCODED_BLOCK_NODE_RE =
+  /^\s*<!--\s*adf:(taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
+const ENCODED_BLOCK_NODE_END_RE =
+  /^\s*<!--\s*adf:\/(taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
+const PARAGRAPH_MARKS_RE = /^\s*<!--\s*adf:paragraph(?:\s+marks=([\s\S]*?))?\s*-->\s*$/
+const PARAGRAPH_MARKS_END_RE = /^\s*<!--\s*adf:\/paragraph\s*-->\s*$/
 
 const textNode = (text: string, marks: ReadonlyArray<AdfNode> | undefined): AdfNode =>
   marks && marks.length > 0 ? { type: "text", text, marks } : { type: "text", text }
+
+const addMark = (marks: ReadonlyArray<AdfNode> | undefined, mark: AdfNode): ReadonlyArray<AdfNode> =>
+  marks && marks.length > 0 ? [...marks, mark] : [mark]
 
 // Code-marked text is a *quotation* of placeholder syntax, not a placeholder
 // (the walker never emits placeholders with a code mark) — expanding it would
@@ -71,10 +114,12 @@ const decodeAttrsBlob = Schema.decodeUnknownOption(AttrsBlob)
 const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null => {
   if (!b64) return null
   try {
-    const decoded = decodeAttrsBlob(JSON.parse(fromBase64(b64)) as unknown)
+    const raw = b64.trim()
+    const parsed = JSON.parse(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    const decoded = decodeAttrsBlob(parsed)
     return Option.isSome(decoded) ? decoded.value : null
   } catch {
-    // Invalid base64 (hand-edited file?) — fall back to the readable key/type.
+    // Invalid JSON/base64 (hand-edited file?) — fall back to the readable key/type.
     return null
   }
 }
@@ -92,6 +137,43 @@ const buildExtensionAttrs = (
   return attrs
 }
 
+const buildPanelAttrs = (type: string | undefined, attrsB64: string | undefined): Record<string, unknown> => {
+  const decoded = decodeAttrs(attrsB64)
+  if (decoded) return decoded
+  return type ? { panelType: type } : {}
+}
+
+const buildInlineCardAttrs = (attrsB64: string | undefined): Record<string, unknown> => decodeAttrs(attrsB64) ?? {}
+
+const decodeMarks = (b64: string | undefined): ReadonlyArray<AdfNode> => {
+  if (!b64) return []
+  try {
+    const raw = b64.trim()
+    const parsed = JSON.parse(raw.startsWith("[") ? raw : fromBase64(raw)) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((mark): mark is AdfNode =>
+        mark !== null && typeof mark === "object" && typeof (mark as Record<string, unknown>)["type"] === "string"
+      )
+      : []
+  } catch {
+    return []
+  }
+}
+
+const decodeNode = (b64: string | undefined): AdfNode | null => {
+  if (!b64) return null
+  try {
+    const raw = b64.trim()
+    const parsed = JSON.parse(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    return parsed !== null && typeof parsed === "object" &&
+        typeof (parsed as Record<string, unknown>)["type"] === "string"
+      ? parsed as AdfNode
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** Split a text node into a sequence of text + status + inlineExtension nodes. */
 const expandInlineText = (
   text: string,
@@ -107,11 +189,30 @@ const expandInlineText = (
     if (match.index > lastIndex) {
       out.push(textNode(text.slice(lastIndex, match.index), marks))
     }
-    // Status capture groups: 1=color, 2=text. InlineExtension: 3=key, 4=type, 5=attrs.
+    // Capture groups follow COMBINED_INLINE_RE order.
+    // InlineNode: 1=type, 2=node. Status: 3=color, 4=text.
+    // InlineCard: 5=attrs. InlineExtension: 6=key, 7=type, 8=attrs.
+    // Underline: 9=text. Sub: 10=text. Sup: 11=text.
+    // Text color: 12=color, 13=text. Background color: 14=color, 15=text.
     if (match[1] !== undefined) {
-      out.push({ type: "status", attrs: { text: match[2] ?? "", color: match[1] } })
+      const decoded = decodeNode(match[2])
+      if (decoded && decoded.type === match[1]) out.push(decoded)
+    } else if (match[3] !== undefined) {
+      out.push({ type: "status", attrs: { text: match[4] ?? "", color: match[3] } })
+    } else if (match[5] !== undefined) {
+      out.push({ type: "inlineCard", attrs: buildInlineCardAttrs(match[5]) })
+    } else if (match[9] !== undefined) {
+      out.push(textNode(match[9], addMark(marks, { type: "underline" })))
+    } else if (match[10] !== undefined) {
+      out.push(textNode(match[10], addMark(marks, { type: "subsup", attrs: { type: "sub" } })))
+    } else if (match[11] !== undefined) {
+      out.push(textNode(match[11], addMark(marks, { type: "subsup", attrs: { type: "sup" } })))
+    } else if (match[12] !== undefined) {
+      out.push(textNode(match[13] ?? "", addMark(marks, { type: "textColor", attrs: { color: match[12] } })))
+    } else if (match[14] !== undefined) {
+      out.push(textNode(match[15] ?? "", addMark(marks, { type: "backgroundColor", attrs: { color: match[14] } })))
     } else {
-      out.push({ type: "inlineExtension", attrs: buildExtensionAttrs(match[3], match[4], match[5]) })
+      out.push({ type: "inlineExtension", attrs: buildExtensionAttrs(match[6], match[7], match[8]) })
     }
     lastIndex = match.index + match[0].length
   }
@@ -178,6 +279,50 @@ const isBodiedExtensionEnd = (node: AdfNode): boolean => {
   return child !== null && typeof child.text === "string" && BODIED_EXTENSION_END_RE.test(child.text)
 }
 
+const parsePanelParagraph = (node: AdfNode): Record<string, unknown> | null => {
+  const child = soleTextChild(node)
+  if (!child || !child.text) return null
+  const match = PANEL_RE.exec(child.text)
+  if (!match) return null
+  const [, type, attrsB64] = match
+  return buildPanelAttrs(type, attrsB64)
+}
+
+const isPanelEnd = (node: AdfNode): boolean => {
+  const child = soleTextChild(node)
+  return child !== null && typeof child.text === "string" && PANEL_END_RE.test(child.text)
+}
+
+const parseEncodedBlockNodeParagraph = (node: AdfNode): { readonly type: string; readonly node: AdfNode } | null => {
+  const child = soleTextChild(node)
+  if (!child || !child.text) return null
+  const match = ENCODED_BLOCK_NODE_RE.exec(child.text)
+  if (!match) return null
+  const decoded = decodeNode(match[2])
+  if (!decoded || decoded.type !== match[1]) return null
+  return { type: match[1]!, node: decoded }
+}
+
+const isEncodedBlockNodeEnd = (node: AdfNode, type: string): boolean => {
+  const child = soleTextChild(node)
+  if (child === null || typeof child.text !== "string") return false
+  const match = ENCODED_BLOCK_NODE_END_RE.exec(child.text)
+  return match?.[1] === type
+}
+
+const parseParagraphMarksParagraph = (node: AdfNode): ReadonlyArray<AdfNode> | null => {
+  const child = soleTextChild(node)
+  if (!child || !child.text) return null
+  const match = PARAGRAPH_MARKS_RE.exec(child.text)
+  if (!match) return null
+  return decodeMarks(match[1])
+}
+
+const isParagraphMarksEnd = (node: AdfNode): boolean => {
+  const child = soleTextChild(node)
+  return child !== null && typeof child.text === "string" && PARAGRAPH_MARKS_END_RE.test(child.text)
+}
+
 /**
  * Replace block-extension marker paragraphs among `children`. A bare
  * `extension` marker becomes an extension node; a `bodiedExtension` marker
@@ -237,6 +382,107 @@ const groupBlockExtensions = (children: ReadonlyArray<AdfNode>, parentType: stri
   return out
 }
 
+const groupPanels = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> => {
+  const out: Array<AdfNode> = []
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    if (!child) continue
+    const attrs = parsePanelParagraph(child)
+    if (!attrs) {
+      if (!isPanelEnd(child)) out.push(child)
+      continue
+    }
+
+    let end = -1
+    for (let j = i + 1; j < children.length; j++) {
+      if (isPanelEnd(children[j]!)) {
+        end = j
+        break
+      }
+      if (parsePanelParagraph(children[j]!)) break
+    }
+
+    if (end === -1) {
+      out.push({ type: "panel", attrs, content: [{ type: "paragraph", content: [] }] })
+      continue
+    }
+
+    const body = groupPanels(children.slice(i + 1, end))
+    out.push({
+      type: "panel",
+      attrs,
+      content: body.length > 0 ? body : [{ type: "paragraph", content: [] }]
+    })
+    i = end
+  }
+  return out
+}
+
+const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> => {
+  const out: Array<AdfNode> = []
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    if (!child) continue
+    const marker = parseEncodedBlockNodeParagraph(child)
+    if (!marker) {
+      out.push(child)
+      continue
+    }
+
+    let end = -1
+    for (let j = i + 1; j < children.length; j++) {
+      if (isEncodedBlockNodeEnd(children[j]!, marker.type)) {
+        end = j
+        break
+      }
+      if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
+    }
+
+    out.push(marker.node)
+    if (end !== -1) i = end
+  }
+  return out
+}
+
+const groupMarkedParagraphs = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> => {
+  const out: Array<AdfNode> = []
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    if (!child) continue
+    const marks = parseParagraphMarksParagraph(child)
+    if (!marks) {
+      if (!isParagraphMarksEnd(child)) out.push(child)
+      continue
+    }
+
+    let end = -1
+    for (let j = i + 1; j < children.length; j++) {
+      if (isParagraphMarksEnd(children[j]!)) {
+        end = j
+        break
+      }
+      if (parseParagraphMarksParagraph(children[j]!) !== null) break
+    }
+
+    if (end === -1) {
+      out.push({ type: "paragraph", marks, content: [] })
+      continue
+    }
+
+    const body = children.slice(i + 1, end)
+    const first = body[0]
+    if (first?.type === "paragraph") {
+      out.push(marks.length > 0 ? { ...first, marks } : first)
+      for (const rest of body.slice(1)) out.push(rest)
+    } else {
+      out.push({ type: "paragraph", marks, content: [] })
+      for (const rest of body) out.push(rest)
+    }
+    i = end
+  }
+  return out
+}
+
 const transform = (node: AdfNode): AdfNode => {
   // ADF codeBlock permits only plain text children — expanding placeholder-
   // looking text inside one would inject schema-invalid nodes and corrupt
@@ -259,7 +505,9 @@ const transform = (node: AdfNode): AdfNode => {
       newContent.push(transform(child))
     }
   }
-  return { ...node, content: groupBlockExtensions(newContent, node.type) }
+  const paragraphsRestored = groupMarkedParagraphs(newContent)
+  const encodedBlocksRestored = groupEncodedBlockNodes(paragraphsRestored)
+  return { ...node, content: groupPanels(groupBlockExtensions(encodedBlocksRestored, node.type)) }
 }
 
 /** Walk the document tree and rewrite placeholder text into proper ADF nodes. */
