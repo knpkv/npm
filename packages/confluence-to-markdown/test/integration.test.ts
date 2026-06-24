@@ -366,8 +366,22 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
     if (Array.isArray(value)) return value.map(normalizeAttrs)
     if (value !== null && typeof value === "object") {
       const entries = Object.entries(value as Record<string, unknown>)
-        .filter(([key, v]) => key !== "localId" && !(key === "macroId" && v !== null && typeof v === "object"))
         .map(([key, v]) => [key, normalizeAttrs(v)] as const)
+        .filter(([key, v]) => {
+          if (key === "localId" || key === "macroMetadata") return false
+          if (key === "layout" && v === "default") return false
+          if (key === "macroId" && v !== null && typeof v === "object") return false
+          if (
+            (key === "macroParams" || key === "parameters") &&
+            v !== null &&
+            typeof v === "object" &&
+            !Array.isArray(v) &&
+            Object.keys(v).length === 0
+          ) {
+            return false
+          }
+          return true
+        })
       return Object.fromEntries(entries)
     }
     return value
@@ -410,7 +424,11 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
       typeof attrs === "object" &&
       !Array.isArray(attrs)
     ) {
-      evidence.attrSignatures.add(`${type}:${stableJson(normalizeAttrs(attrs))}`)
+      const normalized = normalizeAttrs(attrs)
+      const extensionKey = (normalized as Record<string, unknown>)["extensionKey"]
+      if (!(type === "extension" && extensionKey === "toc")) {
+        evidence.attrSignatures.add(`${type}:${stableJson(normalized)}`)
+      }
     }
     if (type === "inlineCard") {
       if (attrs !== null && typeof attrs === "object" && !Array.isArray(attrs)) {
