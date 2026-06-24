@@ -18,6 +18,12 @@ npm install @knpkv/confluence-to-markdown effect
 ```bash
 # Clone pages with full version history
 confluence clone --root-page-id <ID> --base-url <URL>
+confluence clone --url <PAGE_URL>
+
+# Fetch one latest page to stdout without creating a git workspace
+confluence fetch --page-id <ID> --base-url <URL>
+confluence fetch --url <PAGE_URL>
+confluence fetch --url <PAGE_URL> --clean-markdown
 
 # Pull pages from Confluence
 confluence pull
@@ -102,10 +108,19 @@ confluence diff --commit HEAD~1   # compare with commit
 ## How It Works
 
 1. `confluence clone` creates `.confluence/` directory, initializes git, and pulls pages with full version history
-2. `confluence pull` downloads pages and auto-commits changes
-3. `confluence pull --replay-history` replays each Confluence version as a separate git commit with original author/date
-4. Version messages from Confluence are preserved in markdown front-matter
-5. Use standard git commands in `.confluence/` for advanced operations
+2. `confluence fetch` prints the latest markdown for one page without creating `.confluence/` or git commits
+3. `confluence pull` downloads pages and auto-commits changes
+4. `confluence pull --replay-history` replays each Confluence version as a separate git commit with original author/date
+5. Version messages from Confluence are preserved in markdown front-matter
+6. Use standard git commands in `.confluence/` for advanced operations
+
+`clone` and `fetch` accept full page URLs via `--url`, including Confluence paths such as
+`https://yoursite.atlassian.net/wiki/spaces/DEV/pages/123456/Page+Title` and shorthand numeric paths such as
+`https://yoursite.atlassian.com/123456`.
+
+`confluence fetch --clean-markdown` removes Confluence round-trip metadata comments such as `<!-- adf:... -->`
+from the printed output. This is intended for readable exports and is not suitable for editing and pushing back to
+Confluence.
 
 ### Conversion pipeline
 

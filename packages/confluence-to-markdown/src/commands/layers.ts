@@ -198,9 +198,25 @@ export const CloneLayer = DummySyncEngineLayer.pipe(
 )
 
 /**
+ * Fetch layer - needs auth + converter but no config, sync engine, or git workspace.
+ */
+export const FetchLayer = DummySyncEngineLayer.pipe(
+  Layer.provideMerge(UserCacheLayer),
+  Layer.provideMerge(DummyGitServiceLayer),
+  Layer.provideMerge(DummyConfluenceClientLayer),
+  Layer.provideMerge(AuthLive),
+  Layer.provideMerge(ConverterPipeline),
+  Layer.provideMerge(LocalFileSystemLayer),
+  Layer.provideMerge(DummyConfigLayer),
+  Layer.provideMerge(NodeHttpClient.layerFetch),
+  Layer.provideMerge(NodeTerminal.layer),
+  Layer.provideMerge(NodeServices.layer)
+)
+
+/**
  * Determine which layer to use based on command.
  */
-export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "minimal" => {
+export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "fetch" | "minimal" => {
   const cmd = argv[0]
   // auth commands need auth layer only
   if (cmd === "auth") {
@@ -210,8 +226,12 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
   if (cmd === "clone") {
     return "clone"
   }
+  // fetch needs auth + converter but no existing config
+  if (cmd === "fetch") {
+    return "fetch"
+  }
   // --help, -h, --version don't need config
-  if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
+  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {
     return "minimal"
   }
   return "full"

@@ -20,6 +20,7 @@ import { UserCacheLayer } from "../internal/userCache.js"
 import { layer as LocalFileSystemLayer } from "../LocalFileSystem.js"
 import { layer as MarkdownConverterLayer } from "../MarkdownConverter.js"
 import { layer as SyncEngineLayer, SyncEngine } from "../SyncEngine.js"
+import { resolvePageInput } from "./pageInput.js"
 import { getAuth } from "./shared.js"
 
 const ConverterPipeline = MarkdownConverterLayer.pipe(
@@ -37,29 +38,24 @@ const baseUrlOption = Options.string("base-url").pipe(
   Options.optional
 )
 
-/** Validate page ID format */
-const validatePageId = (input: string): Effect.Effect<string, ConfigError> =>
-  input.trim().length > 0
-    ? Effect.succeed(input.trim())
-    : Effect.fail(new ConfigError({ message: "Page ID cannot be empty" }))
-
-/** Validate base URL format */
-const validateBaseUrl = (input: string): Effect.Effect<string, ConfigError> => {
-  const pattern = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/
-  return pattern.test(input)
-    ? Effect.succeed(input)
-    : Effect.fail(
-      new ConfigError({
-        message: `Invalid Confluence URL: ${input}. Expected format: https://yoursite.atlassian.net`
-      })
-    )
-}
+const urlOption = Options.string("url").pipe(
+  Options.withDescription("Confluence root page URL"),
+  Options.optional
+)
 
 export const cloneCommand = Command.make(
   "clone",
-  { rootPageId: rootPageIdOption, baseUrl: baseUrlOption },
-  ({ baseUrl, rootPageId }) =>
+  { rootPageId: rootPageIdOption, baseUrl: baseUrlOption, url: urlOption },
+  ({ baseUrl, rootPageId, url: pageUrl }) =>
     Effect.gen(function*() {
+      const urlInput = Option.isSome(pageUrl)
+        ? yield* resolvePageInput({
+          url: pageUrl.value,
+          pageId: Option.isSome(rootPageId) ? rootPageId.value : undefined,
+          baseUrl: Option.isSome(baseUrl) ? baseUrl.value : undefined
+        })
+        : undefined
+
       const git = yield* GitService
 
       // Fail if .confluence already exists
@@ -79,15 +75,20 @@ export const cloneCommand = Command.make(
       )
       yield* Console.log(`Found git ${gitVersion}`)
 
-      const rawPageId = Option.isSome(rootPageId)
-        ? rootPageId.value
-        : yield* Prompt.text({ message: "Enter Confluence root page ID:" })
-      const rawUrl = Option.isSome(baseUrl)
-        ? baseUrl.value
-        : yield* Prompt.text({ message: "Enter Confluence base URL (e.g., https://yoursite.atlassian.net):" })
+      const input = urlInput ??
+        (yield* Effect.gen(function*() {
+          const rawPageId = Option.isSome(rootPageId)
+            ? rootPageId.value
+            : yield* Prompt.text({ message: "Enter Confluence root page ID:" })
+          const rawUrl = Option.isSome(baseUrl)
+            ? baseUrl.value
+            : yield* Prompt.text({ message: "Enter Confluence base URL (e.g., https://yoursite.atlassian.net):" })
 
-      const pageId = yield* validatePageId(rawPageId)
-      const url = yield* validateBaseUrl(rawUrl)
+          return yield* resolvePageInput({ pageId: rawPageId, baseUrl: rawUrl })
+        }))
+
+      const pageId = input.pageId
+      const url = input.baseUrl
 
       const path = yield* createConfigFile(pageId, url)
       yield* Console.log(`Created configuration file: ${path}`)
