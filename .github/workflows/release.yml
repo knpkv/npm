@@ -28,7 +28,7 @@ jobs:
       id-token: write # For npm provenance
       pull-requests: write # For creating release PRs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install dependencies
         uses: ./.github/actions/setup
       - name: Create Release Pull Request or Publish
