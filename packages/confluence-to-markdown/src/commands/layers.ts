@@ -230,8 +230,8 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
   if (cmd === "fetch") {
     return "fetch"
   }
-  // --help, -h, --version don't need config
-  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "--version") {
+  // skills/help/version don't need config
+  if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
     return "minimal"
   }
   return "full"

@@ -24,7 +24,7 @@ describe("cleanMarkdown", () => {
     const markdown = [
       "[[toc]]",
       "",
-      '<span data-adf-status="todo" data-adf-color="blue">TODO</span>',
+      "<span data-adf-status=\"todo\" data-adf-color=\"blue\">TODO</span>",
       "",
       "<!-- keep this comment -->",
       "",

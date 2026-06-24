@@ -2,10 +2,10 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type { PageId } from "../src/Brand.js"
-import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { fetchPageMarkdown } from "../src/commands/fetch.js"
-import type { PageResponse } from "../src/Schemas.js"
+import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
+import type { PageResponse } from "../src/Schemas.js"
 
 const page: PageResponse = {
   id: "2333334354",

@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import type { PageId } from "../src/Brand.js"
-import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { makeFetchCommand } from "../src/commands/fetch.js"
+import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import type { PageResponse } from "../src/Schemas.js"
 import { CommandHarnessLayer, runConfluenceCommand } from "./commandHarness.js"
 
@@ -23,9 +23,10 @@ const page: PageResponse = {
 const FetchClientLayer = Layer.succeed(
   ConfluenceClient,
   ConfluenceClient.of({
-    getPage: (pageId: PageId) => pageId === "2333334354"
-      ? Effect.succeed(page)
-      : Effect.die(`unexpected page ID: ${pageId}`),
+    getPage: (pageId: PageId) =>
+      pageId === "2333334354"
+        ? Effect.succeed(page)
+        : Effect.die(`unexpected page ID: ${pageId}`),
     getChildren: () => Effect.die("unused"),
     getAllChildren: () => Effect.die("unused"),
     createPage: () => Effect.die("unused"),

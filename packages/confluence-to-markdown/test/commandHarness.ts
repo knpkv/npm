@@ -1,17 +1,17 @@
-import { Command } from "effect/unstable/cli"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Terminal from "effect/Terminal"
+import { Command } from "effect/unstable/cli"
 import type { PageId } from "../src/Brand.js"
+import type { ConfluenceCommandOptions } from "../src/commands/root.js"
+import { makeConfluenceCommand } from "../src/commands/root.js"
 import { ConfluenceAuth } from "../src/ConfluenceAuth.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { layerFromValues as ConfluenceConfigLayerFromValues } from "../src/ConfluenceConfig.js"
 import { GitService } from "../src/GitService.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
 import { SyncEngine } from "../src/SyncEngine.js"
-import type { ConfluenceCommandOptions } from "../src/commands/root.js"
-import { makeConfluenceCommand } from "../src/commands/root.js"
 
 const notCalled = (calls: Ref.Ref<number>) =>
   Ref.update(calls, (count) => count + 1).pipe(

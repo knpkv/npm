@@ -1,6 +1,8 @@
 /**
  * Root CLI command composition.
  */
+import { makeInstallCommand } from "@knpkv/agent-skills"
+import * as Console from "effect/Console"
 import { Command } from "effect/unstable/cli"
 import {
   authCommand,
@@ -20,6 +22,21 @@ export interface ConfluenceCommandOptions {
   readonly fetch?: typeof fetchCommand
 }
 
+const skillsInstall = makeInstallCommand({
+  description: "Install the Confluence agent skill",
+  name: "install",
+  skills: ["confluence"]
+})
+
+const skillsCommand = Command.make(
+  "skills",
+  {},
+  () => Console.log("Usage: confluence skills install")
+).pipe(
+  Command.withDescription("Agent skill commands"),
+  Command.withSubcommands([skillsInstall])
+)
+
 export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
   Command.make("confluence").pipe(
     Command.withDescription("Sync Confluence pages to local markdown"),
@@ -34,7 +51,8 @@ export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
       diffCommand,
       options.fetch ?? fetchCommand,
       newCommand,
-      deleteCommand
+      deleteCommand,
+      skillsCommand
     ])
   )
 
