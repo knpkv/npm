@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-typed-boundary-assignment
+language: tsx
+severity: error
+message: "Validate external data before assigning it to a typed variable"
+
+rule:
+  all:
+    - any:
+        - pattern: "const $VAR: $TYPE = JSON.parse($$$ARGS)"
+        - pattern: "let $VAR: $TYPE = JSON.parse($$$ARGS)"
+        - pattern: "var $VAR: $TYPE = JSON.parse($$$ARGS)"
+        - pattern: "const $VAR: $TYPE = await $OBJ.json()"
+        - pattern: "let $VAR: $TYPE = await $OBJ.json()"
+        - pattern: "var $VAR: $TYPE = await $OBJ.json()"
+        - pattern: "const $VAR: $TYPE = $OBJ.body"
+        - pattern: "let $VAR: $TYPE = $OBJ.body"
+        - pattern: "var $VAR: $TYPE = $OBJ.body"
+    - not:
+        any:
+          - pattern: "const $VAR: unknown = JSON.parse($$$ARGS)"
+          - pattern: "let $VAR: unknown = JSON.parse($$$ARGS)"
+          - pattern: "var $VAR: unknown = JSON.parse($$$ARGS)"
+          - pattern: "const $VAR: unknown = await $OBJ.json()"
+          - pattern: "let $VAR: unknown = await $OBJ.json()"
+          - pattern: "var $VAR: unknown = await $OBJ.json()"
+          - pattern: "const $VAR: unknown = $OBJ.body"
+          - pattern: "let $VAR: unknown = $OBJ.body"
+          - pattern: "var $VAR: unknown = $OBJ.body"
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Type annotations on external data are unchecked at runtime. Decode unknown
+  input first, then work with the validated value:
+
+  const payload = yield* Schema.decodeUnknown(Payload)(await response.json())

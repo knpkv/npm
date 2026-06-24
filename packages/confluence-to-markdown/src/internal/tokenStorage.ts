@@ -17,6 +17,14 @@ const TOKEN_DIR_NAME = ".confluence"
 const TOKEN_FILE_NAME = "auth.json"
 const CONFIG_FILE_NAME = "config.json"
 
+const parseJsonOrNull = (content: string): unknown | null => {
+  try {
+    return JSON.parse(content) as unknown
+  } catch {
+    return null
+  }
+}
+
 /**
  * Service for getting the home directory.
  * This allows mocking in tests.
@@ -117,12 +125,8 @@ export const loadToken = (): Effect.Effect<
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: tokenPath, cause }))
     )
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(content)
-    } catch {
-      return null
-    }
+    const parsed = yield* Effect.sync(() => parseJsonOrNull(content))
+    if (parsed === null) return null
 
     const decoded = yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
       Effect.catchCause(() => Effect.succeed(null))
@@ -206,12 +210,8 @@ export const loadOAuthConfig = (): Effect.Effect<
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: configPath, cause }))
     )
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(content)
-    } catch {
-      return null
-    }
+    const parsed = yield* Effect.sync(() => parseJsonOrNull(content))
+    if (parsed === null) return null
 
     const decoded = yield* Schema.decodeUnknownEffect(OAuthConfigSchema)(parsed).pipe(
       Effect.catchCause(() => Effect.succeed(null))

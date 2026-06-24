@@ -16,8 +16,4 @@ export class CacheError extends Schema.TaggedErrorClass<CacheError>()(
     operation: Schema.String,
     cause: Schema.Defect()
   }
-) {
-  constructor(args: { readonly operation: string; readonly cause: unknown }) {
-    super({ _tag: "CacheError", ...args })
-  }
-}
+) {}

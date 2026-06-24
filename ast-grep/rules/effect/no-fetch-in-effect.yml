@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-fetch-in-effect
+language: tsx
+severity: error
+message: "Use @effect/platform HttpClient instead of raw fetch wrapped in Effect.tryPromise"
+
+rule:
+  any:
+    - pattern: "Effect.tryPromise({ try: () => fetch($$$ARGS) })"
+    - pattern: "Effect.tryPromise({ try: () => fetch($$$ARGS), $$$REST })"
+    - pattern: "Effect.tryPromise(() => fetch($$$ARGS))"
+    - all:
+        - any:
+            - pattern: "Effect.tryPromise({ $$$ARGS })"
+            - pattern: "Effect.tryPromise($CALLBACK)"
+        - has:
+            pattern: fetch($$$FETCH_ARGS)
+            stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Raw fetch wrapped in Effect.tryPromise bypasses Effect's HttpClient service,
+  typed platform errors, and layer-based testing.
+
+  Prefer @effect/platform's HttpClient:
+
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.get(url)

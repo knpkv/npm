@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/sgconfig.json
+
+ruleDirs:
+  - ast-grep/rules/effect
+
+languageGlobs:
+  tsx:
+    - "**/*.ts"
+    - "**/*.tsx"
+
+utilDirs: []

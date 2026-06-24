@@ -6,27 +6,34 @@
     "clean": "node scripts/clean.mjs",
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
     "build": "tspc -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
+    "build:tsgo": "tsgo -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
     "audit": "pnpm audit --prod && pnpm audit --dev",
     "test": "vitest",
     "coverage": "vitest --coverage",
     "check": "pnpm build && pnpm --recursive --filter \"./packages/**/*\" run check",
-    "lint": "eslint \"**/{src,test,examples,dtslint}/**/*.{ts,mjs}\"",
-    "lint:fix": "pnpm lint --fix",
+    "check:tsgo": "pnpm --recursive --filter \"./packages/**/*\" exec tsgo -b tsconfig.json",
+    "lint": "pnpm lint:eslint && pnpm lint:ast",
+    "lint:eslint": "eslint \"**/{src,test,examples,dtslint}/**/*.{ts,mjs}\"",
+    "lint:ast": "ast-grep scan",
+    "lint:fix": "pnpm lint:eslint --fix && pnpm lint:ast --update-all",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "changeset:version": "changeset version",
     "changeset:publish": "pnpm build && changeset publish",
-    "prepare": "ts-patch install -s && husky"
+    "prepare": "ts-patch install -s && effect-tsgo patch && husky"
   },
   "devDependencies": {
+    "@ast-grep/cli": "^0.44.0",
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
     "@effect/build-utils": "^0.8.9",
     "@effect/eslint-plugin": "^0.3.2",
     "@effect/language-service": "^0.86.2",
+    "@effect/tsgo": "^0.14.6",
     "@effect/vitest": "4.0.0-beta.87",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260624.1",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.5.0",
     "eslint-import-resolver-typescript": "^4.4.5",
@@ -52,6 +59,9 @@
       "@changesets/assemble-release-plan": "patches/@changesets__assemble-release-plan.patch",
       "distilled-aws@0.1.1": "patches/distilled-aws@0.1.1.patch"
     },
+    "onlyBuiltDependencies": [
+      "@ast-grep/cli"
+    ],
     "overrides": {
       "distilled-aws>fast-xml-parser": "^5.3.4",
       "vitest": "$vitest",

@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { createContext, useContext } from "react"
+import { createContext, type ReactNode, useContext } from "react"
 
 interface ThemeContextValue {
   readonly theme: string
@@ -11,7 +11,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue>({ theme: "dark" })
 
-export function ThemeProvider({ children }: { readonly children: import("react").ReactNode }) {
+export function ThemeProvider({ children }: { readonly children: ReactNode }) {
   return <ThemeContext.Provider value={{ theme: "dark" }}>{children}</ThemeContext.Provider>
 }
 

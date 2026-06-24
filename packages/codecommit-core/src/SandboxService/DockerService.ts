@@ -104,17 +104,22 @@ const makeDockerService = Effect.gen(function*() {
 
     inspectContainer: (containerId: string) =>
       docker("inspect", containerId).pipe(
+        dockerError("inspectContainer"),
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
               const arr = JSON.parse(output) as Array<ContainerInfo>
-              if (arr.length === 0) throw new Error("Empty inspect result")
+              if (arr.length === 0) return undefined
               return arr[0]!
             },
-            catch: (e) => e
+            catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
           })
         ),
-        dockerError("inspectContainer")
+        Effect.flatMap((containerInfo) =>
+          containerInfo === undefined
+            ? Effect.fail(new DockerError({ operation: "inspectContainer", cause: "Empty inspect result" }))
+            : Effect.succeed(containerInfo)
+        )
       ),
 
     exec: (containerId: string, cmd: ReadonlyArray<string>) =>
@@ -122,6 +127,7 @@ const makeDockerService = Effect.gen(function*() {
 
     listContainersByLabel: (label: string, value: string) =>
       docker("ps", "-a", "--filter", `label=${label}=${value}`, "--format", "{{json .}}").pipe(
+        dockerError("listContainersByLabel"),
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
@@ -135,10 +141,9 @@ const makeDockerService = Effect.gen(function*() {
                 }
               })
             },
-            catch: (e) => e
+            catch: (cause) => new DockerError({ operation: "listContainersByLabel", cause })
           })
-        ),
-        dockerError("listContainersByLabel")
+        )
       )
   } as const
 })

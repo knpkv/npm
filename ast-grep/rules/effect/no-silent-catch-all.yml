@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-silent-catch-all
+language: tsx
+severity: error
+message: "Log before recovering with Effect.catchAll"
+
+rule:
+  pattern: Effect.catchAll($FN)
+  has:
+    any:
+      - pattern: Effect.succeed($$$VALUE)
+      - pattern: Effect.void
+    stopBy: end
+  not:
+    has:
+      any:
+        - pattern: Effect.log($$$ARGS)
+        - pattern: Effect.logDebug($$$ARGS)
+        - pattern: Effect.logInfo($$$ARGS)
+        - pattern: Effect.logWarning($$$ARGS)
+        - pattern: Effect.logError($$$ARGS)
+      stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Silent recovery hides failures from operators and future debugging.
+
+  Log the error before returning a fallback:
+
+  Effect.catchAll((cause) =>
+    Effect.logWarning("Falling back after failure", cause).pipe(
+      Effect.as(fallback)
+    )
+  )
