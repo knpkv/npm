@@ -4,14 +4,26 @@ import { Deferred, Effect } from "effect"
 import { App } from "./tui/App.js"
 import { cleanup } from "./tui/atoms/app.js"
 
-const program = Effect.gen(function* () {
+const escape = "\u001b"
+
+const isTerminalCapabilityResponse = (sequence: string) =>
+  (sequence.startsWith(`${escape}P>|`) && sequence.includes(`${escape}\\`)) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("$y")) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("u")) ||
+  (sequence.startsWith(`${escape}[?`) && sequence.endsWith("c")) ||
+  sequence.includes("|ghostty ")
+
+const program = Effect.gen(function* makeProgram() {
   const exitSignal = yield* Deferred.make<void>()
 
   // Create renderer with automatic cleanup
   const renderer = yield* Effect.acquireRelease(
     Effect.promise(() =>
       createCliRenderer({
-        exitOnCtrlC: false // We handle this ourselves
+        exitOnCtrlC: false, // We handle this ourselves
+        prependInputHandlers: [isTerminalCapabilityResponse],
+        useKittyKeyboard: null,
+        useThread: false
       })
     ),
     (renderer) => Effect.sync(() => renderer.destroy())
