@@ -1,5 +1,44 @@
 # @knpkv/confluence-to-markdown
 
+## 0.7.0
+
+### Minor Changes
+
+- [#81](https://github.com/knpkv/npm/pull/81) [`19c1538`](https://github.com/knpkv/npm/commit/19c153835bc198b9e407a013c16775c3fb7eb357) Thanks [@konopkov](https://github.com/konopkov)! - Ship agent skills alongside each CLI package and add an installer package plus per-CLI `skills install` commands for Codex and Claude.
+
+- [#85](https://github.com/knpkv/npm/pull/85) [`f01d83a`](https://github.com/knpkv/npm/commit/f01d83a091a13808b36aadfd45989240da537e8f) Thanks [@konopkov](https://github.com/konopkov)! - Add `confluence fetch` for printing the latest page markdown without creating a git workspace, support `--url` page parsing for `fetch` and `clone`, and add opt-in `--clean-markdown` output that strips Confluence round-trip metadata comments.
+
+- [#71](https://github.com/knpkv/npm/pull/71) [`e3c3805`](https://github.com/knpkv/npm/commit/e3c3805ee527a6edb69ed91977c95c586b563ff9) Thanks [@konopkov](https://github.com/konopkov)! - Migrate the package workspace to Effect v4 beta.
+
+  This updates runtime and peer dependencies to the Effect v4 beta module layout,
+  adopts Effect platform/runtime services for Node process, HTTP, filesystem, and
+  clock access, and refreshes package export metadata to point published type
+  entries at emitted `dist/*.d.ts` declarations.
+
+  CodeCommit packages now use Effect v4-compatible AWS and cache layers, including
+  typed `distilled-aws` context services, shared cached-comment decoding, and
+  schema-derived config defaults. Jira and Confluence OAuth callback servers bind
+  the expected local callback port range again under the Effect v4 Node HTTP
+  server layer.
+
+  The retired Claude AI packages have been removed from the workspace.
+
+### Patch Changes
+
+- [#72](https://github.com/knpkv/npm/pull/72) [`0e1c5ea`](https://github.com/knpkv/npm/commit/0e1c5eaf6d48c43e6591b6b6260dbfbf6bfb810b) Thanks [@konopkov](https://github.com/konopkov)! - Preserve Confluence-native ADF elements through markdown sync by storing decoded
+  placeholder metadata in per-page `.adf.json` sidecars and hydrating those refs
+  before push.
+
+  The integration test now requires API auth for raw ADF verification, asserts the
+  sidecar file contract, and checks native node and mark metadata across the
+  create/update/reclone cycle.
+
+- [#78](https://github.com/knpkv/npm/pull/78) [`b833841`](https://github.com/knpkv/npm/commit/b8338412b2352188a8505e4ee46ccd3f86a6b58f) Thanks [@konopkov](https://github.com/konopkov)! - Externalize base64-encoded ADF placeholder metadata into `.adf.json` sidecars
+  when pulling Confluence macros and native nodes.
+- Updated dependencies [[`c697d3c`](https://github.com/knpkv/npm/commit/c697d3c4ab779f14f017d3ec8fc8d1bffa1493b5), [`19c1538`](https://github.com/knpkv/npm/commit/19c153835bc198b9e407a013c16775c3fb7eb357), [`e3c3805`](https://github.com/knpkv/npm/commit/e3c3805ee527a6edb69ed91977c95c586b563ff9)]:
+  - @knpkv/agent-skills@0.2.0
+  - @knpkv/confluence-api-client@0.3.0
+
 ## 0.6.0
 
 ### Minor Changes
