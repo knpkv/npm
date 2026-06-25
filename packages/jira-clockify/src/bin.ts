@@ -8,6 +8,7 @@ import { NodeRuntime, NodeStdio } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
 import { Effect } from "effect"
 import * as Console from "effect/Console"
+import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
 import { auth } from "./cli/auth.js"
@@ -49,4 +50,12 @@ const program = processArgv.pipe(
   Effect.provide(NodeStdio.layer)
 )
 
-NodeRuntime.runMain(program)
+// The TUI keeps long-lived resources open through its atom runtime, and OpenTUI
+// holds stdin in raw mode so Ctrl-C arrives as a keypress, not a SIGINT. On a
+// clean in-app quit (exit code 0) runMain's default teardown never reaches
+// `process.exit`, leaving the process hanging on those open handles after the
+// UI tears down. This bin also runs as the Bun child re-spawned from the Node
+// parent, so both processes need the explicit exit. Always terminate.
+const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
+
+NodeRuntime.runMain(program, { teardown: forceExitTeardown })

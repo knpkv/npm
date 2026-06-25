@@ -7,6 +7,7 @@ import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js
 import { makeServer } from "@knpkv/codecommit-web"
 import { Console, Effect, Layer, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -444,4 +445,12 @@ const program = Effect.gen(function*() {
   return yield* runCli
 })
 
-BunRuntime.runMain(Effect.provide(program, BunServices.layer))
+// The TUI keeps long-lived resources open through its atom runtime (SQLite
+// repos, the HTTP client, the EventsHub PubSub). When the user quits in-app the
+// main fiber exits cleanly (code 0) and — because OpenTUI holds stdin in raw
+// mode, so Ctrl-C is delivered as a keypress, not a SIGINT — runMain's default
+// teardown never reaches `process.exit`. The process would then hang on those
+// open handles after the UI has already torn down. Always terminate explicitly.
+const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
+
+BunRuntime.runMain(Effect.provide(program, BunServices.layer), { teardown: forceExitTeardown })
