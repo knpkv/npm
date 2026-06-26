@@ -163,6 +163,19 @@ const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   isLoggedIn: () => Effect.succeed(true)
 })
 
+// JiraAuth with no usable token — postJiraWorklog short-circuits to NotLoggedIn.
+const MockJiraAuthLoggedOutLayer = Layer.succeed(JiraAuth, {
+  configure: () => Effect.void,
+  isConfigured: () => Effect.succeed(false),
+  login: () => Effect.void,
+  logout: () => Effect.void,
+  getAccessToken: () => Effect.succeed(Redacted.make("")),
+  getCloudId: () => Effect.succeed(""),
+  getSiteUrl: () => Effect.succeed(""),
+  getCurrentUser: () => Effect.succeed(null),
+  isLoggedIn: () => Effect.succeed(false)
+})
+
 // Mock HttpClient that returns 201 for Jira worklog POST
 const MockHttpClientLayer = Layer.succeed(
   HttpClient.HttpClient,
@@ -230,10 +243,11 @@ const TestLayer = timerLayer.pipe(
   Layer.provide(MockHttpClientLayer)
 )
 
-// Build a TimerService layer with overridden Clockify / HttpClient mocks.
+// Build a TimerService layer with overridden Clockify / HttpClient / JiraAuth mocks.
 const makeTestLayer = (
   clockify: ClockifyApiClientShape = mockClockify,
-  httpLayer: Layer.Layer<HttpClient.HttpClient> = MockHttpClientLayer
+  httpLayer: Layer.Layer<HttpClient.HttpClient> = MockHttpClientLayer,
+  jiraAuthLayer: Layer.Layer<JiraAuth> = MockJiraAuthLayer
 ) =>
   timerLayer.pipe(
     Layer.provide(Layer.succeed(ClockifyApiClient, clockify)),
@@ -241,7 +255,7 @@ const makeTestLayer = (
     Layer.provide(MockClockifyAuthLayer),
     Layer.provide(MockConfigLayer),
     Layer.provide(MockStateWriterLayer),
-    Layer.provide(MockJiraAuthLayer),
+    Layer.provide(jiraAuthLayer),
     Layer.provide(httpLayer)
   )
 
@@ -291,7 +305,7 @@ describe("TimerService", () => {
         yield* svc.start(makeTicket())
         const result = yield* svc.stop()
         expect(result.clockifyLogged).toBe(true)
-        expect(result.jiraWorklogLogged).toBe(true)
+        expect(result.jiraWorklog?._tag).toBe("Posted")
         const state = yield* SubscriptionRef.get(svc.state)
         expect(state.active).toBe(false)
         expect(state.ticketKey).toBeNull()
@@ -342,7 +356,7 @@ describe("TimerService", () => {
         yield* svc.start(makeTicket())
         // Stop immediately — elapsed ~0ms, should still log with 60s floor
         const result = yield* svc.stop()
-        expect(result.jiraWorklogLogged).toBe(true)
+        expect(result.jiraWorklog?._tag).toBe("Posted")
         expect(result.clockifyLogged).toBe(true)
       }).pipe(Effect.provide(TestLayer)))
   })
@@ -617,30 +631,48 @@ describe("TimerService", () => {
   })
 
   describe("worklog retry", () => {
-    // A successful stop leaves nothing to retry — worklog must be null.
-    it.effect("stop exposes no worklog params when Jira succeeds", () =>
+    // A successful stop leaves nothing to retry — outcome Posted, no retry params.
+    it.effect("stop reports Posted with no retry params when Jira succeeds", () =>
       Effect.gen(function*() {
         resetCaptures()
         const svc = yield* TimerService
         yield* svc.start(makeTicket())
         const result = yield* svc.stop({ comment: "done" })
-        expect(result.jiraWorklogLogged).toBe(true)
+        expect(result.jiraWorklog?._tag).toBe("Posted")
         expect(result.worklog).toBeNull()
       }).pipe(Effect.provide(TestLayer)))
 
-    // A partial stop (Clockify saved, Jira failed) must surface the params needed to retry.
-    it.effect("stop exposes worklog params when Jira fails", () =>
+    // A transient Jira failure (4xx) must report Failed with a message and surface retry params.
+    it.effect("stop reports Failed with a message and retry params when Jira rejects", () =>
       Effect.gen(function*() {
         resetCaptures()
         const svc = yield* TimerService
         yield* svc.start(makeTicket())
         const result = yield* svc.stop({ comment: "done" })
         expect(result.clockifyLogged).toBe(true)
-        expect(result.jiraWorklogLogged).toBe(false)
+        expect(result.jiraWorklog?._tag).toBe("Failed")
+        if (result.jiraWorklog?._tag === "Failed") {
+          // The Jira error body is summarised into the message.
+          expect(result.jiraWorklog.message).toContain("400")
+          expect(result.jiraWorklog.message).toContain("nope")
+        }
         expect(result.worklog).not.toBeNull()
         expect(result.worklog?.ticketKey).toBe("PROJ-123")
         expect(result.worklog?.comment).toBe("done")
       }).pipe(Effect.provide(makeTestLayer(mockClockify, MockHttpClientFailLayer))))
+
+    // Not logged in must report NotLoggedIn (unrecoverable) and expose NO retry params.
+    it.effect("stop reports NotLoggedIn and no retry params when there is no token", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket())
+        const result = yield* svc.stop({ comment: "done" })
+        expect(result.clockifyLogged).toBe(true)
+        expect(result.jiraWorklog?._tag).toBe("NotLoggedIn")
+        // NotLoggedIn can't be fixed by retrying, so the retry payload is withheld.
+        expect(result.worklog).toBeNull()
+      }).pipe(Effect.provide(makeTestLayer(mockClockify, MockHttpClientLayer, MockJiraAuthLoggedOutLayer))))
 
     // logWorklog reposts in isolation and succeeds once Jira recovers — the retry round-trip.
     it.effect("logWorklog recovers after a transient Jira failure", () =>
@@ -649,15 +681,15 @@ describe("TimerService", () => {
         const svc = yield* TimerService
         yield* svc.start(makeTicket())
         const result = yield* svc.stop({ comment: "done" })
-        expect(result.jiraWorklogLogged).toBe(false)
+        expect(result.jiraWorklog?._tag).toBe("Failed")
         expect(result.worklog).not.toBeNull()
         // Jira was flaky on the first POST (during stop) but recovers on retry.
         const retried = yield* svc.logWorklog(result.worklog!)
-        expect(retried).toBe(true)
+        expect(retried._tag).toBe("Posted")
       }).pipe(Effect.provide(makeTestLayer(mockClockify, makeFlakyHttpClientLayer(1)))))
 
-    // A retry against a still-down Jira reports failure rather than crashing.
-    it.effect("logWorklog returns false while Jira is still failing", () =>
+    // A retry against a still-down Jira reports Failed (with reason) rather than crashing.
+    it.effect("logWorklog reports Failed while Jira is still failing", () =>
       Effect.gen(function*() {
         resetCaptures()
         const svc = yield* TimerService
@@ -667,8 +699,22 @@ describe("TimerService", () => {
           durationSeconds: 600,
           comment: "done"
         })
-        expect(retried).toBe(false)
+        expect(retried._tag).toBe("Failed")
+        if (retried._tag === "Failed") expect(retried.message).toContain("400")
       }).pipe(Effect.provide(makeTestLayer(mockClockify, MockHttpClientFailLayer))))
+
+    // logWorklog reports NotLoggedIn when there is no token, so callers can skip retrying.
+    it.effect("logWorklog reports NotLoggedIn when there is no token", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const svc = yield* TimerService
+        const retried = yield* svc.logWorklog({
+          ticketKey: "PROJ-123",
+          startedAt: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 600
+        })
+        expect(retried._tag).toBe("NotLoggedIn")
+      }).pipe(Effect.provide(makeTestLayer(mockClockify, MockHttpClientLayer, MockJiraAuthLoggedOutLayer))))
   })
 
   describe("start backdating", () => {
