@@ -1,5 +1,11 @@
 # @knpkv/jira-clockify
 
+## 0.5.0
+
+### Minor Changes
+
+- [#89](https://github.com/knpkv/npm/pull/89) [`7ee4f6d`](https://github.com/knpkv/npm/commit/7ee4f6d790ad24f2e52482fd29f223f702167e45) Thanks [@konopkov](https://github.com/konopkov)! - Let users retry a failed Jira worklog after a partial timer stop (Clockify saved, Jira failed) — via a "Retry" action in the TUI result popup and a retry prompt in the `jcf stop` CLI flow. Also fix `jcf start/stop/log <KEY>` reporting "Ticket not found in Jira" when actually not logged in: these now detect the missing Jira login and point to `jcf auth jira login`.
+
 ## 0.4.0
 
 ### Minor Changes
