@@ -9,7 +9,21 @@
  * @internal
  */
 import matter from "gray-matter"
+import * as yaml from "js-yaml"
 import type { Issue } from "../IssueService.js"
+
+/**
+ * `gray-matter` ships a default YAML engine that calls `js-yaml`'s `safeDump`/
+ * `safeLoad`, both removed in `js-yaml` 4. The workspace pins `js-yaml` to 4.x
+ * (security override), so we supply an engine backed by the 4.x `dump`/`load`
+ * API, which is safe by default.
+ *
+ * @internal
+ */
+const yamlEngine = {
+  parse: (str: string): object => (yaml.load(str) as object) ?? {},
+  stringify: (data: object): string => yaml.dump(data)
+}
 
 /**
  * Front-matter data for a Jira issue.
@@ -69,7 +83,7 @@ export const extractFrontMatter = (issue: Issue): IssueFrontMatter => ({
 export const serializeIssue = (issue: Issue): string => {
   const frontMatter = extractFrontMatter(issue)
   const content = buildMarkdownContent(issue)
-  return matter.stringify(content, frontMatter)
+  return matter.stringify(content, frontMatter, { engines: { yaml: yamlEngine } })
 }
 
 /**
