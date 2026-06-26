@@ -69,6 +69,42 @@ describe("ADF metadata sidecars", () => {
     })
   })
 
+  it("moves codeBlock node metadata into a linked sidecar", () => {
+    const node = {
+      attrs: { language: "json", localId: "14686791bf5e" },
+      content: [{
+        text: [
+          "{",
+          "  \"pageType\": \"integration-test-asset\",",
+          "  \"mentions\": [\"[Add Engineer]\", \"[Add Reviewer]\"],",
+          "  \"supportsADF\": true",
+          "}"
+        ].join("\n"),
+        type: "text"
+      }],
+      marks: [{ attrs: { mode: "wide", width: 1011 }, type: "breakout" }],
+      type: "codeBlock"
+    }
+    const markdown = [
+      `<!-- adf:codeBlock node=${JSON.stringify(node)} -->`,
+      "",
+      "```json",
+      node.content[0]!.text,
+      "```",
+      "",
+      "<!-- adf:/codeBlock -->"
+    ].join("\n")
+
+    const prepared = externalizeAdfMetadata(markdown, "./2031617.adf.json")
+
+    expect(prepared.markdown).toContain("<!-- adf:codeBlock ref=./2031617.adf.json#codeBlock-1 -->")
+    expect(prepared.markdown).not.toContain("node={")
+    expect(prepared.sidecar?.entries["codeBlock-1"]).toEqual({
+      kind: "node",
+      value: node
+    })
+  })
+
   it("hydrates linked sidecar metadata back into placeholders for push", () => {
     const markdown = `<!-- adf:taskList ref=./123.adf.json#taskList-1 -->`
     const hydrated = hydrateAdfMetadata(

@@ -116,6 +116,11 @@ const stableStringify = (v: unknown): string => {
   return JSON.stringify(v) ?? "null"
 }
 
+const toBase64 = (s: string): string => {
+  const bytes = new TextEncoder().encode(s)
+  return btoa(String.fromCharCode(...bytes))
+}
+
 const inline = (nodes: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): string => {
   if (!nodes) return ""
   let out = ""
@@ -336,7 +341,7 @@ const block = (n: AdfNode, ctx: Ctx): string => {
     case "blockquote":
       return blockquote(n.content, ctx)
     case "codeBlock":
-      return codeBlock(n)
+      return codeBlock(n, ctx)
     case "bulletList":
       return list(n, ctx, false)
     case "orderedList":
@@ -386,7 +391,7 @@ const blockquote = (content: ReadonlyArray<AdfNode> | undefined, ctx: Ctx): stri
   return inner.split("\n").map((l) => (l.length === 0 ? ">" : `> ${l}`)).join("\n")
 }
 
-const codeBlock = (n: AdfNode): string => {
+const codeBlock = (n: AdfNode, ctx: Ctx): string => {
   // A fence's info string may not contain backticks (CommonMark) and a
   // newline would inject lines into the code content — the editor UI uses a
   // fixed language list, but the REST API accepts arbitrary strings.
@@ -396,7 +401,19 @@ const codeBlock = (n: AdfNode): string => {
   // a triple-backtick run — use one backtick more than the longest run inside.
   const runs = text.match(/`+/g) ?? []
   const fence = "`".repeat(Math.max(3, runs.reduce((max, r) => Math.max(max, r.length), 0) + 1))
-  return fence + lang + "\n" + text + "\n" + fence
+  const markdown = fence + lang + "\n" + text + "\n" + fence
+  const attrs = n.attrs ?? {}
+  const hasNonMarkdownAttrs = Object.keys(attrs).some((key) => key !== "language")
+  const hasMarks = (n.marks ?? []).length > 0
+  if (!hasNonMarkdownAttrs && !hasMarks) return markdown
+  if (ctx.inTable) return markdown
+  return [
+    `<!-- adf:codeBlock node=${toBase64(stableStringify(n))} -->`,
+    "",
+    markdown,
+    "",
+    "<!-- adf:/codeBlock -->"
+  ].join("\n")
 }
 
 const listItemBlocks = (item: AdfNode, ctx: Ctx): string => {

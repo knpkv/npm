@@ -26,8 +26,8 @@
  *  - `<!-- adf:panel type=TYPE attrs=BASE64 --> BODY <!-- adf:/panel -->`
  *      (the sibling blocks between the markers become the panel's body)
  *  - `<!-- adf:TYPE node=BASE64 --> BODY <!-- adf:/TYPE -->` for selected
- *      native block nodes such as task/decision lists, expands, layouts,
- *      cards, and tables
+ *      native block nodes such as code blocks with metadata, task/decision
+ *      lists, expands, layouts, cards, and tables
  *  - `<u>TEXT</u>`, `<sub>TEXT</sub>`, `<sup>TEXT</sup>`, and exact styled
  *      spans emitted for Confluence-only inline marks
  *  - `[@Name](confluence-mention://ACCOUNT_ID)`            (link mark with a
@@ -80,9 +80,9 @@ const BODIED_EXTENSION_END_RE = /^\s*<!--\s*adf:\/bodiedExtension\s*-->\s*$/
 const PANEL_RE = /^\s*<!--\s*adf:panel(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->\s*$/
 const PANEL_END_RE = /^\s*<!--\s*adf:\/panel\s*-->\s*$/
 const ENCODED_BLOCK_NODE_RE =
-  /^\s*<!--\s*adf:(taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
 const ENCODED_BLOCK_NODE_END_RE =
-  /^\s*<!--\s*adf:\/(taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:\/(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
 const PARAGRAPH_MARKS_RE = /^\s*<!--\s*adf:paragraph(?:\s+marks=([\s\S]*?))?\s*-->\s*$/
 const PARAGRAPH_MARKS_END_RE = /^\s*<!--\s*adf:\/paragraph\s*-->\s*$/
 const TOC_RE = /^\s*\[\[toc(?::([^\]]+))?\]\]\s*$/
@@ -111,6 +111,11 @@ const fromBase64 = (b64: string): string => {
   return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))
 }
 
+const toBase64 = (s: string): string => {
+  const bytes = new TextEncoder().encode(s)
+  return btoa(String.fromCharCode(...bytes))
+}
+
 // JSON string → free-form attrs record; rejects null/arrays/primitives.
 const AttrsBlob = Schema.Record(Schema.String, Schema.Unknown)
 const decodeAttrsBlob = Schema.decodeUnknownOption(AttrsBlob)
@@ -119,7 +124,7 @@ const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null =>
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = JSON.parse(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
     const decoded = decodeAttrsBlob(parsed)
     return Option.isSome(decoded) ? decoded.value : null
   } catch {
@@ -153,7 +158,7 @@ const decodeMarks = (b64: string | undefined): ReadonlyArray<AdfNode> => {
   if (!b64) return []
   try {
     const raw = b64.trim()
-    const parsed = JSON.parse(raw.startsWith("[") ? raw : fromBase64(raw)) as unknown
+    const parsed = parsePlaceholderJson(raw.startsWith("[") ? raw : fromBase64(raw)) as unknown
     return Array.isArray(parsed)
       ? parsed.filter((mark): mark is AdfNode =>
         mark !== null && typeof mark === "object" && typeof (mark as Record<string, unknown>)["type"] === "string"
@@ -168,7 +173,7 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = JSON.parse(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
     return parsed !== null && typeof parsed === "object" &&
         typeof (parsed as Record<string, unknown>)["type"] === "string"
       ? parsed as AdfNode
@@ -177,6 +182,42 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
     return null
   }
 }
+
+const parsePlaceholderJson = (json: string): unknown => {
+  try {
+    return JSON.parse(json) as unknown
+  } catch {
+    // @atlaskit's markdown parser may insert markdown escapes into placeholder
+    // text before we restore it. Square brackets are common inside code-block
+    // JSON samples and `\[` / `\]` are invalid JSON escapes.
+    return JSON.parse(json.replace(/\\(["[\]])/g, "$1")) as unknown
+  }
+}
+
+const CODE_BLOCK_NODE_LINE_RE = /^(\s*)\\*<!--\s*adf:codeBlock(?:\s+node=([\s\S]*?))?\s*-->(\s*)$/
+const CODE_BLOCK_END_LINE_RE = /^(\s*)\\*<!--\s*adf:\/codeBlock\s*-->(\s*)$/
+
+const normalizePlaceholderLine = (line: string): string => {
+  const codeBlock = CODE_BLOCK_NODE_LINE_RE.exec(line)
+  if (codeBlock) {
+    const [, indent, rawNode, trailing] = codeBlock
+    const node = decodeNode(rawNode)
+    return node?.type === "codeBlock"
+      ? `${indent}<!-- adf:codeBlock node=${toBase64(JSON.stringify(node))} -->${trailing}`
+      : line
+  }
+
+  const codeBlockEnd = CODE_BLOCK_END_LINE_RE.exec(line)
+  if (codeBlockEnd) {
+    const [, indent, trailing] = codeBlockEnd
+    return `${indent}<!-- adf:/codeBlock -->${trailing}`
+  }
+
+  return line
+}
+
+export const normalizeAdfMetadataPlaceholders = (markdown: string): string =>
+  markdown.split("\n").map(normalizePlaceholderLine).join("\n")
 
 /** Split a text node into a sequence of text + status + inlineExtension nodes. */
 const expandInlineText = (

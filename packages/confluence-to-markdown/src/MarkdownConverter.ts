@@ -15,7 +15,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { revertPlaceholders } from "./AdfPlaceholders.js"
+import { normalizeAdfMetadataPlaceholders, revertPlaceholders } from "./AdfPlaceholders.js"
 import { AdfSchemaValidator } from "./AdfSchemaValidator.js"
 import { walk, type WalkerWarning } from "./AdfWalker.js"
 import { AtlaskitTransformers } from "./AtlaskitTransformers.js"
@@ -137,7 +137,8 @@ export const layer: Layer.Layer<
 
     const markdownToAdf = (markdown: string): Effect.Effect<string, ConversionError> =>
       Effect.gen(function*() {
-        const adf = yield* transformers.use(({ json, md }) => json.encode(md.parse(markdown))).pipe(
+        const normalizedMarkdown = normalizeAdfMetadataPlaceholders(markdown)
+        const adf = yield* transformers.use(({ json, md }) => json.encode(md.parse(normalizedMarkdown))).pipe(
           Effect.mapError(toConversionError("markdownToAdf"))
         )
         // The walker emits HTML/comment placeholders for Confluence-only nodes
