@@ -11,7 +11,7 @@ import { ConfigService } from "../../services/ConfigService.js"
 import { TicketService } from "../../services/TicketService.js"
 import { TimerService } from "../../services/TimerService.js"
 import { formatElapsed, parseDuration, parseStartTime } from "../../utils/time.js"
-import { fetchTicketByKey } from "../fetchTicket.js"
+import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 import { fuzzySelect } from "../fuzzySelect.js"
 
 export const start = Command.make(
@@ -129,6 +129,10 @@ export const start = Command.make(
       } else {
         // Key provided — fetch from Jira to validate and get title
         const fetched = yield* fetchTicketByKey(key.value)
+        if (fetched._tag === "NotLoggedIn") {
+          yield* Console.log(NOT_LOGGED_IN_HINT)
+          return
+        }
         if (fetched._tag === "NotFound") {
           yield* Console.log(`Ticket ${key.value} not found in Jira.`)
           return

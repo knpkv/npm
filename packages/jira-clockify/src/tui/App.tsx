@@ -8,9 +8,16 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
-import type { TimerState } from "../services/TimerService.js"
+import type { TimerState, WorklogParams } from "../services/TimerService.js"
 import { refreshAtom, ticketsAtom } from "./atoms/tickets.js"
-import { detectRunningAtom, discardTimerAtom, startTimerAtom, stopTimerAtom, timerStateAtom } from "./atoms/timer.js"
+import {
+  detectRunningAtom,
+  discardTimerAtom,
+  retryWorklogAtom,
+  startTimerAtom,
+  stopTimerAtom,
+  timerStateAtom
+} from "./atoms/timer.js"
 import { filterTextAtom, isFilteringAtom, selectedIndexAtom } from "./atoms/ui.js"
 import { BigTimer } from "./components/BigTimer.js"
 import { Footer, Header, TicketList } from "./components/index.js"
@@ -29,6 +36,7 @@ function AppContent({ onQuit }: AppProps) {
   const setSelectedIndex = useAtomSet(selectedIndexAtom)
   const startTimer = useAtomSet(startTimerAtom)
   const stopTimer = useAtomSet(stopTimerAtom)
+  const retryWorklog = useAtomSet(retryWorklogAtom)
   const discardTimer = useAtomSet(discardTimerAtom)
   const filterText = useAtomValue(filterTextAtom)
   const setFilterText = useAtomSet(filterTextAtom)
@@ -37,6 +45,9 @@ function AppContent({ onQuit }: AppProps) {
   const [showTickets, setShowTickets] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   const [isDiscarding, setIsDiscarding] = useState(false)
+  // Params to retry a Jira worklog after a partial stop (Clockify saved, Jira failed)
+  const [retryParams, setRetryParams] = useState<WorklogParams | null>(null)
+  const [isRetrying, setIsRetrying] = useState(false)
   // Captures the view state when popup opens so it doesn't flicker on timer state change
   const [frozenOnTimer, setFrozenOnTimer] = useState(false)
   const [resultMsg, setResultMsg] = useState<{
@@ -83,9 +94,15 @@ function AppContent({ onQuit }: AppProps) {
   // Observe stop result to show accurate Jira worklog status
   const stopResult = useAtomValue(stopTimerAtom)
   useEffect(() => {
-    if (!frozenOnTimer || isStopping) return
+    // Guard `isWaiting`: a *second* stop re-runs the atom, which surfaces the
+    // previous result with `waiting: true` (Success tag preserved) until the new
+    // one settles. Without this we'd flash the prior stop's popup and could even
+    // re-arm Retry with the previous ticket's worklog params.
+    if (!frozenOnTimer || isStopping || AsyncResult.isWaiting(stopResult)) return
     if (AsyncResult.isSuccess(stopResult)) {
       const jiraOk = stopResult.value.jiraWorklogLogged
+      // Stash params so the user can retry just the worklog if Jira failed.
+      setRetryParams(jiraOk ? null : stopResult.value.worklog)
       setResultMsg({
         title: "Timer stopped",
         lines: [
@@ -97,6 +114,7 @@ function AppContent({ onQuit }: AppProps) {
         type: jiraOk ? "success" : "error"
       })
     } else if (AsyncResult.isFailure(stopResult)) {
+      setRetryParams(null)
       setResultMsg({
         title: "Timer stop failed",
         lines: [{ text: "Could not stop timer", color: "#FF6666" }],
@@ -104,6 +122,53 @@ function AppContent({ onQuit }: AppProps) {
       })
     }
   }, [stopResult, frozenOnTimer, isStopping])
+
+  // Observe worklog-retry result and update the popup in place
+  const retryResult = useAtomValue(retryWorklogAtom)
+  useEffect(() => {
+    // Ignore the in-flight refresh; only act once the retry has settled.
+    if (!isRetrying || AsyncResult.isWaiting(retryResult)) return
+    if (AsyncResult.isSuccess(retryResult)) {
+      setIsRetrying(false)
+      if (retryResult.value) {
+        setRetryParams(null)
+        setResultMsg({
+          title: "Timer stopped",
+          lines: [
+            { text: "Clockify: saved ✓", color: "#00CC66" },
+            { text: "Jira worklog: saved ✓", color: "#00CC66" }
+          ],
+          type: "success"
+        })
+      } else {
+        // Still failing — keep retryParams so the user can try again.
+        setResultMsg({
+          title: "Timer stopped",
+          lines: [
+            { text: "Clockify: saved ✓", color: "#00CC66" },
+            { text: "Jira worklog: still failing ✗", color: "#FF6666" }
+          ],
+          type: "error"
+        })
+      }
+    } else if (AsyncResult.isFailure(retryResult)) {
+      setIsRetrying(false)
+      setResultMsg({
+        title: "Timer stopped",
+        lines: [
+          { text: "Clockify: saved ✓", color: "#00CC66" },
+          { text: "Jira worklog: retry failed ✗", color: "#FF6666" }
+        ],
+        type: "error"
+      })
+    }
+  }, [retryResult, isRetrying])
+
+  const handleRetryWorklog = useCallback(() => {
+    if (!retryParams) return
+    setIsRetrying(true)
+    retryWorklog(retryParams)
+  }, [retryParams, retryWorklog])
 
   // Stop handler with comment — freeze view so popup stays visible
   const handleStop = useCallback(
@@ -240,9 +305,13 @@ function AppContent({ onQuit }: AppProps) {
           title={resultMsg.title}
           lines={resultMsg.lines}
           type={resultMsg.type}
+          onRetry={retryParams ? handleRetryWorklog : undefined}
+          retrying={isRetrying}
           onDismiss={() => {
+            if (isRetrying) return // don't dismiss mid-retry
             setResultMsg(null)
             setFrozenOnTimer(false)
+            setRetryParams(null)
           }}
         />
       ) : null}

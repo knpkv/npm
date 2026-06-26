@@ -10,6 +10,10 @@ interface PopupMessageProps {
   readonly lines: ReadonlyArray<{ text: string; color?: string }>
   readonly type?: "success" | "error" | "info"
   readonly onDismiss: () => void
+  /** When provided, shows a "Retry (r)" action — used to re-run a failed call. */
+  readonly onRetry?: (() => void) | undefined
+  /** Disables the retry action while a retry is in flight. */
+  readonly retrying?: boolean
 }
 
 const typeColors = {
@@ -24,17 +28,22 @@ const typeIcons = {
   info: "●"
 }
 
-export function PopupMessage({ lines, onDismiss, title, type = "info" }: PopupMessageProps) {
+export function PopupMessage({ lines, onDismiss, onRetry, retrying = false, title, type = "info" }: PopupMessageProps) {
   const color = typeColors[type]
   const icon = typeIcons[type]
 
-  useKeyboard((key: { name: string; ctrl?: boolean }) => {
+  useKeyboard((key: { name: string; ctrl?: boolean; char?: string }) => {
+    if (onRetry && !retrying && (key.name === "r" || key.char === "r")) {
+      onRetry()
+      return
+    }
     if (key.name === "return" || key.name === "escape" || key.name === "q") {
       onDismiss()
     }
   })
 
   const height = 4 + lines.length + 2 // border + title + gap + lines + gap + button
+  const retryBg = retrying ? "#555555" : "#FFAA00"
 
   return (
     <box
@@ -83,8 +92,15 @@ export function PopupMessage({ lines, onDismiss, title, type = "info" }: PopupMe
 
         <box style={{ height: 1 } as any} />
 
-        {/* OK button */}
-        <box style={{ height: 1, justifyContent: "center" } as any}>
+        {/* Action buttons */}
+        <box style={{ height: 1, justifyContent: "center", gap: 2 } as any}>
+          {onRetry ? (
+            <box style={{ backgroundColor: retryBg, paddingLeft: 2, paddingRight: 2 } as any}>
+              <text fg="#000000" style={{ fontWeight: "bold" } as any}>
+                {retrying ? "Retrying…" : "Retry (r)"}
+              </text>
+            </box>
+          ) : null}
           <box style={{ backgroundColor: color, paddingLeft: 2, paddingRight: 2 } as any}>
             <text fg="#000000" style={{ fontWeight: "bold" } as any}>
               OK (enter)
