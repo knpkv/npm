@@ -63,15 +63,27 @@ export interface WorklogParams {
   readonly comment?: string | undefined
 }
 
+/**
+ * Outcome of a single Jira worklog post. Distinguishing these lets callers decide whether a
+ * retry is worthwhile and show the user *why* it failed:
+ * - `NotLoggedIn` — no usable token; retrying is pointless until `jcf auth jira login`.
+ * - `Failed` — Jira rejected the request or the network errored; carries the reason and is retryable.
+ */
+export type JiraWorklogOutcome =
+  | { readonly _tag: "Posted" }
+  | { readonly _tag: "NotLoggedIn" }
+  | { readonly _tag: "Failed"; readonly message: string }
+
 export interface StopResult {
   readonly duration: Duration.Duration
   readonly clockifyLogged: boolean
-  readonly jiraWorklogLogged: boolean
   readonly needsProjectId: boolean
   readonly needsBillable: boolean
+  /** Jira worklog outcome. null when there was no ticket to log against. */
+  readonly jiraWorklog: JiraWorklogOutcome | null
   /**
    * Params to retry the Jira worklog after a partial stop (Clockify saved, Jira failed).
-   * null when there was no ticket to log against.
+   * Non-null iff {@link jiraWorklog} is `Failed` (the only retryable failure with a ticket).
    */
   readonly worklog: WorklogParams | null
 }
@@ -92,6 +104,22 @@ const emptyState: TimerState = {
   projectName: null,
   billable: null,
   startedViaJcf: false
+}
+
+// Distil a Jira worklog error body (usually `{ "errorMessages": [...] }`) into a short phrase.
+// Pure helper kept at module scope so the JSON parse isn't a try/catch inside an Effect.gen.
+const summariseJiraError = (status: number, body: string): string => {
+  const trimmed = body.trim()
+  if (!trimmed) return `HTTP ${status}`
+  try {
+    const parsed = JSON.parse(trimmed) as { errorMessages?: ReadonlyArray<string> }
+    if (parsed.errorMessages && parsed.errorMessages.length > 0) {
+      return `HTTP ${status}: ${parsed.errorMessages.join("; ")}`
+    }
+  } catch {
+    // Non-JSON body — fall through to the raw snippet.
+  }
+  return `HTTP ${status}: ${trimmed.slice(0, 200)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -133,11 +161,12 @@ export interface TimerServiceShape {
   readonly stop: (options?: StopOptions) => Effect.Effect<StopResult, TimerError>
   /**
    * (Re)post a Jira worklog in isolation — used to retry after a partial stop where the
-   * Clockify entry saved but the Jira worklog failed. Resolves `true` on success, `false`
-   * on any failure (auth/transport/non-2xx all swallowed by {@link postJiraWorklog}), so
-   * the error channel is honestly `never`.
+   * Clockify entry saved but the Jira worklog failed. Resolves a {@link JiraWorklogOutcome}
+   * so the caller can tell `NotLoggedIn` (don't bother retrying) from a retryable `Failed`
+   * and surface the reason. All failures are swallowed into the outcome, so the error channel
+   * is honestly `never`.
    */
-  readonly logWorklog: (params: WorklogParams) => Effect.Effect<boolean>
+  readonly logWorklog: (params: WorklogParams) => Effect.Effect<JiraWorklogOutcome>
   /** Write a completed interval directly (Clockify entry + Jira worklog), no running timer involved. */
   readonly logManual: (ticket: JiraTicket, options: LogManualOptions) => Effect.Effect<LogManualResult, TimerError>
   readonly discard: Effect.Effect<void, TimerError>
@@ -216,8 +245,13 @@ export const layer = Layer.effect(
         return tagIds
       })
 
-    // Post a Jira worklog via raw HTTP (generated client swallows 4xx as void). Returns success.
-    const postJiraWorklog = (ticketKey: string, startedAt: Date, durationSeconds: number, comment?: string) =>
+    // Post a Jira worklog via raw HTTP (generated client swallows 4xx as void).
+    const postJiraWorklog = (
+      ticketKey: string,
+      startedAt: Date,
+      durationSeconds: number,
+      comment?: string
+    ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
         // Jira rejects worklogs <60s — floor to 60s. Clockify keeps actual elapsed.
         const timeSpent = Math.max(60, Math.floor(durationSeconds))
@@ -231,13 +265,13 @@ export const layer = Layer.effect(
         const cloudId = yield* jiraAuth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
 
         // Short-circuit: without a token or cloudId the request is guaranteed to
-        // 401 against a malformed URL — fail fast locally instead.
+        // 401 against a malformed URL — report not-logged-in so retrying is suppressed.
         if (Redacted.value(accessToken) === "" || cloudId === "") {
           yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
-          return false
+          return { _tag: "NotLoggedIn" }
         }
 
-        const response = yield* httpClient.execute(
+        const exec = yield* httpClient.execute(
           HttpClientRequest.post(
             `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${encodeURIComponent(ticketKey)}/worklog`
           ).pipe(
@@ -258,18 +292,25 @@ export const layer = Layer.effect(
             })
           )
         ).pipe(
-          Effect.catch((e) => Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(Effect.map(() => null)))
+          Effect.map((response) => ({ ok: true as const, response })),
+          Effect.catch((e) =>
+            Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(
+              Effect.as({ ok: false as const, message: `Network error: ${String(e)}` })
+            )
+          )
         )
 
-        if (response && response.status >= 200 && response.status < 300) {
-          yield* Effect.logDebug(`Jira worklog created (${response.status})`)
-          return true
+        if (!exec.ok) {
+          return { _tag: "Failed", message: exec.message }
         }
-        if (response) {
-          const body = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
-          yield* Effect.logDebug(`Jira worklog failed (${response.status}): ${body.slice(0, 300)}`)
+        if (exec.response.status >= 200 && exec.response.status < 300) {
+          yield* Effect.logDebug(`Jira worklog created (${exec.response.status})`)
+          return { _tag: "Posted" }
         }
-        return false
+        const body = yield* exec.response.text.pipe(Effect.catch(() => Effect.succeed("")))
+        const message = summariseJiraError(exec.response.status, body)
+        yield* Effect.logDebug(`Jira worklog failed: ${message}`)
+        return { _tag: "Failed", message }
       })
 
     const start = (ticket: JiraTicket, options?: StartOptions) =>
@@ -386,19 +427,13 @@ export const layer = Layer.effect(
         }
 
         // Log Jira worklog (raw HTTP — generated client swallows 4xx as void)
-        let jiraLogged = false
         const worklog: WorklogParams | null = current.ticketKey
           ? { ticketKey: current.ticketKey, startedAt: current.startedAt, durationSeconds: durationMs / 1000, comment }
           : null
-        if (worklog) {
-          // Use worklog.* throughout so the live POST and the stored retry params can never drift.
-          jiraLogged = yield* postJiraWorklog(
-            worklog.ticketKey,
-            worklog.startedAt,
-            worklog.durationSeconds,
-            worklog.comment
-          )
-        }
+        // Use worklog.* throughout so the live POST and the stored retry params can never drift.
+        const jiraWorklog: JiraWorklogOutcome | null = worklog
+          ? yield* postJiraWorklog(worklog.ticketKey, worklog.startedAt, worklog.durationSeconds, worklog.comment)
+          : null
 
         yield* SubscriptionRef.set(ref, emptyState)
         yield* stateWriter.clear
@@ -406,11 +441,11 @@ export const layer = Layer.effect(
         return {
           duration,
           clockifyLogged: true,
-          jiraWorklogLogged: jiraLogged,
           needsProjectId: !projectId,
           needsBillable: billable === null,
-          // Surface params so the caller can retry the worklog if Clockify saved but Jira failed.
-          worklog: jiraLogged ? null : worklog
+          jiraWorklog,
+          // Only a retryable `Failed` exposes retry params — `NotLoggedIn` can't be fixed by retrying.
+          worklog: jiraWorklog?._tag === "Failed" ? worklog : null
         } satisfies StopResult
       })
 
@@ -461,14 +496,19 @@ export const layer = Layer.effect(
           Effect.catch((e) => Effect.logDebug(`Clockify correction entry failed: ${e.message}`))
         )
 
-        const jiraWorklogLogged = yield* postJiraWorklog(
+        const jiraOutcome = yield* postJiraWorklog(
           ticket.key,
           options.start,
           options.durationSeconds,
           options.comment
         )
 
-        return { clockifyLogged, jiraWorklogLogged, projectId, billable } satisfies LogManualResult
+        return {
+          clockifyLogged,
+          jiraWorklogLogged: jiraOutcome._tag === "Posted",
+          projectId,
+          billable
+        } satisfies LogManualResult
       })
 
     const detectRunning = Effect.gen(function*() {

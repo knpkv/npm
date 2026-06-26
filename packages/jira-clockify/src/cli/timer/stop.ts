@@ -9,10 +9,23 @@ import type { QuitError } from "effect/Terminal"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
-import type { TimerError } from "../../services/TimerService.js"
+import type { JiraWorklogOutcome, TimerError } from "../../services/TimerService.js"
 import { TimerService } from "../../services/TimerService.js"
 import { formatDuration, parseDuration, parseStartTime } from "../../utils/time.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
+
+/** Final one-line Jira worklog status, including the reason a non-retried failure stuck. */
+const worklogStatusLine = (outcome: JiraWorklogOutcome | null): string => {
+  if (outcome === null) return "skipped"
+  switch (outcome._tag) {
+    case "Posted":
+      return "✓"
+    case "NotLoggedIn":
+      return `✗ — not logged in (${NOT_LOGGED_IN_HINT})`
+    case "Failed":
+      return `✗ — ${outcome.message} (Clockify time saved; worklog not posted)`
+  }
+}
 
 /**
  * Interactively resolve a Clockify project for the stop/correction flows.
@@ -258,20 +271,23 @@ export const stop = Command.make(
         )
         yield* Console.log(`  Clockify: ${result.clockifyLogged ? "✓" : "✗"}`)
 
-        // Clockify saved but the Jira worklog failed — offer to retry just the worklog.
-        // The Clockify entry stays put, so retrying never double-logs time there.
-        let jiraLogged = result.jiraWorklogLogged
-        if (!jiraLogged && result.worklog) {
-          const worklog = result.worklog
-          let retry = yield* Prompt.confirm({ message: "  Jira worklog: ✗ — retry?", initial: true })
+        // Clockify saved but the Jira worklog failed — show why, and offer to retry just the
+        // worklog when it's retryable. The Clockify entry stays put, so retrying never double-logs.
+        // `NotLoggedIn` can't be fixed by retrying, so we skip the loop and point at the login command.
+        let outcome = result.jiraWorklog
+        const worklog = result.worklog
+        if (outcome?._tag === "Failed" && worklog) {
+          yield* Console.log(`  Jira worklog: ✗ — ${outcome.message}`)
+          let retry = yield* Prompt.confirm({ message: "  Retry Jira worklog?", initial: true })
           while (retry) {
-            jiraLogged = yield* timer.logWorklog(worklog)
-            if (jiraLogged) break
+            outcome = yield* timer.logWorklog(worklog)
+            if (outcome._tag === "Posted" || outcome._tag === "NotLoggedIn") break
+            yield* Console.log(`  Jira worklog: ✗ — ${outcome.message}`)
             // Default the re-prompt to No: if a retry just failed, don't keep nudging Yes.
-            retry = yield* Prompt.confirm({ message: "  Jira worklog: ✗ — retry again?", initial: false })
+            retry = yield* Prompt.confirm({ message: "  Retry again?", initial: false })
           }
         }
-        yield* Console.log(`  Jira worklog: ${jiraLogged ? "✓" : result.worklog ? "✗" : "skipped"}`)
+        yield* Console.log(`  Jira worklog: ${worklogStatusLine(outcome)}`)
       }
     })
 )

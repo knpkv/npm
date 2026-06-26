@@ -8,7 +8,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
-import type { TimerState, WorklogParams } from "../services/TimerService.js"
+import type { JiraWorklogOutcome, TimerState, WorklogParams } from "../services/TimerService.js"
 import { refreshAtom, ticketsAtom } from "./atoms/tickets.js"
 import {
   detectRunningAtom,
@@ -27,6 +27,26 @@ import { ThemeProvider } from "./context/theme.js"
 
 interface AppProps {
   readonly onQuit: () => void
+}
+
+// Popup lines describing a Jira worklog outcome — shows *why* a post failed so the
+// user isn't left guessing. Shared by the stop-result and retry-result observers.
+function worklogLines(outcome: JiraWorklogOutcome | null): Array<{ text: string; color?: string }> {
+  if (outcome === null) return [{ text: "Jira worklog: skipped", color: "#888888" }]
+  switch (outcome._tag) {
+    case "Posted":
+      return [{ text: "Jira worklog: saved ✓", color: "#00CC66" }]
+    case "NotLoggedIn":
+      return [
+        { text: "Jira worklog: not logged in ✗", color: "#FF6666" },
+        { text: "Run: jcf auth jira login", color: "#FFCC00" }
+      ]
+    case "Failed":
+      return [
+        { text: "Jira worklog: failed ✗", color: "#FF6666" },
+        { text: outcome.message.slice(0, 48), color: "#888888" }
+      ]
+  }
 }
 
 function AppContent({ onQuit }: AppProps) {
@@ -100,18 +120,13 @@ function AppContent({ onQuit }: AppProps) {
     // re-arm Retry with the previous ticket's worklog params.
     if (!frozenOnTimer || isStopping || AsyncResult.isWaiting(stopResult)) return
     if (AsyncResult.isSuccess(stopResult)) {
-      const jiraOk = stopResult.value.jiraWorklogLogged
-      // Stash params so the user can retry just the worklog if Jira failed.
-      setRetryParams(jiraOk ? null : stopResult.value.worklog)
+      const outcome = stopResult.value.jiraWorklog
+      // Only arm Retry for a retryable Failed — NotLoggedIn can't be fixed by retrying.
+      setRetryParams(outcome?._tag === "Failed" ? stopResult.value.worklog : null)
       setResultMsg({
         title: "Timer stopped",
-        lines: [
-          { text: "Clockify: saved ✓", color: "#00CC66" },
-          jiraOk
-            ? { text: "Jira worklog: saved ✓", color: "#00CC66" }
-            : { text: "Jira worklog: failed ✗", color: "#FF6666" }
-        ],
-        type: jiraOk ? "success" : "error"
+        lines: [{ text: "Clockify: saved ✓", color: "#00CC66" }, ...worklogLines(outcome)],
+        type: outcome?._tag === "Posted" ? "success" : "error"
       })
     } else if (AsyncResult.isFailure(stopResult)) {
       setRetryParams(null)
@@ -127,48 +142,26 @@ function AppContent({ onQuit }: AppProps) {
   const retryResult = useAtomValue(retryWorklogAtom)
   useEffect(() => {
     // Ignore the in-flight refresh; only act once the retry has settled.
-    if (!isRetrying || AsyncResult.isWaiting(retryResult)) return
-    if (AsyncResult.isSuccess(retryResult)) {
-      setIsRetrying(false)
-      if (retryResult.value) {
-        setRetryParams(null)
-        setResultMsg({
-          title: "Timer stopped",
-          lines: [
-            { text: "Clockify: saved ✓", color: "#00CC66" },
-            { text: "Jira worklog: saved ✓", color: "#00CC66" }
-          ],
-          type: "success"
-        })
-      } else {
-        // Still failing — keep retryParams so the user can try again.
-        setResultMsg({
-          title: "Timer stopped",
-          lines: [
-            { text: "Clockify: saved ✓", color: "#00CC66" },
-            { text: "Jira worklog: still failing ✗", color: "#FF6666" }
-          ],
-          type: "error"
-        })
-      }
-    } else if (AsyncResult.isFailure(retryResult)) {
-      setIsRetrying(false)
-      setResultMsg({
-        title: "Timer stopped",
-        lines: [
-          { text: "Clockify: saved ✓", color: "#00CC66" },
-          { text: "Jira worklog: retry failed ✗", color: "#FF6666" }
-        ],
-        type: "error"
-      })
-    }
+    // logWorklog has no error channel, so the only settled state is Success(outcome).
+    if (!isRetrying || AsyncResult.isWaiting(retryResult) || !AsyncResult.isSuccess(retryResult)) return
+    setIsRetrying(false)
+    const outcome = retryResult.value
+    // Keep retryParams (and the Retry button) only while the failure stays retryable.
+    if (outcome._tag !== "Failed") setRetryParams(null)
+    setResultMsg({
+      title: "Timer stopped",
+      lines: [{ text: "Clockify: saved ✓", color: "#00CC66" }, ...worklogLines(outcome)],
+      type: outcome._tag === "Posted" ? "success" : "error"
+    })
   }, [retryResult, isRetrying])
 
   const handleRetryWorklog = useCallback(() => {
-    if (!retryParams) return
+    // Guard `isRetrying` too: two quick `r` presses before the state commits would
+    // otherwise fire two POSTs and double-log the worklog.
+    if (!retryParams || isRetrying) return
     setIsRetrying(true)
     retryWorklog(retryParams)
-  }, [retryParams, retryWorklog])
+  }, [retryParams, isRetrying, retryWorklog])
 
   // Stop handler with comment — freeze view so popup stays visible
   const handleStop = useCallback(
