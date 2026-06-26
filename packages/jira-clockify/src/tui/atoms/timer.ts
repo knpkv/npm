@@ -6,7 +6,7 @@
 import { Effect } from "effect"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import type { JiraTicket } from "../../services/TicketService.js"
-import { type StopOptions, TimerService } from "../../services/TimerService.js"
+import { type StopOptions, TimerService, type WorklogParams } from "../../services/TimerService.js"
 import { runtimeAtom } from "./runtime.js"
 
 export const timerStateAtom = runtimeAtom.subscriptionRef(
@@ -29,6 +29,14 @@ export const stopTimerAtom = runtimeAtom.fn(
   Effect.fnUntraced(function*(options?: StopOptions) {
     const service = yield* TimerService
     return yield* service.stop(options)
+  })
+)
+
+// Retry just the Jira worklog after a partial stop (Clockify saved, Jira failed).
+export const retryWorklogAtom = runtimeAtom.fn(
+  Effect.fnUntraced(function*(params: WorklogParams) {
+    const service = yield* TimerService
+    return yield* service.logWorklog(params)
   })
 )
 

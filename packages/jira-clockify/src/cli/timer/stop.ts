@@ -12,7 +12,7 @@ import { ConfigService } from "../../services/ConfigService.js"
 import type { TimerError } from "../../services/TimerService.js"
 import { TimerService } from "../../services/TimerService.js"
 import { formatDuration, parseDuration, parseStartTime } from "../../utils/time.js"
-import { fetchTicketByKey } from "../fetchTicket.js"
+import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 
 /**
  * Interactively resolve a Clockify project for the stop/correction flows.
@@ -153,6 +153,10 @@ export const stop = Command.make(
           return
         }
         const fetched = yield* fetchTicketByKey(key)
+        if (fetched._tag === "NotLoggedIn") {
+          yield* Console.log(NOT_LOGGED_IN_HINT)
+          return
+        }
         if (fetched._tag === "NotFound") {
           yield* Console.log(`Ticket ${key} not found in Jira.`)
           return
@@ -253,7 +257,21 @@ export const stop = Command.make(
           `Timer stopped: ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
         )
         yield* Console.log(`  Clockify: ${result.clockifyLogged ? "✓" : "✗"}`)
-        yield* Console.log(`  Jira worklog: ${result.jiraWorklogLogged ? "✓" : "skipped"}`)
+
+        // Clockify saved but the Jira worklog failed — offer to retry just the worklog.
+        // The Clockify entry stays put, so retrying never double-logs time there.
+        let jiraLogged = result.jiraWorklogLogged
+        if (!jiraLogged && result.worklog) {
+          const worklog = result.worklog
+          let retry = yield* Prompt.confirm({ message: "  Jira worklog: ✗ — retry?", initial: true })
+          while (retry) {
+            jiraLogged = yield* timer.logWorklog(worklog)
+            if (jiraLogged) break
+            // Default the re-prompt to No: if a retry just failed, don't keep nudging Yes.
+            retry = yield* Prompt.confirm({ message: "  Jira worklog: ✗ — retry again?", initial: false })
+          }
+        }
+        yield* Console.log(`  Jira worklog: ${jiraLogged ? "✓" : result.worklog ? "✗" : "skipped"}`)
       }
     })
 )

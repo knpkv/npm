@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient } from "@knpkv/jira-api-client"
+import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
@@ -22,6 +23,20 @@ const makeJiraLayer = (
       }
     }
   } as never)
+
+// JiraAuth mock — only `isLoggedIn` matters for fetchTicketByKey.
+const makeAuthLayer = (loggedIn: boolean) =>
+  Layer.succeed(JiraAuth, {
+    isLoggedIn: () => Effect.succeed(loggedIn)
+  } as never)
+
+// JiraAuth whose isLoggedIn fails with a platform error (e.g. unreadable token file).
+const makeAuthFailLayer = (message: string) =>
+  Layer.succeed(JiraAuth, {
+    isLoggedIn: () => Effect.fail({ message })
+  } as never)
+
+const LoggedIn = makeAuthLayer(true)
 
 const issueFixture = {
   key: "PROJ-7",
@@ -54,16 +69,22 @@ describe("fetchTicketByKey", () => {
       expect(result.ticket.assignee).toBe("Dev")
       expect(result.ticket.type).toBe("Story")
       expect(result.ticket.labels).toEqual(["backend", "api"])
-    }).pipe(Effect.provide(makeJiraLayer(() => ({ data: issueFixture, response: { ok: true, status: 200 } })))))
+    }).pipe(
+      Effect.provide(makeJiraLayer(() => ({ data: issueFixture, response: { ok: true, status: 200 } }))),
+      Effect.provide(LoggedIn)
+    ))
 
   // A 404 must map to NotFound (genuine "no such issue")
   it.effect("returns NotFound on a 404", () =>
     Effect.gen(function*() {
       const result = yield* fetchTicketByKey("PROJ-404")
       expect(result._tag).toBe("NotFound")
-    }).pipe(Effect.provide(
-      makeJiraLayer(() => ({ error: { errorMessages: ["not found"] }, response: { ok: false, status: 404 } }))
-    )))
+    }).pipe(
+      Effect.provide(
+        makeJiraLayer(() => ({ error: { errorMessages: ["not found"] }, response: { ok: false, status: 404 } }))
+      ),
+      Effect.provide(LoggedIn)
+    ))
 
   // A non-404 failure (auth/network) must map to FetchError, NOT NotFound —
   // so a 401 is never reported to the user as "Ticket not found".
@@ -71,7 +92,35 @@ describe("fetchTicketByKey", () => {
     Effect.gen(function*() {
       const result = yield* fetchTicketByKey("PROJ-1")
       expect(result._tag).toBe("FetchError")
-    }).pipe(Effect.provide(
-      makeJiraLayer(() => ({ error: { errorMessages: ["unauthorized"] }, response: { ok: false, status: 401 } }))
-    )))
+    }).pipe(
+      Effect.provide(
+        makeJiraLayer(() => ({ error: { errorMessages: ["unauthorized"] }, response: { ok: false, status: 401 } }))
+      ),
+      Effect.provide(LoggedIn)
+    ))
+
+  // Not logged in must short-circuit to NotLoggedIn — an unauthenticated request
+  // 404s on a malformed URL and would otherwise masquerade as "ticket not found".
+  it.effect("returns NotLoggedIn when not authenticated", () =>
+    Effect.gen(function*() {
+      const result = yield* fetchTicketByKey("PROJ-7")
+      expect(result._tag).toBe("NotLoggedIn")
+    }).pipe(
+      // The Jira client would succeed, but the login check must short-circuit first.
+      Effect.provide(makeJiraLayer(() => ({ data: issueFixture, response: { ok: true, status: 200 } }))),
+      Effect.provide(makeAuthLayer(false))
+    ))
+
+  // A genuine platform error reading the token must NOT masquerade as NotLoggedIn —
+  // it is a real failure and should route to FetchError (only a clean absent token is NotLoggedIn).
+  it.effect("returns FetchError when the login check fails with a platform error", () =>
+    Effect.gen(function*() {
+      const result = yield* fetchTicketByKey("PROJ-7")
+      expect(result._tag).toBe("FetchError")
+      if (result._tag !== "FetchError") return
+      expect(result.message).toBe("token file unreadable")
+    }).pipe(
+      Effect.provide(makeJiraLayer(() => ({ data: issueFixture, response: { ok: true, status: 200 } }))),
+      Effect.provide(makeAuthFailLayer("token file unreadable"))
+    ))
 })

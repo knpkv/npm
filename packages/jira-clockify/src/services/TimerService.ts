@@ -55,12 +55,25 @@ export interface TimerState {
   readonly startedViaJcf: boolean
 }
 
+/** Everything needed to (re)post a Jira worklog without a running timer. */
+export interface WorklogParams {
+  readonly ticketKey: string
+  readonly startedAt: Date
+  readonly durationSeconds: number
+  readonly comment?: string | undefined
+}
+
 export interface StopResult {
   readonly duration: Duration.Duration
   readonly clockifyLogged: boolean
   readonly jiraWorklogLogged: boolean
   readonly needsProjectId: boolean
   readonly needsBillable: boolean
+  /**
+   * Params to retry the Jira worklog after a partial stop (Clockify saved, Jira failed).
+   * null when there was no ticket to log against.
+   */
+  readonly worklog: WorklogParams | null
 }
 
 export class TimerError extends Data.TaggedError("TimerError")<{
@@ -118,6 +131,13 @@ export interface TimerServiceShape {
   readonly state: SubscriptionRef.SubscriptionRef<TimerState>
   readonly start: (ticket: JiraTicket, options?: StartOptions) => Effect.Effect<void, TimerError>
   readonly stop: (options?: StopOptions) => Effect.Effect<StopResult, TimerError>
+  /**
+   * (Re)post a Jira worklog in isolation — used to retry after a partial stop where the
+   * Clockify entry saved but the Jira worklog failed. Resolves `true` on success, `false`
+   * on any failure (auth/transport/non-2xx all swallowed by {@link postJiraWorklog}), so
+   * the error channel is honestly `never`.
+   */
+  readonly logWorklog: (params: WorklogParams) => Effect.Effect<boolean>
   /** Write a completed interval directly (Clockify entry + Jira worklog), no running timer involved. */
   readonly logManual: (ticket: JiraTicket, options: LogManualOptions) => Effect.Effect<LogManualResult, TimerError>
   readonly discard: Effect.Effect<void, TimerError>
@@ -367,8 +387,17 @@ export const layer = Layer.effect(
 
         // Log Jira worklog (raw HTTP — generated client swallows 4xx as void)
         let jiraLogged = false
-        if (current.ticketKey) {
-          jiraLogged = yield* postJiraWorklog(current.ticketKey, current.startedAt, durationMs / 1000, comment)
+        const worklog: WorklogParams | null = current.ticketKey
+          ? { ticketKey: current.ticketKey, startedAt: current.startedAt, durationSeconds: durationMs / 1000, comment }
+          : null
+        if (worklog) {
+          // Use worklog.* throughout so the live POST and the stored retry params can never drift.
+          jiraLogged = yield* postJiraWorklog(
+            worklog.ticketKey,
+            worklog.startedAt,
+            worklog.durationSeconds,
+            worklog.comment
+          )
         }
 
         yield* SubscriptionRef.set(ref, emptyState)
@@ -379,9 +408,15 @@ export const layer = Layer.effect(
           clockifyLogged: true,
           jiraWorklogLogged: jiraLogged,
           needsProjectId: !projectId,
-          needsBillable: billable === null
+          needsBillable: billable === null,
+          // Surface params so the caller can retry the worklog if Clockify saved but Jira failed.
+          worklog: jiraLogged ? null : worklog
         } satisfies StopResult
       })
+
+    // Retry a worklog post in isolation (Clockify already saved during the failed stop).
+    const logWorklog = (params: WorklogParams) =>
+      postJiraWorklog(params.ticketKey, params.startedAt, params.durationSeconds, params.comment)
 
     // Log a completed interval after the fact — for when the timer was never started.
     // Writes a closed Clockify entry (start + end) and posts the matching Jira worklog,
@@ -503,6 +538,6 @@ export const layer = Layer.effect(
       yield* stateWriter.clear
     })
 
-    return { state: ref, start, stop: internalStop, logManual, discard, detectRunning }
+    return { state: ref, start, stop: internalStop, logWorklog, logManual, discard, detectRunning }
   })
 )
