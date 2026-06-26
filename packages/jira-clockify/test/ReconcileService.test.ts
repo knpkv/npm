@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import { deltaToApply, resolvePeriod } from "../src/cli/reconcile.js"
-import { buildReconcileRows, localDay, parseTicketKey } from "../src/services/ReconcileService.js"
+import {
+  buildReconcileRows,
+  combineDescriptions,
+  localDay,
+  parseTicketKey,
+  stripTicketPrefix
+} from "../src/services/ReconcileService.js"
 
 describe("parseTicketKey", () => {
   it("parses the bracket form `[KEY] summary`", () => {
@@ -52,8 +58,8 @@ describe("buildReconcileRows", () => {
       [{ ticketKey: "PROJ-2", day: "2026-06-24", seconds: 1800 }]
     )
     expect(rows).toEqual([
-      { ticketKey: "PROJ-1", day: "2026-06-23", clockifySeconds: 3600, jiraSeconds: 0 },
-      { ticketKey: "PROJ-2", day: "2026-06-24", clockifySeconds: 0, jiraSeconds: 1800 }
+      { ticketKey: "PROJ-1", day: "2026-06-23", clockifySeconds: 3600, jiraSeconds: 0, clockifyDescription: null },
+      { ticketKey: "PROJ-2", day: "2026-06-24", clockifySeconds: 0, jiraSeconds: 1800, clockifyDescription: null }
     ])
   })
 
@@ -76,6 +82,52 @@ describe("buildReconcileRows", () => {
   it("returns an empty list when both sides are empty", () => {
     expect(buildReconcileRows([], [])).toEqual([])
   })
+
+  // The Clockify description becomes the worklog comment, prefix stripped and deduped.
+  it("combines Clockify descriptions per bucket into clockifyDescription", () => {
+    const rows = buildReconcileRows(
+      [
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 3600, description: "[PROJ-1] Fix the widget" },
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 1800, description: "[PROJ-1] Write tests" },
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 600, description: "[PROJ-1] Fix the widget" }
+      ],
+      []
+    )
+    expect(rows[0]?.clockifyDescription).toBe("Fix the widget; Write tests")
+  })
+
+  it("yields a null clockifyDescription when descriptions are only the ticket prefix", () => {
+    const rows = buildReconcileRows(
+      [{ ticketKey: "PROJ-1", day: "2026-06-23", seconds: 3600, description: "[PROJ-1]" }],
+      []
+    )
+    expect(rows[0]?.clockifyDescription).toBeNull()
+  })
+})
+
+describe("stripTicketPrefix", () => {
+  it("strips the bracket and colon ticket markers", () => {
+    expect(stripTicketPrefix("[PROJ-12] Fix the widget")).toBe("Fix the widget")
+    expect(stripTicketPrefix("PROJ-12: Fix the widget")).toBe("Fix the widget")
+  })
+
+  it("keeps the prefix appended after a Clockify stop comment", () => {
+    expect(stripTicketPrefix("[PROJ-12] Fix the widget | extra note")).toBe("Fix the widget | extra note")
+  })
+
+  it("returns empty when only the marker is present", () => {
+    expect(stripTicketPrefix("[PROJ-12]")).toBe("")
+  })
+})
+
+describe("combineDescriptions", () => {
+  it("strips prefixes, dedupes, and joins with '; '", () => {
+    expect(combineDescriptions(["[A-1] one", "[A-1] two", "[A-1] one"])).toBe("one; two")
+  })
+
+  it("returns null when nothing meaningful remains", () => {
+    expect(combineDescriptions([null, undefined, "[A-1]", "  "])).toBeNull()
+  })
 })
 
 describe("deltaToApply", () => {
@@ -83,7 +135,8 @@ describe("deltaToApply", () => {
     ticketKey: "PROJ-1",
     day: "2026-06-23",
     clockifySeconds,
-    jiraSeconds
+    jiraSeconds,
+    clockifyDescription: null
   })
 
   it("returns the gap the target is short in the chosen direction", () => {

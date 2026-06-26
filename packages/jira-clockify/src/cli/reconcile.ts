@@ -155,7 +155,7 @@ export const reconcile = Command.make(
         if (!apply) continue
 
         if (directionTag === "clockify-to-jira") {
-          const outcome = yield* svc.applyToJira(row.ticketKey, row.day, delta)
+          const outcome = yield* svc.applyToJira(row.ticketKey, row.day, delta, row.clockifyDescription ?? undefined)
           if (outcome._tag === "Posted") {
             yield* Console.log(`    ✓ posted to Jira`)
           } else if (outcome._tag === "NotLoggedIn") {
