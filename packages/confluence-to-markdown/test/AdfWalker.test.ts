@@ -143,6 +143,21 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("```")
   })
 
+  it("wraps a code block with metadata in an encoded node marker", () => {
+    const node = {
+      type: "codeBlock",
+      attrs: { language: "ts", uniqueId: "code-1", wrap: true },
+      marks: [{ type: "breakout", attrs: { mode: "wide", width: 760 } }],
+      content: [{ type: "text", text: "const x = 1" }]
+    }
+    const r = walk(doc([node]))
+    expect(r.markdown).toMatch(/<!-- adf:codeBlock node=[A-Za-z0-9+/=]+ -->/)
+    expect(r.markdown).not.toContain(stableStringify(node))
+    expect(r.markdown).toContain("```ts")
+    expect(r.markdown).toContain("const x = 1")
+    expect(r.markdown).toContain("<!-- adf:/codeBlock -->")
+  })
+
   it("renders a table with header row", () => {
     const r = walk(doc([{
       type: "table",

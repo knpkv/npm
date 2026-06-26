@@ -348,6 +348,24 @@ describe("revertPlaceholders", () => {
     expect(out.content).toEqual([taskList, decisionList, expand, table, layoutSection, blockCard, embedCard])
   })
 
+  it("restores a metadata-bearing codeBlock from an encoded node marker", () => {
+    const codeBlock = {
+      type: "codeBlock",
+      attrs: { language: "ts", uniqueId: "code-1", wrap: true, hideLineNumbers: true },
+      marks: [{ type: "breakout", attrs: { mode: "wide", width: 760 } }],
+      content: [{ type: "text", text: "const x = 1" }]
+    }
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:codeBlock node=${b64(codeBlock)} -->`),
+        codeBlock,
+        para(`<!-- adf:/codeBlock -->`)
+      ])
+    ) as { content: Array<unknown> }
+
+    expect(out.content).toEqual([codeBlock])
+  })
+
   it("reverts an extension marker nested inside a bodiedExtension body", () => {
     const out = revertPlaceholders(
       docOf([

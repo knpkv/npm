@@ -57,6 +57,7 @@ const timestampLine = (label: string, date: Date): string => `${label} at ${date
 const RAW_ROUND_TRIP_NODE_TYPES = [
   "blockCard",
   "bodiedExtension",
+  "codeBlock",
   "date",
   "decisionItem",
   "decisionList",
@@ -82,6 +83,7 @@ const RAW_ROUND_TRIP_NODE_TYPES = [
 const RAW_ROUND_TRIP_MARK_TYPES = [
   "alignment",
   "backgroundColor",
+  "breakout",
   "indentation",
   "subsup",
   "textColor",

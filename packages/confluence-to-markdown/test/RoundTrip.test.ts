@@ -43,6 +43,75 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).toContain("const x: number = 1")
     }).pipe(Effect.provide(TestLayer)))
 
+  it.effect("round-trips code-block custom width and attrs as native ADF", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "codeBlock",
+          attrs: { language: "ts", uniqueId: "code-1", wrap: true, hideLineNumbers: true },
+          marks: [{ type: "breakout", attrs: { mode: "wide", width: 760 } }],
+          content: [{ type: "text", text: "const x: number = 1" }]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      expect(md).toContain("```ts")
+      expect(md).toContain("const x: number = 1")
+
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("round-trips metadata-bearing code blocks containing bracket text", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "codeBlock",
+          attrs: { language: "json", localId: "14686791bf5e" },
+          marks: [{ type: "breakout", attrs: { mode: "wide", width: 1011 } }],
+          content: [{
+            type: "text",
+            text: "{\n  \"mentions\": [\"[Add Engineer]\", \"[Add Reviewer]\"],\n  \"supportsADF\": true\n}"
+          }]
+        }]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
+      expect(adfOut.content[0]).toEqual(source.content[0])
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("pushes legacy escaped raw code-block metadata markers as native ADF", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const codeBlock = {
+        type: "codeBlock",
+        attrs: { language: "json", localId: "14686791bf5e" },
+        marks: [{ type: "breakout", attrs: { mode: "wide", width: 1011 } }],
+        content: [{
+          type: "text",
+          text: "{\n  \"mentions\": [\"[Add Engineer]\", \"[Add Reviewer]\"],\n  \"supportsADF\": true\n}"
+        }]
+      }
+      const legacyMarkdown = [
+        `\\<!-- adf:codeBlock node=${JSON.stringify(codeBlock)} -->`,
+        "",
+        "```json",
+        codeBlock.content[0]!.text,
+        "```",
+        "",
+        "\\<!-- adf:/codeBlock -->"
+      ].join("\n")
+      const adfOut = JSON.parse(yield* converter.markdownToAdf(legacyMarkdown)) as {
+        content: Array<unknown>
+      }
+      expect(adfOut.content[0]).toEqual(codeBlock)
+    }).pipe(Effect.provide(TestLayer)))
+
   it.effect("preserves a blockquote", () =>
     Effect.gen(function*() {
       const md = yield* roundTrip("> a quote\n")
