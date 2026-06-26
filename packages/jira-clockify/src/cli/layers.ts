@@ -20,7 +20,10 @@ import { layer as TimerServiceLayer } from "../services/TimerService.js"
 // Platform
 // ---------------------------------------------------------------------------
 
-export const PlatformLayer = Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)
+// HttpClient backs TimerService's raw Jira worklog POST. Use the fetch implementation, not
+// undici: the TUI runs under Bun (see main.tsx) where undici fails with a transport error,
+// while fetch works in both Bun and Node — the same fetch the Jira/Clockify API clients use.
+export const PlatformLayer = Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerFetch)
 
 // ---------------------------------------------------------------------------
 // Leaf layers
