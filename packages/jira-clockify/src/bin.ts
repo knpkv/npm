@@ -15,6 +15,7 @@ import { auth } from "./cli/auth.js"
 import { config } from "./cli/config.js"
 import { HeadlessLayer } from "./cli/layers.js"
 import { list } from "./cli/list.js"
+import { reconcile } from "./cli/reconcile.js"
 import { launchTuiOrSetup } from "./cli/setup.js"
 import { discard, edit, log, start, statusCmd, stop } from "./cli/timer.js"
 
@@ -37,7 +38,7 @@ const skills = Command.make("skills", {}, () => Console.log("Usage: jcf skills i
 )
 
 const root = Command.make("jcf", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))).pipe(
-  Command.withSubcommands([tui, auth, start, stop, discard, log, statusCmd, list, config, edit, skills])
+  Command.withSubcommands([tui, auth, start, stop, discard, log, statusCmd, list, reconcile, config, edit, skills])
 )
 
 const cli = Command.runWith(root, {
