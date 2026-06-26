@@ -11,6 +11,7 @@ import { Effect, Layer, Redacted } from "effect"
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
+import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
 import { layer as TicketServiceLayer } from "../services/TicketService.js"
 import { layer as TimerServiceLayer } from "../services/TimerService.js"
@@ -95,12 +96,22 @@ export const TimerServiceLive = TimerServiceLayer.pipe(
   Layer.provide(PlatformLayer)
 )
 
+export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
+  Layer.provide(ClockifyApiLive),
+  Layer.provide(ClockifyAuthLive),
+  Layer.provide(JiraApiLive),
+  Layer.provide(JiraAuthLive),
+  Layer.provide(ConfigLive),
+  Layer.provide(TimerServiceLive)
+)
+
 // ---------------------------------------------------------------------------
 // Fully closed layer for headless CLI
 // ---------------------------------------------------------------------------
 
 export const HeadlessLayer = Layer.mergeAll(
   TimerServiceLive,
+  ReconcileServiceLive,
   TicketServiceLive,
   ConfigLive,
   StateWriterLive,
