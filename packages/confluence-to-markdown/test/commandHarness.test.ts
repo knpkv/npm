@@ -40,17 +40,18 @@ const FetchClientLayer = Layer.succeed(
 )
 
 describe("command harness", () => {
-  it.effect("runs fetch through the root command without calling GitService", () =>
+  it.effect("runs page get through the root command without calling GitService", () =>
     Effect.gen(function*() {
       const gitCalls = yield* Ref.make(0)
       const stdout = yield* Ref.make("")
-      const fetch = makeFetchCommand({ makeClientLayer: () => FetchClientLayer })
+      const pageGet = makeFetchCommand({ name: "get", makeClientLayer: () => FetchClientLayer })
 
       const exit = yield* runConfluenceCommand([
-        "fetch",
+        "page",
+        "get",
         "--url",
         "https://example.atlassian.net/wiki/pages/2333334354"
-      ], { fetch }).pipe(Effect.provide(CommandHarnessLayer({ gitCalls, stdout })))
+      ], { pageGet }).pipe(Effect.provide(CommandHarnessLayer({ gitCalls, stdout })))
       const calls = yield* Ref.get(gitCalls)
       const output = yield* Ref.get(stdout)
 
@@ -65,6 +66,7 @@ describe("command harness", () => {
       const stdout = yield* Ref.make("")
 
       const exit = yield* runConfluenceCommand([
+        "workspace",
         "clone",
         "--url",
         "https://example.atlassian.net/wiki/pages/2333334354",
@@ -75,5 +77,23 @@ describe("command harness", () => {
 
       expect(exit._tag).toBe("Failure")
       expect(calls).toBe(0)
+    }))
+
+  it.effect("rejects removed legacy top-level commands", () =>
+    Effect.gen(function*() {
+      const legacyCommands = ["clone", "status", "diff", "pull", "push", "commit", "log", "fetch", "new", "delete"]
+
+      for (const command of legacyCommands) {
+        const gitCalls = yield* Ref.make(0)
+        const stdout = yield* Ref.make("")
+
+        const exit = yield* runConfluenceCommand([command]).pipe(
+          Effect.provide(CommandHarnessLayer({ gitCalls, stdout }))
+        )
+        const calls = yield* Ref.get(gitCalls)
+
+        expect(exit._tag).toBe("Failure")
+        expect(calls).toBe(0)
+      }
     }))
 })

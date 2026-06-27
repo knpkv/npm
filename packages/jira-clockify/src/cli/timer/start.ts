@@ -110,7 +110,7 @@ export const start = Command.make(
 
       if (key._tag === "None") {
         if (allTickets.length === 0) {
-          yield* Console.log("No tickets found. Usage: jcf start PROJ-123")
+          yield* Console.log("No tickets found. Usage: jcf timer start PROJ-123")
           return
         }
 

@@ -44,7 +44,7 @@ export const pullCommand = Command.make(
         yield* Console.error("Errors:", result.errors.join("\n"))
       }
     })
-).pipe(Command.withDescription("Download pages from Confluence to local markdown"))
+).pipe(Command.withDescription("Local write: download pages from Confluence to local markdown"))
 
 // === Push command ===
 const dryRunOption = Options.boolean("dry-run").pipe(
@@ -63,7 +63,7 @@ export const pushCommand = Command.make(
       // Check for uncommitted changes
       const gitStatus = yield* git.status()
       if (gitStatus.hasChanges) {
-        yield* Console.log("Uncommitted changes detected. Run 'confluence commit' first.")
+        yield* Console.log("Uncommitted changes detected. Run 'confluence sync commit' first.")
         return
       }
 
@@ -78,7 +78,7 @@ export const pushCommand = Command.make(
         yield* Console.error("Errors:", result.errors.join("\n"))
       }
     })
-).pipe(Command.withDescription("Upload local markdown changes to Confluence"))
+).pipe(Command.withDescription("Remote write: upload local markdown changes to Confluence"))
 
 // === Status command ===
 export const statusCommand = Command.make("status", {}, () =>
@@ -104,7 +104,7 @@ export const statusCommand = Command.make("status", {}, () =>
         yield* Console.log(`  Conflicts: ${gitStatus.conflictedFiles.length} files`)
       }
     } else {
-      yield* Console.log("Git: not initialized (run 'confluence git init')")
+      yield* Console.log("Git: not initialized (run 'confluence workspace clone')")
     }
 
     const result = yield* engine.status()
@@ -127,4 +127,4 @@ Sync Status:
         }
       }
     }
-  })).pipe(Command.withDescription("Show sync status"))
+  })).pipe(Command.withDescription("Read-only: show sync status"))

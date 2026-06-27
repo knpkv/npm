@@ -1,0 +1,17 @@
+---
+title: Confluence
+description: Confluence workspace, sync, and page commands.
+---
+
+Use the `confluence` binary to manage a local Markdown workspace for Confluence pages.
+
+```bash
+confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
+confluence sync status
+confluence sync pull
+confluence sync push --dry-run
+confluence sync push
+confluence page get --page-id <page-id> --base-url https://example.atlassian.net
+confluence page new
+confluence page delete
+```

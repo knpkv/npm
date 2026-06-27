@@ -1,4 +1,4 @@
 interface:
   display_name: "Confluence Markdown CLI"
   short_description: "Sync and export Confluence pages as markdown"
-  default_prompt: "Use $confluence to clone, fetch, pull, edit, or push Confluence pages as markdown while preserving ADF fidelity markers."
+  default_prompt: "Use $confluence to run workspace, sync, and page commands for Confluence markdown while preserving ADF fidelity markers."

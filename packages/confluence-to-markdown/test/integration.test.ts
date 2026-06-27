@@ -235,7 +235,9 @@ const findPageByPageId = (pageId: string) =>
  * Clone pages from Confluence with full history.
  */
 const clonePages = Effect.gen(function*() {
-  const output = yield* runCli(["clone", "--root-page-id", ROOT_PAGE_ID, "--base-url", BASE_URL], { timeout: 120000 })
+  const output = yield* runCli(["workspace", "clone", "--root-page-id", ROOT_PAGE_ID, "--base-url", BASE_URL], {
+    timeout: 120000
+  })
 
   expect(output).toContain("Cloning pages from Confluence")
   expect(output).toMatch(/Cloned \d+ pages with \d+ commits/)
@@ -294,7 +296,7 @@ ${createMarker}
  */
 const commitChanges = (message: string) =>
   Effect.gen(function*() {
-    const output = yield* runCli(["commit", "-m", message])
+    const output = yield* runCli(["sync", "commit", "-m", message])
     expect(output).toContain("Committed:")
     return output
   })
@@ -303,7 +305,7 @@ const commitChanges = (message: string) =>
  * Push changes to Confluence.
  */
 const pushChanges = Effect.gen(function*() {
-  const output = yield* runCli(["push"], { timeout: 90000 })
+  const output = yield* runCli(["sync", "push"], { timeout: 90000 })
 
   const pushedMatch = output.match(/Pushed:\s*(\d+)/)
   const createdMatch = output.match(/Created:\s*(\d+)/)
@@ -319,7 +321,7 @@ const pushChanges = Effect.gen(function*() {
 /**
  * Pull changes from Confluence.
  */
-const pullChanges = runCli(["pull"])
+const pullChanges = runCli(["sync", "pull"])
 
 /**
  * Extract pageId from file front-matter.
@@ -602,7 +604,7 @@ describe("CLI Integration - Page Creation Flow", () => {
         // 3. Commit and push new page
         yield* commitChanges(`Add integration test page ${timestamp}`)
 
-        const statusBefore = yield* runCli(["status"])
+        const statusBefore = yield* runCli(["sync", "status"])
         expect(statusBefore).toContain("Local Only:")
 
         const pushResult1 = yield* pushChanges

@@ -31,3 +31,8 @@ export const list = Command.make(
       }
     })
 )
+
+export const issue = Command.make("issue", {}, () => Console.log("Usage: jcf issue list")).pipe(
+  Command.withDescription("Jira issue commands"),
+  Command.withSubcommands([list])
+)

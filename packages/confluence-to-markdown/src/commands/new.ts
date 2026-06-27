@@ -35,7 +35,7 @@ export const newCommand = Command.make("new", {}, () =>
     const hasPages = tree.children.length > 0 || tree.pageId !== null
 
     if (!hasPages) {
-      yield* Console.log("No pages found. Run 'confluence clone' or 'confluence pull' first.")
+      yield* Console.log("No pages found. Run 'confluence workspace clone' or 'confluence sync pull' first.")
       return
     }
 
@@ -95,6 +95,6 @@ export const newCommand = Command.make("new", {}, () =>
     yield* Console.log("")
     yield* Console.log("Next steps:")
     yield* Console.log("  1. Edit the file to add content")
-    yield* Console.log("  2. Run 'confluence commit' to stage changes")
-    yield* Console.log("  3. Run 'confluence push' to create on Confluence")
-  })).pipe(Command.withDescription("Create a new page to be pushed to Confluence"))
+    yield* Console.log("  2. Run 'confluence sync commit' to stage changes")
+    yield* Console.log("  3. Run 'confluence sync push' to create on Confluence")
+  })).pipe(Command.withDescription("Local write: create a new page to be pushed to Confluence"))

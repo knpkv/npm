@@ -1,5 +1,5 @@
 /**
- * `jira get <key>` command — fetches a single issue and writes to Markdown.
+ * `jira issue get <key>` command — fetches a single issue and writes to Markdown.
  *
  * @internal
  */
@@ -39,4 +39,4 @@ export const getCommand = Command.make(
 
       yield* Console.log(`Done.`)
     })
-).pipe(Command.withDescription("Get a single Jira issue by key"))
+).pipe(Command.withDescription("Read-only: get a single Jira issue by key"))

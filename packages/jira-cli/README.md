@@ -60,14 +60,14 @@ jira auth login
 ### Search by JQL
 
 ```bash
-jira search 'project = PROJ AND status = Done'
+jira issue search 'project = PROJ AND status = Done'
 ```
 
 ### Search by Fix Version
 
 ```bash
-jira search --by-version "1.0.0"
-jira search --by-version "1.0.0" --project PROJ
+jira issue search --by-version "1.0.0"
+jira issue search --by-version "1.0.0" --project PROJ
 ```
 
 ### Options
@@ -124,8 +124,8 @@ jira version list --project PROJ --json
 ### View a version
 
 ```bash
-jira version view 10042
-jira version view 10042 --json
+jira version get 10042
+jira version get 10042 --json
 ```
 
 The version id is the **numeric** id (e.g. `10042`); use `version list` to find it.
@@ -133,7 +133,7 @@ The version id is the **numeric** id (e.g. `10042`); use `version list` to find 
 ### Set the description
 
 ```bash
-jira version set 10042 --description "Q3 release"
+jira version update 10042 --description "Q3 release"
 ```
 
 Requires the `manage:jira-project` scope.
@@ -143,14 +143,14 @@ Requires the `manage:jira-project` scope.
 Manage the "Related work" links (e.g. Confluence pages surfaced on a release report).
 
 ```bash
-jira version relatedwork list 10042
-jira version relatedwork add 10042 \
+jira version related-work list 10042
+jira version related-work add 10042 \
   --title "Release notes" \
   --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
   --category Communication
 ```
 
-`relatedwork add` requires the `write:jira-work` scope.
+`related-work add` requires the `write:jira-work` scope.
 
 ## Auth Commands
 

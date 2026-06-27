@@ -32,7 +32,7 @@ export const deleteCommand = Command.make("delete", {}, () =>
     const choices = allChoices.filter((c) => c.value.pageId !== null)
 
     if (choices.length === 0) {
-      yield* Console.log("No pages found to delete. Run 'confluence clone' or 'confluence pull' first.")
+      yield* Console.log("No pages found to delete. Run 'confluence workspace clone' or 'confluence sync pull' first.")
       return
     }
 
@@ -53,6 +53,6 @@ export const deleteCommand = Command.make("delete", {}, () =>
     yield* Console.log(`Deleted: ${selected.path}`)
     yield* Console.log("")
     yield* Console.log("Next steps:")
-    yield* Console.log("  1. Run 'confluence commit' to stage the deletion")
-    yield* Console.log("  2. Run 'confluence push' to delete from Confluence")
-  })).pipe(Command.withDescription("Delete a page locally (push to remove from Confluence)"))
+    yield* Console.log("  1. Run 'confluence sync commit' to stage the deletion")
+    yield* Console.log("  2. Run 'confluence sync push' to delete from Confluence")
+  })).pipe(Command.withDescription("Local write: delete a page locally (push to remove from Confluence)"))

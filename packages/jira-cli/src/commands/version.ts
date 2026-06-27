@@ -1,5 +1,5 @@
 /**
- * `jira version` command — list / view Jira project versions (releases) with
+ * `jira version` command — list / get Jira project versions (releases) with
  * Driver, Contributors and Approver fields resolved to display names, plus
  * mutations: edit the description and manage "Related work" links (the
  * Confluence pages surfaced on a release report).
@@ -126,13 +126,13 @@ const listCommand = Command.make("list", {
         v.approvers.map((a) => `${a.person.displayName}:${a.status}`).join("|") || "-"
       ].join(sep))
     }
-  })).pipe(Command.withDescription("List versions for a Jira project"))
+  })).pipe(Command.withDescription("Read-only: list versions for a Jira project"))
 
-/** Cap on the number of ticket keys listed in the human `view` output. */
+/** Cap on the number of ticket keys listed in the human `get` output. */
 const TICKET_KEYS_LIMIT = 20
 
-const viewCommand = Command.make(
-  "view",
+const getCommand = Command.make(
+  "get",
   { id: idArg, json: jsonOption, emails: emailsOption },
   ({ emails, id, json }) =>
     Effect.gen(function*() {
@@ -154,10 +154,10 @@ const viewCommand = Command.make(
       )
       yield* Console.log(`tickets (${version.tickets.length}): ${formatTicketKeys(version.tickets)}`)
     })
-).pipe(Command.withDescription("Show a single Jira version"))
+).pipe(Command.withDescription("Read-only: get a single Jira version"))
 
 /**
- * Render a version's ticket keys for the human `view`: the first
+ * Render a version's ticket keys for the human `get`: the first
  * {@link TICKET_KEYS_LIMIT} keys, with a `(+M more)` suffix when truncated, or
  * `-` when there are none.
  */
@@ -174,7 +174,7 @@ const descriptionOption = Options.string("description").pipe(
   Options.withDescription("New version description")
 )
 
-const setCommand = Command.make("set", { id: idArg, description: descriptionOption, json: jsonOption }, ({
+const updateCommand = Command.make("update", { id: idArg, description: descriptionOption, json: jsonOption }, ({
   description,
   id,
   json
@@ -190,10 +190,10 @@ const setCommand = Command.make("set", { id: idArg, description: descriptionOpti
     yield* Console.log(`Updated version ${version.name} (${version.id})`)
     yield* Console.log(`description: ${version.description ?? "-"}`)
   })).pipe(
-    Command.withDescription("Update a version's description (requires manage:jira-project scope)")
+    Command.withDescription("Remote write: update a version's description (requires manage:jira-project scope)")
   )
 
-// === relatedwork ===
+// === related-work ===
 
 const titleOption = Options.string("title").pipe(
   Options.withAlias("t"),
@@ -231,7 +231,7 @@ const relatedWorkListCommand = Command.make(
         yield* Console.log([w.category || "-", w.title ?? "-", w.url ?? "-"].join(sep))
       }
     })
-).pipe(Command.withDescription("List a version's related-work links"))
+).pipe(Command.withDescription("Read-only: list a version's related-work links"))
 
 const relatedWorkAddCommand = Command.make("add", {
   id: idArg,
@@ -252,16 +252,16 @@ const relatedWorkAddCommand = Command.make("add", {
     yield* Console.log(`url: ${created.url ?? url}`)
   })).pipe(
     Command.withDescription(
-      "Attach a related-work link (e.g. a Confluence page) to a version (requires manage:jira-project scope)"
+      "Remote write: attach a related-work link (e.g. a Confluence page) to a version (requires manage:jira-project scope)"
     )
   )
 
-const relatedWorkCommand = Command.make("relatedwork").pipe(
+const relatedWorkCommand = Command.make("related-work").pipe(
   Command.withDescription("List or attach version related-work links (Confluence pages on the release report)"),
   Command.withSubcommands([relatedWorkListCommand, relatedWorkAddCommand])
 )
 
 export const versionCommand = Command.make("version").pipe(
-  Command.withDescription("List, view, or edit Jira project versions (releases)"),
-  Command.withSubcommands([listCommand, viewCommand, setCommand, relatedWorkCommand])
+  Command.withDescription("Jira version commands"),
+  Command.withSubcommands([listCommand, getCommand, updateCommand, relatedWorkCommand])
 )

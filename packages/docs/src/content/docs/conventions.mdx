@@ -1,0 +1,22 @@
+---
+title: Conventions
+description: Shared command conventions across product binaries.
+---
+
+## Namespaces
+
+- `auth` is authentication.
+- `config` is local tool configuration.
+- `skills install` installs bundled agent skills.
+
+## Output
+
+Commands documented for agent parsing use `--json`. With `--json`, stdout contains exactly one JSON value. Progress, warnings, and human hints belong on stderr.
+
+## Mutability
+
+Command references classify commands as read-only, local write, or remote write. Agents should confirm explicit intent before running remote write commands.
+
+## Dry Runs
+
+`--dry-run` is only used when the command can truthfully preview the changes it would make.

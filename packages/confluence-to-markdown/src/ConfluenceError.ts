@@ -31,7 +31,7 @@ export class ConfigNotFoundError extends Data.TaggedError("ConfigNotFoundError")
   constructor(params: { path: string }) {
     super({
       path: params.path,
-      message: `Config not found: ${params.path}\nRun 'confluence clone' to initialize.`
+      message: `Config not found: ${params.path}\nRun 'confluence workspace clone' to initialize.`
     })
   }
 }

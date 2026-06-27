@@ -62,7 +62,7 @@ export const cloneCommand = Command.make(
       const isGitInit = yield* git.isInitialized()
       if (isGitInit) {
         return yield* Effect.fail(
-          new ConfigError({ message: "Already cloned. Use 'confluence pull' to update." })
+          new ConfigError({ message: "Already cloned. Use 'confluence sync pull' to update." })
         )
       }
 
@@ -150,4 +150,4 @@ export const cloneCommand = Command.make(
       yield* writeStdout("\r" + " ".repeat(80) + "\r")
       yield* Console.log(`Cloned ${result.pulled} pages with ${result.commits} commits`)
     })
-).pipe(Command.withDescription("Clone Confluence pages with full version history"))
+).pipe(Command.withDescription("Local write: clone Confluence pages with full version history"))

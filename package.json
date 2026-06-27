@@ -4,6 +4,8 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "clean": "node scripts/clean.mjs",
+    "skills:sync": "node scripts/sync-skills.mjs write",
+    "skills:check": "node scripts/sync-skills.mjs check",
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",
     "build": "tspc -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
     "build:tsgo": "tsgo -b tsconfig.build.json && pnpm --recursive --filter \"./packages/**/*\" run build",
@@ -76,6 +78,7 @@
       "uuid@<11.1.1": "11.1.1",
       "read-yaml-file@<2.1.0": "2.1.0",
       "js-yaml@<=4.1.1": "4.2.0",
+      "yaml@>=2.0.0 <2.8.3": "2.8.3",
       "linkify-it@<=5.0.0": "5.0.1",
       "diff@>=6.0.0 <8.0.3": "8.0.3"
     }

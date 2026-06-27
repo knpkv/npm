@@ -136,7 +136,9 @@ export const launchTui = (args: ReadonlyArray<string>) =>
         yield* Console.log("TUI requires Bun runtime (@opentui/react dependency).")
         yield* Console.log("Install Bun: curl -fsSL https://bun.sh/install | bash")
         yield* Console.log("")
-        yield* Console.log("CLI commands work without Bun: jcf start, jcf stop, jcf status, jcf list")
+        yield* Console.log(
+          "CLI commands work without Bun: jcf timer start, jcf timer stop, jcf timer status, jcf issue list"
+        )
         return
       }
       // Re-exec with bun — must point to bin.ts, not this module

@@ -4,13 +4,93 @@ Jira Markdown is the context for representing Jira work items as local Markdown 
 
 ## Language
 
+**Command Surface**:
+The user-facing CLI contract of a package, including command names, subcommands, arguments, flags, output modes, prompts, and mutation safety conventions.
+_Avoid_: API, SDK, internal command implementation
+
+**Product Binary**:
+The primary executable name for a product-specific Command Surface, such as `jira`, `confluence`, `codecommit`, or `jcf`.
+_Avoid_: Umbrella command, package command
+
+**Command Convention**:
+A shared CLI behavior or naming rule that should feel the same across product-specific Command Surfaces without requiring every product to use the same resource nouns.
+_Avoid_: Universal command grammar, one-size-fits-all CLI
+
+**JSON Output Contract**:
+The machine-readable CLI output rule where `--json` writes exactly one JSON value to stdout while progress, warnings, and human hints go to stderr.
+_Avoid_: Parseable text, quiet mode
+
+**Dry Run**:
+A preview mode for a command that can accurately describe the remote or local changes it would make without applying them.
+_Avoid_: No-op mode, safety flag
+
+**Documentation Site**:
+The published documentation experience for the package collection, initially focused on Canonical Commands, Command Conventions, agent skills, and migration guidance.
+_Avoid_: README collection, SDK reference site
+
+**Product Guide**:
+A Documentation Site section organized around one Product Binary and its Canonical Commands.
+_Avoid_: Task guide, package README
+
+**Command Reference**:
+A Documentation Site page or section that records the exact syntax, arguments, flags, output modes, and mutability class of a Canonical Command.
+_Avoid_: Guide, tutorial, README example
+
+**Canonical Command**:
+The preferred command spelling that documentation, help text, and agent skills should teach after a Command Surface has been simplified.
+_Avoid_: Alias, legacy command
+
+**Resource Command**:
+A Canonical Command grouped under the domain object it operates on, such as an issue, version, page, or pull request.
+_Avoid_: Top-level action command, verb-first command
+
+**Read-Only Command**:
+A command that observes remote or local state without changing it and must be safe for an agent to run without confirmation.
+_Avoid_: Harmless command, safe command
+
+**Local Write Command**:
+A command that changes local files, local configuration, local caches, or local sync metadata without mutating a remote service.
+_Avoid_: Offline command, safe write
+
+**Remote Write Command**:
+A command that mutates Jira, Confluence, CodeCommit, Clockify, or another external service and therefore requires explicit intent before an agent runs it.
+_Avoid_: Dangerous command, update command
+
+**Explicit Intent**:
+The user-provided command arguments or interactive choices that identify the exact remote mutation a Remote Write Command should perform.
+_Avoid_: Confirmation prompt, safety question
+
 **Jira Markdown Sync**:
 A two-way workflow where Jira issues and local Markdown documents can both be sources of change that are reconciled into a shared issue state.
 _Avoid_: Jira Markdown Export, Jira report, snapshot export
 
-**Sync Command**:
-The Jira CLI command family for operating a Sync Workspace, distinct from read-only search and report generation.
-_Avoid_: Search export, markdown report command
+**Sync Workflow Command**:
+A Canonical Command that reconciles local workspace state with a remote service, distinct from one-off read commands and ordinary local file operations.
+_Avoid_: Search export, markdown report command, generic sync command
+
+**Confluence Workspace**:
+A local Markdown mirror of a Confluence page tree together with the metadata needed to reconcile it with Confluence.
+_Avoid_: Export folder, page dump
+
+**Page Command**:
+A Resource Command that operates on Confluence pages.
+_Avoid_: Document command, Confluence file command
+
+**Issue Command**:
+A Resource Command that operates on Jira issues without implying membership in Jira Markdown Sync.
+_Avoid_: Ticket command, Jira export command
+
+**Version Command**:
+A Resource Command that operates on Jira project versions and their release metadata.
+_Avoid_: Release command, fix version command
+
+**PR Command**:
+A Resource Command that operates on CodeCommit pull requests.
+_Avoid_: Pull request command, CodeCommit review command
+
+**Timer Command**:
+A Resource Command that operates on Jira-backed Clockify timer state.
+_Avoid_: Time command, worklog command
 
 **Jira Custom Field**:
 A Jira issue field defined by a Jira site or project outside Jira's built-in issue fields, identified operationally by a site-specific field id and often shown to users by a display name.

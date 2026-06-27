@@ -17,28 +17,28 @@ npm install @knpkv/confluence-to-markdown effect
 
 ```bash
 # Clone pages with full version history
-confluence clone --root-page-id <ID> --base-url <URL>
-confluence clone --url <PAGE_URL>
+confluence workspace clone --root-page-id <ID> --base-url <URL>
+confluence workspace clone --url <PAGE_URL>
 
 # Fetch one latest page to stdout without creating a git workspace
-confluence fetch --page-id <ID> --base-url <URL>
-confluence fetch --url <PAGE_URL>
-confluence fetch --url <PAGE_URL> --clean-markdown
+confluence page get --page-id <ID> --base-url <URL>
+confluence page get --url <PAGE_URL>
+confluence page get --url <PAGE_URL> --clean-markdown
 
 # Pull pages from Confluence
-confluence pull
-confluence pull -f, --force           # overwrite local changes
-confluence pull --replay-history      # replay each version as separate git commit
+confluence sync pull
+confluence sync pull -f, --force           # overwrite local changes
+confluence sync pull --replay-history      # replay each version as separate git commit
 
 # Push local changes to Confluence
-confluence push
-confluence push -n, --dry-run         # preview changes without applying
+confluence sync push
+confluence sync push -n, --dry-run         # preview changes without applying
 
 # Delete a page (interactive selector, deletes local file)
-confluence delete
+confluence page delete
 
 # Check sync status
-confluence status
+confluence sync status
 ```
 
 ### Authentication Commands
@@ -65,52 +65,52 @@ confluence auth logout
 
 ```bash
 # Create a new page (interactive parent selector)
-confluence new
+confluence page new
 
 # Workflow:
-# 1. Create new page: confluence new
+# 1. Create new page: confluence page new
 # 2. Edit the file
-# 3. Commit: confluence commit -m "Add new page"
-# 4. Push to Confluence: confluence push
+# 3. Commit: confluence sync commit -m "Add new page"
+# 4. Push to Confluence: confluence sync push
 ```
 
 ### Page Deletion
 
 ```bash
 # Delete a page (interactive selector)
-confluence delete
+confluence page delete
 
 # Workflow:
-# 1. Delete page: confluence delete (or rm <file>)
-# 2. Commit: confluence commit -m "Delete page"
-# 3. Push to Confluence: confluence push  # deletes from Confluence
+# 1. Delete page: confluence page delete (or rm <file>)
+# 2. Commit: confluence sync commit -m "Delete page"
+# 3. Push to Confluence: confluence sync push  # deletes from Confluence
 ```
 
 ### Git Commands
 
 ```bash
 # Commit current changes
-confluence commit
-confluence commit -m "message"
+confluence sync commit
+confluence sync commit -m "message"
 
 # Show commit history
-confluence log
-confluence log -n 5               # last 5 commits
-confluence log --oneline          # compact format
-confluence log --since 2024-01-01 # since date
+confluence sync log
+confluence sync log -n 5               # last 5 commits
+confluence sync log --oneline          # compact format
+confluence sync log --since 2024-01-01 # since date
 
 # Show changes in working directory
-confluence diff
-confluence diff --staged          # staged changes only
-confluence diff --commit HEAD~1   # compare with commit
+confluence sync diff
+confluence sync diff --staged          # staged changes only
+confluence sync diff --commit HEAD~1   # compare with commit
 ```
 
 ## How It Works
 
-1. `confluence clone` creates `.confluence/` directory, initializes git, and pulls pages with full version history
-2. `confluence fetch` prints the latest markdown for one page without creating `.confluence/` or git commits
-3. `confluence pull` downloads pages and auto-commits changes
-4. `confluence pull --replay-history` replays each Confluence version as a separate git commit with original author/date
+1. `confluence workspace clone` creates `.confluence/` directory, initializes git, and pulls pages with full version history
+2. `confluence page get` prints the latest markdown for one page without creating `.confluence/` or git commits
+3. `confluence sync pull` downloads pages and auto-commits changes
+4. `confluence sync pull --replay-history` replays each Confluence version as a separate git commit with original author/date
 5. Version messages from Confluence are preserved in markdown front-matter
 6. Use standard git commands in `.confluence/` for advanced operations
 
@@ -118,7 +118,7 @@ confluence diff --commit HEAD~1   # compare with commit
 `https://yoursite.atlassian.net/wiki/spaces/DEV/pages/123456/Page+Title` and shorthand numeric paths such as
 `https://yoursite.atlassian.com/123456`.
 
-`confluence fetch --clean-markdown` removes Confluence round-trip metadata comments such as `<!-- adf:... -->`
+`confluence page get --clean-markdown` removes Confluence round-trip metadata comments such as `<!-- adf:... -->`
 from the printed output. This is intended for readable exports and is not suitable for editing and pushing back to
 Confluence.
 
@@ -249,7 +249,7 @@ confluence auth configure --client-id <ID> --client-secret <SECRET>
 confluence auth login
 
 # Check login status
-confluence status
+confluence auth status
 
 # Logout
 confluence auth logout
@@ -273,10 +273,10 @@ Generate API token at [Atlassian Account Settings](https://id.atlassian.com/mana
 
 ## Configuration
 
-Initialize configuration with `confluence clone`:
+Initialize configuration with `confluence workspace clone`:
 
 ```bash
-confluence clone --root-page-id 123456 --base-url https://yoursite.atlassian.net
+confluence workspace clone --root-page-id 123456 --base-url https://yoursite.atlassian.net
 ```
 
 This creates `.confluence/config.json` in your project root:
