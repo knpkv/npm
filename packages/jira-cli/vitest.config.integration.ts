@@ -7,12 +7,11 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["test/**/*.test.ts"],
-    exclude: ["test/integration.test.ts"],
+    include: ["test/integration.test.ts"],
     globals: true,
     environment: "node",
-    testTimeout: 30000,
-    hookTimeout: 30000,
-    teardownTimeout: 30000
+    testTimeout: 120000,
+    hookTimeout: 60000,
+    teardownTimeout: 60000
   }
 })

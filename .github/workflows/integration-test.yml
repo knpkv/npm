@@ -42,3 +42,27 @@ jobs:
           CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
         run: pnpm --filter @knpkv/confluence-to-markdown test:integration
+
+  test-jira:
+    name: Jira CLI Integration Tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: "24.10.0"
+
+      - name: Run integration tests
+        env:
+          JIRA_INTEGRATION: "1"
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL || 'https://knpkv.atlassian.net' }}
+          JIRA_ISSUE_KEY: ${{ vars.JIRA_ISSUE_KEY || 'KAN-1' }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_KEY: ${{ secrets.JIRA_API_KEY }}
+        run: pnpm --filter @knpkv/jira-cli test:integration
