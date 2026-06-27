@@ -133,7 +133,7 @@ For efficient and predictable agent runs:
 
 - Ask for read-only inspection first: `status`, `diff`, `list`, `export`, or commands with `--json`.
 - Include IDs when known: Jira issue keys, Jira version ids, Confluence page ids, AWS profile/region, repository name, PR id, and Clockify project id.
-- Require confirmation before mutating commands such as `confluence push`, `confluence delete`, `jira version set`, `jira version relatedwork add`, `codecommit pr create`, `codecommit pr update`, and timer writes through `jcf`.
+- Require confirmation before mutating commands such as `confluence sync push`, `confluence page delete`, `jira version update`, `jira version related-work add`, `codecommit pr create`, `codecommit pr update`, and timer writes through `jcf`.
 - Do not paste OAuth secrets or API keys into prompts. Let the CLI prompt for them or use the package-supported config files and environment variables.
 
 ## Development Standards

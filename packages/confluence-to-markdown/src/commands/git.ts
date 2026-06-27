@@ -31,7 +31,7 @@ export const commitCommand = Command.make(
       const hash = yield* git.commit({ message: msg })
       yield* Console.log(`Committed: ${hash.substring(0, 7)}`)
     })
-).pipe(Command.withDescription("Stage and commit current changes"))
+).pipe(Command.withDescription("Local write: stage and commit current changes"))
 
 // === Log command ===
 const logLimitOption = Options.integer("limit").pipe(
@@ -79,7 +79,7 @@ export const logCommand = Command.make(
         }
       }
     })
-).pipe(Command.withDescription("Show commit history"))
+).pipe(Command.withDescription("Read-only: show commit history"))
 
 // === Diff command ===
 const diffStagedOption = Options.boolean("staged").pipe(
@@ -111,4 +111,4 @@ export const diffCommand = Command.make(
         yield* Console.log(diff)
       }
     })
-).pipe(Command.withDescription("Show changes in working directory"))
+).pipe(Command.withDescription("Read-only: show changes in working directory"))

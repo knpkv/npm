@@ -1,0 +1,15 @@
+---
+title: Jira
+description: Jira issue and project version commands.
+---
+
+Use the `jira` binary for Jira issue reads and project version workflows.
+
+```bash
+jira issue get PROJ-123
+jira issue search 'project = PROJ'
+jira version list --project PROJ --json
+jira version get 10042 --json
+jira version update 10042 --description "Q3 release"
+jira version related-work add 10042 --title "Release notes" --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123"
+```

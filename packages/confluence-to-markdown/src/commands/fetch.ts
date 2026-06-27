@@ -56,6 +56,7 @@ const optionValue = (option: Option.Option<string>): string | undefined =>
   Option.isSome(option) ? option.value : undefined
 
 export interface FetchCommandOptions {
+  readonly name?: string
   readonly makeClientLayer?: (config: ConfluenceClientConfig) => Layer.Layer<ConfluenceClient>
 }
 
@@ -67,7 +68,7 @@ export const makeFetchCommand = (options: FetchCommandOptions = {}) => {
       ))
 
   return Command.make(
-    "fetch",
+    options.name ?? "fetch",
     { url: urlOption, pageId: pageIdOption, baseUrl: baseUrlOption, cleanMarkdown: cleanMarkdownOption },
     ({ baseUrl, cleanMarkdown, pageId, url }) =>
       Effect.gen(function*() {
@@ -84,7 +85,10 @@ export const makeFetchCommand = (options: FetchCommandOptions = {}) => {
 
         yield* writeStdout(markdown.endsWith("\n") ? markdown : `${markdown}\n`)
       })
-  ).pipe(Command.withDescription("Fetch the latest Confluence page markdown without creating a git workspace"))
+  ).pipe(
+    Command.withDescription("Read-only: fetch the latest Confluence page markdown without creating a git workspace")
+  )
 }
 
 export const fetchCommand = makeFetchCommand()
+export const pageGetCommand = makeFetchCommand({ name: "get" })

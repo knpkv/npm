@@ -12,7 +12,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 - Configure both services before timer operations: Jira OAuth and Clockify API key.
 - Use `jcf auth status` to check readiness.
 - Timer operations write to Clockify and may write Jira worklogs; confirm ambiguous ticket keys, durations, dates, and comments before running them.
-- Use `jcf list --json` when an agent needs structured ticket data.
+- Use `jcf issue list --json` when an agent needs structured ticket data.
 
 ## Setup
 
@@ -46,44 +46,44 @@ jcf tui
 List available Jira tickets:
 
 ```bash
-jcf list
-jcf list --json
+jcf issue list
+jcf issue list --json
 ```
 
 Start work:
 
 ```bash
-jcf start PROJ-123
-jcf start PROJ-123 --ago 15m
-jcf start PROJ-123 --since 09:30
-jcf start PROJ-123 --project <clockify-project-id> --billable
+jcf timer start PROJ-123
+jcf timer start PROJ-123 --ago 15m
+jcf timer start PROJ-123 --since 09:30
+jcf timer start PROJ-123 --project <clockify-project-id> --billable
 ```
 
 Stop or discard current work:
 
 ```bash
-jcf status
-jcf stop
-jcf stop --project <clockify-project-id> --billable
-jcf discard
+jcf timer status
+jcf timer stop
+jcf timer stop --project <clockify-project-id> --billable
+jcf timer discard
 ```
 
 Log completed work manually:
 
 ```bash
-jcf log PROJ-123 --time 1h30m
-jcf log PROJ-123 --time 45m --date 2026-06-24 --at 09:00 --comment "Pairing on release notes"
+jcf timer log PROJ-123 --time 1h30m
+jcf timer log PROJ-123 --time 45m --date 2026-06-24 --at 09:00 --comment "Pairing on release notes"
 ```
 
 Edit the running timer:
 
 ```bash
-jcf edit
+jcf timer edit
 ```
 
 ## Agent Workflow
 
-1. Run `jcf auth status` and `jcf status` before changing timer state.
-2. Use `jcf list --json` to resolve issue keys when the user gives a vague ticket description.
+1. Run `jcf auth status` and `jcf timer status` before changing timer state.
+2. Use `jcf issue list --json` to resolve issue keys when the user gives a vague ticket description.
 3. Prefer explicit flags for non-interactive work: issue key, duration, date, time, project id, billable flag, and comment.
-4. If no timer is running, `jcf stop` may offer an interactive correction interval; use `jcf log` for deterministic manual logging.
+4. If no timer is running, `jcf timer stop` may offer an interactive correction interval; use `jcf timer log` for deterministic manual logging.

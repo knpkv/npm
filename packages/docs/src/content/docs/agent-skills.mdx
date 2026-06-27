@@ -1,0 +1,16 @@
+---
+title: Agent Skills
+description: Bundled skill installation and safety conventions.
+---
+
+Each product package ships its relevant agent skill, and `@knpkv/agent-skills` provides the shared installer.
+
+```bash
+jira skills install
+confluence skills install
+codecommit skills install
+jcf skills install
+knpkv-skills install
+```
+
+Skill content is authored from one source and copied into product packages to avoid drift.

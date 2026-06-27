@@ -12,8 +12,8 @@ function M.pick(config)
   local actions = require("telescope.actions")
   local action_state = require("telescope.actions.state")
 
-  -- Get tickets via jcf list --json
-  local result = vim.fn.system({ config.binary, "list", "--json" })
+  -- Get tickets via jcf issue list --json
+  local result = vim.fn.system({ config.binary, "issue", "list", "--json" })
   local tickets_ok, tickets = pcall(vim.json.decode, result)
   if not tickets_ok or not tickets then
     vim.notify("jcf: failed to get tickets", vim.log.levels.ERROR)
@@ -38,7 +38,7 @@ function M.pick(config)
         actions.close(prompt_bufnr)
         local selection = action_state.get_selected_entry()
         if selection and selection.value and selection.value.key then
-          vim.fn.jobstart({ config.binary, "start", selection.value.key }, { detach = true })
+          vim.fn.jobstart({ config.binary, "timer", "start", selection.value.key }, { detach = true })
           vim.notify("jcf: starting timer on " .. selection.value.key, vim.log.levels.INFO)
         end
       end)

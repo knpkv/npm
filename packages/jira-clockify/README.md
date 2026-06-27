@@ -47,16 +47,16 @@ jcf config reset           # Reset to defaults
 ```bash
 jcf                        # Launch TUI (or guided setup if not configured)
 jcf tui                    # Launch TUI explicitly
-jcf start [ISSUE-KEY]      # Start timer on a Jira ticket
-jcf start KEY --ago 15m    # Start backdated by a duration (forgot to start it earlier)
-jcf start KEY --since 09:30 # Start backdated to a past time today (or an ISO timestamp)
-jcf stop                   # Stop timer, log to Clockify + Jira
-                           #   no timer running? offers to add a correction interval instead
-jcf discard                # Discard timer (delete Clockify entry, no Jira worklog)
-jcf log KEY -t 1h30m       # Log past work manually (--date, --at HH:MM, --comment)
-jcf edit                   # Edit running timer
-jcf status                 # Show current timer status
-jcf list [--json]          # List Jira tickets from configured JQL
+jcf timer start [ISSUE-KEY]       # Start timer on a Jira ticket
+jcf timer start KEY --ago 15m     # Start backdated by a duration
+jcf timer start KEY --since 09:30 # Start backdated to a past time today or ISO timestamp
+jcf timer stop                    # Stop timer, log to Clockify + Jira
+                                  #   no timer running? offers to add a correction interval instead
+jcf timer discard                 # Discard timer (delete Clockify entry, no Jira worklog)
+jcf timer log KEY -t 1h30m        # Log past work manually (--date, --at HH:MM, --comment)
+jcf timer edit                    # Edit running timer
+jcf timer status                  # Show current timer status
+jcf issue list [--json]           # List Jira tickets from configured JQL
 jcf auth status            # Show auth status for both services
 ```
 

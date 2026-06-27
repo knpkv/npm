@@ -12,6 +12,13 @@ node_modules/
 
 coverage/
 docs/
+!docs/
+!docs/**/*.md
+!packages/docs/
+!packages/docs/**
+packages/docs/.astro/
+packages/docs/dist/
+packages/docs/node_modules/
 playwright-report/
 test-results/
 

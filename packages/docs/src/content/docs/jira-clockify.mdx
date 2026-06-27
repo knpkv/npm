@@ -1,0 +1,15 @@
+---
+title: Jira Clockify
+description: Jira-backed Clockify timer commands.
+---
+
+Use the `jcf` binary to track time against Jira issues in Clockify.
+
+```bash
+jcf timer start PROJ-123
+jcf timer status
+jcf timer stop
+jcf timer log PROJ-123 --time 1h
+jcf issue list --json
+jcf sync reconcile
+```

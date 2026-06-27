@@ -1,5 +1,5 @@
 /**
- * `jira search` command — JQL search with multi/single Markdown output.
+ * `jira issue search` command — JQL search with multi/single Markdown output.
  *
  * @internal
  */
@@ -74,8 +74,8 @@ export const searchCommand = Command.make(
         query = jql.value
       } else {
         yield* Console.log("Error: Either a JQL query or --by-version must be provided.")
-        yield* Console.log("Usage: jira search <jql>")
-        yield* Console.log("       jira search --by-version <version>")
+        yield* Console.log("Usage: jira issue search <jql>")
+        yield* Console.log("       jira issue search --by-version <version>")
         return
       }
 
@@ -99,4 +99,4 @@ export const searchCommand = Command.make(
         yield* Console.log(`Exported ${issues.length} file(s) to ${outputDir}/`)
       }
     })
-).pipe(Command.withDescription("Search Jira issues and export to markdown"))
+).pipe(Command.withDescription("Read-only: search Jira issues and export to markdown"))

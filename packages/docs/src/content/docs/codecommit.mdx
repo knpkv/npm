@@ -1,0 +1,15 @@
+---
+title: CodeCommit
+description: CodeCommit pull request commands.
+---
+
+Use the `codecommit` binary for CodeCommit pull request workflows.
+
+```bash
+codecommit pr list --json
+codecommit pr create my-repo "Add feature X" --source feature/x --destination main
+codecommit pr export 123 my-repo --output pr-comments.md
+codecommit pr update 123 --title "New title"
+codecommit tui
+codecommit web --port 3000
+```

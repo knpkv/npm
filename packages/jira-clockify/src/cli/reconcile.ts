@@ -1,5 +1,5 @@
 /**
- * `jcf reconcile` — compare Clockify time against Jira worklogs over a period and
+ * `jcf sync reconcile` — compare Clockify time against Jira worklogs over a period and
  * fill gaps one row at a time.
  *
  * @module
@@ -91,7 +91,9 @@ export const reconcile = Command.make(
     Effect.gen(function*() {
       const dir = Option.isSome(direction) ? direction.value : "clockify-to-jira"
       if (dir !== "clockify-to-jira" && dir !== "jira-to-clockify") {
-        yield* Console.log("Usage: jcf reconcile [clockify-to-jira|jira-to-clockify] [--day|--week|--since|--until]")
+        yield* Console.log(
+          "Usage: jcf sync reconcile [clockify-to-jira|jira-to-clockify] [--day|--week|--since|--until]"
+        )
         return
       }
       const directionTag: ReconcileDirection = dir
@@ -172,4 +174,9 @@ export const reconcile = Command.make(
         }
       }
     })
+)
+
+export const sync = Command.make("sync", {}, () => Console.log("Usage: jcf sync reconcile")).pipe(
+  Command.withDescription("Sync workflow commands"),
+  Command.withSubcommands([reconcile])
 )

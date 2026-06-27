@@ -1,0 +1,13 @@
+---
+title: Guide
+description: How the @knpkv command-line tools are organized.
+---
+
+Each product keeps its own binary:
+
+- `jira` works with Jira issues and project versions.
+- `confluence` syncs Confluence pages with local Markdown.
+- `codecommit` works with CodeCommit pull requests.
+- `jcf` tracks Jira-backed Clockify time.
+
+Commands are organized by resource where that makes the workflow clearer. Shared behaviors such as authentication, configuration, JSON output, dry runs, and agent safety are documented once in the conventions.

@@ -10,16 +10,16 @@ import {
   commitCommand,
   deleteCommand,
   diffCommand,
-  fetchCommand,
   logCommand,
   newCommand,
+  pageGetCommand,
   pullCommand,
   pushCommand,
   statusCommand
 } from "./index.js"
 
 export interface ConfluenceCommandOptions {
-  readonly fetch?: typeof fetchCommand
+  readonly pageGet?: typeof pageGetCommand
 }
 
 const skillsInstall = makeInstallCommand({
@@ -37,21 +37,53 @@ const skillsCommand = Command.make(
   Command.withSubcommands([skillsInstall])
 )
 
+const workspaceCommand = Command.make(
+  "workspace",
+  {},
+  () => Console.log("Usage: confluence workspace clone")
+).pipe(
+  Command.withDescription("Workspace commands"),
+  Command.withSubcommands([cloneCommand])
+)
+
+const syncCommand = Command.make(
+  "sync",
+  {},
+  () => Console.log("Usage: confluence sync status|diff|pull|push|commit|log")
+).pipe(
+  Command.withDescription("Sync workflow commands"),
+  Command.withSubcommands([
+    statusCommand,
+    diffCommand,
+    pullCommand,
+    pushCommand,
+    commitCommand,
+    logCommand
+  ])
+)
+
+const pageCommand = (pageGet: typeof pageGetCommand) =>
+  Command.make(
+    "page",
+    {},
+    () => Console.log("Usage: confluence page get|new|delete")
+  ).pipe(
+    Command.withDescription("Confluence page resource commands"),
+    Command.withSubcommands([
+      pageGet,
+      newCommand,
+      deleteCommand
+    ])
+  )
+
 export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
   Command.make("confluence").pipe(
     Command.withDescription("Sync Confluence pages to local markdown"),
     Command.withSubcommands([
-      cloneCommand,
       authCommand,
-      pullCommand,
-      pushCommand,
-      statusCommand,
-      commitCommand,
-      logCommand,
-      diffCommand,
-      options.fetch ?? fetchCommand,
-      newCommand,
-      deleteCommand,
+      workspaceCommand,
+      syncCommand,
+      pageCommand(options.pageGet ?? pageGetCommand),
       skillsCommand
     ])
   )

@@ -17,11 +17,10 @@ import {
   AppLayer,
   authCommand,
   AuthOnlyLayer,
-  getCommand,
   getLayerType,
   handleError,
+  issueCommand,
   MinimalLayer,
-  searchCommand,
   versionCommand
 } from "./commands/index.js"
 
@@ -32,17 +31,16 @@ const skillsInstall = makeInstallCommand({
 })
 
 const skillsCommand = Command.make("skills", {}, () => Console.log("Usage: jira skills install")).pipe(
-  Command.withDescription("Agent skill commands"),
+  Command.withDescription("Local write agent skill commands"),
   Command.withSubcommands([skillsInstall])
 )
 
 // === Main command ===
 const jira = Command.make("jira").pipe(
-  Command.withDescription("Fetch Jira tickets and export to markdown"),
+  Command.withDescription("Jira CLI commands"),
   Command.withSubcommands([
     authCommand,
-    getCommand,
-    searchCommand,
+    issueCommand,
     skillsCommand,
     versionCommand
   ])

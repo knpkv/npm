@@ -26,7 +26,7 @@ function M.read(state_path)
   return cached
 end
 
--- Periodically run `jcf status` to sync state file with Clockify
+-- Periodically run `jcf timer status` to sync state file with Clockify
 -- This detects externally stopped timers
 function M.start_poll(config, interval_ms)
   if poll_timer then
@@ -36,8 +36,8 @@ function M.start_poll(config, interval_ms)
 
   poll_timer = uv.new_timer()
   poll_timer:start(interval_ms, interval_ms, vim.schedule_wrap(function()
-    -- jcf status updates ~/.jcf/state.json and detects external stops
-    vim.fn.jobstart({ config.binary or "jcf", "status" }, {
+    -- jcf timer status updates ~/.jcf/state.json and detects external stops
+    vim.fn.jobstart({ config.binary or "jcf", "timer", "status" }, {
       on_stdout = function() end,
       on_stderr = function() end,
       detach = true,

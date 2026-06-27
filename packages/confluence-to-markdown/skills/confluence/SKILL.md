@@ -12,9 +12,9 @@ Use the `confluence` binary to manage a local markdown mirror of Confluence Clou
 - Run commands from the workspace that contains, or should contain, the `.confluence/` sync directory.
 - Authenticate before clone or sync with `confluence auth create`, `confluence auth configure`, and `confluence auth login`.
 - Use OAuth for normal operation. API-token env vars may be available as `CONFLUENCE_API_KEY` and `CONFLUENCE_EMAIL`.
-- Confirm before running `confluence push`, because it writes to Confluence.
-- Confirm before running `confluence delete`, because it removes a local page that will be deleted remotely on the next push.
-- Treat `confluence fetch --clean-markdown` output as read-only/export output. Do not push it back unless the user explicitly accepts metadata loss.
+- Confirm before running `confluence sync push`, because it writes to Confluence.
+- Confirm before running `confluence page delete`, because it removes a local page that will be deleted remotely on the next push.
+- Treat `confluence page get --clean-markdown` output as read-only/export output. Do not push it back unless the user explicitly accepts metadata loss.
 
 ## Setup
 
@@ -29,8 +29,8 @@ confluence auth login --site https://example.atlassian.net
 Clone a page tree:
 
 ```bash
-confluence clone --root-page-id <page-id> --base-url https://example.atlassian.net
-confluence clone --url https://example.atlassian.net/wiki/spaces/SPACE/pages/<page-id>/Title
+confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
+confluence workspace clone --url https://example.atlassian.net/wiki/spaces/SPACE/pages/<page-id>/Title
 ```
 
 `clone` initializes `.confluence/`, creates local git history, and creates the `origin/confluence` tracking branch.
@@ -38,9 +38,9 @@ confluence clone --url https://example.atlassian.net/wiki/spaces/SPACE/pages/<pa
 Fetch one latest page without creating a sync workspace:
 
 ```bash
-confluence fetch --url https://example.atlassian.net/wiki/pages/<page-id>
-confluence fetch --page-id <page-id> --base-url https://example.atlassian.net
-confluence fetch --url https://example.atlassian.net/wiki/pages/<page-id> --clean-markdown
+confluence page get --url https://example.atlassian.net/wiki/pages/<page-id>
+confluence page get --page-id <page-id> --base-url https://example.atlassian.net
+confluence page get --url https://example.atlassian.net/wiki/pages/<page-id> --clean-markdown
 ```
 
 ## Sync Workflow
@@ -48,31 +48,31 @@ confluence fetch --url https://example.atlassian.net/wiki/pages/<page-id> --clea
 Inspect before changing anything:
 
 ```bash
-confluence status
-confluence diff
-confluence log --oneline
+confluence sync status
+confluence sync diff
+confluence sync log --oneline
 ```
 
 Pull remote changes:
 
 ```bash
-confluence pull
-confluence pull --force
-confluence pull --replay-history
+confluence sync pull
+confluence sync pull --force
+confluence sync pull --replay-history
 ```
 
 Commit local markdown edits:
 
 ```bash
-confluence diff
-confluence commit --message "Update release notes"
+confluence sync diff
+confluence sync commit --message "Update release notes"
 ```
 
 Preview and publish:
 
 ```bash
-confluence push --dry-run
-confluence push
+confluence sync push --dry-run
+confluence sync push
 ```
 
 ## Page Operations
@@ -80,15 +80,15 @@ confluence push
 Create a page interactively:
 
 ```bash
-confluence new
+confluence page new
 ```
 
 Delete a page locally, then commit and push the deletion:
 
 ```bash
-confluence delete
-confluence commit --message "Delete obsolete page"
-confluence push
+confluence page delete
+confluence sync commit --message "Delete obsolete page"
+confluence sync push
 ```
 
 ## Element Fidelity
@@ -135,9 +135,9 @@ Clean fetch mode removes `adf:` comments from stdout for readability. It is usef
 
 ## Agent Workflow
 
-1. Start with `confluence status` and `confluence diff`.
+1. Start with `confluence sync status` and `confluence sync diff`.
 2. Read and edit markdown files under the configured docs path, usually `.confluence/docs`.
 3. Preserve `<!-- adf:... -->` markers, `.adf.json` sidecars, front matter, and custom Confluence links unless the user explicitly asks for a lossy cleanup.
-4. Use `confluence commit` instead of raw git for normal sync commits so external docs paths are copied into `.confluence/`.
-5. Use `confluence push --dry-run` before `confluence push`.
+4. Use `confluence sync commit` instead of raw git for normal sync commits so external docs paths are copied into `.confluence/`.
+5. Use `confluence sync push --dry-run` before `confluence sync push`.
 6. Mention fidelity limits when editing complex Confluence content: media, cards, macros, panels, task lists, expand sections, layouts, dates, emojis, and some marks may not round-trip exactly.

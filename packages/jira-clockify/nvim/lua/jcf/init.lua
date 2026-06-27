@@ -23,25 +23,25 @@ function M.setup(opts)
       key = require("jcf.branch").detect()
     end
     if key then
-      vim.fn.jobstart({ M.config.binary, "start", key }, { detach = true })
+      vim.fn.jobstart({ M.config.binary, "timer", "start", key }, { detach = true })
       vim.notify("jcf: starting timer on " .. key, vim.log.levels.INFO)
     else
-      -- No key and no branch match → open jcf start in float (has built-in fuzzy selector)
-      require("jcf.float").run_command(M.config, "start")
+      -- No key and no branch match: open jcf timer start in float.
+      require("jcf.float").run_command(M.config, "timer", "start")
     end
   end, { nargs = "?", desc = "Start jcf timer" })
 
   vim.api.nvim_create_user_command("JcfStop", function()
     -- Open in float so the comment prompt is interactive
-    require("jcf.float").run_command(M.config, "stop")
+    require("jcf.float").run_command(M.config, "timer", "stop")
   end, { desc = "Stop jcf timer" })
 
   vim.api.nvim_create_user_command("JcfDiscard", function()
-    require("jcf.float").run_command(M.config, "discard")
+    require("jcf.float").run_command(M.config, "timer", "discard")
   end, { desc = "Discard jcf timer (delete Clockify entry)" })
 
   vim.api.nvim_create_user_command("JcfLog", function(args)
-    local cmd_args = { "log" }
+    local cmd_args = { "timer", "log" }
     if args.args ~= "" then
       for word in args.args:gmatch("%S+") do
         table.insert(cmd_args, word)
@@ -51,11 +51,11 @@ function M.setup(opts)
   end, { nargs = "*", desc = "Log past work manually" })
 
   vim.api.nvim_create_user_command("JcfEdit", function()
-    require("jcf.float").run_command(M.config, "edit")
+    require("jcf.float").run_command(M.config, "timer", "edit")
   end, { desc = "Edit running timer" })
 
   vim.api.nvim_create_user_command("JcfStatus", function()
-    require("jcf.float").run_command(M.config, "status")
+    require("jcf.float").run_command(M.config, "timer", "status")
   end, { desc = "Show timer status" })
 
   -- Start polling for external timer changes

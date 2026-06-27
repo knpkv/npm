@@ -59,15 +59,15 @@ const DummyConfluenceClientLayer = Layer.succeed(
 const DummySyncEngineLayer = Layer.succeed(
   SyncEngine,
   SyncEngine.of({
-    pull: () => Effect.die("Not configured - run 'confluence clone' first"),
+    pull: () => Effect.die("Not configured - run 'confluence workspace clone' first"),
     push: (_options: { dryRun: boolean; message?: string }) =>
-      Effect.die("Not configured - run 'confluence clone' first"),
-    status: () => Effect.die("Not configured - run 'confluence clone' first")
+      Effect.die("Not configured - run 'confluence workspace clone' first"),
+    status: () => Effect.die("Not configured - run 'confluence workspace clone' first")
   })
 )
 
 // Dummy git layer for auth/minimal
-const notConfigured = () => Effect.die("Not configured - run 'confluence clone' first")
+const notConfigured = () => Effect.die("Not configured - run 'confluence workspace clone' first")
 const DummyGitServiceLayer = Layer.succeed(
   GitService,
   GitService.of({
@@ -218,16 +218,20 @@ export const FetchLayer = DummySyncEngineLayer.pipe(
  */
 export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "clone" | "fetch" | "minimal" => {
   const cmd = argv[0]
+  const subcommand = argv[1]
+  if (argv.includes("--help") || argv.includes("-h")) {
+    return "minimal"
+  }
   // auth commands need auth layer only
   if (cmd === "auth") {
     return "auth"
   }
   // clone needs auth + git but not config-dependent services
-  if (cmd === "clone") {
+  if (cmd === "workspace" && subcommand === "clone") {
     return "clone"
   }
-  // fetch needs auth + converter but no existing config
-  if (cmd === "fetch") {
+  // page get needs auth + converter but no existing config
+  if (cmd === "page" && subcommand === "get") {
     return "fetch"
   }
   // skills/help/version don't need config

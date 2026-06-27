@@ -11,8 +11,8 @@ Use the `jira` binary for Jira Cloud issue export and release-version workflows.
 
 - Authenticate first with `jira auth status`, `jira auth create`, `jira auth configure`, and `jira auth login`.
 - Use `--json` on version commands when the agent needs structured data.
-- Use numeric version ids for `jira version view`, `jira version set`, and `jira version relatedwork`.
-- Confirm before commands that mutate Jira: `jira version set` and `jira version relatedwork add`.
+- Use numeric version ids for `jira version get`, `jira version update`, and `jira version related-work`.
+- Confirm before remote write commands: `jira version update` and `jira version related-work add`.
 
 ## Authentication
 
@@ -31,21 +31,21 @@ OAuth scopes used by release workflows include `read:jira-work`, `write:jira-wor
 Fetch one issue as markdown:
 
 ```bash
-jira get PROJ-123 --output-dir ./jira-tickets
+jira issue get PROJ-123 --output-dir ./jira-tickets
 ```
 
 Search with JQL:
 
 ```bash
-jira search 'project = PROJ AND status = Done' --output-dir ./jira-tickets
-jira search 'fixVersion = "1.0.0"' --format single --max-results 200
+jira issue search 'project = PROJ AND status = Done' --output-dir ./jira-tickets
+jira issue search 'fixVersion = "1.0.0"' --format single --max-results 200
 ```
 
 Search by fix version:
 
 ```bash
-jira search --by-version "1.0.0" --project PROJ
-jira search --by-version "1.0.0" --project PROJ --format single
+jira issue search --by-version "1.0.0" --project PROJ
+jira issue search --by-version "1.0.0" --project PROJ --format single
 ```
 
 Output formats:
@@ -66,20 +66,20 @@ jira version list --project PROJ --custom-field "Security & Compliance Impact" -
 View a version:
 
 ```bash
-jira version view 10042 --json
+jira version get 10042 --json
 ```
 
 Update a version description:
 
 ```bash
-jira version set 10042 --description "Q3 release"
+jira version update 10042 --description "Q3 release"
 ```
 
 Manage related work links:
 
 ```bash
-jira version relatedwork list 10042 --json
-jira version relatedwork add 10042 --title "Release notes" --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" --category Communication
+jira version related-work list 10042 --json
+jira version related-work add 10042 --title "Release notes" --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" --category Communication
 ```
 
 ## Agent Workflow

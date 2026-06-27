@@ -5,7 +5,7 @@
  *
  * - **Lazy layer selection**: {@link getLayerType} inspects CLI arguments from `Stdio` to pick
  *   the smallest layer needed — `"minimal"` for help/version, `"auth"` for auth commands,
- *   `"full"` for search/get (which needs API client + issue service).
+ *   `"full"` for issue/version reads and writes.
  * - **Dummy services**: Auth-only and minimal layers provide dying stubs
  *   for unused services to satisfy the type system without initialization cost.
  *
@@ -147,6 +147,9 @@ export const MinimalLayer = DummyIssueServiceLayer.pipe(
  */
 export const getLayerType = (args: ReadonlyArray<string>): "full" | "auth" | "minimal" => {
   const cmd = args[0]
+  if (args.includes("--help") || args.includes("-h")) {
+    return "minimal"
+  }
   if (cmd === "auth") {
     return "auth"
   }
