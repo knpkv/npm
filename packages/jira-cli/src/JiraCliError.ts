@@ -42,3 +42,27 @@ export class WriteError extends Data.TaggedError("WriteError")<{
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+/**
+ * Error when reading or writing Jira Markdown Sync workspace state.
+ *
+ * @category Errors
+ */
+export class SyncWorkspaceError extends Data.TaggedError("SyncWorkspaceError")<{
+  readonly message: string
+  readonly path?: string | undefined
+  readonly cause?: unknown
+}> {}
+
+/**
+ * Error when local Jira Markdown Sync configuration or data fails validation.
+ *
+ * @category Errors
+ */
+export class SyncValidationError extends Data.TaggedError("SyncValidationError")<{
+  readonly message: string
+  readonly issueKey?: string | undefined
+  readonly field?: string | undefined
+  readonly path?: string | undefined
+  readonly cause?: unknown
+}> {}
