@@ -10,6 +10,7 @@ Use the `jira` binary for Jira Cloud issue export and release-version workflows.
 ## Preconditions
 
 - Authenticate first with `jira auth status`, `jira auth create`, `jira auth configure`, and `jira auth login`.
+- For multi-account or multi-site setups, inspect `jira auth profiles` and switch with `jira auth use <profile>` before reading or writing project data.
 - Use `--json` on version commands when the agent needs structured data.
 - Use numeric version ids for `jira version get`, `jira version update`, and `jira version related-work`.
 - Confirm before remote write commands: `jira version update` and `jira version related-work add`.
@@ -22,9 +23,14 @@ jira auth create
 jira auth configure --client-id <id> --client-secret <secret>
 jira auth login
 jira auth login --site https://example.atlassian.net
+jira auth profiles
+jira auth use <profile>
+jira auth remove <profile>
 ```
 
 OAuth scopes used by release workflows include `read:jira-work`, `write:jira-work`, `manage:jira-project`, `read:jira-user`, `read:me`, and `offline_access`.
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID. `jira auth status` shows the active profile.
 
 ## Issue Export
 
@@ -86,5 +92,6 @@ jira version related-work add 10042 --title "Release notes" --url "https://examp
 
 1. Use read-only commands first to find issue keys, version ids, and current release metadata.
 2. Prefer `--json` for release metadata and parse the resulting JSON instead of scraping tables.
-3. Avoid printing tokens or OAuth secrets. Let interactive commands prompt for secrets when needed.
-4. Confirm exact version id, title, URL, category, or description before mutating Jira.
+3. Verify the active auth profile when the user names a site/account or when remote writes are involved.
+4. Avoid printing tokens or OAuth secrets. Let interactive commands prompt for secrets when needed.
+5. Confirm exact version id, title, URL, category, or description before mutating Jira.

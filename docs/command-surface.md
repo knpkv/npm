@@ -35,6 +35,11 @@ jira issue get PROJ-123 --output-dir ./jira-tickets
 jira issue search 'project = PROJ' --output-dir ./jira-tickets
 jira issue search --by-version "1.0.0" --project PROJ
 
+jira auth status
+jira auth profiles
+jira auth use <profile>
+jira auth remove <profile>
+
 jira version list --project PROJ --json
 jira version get 10042 --json
 jira version update 10042 --description "Q3 release"
@@ -54,6 +59,11 @@ Key changes:
 
 ```bash
 confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
+
+confluence auth status
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
 
 confluence sync status
 confluence sync diff

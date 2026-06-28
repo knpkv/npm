@@ -137,6 +137,20 @@ export const getOAuthConfigPath = (
   })
 
 /**
+ * Get auth profiles file path for a specific tool.
+ *
+ * @category Utilities
+ */
+export const getProfilesPath = (
+  toolName: string
+): Effect.Effect<string, HomeDirectoryError, HomeDirectoryTag | Path.Path> =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const configDir = yield* getConfigDir(toolName)
+    return path.join(configDir, "profiles.json")
+  })
+
+/**
  * Ensure config directory exists with secure permissions.
  *
  * @category Utilities

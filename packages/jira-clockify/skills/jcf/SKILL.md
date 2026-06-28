@@ -11,6 +11,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 
 - Configure both services before timer operations: Jira OAuth and Clockify API key.
 - Use `jcf auth status` to check readiness.
+- `jcf` uses the shared Jira CLI auth profile store; for multi-site Jira accounts, use `jira auth profiles` and `jira auth use <profile>` before timer operations when the `jira` binary is available.
 - Timer operations write to Clockify and may write Jira worklogs; confirm ambiguous ticket keys, durations, dates, and comments before running them.
 - Use `jcf issue list --json` when an agent needs structured ticket data.
 
@@ -85,5 +86,6 @@ jcf timer edit
 
 1. Run `jcf auth status` and `jcf timer status` before changing timer state.
 2. Use `jcf issue list --json` to resolve issue keys when the user gives a vague ticket description.
-3. Prefer explicit flags for non-interactive work: issue key, duration, date, time, project id, billable flag, and comment.
-4. If no timer is running, `jcf timer stop` may offer an interactive correction interval; use `jcf timer log` for deterministic manual logging.
+3. Verify the active Jira profile when the user names a Jira site/account or before posting worklogs.
+4. Prefer explicit flags for non-interactive work: issue key, duration, date, time, project id, billable flag, and comment.
+5. If no timer is running, `jcf timer stop` may offer an interactive correction interval; use `jcf timer log` for deterministic manual logging.

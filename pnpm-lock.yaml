@@ -442,6 +442,9 @@ importers:
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
+      '@knpkv/atlassian-common':
+        specifier: workspace:*
+        version: link:../atlassian-common
       '@knpkv/confluence-api-client':
         specifier: workspace:^
         version: link:../confluence-api-client

@@ -7,6 +7,21 @@ Use the `jira` binary to export Jira issues to Markdown and inspect or update Ji
 
 ## Install
 
+Authenticate once per Atlassian account/site, then switch profiles when needed:
+
+```bash
+jira auth create
+jira auth configure --client-id <id> --client-secret <secret>
+jira auth login
+jira auth login --site https://example.atlassian.net
+jira auth status
+jira auth profiles
+jira auth use <profile>
+jira auth remove <profile>
+```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
+
 ```bash
 pnpm dlx @knpkv/jira-cli --help
 ```

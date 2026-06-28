@@ -81,6 +81,10 @@ const AuthLayer = Layer.succeed(
     getAccessToken: () => Effect.succeed("access-token"),
     getCloudId: () => Effect.succeed("cloud-id"),
     getCurrentUser: () => Effect.succeed(null),
+    getActiveProfile: () => Effect.succeed(null),
+    listProfiles: () => Effect.succeed([]),
+    switchProfile: () => Effect.succeed(null),
+    removeProfile: () => Effect.succeed(null),
     isLoggedIn: () => Effect.succeed(true)
   })
 )

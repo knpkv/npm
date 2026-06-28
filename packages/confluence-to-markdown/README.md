@@ -54,6 +54,11 @@ confluence auth configure --client-id <ID> --client-secret <SECRET>
 confluence auth login
 confluence auth login --site <URL>    # for accounts with multiple sites
 
+# Manage saved accounts/sites
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
+
 # Check auth status
 confluence auth status
 
@@ -247,13 +252,19 @@ confluence auth configure --client-id <ID> --client-secret <SECRET>
 
 # Login via browser
 confluence auth login
+confluence auth login --site https://example.atlassian.net
 
 # Check login status
 confluence auth status
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
 
 # Logout
 confluence auth logout
 ```
+
+Each login is saved as an auth profile keyed by Atlassian account and site. `<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
 
 ### API Token (alternative)
 
@@ -266,7 +277,7 @@ Generate API token at [Atlassian Account Settings](https://id.atlassian.com/mana
 
 ### Security Notes
 
-- OAuth credentials stored in `~/.confluence/` with restricted permissions (0600)
+- OAuth credentials and profiles are stored in `~/.config/atlassian/confluence-to-markdown/` with restricted permissions (0600). Existing `~/.confluence/auth.json` and `~/.confluence/config.json` files are migrated on first use.
 - Treat these files as sensitive - do not share or commit
 - Create separate OAuth apps per developer for team projects
 - Tokens auto-refresh; if refresh fails, re-run `confluence auth login`

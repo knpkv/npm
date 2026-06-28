@@ -1,6 +1,6 @@
 # @knpkv/atlassian-common
 
-Shared utilities for Atlassian tools: OAuth2 + PKCE auth, token storage, config paths, AST types, and markdown serialization.
+Shared utilities for Atlassian tools: OAuth2 + PKCE auth, shared auth profiles, token storage, config paths, AST types, and markdown serialization.
 
 ## Installation
 
@@ -15,7 +15,7 @@ pnpm add @knpkv/atlassian-common
 | `@knpkv/atlassian-common`             | Everything (AST, auth, config, serializers)  |
 | `@knpkv/atlassian-common/ast`         | Inline, block, macro, and document AST nodes |
 | `@knpkv/atlassian-common/auth`        | OAuth2 endpoints, PKCE, token exchange       |
-| `@knpkv/atlassian-common/config`      | Config paths, schemas, token storage         |
+| `@knpkv/atlassian-common/config`      | Config paths, schemas, token/profile storage |
 | `@knpkv/atlassian-common/serializers` | Markdown serializer for AST nodes            |
 
 ## OAuth2 + PKCE
@@ -59,15 +59,17 @@ const program = Effect.gen(function* () {
 })
 ```
 
-## Token Storage
+## Token And Profile Storage
 
-Stores OAuth config and tokens in `~/.config/atlassian/` with 0600 permissions.
+Stores OAuth config, auth profiles, and the active token mirror in `~/.config/atlassian/<tool>/` with 0600 permissions.
 
 ```typescript
 import { Effect } from "effect"
 import {
-  saveToken,
-  loadToken,
+  saveProfileToken,
+  loadActiveProfileToken,
+  loadProfiles,
+  setActiveProfileBySelector,
   isTokenExpired,
   saveOAuthConfig,
   loadOAuthConfig,
@@ -75,14 +77,27 @@ import {
 } from "@knpkv/atlassian-common/config"
 
 const program = Effect.gen(function* () {
-  yield* saveOAuthConfig({ clientId: "...", clientSecret: "..." }, "jira")
+  yield* saveOAuthConfig("jira", { clientId: "...", clientSecret: "..." })
   const config = yield* loadOAuthConfig("jira")
 
-  yield* saveToken({ access_token: "...", refresh_token: "...", expires_in: 3600 }, "jira")
-  const token = yield* loadToken("jira")
-  const expired = isTokenExpired(token)
+  yield* saveProfileToken("jira", {
+    access_token: "...",
+    refresh_token: "...",
+    expires_at: Date.now() + 3600_000,
+    scope: "read:jira-work offline_access",
+    cloud_id: "...",
+    site_url: "https://example.atlassian.net"
+  })
+
+  const profiles = yield* loadProfiles("jira")
+  yield* setActiveProfileBySelector("jira", "https://example.atlassian.net")
+
+  const token = yield* loadActiveProfileToken("jira")
+  const expired = token ? isTokenExpired(token) : true
 }).pipe(Effect.provide(HomeDirectoryLive))
 ```
+
+`profiles.json` is the multi-account/site source of truth. `auth.json` is still mirrored to the active profile so older single-profile consumers keep working.
 
 ## AST Types
 

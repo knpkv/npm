@@ -74,6 +74,21 @@ The clone command initializes a local workspace for the root page and its descen
 
 ### Inspect And Reconcile
 
+Authenticate once per Atlassian account/site, then switch profiles when needed:
+
+```bash
+confluence auth create
+confluence auth configure --client-id <id> --client-secret <secret>
+confluence auth login
+confluence auth login --site https://example.atlassian.net
+confluence auth status
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
+```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
+
 ```bash
 confluence sync status
 confluence sync diff
