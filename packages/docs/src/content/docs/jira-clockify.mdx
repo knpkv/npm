@@ -3,13 +3,145 @@ title: Jira Clockify
 description: Jira-backed Clockify timer commands.
 ---
 
-Use the `jcf` binary to track time against Jira issues in Clockify.
+Use the `jcf` binary to track Clockify time against Jira issues. The package is `@knpkv/jira-clockify`.
+
+`jcf` combines Jira OAuth, Clockify API-key auth, local defaults, a TUI, timer commands, and reconciliation between Clockify entries and Jira worklogs.
+
+## Runtime
+
+Inside this workspace:
+
+```bash
+pnpm --filter @knpkv/jira-clockify build
+pnpm --filter @knpkv/jira-clockify test
+```
+
+## Authenticate
+
+Jira OAuth:
+
+```bash
+jcf auth jira create
+jcf auth jira configure
+jcf auth jira login
+jcf auth jira status
+jcf auth jira logout
+```
+
+Clockify API key:
+
+```bash
+jcf auth clockify setup
+jcf auth clockify status
+jcf auth status
+```
+
+Clockify setup validates the API key against `/v1/user`, lists available workspaces, and stores the selected workspace in `~/.jcf/clockify.json`.
+
+## Configure Defaults
+
+```bash
+jcf config show
+jcf config set project
+jcf config set billable
+jcf config set jql 'assignee = currentUser() AND status != Done ORDER BY updated DESC'
+jcf config reset
+```
+
+Config lives in `~/.jcf/config.json`. Defaults include a JQL query, refresh interval, default project, default billable flag, and project map.
+
+## Common Workflows
+
+### Run A Timer
 
 ```bash
 jcf timer start PROJ-123
+jcf timer start PROJ-123 --ago 15m
+jcf timer start PROJ-123 --since 09:30
 jcf timer status
 jcf timer stop
-jcf timer log PROJ-123 --time 1h
-jcf issue list --json
-jcf sync reconcile
+jcf timer discard
 ```
+
+`--ago` and `--since` are for correcting forgotten starts. `--project`, `--billable`, and `--save-defaults` can set Clockify project and billing behavior while starting a timer.
+
+If another timer is already running, `jcf timer start` shows the current ticket and asks whether to stop it and start the new one or keep it. `--ago` wins over `--since`, and future start times are rejected.
+
+### Log Time Manually
+
+```bash
+jcf timer log PROJ-123 --time 1h30m
+jcf timer log PROJ-123 --time 45m --date 2026-06-28 --at 09:00 --comment "Review"
+```
+
+Manual logs require at least one minute. A full ISO `--at` timestamp cannot be combined with `--date` because the date would be ambiguous.
+
+### Browse Jira Issues
+
+```bash
+jcf
+jcf tui
+jcf issue list --json
+```
+
+Running `jcf` without a subcommand launches the TUI or setup flow.
+
+### Reconcile Clockify And Jira
+
+```bash
+jcf sync reconcile
+jcf sync reconcile clockify-to-jira --week
+jcf sync reconcile jira-to-clockify --since 2026-06-01 --until 2026-06-07
+```
+
+Reconciliation compares day-and-ticket buckets. Differences under one minute are ignored because Jira worklogs are minute-granular. Fixes are confirmed one row at a time.
+
+## Write Semantics
+
+Clockify is the primary time store. Timer operations create or update Clockify entries first, then try to mirror work to Jira where applicable. Jira worklog failure does not imply that Clockify time was lost; command output reports Clockify and Jira outcomes separately.
+
+When no active timer exists, `jcf timer stop` can offer a correction flow that logs a completed interval for a ticket. That path still writes remote time and should be treated like `jcf timer log`.
+
+## Command Reference
+
+| Command                    | Class                                          | Important args and flags                                          | Output                                         |
+| -------------------------- | ---------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- |
+| `jcf` / `jcf tui`          | Read-only local UI with possible setup prompts | No args.                                                          | TUI or setup flow.                             |
+| `jcf auth jira create`     | Local write                                    | Opens OAuth app creation page.                                    | Human instructions.                            |
+| `jcf auth jira configure`  | Local write                                    | `--client-id`, `--client-secret` or prompts.                      | Stores Jira OAuth credentials.                 |
+| `jcf auth jira login`      | Local write                                    | Optional `--site`.                                                | Stores Jira tokens.                            |
+| `jcf auth clockify setup`  | Local write                                    | Prompts for API key and workspace.                                | Stores `~/.jcf/clockify.json`.                 |
+| `jcf auth status`          | Read-only                                      | None.                                                             | Combined auth status.                          |
+| `jcf config show`          | Read-only                                      | None.                                                             | Current local config.                          |
+| `jcf config set project`   | Local write                                    | Interactive project picker.                                       | Updates default Clockify project.              |
+| `jcf config set billable`  | Local write                                    | Interactive yes/no.                                               | Updates default billable flag.                 |
+| `jcf config set jql <jql>` | Local write                                    | JQL string.                                                       | Updates issue-list query.                      |
+| `jcf config reset`         | Local write                                    | None.                                                             | Restores defaults.                             |
+| `jcf timer start [key]`    | Remote write                                   | `--project`, `--billable`, `--save-defaults`, `--ago`, `--since`. | Starts Clockify timer.                         |
+| `jcf timer status`         | Read-only                                      | None.                                                             | Current timer state.                           |
+| `jcf timer stop`           | Remote write                                   | `--project`, `--billable`.                                        | Stops active timer and may write Jira worklog. |
+| `jcf timer discard`        | Remote write                                   | None.                                                             | Discards active timer.                         |
+| `jcf timer log <key>`      | Remote write                                   | `--time`, `--date`, `--at`, `--comment`.                          | Creates time entry/worklog.                    |
+| `jcf timer edit`           | Remote write                                   | Interactive.                                                      | Edits active timer details.                    |
+| `jcf issue list`           | Read-only                                      | `--json`.                                                         | Human list or JSON.                            |
+| `jcf sync reconcile`       | Remote write after prompts                     | Direction, `--day`, `--week`, `--since`, `--until`.               | Comparison table and prompted fixes.           |
+| `jcf skills install`       | Local write                                    | Shared installer flags.                                           | Installs the Jira Clockify agent skill.        |
+
+## Agent Guidance
+
+- Start with `jcf auth status`, `jcf config show`, `jcf timer status`, and `jcf issue list --json`.
+- Timer start/stop/log/edit/discard are remote writes because they change Clockify and can affect Jira worklogs.
+- Read command output carefully: Clockify success and Jira worklog success are reported separately.
+- `jcf sync reconcile` asks before applying each fix, but an agent should still get user intent before starting a reconciliation that may write.
+- Use `--since` and `--until` in `YYYY-MM-DD` format for custom reconciliation windows.
+
+## Source Landmarks
+
+| Area                  | Source                                                                            |
+| --------------------- | --------------------------------------------------------------------------------- |
+| Root command          | `packages/jira-clockify/src/cli/root.ts`                                          |
+| Auth commands         | `packages/jira-clockify/src/cli/auth.ts`                                          |
+| Config commands       | `packages/jira-clockify/src/cli/config.ts`                                        |
+| Timer commands        | `packages/jira-clockify/src/cli/timer`                                            |
+| Reconciliation        | `packages/jira-clockify/src/cli/reconcile.ts`, `src/services/ReconcileService.ts` |
+| Command-surface tests | `packages/jira-clockify/test/commandSurface.test.ts`                              |

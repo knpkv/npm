@@ -3,6 +3,76 @@ title: Packages
 description: Published packages in the @knpkv collection.
 ---
 
-The package collection includes product CLIs, API clients, shared Atlassian helpers, CodeCommit core services, and the agent skill installer.
+The package collection contains product CLIs, generated API clients, shared Atlassian helpers, CodeCommit services, and the private documentation site.
 
-The Documentation Site is private and exists to publish CLI-first documentation for the package collection.
+## Product CLIs
+
+| Package                         | Binary         | Purpose                                                 | Docs                             |
+| ------------------------------- | -------------- | ------------------------------------------------------- | -------------------------------- |
+| `@knpkv/jira-cli`               | `jira`         | Export Jira issues and manage project versions.         | [Jira](/jira/)                   |
+| `@knpkv/confluence-to-markdown` | `confluence`   | Sync Confluence Cloud pages to local Markdown.          | [Confluence](/confluence/)       |
+| `@knpkv/codecommit`             | `codecommit`   | TUI, web launcher, and CLI commands for CodeCommit PRs. | [CodeCommit](/codecommit/)       |
+| `@knpkv/jira-clockify`          | `jcf`          | Jira-backed Clockify timer and reconciliation tool.     | [Jira Clockify](/jira-clockify/) |
+| `@knpkv/agent-skills`           | `knpkv-skills` | Shared installer for bundled Codex and Claude skills.   | [Agent Skills](/agent-skills/)   |
+
+## API Clients
+
+The API clients expose Effect services around generated OpenAPI clients. They keep generated schemas available through subpath exports and provide `Context.Service` layers for application code.
+
+| Package                        | Public exports                                                                          | Auth model                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `@knpkv/jira-api-client`       | `JiraApiClient`, `JiraApiConfig`, `FetchClientError`, generated `v3` types.             | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
+| `@knpkv/confluence-api-client` | `ConfluenceApiClient`, `ConfluenceApiConfig`, generated `v1` and `v2` types.            | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
+| `@knpkv/clockify-api-client`   | `ClockifyApiClient`, `ClockifyApiConfig`, `ClockifyApiError`, generated Clockify types. | `X-Api-Key` header.                                                  |
+
+Minimal service shape:
+
+```typescript
+import { Effect, Layer } from "effect"
+import * as Redacted from "effect/Redacted"
+import { JiraApiClient, JiraApiConfig, toEffect } from "@knpkv/jira-api-client"
+
+const program = Effect.gen(function* () {
+  const jira = yield* JiraApiClient
+  return yield* toEffect(jira.v3.client.GET("/rest/api/3/myself"))
+})
+
+const ConfigLive = Layer.succeed(JiraApiConfig, {
+  baseUrl: "https://example.atlassian.net",
+  auth: {
+    type: "basic",
+    email: "you@example.com",
+    apiToken: Redacted.make("...")
+  }
+})
+
+Effect.runPromise(program.pipe(Effect.provide(JiraApiClient.layer), Effect.provide(ConfigLive)))
+```
+
+## Shared Libraries
+
+| Package                   | Purpose                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token storage, AST nodes, and Markdown serialization.                |
+| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services. |
+| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                               |
+
+## Local State By Package
+
+| Package                             | Local state                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `@knpkv/atlassian-common` consumers | `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<tool>/auth.json` and `oauth.json`.                   |
+| `@knpkv/confluence-to-markdown`     | `.confluence/config.json`, `.confluence/docs`, workspace Git metadata, and Confluence OAuth files. |
+| `@knpkv/codecommit-core`            | `~/.codecommit/config.json` and `~/.codecommit/cache.db`.                                          |
+| `@knpkv/jira-clockify`              | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                     |
+| `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                |
+
+## Documentation Surfaces
+
+| Surface                           | Audience               | Role                                                 |
+| --------------------------------- | ---------------------- | ---------------------------------------------------- |
+| `packages/docs`                   | Users and agents       | Canonical CLI-first documentation site.              |
+| Package READMEs                   | npm users              | Package-level quick start and API overview.          |
+| `docs/command-surface.md`         | Maintainers            | Design history for the resource-first command model. |
+| `packages/**/effect-explainer.md` | Maintainers and agents | Architecture notes for Effect-heavy modules.         |
+| `docs/adr`                        | Maintainers            | Architecture decisions.                              |

@@ -1,15 +1,120 @@
 ---
 title: Jira
-description: Jira issue and project version commands.
+description: Jira issue export and project version commands.
 ---
 
-Use the `jira` binary for Jira issue reads and project version workflows.
+Use the `jira` binary to export Jira issues to Markdown and inspect or update Jira project versions. The package is `@knpkv/jira-cli`.
+
+## Install
 
 ```bash
-jira issue get PROJ-123
-jira issue search 'project = PROJ'
+pnpm dlx @knpkv/jira-cli --help
+```
+
+Inside this workspace:
+
+```bash
+pnpm --filter @knpkv/jira-cli build
+pnpm --filter @knpkv/jira-cli test
+```
+
+## Authenticate
+
+Jira uses Atlassian OAuth.
+
+```bash
+jira auth create
+jira auth configure
+jira auth login
+jira auth status
+jira auth logout
+```
+
+`jira auth create` opens Atlassian's OAuth app creation page and prints the required scopes and callback URL. `jira auth configure` stores the client credentials. `jira auth login` completes the browser OAuth flow and can take `--site <url>` when the account has access to multiple Atlassian sites.
+
+## Common Workflows
+
+### Export One Issue
+
+```bash
+jira issue get PROJ-123 --output-dir ./jira-tickets
+```
+
+This reads the issue and writes `./jira-tickets/PROJ-123.md`.
+
+### Export Issues From JQL
+
+```bash
+jira issue search 'project = PROJ AND status != Done' --output-dir ./jira-tickets
+jira issue search 'project = PROJ' --format single --output-dir ./jira-tickets
+```
+
+`--format multi` writes one Markdown file per issue. `--format single` writes a combined `jira-export.md`.
+
+### Export A Fix Version
+
+```bash
+jira issue search --by-version "1.2.3" --project PROJ --format single
 jira version list --project PROJ --json
 jira version get 10042 --json
-jira version update 10042 --description "Q3 release"
-jira version related-work add 10042 --title "Release notes" --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123"
 ```
+
+Version commands use numeric Jira version ids such as `10042`, not version names. If you only know the name, run `jira version list --project <KEY>` first.
+
+### Attach Release Notes
+
+```bash
+jira version related-work add 10042 \
+  --title "Release notes" \
+  --url "https://example.atlassian.net/wiki/spaces/PROJ/pages/123" \
+  --category Communication
+```
+
+Related-work links are the Confluence links surfaced on Jira release reports.
+
+## Command Reference
+
+| Command                               | Class        | Important args and flags                                                                    | Output                         |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- | ------------------------------ |
+| `jira auth create`                    | Local write  | Opens OAuth app creation page.                                                              | Human instructions.            |
+| `jira auth configure`                 | Local write  | `--client-id`, `--client-secret` or prompts.                                                | Stores OAuth credentials.      |
+| `jira auth login`                     | Local write  | Optional `--site <url>`.                                                                    | Stores access/refresh tokens.  |
+| `jira auth logout`                    | Local write  | None.                                                                                       | Clears local auth state.       |
+| `jira auth status`                    | Read-only    | None.                                                                                       | Human login status.            |
+| `jira issue get <key>`                | Local write  | `--output-dir`, default `./jira-tickets`.                                                   | Markdown file for one issue.   |
+| `jira issue search [jql]`             | Local write  | `--by-version`, `--project`, `--format multi\|single`, `--max-results`, `--output-dir`.     | Markdown issue exports.        |
+| `jira version list`                   | Read-only    | `--project`, `--released`, `--unreleased`, `--custom-field`, `--max`, `--json`, `--emails`. | Table or JSON array.           |
+| `jira version get <id>`               | Read-only    | `--json`, `--emails`.                                                                       | Summary or JSON object.        |
+| `jira version update <id>`            | Remote write | `--description`, optional `--json`.                                                         | Updated version.               |
+| `jira version related-work list <id>` | Read-only    | Optional `--json`.                                                                          | Related-work links.            |
+| `jira version related-work add <id>`  | Remote write | `--title`, `--url`, `--category`, optional `--json`.                                        | Created link.                  |
+| `jira skills install`                 | Local write  | Shared installer flags.                                                                     | Installs the Jira agent skill. |
+
+## JSON Contract
+
+Version JSON output removes resolved email addresses by default:
+
+```bash
+jira version list --project PROJ --json
+jira version get 10042 --json
+jira version get 10042 --json --emails
+```
+
+Use `--emails` only when the caller explicitly needs personal email addresses.
+
+## Agent Guidance
+
+- Start with `jira auth status`, `jira version list --json`, or `jira version get --json`.
+- Do not run `jira version update` or `jira version related-work add` without explicit user intent.
+- Prefer `--json` for version inspection and Markdown exports for issue context.
+- Use numeric version ids. A release name belongs in `--by-version`, not in `jira version get`.
+
+## Source Landmarks
+
+| Area               | Source                                                           |
+| ------------------ | ---------------------------------------------------------------- |
+| Command tree       | `packages/jira-cli/src/bin.ts`                                   |
+| Issue commands     | `packages/jira-cli/src/commands/issue.ts`, `get.ts`, `search.ts` |
+| Version commands   | `packages/jira-cli/src/commands/version.ts`                      |
+| Command-tree tests | `packages/jira-cli/test/commandTree.test.ts`                     |
+| JQL builder        | `packages/jira-cli/src/internal/jqlBuilder.ts`                   |

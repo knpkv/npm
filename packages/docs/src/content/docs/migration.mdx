@@ -3,19 +3,62 @@ title: Migration
 description: Moving from legacy command spellings to canonical commands.
 ---
 
-Legacy command spellings are removed rather than kept as compatibility aliases.
+Legacy command spellings are removed rather than kept as compatibility aliases. Scripts and agent prompts should use resource-first canonical commands.
 
-| Legacy                     | Canonical                    |
-| -------------------------- | ---------------------------- |
-| `jira get`                 | `jira issue get`             |
-| `jira search`              | `jira issue search`          |
-| `jira version view`        | `jira version get`           |
-| `jira version set`         | `jira version update`        |
-| `jira version relatedwork` | `jira version related-work`  |
-| `confluence clone`         | `confluence workspace clone` |
-| `confluence pull`          | `confluence sync pull`       |
-| `confluence push`          | `confluence sync push`       |
-| `confluence fetch`         | `confluence page get`        |
-| `jcf start`                | `jcf timer start`            |
-| `jcf list`                 | `jcf issue list`             |
-| `jcf reconcile`            | `jcf sync reconcile`         |
+## Jira
+
+| Legacy                                       | Canonical                                       |
+| -------------------------------------------- | ----------------------------------------------- |
+| `jira get PROJ-123`                          | `jira issue get PROJ-123`                       |
+| `jira search 'project = PROJ'`               | `jira issue search 'project = PROJ'`            |
+| `jira version view 10042`                    | `jira version get 10042`                        |
+| `jira version set 10042 --description "..."` | `jira version update 10042 --description "..."` |
+| `jira version relatedwork ...`               | `jira version related-work ...`                 |
+
+## Confluence
+
+| Legacy                 | Canonical                        |
+| ---------------------- | -------------------------------- |
+| `confluence clone ...` | `confluence workspace clone ...` |
+| `confluence status`    | `confluence sync status`         |
+| `confluence diff`      | `confluence sync diff`           |
+| `confluence pull`      | `confluence sync pull`           |
+| `confluence push`      | `confluence sync push`           |
+| `confluence commit`    | `confluence sync commit`         |
+| `confluence log`       | `confluence sync log`            |
+| `confluence fetch ...` | `confluence page get ...`        |
+| `confluence new`       | `confluence page new`            |
+| `confluence delete`    | `confluence page delete`         |
+| `confluence login`     | `confluence auth login`          |
+
+## Jira Clockify
+
+| Legacy                       | Canonical                          |
+| ---------------------------- | ---------------------------------- |
+| `jcf start PROJ-123`         | `jcf timer start PROJ-123`         |
+| `jcf stop`                   | `jcf timer stop`                   |
+| `jcf discard`                | `jcf timer discard`                |
+| `jcf status`                 | `jcf timer status`                 |
+| `jcf log PROJ-123 --time 1h` | `jcf timer log PROJ-123 --time 1h` |
+| `jcf edit`                   | `jcf timer edit`                   |
+| `jcf list`                   | `jcf issue list`                   |
+| `jcf reconcile`              | `jcf sync reconcile`               |
+
+## CodeCommit
+
+CodeCommit already uses the `pr` resource namespace:
+
+```bash
+codecommit pr list
+codecommit pr create
+codecommit pr export
+codecommit pr update
+```
+
+`codecommit tui` and `codecommit web` remain interface launch commands rather than resource commands.
+
+## Migration Guidance
+
+- Update scripts first, then update agent prompts and documentation snippets.
+- Use the product page command tables to re-check flags; some canonical commands also tightened input validation.
+- Do not add compatibility aliases in new docs or skills. Tests assert that removed legacy commands fail.
