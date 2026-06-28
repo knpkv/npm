@@ -1,5 +1,23 @@
 # @knpkv/confluence-to-markdown
 
+## 1.0.0
+
+### Major Changes
+
+- [#99](https://github.com/knpkv/npm/pull/99) [`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7) Thanks [@konopkov](https://github.com/konopkov)! - Refactor CLI command surfaces around resource-first groups and remove the legacy top-level aliases.
+
+  - Jira issue reads now live under `jira issue get` and `jira issue search`; version reads and writes use `jira version get`, `jira version update`, and `jira version related-work`.
+  - Confluence workspace setup now uses `confluence workspace clone`, page operations use `confluence page`, and sync/git-backed operations use `confluence sync`.
+  - JCF timer operations now use `jcf timer`, ticket listing uses `jcf issue list`, and reconciliation uses `jcf sync reconcile`.
+  - Agent skills and product-local skill copies now document the same canonical commands.
+
+### Patch Changes
+
+- [#91](https://github.com/knpkv/npm/pull/91) [`b1cb35f`](https://github.com/knpkv/npm/commit/b1cb35f4469bcf224978a3a724ea4c782a3db883) Thanks [@konopkov](https://github.com/konopkov)! - Preserve Confluence code block metadata, including custom width breakout marks, through markdown round-trips.
+
+- Updated dependencies [[`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7)]:
+  - @knpkv/agent-skills@0.2.1
+
 ## 0.7.0
 
 ### Minor Changes

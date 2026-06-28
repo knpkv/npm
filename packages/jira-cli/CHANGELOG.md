@@ -1,5 +1,25 @@
 # @knpkv/jira-cli
 
+## 1.0.0
+
+### Major Changes
+
+- [#99](https://github.com/knpkv/npm/pull/99) [`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7) Thanks [@konopkov](https://github.com/konopkov)! - Refactor CLI command surfaces around resource-first groups and remove the legacy top-level aliases.
+
+  - Jira issue reads now live under `jira issue get` and `jira issue search`; version reads and writes use `jira version get`, `jira version update`, and `jira version related-work`.
+  - Confluence workspace setup now uses `confluence workspace clone`, page operations use `confluence page`, and sync/git-backed operations use `confluence sync`.
+  - JCF timer operations now use `jcf timer`, ticket listing uses `jcf issue list`, and reconciliation uses `jcf sync reconcile`.
+  - Agent skills and product-local skill copies now document the same canonical commands.
+
+### Patch Changes
+
+- [#97](https://github.com/knpkv/npm/pull/97) [`0eec900`](https://github.com/knpkv/npm/commit/0eec9001c32e70493be985449798d731f7dfb9ba) Thanks [@konopkov](https://github.com/konopkov)! - Fix `serializeIssue` crashing with `yaml.safeDump is removed in js-yaml 4`. gray-matter's default YAML engine calls js-yaml 3's `safeDump`/`safeLoad`, both removed in js-yaml 4 — which the workspace pins via a security override. The front-matter writer now supplies a custom engine backed by js-yaml 4's `dump`/`load`.
+
+- [#98](https://github.com/knpkv/npm/pull/98) [`fdfd789`](https://github.com/knpkv/npm/commit/fdfd7897442a4616087463c60ae54d94f1726dd3) Thanks [@konopkov](https://github.com/konopkov)! - Add Jira Markdown Sync workspace primitives, field reconciliation helpers, and a live Jira integration test using `JIRA_API_KEY`.
+
+- Updated dependencies [[`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7)]:
+  - @knpkv/agent-skills@0.2.1
+
 ## 0.3.0
 
 ### Minor Changes

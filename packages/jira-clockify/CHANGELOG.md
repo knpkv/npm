@@ -1,5 +1,38 @@
 # @knpkv/jira-clockify
 
+## 1.0.0
+
+### Major Changes
+
+- [#99](https://github.com/knpkv/npm/pull/99) [`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7) Thanks [@konopkov](https://github.com/konopkov)! - Refactor CLI command surfaces around resource-first groups and remove the legacy top-level aliases.
+
+  - Jira issue reads now live under `jira issue get` and `jira issue search`; version reads and writes use `jira version get`, `jira version update`, and `jira version related-work`.
+  - Confluence workspace setup now uses `confluence workspace clone`, page operations use `confluence page`, and sync/git-backed operations use `confluence sync`.
+  - JCF timer operations now use `jcf timer`, ticket listing uses `jcf issue list`, and reconciliation uses `jcf sync reconcile`.
+  - Agent skills and product-local skill copies now document the same canonical commands.
+
+### Minor Changes
+
+- [#94](https://github.com/knpkv/npm/pull/94) [`a12490d`](https://github.com/knpkv/npm/commit/a12490d423b1d4f4e1e75fee0e34093380b5389a) Thanks [@konopkov](https://github.com/konopkov)! - Add `jcf reconcile` to compare Clockify time against Jira worklogs over a period and fill the gaps. Work is bucketed per ticket per local day and summed on each side, so entries split across either system don't read as discrepancies. Pick a direction — `clockify-to-jira` (default) or `jira-to-clockify` — to choose which side is the source of truth; the command reports every bucket with its delta, then prompts to apply each missing slice into the under-logged side (it only ever adds, never deletes, and posts the delta so re-runs converge). Period flags: `--day` (default), `--week` (last 7 days), or a custom `--since`/`--until` window.
+
+- [#92](https://github.com/knpkv/npm/pull/92) [`ceb4006`](https://github.com/knpkv/npm/commit/ceb4006fbae04f99219bacc23022c3143ecb4fd5) Thanks [@konopkov](https://github.com/konopkov)! - Surface _why_ a Jira worklog failed and stop offering pointless retries. The worklog post now reports a typed outcome (`Posted` / `NotLoggedIn` / `Failed{message}`) instead of a bare boolean, so:
+
+  - the `jcf stop` CLI and the TUI retry popup show the actual failure reason (HTTP status / Jira error message) instead of a bare `✗`;
+  - a not-logged-in failure is recognised as unrecoverable — the CLI/TUI show the `jcf auth jira login` hint and suppress the retry affordance rather than looping on a request that can never succeed;
+  - a transient failure still offers retry, now labelled with the reason.
+
+  Also guards the TUI Retry action against a double-keypress that could double-log the worklog.
+
+### Patch Changes
+
+- [#95](https://github.com/knpkv/npm/pull/95) [`53f260b`](https://github.com/knpkv/npm/commit/53f260bb01dc810af7926ab862f75590e766a531) Thanks [@konopkov](https://github.com/konopkov)! - `jcf reconcile` (clockify→jira) now uses the Clockify entry's own description as the Jira worklog comment instead of a fixed "Reconciled from Clockify". For a bucket spanning several entries the descriptions are ticket-prefix-stripped, deduped, and joined; it only falls back to the generic note when there's nothing meaningful to carry over.
+
+- [#96](https://github.com/knpkv/npm/pull/96) [`8f1ff75`](https://github.com/knpkv/npm/commit/8f1ff75cdb5ef74bd4967f1c99c2e7877a844eed) Thanks [@konopkov](https://github.com/konopkov)! - Fix Jira worklog posts failing with a transport error in the TUI. The TUI runs under Bun, where the undici-based HTTP client (used by the raw Jira worklog POST) fails; the CLI runs under Node and was unaffected. Switch the shared HTTP client to the fetch implementation, which works in both Bun and Node — the same fetch the Jira/Clockify API clients already use.
+
+- Updated dependencies [[`0eec900`](https://github.com/knpkv/npm/commit/0eec9001c32e70493be985449798d731f7dfb9ba), [`fdfd789`](https://github.com/knpkv/npm/commit/fdfd7897442a4616087463c60ae54d94f1726dd3), [`59478b0`](https://github.com/knpkv/npm/commit/59478b0d059d359feaf38222e5e55f748ee389d7)]:
+  - @knpkv/jira-cli@1.0.0
+  - @knpkv/agent-skills@0.2.1
+
 ## 0.5.0
 
 ### Minor Changes
