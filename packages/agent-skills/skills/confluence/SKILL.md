@@ -11,6 +11,7 @@ Use the `confluence` binary to manage a local markdown mirror of Confluence Clou
 
 - Run commands from the workspace that contains, or should contain, the `.confluence/` sync directory.
 - Authenticate before clone or sync with `confluence auth create`, `confluence auth configure`, and `confluence auth login`.
+- For multi-account or multi-site setups, inspect `confluence auth profiles` and switch with `confluence auth use <profile>` before pulling or pushing content.
 - Use OAuth for normal operation. API-token env vars may be available as `CONFLUENCE_API_KEY` and `CONFLUENCE_EMAIL`.
 - Confirm before running `confluence sync push`, because it writes to Confluence.
 - Confirm before running `confluence page delete`, because it removes a local page that will be deleted remotely on the next push.
@@ -24,7 +25,12 @@ confluence auth create
 confluence auth configure --client-id <id> --client-secret <secret>
 confluence auth login
 confluence auth login --site https://example.atlassian.net
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
 ```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID. `confluence auth status` shows the active profile.
 
 Clone a page tree:
 
@@ -137,7 +143,8 @@ Clean fetch mode removes `adf:` comments from stdout for readability. It is usef
 
 1. Start with `confluence sync status` and `confluence sync diff`.
 2. Read and edit markdown files under the configured docs path, usually `.confluence/docs`.
-3. Preserve `<!-- adf:... -->` markers, `.adf.json` sidecars, front matter, and custom Confluence links unless the user explicitly asks for a lossy cleanup.
-4. Use `confluence sync commit` instead of raw git for normal sync commits so external docs paths are copied into `.confluence/`.
-5. Use `confluence sync push --dry-run` before `confluence sync push`.
-6. Mention fidelity limits when editing complex Confluence content: media, cards, macros, panels, task lists, expand sections, layouts, dates, emojis, and some marks may not round-trip exactly.
+3. Verify the active auth profile when the user names a site/account or before remote writes.
+4. Preserve `<!-- adf:... -->` markers, `.adf.json` sidecars, front matter, and custom Confluence links unless the user explicitly asks for a lossy cleanup.
+5. Use `confluence sync commit` instead of raw git for normal sync commits so external docs paths are copied into `.confluence/`.
+6. Use `confluence sync push --dry-run` before `confluence sync push`.
+7. Mention fidelity limits when editing complex Confluence content: media, cards, macros, panels, task lists, expand sections, layouts, dates, emojis, and some marks may not round-trip exactly.

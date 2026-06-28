@@ -10,6 +10,7 @@ export {
   getAuthPath,
   getConfigDir,
   getOAuthConfigPath,
+  getProfilesPath,
   type HomeDirectory,
   HomeDirectoryError,
   HomeDirectoryLive,
@@ -41,3 +42,25 @@ export {
   saveOAuthConfig,
   saveToken
 } from "./TokenStorage.js"
+
+// Auth profiles
+export {
+  type AuthProfile,
+  AuthProfileSchema,
+  type AuthProfilesFile,
+  AuthProfilesFileSchema,
+  deleteActiveProfile,
+  deleteProfile,
+  deleteProfileBySelector,
+  findProfile,
+  loadActiveProfile,
+  loadActiveProfileToken,
+  loadProfiles,
+  profileFromToken,
+  profileIdFromToken,
+  profileNameFromToken,
+  saveProfiles,
+  saveProfileToken,
+  setActiveProfile,
+  setActiveProfileBySelector
+} from "./AuthProfiles.js"

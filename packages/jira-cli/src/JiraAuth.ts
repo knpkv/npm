@@ -35,18 +35,23 @@ import {
   revokeToken
 } from "@knpkv/atlassian-common/auth"
 import {
-  deleteToken,
+  type AuthProfile,
+  deleteActiveProfile,
+  deleteProfileBySelector,
   type FileSystemError,
   type HomeDirectoryError,
   HomeDirectoryLive,
   isTokenExpired,
+  loadActiveProfile,
+  loadActiveProfileToken,
   loadOAuthConfig,
-  loadToken,
+  loadProfiles,
   type OAuthConfig,
   type OAuthToken,
   type OAuthUser,
   saveOAuthConfig,
-  saveToken
+  saveProfileToken,
+  setActiveProfileBySelector
 } from "@knpkv/atlassian-common/config"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
@@ -92,9 +97,16 @@ const TokenStorageLive = Layer.mergeAll(
 )
 
 // Wrap token storage operations with their required layers
-const loadTokenOp = () => loadToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const saveTokenOp = (token: OAuthToken) => saveToken(TOOL_NAME, token).pipe(Effect.provide(TokenStorageLive))
-const deleteTokenOp = () => deleteToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
+const loadTokenOp = () => loadActiveProfileToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
+const saveTokenOp = (token: OAuthToken) => saveProfileToken(TOOL_NAME, token).pipe(Effect.provide(TokenStorageLive))
+const deleteTokenOp = () => deleteActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
+const listProfilesOp = () =>
+  loadProfiles(TOOL_NAME).pipe(Effect.map((store) => store.profiles), Effect.provide(TokenStorageLive))
+const loadActiveProfileOp = () => loadActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
+const switchProfileOp = (selector: string) =>
+  setActiveProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
+const removeProfileOp = (selector: string) =>
+  deleteProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
 const loadOAuthConfigOp = () => loadOAuthConfig(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
 const saveOAuthConfigOp = (config: OAuthConfig) =>
   saveOAuthConfig(TOOL_NAME, config).pipe(Effect.provide(TokenStorageLive))
@@ -167,6 +179,24 @@ export interface JiraAuthService {
     OAuthUser | null,
     FileSystemError | HomeDirectoryError | PlatformError.PlatformError
   >
+  /** Get active auth profile */
+  readonly getActiveProfile: () => Effect.Effect<
+    AuthProfile | null,
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  >
+  /** List stored auth profiles */
+  readonly listProfiles: () => Effect.Effect<
+    ReadonlyArray<AuthProfile>,
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  >
+  /** Switch active profile by ID, name, site URL, cloud ID, or account ID */
+  readonly switchProfile: (
+    selector: string
+  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
+  /** Remove stored profile by ID, name, site URL, cloud ID, or account ID */
+  readonly removeProfile: (
+    selector: string
+  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
   /** Check if user is logged in */
   readonly isLoggedIn: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
 }
@@ -403,14 +433,11 @@ const make = Effect.gen(function*() {
         return Redacted.make(refreshed.access_token)
       }
 
-      // This fiber owns the refresh
-      const config = yield* getConfig()
-      yield* Console.log("Token expired, refreshing...")
-
-      const result = yield* refreshTokenImpl(token, config).pipe(
-        Effect.tap((refreshed) => Deferred.succeed(deferred, refreshed)),
-        Effect.tapError((error) => Deferred.fail(deferred, error)),
-        Effect.ensuring(Ref.set(refreshLock, Option.none())),
+      const refresh = Effect.gen(function*() {
+        const config = yield* getConfig()
+        yield* Console.log("Token expired, refreshing...")
+        return yield* refreshTokenImpl(token, config)
+      }).pipe(
         Effect.catchTag("OAuthError", (error) => {
           if (error.step === "refresh") {
             return Effect.gen(function*() {
@@ -426,6 +453,15 @@ const make = Effect.gen(function*() {
           return Effect.fail(error)
         })
       )
+
+      // This fiber owns the refresh. Complete the shared Deferred with the final
+      // transformed exit so waiters observe the same success or failure.
+      const exit = yield* refresh.pipe(
+        Effect.exit,
+        Effect.ensuring(Ref.set(refreshLock, Option.none()))
+      )
+      yield* Deferred.done(deferred, exit)
+      const result = yield* Deferred.await(deferred)
 
       return Redacted.make(result.access_token)
     })
@@ -463,6 +499,26 @@ const make = Effect.gen(function*() {
       return token?.user ?? null
     })
 
+  const getActiveProfile = (): Effect.Effect<
+    AuthProfile | null,
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  > => loadActiveProfileOp()
+
+  const listProfiles = (): Effect.Effect<
+    ReadonlyArray<AuthProfile>,
+    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+  > => listProfilesOp()
+
+  const switchProfile = (
+    selector: string
+  ): Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
+    switchProfileOp(selector)
+
+  const removeProfile = (
+    selector: string
+  ): Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
+    removeProfileOp(selector)
+
   const isLoggedIn = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
@@ -478,6 +534,10 @@ const make = Effect.gen(function*() {
     getCloudId,
     getSiteUrl,
     getCurrentUser,
+    getActiveProfile,
+    listProfiles,
+    switchProfile,
+    removeProfile,
     isLoggedIn
   })
 })

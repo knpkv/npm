@@ -5,6 +5,21 @@ description: Jira issue and project version commands.
 
 Use the `jira` binary for Jira issue reads and project version workflows.
 
+Authenticate once per Atlassian account/site, then switch profiles when needed:
+
+```bash
+jira auth create
+jira auth configure --client-id <id> --client-secret <secret>
+jira auth login
+jira auth login --site https://example.atlassian.net
+jira auth status
+jira auth profiles
+jira auth use <profile>
+jira auth remove <profile>
+```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
+
 ```bash
 jira issue get PROJ-123
 jira issue search 'project = PROJ'

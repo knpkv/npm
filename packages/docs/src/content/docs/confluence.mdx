@@ -5,6 +5,21 @@ description: Confluence workspace, sync, and page commands.
 
 Use the `confluence` binary to manage a local Markdown workspace for Confluence pages.
 
+Authenticate once per Atlassian account/site, then switch profiles when needed:
+
+```bash
+confluence auth create
+confluence auth configure --client-id <id> --client-secret <secret>
+confluence auth login
+confluence auth login --site https://example.atlassian.net
+confluence auth status
+confluence auth profiles
+confluence auth use <profile>
+confluence auth remove <profile>
+```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
+
 ```bash
 confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
 confluence sync status

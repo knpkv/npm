@@ -61,6 +61,10 @@ const DummyJiraAuthLayer = Layer.succeed(
     getCloudId: () => Effect.die(new Error("Not configured")),
     getSiteUrl: () => Effect.die(new Error("Not configured")),
     getCurrentUser: () => Effect.succeed(null),
+    getActiveProfile: () => Effect.succeed(null),
+    listProfiles: () => Effect.succeed([]),
+    switchProfile: () => Effect.succeed(null),
+    removeProfile: () => Effect.succeed(null),
     isLoggedIn: () => Effect.succeed(false)
   })
 )

@@ -37,7 +37,7 @@ jobs:
           node-version: "24.10.0"
 
       - name: Build packages
-        run: pnpm --filter @knpkv/agent-skills --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
+        run: pnpm --filter @knpkv/agent-skills --filter @knpkv/atlassian-common --filter @knpkv/confluence-api-client --filter @knpkv/confluence-to-markdown build
 
       - name: Run integration tests
         env:

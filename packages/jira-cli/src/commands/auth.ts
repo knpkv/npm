@@ -11,7 +11,7 @@
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { openBrowser } from "../internal/openBrowser.js"
 import { JiraAuth } from "../JiraAuth.js"
 
@@ -97,13 +97,64 @@ const logoutCommand = Command.make("logout", {}, () =>
 const statusCommand = Command.make("status", {}, () =>
   Effect.gen(function*() {
     const auth = yield* JiraAuth
-    const user = yield* auth.getCurrentUser()
-    if (user) {
-      yield* Console.log(`Logged in as: ${user.name} (${user.email})`)
+    const profile = yield* auth.getActiveProfile()
+    if (profile) {
+      const user = profile.token.user
+      const account = user ? `${user.name} (${user.email})` : "unknown user"
+      yield* Console.log(`Active profile: ${profile.name}`)
+      yield* Console.log(`Account: ${account}`)
+      yield* Console.log(`Site: ${profile.token.site_url}`)
+      yield* Console.log(`Profile ID: ${profile.id}`)
     } else {
       yield* Console.log("Not logged in. Use 'jira auth login' to authenticate.")
     }
   })).pipe(Command.withDescription("Show authentication status"))
+
+// === Auth profiles command ===
+const profilesCommand = Command.make("profiles", {}, () =>
+  Effect.gen(function*() {
+    const auth = yield* JiraAuth
+    const [profiles, active] = yield* Effect.all([auth.listProfiles(), auth.getActiveProfile()])
+    if (profiles.length === 0) {
+      yield* Console.log("No auth profiles. Use 'jira auth login' to authenticate.")
+      return
+    }
+
+    for (const profile of profiles) {
+      const marker = active?.id === profile.id ? "*" : " "
+      yield* Console.log(`${marker} ${profile.id}`)
+      yield* Console.log(`    ${profile.name}`)
+      yield* Console.log(`    ${profile.token.site_url}`)
+    }
+  })).pipe(Command.withDescription("List stored auth profiles"))
+
+const profileArg = Args.string("profile").pipe(
+  Args.withDescription("Profile ID, name, site URL, cloud ID, or account ID")
+)
+
+// === Auth use command ===
+const useCommand = Command.make("use", { profile: profileArg }, ({ profile }) =>
+  Effect.gen(function*() {
+    const auth = yield* JiraAuth
+    const selected = yield* auth.switchProfile(profile)
+    if (!selected) {
+      yield* Console.log(`Profile not found: ${profile}`)
+      return
+    }
+    yield* Console.log(`Active profile: ${selected.name}`)
+  })).pipe(Command.withDescription("Switch active auth profile"))
+
+// === Auth remove command ===
+const removeCommand = Command.make("remove", { profile: profileArg }, ({ profile }) =>
+  Effect.gen(function*() {
+    const auth = yield* JiraAuth
+    const removed = yield* auth.removeProfile(profile)
+    if (!removed) {
+      yield* Console.log(`Profile not found: ${profile}`)
+      return
+    }
+    yield* Console.log(`Removed profile: ${removed.name}`)
+  })).pipe(Command.withDescription("Remove stored auth profile"))
 
 // === Auth command group ===
 export const authCommand = Command.make("auth").pipe(
@@ -113,6 +164,9 @@ export const authCommand = Command.make("auth").pipe(
     configureCommand,
     loginCommand,
     logoutCommand,
-    statusCommand
+    statusCommand,
+    profilesCommand,
+    useCommand,
+    removeCommand
   ])
 )

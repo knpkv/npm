@@ -53,7 +53,19 @@ jira auth configure --client-id <ID> --client-secret <SECRET>
 
 ```bash
 jira auth login
+jira auth login --site https://example.atlassian.net
 ```
+
+Each successful login is saved as an auth profile keyed by the Atlassian account and site. Use profiles when you work across multiple Jira sites or accounts:
+
+```bash
+jira auth status
+jira auth profiles
+jira auth use <profile>
+jira auth remove <profile>
+```
+
+`<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
 
 ## Usage
 
@@ -158,6 +170,9 @@ jira version related-work add 10042 \
 jira auth create     # Open Atlassian console to create OAuth app
 jira auth configure  # Set client ID and secret
 jira auth login      # Authenticate via OAuth
+jira auth profiles   # List stored accounts/sites
+jira auth use        # Switch active profile
+jira auth remove     # Remove one stored profile
 jira auth logout     # Remove stored credentials
 jira auth status     # Show current auth status
 ```
