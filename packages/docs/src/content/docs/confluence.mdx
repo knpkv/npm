@@ -3,15 +3,137 @@ title: Confluence
 description: Confluence workspace, sync, and page commands.
 ---
 
-Use the `confluence` binary to manage a local Markdown workspace for Confluence pages.
+Use the `confluence` binary to manage a local Markdown workspace for Confluence Cloud pages. The package is `@knpkv/confluence-to-markdown`.
+
+The core idea is round-trip Markdown: pull Confluence pages into files, edit locally, inspect the diff, then push back to Confluence when you are ready.
+
+## Install
 
 ```bash
-confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
+pnpm dlx @knpkv/confluence-to-markdown --help
+```
+
+Inside this workspace:
+
+```bash
+pnpm --filter @knpkv/confluence-to-markdown build
+pnpm --filter @knpkv/confluence-to-markdown test
+```
+
+## Authenticate
+
+OAuth is preferred:
+
+```bash
+confluence auth create
+confluence auth configure
+confluence auth login
+confluence auth status
+confluence auth logout
+```
+
+For older automation, token auth is still accepted through environment variables before OAuth is used:
+
+```bash
+CONFLUENCE_EMAIL=you@example.com
+CONFLUENCE_API_KEY=<api-token>
+```
+
+## Page Input
+
+Most page commands accept either a full Confluence URL or a page id plus site base URL:
+
+```bash
+confluence page get --url https://example.atlassian.net/wiki/pages/2333334354
+confluence page get --page-id 2333334354 --base-url https://example.atlassian.net
+```
+
+Do not combine `--url` with `--page-id` or `--base-url`. Base URLs must be HTTPS Atlassian Cloud roots such as `https://example.atlassian.net`.
+
+## Workspace Model
+
+`confluence workspace clone` creates a local workspace with:
+
+- `.confluence/config.json` containing the root page, base URL, docs path, exclude patterns, and tracked paths.
+- Markdown files under `.confluence/docs` by default.
+- Page front matter containing Confluence page ids, versions, titles, update timestamps, and content hashes.
+- A Git repository model that uses `origin/confluence` as the remote-state branch when Git is initialized.
+
+The default config tracks Markdown files and keeps source ADF disabled unless `saveSource` is set.
+
+## Common Workflows
+
+### Clone A Page Tree
+
+```bash
+confluence workspace clone --url https://example.atlassian.net/wiki/pages/2333334354
+confluence workspace clone --root-page-id 2333334354 --base-url https://example.atlassian.net
+```
+
+The clone command initializes a local workspace for the root page and its descendants.
+
+### Inspect And Reconcile
+
+```bash
 confluence sync status
+confluence sync diff
 confluence sync pull
 confluence sync push --dry-run
 confluence sync push
-confluence page get --page-id <page-id> --base-url https://example.atlassian.net
-confluence page new
-confluence page delete
+confluence sync commit --message "Update release notes"
+confluence sync log --limit 20 --oneline
 ```
+
+Use `sync pull` before editing when remote pages may have changed. Use `sync push --dry-run` before remote writes.
+
+`sync push` is designed for committed local edits. If the workspace has uncommitted changes, commit them first with `confluence sync commit --message "..."` so the tool can compare the current branch against `origin/confluence`.
+
+### Fetch One Page
+
+```bash
+confluence page get --url https://example.atlassian.net/wiki/pages/2333334354
+confluence page get --url https://example.atlassian.net/wiki/pages/2333334354 --clean-markdown
+```
+
+By default, one-off fetch preserves Confluence round-trip metadata comments. `--clean-markdown` removes those comments for readable output that is not intended for lossless push-back.
+
+## Command Reference
+
+| Command                      | Class        | Important args and flags                                      | Output                               |
+| ---------------------------- | ------------ | ------------------------------------------------------------- | ------------------------------------ |
+| `confluence auth create`     | Local write  | Opens OAuth app creation page.                                | Human instructions.                  |
+| `confluence auth configure`  | Local write  | `--client-id`, `--client-secret` or prompts.                  | Stores OAuth credentials.            |
+| `confluence auth login`      | Local write  | Optional `--site <url>`.                                      | Stores OAuth tokens.                 |
+| `confluence auth logout`     | Local write  | None.                                                         | Clears local auth state.             |
+| `confluence auth status`     | Read-only    | None.                                                         | Human login status.                  |
+| `confluence workspace clone` | Local write  | `--url` or `--root-page-id` plus `--base-url`.                | Local Markdown workspace.            |
+| `confluence sync status`     | Read-only    | None.                                                         | Local/remote change summary.         |
+| `confluence sync diff`       | Read-only    | `--staged`, `--commit`, optional file.                        | Git-style diff.                      |
+| `confluence sync pull`       | Local write  | `--force`, `--replay-history`.                                | Updates local workspace.             |
+| `confluence sync push`       | Remote write | `--dry-run` / `-n`.                                           | Updates Confluence pages.            |
+| `confluence sync commit`     | Local write  | `--message` / `-m`.                                           | Git commit in workspace.             |
+| `confluence sync log`        | Read-only    | `--limit`, `--oneline`, `--since`, optional file.             | Git history.                         |
+| `confluence page get`        | Read-only    | `--url` or `--page-id` plus `--base-url`, `--clean-markdown`. | Markdown on stdout.                  |
+| `confluence page new`        | Remote write | Interactive prompts.                                          | Creates a page.                      |
+| `confluence page delete`     | Remote write | Interactive prompts.                                          | Deletes a page.                      |
+| `confluence skills install`  | Local write  | Shared installer flags.                                       | Installs the Confluence agent skill. |
+
+## Agent Guidance
+
+- Start with `confluence auth status`, `confluence sync status`, and `confluence sync diff`.
+- Prefer `confluence sync push --dry-run` before any `confluence sync push`.
+- Commit local edits with `confluence sync commit` before pushing a Git-backed workspace.
+- Use `page get --clean-markdown` for one-off reading and default preserving output for sync workflows.
+- Treat `page new`, `page delete`, and `sync push` as remote writes that need explicit confirmation.
+
+## Source Landmarks
+
+| Area                    | Source                                                        |
+| ----------------------- | ------------------------------------------------------------- |
+| Command tree            | `packages/confluence-to-markdown/src/commands/root.ts`        |
+| Page input validation   | `packages/confluence-to-markdown/src/commands/pageInput.ts`   |
+| Auth fallback           | `packages/confluence-to-markdown/src/commands/shared.ts`      |
+| Workspace config schema | `packages/confluence-to-markdown/src/Schemas.ts`              |
+| Sync commands           | `packages/confluence-to-markdown/src/commands/sync.ts`        |
+| Round-trip conversion   | `packages/confluence-to-markdown/src/MarkdownConverter.ts`    |
+| Command harness tests   | `packages/confluence-to-markdown/test/commandHarness.test.ts` |

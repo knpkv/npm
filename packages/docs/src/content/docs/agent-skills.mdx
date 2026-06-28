@@ -3,14 +3,92 @@ title: Agent Skills
 description: Bundled skill installation and safety conventions.
 ---
 
-Each product package ships its relevant agent skill, and `@knpkv/agent-skills` provides the shared installer.
+Product packages ship Codex-compatible and Claude-compatible skills, and `@knpkv/agent-skills` provides the shared installer.
+
+## Install
+
+Install all bundled skills:
+
+```bash
+knpkv-skills install
+knpkv-skills install --agent all
+knpkv-skills install --agent codex
+knpkv-skills install --agent claude
+```
+
+Preview before writing:
+
+```bash
+knpkv-skills install --dry-run
+knpkv-skills install --agent codex --dry-run
+```
+
+Replace existing skill directories:
+
+```bash
+knpkv-skills install --force
+```
+
+Override target directories:
+
+```bash
+knpkv-skills install --codex-dir ./tmp/codex-skills
+knpkv-skills install --claude-dir ./tmp/claude-skills
+```
+
+Product CLIs install their own related skill:
 
 ```bash
 jira skills install
 confluence skills install
 codecommit skills install
 jcf skills install
-knpkv-skills install
 ```
 
-Skill content is authored from one source and copied into product packages to avoid drift.
+## Targets
+
+| Agent  | Default target                         |
+| ------ | -------------------------------------- |
+| Codex  | `${CODEX_HOME:-$HOME/.codex}/skills`   |
+| Claude | `${CLAUDE_HOME:-$HOME/.claude}/skills` |
+
+`--agent all` installs into both targets. `--dry-run` prints the installation plan without writing. `--force` replaces an existing skill directory.
+
+## Bundled Skills
+
+| Skill        | Source of truth                           | Product copy                                        |
+| ------------ | ----------------------------------------- | --------------------------------------------------- |
+| `codecommit` | `packages/agent-skills/skills/codecommit` | `packages/codecommit/skills/codecommit`             |
+| `confluence` | `packages/agent-skills/skills/confluence` | `packages/confluence-to-markdown/skills/confluence` |
+| `jira`       | `packages/agent-skills/skills/jira`       | `packages/jira-cli/skills/jira`                     |
+| `jcf`        | `packages/agent-skills/skills/jcf`        | `packages/jira-clockify/skills/jcf`                 |
+
+Skill content is authored from `packages/agent-skills/skills/*` and copied into product packages. Do not edit product-local copies by hand.
+
+## Drift Checks
+
+```bash
+pnpm skills:check
+pnpm skills:sync
+```
+
+`pnpm skills:check` fails when product-local bundled skills drift from the authoring source. `pnpm skills:sync` rewrites the product-local copies.
+
+## Agent Safety
+
+Skills should follow the same safety model as the command docs:
+
+- Prefer read-only status/list/export commands before writes.
+- Use `--json` when a documented command supports it.
+- Ask for explicit confirmation before remote writes.
+- Use truthful dry-runs, especially `confluence sync push --dry-run` and skill installer `--dry-run`.
+- Include known identifiers in prompts: Jira issue keys, version ids, Confluence page ids, AWS profile/region/repository, CodeCommit PR ids, and Clockify project ids.
+
+## Source Landmarks
+
+| Area              | Source                               |
+| ----------------- | ------------------------------------ |
+| Shared installer  | `packages/agent-skills/src/index.ts` |
+| Installer CLI     | `packages/agent-skills/src/bin.ts`   |
+| Skill sync script | `scripts/sync-skills.mjs`            |
+| Product skills    | `packages/*/skills`                  |

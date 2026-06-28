@@ -3,11 +3,69 @@ title: Guide
 description: How the @knpkv command-line tools are organized.
 ---
 
-Each product keeps its own binary:
+Each product keeps its own binary and exposes resource-first commands. The command name tells you the domain, the next segment names the resource, and the final segment names the action.
 
-- `jira` works with Jira issues and project versions.
-- `confluence` syncs Confluence pages with local Markdown.
-- `codecommit` works with CodeCommit pull requests.
-- `jcf` tracks Jira-backed Clockify time.
+```text
+jira issue get PROJ-123
+jira version related-work add 10042 --title "Release notes" --url https://...
+confluence workspace clone --url https://example.atlassian.net/wiki/pages/123
+confluence sync push --dry-run
+codecommit pr list --filter needs-my-review --json
+jcf timer start PROJ-123 --ago 15m
+```
 
-Commands are organized by resource where that makes the workflow clearer. Shared behaviors such as authentication, configuration, JSON output, dry runs, and agent safety are documented once in the conventions.
+## Tool Map
+
+| Binary         | Package                         | Primary job                                             | Best first command               |
+| -------------- | ------------------------------- | ------------------------------------------------------- | -------------------------------- |
+| `jira`         | `@knpkv/jira-cli`               | Export issues and inspect/update Jira release versions  | `jira auth status`               |
+| `confluence`   | `@knpkv/confluence-to-markdown` | Sync Confluence pages to local Markdown                 | `confluence auth status`         |
+| `codecommit`   | `@knpkv/codecommit`             | Browse, list, create, update, and export CodeCommit PRs | `codecommit tui`                 |
+| `jcf`          | `@knpkv/jira-clockify`          | Track Clockify time against Jira issues                 | `jcf auth status`                |
+| `knpkv-skills` | `@knpkv/agent-skills`           | Install bundled agent skills                            | `knpkv-skills install --dry-run` |
+
+## Typical Workflows
+
+### Export Jira Release Context
+
+1. Confirm Jira auth with `jira auth status`.
+2. Find a version id with `jira version list --project PROJ --json`.
+3. Inspect the release with `jira version get 10042 --json`.
+4. Export issues with `jira issue search --by-version "1.2.3" --project PROJ --format single`.
+5. Attach release notes with `jira version related-work add 10042 --title "Release notes" --url <confluence-url>`.
+
+### Maintain Confluence Pages Locally
+
+1. Configure auth with `confluence auth create`, `confluence auth configure`, then `confluence auth login`.
+2. Clone a subtree with `confluence workspace clone --url <page-url>`.
+3. Inspect changes with `confluence sync status` and `confluence sync diff`.
+4. Pull remote updates before editing with `confluence sync pull`.
+5. Preview writes with `confluence sync push --dry-run`.
+6. Push only after reviewing the preview with `confluence sync push`.
+
+### Review CodeCommit Pull Requests
+
+1. Open the interactive browser with `codecommit tui`, or the web UI with `codecommit web`.
+2. Use `codecommit pr list --filter needs-my-review --json` for agent-readable review queues.
+3. Export discussion with `codecommit pr export <pr-id> <repo> --output pr-comments.md`.
+4. Use `codecommit pr update` only when you intend to change the remote PR.
+
+### Track Time Against Jira
+
+1. Configure Jira and Clockify with `jcf auth jira ...` and `jcf auth clockify setup`.
+2. Set defaults with `jcf config set project`, `jcf config set billable`, and `jcf config set jql`.
+3. Start a timer with `jcf timer start PROJ-123`, optionally `--ago 15m`.
+4. Stop, discard, edit, or log time through `jcf timer`.
+5. Reconcile systems with `jcf sync reconcile clockify-to-jira`.
+
+## Command Safety
+
+The docs classify commands by effect:
+
+| Class        | Meaning                                           | Examples                                                                                               |
+| ------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Read-only    | Reads remote or local state without changing it   | `jira version list`, `confluence sync status`, `codecommit pr list --json`, `jcf timer status`         |
+| Local write  | Writes files or local config only                 | `jira issue get`, `confluence workspace clone`, `jcf config set jql`, `knpkv-skills install --dry-run` |
+| Remote write | Changes Jira, Confluence, Clockify, or CodeCommit | `jira version update`, `confluence sync push`, `codecommit pr create`, `jcf timer stop`                |
+
+When asking an agent to use these tools, prefer read-only commands first and require explicit confirmation for remote writes.

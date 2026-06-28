@@ -3,13 +3,129 @@ title: CodeCommit
 description: CodeCommit pull request commands.
 ---
 
-Use the `codecommit` binary for CodeCommit pull request workflows.
+Use the `codecommit` binary for AWS CodeCommit pull request workflows. The package is `@knpkv/codecommit`.
+
+It has three surfaces:
+
+- `codecommit tui` for an interactive terminal browser.
+- `codecommit web` for a local web UI.
+- `codecommit pr ...` for scriptable pull request operations.
+
+## Runtime
+
+The CLI entrypoint runs on Bun. The core services live in `@knpkv/codecommit-core` and are shared by the TUI and web UI.
+
+Inside this workspace:
 
 ```bash
-codecommit pr list --json
-codecommit pr create my-repo "Add feature X" --source feature/x --destination main
-codecommit pr export 123 my-repo --output pr-comments.md
-codecommit pr update 123 --title "New title"
-codecommit tui
-codecommit web --port 3000
+pnpm --filter @knpkv/codecommit build
+pnpm --filter @knpkv/codecommit test
+pnpm --filter @knpkv/codecommit-core test
 ```
+
+## Interfaces
+
+```bash
+codecommit
+codecommit tui
+codecommit web --port 3000 --hostname 127.0.0.1
+```
+
+Running `codecommit` without a subcommand launches the TUI. The web command starts a local server and attempts to open the browser.
+
+## Common Workflows
+
+### List Pull Requests
+
+```bash
+codecommit pr list --profile default --region us-east-1
+codecommit pr list --repo my-repo --author alice
+codecommit pr list --all
+codecommit pr list --json
+```
+
+### Use Cross-Account Presets
+
+```bash
+codecommit pr list --filter mine
+codecommit pr list --filter needs-my-review --json
+codecommit pr list --filter stale
+codecommit pr list --filter conflicting
+```
+
+Filter presets fan out across enabled accounts from the local CodeCommit config. When `--filter` is supplied, `--profile`, `--region`, `--status`, and `--all` are ignored because presets scan open PRs across configured accounts.
+
+| Preset            | Meaning                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `mine`            | PRs authored by the current AWS caller identity.                 |
+| `needs-my-review` | PRs where the current AWS caller identity still needs to review. |
+| `stale`           | Open PRs whose last modification is more than 7 days old.        |
+| `conflicting`     | Open PRs that are not mergeable.                                 |
+
+### Export Review Discussion
+
+```bash
+codecommit pr export 123 my-repo --output pr-comments.md
+```
+
+This writes pull request metadata, description, and comment threads as Markdown.
+
+### Create Or Update A PR
+
+```bash
+codecommit pr create my-repo "Add feature X" --source feature/x --destination main
+codecommit pr update 123 --title "New title"
+codecommit pr update 123 --description "New description"
+```
+
+## Command Reference
+
+| Command                               | Class              | Important args and flags                                                                               | Output                               |
+| ------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `codecommit`                          | Read-only local UI | No args.                                                                                               | Launches TUI.                        |
+| `codecommit tui`                      | Read-only local UI | No args.                                                                                               | Launches TUI.                        |
+| `codecommit web`                      | Read-only local UI | `--port`, `--hostname`.                                                                                | Starts local web UI.                 |
+| `codecommit pr list`                  | Read-only          | `--profile`, `--region`, `--status OPEN\|CLOSED`, `--all`, `--repo`, `--author`, `--filter`, `--json`. | Human table or JSON.                 |
+| `codecommit pr create <repo> <title>` | Remote write       | `--source`, `--destination`, `--description`, `--profile`, `--region`.                                 | Created PR id and AWS console link.  |
+| `codecommit pr export <pr-id> <repo>` | Local write        | `--output`, `--profile`, `--region`.                                                                   | Markdown to file or stdout.          |
+| `codecommit pr update <pr-id>`        | Remote write       | `--title`, `--description`, `--profile`, `--region`.                                                   | Update confirmation.                 |
+| `codecommit skills install`           | Local write        | Shared installer flags.                                                                                | Installs the CodeCommit agent skill. |
+
+## JSON Contract
+
+`codecommit pr list --json` emits JSON on stdout. Filter-preset progress and warnings are written to stderr so the JSON remains parseable.
+
+```bash
+codecommit pr list --filter needs-my-review --json
+```
+
+If caller identity cannot be resolved for an identity-based preset, results may be incomplete for that profile and a warning is printed on stderr.
+
+## Local State
+
+The TUI and web UI use `@knpkv/codecommit-core` services:
+
+- `~/.codecommit/config.json` for configured AWS accounts, regions, refresh behavior, theme, and sandbox settings.
+- `~/.codecommit/cache.db` for the local SQLite cache.
+- AWS profile and region configuration from normal AWS credential/config files.
+
+When no CodeCommit config exists, the core config service provides defaults. Account discovery can use profiles from `~/.aws/config` and `~/.aws/credentials`.
+
+## Agent Guidance
+
+- Start with `codecommit pr list --filter needs-my-review --json` or a specific `--repo`.
+- Use `pr export` to capture discussion before review work.
+- Do not run `pr create` or `pr update` without explicit user intent.
+- Prefer the TUI or web UI when the task requires browsing multiple accounts interactively.
+
+## Source Landmarks
+
+| Area                               | Source                                     |
+| ---------------------------------- | ------------------------------------------ |
+| CLI command tree                   | `packages/codecommit/src/bin.ts`           |
+| Filter presets                     | `packages/codecommit/src/filterPresets.ts` |
+| Cross-account filter orchestration | `packages/codecommit/src/FilterService.ts` |
+| TUI                                | `packages/codecommit/src/tui`              |
+| Shared domain/services             | `packages/codecommit-core/src`             |
+| Web UI and server                  | `packages/codecommit-web/src`              |
+| CLI help test                      | `packages/codecommit/test/bin.test.ts`     |

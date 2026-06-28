@@ -3,20 +3,101 @@ title: Conventions
 description: Shared command conventions across product binaries.
 ---
 
+These conventions keep command usage predictable for humans and agents. They are source-backed by the CLI implementations under each package's `src/commands` or `src/cli` directory.
+
 ## Namespaces
 
-- `auth` is authentication.
-- `config` is local tool configuration.
-- `skills install` installs bundled agent skills.
+Commands are organized by resource:
+
+| Namespace                                                      | Meaning                                                |
+| -------------------------------------------------------------- | ------------------------------------------------------ |
+| `auth`                                                         | Authentication setup, login, logout, and status checks |
+| `config`                                                       | Local tool configuration                               |
+| `issue`, `version`, `page`, `workspace`, `sync`, `pr`, `timer` | Domain resources                                       |
+| `skills install`                                               | Bundled agent skill installation                       |
+
+Legacy top-level aliases are intentionally removed. Use `jira issue get`, not `jira get`; use `jcf timer start`, not `jcf start`; use `confluence sync pull`, not `confluence pull`.
 
 ## Output
 
-Commands documented for agent parsing use `--json`. With `--json`, stdout contains exactly one JSON value. Progress, warnings, and human hints belong on stderr.
+Commands documented for agent parsing use `--json`. With `--json`, stdout should contain exactly one JSON value. Progress, warnings, and human hints belong on stderr so callers can parse stdout directly.
+
+Current JSON-oriented commands include:
+
+| Command                                 | Notes                                                          |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `jira version list --json`              | Strips resolved email addresses unless `--emails` is supplied. |
+| `jira version get --json`               | Requires a numeric version id.                                 |
+| `jira version related-work list --json` | Returns related-work links for a version.                      |
+| `jira version related-work add --json`  | Remote write; returns the created related-work item.           |
+| `codecommit pr list --json`             | Emits JSON for single-account and filter-preset listing.       |
+| `jcf issue list --json`                 | Emits issue list output for timer selection workflows.         |
 
 ## Mutability
 
 Command references classify commands as read-only, local write, or remote write. Agents should confirm explicit intent before running remote write commands.
 
+| Class        | Definition                                                        | Agent guidance                                                      |
+| ------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Read-only    | Reads state without changing local files or remote systems.       | Safe as a first inspection step.                                    |
+| Local write  | Creates or updates files/config on the machine.                   | Confirm target paths when broad writes are possible.                |
+| Remote write | Mutates Jira, Confluence, Clockify, CodeCommit, or AWS resources. | Require explicit user intent and prefer `--dry-run` when available. |
+
 ## Dry Runs
 
 `--dry-run` is only used when the command can truthfully preview the changes it would make.
+
+Known dry-run commands:
+
+| Command                              | Previewed operation                                  |
+| ------------------------------------ | ---------------------------------------------------- |
+| `confluence sync push --dry-run`     | Remote Confluence page updates that would be pushed. |
+| `knpkv-skills install --dry-run`     | Skill directories that would be installed.           |
+| `<product> skills install --dry-run` | Product-specific skill installation plan.            |
+
+## Authentication
+
+Atlassian CLIs support OAuth commands:
+
+```bash
+jira auth create
+jira auth configure
+jira auth login
+jira auth status
+
+confluence auth create
+confluence auth configure
+confluence auth login
+confluence auth status
+```
+
+Confluence also accepts legacy token environment variables before falling back to OAuth:
+
+```bash
+CONFLUENCE_EMAIL=you@example.com
+CONFLUENCE_API_KEY=<api-token>
+```
+
+Jira Clockify composes Jira OAuth from `@knpkv/jira-cli` with a Clockify API key stored in `~/.jcf/clockify.json`.
+
+## Paths and Local State
+
+| Tool           | Local state                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `jira`         | OAuth/config state from shared Atlassian helpers; issue exports default to `./jira-tickets`.       |
+| `confluence`   | OAuth/config state plus `.confluence/config.json` and cloned Markdown workspace files.             |
+| `codecommit`   | `~/.codecommit/config.json` and `~/.codecommit/cache.db` used by the TUI/web UI.                   |
+| `jcf`          | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                     |
+| `knpkv-skills` | `${CODEX_HOME:-$HOME/.codex}/skills` and `${CLAUDE_HOME:-$HOME/.claude}/skills` unless overridden. |
+
+Shared Atlassian helpers use `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<tool>/auth.json` and `oauth.json` with owner-only file permissions.
+
+## Source Landmarks
+
+| Area                       | Source                                         |
+| -------------------------- | ---------------------------------------------- |
+| Jira command tree          | `packages/jira-cli/src/commands`               |
+| Confluence command tree    | `packages/confluence-to-markdown/src/commands` |
+| CodeCommit command tree    | `packages/codecommit/src/bin.ts`               |
+| Jira Clockify command tree | `packages/jira-clockify/src/cli`               |
+| Skill installer            | `packages/agent-skills/src/index.ts`           |

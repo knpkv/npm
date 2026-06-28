@@ -3,6 +3,52 @@ title: "@knpkv Documentation"
 description: CLI-first documentation for the @knpkv package collection.
 ---
 
-The `@knpkv` package collection provides command-line tools for Jira, Confluence, CodeCommit, Jira-backed Clockify timers, and bundled agent skills.
+The `@knpkv` package collection is a workspace of focused command-line tools and Effect-based TypeScript libraries for developer operations:
 
-These docs start with the command surface: product binaries, canonical commands, shared conventions, and migration guidance.
+- Jira issue and release-version export.
+- Confluence page synchronization between Atlassian Cloud and local Markdown.
+- AWS CodeCommit pull request browsing, export, and update workflows.
+- Jira-backed Clockify timers and reconciliation.
+- Bundled Codex and Claude agent skills for the CLIs.
+
+The docs are organized around the real command surface exposed by each package. Start with the guide if you are choosing a tool, then use the product pages as command references.
+
+## First Decision
+
+| Need                                                        | Start with                       |
+| ----------------------------------------------------------- | -------------------------------- |
+| Export Jira issues or inspect release versions              | [Jira](/jira/)                   |
+| Clone, pull, edit, and push Confluence pages as Markdown    | [Confluence](/confluence/)       |
+| Review or export CodeCommit pull requests                   | [CodeCommit](/codecommit/)       |
+| Track time from Jira issues into Clockify                   | [Jira Clockify](/jira-clockify/) |
+| Install agent-facing commands for Codex or Claude           | [Agent Skills](/agent-skills/)   |
+| Understand command naming, JSON output, and mutation safety | [Conventions](/conventions/)     |
+
+## Repository Shape
+
+The monorepo is split into product CLIs, reusable clients, shared Atlassian helpers, and private documentation:
+
+```text
+packages/
+  jira-cli/                 jira binary
+  confluence-to-markdown/   confluence binary
+  codecommit/               codecommit binary and TUI
+  jira-clockify/            jcf binary and TUI
+  jira-api-client/          Effect Jira Cloud REST client
+  confluence-api-client/    Effect Confluence Cloud REST client
+  clockify-api-client/      Effect Clockify REST client
+  atlassian-common/         OAuth, config, AST, serializers
+  agent-skills/             shared skill installer
+  docs/                     this Starlight site
+```
+
+## Common Runtime Model
+
+Most packages use Effect services at their boundaries:
+
+- CLI commands are built with `effect/unstable/cli`.
+- Remote API clients expose `Context.Service` layers.
+- Errors are tagged so callers can recover by tag instead of parsing strings.
+- Commands that support `--json` keep machine-readable stdout clean.
+
+See [Packages](/packages/) for library exports and [Conventions](/conventions/) for command behavior.
