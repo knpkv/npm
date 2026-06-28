@@ -13,8 +13,12 @@ on:
     paths:
       - "packages/*/test/integration.test.ts"
       - "packages/agent-skills/**"
+      - "packages/atlassian-common/src/**"
       - "packages/confluence-to-markdown/src/**"
       - "packages/confluence-to-markdown/package.json"
+      - "packages/jira-api-client/src/**"
+      - "packages/jira-cli/src/**"
+      - "packages/jira-cli/package.json"
       - ".github/workflows/integration-test.yml"
 
 jobs:
@@ -45,7 +49,6 @@ jobs:
 
   test-jira:
     name: Jira CLI Integration Tests
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -60,7 +63,7 @@ jobs:
 
       - name: Run integration tests
         env:
-          JIRA_INTEGRATION: "1"
+          JIRA_INTEGRATION: ${{ secrets.JIRA_EMAIL != '' && secrets.JIRA_API_KEY != '' && '1' || '0' }}
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL || 'https://knpkv.atlassian.net' }}
           JIRA_ISSUE_KEY: ${{ vars.JIRA_ISSUE_KEY || 'KAN-1' }}
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
