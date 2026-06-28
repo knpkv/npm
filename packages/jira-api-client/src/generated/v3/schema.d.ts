@@ -1212,6 +1212,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rest/api/3/config/fieldschemes/{id}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clone field scheme
+         * @description Endpoint for cloning an existing field association scheme into a new one.
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        post: operations["cloneFieldAssociationScheme"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rest/api/3/config/fieldschemes/{id}/fields": {
         parameters: {
             query?: never;
@@ -1925,6 +1947,7 @@ export interface paths {
          *      *  Fields that cannot be added to the issue navigator are always returned.
          *      *  Fields that cannot be placed on an issue screen are always returned.
          *      *  Fields that depend on global Jira settings are only returned if the setting is enabled. That is, timetracking fields, subtasks, votes, and watches.
+         *      *  Fields that are not associated to any used field configurations or screens are not returned.
          *      *  For all other fields, this operation only returns the fields that the user has permission to view (that is, the field is used in at least one project that the user has *Browse Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for.)
          *
          *     This operation can be accessed anonymously.
@@ -2063,6 +2086,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rest/api/3/field/{fieldId}/association/project": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get field project associations
+         * @description Returns a [paginated](#pagination) list of project associations for the given custom field. Each association contains the ID of a project the field is associated with.
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        get: operations["getFieldProjectAssociations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rest/api/3/field/{fieldId}/context": {
         parameters: {
             query?: never;
@@ -2107,6 +2152,7 @@ export interface paths {
         };
         /**
          * Get custom field contexts default values
+         * @deprecated
          * @description Returns a [paginated](#pagination) list of defaults for a custom field. The results can be filtered by `contextId`, otherwise all values are returned. If no defaults are set for a context, nothing is returned.
          *     The returned object depends on type of the custom field:
          *
@@ -2141,11 +2187,14 @@ export interface paths {
          *      *  `CustomFieldContextDefaultValueForgeUserFieldBean` (type `forge.user`) for Forge user fields.
          *      *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.
          *
+         *     **Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.
+         *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         get: operations["getDefaultValues"];
         /**
          * Set custom field contexts default values
+         * @deprecated
          * @description Sets default for contexts of a custom field. Default are defined using these objects:
          *
          *      *  `CustomFieldContextDefaultValueDate` (type `datepicker`) for date fields.
@@ -2180,6 +2229,8 @@ export interface paths {
          *      *  `CustomFieldContextDefaultValueForgeMultiUserFieldBean` (type `forge.user.list`) for Forge user collection fields.
          *
          *     Only one type of default object can be included in a request. To remove a default for a context, set the default parameter to `null`.
+         *
+         *     **Deprecated:** This API is deprecated and will be removed in October 2026. A replacement API that supports multiple default values per issue type within a context is coming soon. See the deprecation notice [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -2283,6 +2334,8 @@ export interface paths {
          * Delete custom field context
          * @description Deletes a [ custom field context](https://confluence.atlassian.com/adminjiracloud/what-are-custom-field-contexts-991923859.html).
          *
+         *     This API will not allow removing the global context from April 2026. Instead, an HTTP 400 response will be returned. See [CHANGE-3019](https://developer.atlassian.com/changelog/#CHANGE-3019)
+         *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         delete: operations["deleteCustomFieldContext"];
@@ -2306,6 +2359,8 @@ export interface paths {
          *     A custom field context without any issue types applies to all issue types. Adding issue types to such a custom field context would result in it applying to only the listed issue types.
          *
          *     If any of the issue types exists in the custom field context, the operation fails and no issue types are added.
+         *
+         *     This API will not allow adding issue types to the global context from April 2026. Instead, an HTTP 400 response will be returned. See [CHANGE-3019](https://developer.atlassian.com/changelog/#CHANGE-3019)
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -2472,6 +2527,8 @@ export interface paths {
          * @description Assigns a custom field context to projects.
          *
          *     If any project in the request is assigned to any context of the custom field, the operation fails.
+         *
+         *     This API will not allow adding projects to the global context from April 2026. Instead, an HTTP 400 response will be returned. See [CHANGE-3019](https://developer.atlassian.com/changelog/#CHANGE-3019)
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -2781,7 +2838,10 @@ export interface paths {
         };
         /**
          * Get all field configurations
-         * @description Returns a [paginated](#pagination) list of field configurations. The list can be for all field configurations or a subset determined by any combination of these criteria:
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Returns a [paginated](#pagination) list of field configurations. The list can be for all field configurations or a subset determined by any combination of these criteria:
          *
          *      *  a list of field configuration item IDs.
          *      *  whether the field configuration is a default.
@@ -2795,7 +2855,10 @@ export interface paths {
         put?: never;
         /**
          * Create field configuration
-         * @description Creates a field configuration. The field configuration is created with the same field properties as the default configuration, with all the fields being optional.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Creates a field configuration. The field configuration is created with the same field properties as the default configuration, with all the fields being optional.
          *
          *     This operation can only create configurations for use in company-managed (classic) projects.
          *
@@ -2818,7 +2881,10 @@ export interface paths {
         get?: never;
         /**
          * Update field configuration
-         * @description Updates a field configuration. The name and the description provided in the request override the existing values.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Updates a field configuration. The name and the description provided in the request override the existing values.
          *
          *     This operation can only update configurations used in company-managed (classic) projects.
          *
@@ -2828,7 +2894,10 @@ export interface paths {
         post?: never;
         /**
          * Delete field configuration
-         * @description Deletes a field configuration.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Deletes a field configuration.
          *
          *     This operation can only delete configurations used in company-managed (classic) projects.
          *
@@ -2849,7 +2918,10 @@ export interface paths {
         };
         /**
          * Get field configuration items
-         * @description Returns a [paginated](#pagination) list of all fields for a configuration.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Returns a [paginated](#pagination) list of all fields for a configuration.
          *
          *     Only the fields from configurations used in company-managed (classic) projects are returned.
          *
@@ -2858,7 +2930,10 @@ export interface paths {
         get: operations["getFieldConfigurationItems"];
         /**
          * Update field configuration items
-         * @description Updates fields in a field configuration. The properties of the field configuration fields provided override the existing values.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Updates fields in a field configuration. The properties of the field configuration fields provided override the existing values.
          *
          *     This operation can only update field configurations used in company-managed (classic) projects.
          *
@@ -2885,7 +2960,10 @@ export interface paths {
         };
         /**
          * Get all field configuration schemes
-         * @description Returns a [paginated](#pagination) list of field configuration schemes.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Returns a [paginated](#pagination) list of field configuration schemes.
          *
          *     Only field configuration schemes used in classic projects are returned.
          *
@@ -2895,7 +2973,10 @@ export interface paths {
         put?: never;
         /**
          * Create field configuration scheme
-         * @description Creates a field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Creates a field configuration scheme.
          *
          *     This operation can only create field configuration schemes used in company-managed (classic) projects.
          *
@@ -2917,7 +2998,10 @@ export interface paths {
         };
         /**
          * Get field configuration issue type items
-         * @description Returns a [paginated](#pagination) list of field configuration issue type items.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Returns a [paginated](#pagination) list of field configuration issue type items.
          *
          *     Only items used in classic projects are returned.
          *
@@ -2941,7 +3025,10 @@ export interface paths {
         };
         /**
          * Get field configuration schemes for projects
-         * @description Returns a [paginated](#pagination) list of field configuration schemes and, for each scheme, a list of the projects that use it.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Returns a [paginated](#pagination) list of field configuration schemes and, for each scheme, a list of the projects that use it.
          *
          *     The list is sorted by field configuration scheme ID. The first item contains the list of project IDs assigned to the default field configuration scheme.
          *
@@ -2952,7 +3039,10 @@ export interface paths {
         get: operations["getFieldConfigurationSchemeProjectMapping"];
         /**
          * Assign field configuration scheme to project
-         * @description Assigns a field configuration scheme to a project. If the field configuration scheme ID is `null`, the operation assigns the default field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Assigns a field configuration scheme to a project. If the field configuration scheme ID is `null`, the operation assigns the default field configuration scheme.
          *
          *     Field configuration schemes can only be assigned to classic projects.
          *
@@ -2976,7 +3066,10 @@ export interface paths {
         get?: never;
         /**
          * Update field configuration scheme
-         * @description Updates a field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Updates a field configuration scheme.
          *
          *     This operation can only update field configuration schemes used in company-managed (classic) projects.
          *
@@ -2986,7 +3079,10 @@ export interface paths {
         post?: never;
         /**
          * Delete field configuration scheme
-         * @description Deletes a field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Deletes a field configuration scheme.
          *
          *     This operation can only delete field configuration schemes used in company-managed (classic) projects.
          *
@@ -3008,7 +3104,10 @@ export interface paths {
         get?: never;
         /**
          * Assign issue types to field configurations
-         * @description Assigns issue types to field configurations on field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Assigns issue types to field configurations on field configuration scheme.
          *
          *     This operation can only modify field configuration schemes used in company-managed (classic) projects.
          *
@@ -3033,7 +3132,10 @@ export interface paths {
         put?: never;
         /**
          * Remove issue types from field configuration scheme
-         * @description Removes issue types from the field configuration scheme.
+         * @deprecated
+         * @description Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
+         *
+         *     Removes issue types from the field configuration scheme.
          *
          *     This operation can only modify field configuration schemes used in company-managed (classic) projects.
          *
@@ -3416,6 +3518,30 @@ export interface paths {
          *     **[Permissions](#permissions) required:** Permission to access Jira and the user must own the filter.
          */
         delete: operations["deleteSharePermission"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rest/api/3/forge/panel/action/bulk/async": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk pin or unpin issue panel to projects
+         * @description Bulk pin or unpin an issue panel (added by a Forge app) to or from multiple projects.
+         *
+         *     The operation runs asynchronously. The response includes a task ID - use the [Get task](#api-rest-api-3-task-taskId-get) endpoint to check progress.
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        post: operations["bulkPinUnpinProjectsAsync"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4126,6 +4252,8 @@ export interface paths {
          * @description Edits an issue. Issue properties may be updated as part of the edit. Please note that issue transition is not supported and is ignored here. To transition an issue, please use [Transition issue](#api-rest-api-3-issue-issueIdOrKey-transitions-post).
          *
          *     The edits to the issue's fields are defined using `update` and `fields`. The fields that can be edited are determined using [ Get edit issue metadata](#api-rest-api-3-issue-issueIdOrKey-editmeta-get).
+         *
+         *     **Note:** This endpoint doesn't check screen configurations to determine if a field is editable. For more context, see the [Deprecation of override screen security](https://community.developer.atlassian.com/t/deprecation-of-override-screen-security/97153) announcement.
          *
          *     The parent field may be set by key or ID. For standard issue types, the parent may be removed by setting `update.parent.set.none` to *true*. Note that the `description`, `environment`, and any `textarea` type custom fields (multi-line text fields) take Atlassian Document Format content. Single line custom fields (`textfield`) accept a string and don't handle Atlassian Document Format content.
          *
@@ -5007,7 +5135,8 @@ export interface paths {
          *
          *      *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the projects containing the source and destination issues.
          *      *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
-         *      *  *Delete all worklogs*[ and *Edit all worklogs*](https://confluence.atlassian.com/x/yodKLg)[project permission](https://confluence.atlassian.com/x/yodKLg)
+         *      *  *Delete all worklogs* [project permission](https://confluence.atlassian.com/x/yodKLg)
+         *      *  *Work on issues* [project permission](https://confluence.atlassian.com/x/yodKLg) to log work on an issue, that is to create a worklog entry, if time tracking is enabled. This permission is required as a prerequisite for applying the other time-tracking permissions
          *      *  If the worklog has visibility restrictions, belongs to the group or has the role visibility is restricted to.
          */
         post: operations["bulkMoveWorklogs"];
@@ -5690,7 +5819,7 @@ export interface paths {
         put?: never;
         /**
          * Create issue type
-         * @description Creates an issue type and adds it to the default issue type scheme.
+         * @description Creates an issue type.
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -5997,9 +6126,9 @@ export interface paths {
          * Delete issue type scheme
          * @description Deletes an issue type scheme.
          *
-         *     Only issue type schemes used in classic projects can be deleted.
+         *     Only issue type schemes used in classic projects can be deleted. Only issue type schemes not associated with a project can be deleted
          *
-         *     Any projects assigned to the scheme are reassigned to the default issue type scheme.
+         *     A validation error will be returned if the specified scheme is associated with one or more projects. Use [Get issue type scheme API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-type-schemes/#api-rest-api-3-issuetypescheme-get) (with the projects expand, and id query parameter) to get a list of projects. Then, use [Assign issue type scheme to project API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-type-schemes/#api-rest-api-3-issuetypescheme-project-put) to associate all projects to another scheme before deleting.
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -7539,16 +7668,15 @@ export interface paths {
          * @deprecated
          * @description Returns the list of all issue priorities.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **Deprecated:** Use [Search priorities](#api-rest-api-3-priority-search-get) instead. **[Permissions](#permissions) required:** Permission to access Jira.
          */
         get: operations["getPriorities"];
         put?: never;
         /**
          * Create priority
-         * @deprecated
          * @description Creates an issue priority.
          *
-         *     Deprecation applies to iconUrl param in request body which will be sunset on 16th Mar 2025. For more details refer to [changelog](https://developer.atlassian.com/changelog/#CHANGE-1525).
+         *     **Deprecation notice:** The `iconUrl` parameter was sunset on 16th Mar 2025, and replaced with `avatarId`. See [CHANGE-1525](https://developer.atlassian.com/changelog/#CHANGE-1525).
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -7612,12 +7740,15 @@ export interface paths {
         };
         /**
          * Search priorities
-         * @deprecated
          * @description Returns a [paginated](#pagination) list of priorities. The list can contain all priorities or a subset determined by any combination of these criteria:
          *
          *      *  a list of priority IDs. Any invalid priority IDs are ignored.
          *      *  a list of project IDs. Only priorities that are available in these projects will be returned. Any invalid project IDs are ignored.
          *      *  whether the field configuration is a default. This returns priorities from company-managed (classic) projects only, as there is no concept of default priorities in team-managed projects.
+         *
+         *     **Deprecation notice:** The `onlyDefault` parameter is deprecated and will be removed at a later date. See [CHANGE-1655](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-1655).
+         *
+         *     **Deprecation notice:** The `isDefault` property of priorities is deprecated and will be removed at a later date. See [CHANGE-1655](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-1655).
          *
          *     **[Permissions](#permissions) required:** Permission to access Jira.
          */
@@ -7639,19 +7770,18 @@ export interface paths {
         };
         /**
          * Get priority
-         * @description Returns an issue priority.
+         * @description Returns an issue priority. To fetch multiple priorities at once, use [Search priorities](#api-rest-api-3-priority-search-get) instead.
          *
          *     **[Permissions](#permissions) required:** Permission to access Jira.
          */
         get: operations["getPriority"];
         /**
          * Update priority
-         * @deprecated
          * @description Updates an issue priority.
          *
          *     At least one request body parameter must be defined.
          *
-         *     Deprecation applies to iconUrl param in request body which will be sunset on 16th Mar 2025. For more details refer to [changelog](https://developer.atlassian.com/changelog/#CHANGE-1525).
+         *     **Deprecation notice:** The `iconUrl` parameter was sunset on 16th Mar 2025, and replaced with `avatarId`. See [CHANGE-1525](https://developer.atlassian.com/changelog/#CHANGE-1525).
          *
          *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
@@ -7682,7 +7812,7 @@ export interface paths {
          * Get priority schemes
          * @description Returns a [paginated](#pagination) list of priority schemes.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         get: operations["getPrioritySchemes"];
         put?: never;
@@ -7712,7 +7842,7 @@ export interface paths {
          * Suggested priorities for mappings
          * @description Returns a [paginated](#pagination) list of priorities that would require mapping, given a change in priorities or projects associated with a priority scheme.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         post: operations["suggestedPrioritiesForMappings"];
         delete?: never;
@@ -7732,7 +7862,7 @@ export interface paths {
          * Get available priorities by priority scheme
          * @description Returns a [paginated](#pagination) list of priorities available for adding to a priority scheme.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         get: operations["getAvailablePrioritiesByPriorityScheme"];
         put?: never;
@@ -7784,7 +7914,7 @@ export interface paths {
          * Get priorities by priority scheme
          * @description Returns a [paginated](#pagination) list of priorities by scheme.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         get: operations["getPrioritiesByPriorityScheme"];
         put?: never;
@@ -7806,7 +7936,7 @@ export interface paths {
          * Get projects by priority scheme
          * @description Returns a [paginated](#pagination) list of projects by scheme.
          *
-         *     **[Permissions](#permissions) required:** Permission to access Jira.
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         get: operations["getProjectsByPriorityScheme"];
         put?: never;
@@ -7844,6 +7974,7 @@ export interface paths {
          *     | `business` | `com.atlassian.jira-core-project-templates:jira-core-simplified-content-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-document-approval`, `com.atlassian.jira-core-project-templates:jira-core-simplified-lead-tracking`, `com.atlassian.jira-core-project-templates:jira-core-simplified-process-control`, `com.atlassian.jira-core-project-templates:jira-core-simplified-procurement`, `com.atlassian.jira-core-project-templates:jira-core-simplified-project-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-recruitment`, `com.atlassian.jira-core-project-templates:jira-core-simplified-task-tracking` |
          *     | `service_desk` | `com.atlassian.servicedesk:simplified-it-service-management`, `com.atlassian.servicedesk:simplified-external-service-desk`, `com.atlassian.servicedesk:simplified-hr-service-desk`, `com.atlassian.servicedesk:simplified-facilities-service-desk`, `com.atlassian.servicedesk:simplified-legal-service-desk`, `com.atlassian.servicedesk:simplified-analytics-service-desk`, `com.atlassian.servicedesk:simplified-marketing-service-desk`, `com.atlassian.servicedesk:simplified-design-service-desk`, `com.atlassian.servicedesk:simplified-sales-service-desk`, `com.atlassian.servicedesk:simplified-finance-service-desk`, `com.atlassian.servicedesk:company-managed-blank-service-project`, `com.atlassian.servicedesk:company-managed-general-service-project`, `com.atlassian.servicedesk:team-managed-general-service-project`, `com.atlassian.servicedesk:next-gen-it-service-desk`, `com.atlassian.servicedesk:next-gen-hr-service-desk`, `com.atlassian.servicedesk:next-gen-legal-service-desk`, `com.atlassian.servicedesk:next-gen-marketing-service-desk`, `com.atlassian.servicedesk:next-gen-facilities-service-desk`, `com.atlassian.servicedesk:next-gen-analytics-service-desk`, `com.atlassian.servicedesk:next-gen-finance-service-desk`, `com.atlassian.servicedesk:next-gen-design-service-desk`, `com.atlassian.servicedesk:next-gen-sales-service-desk` |
          *     | `software` | `com.pyxis.greenhopper.jira:gh-simplified-agility-kanban`, `com.pyxis.greenhopper.jira:gh-simplified-agility-scrum`, `com.pyxis.greenhopper.jira:gh-simplified-basic`, `com.pyxis.greenhopper.jira:gh-simplified-kanban-classic`, `com.pyxis.greenhopper.jira:gh-simplified-scrum-classic` |
+         *     | `customer_service` | `com.atlassian.jcs:customer-service-management` |
          *     The project types are available according to the installed Jira features as follows:
          *
          *      *  Jira Core, the default, enables `business` projects.
@@ -7886,6 +8017,8 @@ export interface paths {
          *      *  [asynchronous](#async). Follow the `Location` link in the response header to determine the status of the task and use [Get task](#api-rest-api-3-task-taskId-get) to obtain subsequent updates.
          *
          *     ***Note: This API is only supported for Jira Enterprise edition.***
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
          */
         post: operations["createProjectWithCustomTemplate"];
         delete?: never;
@@ -8306,6 +8439,34 @@ export interface paths {
          *     **[Permissions](#permissions) required:** *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.
          */
         get: operations["getAllProjectAvatars"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rest/api/3/project/{projectIdOrKey}/classification-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the classification configuration for a project
+         * @description Returns the consolidated classification configuration for a project's admin settings page.
+         *
+         *     This includes permitted classification levels (with status), the project's default classification level, the organization's default classification level, and the container override setting.
+         *
+         *     **[Permissions](#permissions) required:**
+         *
+         *      *  *Browse Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.
+         *      *  *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.
+         *      *  *Administer jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        get: operations["getProjectClassificationConfig"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10232,6 +10393,17 @@ export interface paths {
          *
          *     Each app can define up to 3000 UI modifications. Each UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.
          *
+         *     **Context types:**
+         *
+         *      *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:
+         *
+         *          *  `GIC` \- Jira global issue create
+         *          *  `IssueView` \- Jira issue view
+         *          *  `IssueTransition` \- Jira issue transition
+         *      *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:
+         *
+         *          *  `JSMRequestCreate` \- Jira Service Management request create portal view
+         *
          *     **[Permissions](#permissions) required:**
          *
          *      *  *None* if the UI modification is created without contexts.
@@ -10259,6 +10431,17 @@ export interface paths {
          * @description Updates a UI modification. UI modification can only be updated by Forge apps.
          *
          *     Each UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.
+         *
+         *     **Context types:**
+         *
+         *      *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:
+         *
+         *          *  `GIC` \- Jira global issue create
+         *          *  `IssueView` \- Jira issue view
+         *          *  `IssueTransition` \- Jira issue transition
+         *      *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:
+         *
+         *          *  `JSMRequestCreate` \- Jira Service Management request create portal view
          *
          *     **[Permissions](#permissions) required:**
          *
@@ -10471,9 +10654,11 @@ export interface paths {
          * Create user
          * @description Creates a user. This resource is retained for legacy compatibility. As soon as a more suitable alternative is available this resource will be deprecated.
          *
+         *     **Note:** This API does not support Forge apps.
+         *
          *     If the user exists and has access to Jira, the operation returns a 201 status. If the user exists but does not have access to Jira, the operation returns a 400 status.
          *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg). The caller has to be an **organization admin**.
          */
         post: operations["createUser"];
         /**
@@ -11380,770 +11565,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/rest/api/3/workflow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get all workflows
-         * @deprecated
-         * @description This will be removed on [February 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2567); use [Search workflows](#api-rest-api-3-workflows-search-get) instead.
-         *
-         *     Returns all workflows in Jira or a workflow.
-         *
-         *     If the `workflowName` parameter is specified, the workflow is returned as an object (not in an array). Otherwise, an array of workflow objects is returned.
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        get: operations["getAllWorkflows"];
-        put?: never;
-        /**
-         * Create workflow
-         * @deprecated
-         * @description This will be removed on [February 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2568); use [Bulk create workflows](#api-rest-api-3-workflows-create-post) to create both team and company-managed scoped workflows.
-         *
-         *     Creates a workflow. You can define transition rules using the shapes detailed in the following sections. If no transitional rules are specified the default system transition rules are used. Note: This only applies to company-managed scoped workflows.
-         *
-         *     #### Conditions ####
-         *
-         *     Conditions enable workflow rules that govern whether a transition can execute.
-         *
-         *     ##### Always false condition #####
-         *
-         *     A condition that always fails.
-         *
-         *         {
-         *            "type": "AlwaysFalseCondition"
-         *          }
-         *
-         *     ##### Block transition until approval #####
-         *
-         *     A condition that blocks issue transition if there is a pending approval.
-         *
-         *         {
-         *            "type": "BlockInProgressApprovalCondition"
-         *          }
-         *
-         *     ##### Compare number custom field condition #####
-         *
-         *     A condition that allows transition if a comparison between a number custom field and a value is true.
-         *
-         *         {
-         *            "type": "CompareNumberCFCondition",
-         *            "configuration": {
-         *              "comparator": "=",
-         *              "fieldId": "customfield_10029",
-         *              "fieldValue": 2
-         *            }
-         *          }
-         *
-         *      *  `comparator` One of the supported comparator: `=`, `>`, and `<`.
-         *      *  `fieldId` The custom numeric field ID. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:float`
-         *          *  `com.pyxis.greenhopper.jira:jsw-story-points`
-         *      *  `fieldValue` The value for comparison.
-         *
-         *     ##### Hide from user condition #####
-         *
-         *     A condition that hides a transition from users. The transition can only be triggered from a workflow function or REST API operation.
-         *
-         *         {
-         *            "type": "RemoteOnlyCondition"
-         *          }
-         *
-         *     ##### Only assignee condition #####
-         *
-         *     A condition that allows only the assignee to execute a transition.
-         *
-         *         {
-         *            "type": "AllowOnlyAssignee"
-         *          }
-         *
-         *     ##### Only Bamboo notifications workflow condition (deprecated) #####
-         *
-         *     A condition that makes the transition available only to Bamboo build notifications.
-         *
-         *         {
-         *            "type": "OnlyBambooNotificationsCondition"
-         *          }
-         *
-         *     ##### Only reporter condition #####
-         *
-         *     A condition that allows only the reporter to execute a transition.
-         *
-         *         {
-         *            "type": "AllowOnlyReporter"
-         *          }
-         *
-         *     ##### Permission condition #####
-         *
-         *     A condition that allows only users with a permission to execute a transition.
-         *
-         *         {
-         *            "type": "PermissionCondition",
-         *            "configuration": {
-         *                "permissionKey": "BROWSE_PROJECTS"
-         *            }
-         *          }
-         *
-         *      *  `permissionKey` The permission required to perform the transition. Allowed values: [built-in](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions) or app defined permissions.
-         *
-         *     ##### Previous status condition #####
-         *
-         *     A condition that allows a transition based on whether an issue has or has not transitioned through a status.
-         *
-         *         {
-         *            "type": "PreviousStatusCondition",
-         *            "configuration": {
-         *              "ignoreLoopTransitions": true,
-         *              "includeCurrentStatus": true,
-         *              "mostRecentStatusOnly": true,
-         *              "reverseCondition": true,
-         *              "previousStatus": {
-         *                "id": "5"
-         *              }
-         *            }
-         *          }
-         *
-         *     By default this condition allows the transition if the status, as defined by its ID in the `previousStatus` object, matches any previous issue status, unless:
-         *
-         *      *  `ignoreLoopTransitions` is `true`, then loop transitions (from and to the same status) are ignored.
-         *      *  `includeCurrentStatus` is `true`, then the current issue status is also checked.
-         *      *  `mostRecentStatusOnly` is `true`, then only the issue's preceding status (the one immediately before the current status) is checked.
-         *      *  `reverseCondition` is `true`, then the status must not be present.
-         *
-         *     ##### Separation of duties condition #####
-         *
-         *     A condition that prevents a user to perform the transition, if the user has already performed a transition on the issue.
-         *
-         *         {
-         *            "type": "SeparationOfDutiesCondition",
-         *            "configuration": {
-         *              "fromStatus": {
-         *                "id": "5"
-         *              },
-         *              "toStatus": {
-         *                "id": "6"
-         *              }
-         *            }
-         *          }
-         *
-         *      *  `fromStatus` OPTIONAL. An object containing the ID of the source status of the transition that is blocked. If omitted any transition to `toStatus` is blocked.
-         *      *  `toStatus` An object containing the ID of the target status of the transition that is blocked.
-         *
-         *     ##### Subtask blocking condition #####
-         *
-         *     A condition that blocks transition on a parent issue if any of its subtasks are in any of one or more statuses.
-         *
-         *         {
-         *            "type": "SubTaskBlockingCondition",
-         *            "configuration": {
-         *              "statuses": [
-         *                {
-         *                  "id": "1"
-         *                },
-         *                {
-         *                  "id": "3"
-         *                }
-         *              ]
-         *            }
-         *          }
-         *
-         *      *  `statuses` A list of objects containing status IDs.
-         *
-         *     ##### User is in any group condition #####
-         *
-         *     A condition that allows users belonging to any group from a list of groups to execute a transition.
-         *
-         *         {
-         *            "type": "UserInAnyGroupCondition",
-         *            "configuration": {
-         *              "groups": [
-         *                "administrators",
-         *                "atlassian-addons-admin"
-         *              ]
-         *            }
-         *          }
-         *
-         *      *  `groups` A list of group names.
-         *
-         *     ##### User is in any project role condition #####
-         *
-         *     A condition that allows only users with at least one project roles from a list of project roles to execute a transition.
-         *
-         *         {
-         *            "type": "InAnyProjectRoleCondition",
-         *            "configuration": {
-         *              "projectRoles": [
-         *                {
-         *                  "id": "10002"
-         *                },
-         *                {
-         *                  "id": "10003"
-         *                },
-         *                {
-         *                  "id": "10012"
-         *                },
-         *                {
-         *                  "id": "10013"
-         *                }
-         *              ]
-         *            }
-         *          }
-         *
-         *      *  `projectRoles` A list of objects containing project role IDs.
-         *
-         *     ##### User is in custom field condition #####
-         *
-         *     A condition that allows only users listed in a given custom field to execute the transition.
-         *
-         *         {
-         *            "type": "UserIsInCustomFieldCondition",
-         *            "configuration": {
-         *              "allowUserInField": false,
-         *              "fieldId": "customfield_10010"
-         *            }
-         *          }
-         *
-         *      *  `allowUserInField` If `true` only a user who is listed in `fieldId` can perform the transition, otherwise, only a user who is not listed in `fieldId` can perform the transition.
-         *      *  `fieldId` The ID of the field containing the list of users.
-         *
-         *     ##### User is in group condition #####
-         *
-         *     A condition that allows users belonging to a group to execute a transition.
-         *
-         *         {
-         *            "type": "UserInGroupCondition",
-         *            "configuration": {
-         *              "group": "administrators"
-         *            }
-         *          }
-         *
-         *      *  `group` The name of the group.
-         *
-         *     ##### User is in group custom field condition #####
-         *
-         *     A condition that allows users belonging to a group specified in a custom field to execute a transition.
-         *
-         *         {
-         *            "type": "InGroupCFCondition",
-         *            "configuration": {
-         *              "fieldId": "customfield_10012"
-         *            }
-         *          }
-         *
-         *      *  `fieldId` The ID of the field. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:multigrouppicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:grouppicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:select`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:multiselect`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:radiobuttons`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes`
-         *          *  `com.pyxis.greenhopper.jira:gh-epic-status`
-         *
-         *     ##### User is in project role condition #####
-         *
-         *     A condition that allows users with a project role to execute a transition.
-         *
-         *         {
-         *            "type": "InProjectRoleCondition",
-         *            "configuration": {
-         *              "projectRole": {
-         *                "id": "10002"
-         *              }
-         *            }
-         *          }
-         *
-         *      *  `projectRole` An object containing the ID of a project role.
-         *
-         *     ##### Value field condition #####
-         *
-         *     A conditions that allows a transition to execute if the value of a field is equal to a constant value or simply set.
-         *
-         *         {
-         *            "type": "ValueFieldCondition",
-         *            "configuration": {
-         *              "fieldId": "assignee",
-         *              "fieldValue": "qm:6e1ecee6-8e64-4db6-8c85-916bb3275f51:54b56885-2bd2-4381-8239-78263442520f",
-         *              "comparisonType": "NUMBER",
-         *              "comparator": "="
-         *            }
-         *          }
-         *
-         *      *  `fieldId` The ID of a field used in the comparison.
-         *      *  `fieldValue` The expected value of the field.
-         *      *  `comparisonType` The type of the comparison. Allowed values: `STRING`, `NUMBER`, `DATE`, `DATE_WITHOUT_TIME`, or `OPTIONID`.
-         *      *  `comparator` One of the supported comparator: `>`, `>=`, `=`, `<=`, `<`, `!=`.
-         *
-         *     **Notes:**
-         *
-         *      *  If you choose the comparison type `STRING`, only `=` and `!=` are valid options.
-         *      *  You may leave `fieldValue` empty when comparison type is `!=` to indicate that a value is required in the field.
-         *      *  For date fields without time format values as `yyyy-MM-dd`, and for those with time as `yyyy-MM-dd HH:mm`. For example, for July 16 2021 use `2021-07-16`, for 8:05 AM use `2021-07-16 08:05`, and for 4 PM: `2021-07-16 16:00`.
-         *
-         *     #### Validators ####
-         *
-         *     Validators check that any input made to the transition is valid before the transition is performed.
-         *
-         *     ##### Date field validator #####
-         *
-         *     A validator that compares two dates.
-         *
-         *         {
-         *            "type": "DateFieldValidator",
-         *            "configuration": {
-         *                "comparator": ">",
-         *                "date1": "updated",
-         *                "date2": "created",
-         *                "expression": "1d",
-         *                "includeTime": true
-         *              }
-         *          }
-         *
-         *      *  `comparator` One of the supported comparator: `>`, `>=`, `=`, `<=`, `<`, or `!=`.
-         *      *  `date1` The date field to validate. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datepicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datetime`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-end`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-start`
-         *          *  `duedate`
-         *          *  `created`
-         *          *  `updated`
-         *          *  `resolutiondate`
-         *      *  `date2` The second date field. Required, if `expression` is not passed. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datepicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datetime`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-end`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-start`
-         *          *  `duedate`
-         *          *  `created`
-         *          *  `updated`
-         *          *  `resolutiondate`
-         *      *  `expression` An expression specifying an offset. Required, if `date2` is not passed. Offsets are built with a number, with `-` as prefix for the past, and one of these time units: `d` for day, `w` for week, `m` for month, or `y` for year. For example, -2d means two days into the past and 1w means one week into the future. The `now` keyword enables a comparison with the current date.
-         *      *  `includeTime` If `true`, then the time part of the data is included for the comparison. If the field doesn't have a time part, 00:00:00 is used.
-         *
-         *     ##### Windows date validator #####
-         *
-         *     A validator that checks that a date falls on or after a reference date and before or on the reference date plus a number of days.
-         *
-         *         {
-         *            "type": "WindowsDateValidator",
-         *            "configuration": {
-         *                "date1": "customfield_10009",
-         *                "date2": "created",
-         *                "windowsDays": 5
-         *              }
-         *          }
-         *
-         *      *  `date1` The date field to validate. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datepicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datetime`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-end`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-start`
-         *          *  `duedate`
-         *          *  `created`
-         *          *  `updated`
-         *          *  `resolutiondate`
-         *      *  `date2` The reference date. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datepicker`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:datetime`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-end`
-         *          *  `com.atlassian.jpo:jpo-custom-field-baseline-start`
-         *          *  `duedate`
-         *          *  `created`
-         *          *  `updated`
-         *          *  `resolutiondate`
-         *      *  `windowsDays` A positive integer indicating a number of days.
-         *
-         *     ##### Field required validator #####
-         *
-         *     A validator that checks fields are not empty. By default, if a field is not included in the current context it's ignored and not validated.
-         *
-         *         {
-         *              "type": "FieldRequiredValidator",
-         *              "configuration": {
-         *                  "ignoreContext": true,
-         *                  "errorMessage": "Hey",
-         *                  "fieldIds": [
-         *                      "versions",
-         *                      "customfield_10037",
-         *                      "customfield_10003"
-         *                  ]
-         *              }
-         *          }
-         *
-         *      *  `ignoreContext` If `true`, then the context is ignored and all the fields are validated.
-         *      *  `errorMessage` OPTIONAL. The error message displayed when one or more fields are empty. A default error message is shown if an error message is not provided.
-         *      *  `fieldIds` The list of fields to validate.
-         *
-         *     ##### Field changed validator #####
-         *
-         *     A validator that checks that a field value is changed. However, this validation can be ignored for users from a list of groups.
-         *
-         *         {
-         *              "type": "FieldChangedValidator",
-         *              "configuration": {
-         *                  "fieldId": "comment",
-         *                  "errorMessage": "Hey",
-         *                  "exemptedGroups": [
-         *                      "administrators",
-         *                      "atlassian-addons-admin"
-         *                  ]
-         *              }
-         *          }
-         *
-         *      *  `fieldId` The ID of a field.
-         *      *  `errorMessage` OPTIONAL. The error message displayed if the field is not changed. A default error message is shown if the error message is not provided.
-         *      *  `exemptedGroups` OPTIONAL. The list of groups.
-         *
-         *     ##### Field has single value validator #####
-         *
-         *     A validator that checks that a multi-select field has only one value. Optionally, the validation can ignore values copied from subtasks.
-         *
-         *         {
-         *              "type": "FieldHasSingleValueValidator",
-         *              "configuration": {
-         *                  "fieldId": "attachment,
-         *                  "excludeSubtasks": true
-         *              }
-         *          }
-         *
-         *      *  `fieldId` The ID of a field.
-         *      *  `excludeSubtasks` If `true`, then values copied from subtasks are ignored.
-         *
-         *     ##### Parent status validator #####
-         *
-         *     A validator that checks the status of the parent issue of a subtask. Ìf the issue is not a subtask, no validation is performed.
-         *
-         *         {
-         *              "type": "ParentStatusValidator",
-         *              "configuration": {
-         *                  "parentStatuses": [
-         *                      {
-         *                        "id":"1"
-         *                      },
-         *                      {
-         *                        "id":"2"
-         *                      }
-         *                  ]
-         *              }
-         *          }
-         *
-         *      *  `parentStatus` The list of required parent issue statuses.
-         *
-         *     ##### Permission validator #####
-         *
-         *     A validator that checks the user has a permission.
-         *
-         *         {
-         *            "type": "PermissionValidator",
-         *            "configuration": {
-         *                "permissionKey": "ADMINISTER_PROJECTS"
-         *            }
-         *          }
-         *
-         *      *  `permissionKey` The permission required to perform the transition. Allowed values: [built-in](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions) or app defined permissions.
-         *
-         *     ##### Previous status validator #####
-         *
-         *     A validator that checks if the issue has held a status.
-         *
-         *         {
-         *            "type": "PreviousStatusValidator",
-         *            "configuration": {
-         *                "mostRecentStatusOnly": false,
-         *                "previousStatus": {
-         *                    "id": "15"
-         *                }
-         *            }
-         *          }
-         *
-         *      *  `mostRecentStatusOnly` If `true`, then only the issue's preceding status (the one immediately before the current status) is checked.
-         *      *  `previousStatus` An object containing the ID of an issue status.
-         *
-         *     ##### Regular expression validator #####
-         *
-         *     A validator that checks the content of a field against a regular expression.
-         *
-         *         {
-         *            "type": "RegexpFieldValidator",
-         *            "configuration": {
-         *                "regExp": "[0-9]",
-         *                "fieldId": "customfield_10029"
-         *            }
-         *          }
-         *
-         *      *  `regExp`A regular expression.
-         *      *  `fieldId` The ID of a field. Allowed field types:
-         *
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:select`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:multiselect`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:radiobuttons`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:textarea`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:textfield`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:url`
-         *          *  `com.atlassian.jira.plugin.system.customfieldtypes:float`
-         *          *  `com.pyxis.greenhopper.jira:jsw-story-points`
-         *          *  `com.pyxis.greenhopper.jira:gh-epic-status`
-         *          *  `description`
-         *          *  `summary`
-         *
-         *     ##### User permission validator #####
-         *
-         *     A validator that checks if a user has a permission. Obsolete. You may encounter this validator when getting transition rules and can pass it when updating or creating rules, for example, when you want to duplicate the rules from a workflow on a new workflow.
-         *
-         *         {
-         *              "type": "UserPermissionValidator",
-         *              "configuration": {
-         *                  "permissionKey": "BROWSE_PROJECTS",
-         *                  "nullAllowed": false,
-         *                  "username": "TestUser"
-         *              }
-         *          }
-         *
-         *      *  `permissionKey` The permission to be validated. Allowed values: [built-in](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions) or app defined permissions.
-         *      *  `nullAllowed` If `true`, allows the transition when `username` is empty.
-         *      *  `username` The username to validate against the `permissionKey`.
-         *
-         *     #### Post functions ####
-         *
-         *     Post functions carry out any additional processing required after a Jira workflow transition is executed.
-         *
-         *     ##### Fire issue event function #####
-         *
-         *     A post function that fires an event that is processed by the listeners.
-         *
-         *         {
-         *            "type": "FireIssueEventFunction",
-         *            "configuration": {
-         *              "event": {
-         *                "id":"1"
-         *              }
-         *            }
-         *          }
-         *
-         *     **Note:** If provided, this post function overrides the default `FireIssueEventFunction`. Can be included once in a transition.
-         *
-         *      *  `event` An object containing the ID of the issue event.
-         *
-         *     ##### Update issue status #####
-         *
-         *     A post function that sets issue status to the linked status of the destination workflow status.
-         *
-         *         {
-         *            "type": "UpdateIssueStatusFunction"
-         *          }
-         *
-         *     **Note:** This post function is a default function in global and directed transitions. It can only be added to the initial transition and can only be added once.
-         *
-         *     ##### Create comment #####
-         *
-         *     A post function that adds a comment entered during the transition to an issue.
-         *
-         *         {
-         *            "type": "CreateCommentFunction"
-         *          }
-         *
-         *     **Note:** This post function is a default function in global and directed transitions. It can only be added to the initial transition and can only be added once.
-         *
-         *     ##### Store issue #####
-         *
-         *     A post function that stores updates to an issue.
-         *
-         *         {
-         *            "type": "IssueStoreFunction"
-         *          }
-         *
-         *     **Note:** This post function can only be added to the initial transition and can only be added once.
-         *
-         *     ##### Assign to current user function #####
-         *
-         *     A post function that assigns the issue to the current user if the current user has the `ASSIGNABLE_USER` permission.
-         *
-         *         {
-         *              "type": "AssignToCurrentUserFunction"
-         *          }
-         *
-         *     **Note:** This post function can be included once in a transition.
-         *
-         *     ##### Assign to lead function #####
-         *
-         *     A post function that assigns the issue to the project or component lead developer.
-         *
-         *         {
-         *              "type": "AssignToLeadFunction"
-         *          }
-         *
-         *     **Note:** This post function can be included once in a transition.
-         *
-         *     ##### Assign to reporter function #####
-         *
-         *     A post function that assigns the issue to the reporter.
-         *
-         *         {
-         *              "type": "AssignToReporterFunction"
-         *          }
-         *
-         *     **Note:** This post function can be included once in a transition.
-         *
-         *     ##### Clear field value function #####
-         *
-         *     A post function that clears the value from a field.
-         *
-         *         {
-         *            "type": "ClearFieldValuePostFunction",
-         *            "configuration": {
-         *              "fieldId": "assignee"
-         *            }
-         *          }
-         *
-         *      *  `fieldId` The ID of the field.
-         *
-         *     ##### Copy value from other field function #####
-         *
-         *     A post function that copies the value of one field to another, either within an issue or from parent to subtask.
-         *
-         *         {
-         *            "type": "CopyValueFromOtherFieldPostFunction",
-         *            "configuration": {
-         *              "sourceFieldId": "assignee",
-         *              "destinationFieldId": "creator",
-         *              "copyType": "same"
-         *            }
-         *          }
-         *
-         *      *  `sourceFieldId` The ID of the source field.
-         *      *  `destinationFieldId` The ID of the destination field.
-         *      *  `copyType` Use `same` to copy the value from a field inside the issue, or `parent` to copy the value from the parent issue.
-         *
-         *     ##### Create Crucible review workflow function (deprecated) #####
-         *
-         *     A post function that creates a Crucible review for all unreviewed code for the issue.
-         *
-         *         {
-         *              "type": "CreateCrucibleReviewWorkflowFunction"
-         *          }
-         *
-         *     **Note:** This post function can be included once in a transition.
-         *
-         *     ##### Set issue security level based on user's project role function #####
-         *
-         *     A post function that sets the issue's security level if the current user has a project role.
-         *
-         *         {
-         *            "type": "SetIssueSecurityFromRoleFunction",
-         *            "configuration": {
-         *              "projectRole": {
-         *                  "id":"10002"
-         *              },
-         *              "issueSecurityLevel": {
-         *                  "id":"10000"
-         *              }
-         *            }
-         *          }
-         *
-         *      *  `projectRole` An object containing the ID of the project role.
-         *      *  `issueSecurityLevel` OPTIONAL. The object containing the ID of the security level. If not passed, then the security level is set to `none`.
-         *
-         *     ##### Trigger a webhook function #####
-         *
-         *     A post function that triggers a webhook.
-         *
-         *         {
-         *            "type": "TriggerWebhookFunction",
-         *            "configuration": {
-         *              "webhook": {
-         *                "id": "1"
-         *              }
-         *            }
-         *          }
-         *
-         *      *  `webhook` An object containing the ID of the webhook listener to trigger.
-         *
-         *     ##### Update issue custom field function #####
-         *
-         *     A post function that updates the content of an issue custom field.
-         *
-         *         {
-         *            "type": "UpdateIssueCustomFieldPostFunction",
-         *            "configuration": {
-         *              "mode": "append",
-         *              "fieldId": "customfield_10003",
-         *              "fieldValue": "yikes"
-         *            }
-         *          }
-         *
-         *      *  `mode` Use `replace` to override the field content with `fieldValue` or `append` to add `fieldValue` to the end of the field content.
-         *      *  `fieldId` The ID of the field.
-         *      *  `fieldValue` The update content.
-         *
-         *     ##### Update issue field function #####
-         *
-         *     A post function that updates a simple issue field.
-         *
-         *         {
-         *            "type": "UpdateIssueFieldFunction",
-         *            "configuration": {
-         *              "fieldId": "assignee",
-         *              "fieldValue": "5f0c277e70b8a90025a00776"
-         *            }
-         *          }
-         *
-         *      *  `fieldId` The ID of the field. Allowed field types:
-         *
-         *          *  `assignee`
-         *          *  `description`
-         *          *  `environment`
-         *          *  `priority`
-         *          *  `resolution`
-         *          *  `summary`
-         *          *  `timeoriginalestimate`
-         *          *  `timeestimate`
-         *          *  `timespent`
-         *      *  `fieldValue` The update value.
-         *      *  If the `fieldId` is `assignee`, the `fieldValue` should be one of these values:
-         *
-         *          *  an account ID.
-         *          *  `automatic`.
-         *          *  a blank string, which sets the value to `unassigned`.
-         *
-         *     #### Connect rules ####
-         *
-         *     Connect rules are conditions, validators, and post functions of a transition that are registered by Connect apps. To create a rule registered by the app, the app must be enabled and the rule's module must exist.
-         *
-         *         {
-         *            "type": "appKey__moduleKey",
-         *            "configuration": {
-         *              "value":"{\"isValid\":\"true\"}"
-         *            }
-         *          }
-         *
-         *      *  `type` A Connect rule key in a form of `appKey__moduleKey`.
-         *      *  `value` The stringified JSON configuration of a Connect rule.
-         *
-         *     #### Forge rules ####
-         *
-         *     Forge transition rules are not yet supported.
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        post: operations["createWorkflow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/rest/api/3/workflow/history": {
         parameters: {
             query?: never;
@@ -12156,6 +11577,8 @@ export interface paths {
         /**
          * Read workflow version from history
          * @description Returns a workflow and related statuses for a specified workflow id and version number.
+         *
+         *     **Note:** Stored workflow data expires after 60 days. Additionally, no data from before the 30th of October 2025 is available.
          *
          *     **[Permissions](#permissions) required:**
          *
@@ -12181,6 +11604,8 @@ export interface paths {
         /**
          * List workflow history entries
          * @description Returns a list of workflow history entries for a specified workflow id.
+         *
+         *     **Note:** Stored workflow data expires after 60 days. Additionally, no data from before the 30th of October 2025 is available.
          *
          *     **[Permissions](#permissions) required:**
          *
@@ -12232,6 +11657,8 @@ export interface paths {
          *
          *     Rules are enabled if the `disabled` parameter is not provided.
          *
+         *     **Note:** The `draft` parameter in the request body WorkflowId is deprecated and will be removed from this API on [November 2, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3147).
+         *
          *     **[Permissions](#permissions) required:** Only [Connect](https://developer.atlassian.com/cloud/jira/platform/index/#connect-apps) or [Forge](https://developer.atlassian.com/cloud/jira/platform/index/#forge-apps) apps can use this operation.
          */
         put: operations["updateWorkflowTransitionRuleConfigurations"];
@@ -12259,6 +11686,8 @@ export interface paths {
          *      *  [validators](https://developer.atlassian.com/cloud/jira/platform/modules/workflow-validator/)
          *
          *     Only rules created by the calling Connect app can be deleted.
+         *
+         *     **Note:** The `draft` parameter in the request body WorkflowId is deprecated and will be removed from this API on [November 2, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3147).
          *
          *     **[Permissions](#permissions) required:** Only Connect apps can use this operation.
          */
@@ -12922,6 +12351,23 @@ export interface paths {
          *
          *      *  `webhookId` the ID of the webhook.
          *
+         *     ##### Trigger agent #####
+         *
+         *     A post function that triggers a Jira AI agent for the issue after the transition runs, using the configured agent and an optional prompt. The agent run is asynchronous: it is scheduled after the transition finishes and does not block the transition.
+         *
+         *         {
+         *            "ruleKey": "system:trigger-agent",
+         *            "parameters": {
+         *              "agentId": "712020:3c6d3f05-331a-4488-932e-37c34b704720",
+         *              "promptValue": ""
+         *            }
+         *          }
+         *
+         *     Parameters:
+         *
+         *      *  `agentId` the identifier of the agent to trigger (the Atlassian account ID of the agent).
+         *      *  `promptValue` optional text passed to the agent as a user prompt after the transition runs; use an empty string if no extra prompt is needed.
+         *
          *     #### Screen ####
          *
          *     ##### Remind people to update fields #####
@@ -12993,7 +12439,9 @@ export interface paths {
          *            "parameters": {
          *              "key": "ari:cloud:ecosystem::extension/{appId}/{environmentId}/static/{moduleKey}",
          *              "config": "{"searchString":"workflow validator"}",
-         *              "id": "a865ddf6-bb3f-4a7b-9540-c2f8b3f9f6c2"
+         *              "id": "a865ddf6-bb3f-4a7b-9540-c2f8b3f9f6c2",
+         *              "disabled": "false",
+         *              "tag": ""
          *            }
          *          }
          *
@@ -13003,6 +12451,8 @@ export interface paths {
          *      *  `key` the identifier for the Forge app
          *      *  `config` the persistent stringified JSON configuration for the Forge rule
          *      *  `id` the ID of the Forge rule
+         *      *  `disabled` determine if the Forge app is disabled. Allowed values: `true`, `false`.
+         *      *  `tag` additional tags for the Forge app
          */
         get: operations["workflowCapabilities"];
         put?: never;
@@ -13236,6 +12686,32 @@ export interface paths {
          */
         put: operations["assignSchemeToProject"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rest/api/3/workflowscheme/project/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch workflow scheme for project
+         * @description Switches a workflow scheme for a project.
+         *
+         *     Workflow schemes can only be assigned to classic projects.
+         *
+         *     **Calculating required mappings:** If statuses from the current workflow scheme won't exist in the target workflow scheme, you must provide `mappingsByIssueTypeOverride` to specify how issues with those statuses should be migrated. Use [the required workflow scheme mappings API](#api-rest-api-3-workflowscheme-update-mappings-post) to determine which statuses and issue types require mappings.
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        post: operations["switchWorkflowSchemeForProject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13764,7 +13240,7 @@ export interface paths {
         };
         /**
          * Get app properties
-         * @description Gets all the properties of an app.
+         * @description Gets all the properties of an app. The reserved key `connect_client_key_019cdff3-8bfb-71fe-9628-875b700aebb8` is not returned.
          *
          *     **[Permissions](#permissions) required:** Only a Connect app whose key matches `addonKey` can make this request.
          *     Additionally, Forge apps can access Connect app properties (stored against the same `app.connect.key`).
@@ -13787,7 +13263,9 @@ export interface paths {
         };
         /**
          * Get app property
-         * @description Returns the key and value of an app's property.
+         * @description Returns the key and value of an app's property. The property key `connect_client_key_019cdff3-8bfb-71fe-9628-875b700aebb8`
+         *     is reserved. It returns a synthetic, read-only property containing the Connect `clientKey` for the requested tenant.
+         *     This is intended for Forge apps with `app.connect.key` to retrieve the Connect client key during migration.
          *
          *     **[Permissions](#permissions) required:** Only a Connect app whose key matches `addonKey` can make this request.
          *     Additionally, Forge apps can access Connect app properties (stored against the same `app.connect.key`).
@@ -13908,6 +13386,51 @@ export interface paths {
          * @description Returns configurations for workflow transition rules migrated from server to cloud and owned by the calling Connect app.
          */
         post: operations["MigrationResource.workflowRuleSearch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rest/atlassian-connect/1/migration/{connectKey}/{jiraIssueFieldsKey}/task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Connect issue field migration task
+         * @description Returns the details of a Connect issue field's migration to Forge.
+         *
+         *     When migrating a Connect app to Forge, [Issue Field](https://developer.atlassian.com/cloud/jira/software/modules/issue-field/) modules
+         *     must be converted to [Custom field](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field/). When the
+         *     Forge version of the app is installed, Forge creates a
+         *     [background task](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-tasks/#api-group-tasks) to track the
+         *     migration of field data across. This endpoint returns the status and other details of that background task.
+         *
+         *     For more details, see
+         *     [Jira modules > Jira Custom Fields](https://developer.atlassian.com/platform/adopting-forge-from-connect/migrate-jira-custom-fields/).
+         *
+         *     **[Permissions](#permissions) required:** Only Connect and Forge apps can make this request.
+         */
+        get: operations["ConnectToForgeMigrationFetchTaskResource.fetchMigrationTask_get"];
+        put?: never;
+        /**
+         * Submit Connect issue field migration task
+         * @description Submits a request to trigger migration of connect issue field to its Forge custom field counterpart.
+         *
+         *     When migrating a Connect app to Forge, [Issue Field](https://developer.atlassian.com/cloud/jira/software/modules/issue-field/) modules
+         *     must be converted to [Custom field](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field/) modules.
+         *     This endpoint triggers the background migration of field data. Use the GET endpoint to retrieve
+         *     the status and progress of the task.
+         *
+         *     For more details, see
+         *     [Jira modules > Jira Custom Fields](https://developer.atlassian.com/platform/adopting-forge-from-connect/migrate-jira-custom-fields/).
+         *
+         *     **[Permissions](#permissions) required:** Only Connect and Forge apps can make this request.
+         */
+        post: operations["ConnectToForgeMigrationTaskSubmissionResource.submitTask_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14656,6 +14179,13 @@ export interface components {
              */
             state?: true | false;
         };
+        /** @description Configuration of features for one or more boards. Replaces the deprecated features field on BoardPayload */
+        BoardFeaturesPayload: {
+            /** @description A map of board PCRIs to the list of features to enable on each board. */
+            boardFeatures?: {
+                [key: string]: components["schemas"]["BoardFeaturePayload"][];
+            };
+        } | null;
         /** @description The payload for creating a board */
         BoardPayload: {
             /**
@@ -14673,7 +14203,10 @@ export interface components {
             cardLayouts?: components["schemas"]["CardLayoutField"][];
             /** @description The columns of the board */
             columns?: components["schemas"]["BoardColumnPayload"][];
-            /** @description Feature settings for the board */
+            /**
+             * @deprecated
+             * @description Feature settings for the board. Deprecated: use boardFeatures capability instead.
+             */
             features?: components["schemas"]["BoardFeaturePayload"][];
             /** @description The name of the board */
             name?: string;
@@ -15722,9 +15255,15 @@ export interface components {
             description?: string;
             /**
              * Format: int64
-             * @description The ID of the field configuration scheme for the project. Use the [Get all field configuration schemes](#api-rest-api-3-fieldconfigurationscheme-get) operation to get a list of field configuration scheme IDs. If you specify the field configuration scheme you cannot specify the project template key.
+             * @deprecated
+             * @description Deprecated use [fieldScheme](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) instead. The ID of the field configuration scheme for the project. Use the [Get all field configuration schemes](#api-rest-api-3-fieldconfigurationscheme-get) operation to get a list of field configuration scheme IDs. If you specify the field configuration scheme you cannot specify the project template key.
              */
             fieldConfigurationScheme?: number;
+            /**
+             * Format: int64
+             * @description The ID of the field scheme for the project. Use the [Get field schemes](#api-rest-api-3-config-fieldschemes-get) operation to get a list of field scheme IDs. If you specify the field scheme you cannot specify the project template key.
+             */
+            fieldScheme?: number;
             /**
              * Format: int64
              * @description The ID of the issue security scheme for the project, which enables you to control who can and cannot view issues. Use the [Get issue security schemes](#api-rest-api-3-issuesecurityschemes-get) resource to get all issue security scheme IDs.
@@ -15762,7 +15301,7 @@ export interface components {
              * @description A predefined configuration for a project. The type of the `projectTemplateKey` must match with the type of the `projectTypeKey`.
              * @enum {string}
              */
-            projectTemplateKey?: "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban" | "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum" | "com.pyxis.greenhopper.jira:gh-simplified-basic" | "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic" | "com.pyxis.greenhopper.jira:gh-simplified-scrum-classic" | "com.pyxis.greenhopper.jira:gh-cross-team-template" | "com.pyxis.greenhopper.jira:gh-cross-team-planning-template" | "com.atlassian.servicedesk:simplified-it-service-management" | "com.atlassian.servicedesk:simplified-it-service-management-basic" | "com.atlassian.servicedesk:simplified-it-service-management-operations" | "com.atlassian.servicedesk:simplified-general-service-desk" | "com.atlassian.servicedesk:simplified-internal-service-desk" | "com.atlassian.servicedesk:simplified-external-service-desk" | "com.atlassian.servicedesk:simplified-hr-service-desk" | "com.atlassian.servicedesk:simplified-facilities-service-desk" | "com.atlassian.servicedesk:simplified-legal-service-desk" | "com.atlassian.servicedesk:simplified-marketing-service-desk" | "com.atlassian.servicedesk:simplified-finance-service-desk" | "com.atlassian.servicedesk:simplified-analytics-service-desk" | "com.atlassian.servicedesk:simplified-design-service-desk" | "com.atlassian.servicedesk:simplified-sales-service-desk" | "com.atlassian.servicedesk:simplified-halp-service-desk" | "com.atlassian.servicedesk:next-gen-it-service-desk" | "com.atlassian.servicedesk:next-gen-hr-service-desk" | "com.atlassian.servicedesk:next-gen-legal-service-desk" | "com.atlassian.servicedesk:next-gen-marketing-service-desk" | "com.atlassian.servicedesk:next-gen-facilities-service-desk" | "com.atlassian.servicedesk:next-gen-general-service-desk" | "com.atlassian.servicedesk:next-gen-analytics-service-desk" | "com.atlassian.servicedesk:next-gen-finance-service-desk" | "com.atlassian.servicedesk:next-gen-design-service-desk" | "com.atlassian.servicedesk:next-gen-sales-service-desk" | "com.atlassian.jira-core-project-templates:jira-core-simplified-content-management" | "com.atlassian.jira-core-project-templates:jira-core-simplified-document-approval" | "com.atlassian.jira-core-project-templates:jira-core-simplified-lead-tracking" | "com.atlassian.jira-core-project-templates:jira-core-simplified-process-control" | "com.atlassian.jira-core-project-templates:jira-core-simplified-procurement" | "com.atlassian.jira-core-project-templates:jira-core-simplified-project-management" | "com.atlassian.jira-core-project-templates:jira-core-simplified-recruitment" | "com.atlassian.jira-core-project-templates:jira-core-simplified-task-";
+            projectTemplateKey?: "com.pyxis.greenhopper.jira:gh-simplified-agility-kanban" | "com.pyxis.greenhopper.jira:gh-simplified-agility-scrum" | "com.pyxis.greenhopper.jira:gh-simplified-basic" | "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic" | "com.pyxis.greenhopper.jira:gh-simplified-scrum-classic" | "com.pyxis.greenhopper.jira:gh-cross-team-template" | "com.pyxis.greenhopper.jira:gh-cross-team-planning-template" | "com.atlassian.servicedesk:simplified-it-service-management" | "com.atlassian.servicedesk:simplified-it-service-management-basic" | "com.atlassian.servicedesk:simplified-it-service-management-operations" | "com.atlassian.servicedesk:simplified-internal-service-desk" | "com.atlassian.servicedesk:simplified-external-service-desk" | "com.atlassian.servicedesk:simplified-hr-service-desk" | "com.atlassian.servicedesk:simplified-facilities-service-desk" | "com.atlassian.servicedesk:simplified-legal-service-desk" | "com.atlassian.servicedesk:simplified-marketing-service-desk" | "com.atlassian.servicedesk:simplified-finance-service-desk" | "com.atlassian.servicedesk:simplified-analytics-service-desk" | "com.atlassian.servicedesk:simplified-design-service-desk" | "com.atlassian.servicedesk:simplified-sales-service-desk" | "com.atlassian.servicedesk:simplified-halp-service-desk" | "com.atlassian.servicedesk:next-gen-it-service-desk" | "com.atlassian.servicedesk:next-gen-hr-service-desk" | "com.atlassian.servicedesk:next-gen-legal-service-desk" | "com.atlassian.servicedesk:next-gen-marketing-service-desk" | "com.atlassian.servicedesk:next-gen-facilities-service-desk" | "com.atlassian.servicedesk:next-gen-general-service-desk" | "com.atlassian.servicedesk:next-gen-analytics-service-desk" | "com.atlassian.servicedesk:next-gen-finance-service-desk" | "com.atlassian.servicedesk:next-gen-design-service-desk" | "com.atlassian.servicedesk:next-gen-sales-service-desk" | "com.atlassian.jira-core-project-templates:jira-core-simplified-content-management" | "com.atlassian.jira-core-project-templates:jira-core-simplified-document-approval" | "com.atlassian.jira-core-project-templates:jira-core-simplified-lead-tracking" | "com.atlassian.jira-core-project-templates:jira-core-simplified-process-control" | "com.atlassian.jira-core-project-templates:jira-core-simplified-procurement" | "com.atlassian.jira-core-project-templates:jira-core-simplified-project-management" | "com.atlassian.jira-core-project-templates:jira-core-simplified-recruitment" | "com.atlassian.jira-core-project-templates:jira-core-simplified-task-" | "com.atlassian.jcs:customer-service-management";
             /**
              * @description The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes), which defines the application-specific feature set. If you don't specify the project template you have to specify the project type.
              * @enum {string}
@@ -15823,162 +15362,6 @@ export interface components {
             /** @description The name of the project role. Must be unique. Cannot begin or end with whitespace. The maximum length is 255 characters. Required when creating a project role. Optional when partially updating a project role. */
             name?: string;
         };
-        /** @description A workflow transition condition. */
-        CreateWorkflowCondition: {
-            /** @description The list of workflow conditions. */
-            conditions?: components["schemas"]["CreateWorkflowCondition"][];
-            /** @description EXPERIMENTAL. The configuration of the transition rule. */
-            configuration?: {
-                [key: string]: unknown;
-            };
-            /**
-             * @description The compound condition operator.
-             * @enum {string}
-             */
-            operator?: "AND" | "OR";
-            /** @description The type of the transition rule. */
-            type?: string;
-        };
-        /** @description The details of a workflow. */
-        CreateWorkflowDetails: {
-            /** @description The description of the workflow. The maximum length is 1000 characters. */
-            description?: string;
-            /** @description The name of the workflow. The name must be unique. The maximum length is 255 characters. Characters can be separated by a whitespace but the name cannot start or end with a whitespace. */
-            name: string;
-            /** @description The statuses of the workflow. Any status that does not include a transition is added to the workflow without a transition. */
-            statuses: components["schemas"]["CreateWorkflowStatusDetails"][];
-            /**
-             * @description The transitions of the workflow. For the request to be valid, these transitions must:
-             *
-             *      *  include one *initial* transition.
-             *      *  not use the same name for a *global* and *directed* transition.
-             *      *  have a unique name for each *global* transition.
-             *      *  have a unique 'to' status for each *global* transition.
-             *      *  have unique names for each transition from a status.
-             *      *  not have a 'from' status on *initial* and *global* transitions.
-             *      *  have a 'from' status on *directed* transitions.
-             *
-             *     All the transition statuses must be included in `statuses`.
-             */
-            transitions: components["schemas"]["CreateWorkflowTransitionDetails"][];
-        };
-        /** @description The details of a transition status. */
-        CreateWorkflowStatusDetails: {
-            /** @description The ID of the status. */
-            id: string;
-            /** @description The properties of the status. */
-            properties?: {
-                [key: string]: string;
-            };
-        };
-        /** @description The details of a workflow transition. */
-        CreateWorkflowTransitionDetails: {
-            /** @description The description of the transition. The maximum length is 1000 characters. */
-            description?: string;
-            /** @description The statuses the transition can start from. */
-            from?: string[];
-            /** @description The name of the transition. The maximum length is 60 characters. */
-            name: string;
-            /** @description The properties of the transition. */
-            properties?: {
-                [key: string]: string;
-            };
-            /** @description The rules of the transition. */
-            rules?: components["schemas"]["CreateWorkflowTransitionRulesDetails"];
-            /** @description The screen of the transition. */
-            screen?: components["schemas"]["CreateWorkflowTransitionScreenDetails"];
-            /** @description The status the transition goes to. */
-            to: string;
-            /**
-             * @description The type of the transition.
-             * @enum {string}
-             */
-            type: "global" | "initial" | "directed";
-        };
-        /** @description A workflow transition rule. */
-        CreateWorkflowTransitionRule: {
-            /** @description EXPERIMENTAL. The configuration of the transition rule. */
-            configuration?: {
-                [key: string]: unknown;
-            };
-            /** @description The type of the transition rule. */
-            type: string;
-        };
-        /** @description The details of a workflow transition rules. */
-        CreateWorkflowTransitionRulesDetails: {
-            /** @description The workflow conditions. */
-            conditions?: components["schemas"]["CreateWorkflowCondition"];
-            /**
-             * @description The workflow post functions.
-             *
-             *     **Note:** The default post functions are always added to the *initial* transition, as in:
-             *
-             *         "postFunctions": [
-             *             {
-             *                 "type": "IssueCreateFunction"
-             *             },
-             *             {
-             *                 "type": "IssueReindexFunction"
-             *             },
-             *             {
-             *                 "type": "FireIssueEventFunction",
-             *                 "configuration": {
-             *                     "event": {
-             *                         "id": "1",
-             *                         "name": "issue_created"
-             *                     }
-             *                 }
-             *             }
-             *         ]
-             *
-             *     **Note:** The default post functions are always added to the *global* and *directed* transitions, as in:
-             *
-             *         "postFunctions": [
-             *             {
-             *                 "type": "UpdateIssueStatusFunction"
-             *             },
-             *             {
-             *                 "type": "CreateCommentFunction"
-             *             },
-             *             {
-             *                 "type": "GenerateChangeHistoryFunction"
-             *             },
-             *             {
-             *                 "type": "IssueReindexFunction"
-             *             },
-             *             {
-             *                 "type": "FireIssueEventFunction",
-             *                 "configuration": {
-             *                     "event": {
-             *                         "id": "13",
-             *                         "name": "issue_generic"
-             *                     }
-             *                 }
-             *             }
-             *         ]
-             */
-            postFunctions?: components["schemas"]["CreateWorkflowTransitionRule"][];
-            /**
-             * @description The workflow validators.
-             *
-             *     **Note:** The default permission validator is always added to the *initial* transition, as in:
-             *
-             *         "validators": [
-             *             {
-             *                 "type": "PermissionValidator",
-             *                 "configuration": {
-             *                     "permissionKey": "CREATE_ISSUES"
-             *                 }
-             *             }
-             *         ]
-             */
-            validators?: components["schemas"]["CreateWorkflowTransitionRule"][];
-        };
-        /** @description The details of a transition screen. */
-        CreateWorkflowTransitionScreenDetails: {
-            /** @description The ID of the screen. */
-            id: string;
-        };
         /** @description Details about a created issue or subtask. */
         CreatedIssue: {
             /** @description The ID of the created issue or subtask. */
@@ -16038,6 +15421,8 @@ export interface components {
         };
         /** @description The default value for a Date custom field. */
         CustomFieldContextDefaultValueDate: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default date in ISO format. Ignored if `useCurrent` is true. */
             date?: string;
             /**
@@ -16053,6 +15438,8 @@ export interface components {
         };
         /** @description The default value for a date time custom field. */
         CustomFieldContextDefaultValueDateTime: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default date-time in ISO format. Ignored if `useCurrent` is true. */
             dateTime?: string;
             /**
@@ -16068,6 +15455,8 @@ export interface components {
         };
         /** @description Default value for a float (number) custom field. */
         CustomFieldContextDefaultValueFloat: {
+            /** @description The ID of the context. */
+            contextId: string;
             /**
              * Format: double
              * @description The default floating-point number.
@@ -16122,6 +15511,8 @@ export interface components {
         };
         /** @description The default text for a Forge collection of strings custom field. */
         CustomFieldContextDefaultValueForgeMultiStringField: {
+            /** @description The ID of the context. */
+            contextId: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -16159,6 +15550,8 @@ export interface components {
         };
         /** @description The default value for a Forge object custom field. */
         CustomFieldContextDefaultValueForgeObjectField: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default JSON object. */
             object?: Record<string, never>;
             /**
@@ -16194,6 +15587,8 @@ export interface components {
         };
         /** @description Default value for a labels custom field. */
         CustomFieldContextDefaultValueLabels: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default labels value. */
             labels: string[];
             /**
@@ -16240,6 +15635,8 @@ export interface components {
         };
         /** @description The default value for a multiple version picker custom field. */
         CustomFieldContextDefaultValueMultipleVersionPicker: {
+            /** @description The ID of the context. */
+            contextId: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -16264,6 +15661,8 @@ export interface components {
         };
         /** @description The default text for a read only custom field. */
         CustomFieldContextDefaultValueReadOnly: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default text. The maximum length is 255 characters. */
             text?: string;
             /**
@@ -16298,6 +15697,8 @@ export interface components {
         };
         /** @description The default value for a version picker custom field. */
         CustomFieldContextDefaultValueSingleVersionPicker: {
+            /** @description The ID of the context. */
+            contextId: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -16310,6 +15711,8 @@ export interface components {
         };
         /** @description The default text for a text area custom field. */
         CustomFieldContextDefaultValueTextArea: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default text. The maximum length is 32767 characters. */
             text?: string;
             /**
@@ -16320,6 +15723,8 @@ export interface components {
         };
         /** @description The default text for a text custom field. */
         CustomFieldContextDefaultValueTextField: {
+            /** @description The ID of the context. */
+            contextId: string;
             /** @description The default text. The maximum length is 254 characters. */
             text?: string;
             /**
@@ -16563,6 +15968,7 @@ export interface components {
         };
         /** @description The specific request object for creating a project with template. */
         CustomTemplateRequestDTO: {
+            boardFeatures?: components["schemas"]["BoardFeaturesPayload"];
             boards?: components["schemas"]["BoardsPayload"];
             field?: components["schemas"]["FieldCapabilityPayload"];
             issueType?: components["schemas"]["IssueTypeProjectCreatePayload"];
@@ -16763,6 +16169,8 @@ export interface components {
             description?: string;
             /** @description The guideline of the data classification object. */
             guideline?: string;
+            /** @description The guideline in ADF (Atlassian Document Format) for rich text rendering. */
+            guidelineADF?: string;
             /** @description The ID of the data classification object. */
             id: string;
             /** @description The name of the data classification object. */
@@ -16832,27 +16240,6 @@ export interface components {
         DeleteFieldAssociationSchemeResponse: {
             deleted?: boolean;
             id?: string;
-        };
-        /** @description Details about a workflow. */
-        DeprecatedWorkflow: {
-            default?: boolean;
-            /** @description The description of the workflow. */
-            readonly description?: string;
-            /** @description The datetime the workflow was last modified. */
-            readonly lastModifiedDate?: string;
-            /** @description This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details. */
-            readonly lastModifiedUser?: string;
-            /** @description The account ID of the user that last modified the workflow. */
-            readonly lastModifiedUserAccountId?: string;
-            /** @description The name of the workflow. */
-            readonly name?: string;
-            /** @description The scope where this workflow applies */
-            readonly scope?: components["schemas"]["Scope"];
-            /**
-             * Format: int32
-             * @description The number of steps included in the workflow.
-             */
-            readonly steps?: number;
         };
         DetailedErrorCollection: {
             /** @description Map of objects representing additional details for an error */
@@ -17084,9 +16471,28 @@ export interface components {
             /** @description The display name of the field type */
             typeDisplayName?: string;
         };
+        /** @description Defines the payload for the field association scheme. */
+        FieldAssociationItemPayload: {
+            /**
+             * @description The description of the field association item
+             * @example The description of the field association item
+             */
+            description?: string;
+            pcri?: components["schemas"]["ProjectCreateResourceIdentifier"];
+            qualifierId?: components["schemas"]["ProjectCreateResourceIdentifier"];
+            qualifierType?: components["schemas"]["ProjectCreateResourceIdentifier"];
+            /**
+             * @description The renderer type of the field
+             * @example jira-text-renderer
+             */
+            rendererType?: string;
+            /** @description Whether the field is required */
+            required?: boolean;
+        };
         FieldAssociationParameters: {
             description?: string;
             isRequired: boolean;
+            rendererType?: string;
         };
         /** @description Field association scheme field search results. */
         FieldAssociationSchemeFieldSearchResult: {
@@ -17111,7 +16517,12 @@ export interface components {
         };
         /** @description Project search results for field association scheme. */
         FieldAssociationSchemeProjectSearchResult: {
+            avatarUrls?: {
+                [key: string]: string;
+            };
+            deleted?: boolean;
             id?: string;
+            key?: string;
             name?: string;
         };
         /** @description Details of field associations with projects. */
@@ -17126,8 +16537,12 @@ export interface components {
             /** @description The custom field definitions. See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/\#api-rest-api-3-field-post */
             customFieldDefinitions?: components["schemas"]["CustomFieldPayload"][] | null;
             fieldLayoutScheme?: components["schemas"]["FieldLayoutSchemePayload"];
-            /** @description The field layouts configuration. */
+            /**
+             * @deprecated
+             * @description The field layouts configuration.
+             */
             fieldLayouts?: components["schemas"]["FieldLayoutPayload"][] | null;
+            fieldScheme?: components["schemas"]["FieldSchemePayload"];
             /** @description The issue layouts configuration */
             issueLayouts?: components["schemas"]["IssueLayoutPayload"][] | null;
             issueTypeScreenScheme?: components["schemas"]["IssueTypeScreenSchemePayload"];
@@ -17309,7 +16724,10 @@ export interface components {
             /** @description Whether the field is required */
             required?: boolean;
         };
-        /** @description Defines the payload for the field layouts. See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-field-configurations/\#api-group-issue-field-configurations" + fieldlayout is what users would see as "Field Configuration" in Jira's UI - https://support.atlassian.com/jira-cloud-administration/docs/manage-issue-field-configurations/ */
+        /**
+         * @deprecated
+         * @description Defines the payload for the field layouts. See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-field-configurations/\#api-group-issue-field-configurations" + fieldlayout is what users would see as "Field Configuration" in Jira's UI - https://support.atlassian.com/jira-cloud-administration/docs/manage-issue-field-configurations/
+         */
         FieldLayoutPayload: {
             /** @description The field layout configuration. See https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-field-configurations/\#api-rest-api-3-fieldconfiguration-post */
             configuration?: components["schemas"]["FieldLayoutConfiguration"][];
@@ -17325,7 +16743,12 @@ export interface components {
             name?: string;
             pcri?: components["schemas"]["ProjectCreateResourceIdentifier"];
         } | null;
-        /** @description Defines the payload for the field layout schemes. See "Field Configuration Scheme" - https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-field-configurations/\#api-rest-api-3-fieldconfigurationscheme-post https://support.atlassian.com/jira-cloud-administration/docs/configure-a-field-configuration-scheme/ */
+        /**
+         * @deprecated
+         * @description Deprecated use [fieldAssociationScheme](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) instead Defines the payload for the field layout schemes. See [ Field configuration scheme](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-field-configurations/#api-rest-api-3-fieldconfigurationscheme-post).
+         *
+         *     [ How to configure a field configuration scheme](https://support.atlassian.com/jira-cloud-administration/docs/configure-a-field-configuration-scheme/).
+         */
         FieldLayoutSchemePayload: {
             defaultFieldLayout?: components["schemas"]["ProjectCreateResourceIdentifier"];
             /**
@@ -17369,6 +16792,10 @@ export interface components {
             /** @description The data type of the field. */
             readonly schema: components["schemas"]["JsonTypeBean"];
         };
+        /** @description List of project associations. */
+        FieldProjectAssociation: {
+            projectId?: string;
+        };
         /** @description Details of a field that can be used in advanced searches. */
         FieldReferenceData: {
             /**
@@ -17410,6 +16837,27 @@ export interface components {
             /** @description The field identifier. */
             value?: string;
         };
+        /** @description Defines the payload to configure the field scheme for a project. See [Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes). */
+        FieldSchemePayload: {
+            /**
+             * @description The description of the field scheme
+             * @example This is a field scheme
+             */
+            description?: string;
+            /** @description The field association items for this field scheme. */
+            items?: components["schemas"]["FieldAssociationItemPayload"][];
+            /**
+             * @description The name of the field scheme
+             * @example My Field Scheme
+             */
+            name?: string;
+            /**
+             * @description The strategy to use when there is a conflict with an existing field scheme. FAIL - Fail execution, this always needs to be unique; USE - Use the existing entity and ignore new entity parameters
+             * @enum {string}
+             */
+            onConflict?: "FAIL" | "USE" | "NEW";
+            pcri?: components["schemas"]["ProjectCreateResourceIdentifier"];
+        } | null;
         /** @description Partial failure result when updating field scheme to fields associations. */
         FieldSchemeToFieldsPartialFailure: {
             error?: string;
@@ -17525,6 +16973,11 @@ export interface components {
             description?: string;
             /** @description Whether the field is required, null to preserve current requirement setting */
             isRequired?: boolean;
+            /**
+             * @description The renderer type for the field, null to preserve current renderer type
+             * @enum {string}
+             */
+            rendererType?: "jira-text-renderer" | "atlassian-wiki-renderer";
         };
         /** @description The list of work type-specific parameter overrides, may be empty if only default parameters are being updated */
         FieldsSchemeItemWorkTypeParameter: {
@@ -17532,6 +16985,11 @@ export interface components {
             description?: string;
             /** @description Whether the field is required for this work type, null to use default or preserve current */
             isRequired?: boolean;
+            /**
+             * @description The renderer type for the field for this work type, null to use default or preserve current
+             * @enum {string}
+             */
+            rendererType?: "jira-text-renderer" | "atlassian-wiki-renderer";
             /**
              * Format: int64
              * @description The ID of the work type (issue type) for which these parameters apply
@@ -17670,6 +17128,15 @@ export interface components {
              * @description The index of the first item returned on the page.
              */
             readonly "start-index"?: number;
+        };
+        ForgePanelProjectPinAsyncResponse: {
+            taskId?: string;
+        };
+        ForgePanelProjectPinRequest: {
+            /** @description The moduleId of the Forge panel in the format `ari:cloud:ecosystem::extension/{app-id}/{environment-id}/static/{module-key}` */
+            moduleId: string;
+            /** @description The list of projects to pin or unpin the issue panel to or from. */
+            projectList: components["schemas"]["ProjectPinAction"][];
         };
         /** @description A group found in a search. */
         FoundGroup: {
@@ -17846,6 +17313,8 @@ export interface components {
         /** @description Response object for getting a field association scheme by ID. */
         GetFieldAssociationSchemeByIdResponse: {
             description?: string;
+            /** Format: int64 */
+            fieldsCount?: number;
             id?: string;
             isDefault?: boolean;
             links?: components["schemas"]["FieldAssociationSchemeLinks"];
@@ -17854,6 +17323,8 @@ export interface components {
         /** @description Response object for getting a field association scheme. */
         GetFieldAssociationSchemeResponse: {
             description?: string;
+            /** Format: int64 */
+            fieldsCount?: number;
             /** Format: int64 */
             id?: number;
             isDefault?: boolean;
@@ -18474,6 +17945,10 @@ export interface components {
         /** @description Defines the payload to configure the issue layout item for a project. */
         IssueLayoutItemPayload: {
             itemKey?: components["schemas"]["ProjectCreateResourceIdentifier"];
+            /** @description Additional properties for this item. This field is only used when the type is FIELD. */
+            properties?: {
+                [key: string]: unknown;
+            };
             /**
              * @description The item section type
              * @enum {string}
@@ -20119,12 +19594,10 @@ export interface components {
             /** @description Value for each field. Accepts Atlassian Document Format (ADF) for rich text fields like `description`, `environments`. For ADF format details, refer to: [Atlassian Document Format](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure) */
             value: Record<string, never>;
         };
-        /** @description Overrides, for the selected issue types, any status mappings provided in `statusMappingsByWorkflows`. Status mappings are required when the new workflow for an issue type doesn't contain all statuses that the old workflow has. Status mappings can be provided by a combination of `statusMappingsByWorkflows` and `statusMappingsByIssueTypeOverride`. */
+        /** @description The mappings for migrating issues from old statuses to new statuses when switching from one workflow scheme to another. This field is required if any statuses in the current project's workflows would no longer exist in the target workflow scheme. Each mapping defines how to update issues from an old status to the corresponding new status in the issue’s new workflow. */
         MappingsByIssueTypeOverride: {
-            /** @description The ID of the issue type for this mapping. */
-            issueTypeId: string;
-            /** @description The list of status mappings. */
-            statusMappings: components["schemas"]["WorkflowAssociationStatusMapping"][];
+            issueTypeId?: string;
+            statusMappings?: components["schemas"]["WorkflowAssociationStatusMapping"][];
         };
         /** @description The status mappings by workflows. Status mappings are required when the new workflow for an issue type doesn't contain all statuses that the old workflow has. Status mappings can be provided by a combination of `statusMappingsByWorkflows` and `statusMappingsByIssueTypeOverride`. */
         MappingsByWorkflow: {
@@ -21278,6 +20751,38 @@ export interface components {
             readonly total?: number;
             /** @description The list of items. */
             readonly values?: components["schemas"]["FieldConfigurationSchemeProjects"][];
+        };
+        /** @description A page of items. */
+        PageBeanFieldProjectAssociation: {
+            /** @description Whether this is the last page. */
+            readonly isLast?: boolean;
+            /**
+             * Format: int32
+             * @description The maximum number of items that could be returned.
+             */
+            readonly maxResults?: number;
+            /**
+             * Format: uri
+             * @description If there is another page of results, the URL of the next page.
+             */
+            readonly nextPage?: string;
+            /**
+             * Format: uri
+             * @description The URL of the page.
+             */
+            readonly self?: string;
+            /**
+             * Format: int64
+             * @description The index of the first item returned.
+             */
+            readonly startAt?: number;
+            /**
+             * Format: int64
+             * @description The number of items returned.
+             */
+            readonly total?: number;
+            /** @description The list of items. */
+            readonly values?: components["schemas"]["FieldProjectAssociation"][];
         };
         /** @description A page of items. */
         PageBeanFilterDetails: {
@@ -23398,6 +22903,16 @@ export interface components {
             /** @description Whether the logged user can edit the project. */
             readonly canEdit?: boolean;
         };
+        /** @description The list of projects to pin or unpin the issue panel to or from. */
+        ProjectPinAction: {
+            /**
+             * @description The action to perform: PIN or UNPIN.
+             * @enum {string}
+             */
+            action: "PIN" | "UNPIN";
+            /** @description The project ID or key. */
+            projectIdOrKey: string;
+        };
         /** @description Details about the roles in a project. */
         ProjectRole: {
             /** @description The list of users who act in this role. */
@@ -23477,6 +22992,11 @@ export interface components {
             readonly self?: string;
             /** @description The translated name of the project role. */
             translatedName?: string;
+            /**
+             * @description The type of the project role. This is "DEFAULT" or "GUEST\_ROLE".
+             * @enum {string}
+             */
+            readonly type?: "DEFAULT" | "GUEST_ROLE";
         };
         /** @description Details of the group associated with the role. */
         ProjectRoleGroup: {
@@ -23780,6 +23300,7 @@ export interface components {
             self?: string;
         };
         Resource: {
+            contentAsByteArray?: string[];
             description?: string;
             /** Format: binary */
             file?: string;
@@ -23854,7 +23375,7 @@ export interface components {
              * @example EDITABLE
              * @enum {string}
              */
-            type?: "HIDDEN" | "VIEWABLE" | "EDITABLE";
+            type?: "HIDDEN" | "VIEWABLE" | "EDITABLE" | "GUEST";
         };
         RolesCapabilityPayload: {
             /** @description A map of role PCRI (can be ID or REF) to a list of user or group PCRI IDs to associate with the role and project. */
@@ -24170,6 +23691,8 @@ export interface components {
             readonly schema?: {
                 [key: string]: components["schemas"]["JsonTypeBean"];
             };
+            /** @description Experimental. Warnings generated during the search, e.g. when a JQL clause exceeded its argument limit or when the result set was truncated due to an ingestion limit. This field is currently rolling out behind a feature flag and may be absent, empty, or change shape without notice until generally available. */
+            readonly warnings?: components["schemas"]["SearchWarning"][];
         };
         /** @description Details of how to filter and list search auto complete information. */
         SearchAutoCompleteFilter: {
@@ -24251,10 +23774,12 @@ export interface components {
         SearchResultFieldParameters: {
             description?: string;
             isRequired?: boolean;
+            rendererType?: string;
         };
         SearchResultWorkTypeParameters: {
             description?: string;
             isRequired?: boolean;
+            rendererType?: string;
             workTypeId?: string;
         };
         /** @description The result of a JQL search. */
@@ -24288,6 +23813,32 @@ export interface components {
             readonly total?: number;
             /** @description Any warnings related to the JQL query. */
             readonly warningMessages?: string[];
+        };
+        /** @description Experimental. A warning returned alongside successful search results. */
+        SearchWarning: {
+            /** @description Structured details about the warning, if available. */
+            details?: components["schemas"]["SearchWarningLimitDetails"];
+            /** @description A human-readable explanation of the warning suitable for surfacing to end users. */
+            readonly message?: string;
+            /** @description The type of warning, e.g. CLAUSE\_LIMIT\_EXCEEDED or CLAUSE\_RESULT\_TRUNCATED. */
+            readonly type?: string;
+        };
+        /** @description Experimental. Structured details about a JQL clause exceeding its argument limit. */
+        SearchWarningLimitDetails: {
+            /**
+             * Format: int64
+             * @description The actual number of arguments supplied that exceeded the limit.
+             */
+            readonly actual?: number;
+            /** @description The arguments passed to the JQL clause. */
+            readonly arguments?: string;
+            /** @description The JQL clause that triggered the limit, e.g. issueHistory(). */
+            readonly clause?: string;
+            /**
+             * Format: int64
+             * @description The maximum number of arguments allowed for the clause.
+             */
+            readonly limit?: number;
         };
         /** @description Details of an issue level security item. */
         SecurityLevel: {
@@ -25058,6 +24609,62 @@ export interface components {
             name?: string;
         };
         /** @description Details about a task. */
+        TaskProgress: {
+            /** @description The description of the task. */
+            description?: string;
+            /**
+             * Format: int64
+             * @description The execution time of the task, in milliseconds.
+             */
+            elapsedRuntime: number;
+            /**
+             * Format: date-time
+             * @description A timestamp recording when the task was finished.
+             */
+            finished?: string;
+            /** @description The ID of the task. */
+            id: string;
+            /**
+             * Format: date-time
+             * @description A timestamp recording when the task progress was last updated.
+             */
+            lastUpdate: string;
+            /** @description Information about the progress of the task. */
+            message?: string;
+            /**
+             * Format: int64
+             * @description The progress of the task, as a percentage complete.
+             */
+            progress: number;
+            /** @description The result of the task execution. */
+            result?: unknown;
+            /**
+             * Format: uri
+             * @description The URL of the task.
+             */
+            self: string;
+            /**
+             * Format: date-time
+             * @description A timestamp recording when the task was started.
+             */
+            started?: string;
+            /**
+             * @description The status of the task.
+             * @enum {string}
+             */
+            status: "ENQUEUED" | "RUNNING" | "COMPLETE" | "FAILED" | "CANCEL_REQUESTED" | "CANCELLED" | "DEAD";
+            /**
+             * Format: date-time
+             * @description A timestamp recording when the task was submitted.
+             */
+            submitted?: string;
+            /**
+             * Format: int64
+             * @description The ID of the user who submitted the task.
+             */
+            submittedBy: number;
+        };
+        /** @description Details about a task. */
         TaskProgressBeanJsonNode: {
             /** @description The description of the task. */
             description?: string;
@@ -25448,13 +25055,27 @@ export interface components {
             readonly isAvailable?: boolean;
             /** @description The issue type ID of the context. Null is treated as a wildcard, meaning the UI modification will be applied to all issue types. Each UI modification context can have a maximum of one wildcard. */
             issueTypeId?: string;
+            /** @description The portal ID of the context. Only required for Jira Service Management request create portal view (`JSMRequestCreate`). */
+            portalId?: string;
             /** @description The project ID of the context. Null is treated as a wildcard, meaning the UI modification will be applied to all projects. Each UI modification context can have a maximum of one wildcard. */
             projectId?: string;
+            /** @description The request type ID of the context. Only required for Jira Service Management request create portal view (`JSMRequestCreate`). */
+            requestTypeId?: string;
             /**
-             * @description The view type of the context. Only `GIC`(Global Issue Create), `IssueView` and `IssueTransition` are supported. Null is treated as a wildcard, meaning the UI modification will be applied to all view types. Each UI modification context can have a maximum of one wildcard.
+             * @description The view type of the context.
+             *     Supported values:
+             *
+             *      *  `GIC` \- Jira global issue create
+             *      *  `IssueView` \- Jira issue view
+             *      *  `IssueTransition` \- Jira issue transition
+             *      *  `JSMRequestCreate` \- Jira Service Management request create portal view
+             *
+             *     For Jira view types (`GIC`, `IssueView`, `IssueTransition`), null is treated as a wildcard, meaning the UI modification will be applied to all view types. Each Jira context can have a maximum of one wildcard.
+             *
+             *     Wildcards are not applicable for JSM contexts.
              * @enum {string}
              */
-            viewType?: "GIC" | "IssueView" | "IssueTransition";
+            viewType?: "GIC" | "IssueView" | "IssueTransition" | "JSMRequestCreate";
         };
         /** @description The details of a UI modification. */
         UiModificationDetails: {
@@ -25847,6 +25468,8 @@ export interface components {
             readonly expand?: string;
             /** @description The groups that the user belongs to. */
             readonly groups?: components["schemas"]["SimpleListWrapperGroupName"];
+            /** @description Whether the user is a guest. */
+            readonly guest?: boolean;
             /** @description This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details. */
             key?: string;
             /** @description The locale of the user. Depending on the user’s privacy setting, this may be returned as null. */
@@ -26068,8 +25691,8 @@ export interface components {
             archived?: boolean;
             /** @description The description of the version. Optional when creating or updating a version. The maximum size is 16,384 bytes. */
             description?: string;
-            /** @description If the expand option `driver` is used, returns the Atlassian account ID of the driver. */
-            readonly driver?: string;
+            /** @description The Atlassian account ID of the version driver. Optional when creating or updating a version. If the expand option `driver` is used, returns the Atlassian account ID of the driver. */
+            driver?: string;
             /**
              * @description Use [expand](em>#expansion) to include additional information about version in the response. This parameter accepts a comma-separated list. Expand options include:
              *
@@ -26303,7 +25926,7 @@ export interface components {
         /** @description A webhook. */
         Webhook: {
             /** @description The Jira events that trigger the webhook. */
-            events: ("jira:issue_created" | "jira:issue_updated" | "jira:issue_deleted" | "comment_created" | "comment_updated" | "comment_deleted" | "issue_property_set" | "issue_property_deleted")[];
+            events: ("jira:issue_created" | "jira:issue_updated" | "jira:issue_deleted" | "comment_created" | "comment_updated" | "comment_deleted" | "issue_property_set" | "issue_property_deleted" | "sprint_created" | "sprint_updated" | "sprint_closed" | "sprint_deleted" | "sprint_started" | "jira:version_released" | "jira:version_unreleased" | "jira:version_created" | "jira:version_moved" | "jira:version_updated" | "jira:version_merged" | "jira:version_deleted")[];
             /**
              * Format: int64
              * @description The date after which the webhook is no longer sent. Use [Extend webhook life](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-webhooks/#api-rest-api-3-webhook-refresh-put) to extend the date.
@@ -26326,7 +25949,7 @@ export interface components {
         /** @description A list of webhooks. */
         WebhookDetails: {
             /** @description The Jira events that trigger the webhook. */
-            events: ("jira:issue_created" | "jira:issue_updated" | "jira:issue_deleted" | "comment_created" | "comment_updated" | "comment_deleted" | "issue_property_set" | "issue_property_deleted")[];
+            events: ("jira:issue_created" | "jira:issue_updated" | "jira:issue_deleted" | "comment_created" | "comment_updated" | "comment_deleted" | "issue_property_set" | "issue_property_deleted" | "sprint_created" | "sprint_updated" | "sprint_closed" | "sprint_deleted" | "sprint_started" | "jira:version_released" | "jira:version_unreleased" | "jira:version_created" | "jira:version_moved" | "jira:version_updated" | "jira:version_merged" | "jira:version_deleted")[];
             /** @description A list of field IDs. When the issue changelog contains any of the fields, the webhook `jira:issue_updated` is sent. If this parameter is not present, the app is notified about all field updates. */
             fieldIdsFilter?: string[];
             /** @description A list of issue property keys. A change of those issue properties triggers the `issue_property_set` or `issue_property_deleted` webhooks. If this parameter is not present, the app is notified about all issue property updates. */
@@ -26360,6 +25983,7 @@ export interface components {
         WorkTypeParameters: {
             description?: string;
             isRequired: boolean;
+            rendererType?: string;
             /** Format: int64 */
             workTypeId: number;
         };
@@ -26392,12 +26016,9 @@ export interface components {
              */
             updated?: string;
         };
-        /** @description The list of status mappings. */
         WorkflowAssociationStatusMapping: {
-            /** @description The ID of the status in the new workflow. */
-            newStatusId: string;
-            /** @description The ID of the status in the old workflow that isn't present in the new workflow. */
-            oldStatusId: string;
+            newStatusId?: string;
+            oldStatusId?: string;
         };
         WorkflowCapabilities: {
             /** @description The Connect provided ecosystem rules available. */
@@ -26549,17 +26170,10 @@ export interface components {
             statuses?: components["schemas"]["WorkflowDocumentStatusDTO"][];
             workflows?: components["schemas"]["WorkflowDocumentDTO"][];
         };
-        /** @description The classic workflow identifiers. */
-        WorkflowIDs: {
-            /** @description The entity ID of the workflow. */
-            entityId?: string;
-            /** @description The name of the workflow. */
-            name: string;
-        };
         /** @description Properties that identify a workflow. */
         WorkflowId: {
-            /** @description Whether the workflow is in the draft state. */
-            draft: boolean;
+            /** @description **Deprecated:** Whether the workflow is in the draft state. The 'draft' parameter will be removed from this API on [November 2, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3147). */
+            draft?: boolean;
             /** @description The name of the workflow. */
             name: string;
         };
@@ -26878,6 +26492,11 @@ export interface components {
             };
             /** @description The name of the workflow scheme */
             name?: string;
+            /**
+             * @description The strategy to use if there is a conflict with another workflow scheme
+             * @enum {string}
+             */
+            onConflict?: "FAIL" | "USE" | "NEW";
             pcri?: components["schemas"]["ProjectCreateResourceIdentifier"];
         };
         /** @description An associated workflow scheme and project. */
@@ -26886,6 +26505,23 @@ export interface components {
             projectId: string;
             /** @description The ID of the workflow scheme. If the workflow scheme ID is `null`, the operation assigns the default workflow scheme. */
             workflowSchemeId?: string;
+        };
+        /** @description Request to switch a project's workflow scheme */
+        WorkflowSchemeProjectSwitchBean: {
+            /** @description The mappings for migrating issues from old statuses to new statuses when switching from one workflow scheme to another. This field is required if any statuses in the current project's workflows would no longer exist in the target workflow scheme. Each mapping defines how to update issues from an old status to the corresponding new status in the issue’s new workflow. */
+            mappingsByIssueTypeOverride?: components["schemas"]["MappingsByIssueTypeOverride"][];
+            /**
+             * @description The ID of the project to switch the workflow scheme for
+             * @example 10001
+             */
+            projectId?: string;
+            /**
+             * @description The ID of the target workflow scheme to switch to
+             * @example 10002
+             */
+            targetSchemeId?: string;
+        } & {
+            [key: string]: unknown;
         };
         /** @description Projects using the workflow scheme. */
         WorkflowSchemeProjectUsageDTO: {
@@ -27073,7 +26709,7 @@ export interface components {
         WorkflowStatusUpdate: {
             /** @description The description of the status. */
             description?: string;
-            /** @description The ID of the status. */
+            /** @description The ID of the status. When reusing an existing status, this field should be provided. */
             id?: string;
             /** @description The name of the status. */
             name: string;
@@ -27082,7 +26718,7 @@ export interface components {
              * @enum {string}
              */
             statusCategory: "TODO" | "IN_PROGRESS" | "DONE";
-            /** @description The reference of the status. */
+            /** @description The reference of the status. If adding a new status to a team-managed workflow, this must be a UUID (for company-managed a UUID is not needed). */
             statusReference: string;
         } & {
             [key: string]: unknown;
@@ -27250,6 +26886,8 @@ export interface components {
         };
         /** @description The details about a workflow validation error. */
         WorkflowValidationError: {
+            /** @description Additional details about the validation error. */
+            additionalDetails?: string;
             /** @description An error code. */
             code?: string;
             elementReference?: components["schemas"]["WorkflowElementReference"];
@@ -27669,6 +27307,8 @@ export interface operations {
             query?: {
                 /** @description Whether to generate a changelog for this update. */
                 generateChangelog?: boolean;
+                /** @description Whether to generate app events for this update. Suppresses Forge, Connect, OAuth 2.0, and admin-configured webhooks (registered via the Jira admin UI). Note: Suppressing events means that "issue updated" events will not be emitted for your app or any other apps installed in Jira. This may cause other apps to retain stale data for the updated field, resulting in potentially confusing behaviour. We do not recommend using this flag in a Marketplace app as it may result in incompatibilities with other apps that depend on up-to-date issue data. */
+                generateAppEvents?: boolean;
             };
             header?: never;
             path?: never;
@@ -27890,6 +27530,8 @@ export interface operations {
             query?: {
                 /** @description Whether to generate a changelog for this update. */
                 generateChangelog?: boolean;
+                /** @description Whether to generate app events for this update. Suppresses Forge, Connect, OAuth 2.0, and admin-configured webhooks (registered via the Jira admin UI). Note: Suppressing events means that "issue updated" events will not be emitted for your app or any other apps installed in Jira. This may cause other apps to retain stale data for the updated field, resulting in potentially confusing behaviour. We do not recommend using this flag in a Marketplace app as it may result in incompatibilities with other apps that depend on up-to-date issue data. */
+                generateAppEvents?: boolean;
             };
             header?: never;
             path: {
@@ -29936,7 +29578,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"description":"Field Association Scheme test description","id":1000,"isDefault":false,"links":{"associations":"rest/api/3/config/fieldschemes/10000/associations","projects":"rest/api/3/config/fieldschemes/10000/projects"},"matchedFilters":{"projectIds":[10001,10002],"query":"query"},"name":"Field Association Scheme test name"} */
+                    /** @example {"description":"Field Association Scheme test description","fieldsCount":5,"id":1000,"isDefault":false,"links":{"associations":"rest/api/3/config/fieldschemes/10000/fields","projects":"rest/api/3/config/fieldschemes/10000/projects"},"matchedFilters":{"projectIds":[10001,10002],"query":"query"},"name":"Field Association Scheme test name"} */
                     "application/json": components["schemas"]["PageBean2GetFieldAssociationSchemeResponse"];
                 };
             };
@@ -30004,7 +29646,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"description":"Field association scheme description","id":10000,"links":{"associations":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/associations","projects":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/projects"},"name":"Field association scheme name"} */
+                    /** @example {"description":"Field association scheme description","id":10000,"links":{"associations":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/fields","projects":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/projects"},"name":"Field association scheme name"} */
                     "application/json": components["schemas"]["CreateFieldAssociationSchemeResponse"];
                 };
             };
@@ -30250,7 +29892,8 @@ export interface operations {
                  *         {
                  *           "parameters": {
                  *             "description": "Field description",
-                 *             "isRequired": true
+                 *             "isRequired": true,
+                 *             "rendererType": "atlassian-wiki-renderer"
                  *           },
                  *           "schemeIds": [
                  *             10000,
@@ -30260,6 +29903,7 @@ export interface operations {
                  *             {
                  *               "description": "Description for Bug",
                  *               "isRequired": false,
+                 *               "rendererType": "jira-text-renderer",
                  *               "workTypeId": 10002
                  *             }
                  *           ]
@@ -30279,6 +29923,7 @@ export interface operations {
                  *             {
                  *               "description": "Description for Task",
                  *               "isRequired": true,
+                 *               "rendererType": "atlassian-wiki-renderer",
                  *               "workTypeId": 10003
                  *             }
                  *           ]
@@ -30620,7 +30265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"description":"This is a field association scheme","id":"123","isDefault":false,"links":{"associations":"rest/api/3/config/fieldschemes/10000/associations","projects":"rest/api/3/config/fieldschemes/10000/projects"},"name":"Scheme"} */
+                    /** @example {"description":"This is a field association scheme","fieldsCount":5,"id":"123","isDefault":false,"links":{"associations":"rest/api/3/config/fieldschemes/10000/fields","projects":"rest/api/3/config/fieldschemes/10000/projects"},"name":"Scheme"} */
                     "application/json": components["schemas"]["GetFieldAssociationSchemeByIdResponse"];
                 };
             };
@@ -30672,7 +30317,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"description":"Field association scheme description","id":10000,"links":{"associations":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/associations","projects":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/projects"},"name":"Field association scheme name"} */
+                    /** @example {"description":"Field association scheme description","id":10000,"links":{"associations":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/fields","projects":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/projects"},"name":"Field association scheme name"} */
                     "application/json": components["schemas"]["UpdateFieldAssociationSchemeResponse"];
                 };
             };
@@ -30783,6 +30428,77 @@ export interface operations {
             };
         };
     };
+    cloneFieldAssociationScheme: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The ID of the source field association scheme to clone from */
+                id: number;
+            };
+            cookie?: never;
+        };
+        /** @description The request containing the name and description for the new scheme */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "description": "Field association scheme description",
+                 *       "name": "Field association scheme name"
+                 *     }
+                 */
+                "application/json": components["schemas"]["CreateFieldAssociationSchemeRequest"];
+            };
+        };
+        responses: {
+            /** @description Returned if the clone was successful. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"description":"Field association scheme description","id":10000,"links":{"associations":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/fields","projects":"{BASE_API_URL}/rest/api/2/config/fieldschemes/9/projects"},"name":"Field association scheme name"} */
+                    "application/json": components["schemas"]["CreateFieldAssociationSchemeResponse"];
+                };
+            };
+            /** @description Returned if the request is invalid. If request is malformed, returns a collection of errors. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollections"];
+                };
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Returned if the user does not have the required permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Returned if the feature flag is disabled or the source scheme ID is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     searchFieldAssociationSchemeFields: {
         parameters: {
             query?: {
@@ -30808,7 +30524,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"allowedOperations":["REMOVE","CHANGE_REQUIRED","CHANGE_DESCRIPTION"],"fieldId":"customfield_10000","parameters":{"description":"text","isRequired":true},"restrictedToWorkTypes":["1","2"],"workTypeParameters":[{"description":"text","isRequired":true,"workTypeId":"1"},{"description":"textarea","isRequired":false,"workTypeId":"2"}]} */
+                    /** @example {"allowedOperations":["REMOVE","CHANGE_REQUIRED","CHANGE_DESCRIPTION"],"fieldId":"customfield_10000","parameters":{"description":"text","isRequired":true,"rendererType":"atlassian-wiki-renderer"},"restrictedToWorkTypes":["1","2"],"workTypeParameters":[{"description":"text","isRequired":true,"rendererType":"jira-text-renderer","workTypeId":"1"},{"description":"textarea","isRequired":false,"rendererType":"atlassian-wiki-renderer","workTypeId":"2"}]} */
                     "application/json": components["schemas"]["PageBean2FieldAssociationSchemeFieldSearchResult"];
                 };
             };
@@ -30870,7 +30586,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"fieldId":"customfield_10000","parameters":{"description":"Teams field","isRequired":true},"workTypeParameters":[{"description":"Teams field","isRequired":false,"workTypeId":10010}]} */
+                    /** @example {"fieldId":"customfield_10000","parameters":{"description":"Teams field","isRequired":true,"rendererType":"atlassian-wiki-renderer"},"workTypeParameters":[{"description":"Teams field","isRequired":false,"rendererType":"jira-text-renderer","workTypeId":10010}]} */
                     "application/json": components["schemas"]["GetFieldAssociationParametersResponse"];
                 };
             };
@@ -33128,6 +32844,56 @@ export interface operations {
                     /** @example {"errorMessages":["The custom field was not found."],"errors":{}} */
                     "application/json": unknown;
                 };
+            };
+        };
+    };
+    getFieldProjectAssociations: {
+        parameters: {
+            query?: {
+                /** @description The index of the first item to return in a page of results (page offset). */
+                startAt?: number;
+                /** @description The maximum number of items to return per page. */
+                maxResults?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The ID of the field, for example `customfield_10000`. */
+                fieldId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returned if the request is successful. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"isLast":false,"maxResults":50,"startAt":0,"total":2,"values":[{"projectId":"10010"},{"projectId":"10020"}]} */
+                    "application/json": components["schemas"]["PageBeanFieldProjectAssociation"];
+                };
+            };
+            /** @description Returned if the request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the user does not have the necessary permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -37069,6 +36835,58 @@ export interface operations {
             };
         };
     };
+    bulkPinUnpinProjectsAsync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Forge module ID and the list of projects with pin or unpin action. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForgePanelProjectPinRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted. Returns the task ID for polling progress. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForgePanelProjectPinAsyncResponse"];
+                };
+            };
+            /** @description Returned if the request body is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollection"];
+                };
+            };
+            /** @description Returned if the user does not have permission to administer Jira. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollection"];
+                };
+            };
+            /** @description Returned if the task could not be submitted (server error). */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollection"];
+                };
+            };
+        };
+    };
     getGroup: {
         parameters: {
             query?: {
@@ -37506,6 +37324,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Returned if rate limiting is being enforced. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     findGroups: {
@@ -37568,6 +37393,8 @@ export interface operations {
                 caseInsensitive?: boolean;
                 /** @description Whether Connect app users and groups should be excluded from the search results. If an invalid value is provided, the default value is used. */
                 excludeConnectAddons?: boolean;
+                /** @description Whether AI Agents should be included in the search results. If an invalid value is provided, the default value is used. */
+                includeAiAgents?: boolean;
             };
             header?: never;
             path?: never;
@@ -38631,6 +38458,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorCollection"];
                 };
             };
+            /** @description Returned if another bulk update on the same issues is already in progress. Retry the request later. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollection"];
+                };
+            };
         };
     };
     bulkSetIssuePropertiesByIssue: {
@@ -38698,6 +38534,15 @@ export interface operations {
             };
             /** @description Return if the user does not have the necessary permission. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorCollection"];
+                };
+            };
+            /** @description Returned if another bulk update on the same issues is already in progress. Retry the request later. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -39169,7 +39014,7 @@ export interface operations {
              *
              *      *  the request body is missing.
              *      *  the user does not have the necessary permission to edit one or more fields.
-             *      *  the request includes one or more fields that are not found or are not associated with the issue's edit screen.
+             *      *  the request includes one or more fields that don't exist or aren't associated with the project and issue type.
              *      *  the request includes an invalid transition.
              */
             400: {
@@ -40132,14 +39977,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Returned if the request is successful. */
+            /** @description Returned if the request is successful. A single RemoteIssueLink will be returned when specifying `globalId`, otherwise an array of RemoteIssueLink is returned. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     /** @example [{"application":{"name":"My Acme Tracker","type":"com.acme.tracker"},"globalId":"system=http://www.mycompany.com/support&id=1","id":10000,"object":{"icon":{"title":"Support Ticket","url16x16":"http://www.mycompany.com/support/ticket.png"},"status":{"icon":{"link":"http://www.mycompany.com/support?id=1&details=closed","title":"Case Closed","url16x16":"http://www.mycompany.com/support/resolved.png"},"resolved":true},"summary":"Customer support issue","title":"TSTSUP-111","url":"http://www.mycompany.com/support?id=1"},"relationship":"causes","self":"https://your-domain.atlassian.net/rest/api/issue/MKY-1/remotelink/10000"},{"application":{"name":"My Acme Tester","type":"com.acme.tester"},"globalId":"system=http://www.anothercompany.com/tester&id=1234","id":10001,"object":{"icon":{"title":"Test Case","url16x16":"http://www.anothercompany.com/tester/images/testcase.gif"},"status":{"icon":{"link":"http://www.anothercompany.com/tester/person?accountId=5b10a2844c20165700ede21g","title":"Tested by Mia Krystof","url16x16":"http://www.anothercompany.com/tester/images/person/mia.gif"},"resolved":false},"summary":"Test that the submit button saves the item","title":"Test Case #1234","url":"http://www.anothercompany.com/tester/testcase/1234"},"relationship":"is tested by","self":"https://your-domain.atlassian.net/rest/api/issue/MKY-1/remotelink/10001"}] */
-                    "application/json": components["schemas"]["RemoteIssueLink"];
+                    "application/json": components["schemas"]["RemoteIssueLink"][] | components["schemas"]["RemoteIssueLink"];
                 };
             };
             /** @description Returned if the request is invalid. */
@@ -44564,7 +44409,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Returned if the request is to delete the default issue type scheme. */
+            /** @description Returned if the request is to delete the default issue type scheme or if the scheme is associated with a project */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -48849,7 +48694,7 @@ export interface operations {
                 /**
                  * @example {
                  *       "description": "My priority description",
-                 *       "iconUrl": "images/icons/priorities/major.png",
+                 *       "iconUrl": "/images/icons/priorities/major.png",
                  *       "name": "My new priority",
                  *       "statusColor": "#ABCDEF"
                  *     }
@@ -49137,7 +48982,7 @@ export interface operations {
                 /**
                  * @example {
                  *       "description": "My updated priority description",
-                 *       "iconUrl": "images/icons/priorities/minor.png",
+                 *       "iconUrl": "/images/icons/priorities/minor.png",
                  *       "name": "My updated priority",
                  *       "statusColor": "#123456"
                  *     }
@@ -50717,6 +50562,44 @@ export interface operations {
             };
         };
     };
+    getProjectClassificationConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The project ID or project key (case-sensitive). */
+                projectIdOrKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returned if the request is successful. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"classificationLevels":[{"id":"ari:cloud:platform::classification-tag/5bfa70f7-4af1-44f5-9e12-1ce185f15a38","status":"published","name":"Restricted","rank":1,"description":"Data we hold that would be very damaging and would cause loss of trust with customers and present legal risk if mishandled","guideline":"Access to data must be restricted to only individuals who need access in order to perform their job duties.","color":"RED"}],"containerOverride":"ANY","defaultClassificationLevel":{"id":"ari:cloud:platform::classification-tag/5bfa70f7-4af1-44f5-9e12-1ce185f15a38","status":"published","name":"Restricted","rank":1,"description":"Data we hold that would be very damaging and would cause loss of trust with customers and present legal risk if mishandled","guideline":"Access to data must be restricted to only individuals who need access in order to perform their job duties.","color":"RED"},"organizationClassificationLevel":{"id":"ari:cloud:platform::classification-tag/a82d653e-1035-4aa2-b9de-4265511fd487","status":"published","name":"Confidential","rank":2,"description":"Data we hold that would likely be damaging and could cause loss of trust with our customers if mishandled","guideline":"Data should be encrypted at rest and in transit.","color":"BLUE"}} */
+                    "application/json": unknown;
+                };
+            };
+            /** @description Returned if the user does not have the necessary permission. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the project is not found or the feature is disabled. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getDefaultProjectClassification: {
         parameters: {
             query?: never;
@@ -50735,7 +50618,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"classification":{"id":"ari:cloud:platform::classification-tag/5bfa70f7-4af1-44f5-9e12-1ce185f15a38","status":"published","name":"Restricted","rank":1,"description":"Data we hold that would be very damaging and would cause loss of trust with customers and present legal risk if mishandled","guideline":"Access to data must be restricted to only individuals who need access in order to perform their job duties.","color":"RED"}} */
+                    /** @example {"classification":{"id":"ari:cloud:platform::classification-tag/5bfa70f7-4af1-44f5-9e12-1ce185f15a38","status":"published","name":"Restricted","rank":1,"description":"Data we hold that would be very damaging and would cause loss of trust with customers and present legal risk if mishandled","guideline":"Access to data must be restricted to only individuals who need access in order to perform their job duties.","guidelineADF":"{\"version\":1,\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Access to data must be restricted to only individuals who need access in order to perform their job duties.\"}]}]}","color":"RED"}} */
                     "application/json": unknown;
                 };
             };
@@ -51691,7 +51574,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example [{"self":"https://your-domain.atlassian.net/rest/api/3/project/MKY/role/10360","name":"Developers","id":10360,"description":"A project role that represents developers in a project","admin":false,"default":true,"roleConfigurable":true,"translatedName":"Developers"}] */
+                    /** @example [{"self":"https://your-domain.atlassian.net/rest/api/3/project/MKY/role/10360","name":"Developers","id":10360,"description":"A project role that represents developers in a project","admin":false,"default":true,"roleConfigurable":true,"translatedName":"Developers","type":"DEFAULT"}] */
                     "application/json": components["schemas"]["ProjectRoleDetails"][];
                 };
             };
@@ -54357,7 +54240,9 @@ export interface operations {
     };
     addScreenTabField: {
         parameters: {
-            query?: never;
+            query?: {
+                skipFieldAssociation?: boolean;
+            };
             header?: never;
             path: {
                 /** @description The ID of the screen. */
@@ -55745,6 +55630,8 @@ export interface operations {
                 searchString?: string;
                 /** @description Category of the status to filter by. The supported values are: `TODO`, `IN_PROGRESS`, and `DONE`. */
                 statusCategory?: string;
+                /** @description Whether to include global statuses (scope = null, not tied to any project) in the response. Defaults to false. Only relevant for project scoped queries. */
+                includeGlobalStatuses?: boolean;
             };
             header?: never;
             path?: never;
@@ -56070,7 +55957,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"isLast":true,"maxResults":100,"startAt":0,"total":3,"values":[{"id":"d7dbda8a-6239-4b63-8e13-a5ef975c8e61","name":"Reveal Story Points","description":"Reveals Story Points field when any Sprint is selected.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d7dbda8a-6239-4b63-8e13-a5ef975c8e61","data":"{field: 'Story Points', config: {hidden: false}}","contexts":[{"id":"1533537a-bda3-4ac6-8481-846128cd9ef4","projectId":"10000","issueTypeId":"10000","viewType":"GIC","isAvailable":true},{"id":"c016fefa-6eb3-40c9-8596-4c4ef273e67c","projectId":"10000","issueTypeId":"10001","viewType":"IssueView","isAvailable":true},{"id":"1016defa-7ew3-40c5-8696-4c1efg73e67s","projectId":"10000","issueTypeId":"10002","viewType":"IssueTransition","isAvailable":true}]},{"id":"e4fe8db5-f82f-416b-a3aa-b260b55da577","name":"Set Assignee","description":"Sets the Assignee field automatically.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/e4fe8db5-f82f-416b-a3aa-b260b55da577","contexts":[{"id":"8b3740f9-8780-4958-8228-69dcfbda11d9","projectId":"10000","issueTypeId":"10000","viewType":"GIC","isAvailable":true}]},{"id":"1453f993-79ce-4389-a36d-eb72d5c85dd6","name":"Hide Labels","description":"Hides Labels if any component is provided.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/1453f993-79ce-4389-a36d-eb72d5c85dd6","contexts":[]},{"id":"d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff","name":"Wildcard example","description":"This context is applied to all issue types","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff","contexts":[{"id":"521f2181-5d5e-46ea-9fc9-871bbf245b8b","projectId":"10000","issueTypeId":null,"viewType":"GIC","isAvailable":true}]}]} */
+                    /** @example {"isLast":true,"maxResults":100,"startAt":0,"total":3,"values":[{"id":"d7dbda8a-6239-4b63-8e13-a5ef975c8e61","name":"Reveal Story Points","description":"Reveals Story Points field when any Sprint is selected.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d7dbda8a-6239-4b63-8e13-a5ef975c8e61","data":"{field: 'Story Points', config: {hidden: false}}","contexts":[{"id":"1533537a-bda3-4ac6-8481-846128cd9ef4","projectId":"10000","issueTypeId":"10000","viewType":"GIC","isAvailable":true},{"id":"c016fefa-6eb3-40c9-8596-4c4ef273e67c","projectId":"10000","issueTypeId":"10001","viewType":"IssueView","isAvailable":true},{"id":"1016defa-7ew3-40c5-8696-4c1efg73e67s","projectId":"10000","issueTypeId":"10002","viewType":"IssueTransition","isAvailable":true}]},{"id":"e4fe8db5-f82f-416b-a3aa-b260b55da577","name":"Set Assignee","description":"Sets the Assignee field automatically.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/e4fe8db5-f82f-416b-a3aa-b260b55da577","contexts":[{"id":"8b3740f9-8780-4958-8228-69dcfbda11d9","projectId":"10000","issueTypeId":"10000","viewType":"GIC","isAvailable":true}]},{"id":"d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff","name":"Wildcard example","description":"This context is applied to all issue types","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff","contexts":[{"id":"521f2181-5d5e-46ea-9fc9-871bbf245b8b","projectId":"10000","issueTypeId":null,"viewType":"GIC","isAvailable":true}]},{"id":"1453f993-79ce-4389-a36d-eb72d5c85dd6","name":"JSM Context","description":"JSM context doesn't support wildcards.","self":"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/1453f993-79ce-4389-a36d-eb72d5c85dd6","contexts":[{"id":"521f2181-8780-4958-9fc9-871bbf245b8b","projectId":null,"portalId":"5","issueTypeId":null,"requestTypeId":"100","viewType":"JSMRequestCreate","isAvailable":true}]}]} */
                     "application/json": components["schemas"]["PageBeanUiModificationDetails"];
                 };
             };
@@ -56129,6 +56016,13 @@ export interface operations {
                  *           "issueTypeId": "10003",
                  *           "projectId": "10000",
                  *           "viewType": null
+                 *         },
+                 *         {
+                 *           "issueTypeId": null,
+                 *           "portalId": "1",
+                 *           "projectId": null,
+                 *           "requestTypeId": "10",
+                 *           "viewType": "JSMRequestCreate"
                  *         }
                  *       ],
                  *       "data": "{field: 'Story Points', config: {hidden: false}}",
@@ -56171,7 +56065,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Returned if a project or an issue type in the context are not found. */
+            /** @description Returned if a project, issue type, portal, or request type in the context are not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -56213,6 +56107,13 @@ export interface operations {
                  *           "issueTypeId": "10002",
                  *           "projectId": "10000",
                  *           "viewType": "IssueTransition"
+                 *         },
+                 *         {
+                 *           "issueTypeId": null,
+                 *           "portalId": "5",
+                 *           "projectId": null,
+                 *           "requestTypeId": "100",
+                 *           "viewType": "JSMRequestCreate"
                  *         }
                  *       ],
                  *       "data": "{field: 'Story Points', config: {hidden: true}}",
@@ -56253,7 +56154,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Returned if the UI modification, a project or an issue type in the context are not found. */
+            /** @description Returned if the UI modification, a project, issue type, portal, or request type in the context are not found. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -56816,7 +56717,7 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description Returned if the request is invalid or the number of licensed users is exceeded. */
+            /** @description Returned if the request is invalid, the user already exists but does not have access to jira, or the number of licensed users is exceeded. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -56984,6 +56885,8 @@ export interface operations {
                 /** @description The ID of the transition. */
                 actionDescriptorId?: number;
                 recommend?: boolean;
+                accountType?: string[];
+                appType?: string[];
             };
             header?: never;
             path?: never;
@@ -58107,6 +58010,7 @@ export interface operations {
                 startAt?: number;
                 /** @description The maximum number of items to return (limited to 1000). */
                 maxResults?: number;
+                expand?: string;
             };
             header?: never;
             path?: never;
@@ -58154,6 +58058,7 @@ export interface operations {
                 startAt?: number;
                 /** @description The maximum number of items to return (limited to 1000). */
                 maxResults?: number;
+                expand?: string;
             };
             header?: never;
             path?: never;
@@ -59169,199 +59074,6 @@ export interface operations {
             };
         };
     };
-    getAllWorkflows: {
-        parameters: {
-            query?: {
-                /** @description The name of the workflow to be returned. Only one workflow can be specified. */
-                workflowName?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Returned if the request is successful. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example [{"default":true,"description":"A classic Jira workflow","lastModifiedDate":"01-01-2011","lastModifiedUser":"admin","lastModifiedUserAccountId":"5b10a2844c20165700ede21g","name":"classic workflow","steps":5}] */
-                    "application/json": components["schemas"]["DeprecatedWorkflow"][];
-                };
-            };
-            /** @description Returned if the user does not have the necessary permission. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    createWorkflow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description The workflow details. */
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "description": "This is a workflow used for Stories and Tasks",
-                 *       "name": "Workflow 1",
-                 *       "statuses": [
-                 *         {
-                 *           "id": "1",
-                 *           "properties": {
-                 *             "jira.issue.editable": "false"
-                 *           }
-                 *         },
-                 *         {
-                 *           "id": "2"
-                 *         },
-                 *         {
-                 *           "id": "3"
-                 *         }
-                 *       ],
-                 *       "transitions": [
-                 *         {
-                 *           "from": [],
-                 *           "name": "Created",
-                 *           "to": "1",
-                 *           "type": "initial"
-                 *         },
-                 *         {
-                 *           "from": [
-                 *             "1"
-                 *           ],
-                 *           "name": "In progress",
-                 *           "properties": {
-                 *             "custom-property": "custom-value"
-                 *           },
-                 *           "rules": {
-                 *             "conditions": {
-                 *               "conditions": [
-                 *                 {
-                 *                   "type": "RemoteOnlyCondition"
-                 *                 },
-                 *                 {
-                 *                   "configuration": {
-                 *                     "groups": [
-                 *                       "developers",
-                 *                       "qa-testers"
-                 *                     ]
-                 *                   },
-                 *                   "type": "UserInAnyGroupCondition"
-                 *                 }
-                 *               ],
-                 *               "operator": "AND"
-                 *             },
-                 *             "postFunctions": [
-                 *               {
-                 *                 "type": "AssignToCurrentUserFunction"
-                 *               }
-                 *             ]
-                 *           },
-                 *           "screen": {
-                 *             "id": "10001"
-                 *           },
-                 *           "to": "2",
-                 *           "type": "directed"
-                 *         },
-                 *         {
-                 *           "name": "Completed",
-                 *           "rules": {
-                 *             "postFunctions": [
-                 *               {
-                 *                 "configuration": {
-                 *                   "fieldId": "assignee"
-                 *                 },
-                 *                 "type": "ClearFieldValuePostFunction"
-                 *               }
-                 *             ],
-                 *             "validators": [
-                 *               {
-                 *                 "configuration": {
-                 *                   "parentStatuses": [
-                 *                     {
-                 *                       "id": "3"
-                 *                     }
-                 *                   ]
-                 *                 },
-                 *                 "type": "ParentStatusValidator"
-                 *               },
-                 *               {
-                 *                 "configuration": {
-                 *                   "permissionKey": "ADMINISTER_PROJECTS"
-                 *                 },
-                 *                 "type": "PermissionValidator"
-                 *               }
-                 *             ]
-                 *           },
-                 *           "to": "3",
-                 *           "type": "global"
-                 *         }
-                 *       ]
-                 *     }
-                 */
-                "application/json": components["schemas"]["CreateWorkflowDetails"];
-            };
-        };
-        responses: {
-            /** @description Returned if the workflow is created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"entityId":"d7178e8d-bf6c-4c0c-9e90-758a0b965b67","name":"Workflow 1"} */
-                    "application/json": components["schemas"]["WorkflowIDs"];
-                };
-            };
-            /** @description Returned if the request is not valid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"errorMessages":["The request body parameters are missing."],"errors":{}} */
-                    "application/json": unknown;
-                };
-            };
-            /** @description Returned if the authentication credentials are incorrect or missing. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the user does not have the required permissions. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"errorMessages":["Only Jira administrators can access the workflow configuration."],"errors":{}} */
-                    "application/json": unknown;
-                };
-            };
-            /** @description Returned if one or more statuses is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"errorMessages":["Status with ID 10000 was not found"],"errors":{}} */
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
     readWorkflowFromHistory: {
         parameters: {
             query?: never;
@@ -59473,7 +59185,7 @@ export interface operations {
                 workflowNames?: string[];
                 /** @description The list of `tags` to filter by. */
                 withTags?: string[];
-                /** @description Whether draft or published workflows are returned. If not provided, both workflow types are returned. */
+                /** @description **Deprecated:** Whether draft or published workflows are returned. If not provided, both workflow types are returned. The 'draft' parameter will be removed from this API on [November 2, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3147). */
                 draft?: boolean;
                 /** @description Use [expand](#expansion) to include additional information in the response. This parameter accepts `transition`, which, for each rule, returns information about the transition the rule is assigned to. */
                 expand?: string;
@@ -60240,10 +59952,7 @@ export interface operations {
     };
     readWorkflows: {
         parameters: {
-            query?: {
-                /** @description Return the new field `approvalConfiguration` instead of the deprecated status properties for approval configuration. */
-                useApprovalConfiguration?: boolean;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -60640,7 +60349,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"errors":[{"code":"NON_UNIQUE_STATUS_NAME","elementReference":{"statusReference":"1f0443ff-47e4-4306-9c26-0af696059a43"},"level":"ERROR","message":"You must use a unique status name.","type":"STATUS"}]} */
+                    /** @example {"errors":[{"additionalDetails":"Additional details about the error message.","code":"NON_UNIQUE_STATUS_NAME","elementReference":{"statusReference":"1f0443ff-47e4-4306-9c26-0af696059a43"},"level":"ERROR","message":"You must use a unique status name.","type":"STATUS"}]} */
                     "application/json": components["schemas"]["WorkflowValidationErrorList"];
                 };
             };
@@ -60765,6 +60474,8 @@ export interface operations {
                 scope?: string;
                 /** @description Filters active and inactive workflows. */
                 isActive?: boolean;
+                /** @description The ID of the project to filter the workflows by. Only workflows associated with the given project are returned. */
+                projectId?: number;
             };
             header?: never;
             path?: never;
@@ -61147,7 +60858,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    /** @example {"errors":[{"code":"NON_UNIQUE_STATUS_NAME","elementReference":{"statusReference":"1f0443ff-47e4-4306-9c26-0af696059a43"},"level":"ERROR","message":"You must use a unique status name.","type":"STATUS"}]} */
+                    /** @example {"errors":[{"additionalDetails":"Additional details about the error message.","code":"NON_UNIQUE_STATUS_NAME","elementReference":{"statusReference":"1f0443ff-47e4-4306-9c26-0af696059a43"},"level":"ERROR","message":"You must use a unique status name.","type":"STATUS"}]} */
                     "application/json": components["schemas"]["WorkflowValidationErrorList"];
                 };
             };
@@ -61377,6 +61088,89 @@ export interface operations {
                 };
                 content: {
                     /** @example {"errorMessages":["The workflow scheme was not found."],"errors":{}} */
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    switchWorkflowSchemeForProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The request containing project ID, target scheme ID, and any issue type mappings. */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "mappingsByIssueTypeOverride": [
+                 *         {
+                 *           "issueTypeId": "10000",
+                 *           "statusMappings": [
+                 *             {
+                 *               "newStatusId": "10003",
+                 *               "oldStatusId": "3"
+                 *             },
+                 *             {
+                 *               "newStatusId": "10009",
+                 *               "oldStatusId": "10"
+                 *             }
+                 *           ]
+                 *         },
+                 *         {
+                 *           "issueTypeId": "10011",
+                 *           "statusMappings": [
+                 *             {
+                 *               "newStatusId": "10003",
+                 *               "oldStatusId": "3"
+                 *             },
+                 *             {
+                 *               "newStatusId": "10002",
+                 *               "oldStatusId": "10003"
+                 *             }
+                 *           ]
+                 *         }
+                 *       ],
+                 *       "projectId": "10001",
+                 *       "targetSchemeId": "10002"
+                 *     }
+                 */
+                "application/json": components["schemas"]["WorkflowSchemeProjectSwitchBean"];
+            };
+        };
+        responses: {
+            /** @description Returned if the request is successful and the task has been started. */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProgressBeanObject"];
+                };
+            };
+            /** @description Returned if the request is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing, or the caller doesn't have permissions to perform the operation. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if a conflicting task is already running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"errorMessages":["Another task is currently running, please try again later."],"errors":{"conflictingTaskId":"10000"}} */
                     "application/json": unknown;
                 };
             };
@@ -63500,6 +63294,21 @@ export interface operations {
                     "application/json": components["schemas"]["OperationMessage"];
                 };
             };
+            /** @description Returned if the property key is reserved and read-only. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "The property key is reserved and cannot be created or updated.",
+                     *       "statusCode": 403
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
         };
     };
     "AddonPropertiesResource.deleteAddonProperty_delete": {
@@ -63548,6 +63357,21 @@ export interface operations {
                      * @example {
                      *       "message": "Access to this resource must be authenticated as an app.",
                      *       "statusCode": 401
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
+            /** @description Returned if the property key is reserved and read-only. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "The property key is reserved and cannot be deleted.",
+                     *       "statusCode": 403
                      *     }
                      */
                     "application/json": components["schemas"]["OperationMessage"];
@@ -63921,6 +63745,145 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "ConnectToForgeMigrationFetchTaskResource.fetchMigrationTask_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The key of the Connect app that contains the Jira issue field being migrated.
+                 * @example com.example.app
+                 */
+                connectKey: string;
+                /**
+                 * @description The module key of the Connect issue field being migrated.
+                 * @example my-custom-field
+                 */
+                jiraIssueFieldsKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returned if the request is successful and a migration task is found. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskProgress"];
+                };
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Access to this resource must be authenticated as an app.",
+                     *       "statusCode": 401
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
+            /**
+             * @description Returned if:
+             *     * no migrated Forge module with the given key is found.
+             *     * no ongoing migration task exists for the custom field.
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "No ongoing migration task for the custom field.",
+                     *       "statusCode": 404
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
+        };
+    };
+    "ConnectToForgeMigrationTaskSubmissionResource.submitTask_post": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The key of the Connect app that contains the Jira issue field being migrated.
+                 * @example com.example.app
+                 */
+                connectKey: string;
+                /**
+                 * @description The module key of the Connect issue field being migrated.
+                 * @example my-custom-field
+                 */
+                jiraIssueFieldsKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returned if the migration task was submitted successfully. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Access to this resource must be authenticated as an app.",
+                     *       "statusCode": 401
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
+            /** @description Returned if no migrated Forge module with the given key is found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "No migrated Forge module with given key is found.",
+                     *       "statusCode": 404
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
+            };
+            /** @description Returned if a migration task is already in progress for the field. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Failed to trigger migration task because of already in progress task for the field.",
+                     *       "statusCode": 409
+                     *     }
+                     */
+                    "application/json": components["schemas"]["OperationMessage"];
+                };
             };
         };
     };

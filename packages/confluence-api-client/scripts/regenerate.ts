@@ -12,7 +12,6 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
-import * as Stdio from "effect/Stdio"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -157,10 +156,6 @@ const generateTypes = (
     }
   })
 
-const readArgv: Effect.Effect<ReadonlyArray<string>, never, Stdio.Stdio> = Stdio.Stdio.pipe(
-  Effect.flatMap((stdio) => stdio.args)
-)
-
 const checkOnly = Options.boolean("check").pipe(
   Options.withDescription("Check only, exit 1 if outdated"),
   Options.withDefault(false)
@@ -245,10 +240,7 @@ const cli = Command.run(regenerate, {
   version: pkg.version
 })
 
-Effect.gen(function*() {
-  const argv = yield* readArgv
-  yield* cli(argv)
-}).pipe(
+cli.pipe(
   Effect.provide(NodeHttpClient.layerFetch),
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain
