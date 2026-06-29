@@ -9,20 +9,22 @@ The `@knpkv` package collection is a workspace of focused command-line tools and
 - Confluence page synchronization between Atlassian Cloud and local Markdown.
 - AWS CodeCommit pull request browsing, export, and update workflows.
 - Jira-backed Clockify timers and reconciliation.
+- Unified Atlassian OAuth profile diagnostics and repair.
 - Bundled Codex and Claude agent skills for the CLIs.
 
 The docs are organized around the real command surface exposed by each package. Start with the guide if you are choosing a tool, then use the product pages as command references.
 
 ## First Decision
 
-| Need                                                        | Start with                       |
-| ----------------------------------------------------------- | -------------------------------- |
-| Export Jira issues or inspect release versions              | [Jira](/jira/)                   |
-| Clone, pull, edit, and push Confluence pages as Markdown    | [Confluence](/confluence/)       |
-| Review or export CodeCommit pull requests                   | [CodeCommit](/codecommit/)       |
-| Track time from Jira issues into Clockify                   | [Jira Clockify](/jira-clockify/) |
-| Install agent-facing commands for Codex or Claude           | [Agent Skills](/agent-skills/)   |
-| Understand command naming, JSON output, and mutation safety | [Conventions](/conventions/)     |
+| Need                                                        | Start with                                 |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| Export Jira issues or inspect release versions              | [Jira](/jira/)                             |
+| Clone, pull, edit, and push Confluence pages as Markdown    | [Confluence](/confluence/)                 |
+| Review or export CodeCommit pull requests                   | [CodeCommit](/codecommit/)                 |
+| Track time from Jira issues into Clockify                   | [Jira Clockify](/jira-clockify/)           |
+| Inspect or repair Jira/Confluence OAuth profile state       | [Atlassian Profiles](/atlassian-profiles/) |
+| Install agent-facing commands for Codex or Claude           | [Agent Skills](/agent-skills/)             |
+| Understand command naming, JSON output, and mutation safety | [Conventions](/conventions/)               |
 
 ## Repository Shape
 
@@ -37,7 +39,7 @@ packages/
   jira-api-client/          Effect Jira Cloud REST client
   confluence-api-client/    Effect Confluence Cloud REST client
   clockify-api-client/      Effect Clockify REST client
-  atlassian-common/         OAuth, config, AST, serializers
+  atlassian-common/         OAuth, profiles, config, AST, serializers
   agent-skills/             shared skill installer
   docs/                     this Starlight site
 ```

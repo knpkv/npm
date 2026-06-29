@@ -64,3 +64,22 @@ export {
   setActiveProfile,
   setActiveProfileBySelector
 } from "./AuthProfiles.js"
+
+// Unified profile manager
+export {
+  ATLASSIAN_TOOLS,
+  type AtlassianToolDefinition,
+  CONFLUENCE_REQUIRED_SCOPES,
+  inspectAllToolProfiles,
+  inspectToolProfiles,
+  JIRA_REQUIRED_SCOPES,
+  migrateLegacyProfiles,
+  MissingOAuthConfigError,
+  missingScopes,
+  ProfileNotFoundError,
+  type ProfileTokenStatus,
+  refreshActiveProfiles,
+  tokenScopes,
+  type ToolProfileStatus,
+  useProfileForAllTools
+} from "./ProfileManager.js"

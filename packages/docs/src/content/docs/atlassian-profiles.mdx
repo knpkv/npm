@@ -1,0 +1,76 @@
+---
+title: Atlassian Profiles
+description: Unified Jira, Confluence, and Jira Clockify OAuth profile management.
+---
+
+The `atlassian` binary is provided by `@knpkv/atlassian-common` and gives Jira, Confluence, and Jira Clockify a shared profile-management view.
+
+Use it when you need to see which Atlassian account/site each tool is using, switch matching profiles across tools, diagnose expired tokens or missing scopes, refresh expired OAuth tokens, or migrate older single-profile `auth.json` files into `profiles.json` storage.
+
+## Install And Build
+
+Published installs expose the binary as `atlassian` from `@knpkv/atlassian-common`.
+
+Inside this workspace:
+
+```bash
+pnpm --filter @knpkv/atlassian-common build
+node packages/atlassian-common/dist/bin.js profiles list
+```
+
+The package build marks `dist/bin.js` executable.
+
+## Profile Commands
+
+```bash
+atlassian profiles list
+atlassian profiles use <profile>
+atlassian profiles doctor
+atlassian profiles migrate
+atlassian auth refresh
+```
+
+`<profile>` accepts the same selector style as the product CLIs: profile ID, profile name, site URL, cloud ID, or account ID.
+
+## What Each Command Does
+
+| Command                            | Class       | Behavior                                                                                                                 |
+| ---------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `atlassian profiles list`          | Read-only   | Shows the active profile, token status, site, and scope status for Jira CLI, Confluence to Markdown, and Jira Clockify.  |
+| `atlassian profiles use <profile>` | Local write | Switches matching profiles in each existing auth store; fails if the selector is not found in any auth store.            |
+| `atlassian profiles doctor`        | Read-only   | Lists profile status and prints re-login or refresh suggestions for missing profiles, expired tokens, or missing scopes. |
+| `atlassian profiles migrate`       | Local write | Converts legacy single-profile `auth.json` files into shared `profiles.json` files where a profile store does not exist. |
+| `atlassian auth refresh`           | Local write | Refreshes expired active OAuth tokens and fails when an expired store is missing matching OAuth client configuration.    |
+
+Jira Clockify uses Jira OAuth through the `jira-cli` auth store. The unified output shows this as an auth-store relationship instead of creating a separate Jira Clockify token store.
+
+## Required Scopes
+
+The doctor checks scopes against each tool's needs.
+
+| Tool                       | Required scopes                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Jira CLI and Jira Clockify | `read:jira-work`, `write:jira-work`, `manage:jira-project`, `read:jira-user`, `read:me`, `offline_access` |
+| Confluence to Markdown     | `read:page:confluence`, `write:page:confluence`, `delete:page:confluence`, `read:me`, `offline_access`    |
+
+When scopes are missing, re-run the relevant product login after updating the OAuth app permissions in Atlassian Developer Console.
+
+## Recommended Workflow
+
+1. Run `atlassian profiles doctor` before cross-tool work.
+2. If a legacy install is detected, run `atlassian profiles migrate`.
+3. Use `atlassian profiles use <profile>` to select the same account/site wherever that profile already exists; a missing selector fails instead of silently keeping the old active profile.
+4. Run `atlassian auth refresh` when tokens are expired.
+5. Re-login with `jira auth login`, `confluence auth login`, or `jcf auth jira login` if the doctor reports missing scopes or an unrefreshable token.
+
+## Local State
+
+The manager reads the shared XDG Atlassian config tree:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/auth.json
+${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/oauth.json
+${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/profiles.json
+```
+
+The auth stores currently inspected are `jira-cli` and `confluence-to-markdown`; Jira Clockify is reported as a consumer of `jira-cli` auth.

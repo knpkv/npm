@@ -5,7 +5,7 @@ description: Jira-backed Clockify timer commands.
 
 Use the `jcf` binary to track Clockify time against Jira issues. The package is `@knpkv/jira-clockify`.
 
-`jcf` combines Jira OAuth, Clockify API-key auth, local defaults, a TUI, timer commands, and reconciliation between Clockify entries and Jira worklogs.
+`jcf` combines Jira OAuth, Clockify API-key auth, local defaults, a TUI, timer commands, and reconciliation between Clockify entries and Jira worklogs. Jira OAuth is read from the `jira-cli` auth store, so `atlassian profiles doctor` shows `jcf` as a consumer of the Jira CLI profile.
 
 ## Runtime
 
@@ -34,6 +34,13 @@ Clockify API key:
 jcf auth clockify setup
 jcf auth clockify status
 jcf auth status
+```
+
+For cross-tool profile diagnostics and token refresh, use:
+
+```bash
+atlassian profiles doctor
+atlassian auth refresh
 ```
 
 Clockify setup validates the API key against `/v1/user`, lists available workspaces, and stores the selected workspace in `~/.jcf/clockify.json`.

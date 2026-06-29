@@ -12,7 +12,8 @@ export default defineConfig({
             { label: "Overview", link: "/" },
             { label: "Guide", link: "/guide/" },
             { label: "Conventions", link: "/conventions/" },
-            { label: "Migration", link: "/migration/" }
+            { label: "Migration", link: "/migration/" },
+            { label: "Atlassian Profiles", link: "/atlassian-profiles/" }
           ]
         },
         {
