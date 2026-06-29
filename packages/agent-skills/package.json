@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/agent-skills",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Installer for @knpkv agent skills",
   "license": "MIT",
   "author": "knpkv",
