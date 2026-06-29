@@ -57,7 +57,7 @@ Known dry-run commands:
 
 ## Authentication
 
-Atlassian CLIs support OAuth commands:
+Atlassian CLIs support OAuth commands and can be inspected together with the unified `atlassian` profile manager:
 
 ```bash
 jira auth create
@@ -69,7 +69,15 @@ confluence auth create
 confluence auth configure
 confluence auth login
 confluence auth status
+
+atlassian profiles list
+atlassian profiles doctor
+atlassian profiles use <profile>
+atlassian profiles migrate
+atlassian auth refresh
 ```
+
+`atlassian profiles use <profile>` only switches profiles already present in each tool auth store; it does not copy OAuth tokens across stores. Jira Clockify consumes the `jira-cli` auth store, so unified output reports that relationship.
 
 Confluence also accepts legacy token environment variables before falling back to OAuth:
 

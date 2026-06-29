@@ -22,9 +22,18 @@ jcf timer start PROJ-123 --ago 15m
 | `confluence`   | `@knpkv/confluence-to-markdown` | Sync Confluence pages to local Markdown                 | `confluence auth status`         |
 | `codecommit`   | `@knpkv/codecommit`             | Browse, list, create, update, and export CodeCommit PRs | `codecommit tui`                 |
 | `jcf`          | `@knpkv/jira-clockify`          | Track Clockify time against Jira issues                 | `jcf auth status`                |
+| `atlassian`    | `@knpkv/atlassian-common`       | Inspect and repair shared Atlassian OAuth profiles      | `atlassian profiles doctor`      |
 | `knpkv-skills` | `@knpkv/agent-skills`           | Install bundled agent skills                            | `knpkv-skills install --dry-run` |
 
 ## Typical Workflows
+
+### Check Atlassian Profiles Across Tools
+
+1. Run `atlassian profiles doctor` to see the active Jira, Confluence, and Jira Clockify profile state.
+2. Run `atlassian profiles migrate` if the doctor finds legacy single-profile `auth.json` files.
+3. Switch matching existing profiles with `atlassian profiles use <profile>`.
+4. Refresh expired active tokens with `atlassian auth refresh`.
+5. Re-login with the product CLI when scopes are missing.
 
 ### Export Jira Release Context
 

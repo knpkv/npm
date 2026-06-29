@@ -7,13 +7,14 @@ The package collection contains product CLIs, generated API clients, shared Atla
 
 ## Product CLIs
 
-| Package                         | Binary         | Purpose                                                 | Docs                             |
-| ------------------------------- | -------------- | ------------------------------------------------------- | -------------------------------- |
-| `@knpkv/jira-cli`               | `jira`         | Export Jira issues and manage project versions.         | [Jira](/jira/)                   |
-| `@knpkv/confluence-to-markdown` | `confluence`   | Sync Confluence Cloud pages to local Markdown.          | [Confluence](/confluence/)       |
-| `@knpkv/codecommit`             | `codecommit`   | TUI, web launcher, and CLI commands for CodeCommit PRs. | [CodeCommit](/codecommit/)       |
-| `@knpkv/jira-clockify`          | `jcf`          | Jira-backed Clockify timer and reconciliation tool.     | [Jira Clockify](/jira-clockify/) |
-| `@knpkv/agent-skills`           | `knpkv-skills` | Shared installer for bundled Codex and Claude skills.   | [Agent Skills](/agent-skills/)   |
+| Package                         | Binary         | Purpose                                                 | Docs                                       |
+| ------------------------------- | -------------- | ------------------------------------------------------- | ------------------------------------------ |
+| `@knpkv/jira-cli`               | `jira`         | Export Jira issues and manage project versions.         | [Jira](/jira/)                             |
+| `@knpkv/confluence-to-markdown` | `confluence`   | Sync Confluence Cloud pages to local Markdown.          | [Confluence](/confluence/)                 |
+| `@knpkv/codecommit`             | `codecommit`   | TUI, web launcher, and CLI commands for CodeCommit PRs. | [CodeCommit](/codecommit/)                 |
+| `@knpkv/jira-clockify`          | `jcf`          | Jira-backed Clockify timer and reconciliation tool.     | [Jira Clockify](/jira-clockify/)           |
+| `@knpkv/agent-skills`           | `knpkv-skills` | Shared installer for bundled Codex and Claude skills.   | [Agent Skills](/agent-skills/)             |
+| `@knpkv/atlassian-common`       | `atlassian`    | Unified Atlassian OAuth profile diagnostics and repair. | [Atlassian Profiles](/atlassian-profiles/) |
 
 ## API Clients
 
@@ -51,21 +52,21 @@ Effect.runPromise(program.pipe(Effect.provide(JiraApiClient.layer), Effect.provi
 
 ## Shared Libraries
 
-| Package                   | Purpose                                                                                                                 |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token storage, AST nodes, and Markdown serialization.                |
-| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services. |
-| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                               |
+| Package                   | Purpose                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token/profile storage, profile-manager CLI, AST nodes, and Markdown serialization. |
+| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services.               |
+| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                                             |
 
 ## Local State By Package
 
-| Package                             | Local state                                                                                        |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `@knpkv/atlassian-common` consumers | `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<tool>/auth.json` and `oauth.json`.                   |
-| `@knpkv/confluence-to-markdown`     | `.confluence/config.json`, `.confluence/docs`, workspace Git metadata, and Confluence OAuth files. |
-| `@knpkv/codecommit-core`            | `~/.codecommit/config.json` and `~/.codecommit/cache.db`.                                          |
-| `@knpkv/jira-clockify`              | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                     |
-| `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                |
+| Package                             | Local state                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `@knpkv/atlassian-common` consumers | `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/auth.json`, `oauth.json`, and `profiles.json`. |
+| `@knpkv/confluence-to-markdown`     | `.confluence/config.json`, `.confluence/docs`, workspace Git metadata, and Confluence OAuth files.       |
+| `@knpkv/codecommit-core`            | `~/.codecommit/config.json` and `~/.codecommit/cache.db`.                                                |
+| `@knpkv/jira-clockify`              | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                           |
+| `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                      |
 
 ## Documentation Surfaces
 
