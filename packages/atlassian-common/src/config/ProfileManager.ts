@@ -169,6 +169,12 @@ export const inspectAllToolProfiles = (
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
 ) => Effect.forEach(tools, inspectToolProfiles)
 
+/**
+ * Switch matching existing profiles across auth stores.
+ *
+ * Fails when the selector is not present in any store so callers do not
+ * mistake an unchanged profile list for a successful switch.
+ */
 export const useProfileForAllTools = (
   selector: string,
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
@@ -196,6 +202,12 @@ export const useProfileForAllTools = (
     return yield* inspectAllToolProfiles(tools)
   })
 
+/**
+ * Persist legacy single-token auth files into shared profile stores.
+ *
+ * Supports both XDG Atlassian auth files and tool-specific legacy paths such
+ * as Confluence's historical `~/.confluence/auth.json`.
+ */
 export const migrateLegacyProfiles = (
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
 ): Effect.Effect<
@@ -224,6 +236,12 @@ export const migrateLegacyProfiles = (
     return yield* inspectAllToolProfiles(tools)
   })
 
+/**
+ * Refresh expired active profiles.
+ *
+ * Fails when an expired profile lacks OAuth client configuration so refresh
+ * callers cannot report success while leaving a token expired.
+ */
 export const refreshActiveProfiles = (
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
 ): Effect.Effect<
