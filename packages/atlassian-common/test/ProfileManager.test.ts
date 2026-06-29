@@ -8,8 +8,11 @@ import {
   HomeDirectoryLive,
   inspectAllToolProfiles,
   migrateLegacyProfiles,
+  MissingOAuthConfigError,
   missingScopes,
   type OAuthToken,
+  ProfileNotFoundError,
+  refreshActiveProfiles,
   saveProfileToken,
   useProfileForAllTools
 } from "../src/config/index.js"
@@ -33,10 +36,10 @@ const sharedStoreTools: ReadonlyArray<AtlassianToolDefinition> = [
 const fsError = (method: string) =>
   Effect.fail(new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" }))
 
-const makeToken = (n: number, scope = "read:me offline_access"): OAuthToken => ({
+const makeToken = (n: number, scope = "read:me offline_access", expiresAt = Date.now() + 60_000): OAuthToken => ({
   access_token: `access-${n}`,
   refresh_token: `refresh-${n}`,
-  expires_at: Date.now() + 60_000,
+  expires_at: expiresAt,
   scope,
   cloud_id: `cloud-${n}`,
   site_url: `https://site-${n}.atlassian.net`,
@@ -118,7 +121,7 @@ describe("ProfileManager", () => {
     expect(result.map((status) => status.activeProfile?.id)).toEqual(["account-1@cloud-1", "account-1@cloud-1"])
   })
 
-  it("migrates legacy auth.json tokens into profile stores", async () => {
+  it("migrates XDG legacy auth.json tokens into profile stores", async () => {
     const token = makeToken(3)
     const { result, store } = await run(
       Effect.gen(function*() {
@@ -133,5 +136,53 @@ describe("ProfileManager", () => {
 
     expect(result[0]!.activeProfile?.id).toBe("account-3@cloud-3")
     expect(JSON.parse(store[`${TEST_HOME}/.config/atlassian/tool-a/profiles.json`]!)["profiles"]).toHaveLength(1)
+  })
+
+  it("migrates tool-specific legacy auth.json tokens into profile stores", async () => {
+    const token = makeToken(4)
+    const legacyTools: ReadonlyArray<AtlassianToolDefinition> = [
+      {
+        toolName: "legacy-tool",
+        legacyAuthPath: [".legacy-tool", "auth.json"],
+        label: "Legacy Tool",
+        loginHint: "legacy login",
+        requiredScopes: ["read:me"]
+      }
+    ]
+    const { result, store } = await run(
+      Effect.gen(function*() {
+        yield* FileSystem.FileSystem.pipe(
+          Effect.flatMap((fs) =>
+            fs.writeFileString(`${TEST_HOME}/.legacy-tool/auth.json`, JSON.stringify(token, null, 2))
+          )
+        )
+        return yield* migrateLegacyProfiles(legacyTools)
+      })
+    )
+
+    expect(result[0]!.activeProfile?.id).toBe("account-4@cloud-4")
+    expect(JSON.parse(store[`${TEST_HOME}/.config/atlassian/legacy-tool/profiles.json`]!)["profiles"]).toHaveLength(1)
+  })
+
+  it("fails when selecting a missing profile", async () => {
+    await expect(
+      run(
+        Effect.gen(function*() {
+          yield* saveProfileToken("tool-a", makeToken(1))
+          return yield* useProfileForAllTools("missing", tools)
+        })
+      )
+    ).rejects.toBeInstanceOf(ProfileNotFoundError)
+  })
+
+  it("fails expired-token refresh when OAuth config is missing", async () => {
+    await expect(
+      run(
+        Effect.gen(function*() {
+          yield* saveProfileToken("tool-a", makeToken(1, "read:me offline_access", Date.now() - 1_000))
+          return yield* refreshActiveProfiles([tools[0]!])
+        })
+      )
+    ).rejects.toBeInstanceOf(MissingOAuthConfigError)
   })
 })

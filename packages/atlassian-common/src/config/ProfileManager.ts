@@ -3,21 +3,24 @@
  *
  * @module
  */
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import type * as Path from "effect/Path"
+import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import * as Schema from "effect/Schema"
 import type { HttpClient } from "effect/unstable/http"
 import type { OAuthError } from "../auth/OAuthErrors.js"
 import { refreshToken } from "../auth/OAuthOperations.js"
 import { type AuthProfile, findProfile, loadProfiles, saveProfiles, saveProfileToken } from "./AuthProfiles.js"
-import { getProfilesPath, type HomeDirectoryError, type HomeDirectoryTag } from "./ConfigPaths.js"
-import type { OAuthToken } from "./OAuthSchemas.js"
-import { type FileSystemError, isTokenExpired, loadOAuthConfig } from "./TokenStorage.js"
+import { getProfilesPath, type HomeDirectoryError, HomeDirectoryTag } from "./ConfigPaths.js"
+import { type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
+import { FileSystemError, isTokenExpired, loadOAuthConfig } from "./TokenStorage.js"
 
 export interface AtlassianToolDefinition {
   readonly toolName: string
   readonly authStoreName?: string
+  readonly legacyAuthPath?: ReadonlyArray<string>
   readonly label: string
   readonly loginHint: string
   readonly requiredScopes: ReadonlyArray<string>
@@ -49,6 +52,7 @@ export const ATLASSIAN_TOOLS = [
   },
   {
     toolName: "confluence-to-markdown",
+    legacyAuthPath: [".confluence", "auth.json"],
     label: "Confluence to Markdown",
     loginHint: "confluence auth login",
     requiredScopes: CONFLUENCE_REQUIRED_SCOPES
@@ -63,6 +67,23 @@ export const ATLASSIAN_TOOLS = [
 ] as const satisfies ReadonlyArray<AtlassianToolDefinition>
 
 export type ProfileTokenStatus = "valid" | "expired"
+
+export class ProfileNotFoundError extends Data.TaggedError("ProfileNotFoundError")<{
+  readonly selector: string
+}> {
+  override get message(): string {
+    return `Profile not found: ${this.selector}`
+  }
+}
+
+export class MissingOAuthConfigError extends Data.TaggedError("MissingOAuthConfigError")<{
+  readonly authStoreName: string
+  readonly profileId: string
+}> {
+  override get message(): string {
+    return `Cannot refresh expired profile ${this.profileId}: missing OAuth config for ${this.authStoreName}`
+  }
+}
 
 export interface ToolProfileStatus {
   readonly tool: AtlassianToolDefinition
@@ -80,6 +101,35 @@ const uniqueAuthTools = (tools: ReadonlyArray<AtlassianToolDefinition>): Readonl
   tools.filter((tool, index) =>
     tools.findIndex((candidate) => authStoreName(candidate) === authStoreName(tool)) === index
   )
+
+const loadLegacyToken = (
+  tool: AtlassianToolDefinition
+): Effect.Effect<
+  OAuthToken | null,
+  FileSystemError | HomeDirectoryError,
+  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
+> =>
+  Effect.gen(function*() {
+    if (!tool.legacyAuthPath) return null
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const homeDirectory = yield* HomeDirectoryTag
+    const home = yield* homeDirectory.get()
+    const authPath = path.join(home, ...tool.legacyAuthPath)
+    const exists = yield* fs.exists(authPath).pipe(Effect.catch(() => Effect.succeed(false)))
+    if (!exists) return null
+    const content = yield* fs.readFileString(authPath).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "read", path: authPath, cause }))
+    )
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(content) as unknown,
+      catch: (cause) => cause
+    }).pipe(Effect.catch(() => Effect.succeed(null)))
+    if (parsed === null) return null
+    return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
+      Effect.catch(() => Effect.succeed(null))
+    )
+  })
 
 export const tokenScopes = (token: OAuthToken): ReadonlySet<string> =>
   new Set(token.scope.split(/\s+/).filter((scope: string) => scope.length > 0))
@@ -124,7 +174,7 @@ export const useProfileForAllTools = (
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
 ): Effect.Effect<
   ReadonlyArray<ToolProfileStatus>,
-  FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
+  ProfileNotFoundError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag
 > =>
   Effect.gen(function*() {
@@ -136,7 +186,7 @@ export const useProfileForAllTools = (
     ).find((profile): profile is AuthProfile =>
       profile !== null
     )
-    if (!selected) return yield* inspectAllToolProfiles(tools)
+    if (!selected) return yield* Effect.fail(new ProfileNotFoundError({ selector }))
 
     yield* Effect.forEach(stores, ([tool, store]) => {
       const matching = findProfile(store.profiles, selector) ?? findProfile(store.profiles, selected.id)
@@ -164,6 +214,11 @@ export const migrateLegacyProfiles = (
         const store = yield* loadProfiles(storeName)
         if (store.profiles.length > 0) {
           yield* saveProfiles(storeName, store)
+          return
+        }
+        const legacyToken = yield* loadLegacyToken(tool)
+        if (legacyToken !== null) {
+          yield* saveProfileToken(storeName, legacyToken)
         }
       }))
     return yield* inspectAllToolProfiles(tools)
@@ -173,7 +228,7 @@ export const refreshActiveProfiles = (
   tools: ReadonlyArray<AtlassianToolDefinition> = ATLASSIAN_TOOLS
 ): Effect.Effect<
   ReadonlyArray<ToolProfileStatus>,
-  OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
+  MissingOAuthConfigError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError,
   FileSystem.FileSystem | Path.Path | HomeDirectoryTag | HttpClient.HttpClient
 > =>
   Effect.gen(function*() {
@@ -185,7 +240,9 @@ export const refreshActiveProfiles = (
           null
         if (!active || !isTokenExpired(active.token, 0)) return
         const config = yield* loadOAuthConfig(storeName)
-        if (!config) return
+        if (!config) {
+          return yield* Effect.fail(new MissingOAuthConfigError({ authStoreName: storeName, profileId: active.id }))
+        }
         const refreshed = yield* refreshToken(active.token, config)
         yield* saveProfileToken(storeName, refreshed)
       }))

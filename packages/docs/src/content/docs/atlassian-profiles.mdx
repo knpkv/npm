@@ -37,10 +37,10 @@ atlassian auth refresh
 | Command                            | Class       | Behavior                                                                                                                 |
 | ---------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `atlassian profiles list`          | Read-only   | Shows the active profile, token status, site, and scope status for Jira CLI, Confluence to Markdown, and Jira Clockify.  |
-| `atlassian profiles use <profile>` | Local write | Switches matching profiles in each existing auth store. It does not copy OAuth tokens between unrelated tool stores.     |
+| `atlassian profiles use <profile>` | Local write | Switches matching profiles in each existing auth store; fails if the selector is not found in any auth store.            |
 | `atlassian profiles doctor`        | Read-only   | Lists profile status and prints re-login or refresh suggestions for missing profiles, expired tokens, or missing scopes. |
 | `atlassian profiles migrate`       | Local write | Converts legacy single-profile `auth.json` files into shared `profiles.json` files where a profile store does not exist. |
-| `atlassian auth refresh`           | Local write | Refreshes expired active OAuth tokens when the matching OAuth client configuration is available.                         |
+| `atlassian auth refresh`           | Local write | Refreshes expired active OAuth tokens and fails when an expired store is missing matching OAuth client configuration.    |
 
 Jira Clockify uses Jira OAuth through the `jira-cli` auth store. The unified output shows this as an auth-store relationship instead of creating a separate Jira Clockify token store.
 
@@ -59,7 +59,7 @@ When scopes are missing, re-run the relevant product login after updating the OA
 
 1. Run `atlassian profiles doctor` before cross-tool work.
 2. If a legacy install is detected, run `atlassian profiles migrate`.
-3. Use `atlassian profiles use <profile>` to select the same account/site wherever that profile already exists.
+3. Use `atlassian profiles use <profile>` to select the same account/site wherever that profile already exists; a missing selector fails instead of silently keeping the old active profile.
 4. Run `atlassian auth refresh` when tokens are expired.
 5. Re-login with `jira auth login`, `confluence auth login`, or `jcf auth jira login` if the doctor reports missing scopes or an unrefreshable token.
 
