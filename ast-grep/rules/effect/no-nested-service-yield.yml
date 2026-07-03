@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-nested-service-yield
+language: tsx
+severity: error
+message: "Bind Effect services to named variables before calling methods"
+
+rule:
+  pattern: yield* (yield* $SERVICE).$METHOD($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Nested service yields hide dependencies and make generated code harder to review.
+
+  Prefer:
+
+  const service = yield* SomeService
+  yield* service.someMethod(input)

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/javascript_rule.json
+
+id: no-direct-fetch-js
+language: javascript
+severity: error
+message: "Use @effect/platform HttpClient instead of raw fetch"
+
+rule:
+  any:
+    - pattern: fetch($$$ARGS)
+    - pattern: globalThis.fetch($$$ARGS)
+
+files:
+  - "scripts/**/*.mjs"
+
+ignores:
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  JavaScript scripts should use Effect HttpClient instead of raw fetch.

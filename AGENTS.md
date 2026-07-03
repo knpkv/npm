@@ -120,3 +120,25 @@ Recommended checks:
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 
 <!-- effect-reference:end -->
+
+## Effect Static Checks
+
+Effect-specific agent guardrails live in `ast-grep/rules/effect` and run through
+`pnpm lint:ast`. See `docs/effect-static-checks.md` before adding, weakening, or
+working around these rules.
+
+When writing Effect code:
+
+- Prefer `Context.Service` class syntax and explicit `Layer.effect` /
+  `Layer.succeed` layers.
+- Bind services before calling methods inside generators:
+  `const service = yield* SomeService`.
+- Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
+  keep failures in the typed error channel.
+- Decode untrusted JSON/body data with Schema helpers before assigning it to a
+  domain type.
+- Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
+  `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
+  Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
+  `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
+  may use host APIs only where the framework requires them.

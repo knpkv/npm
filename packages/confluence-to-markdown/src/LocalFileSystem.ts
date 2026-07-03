@@ -3,6 +3,7 @@
  *
  * @module
  */
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -184,7 +185,8 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         const serialized = serializeMarkdown(frontMatter, content)
 
         // Atomic write: write to temp file, then rename
-        const tempPath = `${filePath}.tmp.${Date.now()}`
+        const nowMs = yield* Clock.currentTimeMillis
+        const tempPath = `${filePath}.tmp.${nowMs}`
         yield* fs.writeFileString(tempPath, serialized).pipe(
           Effect.mapError((cause) => new FileSystemError({ operation: "write", path: filePath, cause }))
         )
@@ -259,7 +261,8 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         )
 
         // Atomic write: write to temp file, then rename
-        const tempPath = `${filePath}.tmp.${Date.now()}`
+        const nowMs = yield* Clock.currentTimeMillis
+        const tempPath = `${filePath}.tmp.${nowMs}`
         yield* fs.writeFileString(tempPath, content).pipe(
           Effect.mapError((cause) => new FileSystemError({ operation: "write", path: filePath, cause }))
         )
@@ -293,7 +296,8 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
         const serialized = serializeNewPageMarkdown(frontMatter, content)
 
         // Atomic write: write to temp file, then rename
-        const tempPath = `${filePath}.tmp.${Date.now()}`
+        const nowMs = yield* Clock.currentTimeMillis
+        const tempPath = `${filePath}.tmp.${nowMs}`
         yield* fs.writeFileString(tempPath, serialized).pipe(
           Effect.mapError((cause) => new FileSystemError({ operation: "write", path: filePath, cause }))
         )

@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { Console, Effect, Option, SubscriptionRef } from "effect"
+import { Clock, Console, Effect, Option, SubscriptionRef } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
@@ -49,6 +49,7 @@ export const start = Command.make(
       const cfg = yield* ConfigService
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
+      const nowMs = yield* Clock.currentTimeMillis
 
       // Resolve a backdated start, if requested. --ago wins over --since.
       let startedAt: Date | undefined
@@ -62,14 +63,14 @@ export const start = Command.make(
           yield* Console.log("--ago must be greater than zero (e.g. 15m, 1h).")
           return
         }
-        startedAt = new Date(Date.now() - secs * 1000)
+        startedAt = new Date(nowMs - secs * 1000)
       } else if (Option.isSome(since)) {
         const parsed = parseStartTime(since.value)
         if (!parsed) {
           yield* Console.log("Invalid --since. Use HH:MM (today) or an ISO timestamp.")
           return
         }
-        if (parsed.getTime() > Date.now()) {
+        if (parsed.getTime() > nowMs) {
           yield* Console.log("--since is in the future. Pick a time at or before now.")
           return
         }
@@ -81,7 +82,7 @@ export const start = Command.make(
       const currentState = yield* SubscriptionRef.get(timer.state)
       if (currentState.active && currentState.ticketKey) {
         const elapsed = currentState.startedAt
-          ? Math.floor((Date.now() - currentState.startedAt.getTime()) / 1000)
+          ? Math.floor((nowMs - currentState.startedAt.getTime()) / 1000)
           : 0
         const h = Math.floor(elapsed / 3600)
         const m = Math.floor((elapsed % 3600) / 60)
@@ -203,7 +204,7 @@ export const start = Command.make(
       )
 
       const startedSuffix = startedAt
-        ? ` (started ${formatElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000))} ago)`
+        ? ` (started ${formatElapsed(Math.floor((nowMs - startedAt.getTime()) / 1000))} ago)`
         : ""
       yield* Console.log(`Timer started: ${ticket.key} — ${ticket.summary}${startedSuffix}`)
     })

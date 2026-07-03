@@ -9,6 +9,7 @@ rule:
   any:
     - pattern: Effect.runPromise($$$ARGS)
     - pattern: Effect.runSync($$$ARGS)
+    - pattern: Effect.runFork($$$ARGS)
   inside:
     pattern: Effect.gen($$$BODY)
     stopBy: end
@@ -27,7 +28,8 @@ ignores:
   - "scratchpad/**"
 
 note: |
-  Effect.runPromise and Effect.runSync belong at process, framework, or test boundaries.
+  Effect.runPromise, Effect.runSync, and Effect.runFork belong at process,
+  framework, or test boundaries.
   Inside Effect.gen, compose with yield*:
 
   const value = yield* someEffect

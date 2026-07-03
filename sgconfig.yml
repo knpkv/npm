@@ -7,5 +7,7 @@ languageGlobs:
   tsx:
     - "**/*.ts"
     - "**/*.tsx"
+  javascript:
+    - "**/*.mjs"
 
 utilDirs: []

@@ -3,6 +3,7 @@
  *
  * @module
  */
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -64,7 +65,8 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const dir = path.dirname(filePath)
       yield* ensureDir(dir)
-      const tempPath = `${filePath}.tmp.${Date.now()}`
+      const nowMs = yield* Clock.currentTimeMillis
+      const tempPath = `${filePath}.tmp.${nowMs}`
       yield* fs.writeFileString(tempPath, content).pipe(
         Effect.mapError(mapWorkspaceError("Failed to write sync workspace file", filePath))
       )

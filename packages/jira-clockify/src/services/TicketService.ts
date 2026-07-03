@@ -16,6 +16,7 @@
 import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -120,6 +121,7 @@ export const layer = Layer.effect(
 
     const refresh = Effect.gen(function*() {
       yield* SubscriptionRef.set(ref, { ...emptyState, loading: true })
+      const now = yield* DateTime.nowAsDate
 
       const cfg = yield* config.get
       const jql = cfg.defaultJql
@@ -144,7 +146,7 @@ export const layer = Layer.effect(
         tickets,
         loading: false,
         error: null,
-        lastRefreshed: new Date()
+        lastRefreshed: now
       })
     }).pipe(
       Effect.catch((e: TicketError) => {

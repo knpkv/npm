@@ -18,6 +18,7 @@
  *
  * @module
  */
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -199,12 +200,13 @@ export const refreshToken = (
     const tokenResponse = yield* Schema.decodeUnknownEffect(TokenResponseSchema)(body).pipe(
       Effect.mapError((cause) => new OAuthError({ step: "refresh", cause }))
     )
+    const nowMs = yield* Clock.currentTimeMillis
 
     return {
       ...token,
       access_token: tokenResponse.access_token,
       refresh_token: tokenResponse.refresh_token,
-      expires_at: Date.now() + tokenResponse.expires_in * 1000,
+      expires_at: nowMs + tokenResponse.expires_in * 1000,
       scope: tokenResponse.scope
     }
   })

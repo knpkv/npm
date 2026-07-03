@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/javascript_rule.json
+
+id: no-direct-process-access-js
+language: javascript
+severity: error
+message: "Use Effect Stdio/process services instead of direct process access"
+
+rule:
+  any:
+    - pattern: process.$PROP
+    - pattern: globalThis.process.$PROP
+    - pattern: import $NAME from "node:process"
+    - pattern: import $NAME from "process"
+    - pattern: import * as $NAME from "node:process"
+    - pattern: import * as $NAME from "process"
+    - pattern: import { $$$IMPORTS } from "node:process"
+    - pattern: import { $$$IMPORTS } from "process"
+    - pattern: require("node:process")
+    - pattern: require("process")
+
+files:
+  - "scripts/**/*.mjs"
+
+ignores:
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  JavaScript scripts should use Effect Stdio for argv and NodeRuntime for exit
+  handling instead of reading process directly.

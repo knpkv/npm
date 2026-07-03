@@ -14,7 +14,7 @@
  *
  * @category Service
  */
-import { Clock, Context, Data, Effect, Layer, Option, type SubscriptionRef } from "effect"
+import { Clock, Context, Data, DateTime, Effect, Layer, Option, type SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { StatsRepo } from "../CacheService/repos/StatsRepo/index.js"
@@ -183,7 +183,10 @@ const makeStatsService = Effect.gen(function*() {
         Effect.catchCause((cause) => Effect.logWarning("StatsService.syncWeek failed", cause))
       ) as Effect.Effect<void>,
 
-    currentWeek: () => toISOWeek(new Date())
+    currentWeek: () =>
+      DateTime.now.pipe(
+        Effect.map((now) => toISOWeek(DateTime.toDateUtc(now)))
+      )
   } satisfies StatsService.Service
 })
 
@@ -201,6 +204,6 @@ export declare namespace StatsService {
   export interface Service {
     readonly getWeeklyStats: (week: string, filters: StatsRepo.Filters) => Effect.Effect<WeeklyStats>
     readonly syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>) => Effect.Effect<void>
-    readonly currentWeek: () => string
+    readonly currentWeek: () => Effect.Effect<string>
   }
 }

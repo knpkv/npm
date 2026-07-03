@@ -22,8 +22,10 @@
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -188,19 +190,21 @@ export const layer = Layer.effect(
     const ref = yield* SubscriptionRef.make<TimerState>(emptyState)
     const tagCache = new Map<string, string>()
 
-    const writeStateFile = (state: TimerState) => {
-      const file: TimerStateFile = {
-        active: state.active,
-        ticketKey: state.ticketKey,
-        summary: state.summary,
-        project: state.project,
-        startedAt: state.startedAt?.toISOString() ?? null,
-        startedAt_unix: state.startedAt ? Math.floor(state.startedAt.getTime() / 1000) : null,
-        elapsed: state.startedAt ? Math.floor((Date.now() - state.startedAt.getTime()) / 1000) : 0,
-        clockifyEntryId: state.clockifyEntryId
-      }
-      return stateWriter.write(file)
-    }
+    const writeStateFile = (state: TimerState) =>
+      Effect.gen(function*() {
+        const nowMs = yield* Clock.currentTimeMillis
+        const file: TimerStateFile = {
+          active: state.active,
+          ticketKey: state.ticketKey,
+          summary: state.summary,
+          project: state.project,
+          startedAt: state.startedAt?.toISOString() ?? null,
+          startedAt_unix: state.startedAt ? Math.floor(state.startedAt.getTime() / 1000) : null,
+          elapsed: state.startedAt ? Math.floor((nowMs - state.startedAt.getTime()) / 1000) : 0,
+          clockifyEntryId: state.clockifyEntryId
+        }
+        return yield* stateWriter.write(file)
+      })
 
     const getAuth = clockifyAuth.getConfig.pipe(
       Effect.mapError((e) => new TimerError({ message: e.message }))
@@ -319,7 +323,7 @@ export const layer = Layer.effect(
         const cfg = yield* config.get
 
         // The new entry's start (possibly backdated to correct a forgotten start).
-        const newStartedAt = options?.startedAt ?? new Date()
+        const newStartedAt = options?.startedAt ?? (yield* DateTime.nowAsDate)
 
         // Auto-stop existing timer. When backdating, close the previous entry at
         // the new start time (not now) to avoid overlapping Clockify intervals.
@@ -387,7 +391,7 @@ export const layer = Layer.effect(
         // `endAt` lets `start` close the previous entry at the new (possibly
         // backdated) start time so the two Clockify intervals never overlap.
         // Never end before the entry began.
-        const now = endAt && endAt.getTime() >= current.startedAt.getTime() ? endAt : new Date()
+        const now = endAt && endAt.getTime() >= current.startedAt.getTime() ? endAt : yield* DateTime.nowAsDate
         const durationMs = now.getTime() - current.startedAt.getTime()
         const duration = Duration.millis(durationMs)
 
@@ -458,15 +462,16 @@ export const layer = Layer.effect(
     // without ever touching the running-timer state.
     const logManual = (ticket: JiraTicket, options: LogManualOptions) =>
       Effect.gen(function*() {
+        const nowMs = yield* Clock.currentTimeMillis
         // Shared future-time guard for all backdating callers (log + stop-correction).
         // Mirrors `start --since`, which rejects future starts at the command layer.
-        if (options.start.getTime() > Date.now()) {
+        if (options.start.getTime() > nowMs) {
           return yield* Effect.fail(
             new TimerError({ message: "Start time is in the future. Pick a time at or before now." })
           )
         }
         const end = new Date(options.start.getTime() + options.durationSeconds * 1000)
-        if (end.getTime() > Date.now()) {
+        if (end.getTime() > nowMs) {
           return yield* Effect.fail(
             new TimerError({ message: "End time is in the future. Shorten the duration or pick an earlier start." })
           )
