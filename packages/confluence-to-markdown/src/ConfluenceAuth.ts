@@ -33,6 +33,7 @@ import {
   type HomeDirectoryError,
   HomeDirectoryLive,
   HomeDirectoryTag,
+  getProfilesPath,
   isTokenExpired,
   loadActiveProfile,
   loadActiveProfileToken,
@@ -141,10 +142,25 @@ const loadLegacyOAuthConfig = (): Effect.Effect<
     )
   })
 
+const profilesStoreExists = (): Effect.Effect<
+  boolean,
+  HomeDirectoryError,
+  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
+> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const profilesPath = yield* getProfilesPath(TOOL_NAME)
+    return yield* fs.exists(profilesPath).pipe(
+      Effect.catch(() => Effect.succeed(false))
+    )
+  })
+
 const loadTokenOp = () =>
   Effect.gen(function*() {
     const token = yield* loadActiveProfileToken(TOOL_NAME)
     if (token !== null) return token
+    const hasProfilesStore = yield* profilesStoreExists()
+    if (hasProfilesStore) return null
     const legacyToken = yield* loadLegacyToken()
     if (legacyToken !== null) {
       yield* saveProfileToken(TOOL_NAME, legacyToken)
