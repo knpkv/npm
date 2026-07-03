@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { Console, Effect } from "effect"
+import { Clock, Console, Effect } from "effect"
 import { Command } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { StateWriter } from "../../services/StateWriter.js"
@@ -16,6 +16,8 @@ export const statusCmd = Command.make(
     Effect.gen(function*() {
       const stateWriter = yield* StateWriter
       const state = yield* stateWriter.read
+      const nowMs = yield* Clock.currentTimeMillis
+      const nowUnix = Math.floor(nowMs / 1000)
 
       // Verify against Clockify — timer may have been stopped externally
       if (state.active) {
@@ -42,7 +44,7 @@ export const statusCmd = Command.make(
           if (running) {
             yield* stateWriter.write({
               ...state,
-              elapsed: state.startedAt_unix ? Math.floor(Date.now() / 1000) - state.startedAt_unix : 0
+              elapsed: state.startedAt_unix ? nowUnix - state.startedAt_unix : 0
             })
           }
         }
@@ -54,7 +56,7 @@ export const statusCmd = Command.make(
       }
 
       const elapsed = state.startedAt_unix
-        ? Math.floor(Date.now() / 1000) - state.startedAt_unix
+        ? nowUnix - state.startedAt_unix
         : 0
       const h = Math.floor(elapsed / 3600)
       const m = Math.floor((elapsed % 3600) / 60)

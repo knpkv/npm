@@ -4,6 +4,7 @@
  * @module
  */
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -634,13 +635,16 @@ export const layer: Layer.Layer<
 
           // Get author info
           const author = fullPage.version.authorId ? yield* getUser(fullPage.version.authorId) : undefined
+          const updatedAt = fullPage.version.createdAt
+            ? new Date(fullPage.version.createdAt)
+            : yield* DateTime.nowAsDate
 
           // Write file
           const frontMatter: PageFrontMatter = {
             pageId,
             version: fullPage.version.number,
             title: fullPage.title,
-            updated: fullPage.version.createdAt ? new Date(fullPage.version.createdAt) : new Date(),
+            updated: updatedAt,
             ...(effectiveParentId ? { parentId: effectiveParentId as PageId } : {}),
             ...(page.position !== undefined ? { position: page.position } : {}),
             contentHash,
@@ -805,13 +809,16 @@ export const layer: Layer.Layer<
           const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, createdPage.id)
           const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
           const canonicalHash = yield* hashBody(canonicalMarkdown)
+          const updatedAt = canonicalPage.version.createdAt
+            ? new Date(canonicalPage.version.createdAt)
+            : yield* DateTime.nowAsDate
 
           // Write canonical content with full front-matter
           const newFrontMatter: PageFrontMatter = {
             pageId: createdPage.id as PageId,
             version: createdPage.version.number,
             title,
-            updated: new Date(canonicalPage.version.createdAt ?? new Date().toISOString()),
+            updated: updatedAt,
             parentId: parentId as PageId,
             contentHash: canonicalHash
           }
@@ -856,12 +863,15 @@ export const layer: Layer.Layer<
         const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, fm.pageId)
         const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
         const canonicalHash = yield* hashBody(canonicalMarkdown)
+        const updatedAt = canonicalPage.version.createdAt
+          ? new Date(canonicalPage.version.createdAt)
+          : yield* DateTime.nowAsDate
 
         // Write canonical content with updated front-matter
         const newFrontMatter: PageFrontMatter = {
           ...fm,
           version: updatedPage.version.number,
-          updated: new Date(canonicalPage.version.createdAt ?? new Date().toISOString()),
+          updated: updatedAt,
           contentHash: canonicalHash
         }
         yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)

@@ -1,13 +1,16 @@
-import { constants } from "node:fs"
-import { access, cp, readFile, readdir, rm } from "node:fs/promises"
-import { join } from "node:path"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Console from "effect/Console"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as Stdio from "effect/Stdio"
 
-const mode = process.argv[2] ?? "check"
-const validModes = new Set(["check", "write"])
-
-if (!validModes.has(mode)) {
-  console.error("Usage: node scripts/sync-skills.mjs [check|write]")
-  process.exit(1)
+class SyncSkillsError extends Data.TaggedError("SyncSkillsError") {
+  get message() {
+    return this.reason
+  }
 }
 
 const roots = [
@@ -17,66 +20,81 @@ const roots = [
   ["jira", "packages/jira-cli/skills/jira"]
 ]
 
-const exists = async (path) => {
-  try {
-    await access(path, constants.F_OK)
-    return true
-  } catch {
-    return false
-  }
-}
+const validModes = new Set(["check", "write"])
 
-const collectFiles = async (dir, prefix = "") => {
-  const entries = await readdir(dir, { withFileTypes: true })
-  const files = []
-  for (const entry of entries) {
-    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`
-    const absolute = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await collectFiles(absolute, relative)))
-    } else if (entry.isFile()) {
-      files.push(relative)
+const collectFiles = (dir, prefix = "") =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const entries = yield* fs.readDirectory(dir)
+    const files = []
+    for (const entry of entries) {
+      const relative = prefix === "" ? entry : `${prefix}/${entry}`
+      const absolute = path.join(dir, entry)
+      const stat = yield* fs.stat(absolute)
+      if (stat.type === "Directory") {
+        files.push(...(yield* collectFiles(absolute, relative)))
+      } else if (stat.type === "File") {
+        files.push(relative)
+      }
+    }
+    return files.sort()
+  })
+
+const sameTree = (source, destination) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const destinationExists = yield* fs.exists(destination)
+    if (!destinationExists) return false
+    const [sourceFiles, destinationFiles] = yield* Effect.all([collectFiles(source), collectFiles(destination)])
+    if (JSON.stringify(sourceFiles) !== JSON.stringify(destinationFiles)) return false
+
+    for (const relative of sourceFiles) {
+      const [sourceContent, destinationContent] = yield* Effect.all([
+        fs.readFileString(path.join(source, relative)),
+        fs.readFileString(path.join(destination, relative))
+      ])
+      if (sourceContent !== destinationContent) return false
+    }
+
+    return true
+  })
+
+const copySkill = (source, destination) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    yield* fs.remove(destination, { force: true, recursive: true })
+    yield* fs.copy(source, destination, { overwrite: true })
+  })
+
+const program = Effect.gen(function* () {
+  const stdio = yield* Stdio.Stdio
+  const args = yield* stdio.args
+  const mode = args[0] ?? "check"
+
+  if (!validModes.has(mode)) {
+    return yield* Effect.fail(new SyncSkillsError({ reason: "Usage: node scripts/sync-skills.mjs [check|write]" }))
+  }
+
+  const outOfSync = []
+
+  for (const [skill, destination] of roots) {
+    const source = `packages/agent-skills/skills/${skill}`
+    if (mode === "write") {
+      yield* copySkill(source, destination)
+      yield* Console.log(`synced ${skill}: ${source} -> ${destination}`)
+    } else if (!(yield* sameTree(source, destination))) {
+      outOfSync.push(`${skill}: ${destination}`)
     }
   }
-  return files.sort()
-}
 
-const sameTree = async (source, destination) => {
-  if (!(await exists(destination))) return false
-  const [sourceFiles, destinationFiles] = await Promise.all([collectFiles(source), collectFiles(destination)])
-  if (JSON.stringify(sourceFiles) !== JSON.stringify(destinationFiles)) return false
-
-  for (const relative of sourceFiles) {
-    const [sourceContent, destinationContent] = await Promise.all([
-      readFile(join(source, relative)),
-      readFile(join(destination, relative))
-    ])
-    if (!sourceContent.equals(destinationContent)) return false
+  if (outOfSync.length > 0) {
+    yield* Console.error("Product-local skills are out of sync with packages/agent-skills/skills:")
+    for (const line of outOfSync) yield* Console.error(`  ${line}`)
+    yield* Console.error("Run: pnpm skills:sync")
+    return yield* Effect.fail(new SyncSkillsError({ reason: "Product-local skills are out of sync" }))
   }
+})
 
-  return true
-}
-
-const copySkill = async (source, destination) => {
-  await rm(destination, { force: true, recursive: true })
-  await cp(source, destination, { recursive: true })
-}
-
-const outOfSync = []
-
-for (const [skill, destination] of roots) {
-  const source = `packages/agent-skills/skills/${skill}`
-  if (mode === "write") {
-    await copySkill(source, destination)
-    console.log(`synced ${skill}: ${source} -> ${destination}`)
-  } else if (!(await sameTree(source, destination))) {
-    outOfSync.push(`${skill}: ${destination}`)
-  }
-}
-
-if (outOfSync.length > 0) {
-  console.error("Product-local skills are out of sync with packages/agent-skills/skills:")
-  for (const line of outOfSync) console.error(`  ${line}`)
-  console.error("Run: pnpm skills:sync")
-  process.exit(1)
-}
+NodeRuntime.runMain(program.pipe(Effect.provide(NodeServices.layer)), { disableErrorReporting: true })

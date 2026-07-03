@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-timer-api
+language: tsx
+severity: error
+message: "Use Effect Clock/Schedule/Sleep instead of raw timer APIs inside Effect code"
+
+rule:
+  any:
+    - pattern: Date.now()
+    - pattern: new Date()
+    - pattern: setTimeout($$$ARGS)
+    - pattern: setInterval($$$ARGS)
+    - pattern: clearTimeout($$$ARGS)
+    - pattern: clearInterval($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Effect code should use services for time so tests can control time and runtime
+  scheduling stays inside fibers.
+
+  Prefer:
+
+  const nowMs = yield* Clock.currentTimeMillis
+  yield* Effect.sleep("1 second")
+  yield* Effect.repeat(effect, Schedule.spaced("30 seconds"))

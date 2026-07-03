@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/javascript_rule.json
+
+id: no-direct-timer-api-js
+language: javascript
+severity: error
+message: "Use Effect Clock/Schedule/Sleep instead of raw timer APIs"
+
+rule:
+  any:
+    - pattern: Date.now()
+    - pattern: new Date()
+    - pattern: setTimeout($$$ARGS)
+    - pattern: setInterval($$$ARGS)
+    - pattern: clearTimeout($$$ARGS)
+    - pattern: clearInterval($$$ARGS)
+
+files:
+  - "scripts/**/*.mjs"
+
+ignores:
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  JavaScript scripts should use Effect Clock and scheduling APIs instead of raw
+  wall-clock or timer APIs.

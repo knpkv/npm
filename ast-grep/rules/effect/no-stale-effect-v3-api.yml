@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-stale-effect-v3-api
+language: tsx
+severity: error
+message: "Use Effect v4 APIs in this repository"
+
+rule:
+  any:
+    - pattern: Context.Tag($$$ARGS)
+    - pattern: Context.GenericTag($$$ARGS)
+    - pattern: Effect.Tag($$$ARGS)
+    - pattern: Effect.Service($$$ARGS)
+    - pattern: Effect.catchAll($$$ARGS)
+    - pattern: Effect.catchAllCause($$$ARGS)
+    - pattern: Effect.catchAllDefect($$$ARGS)
+    - pattern: Effect.catchSome($$$ARGS)
+    - pattern: Effect.catchSomeCause($$$ARGS)
+    - pattern: Effect.catchSomeDefect($$$ARGS)
+    - pattern: Effect.gen(this, $$$ARGS)
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  This repo targets Effect v4 beta idioms.
+
+  Common replacements:
+  - Context.Tag / Context.GenericTag / Effect.Tag / Effect.Service -> Context.Service
+  - Effect.catchAll -> Effect.catch
+  - Effect.catchAllCause -> Effect.catchCause
+  - Effect.catchSome -> Effect.catchFilter
+  - Effect.gen(this, ...) -> Effect.gen({ self: this }, ...)

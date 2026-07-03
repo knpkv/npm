@@ -22,7 +22,7 @@ export class UserCache extends Context.Service<
      */
     readonly getOrFetch: (
       accountId: string,
-      fetch: (accountId: string) => Effect.Effect<AtlassianUser, unknown>
+      loadUser: (accountId: string) => Effect.Effect<AtlassianUser, unknown>
     ) => Effect.Effect<AtlassianUser, unknown>
 
     /**
@@ -60,14 +60,14 @@ const make = Effect.gen(function*() {
 
   const getOrFetch = <E>(
     accountId: string,
-    fetch: (accountId: string) => Effect.Effect<AtlassianUser, E>
+    loadUser: (accountId: string) => Effect.Effect<AtlassianUser, E>
   ): Effect.Effect<AtlassianUser, E> =>
     Effect.gen(function*() {
       const cached = yield* get(accountId)
       if (cached) {
         return cached
       }
-      const user = yield* fetch(accountId)
+      const user = yield* loadUser(accountId)
       yield* put(accountId, user)
       return user
     })

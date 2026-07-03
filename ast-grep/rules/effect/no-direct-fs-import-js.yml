@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/javascript_rule.json
+
+id: no-direct-fs-import-js
+language: javascript
+severity: error
+message: "Use Effect's FileSystem service instead of direct node:fs imports"
+
+rule:
+  any:
+    - pattern: import $NAME from "node:fs"
+    - pattern: import $NAME from "fs"
+    - pattern: import $NAME from "node:fs/promises"
+    - pattern: import $NAME from "fs/promises"
+    - pattern: import * as $NAME from "node:fs"
+    - pattern: import * as $NAME from "fs"
+    - pattern: import * as $NAME from "node:fs/promises"
+    - pattern: import * as $NAME from "fs/promises"
+    - pattern: import { $$$IMPORTS } from "node:fs"
+    - pattern: import { $$$IMPORTS } from "fs"
+    - pattern: import { $$$IMPORTS } from "node:fs/promises"
+    - pattern: import { $$$IMPORTS } from "fs/promises"
+    - pattern: require("node:fs")
+    - pattern: require("fs")
+    - pattern: require("node:fs/promises")
+    - pattern: require("fs/promises")
+
+files:
+  - "scripts/**/*.mjs"
+
+ignores:
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  JavaScript scripts should use Effect FileSystem so filesystem access remains
+  testable and consistent with package code.

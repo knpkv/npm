@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-process-access
+language: tsx
+severity: error
+message: "Use Effect's process service instead of direct process access"
+
+rule:
+  any:
+    - pattern: process.$PROP
+    - pattern: globalThis.process.$PROP
+    - pattern: import $NAME from "node:process"
+    - pattern: import $NAME from "process"
+    - pattern: import * as $NAME from "node:process"
+    - pattern: import * as $NAME from "process"
+    - pattern: import { $$$IMPORTS } from "node:process"
+    - pattern: import { $$$IMPORTS } from "process"
+    - pattern: require("node:process")
+    - pattern: require("process")
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/bin.ts"
+  - "**/main.ts"
+  - "**/main.tsx"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Direct process access is hard to test and bypasses Effect runtime services.
+
+  In Effect code, use `effect/unstable/process` modules such as
+  ChildProcess, ChildProcessSpawner, or the process-specific service you need.
+  Keep process.exit and process argv/env reads at executable boundaries only.

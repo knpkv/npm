@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { Console, Duration, Effect, Option, SubscriptionRef } from "effect"
+import { Clock, Console, Duration, Effect, Option, SubscriptionRef } from "effect"
 import type { QuitError } from "effect/Terminal"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
@@ -148,6 +148,7 @@ export const stop = Command.make(
       // Correction flow: log a completed interval when no timer was ever started.
       // Reuses the same project/billable prompts as the normal stop path below.
       const runCorrection = Effect.gen(function*() {
+        const nowMs = yield* Clock.currentTimeMillis
         const proceed = yield* Prompt.select({
           message: "No active timer. Add a correction interval instead?",
           choices: [
@@ -192,7 +193,7 @@ export const stop = Command.make(
         })).trim()
         let start: Date
         if (!whenStr) {
-          start = new Date(Date.now() - durationSeconds * 1000)
+          start = new Date(nowMs - durationSeconds * 1000)
         } else {
           const parsed = parseStartTime(whenStr)
           if (!parsed) {

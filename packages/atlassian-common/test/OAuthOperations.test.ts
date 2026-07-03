@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { TestClock } from "effect/testing"
 import type { HttpClientRequest } from "effect/unstable/http"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { expect } from "vitest"
@@ -57,6 +58,8 @@ const oauthConfig: OAuthConfig = {
   clientId: "cid",
   clientSecret: "csecret"
 }
+
+const TEST_NOW = Date.parse("2026-01-01T00:00:00.000Z")
 
 const oauthToken: OAuthToken = {
   access_token: "old-access",
@@ -221,6 +224,7 @@ describe("OAuthOperations", () => {
     // Verifies grant_type=refresh_token is sent and returned token preserves cloud_id/site_url from original
     it.effect("sends refresh_token and returns updated OAuthToken", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(TEST_NOW)
         const { capturedRequests, mockClient } = createMockHttpClient([
           { status: 200, body: { ...validTokenBody, access_token: "new-access", refresh_token: "new-refresh" } }
         ])
@@ -232,7 +236,7 @@ describe("OAuthOperations", () => {
         // preserves existing fields
         expect(result.cloud_id).toBe("cloud-1")
         expect(result.site_url).toBe("https://site.atlassian.net")
-        expect(result.expires_at).toBeGreaterThan(Date.now())
+        expect(result.expires_at).toBe(TEST_NOW + validTokenBody.expires_in * 1000)
 
         const req = capturedRequests[0]!
         const body = yield* req.body._tag === "Uint8Array"

@@ -21,7 +21,7 @@
  */
 import { AwsClient, ConfigService, type Domain, type Errors } from "@knpkv/codecommit-core"
 import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Context, Effect, Layer, type Option, Stream } from "effect"
+import { Clock, Context, Effect, Layer, type Option, Stream } from "effect"
 import { type FilterPreset, matchesPreset, matchesRepoAuthor } from "./filterPresets.js"
 
 /** A single `{ profile, region }` account/region pair to scan. */
@@ -82,8 +82,9 @@ const make: Effect.Effect<
       .flatMap((a) => a.regions.map((r): FilterTarget => ({ profile: a.profile, region: r })))
   })
 
-  const collect: FilterServiceShape["collect"] = (preset, targets, opts, now = new Date()) =>
+  const collect: FilterServiceShape["collect"] = (preset, targets, opts, now) =>
     Effect.gen(function*() {
+      const effectiveNow = now ?? new Date(yield* Clock.currentTimeMillis)
       // Resolve caller identity once per profile (deduped per profile within this
       // run, not cached across runs) for presets that compare against "me".
       const callerByProfile = new Map<string, string>()
@@ -119,7 +120,8 @@ const make: Effect.Effect<
           Effect.catchIf(
             aws.getPullRequests(acct, { status: "OPEN" }).pipe(
               Stream.filter((pr) =>
-                matchesPreset(preset, pr, callerByProfile, now) && matchesRepoAuthor(pr, opts.repo, opts.author)
+                matchesPreset(preset, pr, callerByProfile, effectiveNow) &&
+                matchesRepoAuthor(pr, opts.repo, opts.author)
               ),
               Stream.runCollect,
               Effect.map((chunk) => ({ ok: Array.from(chunk), failed: null as string | null }))

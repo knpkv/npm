@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService } from "../src/services/ConfigService.js"
@@ -20,6 +21,7 @@ import { layer as timerLayer, TimerError, TimerService } from "../src/services/T
 
 const WORKSPACE_ID = "ws-1"
 const USER_ID = "user-1"
+const MANUAL_NOW = Date.parse("2025-01-01T10:00:00.000Z")
 
 const makeTicket = (overrides?: Partial<JiraTicket>): JiraTicket => ({
   key: "PROJ-123",
@@ -151,6 +153,13 @@ const MockStateWriterLayer = Layer.succeed(StateWriter, {
   })
 })
 
+const mockJiraAuthProfileMethods = {
+  getActiveProfile: () => Effect.succeed(null),
+  listProfiles: () => Effect.succeed([]),
+  switchProfile: () => Effect.succeed(null),
+  removeProfile: () => Effect.succeed(null)
+}
+
 const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   configure: () => Effect.void,
   isConfigured: () => Effect.succeed(true),
@@ -160,10 +169,7 @@ const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   getCloudId: () => Effect.succeed("cloud-1"),
   getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
   getCurrentUser: () => Effect.succeed(null),
-  getActiveProfile: () => Effect.succeed(null),
-  listProfiles: () => Effect.succeed([]),
-  switchProfile: () => Effect.succeed(null),
-  removeProfile: () => Effect.succeed(null),
+  ...mockJiraAuthProfileMethods,
   isLoggedIn: () => Effect.succeed(true)
 })
 
@@ -177,10 +183,7 @@ const MockJiraAuthLoggedOutLayer = Layer.succeed(JiraAuth, {
   getCloudId: () => Effect.succeed(""),
   getSiteUrl: () => Effect.succeed(""),
   getCurrentUser: () => Effect.succeed(null),
-  getActiveProfile: () => Effect.succeed(null),
-  listProfiles: () => Effect.succeed([]),
-  switchProfile: () => Effect.succeed(null),
-  removeProfile: () => Effect.succeed(null),
+  ...mockJiraAuthProfileMethods,
   isLoggedIn: () => Effect.succeed(false)
 })
 
@@ -514,6 +517,7 @@ describe("TimerService", () => {
     // Logging a forgotten interval writes a closed Clockify entry (start + end) and a Jira worklog
     it.effect("creates a closed Clockify entry and posts a Jira worklog", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         writtenStates = []
         cleared = false
@@ -533,6 +537,7 @@ describe("TimerService", () => {
     // A correction must never disturb the running-timer state (there was no running timer)
     it.effect("leaves timer state inactive", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         writtenStates = []
         cleared = false
@@ -546,6 +551,7 @@ describe("TimerService", () => {
     // Explicit projectId/billable options flow through to the Clockify entry
     it.effect("honours explicit projectId and billable options", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         writtenStates = []
         cleared = false
@@ -566,6 +572,7 @@ describe("TimerService", () => {
     // A failing Clockify createTimeEntry must flip clockifyLogged to false (not crash)
     it.effect("clockifyLogged is false when the Clockify entry fails", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         const svc = yield* TimerService
         const result = yield* svc.logManual(makeTicket(), {
@@ -585,6 +592,7 @@ describe("TimerService", () => {
     // A failing Jira worklog POST must flip jiraWorklogLogged to false (not crash)
     it.effect("jiraWorklogLogged is false when the Jira worklog POST fails", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         const svc = yield* TimerService
         const result = yield* svc.logManual(makeTicket(), {
@@ -599,6 +607,7 @@ describe("TimerService", () => {
     // must still post a worklog (floored), so jiraWorklogLogged stays true.
     it.effect("applies the 60s worklog floor on a sub-minute manual log", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         const svc = yield* TimerService
         const result = yield* svc.logManual(makeTicket(), {
@@ -611,9 +620,10 @@ describe("TimerService", () => {
     // Future start times are rejected by the shared guard in logManual
     it.effect("fails when the start time is in the future", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         const svc = yield* TimerService
-        const future = new Date(Date.now() + 60 * 60 * 1000)
+        const future = new Date(MANUAL_NOW + 60 * 60 * 1000)
         const error = yield* svc.logManual(makeTicket(), { start: future, durationSeconds: 600 }).pipe(Effect.flip)
         expect(error).toBeInstanceOf(TimerError)
         expect(error.message).toMatch(/future/i)
@@ -625,9 +635,10 @@ describe("TimerService", () => {
     // would receive a worklog whose end time has not happened yet.
     it.effect("fails when the manual interval would end in the future", () =>
       Effect.gen(function*() {
+        yield* TestClock.setTime(MANUAL_NOW)
         resetCaptures()
         const svc = yield* TimerService
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+        const fiveMinutesAgo = new Date(MANUAL_NOW - 5 * 60 * 1000)
         const error = yield* svc.logManual(makeTicket(), {
           start: fiveMinutesAgo,
           durationSeconds: 10 * 60
