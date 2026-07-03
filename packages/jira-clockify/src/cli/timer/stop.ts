@@ -148,7 +148,6 @@ export const stop = Command.make(
       // Correction flow: log a completed interval when no timer was ever started.
       // Reuses the same project/billable prompts as the normal stop path below.
       const runCorrection = Effect.gen(function*() {
-        const nowMs = yield* Clock.currentTimeMillis
         const proceed = yield* Prompt.select({
           message: "No active timer. Add a correction interval instead?",
           choices: [
@@ -193,6 +192,7 @@ export const stop = Command.make(
         })).trim()
         let start: Date
         if (!whenStr) {
+          const nowMs = yield* Clock.currentTimeMillis
           start = new Date(nowMs - durationSeconds * 1000)
         } else {
           const parsed = parseStartTime(whenStr)

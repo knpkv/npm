@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/confluence-to-markdown",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sync Confluence Cloud pages to local GitHub Flavored Markdown files",
   "license": "MIT",
   "author": "knpkv",
@@ -105,6 +105,7 @@
     "@atlaskit/editor-markdown-transformer": "^6.0.1",
     "@effect/platform-node": "4.0.0-beta.87",
     "@knpkv/agent-skills": "workspace:^",
+    "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/confluence-api-client": "workspace:^",
     "ajv": "^8.20.0",
     "ajv-draft-04": "^1.0.0",

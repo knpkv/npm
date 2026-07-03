@@ -114,6 +114,10 @@ const DummyConfluenceAuthLayer = Layer.succeed(
     getAccessToken: () => Effect.die("Not configured"),
     getCloudId: () => Effect.die("Not configured"),
     getCurrentUser: () => Effect.succeed(null),
+    getActiveProfile: () => Effect.succeed(null),
+    listProfiles: () => Effect.succeed([]),
+    switchProfile: () => Effect.succeed(null),
+    removeProfile: () => Effect.succeed(null),
     isLoggedIn: () => Effect.succeed(false)
   })
 )
