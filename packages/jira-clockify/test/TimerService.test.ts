@@ -153,6 +153,13 @@ const MockStateWriterLayer = Layer.succeed(StateWriter, {
   })
 })
 
+const mockJiraAuthProfileMethods = {
+  getActiveProfile: () => Effect.succeed(null),
+  listProfiles: () => Effect.succeed([]),
+  switchProfile: () => Effect.succeed(null),
+  removeProfile: () => Effect.succeed(null)
+}
+
 const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   configure: () => Effect.void,
   isConfigured: () => Effect.succeed(true),
@@ -162,6 +169,7 @@ const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   getCloudId: () => Effect.succeed("cloud-1"),
   getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
   getCurrentUser: () => Effect.succeed(null),
+  ...mockJiraAuthProfileMethods,
   isLoggedIn: () => Effect.succeed(true)
 })
 
@@ -175,6 +183,7 @@ const MockJiraAuthLoggedOutLayer = Layer.succeed(JiraAuth, {
   getCloudId: () => Effect.succeed(""),
   getSiteUrl: () => Effect.succeed(""),
   getCurrentUser: () => Effect.succeed(null),
+  ...mockJiraAuthProfileMethods,
   isLoggedIn: () => Effect.succeed(false)
 })
 
