@@ -152,6 +152,9 @@ importers:
 
   packages/atlassian-common:
     dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.87
+        version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
@@ -165,9 +168,6 @@ importers:
         specifier: ^11.0.5
         version: 11.0.5
     devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-beta.87
-        version: 4.0.0-beta.87(effect@4.0.0-beta.87)(ioredis@5.11.1)
       '@effect/vitest':
         specifier: 4.0.0-beta.87
         version: 4.0.0-beta.87(effect@4.0.0-beta.87)(vitest@4.1.9)
@@ -448,6 +448,9 @@ importers:
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
+      '@knpkv/atlassian-common':
+        specifier: workspace:*
+        version: link:../atlassian-common
       '@knpkv/confluence-api-client':
         specifier: workspace:^
         version: link:../confluence-api-client

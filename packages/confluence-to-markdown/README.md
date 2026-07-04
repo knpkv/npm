@@ -277,7 +277,7 @@ Generate API token at [Atlassian Account Settings](https://id.atlassian.com/mana
 
 ### Security Notes
 
-- OAuth credentials and profiles are stored in `~/.config/atlassian/confluence-to-markdown/` with restricted permissions (0600). Existing `~/.confluence/auth.json` and `~/.confluence/config.json` files are migrated on first use.
+- OAuth credentials and profiles are stored in `~/.config/atlassian/confluence-to-markdown/` with restricted permissions (0600). Legacy `~/.confluence/auth.json` token files are no longer migrated; run `confluence auth login` to create a profile in the shared Atlassian store. Legacy `~/.confluence/config.json` OAuth client configuration is still migrated on first use.
 - Treat these files as sensitive - do not share or commit
 - Create separate OAuth apps per developer for team projects
 - Tokens auto-refresh; if refresh fails, re-run `confluence auth login`
