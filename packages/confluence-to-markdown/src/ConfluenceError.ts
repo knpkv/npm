@@ -4,6 +4,7 @@
  * @module
  */
 import * as Data from "effect/Data"
+import * as Predicate from "effect/Predicate"
 
 /**
  * Error thrown when .confluence.json is not found.
@@ -194,7 +195,7 @@ export class AtlaskitTransformersError extends Data.TaggedError("AtlaskitTransfo
     super({
       cause: params.cause,
       message: `Atlaskit transformer failed: ${
-        params.cause instanceof Error ? params.cause.message : String(params.cause)
+        Predicate.isError(params.cause) ? params.cause.message : String(params.cause)
       }`
     })
   }
@@ -330,9 +331,7 @@ export type ConfluenceError =
  * @category Utilities
  */
 export const isConfluenceError = (error: unknown): error is ConfluenceError =>
-  typeof error === "object" &&
-  error !== null &&
-  "_tag" in error &&
+  Predicate.hasProperty(error, "_tag") &&
   [
     "ConfigNotFoundError",
     "ConfigParseError",

@@ -9,6 +9,7 @@ import { ConfluenceApiClient, ConfluenceApiConfig, type FetchClientError, toEffe
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import type { PageId } from "./Brand.js"
@@ -158,11 +159,7 @@ const rateLimitRetry = {
     Schedule.either(Schedule.spaced("30 seconds"))
   ),
   times: 3,
-  while: (error: unknown) =>
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    error._tag === "RateLimitError"
+  while: (error: unknown) => Predicate.isTagged(error, "RateLimitError")
 } as const
 
 /**

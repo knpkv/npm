@@ -35,6 +35,7 @@ import {
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
+import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
   ArrowLeftIcon,
@@ -94,6 +95,11 @@ const categoryBadgeVariant = (status: CategoryStatus) =>
 
 const categoryBadgeClass = (status: CategoryStatus) =>
   status === "positive" ? "border-green-500/30 text-green-600 dark:text-green-400" : ""
+
+const isTextInputTarget = (target: EventTarget | null): boolean => {
+  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
+  return tagName === "INPUT" || tagName === "TEXTAREA"
+}
 
 const formatRelativeDate = (dateStr: string): string => {
   const date = new Date(dateStr)
@@ -743,7 +749,7 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (isTextInputTarget(e.target)) return
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")

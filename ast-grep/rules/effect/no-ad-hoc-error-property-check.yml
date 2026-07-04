@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-ad-hoc-error-property-check
+language: tsx
+severity: error
+message: "Use Effect Predicate helpers for error property/tag checks"
+
+rule:
+  any:
+    - pattern: '"message" in $VALUE'
+    - pattern: '"_tag" in $VALUE'
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Error and defect inspection should use Effect-native predicates instead of
+  raw `in` checks.
+
+  Prefer:
+
+  Predicate.isError(value)
+  Predicate.hasProperty(value, "message")
+  Predicate.isTagged(value, "SomeError")

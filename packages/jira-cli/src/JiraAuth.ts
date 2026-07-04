@@ -55,6 +55,7 @@ import {
 } from "@knpkv/atlassian-common/config"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -228,6 +229,7 @@ export class JiraAuth extends Context.Service<
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const cryptoService = yield* Crypto.Crypto
 
   // Ref to track ongoing refresh operation to prevent concurrent refreshes
   const refreshLock = yield* Ref.make<
@@ -300,9 +302,11 @@ const make = Effect.gen(function*() {
   > =>
     Effect.gen(function*() {
       const config = yield* getConfig()
-      const state = yield* generateUUID()
-      const codeVerifier = generateCodeVerifier()
-      const codeChallenge = yield* computeCodeChallenge(codeVerifier)
+      const state = yield* generateUUID().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+      const codeVerifier = yield* generateCodeVerifier().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+      const codeChallenge = yield* computeCodeChallenge(codeVerifier).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService)
+      )
 
       const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
         Effect.provide(HttpServerFactoryLive)

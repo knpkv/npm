@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-global-this
+language: tsx
+severity: error
+message: "Do not access host globals through globalThis"
+
+rule:
+  pattern: globalThis
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Avoid `globalThis` indirection. Prefer the explicit runtime boundary or
+  Effect service for the capability being used.

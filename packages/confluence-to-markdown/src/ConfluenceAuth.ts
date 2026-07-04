@@ -30,7 +30,6 @@ import {
   deleteActiveProfile,
   deleteProfileBySelector,
   FileSystemError,
-  getProfilesPath,
   type HomeDirectoryError,
   HomeDirectoryLive,
   HomeDirectoryTag,
@@ -42,7 +41,6 @@ import {
   type OAuthConfig,
   OAuthConfigSchema,
   type OAuthToken,
-  OAuthTokenSchema,
   type OAuthUser,
   saveOAuthConfig,
   saveProfileToken,
@@ -50,6 +48,7 @@ import {
 } from "@knpkv/atlassian-common/config"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -67,7 +66,7 @@ import { startCallbackServer } from "./internal/oauthServer.js"
 import { openBrowser } from "./internal/openBrowser.js"
 
 const TOOL_NAME = "confluence-to-markdown"
-const LEGACY_DIR_NAME = ".confluence"
+const LEGACY_CONFIG_DIR_NAME = ".confluence"
 
 const TokenStorageLive = Layer.mergeAll(
   NodeFileSystem.layer,
@@ -83,12 +82,12 @@ const parseJsonOrNull = (content: string): unknown | null => {
   }
 }
 
-const getLegacyPath = (fileName: string) =>
+const getLegacyConfigPath = (fileName: string) =>
   Effect.gen(function*() {
     const homeDirectory = yield* HomeDirectoryTag
     const path = yield* Path.Path
     const home = yield* homeDirectory.get()
-    return path.join(home, LEGACY_DIR_NAME, fileName)
+    return path.join(home, LEGACY_CONFIG_DIR_NAME, fileName)
   })
 
 const readLegacyJson = (
@@ -100,7 +99,7 @@ const readLegacyJson = (
 > =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const filePath = yield* getLegacyPath(fileName)
+    const filePath = yield* getLegacyConfigPath(fileName)
     const exists = yield* fs.exists(filePath).pipe(
       Effect.catch(() => Effect.succeed(false))
     )
@@ -116,19 +115,6 @@ const readLegacyJson = (
     return parsed
   })
 
-const loadLegacyToken = (): Effect.Effect<
-  OAuthToken | null,
-  FileSystemError | HomeDirectoryError,
-  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
-> =>
-  Effect.gen(function*() {
-    const parsed = yield* readLegacyJson("auth.json")
-    if (parsed === null) return null
-    return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
-      Effect.catch(() => Effect.succeed(null))
-    )
-  })
-
 const loadLegacyOAuthConfig = (): Effect.Effect<
   OAuthConfig | null,
   FileSystemError | HomeDirectoryError,
@@ -142,31 +128,7 @@ const loadLegacyOAuthConfig = (): Effect.Effect<
     )
   })
 
-const profilesStoreExists = (): Effect.Effect<
-  boolean,
-  HomeDirectoryError,
-  FileSystem.FileSystem | Path.Path | HomeDirectoryTag
-> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const profilesPath = yield* getProfilesPath(TOOL_NAME)
-    return yield* fs.exists(profilesPath).pipe(
-      Effect.catch(() => Effect.succeed(false))
-    )
-  })
-
-const loadTokenOp = () =>
-  Effect.gen(function*() {
-    const token = yield* loadActiveProfileToken(TOOL_NAME)
-    if (token !== null) return token
-    const hasProfilesStore = yield* profilesStoreExists()
-    if (hasProfilesStore) return null
-    const legacyToken = yield* loadLegacyToken()
-    if (legacyToken !== null) {
-      yield* saveProfileToken(TOOL_NAME, legacyToken)
-    }
-    return legacyToken
-  }).pipe(Effect.provide(TokenStorageLive))
+const loadTokenOp = () => loadActiveProfileToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
 const saveTokenOp = (token: OAuthToken) => saveProfileToken(TOOL_NAME, token).pipe(Effect.provide(TokenStorageLive))
 const deleteTokenOp = () => deleteActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
 const loadOAuthConfigOp = () =>
@@ -283,6 +245,7 @@ export class ConfluenceAuth extends Context.Service<
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const cryptoService = yield* Crypto.Crypto
 
   const refreshLock = yield* Ref.make<
     Option.Option<
@@ -346,9 +309,11 @@ const make = Effect.gen(function*() {
   const login: ConfluenceAuthService["login"] = (options) =>
     Effect.gen(function*() {
       const config = yield* getConfig()
-      const state = yield* generateUUID()
-      const codeVerifier = generateCodeVerifier()
-      const codeChallenge = yield* computeCodeChallenge(codeVerifier)
+      const state = yield* generateUUID().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+      const codeVerifier = yield* generateCodeVerifier().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
+      const codeChallenge = yield* computeCodeChallenge(codeVerifier).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService)
+      )
 
       const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
         Effect.provide(HttpServerFactoryLive),
@@ -563,5 +528,5 @@ const make = Effect.gen(function*() {
 export const layer: Layer.Layer<
   ConfluenceAuth,
   never,
-  HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner
+  HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
 > = Layer.effect(ConfluenceAuth, make)

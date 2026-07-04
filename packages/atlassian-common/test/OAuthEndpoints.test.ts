@@ -1,25 +1,30 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { it as effectIt } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { describe, expect, it } from "vitest"
 import { AUTH_URL, buildAuthUrl, computeCodeChallenge, generateCodeVerifier } from "../src/auth/OAuthEndpoints.js"
+
+const withCrypto = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provide(NodeCrypto.layer))
 
 describe("OAuthEndpoints", () => {
   // ---- PKCE ----
 
   describe("generateCodeVerifier", () => {
     // 32 random bytes base64url-encoded = 43 chars; verifies output shape for RFC 7636 compliance
-    it("returns a base64url string of 43 characters (32 random bytes)", () => {
-      const verifier = generateCodeVerifier()
-      expect(verifier).toHaveLength(43)
-      expect(verifier).toMatch(/^[A-Za-z0-9_-]+$/)
-    })
+    effectIt.effect("returns a base64url string of 43 characters (32 random bytes)", () =>
+      Effect.gen(function*() {
+        const verifier = yield* generateCodeVerifier()
+        expect(verifier).toHaveLength(43)
+        expect(verifier).toMatch(/^[A-Za-z0-9_-]+$/)
+      }).pipe(withCrypto))
 
     // PKCE verifiers must be unique per auth request — reuse enables replay attacks
-    it("produces unique values", () => {
-      const a = generateCodeVerifier()
-      const b = generateCodeVerifier()
-      expect(a).not.toBe(b)
-    })
+    effectIt.effect("produces unique values", () =>
+      Effect.gen(function*() {
+        const a = yield* generateCodeVerifier()
+        const b = yield* generateCodeVerifier()
+        expect(a).not.toBe(b)
+      }).pipe(withCrypto))
   })
 
   describe("computeCodeChallenge", () => {
@@ -30,23 +35,23 @@ describe("OAuthEndpoints", () => {
         const expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         const challenge = yield* computeCodeChallenge(verifier)
         expect(challenge).toBe(expected)
-      }))
+      }).pipe(withCrypto))
 
     // Same verifier must always produce same challenge — server verifies this on token exchange
     effectIt.effect("is deterministic", () =>
       Effect.gen(function*() {
-        const v = generateCodeVerifier()
+        const v = yield* generateCodeVerifier()
         const a = yield* computeCodeChallenge(v)
         const b = yield* computeCodeChallenge(v)
         expect(a).toBe(b)
-      }))
+      }).pipe(withCrypto))
 
     // base64url must not contain +, /, = — these break URL query params
     effectIt.effect("produces base64url output (no +, /, =)", () =>
       Effect.gen(function*() {
         const challenge = yield* computeCodeChallenge("test-verifier-string")
         expect(challenge).toMatch(/^[A-Za-z0-9_-]+$/)
-      }))
+      }).pipe(withCrypto))
   })
 
   // ---- buildAuthUrl ----
@@ -103,7 +108,7 @@ describe("OAuthEndpoints", () => {
           const parsed = new URL(url)
           expect(parsed.searchParams.get("code_challenge")).toBe(challenge)
           expect(parsed.searchParams.get("code_challenge_method")).toBe("S256")
-        })
+        }).pipe(withCrypto)
     )
   })
 })

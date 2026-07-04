@@ -6,7 +6,7 @@
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Data, Effect, Option } from "effect"
+import { Console, Data, Effect, Option, Predicate } from "effect"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
@@ -88,9 +88,7 @@ const jiraLogin = Command.make(
         yield* Console.log("\nRe-run with --site <url> to select a specific site.")
       }
     }).pipe(
-      Effect.catch((e) =>
-        Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
-      )
+      Effect.catch((e) => Console.log(`Error: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`))
     )
 )
 
@@ -102,9 +100,9 @@ const jiraLogout = Command.make(
       const auth = yield* JiraAuth
       yield* auth.logout()
       yield* Console.log("Logged out from Jira")
-    }).pipe(Effect.catch((e) =>
-      Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
-    ))
+    }).pipe(
+      Effect.catch((e) => Console.log(`Error: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`))
+    )
 )
 
 const jiraStatus = Command.make(
@@ -197,9 +195,7 @@ export const clockifySetup = Command.make(
       yield* Console.log("")
       yield* Console.log("Clockify configured! Saved to ~/.jcf/clockify.json")
     }).pipe(
-      Effect.catch((e) =>
-        Console.log(`Error: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
-      )
+      Effect.catch((e) => Console.log(`Error: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`))
     )
 )
 

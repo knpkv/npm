@@ -12,7 +12,7 @@
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Schema, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -28,16 +28,18 @@ const copyToClipboard = (text: string) => {
 }
 
 const extractAwsMessage = (e: unknown): string => {
-  if (!e || typeof e !== "object") return String(e)
-  const err = e as Record<string, unknown>
+  if (!Predicate.isObjectKeyword(e)) return String(e)
   // AwsApiError.cause may contain the real AWS exception
-  const cause = err.cause
-  if (cause && typeof cause === "object" && "message" in cause) {
-    return String((cause as Record<string, unknown>).message)
+  const cause = Predicate.hasProperty(e, "cause") ? e.cause : undefined
+  if (Predicate.hasProperty(cause, "message")) {
+    return String(cause.message)
   }
-  if ("message" in err && typeof err.message === "string" && err.message) return err.message
+  if (Predicate.hasProperty(e, "message") && typeof e.message === "string" && e.message) return e.message
   // PermissionDeniedError or other tagged errors
-  if ("reason" in err) return `Permission ${err.reason}: ${err.operation ?? "unknown operation"}`
+  if (Predicate.hasProperty(e, "reason")) {
+    const operation = Predicate.hasProperty(e, "operation") ? e.operation : "unknown operation"
+    return `Permission ${e.reason}: ${operation}`
+  }
   try {
     return JSON.stringify(e)
   } catch {
@@ -126,7 +128,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
                 notificationRepo.addSystem({
                   type: "error",
                   title: "Assume Failed",
-                  message: e instanceof Error ? e.message : String(e)
+                  message: Predicate.isError(e) ? e.message : String(e)
                 }))
             )
           )

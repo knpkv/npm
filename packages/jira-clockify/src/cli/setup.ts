@@ -6,11 +6,13 @@
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect } from "effect"
+import { Console, Effect, Predicate } from "effect"
 import * as Path from "effect/Path"
 import { Prompt } from "effect/unstable/cli"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
+
+declare const Bun: unknown
 
 // ---------------------------------------------------------------------------
 // First-run setup
@@ -46,7 +48,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     yield* Console.log("Starting Jira login...")
     yield* jira.login().pipe(
       Effect.catch((e) =>
-        Console.log(`Jira login failed: ${"message" in (e as object) ? (e as { message: string }).message : String(e)}`)
+        Console.log(`Jira login failed: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`)
       )
     )
     const user = yield* jira.getCurrentUser().pipe(Effect.catch(() => Effect.succeed(null)))
@@ -120,7 +122,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
 export const launchTui = (args: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     // @opentui/react requires Bun (react-reconciler import without .js extension)
-    const isBun = "Bun" in globalThis
+    const isBun = typeof Bun !== "undefined"
     if (isBun) {
       yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
     } else {

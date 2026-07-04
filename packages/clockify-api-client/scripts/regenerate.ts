@@ -9,10 +9,12 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Console from "effect/Console"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
+import * as Schema from "effect/Schema"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -55,30 +57,45 @@ interface ClockifyPatches {
   readonly schemas?: Record<string, ClockifySchemaPatch>
 }
 
-const fetchText = (url: string): Effect.Effect<string, Error, HttpClient.HttpClient> =>
+class RegenerateError extends Data.TaggedError("RegenerateError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+const JsonString = Schema.fromJsonString(Schema.Json)
+
+const SpecInfoResponse = Schema.Struct({
+  info: Schema.Struct({
+    version: Schema.String,
+    title: Schema.String
+  })
+})
+
+const fetchText = (url: string): Effect.Effect<string, RegenerateError, HttpClient.HttpClient> =>
   HttpClient.get(url).pipe(
     Effect.flatMap((response) =>
       response.status >= 200 && response.status < 300
         ? response.text
-        : Effect.fail(new Error(`Failed to fetch ${url}: ${response.status}`))
+        : Effect.fail(new RegenerateError({ message: `Failed to fetch ${url}`, cause: { status: response.status } }))
     ),
-    Effect.mapError((e) => e instanceof Error ? e : new Error(`Fetch failed: ${e}`))
+    Effect.mapError((cause) => new RegenerateError({ message: `Fetch failed: ${url}`, cause }))
   )
 
-const fetchJson = <A>(url: string): Effect.Effect<A, Error, HttpClient.HttpClient> =>
-  fetchText(url).pipe(
-    Effect.flatMap((text) =>
-      Effect.try({
-        try: () => JSON.parse(text) as A,
-        catch: (e) => new Error(`JSON parse failed: ${e}`)
-      })
-    )
+const decodeJsonString = (text: string): Effect.Effect<Schema.Json, RegenerateError> =>
+  Schema.decodeUnknownEffect(JsonString)(text).pipe(
+    Effect.mapError((cause) => new RegenerateError({ message: "JSON decode failed", cause }))
   )
 
-const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(function*() {
+const encodeJsonString = (value: unknown): Effect.Effect<string, RegenerateError> =>
+  Schema.encodeUnknownEffect(JsonString)(value).pipe(
+    Effect.map((encoded) => `${encoded}\n`),
+    Effect.mapError((cause) => new RegenerateError({ message: "JSON encode failed", cause }))
+  )
+
+const scriptPaths: Effect.Effect<ScriptPaths, RegenerateError, Path.Path> = Effect.gen(function*() {
   const path = yield* Path.Path
   const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
-    Effect.mapError((e) => new Error(`Script path resolution failed: ${e.message}`))
+    Effect.mapError((cause) => new RegenerateError({ message: "Script path resolution failed", cause }))
   )
   const scriptDir = path.dirname(scriptFile)
   const packageDir = path.join(scriptDir, "..")
@@ -94,29 +111,43 @@ const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(fun
   }
 })
 
-const fetchSpecInfo: Effect.Effect<SpecInfo, Error, HttpClient.HttpClient> =
-  fetchJson<{ info: { version: string; title: string } }>(SPEC_URL).pipe(
-    Effect.map((spec) => ({ version: spec.info.version, title: spec.info.title }))
-  )
+const fetchSpecInfo: Effect.Effect<SpecInfo, RegenerateError, HttpClient.HttpClient> = fetchText(SPEC_URL).pipe(
+  Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(SpecInfoResponse))),
+  Effect.map(({ info }) => ({ version: info.version, title: info.title })),
+  Effect.mapError((cause) => new RegenerateError({ message: "JSON decode failed", cause }))
+)
 
-const fetchAndSaveSpec = (outputFile: string): Effect.Effect<void, Error, FileSystem.FileSystem | HttpClient.HttpClient> =>
+const fetchAndSaveSpec = (
+  packageDir: string,
+  outputFile: string
+): Effect.Effect<
+  void,
+  RegenerateError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | HttpClient.HttpClient
+> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const spec = yield* fetchText(SPEC_URL)
-    yield* fs.writeFileString(outputFile, spec).pipe(
-      Effect.mapError((e) => new Error(`Save failed: ${e.message}`))
+    const encodedSpec = yield* decodeJsonString(spec).pipe(Effect.flatMap(encodeJsonString))
+    yield* fs.writeFileString(outputFile, encodedSpec).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Save failed", cause }))
     )
+    yield* formatFile(packageDir, outputFile)
   })
 
 /**
  * Apply patches from clockify-v1.patch.json to the spec in-place.
  * Keeps original spec clean — patches add missing fields and required arrays.
  */
-const applyPatches = (specFile: string, patchFile: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+const applyPatches = (
+  packageDir: string,
+  specFile: string,
+  patchFile: string
+): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const patchExists = yield* fs.exists(patchFile).pipe(
-      Effect.mapError((e) => new Error(`Patch lookup failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Patch lookup failed", cause }))
     )
     if (!patchExists) return
 
@@ -124,16 +155,17 @@ const applyPatches = (specFile: string, patchFile: string): Effect.Effect<void, 
       fs.readFileString(specFile),
       fs.readFileString(patchFile)
     ]).pipe(
-      Effect.mapError((e) => new Error(`Patch read failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Patch read failed", cause }))
     )
 
-    const { patches, spec } = yield* Effect.try({
-      try: () => ({
-        spec: JSON.parse(specText) as ClockifySpec,
-        patches: JSON.parse(patchText) as ClockifyPatches
-      }),
-      catch: (e) => new Error(`Patch parse failed: ${e}`)
-    })
+    const [specJson, patchJson] = yield* Effect.all([
+      decodeJsonString(specText),
+      decodeJsonString(patchText)
+    ]).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Patch parse failed", cause }))
+    )
+    const spec = specJson as ClockifySpec
+    const patches = patchJson as ClockifyPatches
 
     yield* Effect.try({
       try: () => {
@@ -172,12 +204,16 @@ const applyPatches = (specFile: string, patchFile: string): Effect.Effect<void, 
           }
         }
       },
-      catch: (e) => new Error(`Patch failed: ${e}`)
+      catch: (cause) => new RegenerateError({ message: "Patch failed", cause })
     })
 
-    yield* fs.writeFileString(specFile, JSON.stringify(spec, null, 2)).pipe(
-      Effect.mapError((e) => new Error(`Patch write failed: ${e.message}`))
+    const encodedSpec = yield* encodeJsonString(spec).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Patch encode failed", cause }))
     )
+    yield* fs.writeFileString(specFile, encodedSpec).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Patch write failed", cause }))
+    )
+    yield* formatFile(packageDir, specFile)
   })
 
 const commandExitCode = (
@@ -187,7 +223,27 @@ const commandExitCode = (
     Effect.flatMap((spawner) => spawner.exitCode(command))
   )
 
-const generateTypes = (paths: ScriptPaths): Effect.Effect<void, Error, ChildProcessSpawner.ChildProcessSpawner> =>
+const formatFile = (
+  packageDir: string,
+  file: string
+): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function*() {
+    const command = ChildProcess.make("pnpm", ["exec", "prettier", "--write", file], {
+      cwd: packageDir,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+    const exitCode = yield* commandExitCode(command).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Formatting failed", cause }))
+    )
+
+    if (exitCode !== 0) {
+      return yield* Effect.fail(new RegenerateError({ message: "Formatting failed", cause: { exitCode } }))
+    }
+  })
+
+const generateTypes = (paths: ScriptPaths): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function*() {
     const command = ChildProcess.make("pnpm", ["exec", "openapi-typescript", paths.specFile, "-o", paths.outputFile], {
       cwd: paths.packageDir,
@@ -196,11 +252,11 @@ const generateTypes = (paths: ScriptPaths): Effect.Effect<void, Error, ChildProc
       stderr: "inherit"
     })
     const exitCode = yield* commandExitCode(command).pipe(
-      Effect.mapError((e) => new Error(`Generation failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Generation failed", cause }))
     )
 
     if (exitCode !== 0) {
-      return yield* Effect.fail(new Error(`Generation failed with exit code ${exitCode}`))
+      return yield* Effect.fail(new RegenerateError({ message: "Generation failed", cause: { exitCode } }))
     }
   })
 
@@ -214,7 +270,7 @@ const program = Effect.gen(function*() {
   const current = yield* fs.exists(paths.versionFile).pipe(
     Effect.flatMap((exists) => exists ? fs.readFileString(paths.versionFile) : Effect.succeed(null)),
     Effect.map((content) => content?.trim() ?? null),
-    Effect.mapError((e) => new Error(`Version read failed: ${e.message}`))
+    Effect.mapError((cause) => new RegenerateError({ message: "Version read failed", cause }))
   )
 
   yield* Console.log(`Current: ${current ?? "none"}, Remote: ${info.version}`)
@@ -223,18 +279,18 @@ const program = Effect.gen(function*() {
     yield* Console.log("Spec up to date, regenerating types...")
   } else {
     yield* fs.makeDirectory(paths.specsDir, { recursive: true }).pipe(
-      Effect.mapError((e) => new Error(`Spec directory creation failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Spec directory creation failed", cause }))
     )
 
     yield* Console.log(`Fetching spec (${info.version})...`)
-    yield* fetchAndSaveSpec(paths.specFile)
+    yield* fetchAndSaveSpec(paths.packageDir, paths.specFile)
     yield* fs.writeFileString(paths.versionFile, info.version).pipe(
-      Effect.mapError((e) => new Error(`Version write failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Version write failed", cause }))
     )
   }
 
   yield* Console.log("Applying patches...")
-  yield* applyPatches(paths.specFile, paths.patchFile)
+  yield* applyPatches(paths.packageDir, paths.specFile, paths.patchFile)
 
   yield* Console.log("Generating types...")
   yield* generateTypes(paths)

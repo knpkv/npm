@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { HomeDirectory } from "./HomeDirectory.js"
@@ -90,7 +91,7 @@ export const layer = Layer.effect(
         }
       }).pipe(
         Effect.catch((error) =>
-          error instanceof ClockifyAuthMissingError
+          Predicate.isTagged(error, "ClockifyAuthMissingError")
             ? Effect.fail(error)
             : Effect.fail(new ClockifyAuthMissingError({ message: "Failed to read Clockify auth" }))
         )
