@@ -3,7 +3,7 @@
 id: no-bare-new-error-in-effect
 language: tsx
 severity: error
-message: "Use a tagged/domain error instead of bare new Error inside Effect code"
+message: "Use tagged/domain errors instead of native Error inside Effect code"
 
 rule:
   any:
@@ -27,7 +27,6 @@ ignores:
   - "**/*.test.ts"
   - "**/*.spec.ts"
   - "**/generated/**"
-  - "packages/*-api-client/scripts/regenerate.ts"
   - "repos/**"
   - "scratchpad/**"
 
