@@ -4,7 +4,9 @@
  * @module
  * @internal
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type { ContentHash } from "../Brand.js"
@@ -50,21 +52,29 @@ export const makeHashServiceLive = (
   )
 
 /**
- * Default implementation using Web Crypto API (available in all modern runtimes).
+ * Default implementation using Effect's platform Crypto service.
  *
  * @category Layers
  */
-export const HashServiceLive: Layer.Layer<HashServiceTag> = makeHashServiceLive(
-  async (content: string) => {
-    const encoder = new TextEncoder()
-    const data = encoder.encode(content)
-    const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", data)
-    const hashArray = new Uint8Array(hashBuffer)
-    return Array.from(hashArray)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-  }
+const HashServiceFromCrypto: Layer.Layer<HashServiceTag, never, Crypto.Crypto> = Layer.effect(
+  HashServiceTag,
+  Effect.gen(function*() {
+    const cryptoService = yield* Crypto.Crypto
+    return {
+      computeSha256: (content: string) =>
+        cryptoService.digest("SHA-256", new TextEncoder().encode(content)).pipe(
+          Effect.orDie,
+          Effect.map((hashArray) =>
+            Array.from(hashArray)
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("") as ContentHash
+          )
+        )
+    }
+  })
 )
+
+export const HashServiceLive: Layer.Layer<HashServiceTag> = HashServiceFromCrypto.pipe(Layer.provide(NodeCrypto.layer))
 
 /**
  * Compute SHA256 hash of content.
@@ -74,7 +84,9 @@ export const HashServiceLive: Layer.Layer<HashServiceTag> = makeHashServiceLive(
  *
  * @internal
  */
-export const computeHash = (content: string): Effect.Effect<ContentHash, never, HashServiceTag> =>
+export const computeHash = (
+  content: string
+): Effect.Effect<ContentHash, never, HashServiceTag> =>
   Effect.gen(function*() {
     const hashService = yield* HashServiceTag
     return yield* hashService.computeSha256(content)

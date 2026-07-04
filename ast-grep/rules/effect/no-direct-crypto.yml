@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-crypto
+language: tsx
+severity: error
+message: "Use Effect Crypto or Random services instead of host crypto"
+
+rule:
+  any:
+    - pattern: crypto
+    - pattern: import $$$IMPORTS from "node:crypto"
+    - pattern: import $$$IMPORTS from "crypto"
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Use `Crypto.Crypto` for security-sensitive random bytes, UUIDs, and digests.
+  Use `Random` only for non-security randomness such as local scheduling or
+  ephemeral UI/request ids.
