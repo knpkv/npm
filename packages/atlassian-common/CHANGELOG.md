@@ -1,5 +1,16 @@
 # @knpkv/atlassian-common
 
+## 1.0.0
+
+### Major Changes
+
+- [#109](https://github.com/knpkv/npm/pull/109) [`734f891`](https://github.com/knpkv/npm/commit/734f8911d930cedc8642d5e2bd9fa73c76a99054) Thanks [@konopkov](https://github.com/konopkov)! - BREAKING: PKCE and auth UUID helpers now use Effect's platform `Crypto` service.
+
+  `generateCodeVerifier()` now returns an `Effect` instead of a string, and
+  `computeCodeChallenge()` / `generateUUID()` now require a `Crypto.Crypto` service
+  in their Effect environment. Provide an appropriate platform layer such as
+  `@effect/platform-node/NodeCrypto.layer` at the runtime edge.
+
 ## 0.4.0
 
 ### Minor Changes
