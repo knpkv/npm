@@ -7,7 +7,7 @@
  * @internal
  */
 
-import { Cause, Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
+import { Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
@@ -69,9 +69,9 @@ export const fetchAndUpsertPRs = (params: {
           Stream.map((pr) => ({ awsAccountId, label, pr })),
           Stream.catchCause((cause) => {
             const squashed = Cause.squash(cause)
-            const causeStr = squashed instanceof Error
-              ? (squashed.name !== "Error" ? squashed.name : squashed.message)
-              : String(squashed) || "Unknown error"
+            const causeStr = (Predicate.isError(squashed)
+              ? squashed.name !== "Error" ? squashed.name : squashed.message
+              : String(squashed)) || "Unknown error"
             const message = JSON.stringify({
               operation: "getPullRequests",
               profile: account.profile,

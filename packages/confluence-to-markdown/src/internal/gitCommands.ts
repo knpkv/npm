@@ -5,6 +5,7 @@
  * @internal
  */
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as EffectString from "effect/String"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -51,19 +52,16 @@ const mapPlatformError = (
   commandStr: string
 ): GitError | GitNotInstalledError => {
   if (
-    typeof error === "object"
-    && error !== null
-    && "_tag" in error
-    && "reason" in error
-    && error._tag === "SystemError"
+    Predicate.isTagged(error, "SystemError")
+    && Predicate.hasProperty(error, "reason")
     && error.reason === "NotFound"
   ) {
-    const message = "message" in error ? globalThis.String(error.message) : "command not found"
+    const message = Predicate.hasProperty(error, "message") ? String(error.message) : "command not found"
     return new GitNotInstalledError({
       message: `Git not found: ${message}. Please install git.`
     })
   }
-  const message = error instanceof Error ? error.message : globalThis.String(error)
+  const message = Predicate.isError(error) ? error.message : String(error)
   return new GitError({
     command: commandStr,
     message

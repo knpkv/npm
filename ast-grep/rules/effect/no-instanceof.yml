@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-instanceof
+language: tsx
+severity: error
+message: "Avoid instanceof checks; use Effect-native or structural predicates"
+
+rule:
+  pattern: $VALUE instanceof $TYPE
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Avoid constructor-based narrowing. For errors and defects, use Effect-native
+  checks such as `Predicate.isError`, `Predicate.isTagged`, and
+  `Predicate.hasProperty`, or route tagged errors with `Effect.catchTag`.

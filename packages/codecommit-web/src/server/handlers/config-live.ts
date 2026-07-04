@@ -1,6 +1,6 @@
 import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Config, Effect, Option, Schema, SubscriptionRef } from "effect"
+import { Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -51,7 +51,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             )
             : undefined
           return { path, exists, modifiedAt }
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e instanceof Error ? e.message : String(e) }))))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: Predicate.isError(e) ? e.message : String(e) }))))
       .handle("database", () =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
@@ -68,12 +68,12 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
             )
             : undefined
           return { path, sizeBytes: stat?.size ?? 0, exists, modifiedAt: stat?.modifiedAt }
-        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: Predicate.isError(e) ? e.message : String(e) }))))
       .handle("validate", () =>
         Effect.gen(function*() {
           const result = yield* configService.validate
           return { status: result.status, path: result.path, errors: result.errors }
-        }).pipe(Effect.mapError((e) => new ApiError({ message: e instanceof Error ? e.message : String(e) }))))
+        }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const existing = yield* configService.load.pipe(

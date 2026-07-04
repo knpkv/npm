@@ -8,10 +8,12 @@ import { Command, Flag as Options } from "effect/unstable/cli"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Console from "effect/Console"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
+import * as Schema from "effect/Schema"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -36,30 +38,48 @@ interface ScriptPaths {
   readonly generatedV2Dir: string
 }
 
-const fetchText = (url: string): Effect.Effect<string, Error, HttpClient.HttpClient> =>
+class RegenerateError extends Data.TaggedError("RegenerateError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+const JsonString = Schema.fromJsonString(Schema.Json)
+
+const SpecInfoResponse = Schema.Struct({
+  info: Schema.Struct({
+    version: Schema.String,
+    title: Schema.String
+  })
+})
+
+const fetchText = (url: string): Effect.Effect<string, RegenerateError, HttpClient.HttpClient> =>
   HttpClient.get(url).pipe(
     Effect.flatMap((response) =>
       response.status >= 200 && response.status < 300
         ? response.text
-        : Effect.fail(new Error(`Failed to fetch ${url}: ${response.status}`))
+        : Effect.fail(new RegenerateError({ message: `Failed to fetch ${url}`, cause: { status: response.status } }))
     ),
-    Effect.mapError((e) => e instanceof Error ? e : new Error(`Fetch failed: ${e}`))
+    Effect.mapError((cause) => new RegenerateError({ message: `Fetch failed: ${url}`, cause }))
   )
 
-const fetchJson = <A>(url: string): Effect.Effect<A, Error, HttpClient.HttpClient> =>
+const fetchSpecInfo = (url: string): Effect.Effect<SpecInfo, RegenerateError, HttpClient.HttpClient> =>
   fetchText(url).pipe(
-    Effect.flatMap((text) =>
-      Effect.try({
-        try: () => JSON.parse(text) as A,
-        catch: (e) => new Error(`JSON parse failed: ${e}`)
-      })
-    )
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(SpecInfoResponse))),
+    Effect.map(({ info }) => ({ version: info.version, title: info.title })),
+    Effect.mapError((cause) => new RegenerateError({ message: "JSON decode failed", cause }))
   )
 
-const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(function*() {
+const formatJson = (text: string): Effect.Effect<string, RegenerateError> =>
+  Schema.decodeUnknownEffect(JsonString)(text).pipe(
+    Effect.flatMap(Schema.encodeEffect(JsonString)),
+    Effect.map((encoded) => `${encoded}\n`),
+    Effect.mapError((cause) => new RegenerateError({ message: "JSON format failed", cause }))
+  )
+
+const scriptPaths: Effect.Effect<ScriptPaths, RegenerateError, Path.Path> = Effect.gen(function*() {
   const path = yield* Path.Path
   const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
-    Effect.mapError((e) => new Error(`Script path resolution failed: ${e.message}`))
+    Effect.mapError((cause) => new RegenerateError({ message: "Script path resolution failed", cause }))
   )
   const scriptDir = path.dirname(scriptFile)
   const packageDir = path.join(scriptDir, "..")
@@ -75,50 +95,52 @@ const scriptPaths: Effect.Effect<ScriptPaths, Error, Path.Path> = Effect.gen(fun
   }
 })
 
-const fetchSpecInfo = (url: string): Effect.Effect<SpecInfo, Error, HttpClient.HttpClient> =>
-  fetchJson<{ info: { version: string; title: string } }>(url).pipe(
-    Effect.map((spec) => ({ version: spec.info.version, title: spec.info.title }))
-  )
-
 const fetchAndSaveSpec = (
+  packageDir: string,
   url: string,
   outputPath: string
-): Effect.Effect<void, Error, FileSystem.FileSystem | HttpClient.HttpClient> =>
+): Effect.Effect<
+  void,
+  RegenerateError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | HttpClient.HttpClient
+> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const spec = yield* fetchText(url)
-    yield* fs.writeFileString(outputPath, spec).pipe(
-      Effect.mapError((e) => new Error(`Save failed: ${e.message}`))
+    const formattedSpec = yield* formatJson(spec)
+    yield* fs.writeFileString(outputPath, formattedSpec).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Save failed", cause }))
     )
+    yield* formatFile(packageDir, outputPath)
   })
 
-const readVersion = (file: string): Effect.Effect<string | null, Error, FileSystem.FileSystem> =>
+const readVersion = (file: string): Effect.Effect<string | null, RegenerateError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const exists = yield* fs.exists(file).pipe(
-      Effect.mapError((e) => new Error(`Version lookup failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Version lookup failed", cause }))
     )
     if (!exists) return null
 
     return yield* fs.readFileString(file).pipe(
       Effect.map((version) => version.trim()),
-      Effect.mapError((e) => new Error(`Version read failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Version read failed", cause }))
     )
   })
 
-const writeVersion = (file: string, version: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+const writeVersion = (file: string, version: string): Effect.Effect<void, RegenerateError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* fs.writeFileString(file, version).pipe(
-      Effect.mapError((e) => new Error(`Version write failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Version write failed", cause }))
     )
   })
 
-const ensureDir = (dir: string): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+const ensureDir = (dir: string): Effect.Effect<void, RegenerateError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-      Effect.mapError((e) => new Error(`Directory creation failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Directory creation failed", cause }))
     )
   })
 
@@ -135,9 +157,29 @@ const commandExitCode = (
     Effect.flatMap((spawner) => spawner.exitCode(command))
   )
 
+const formatFile = (
+  packageDir: string,
+  file: string
+): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function*() {
+    const command = ChildProcess.make("pnpm", ["exec", "prettier", "--write", file], {
+      cwd: packageDir,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+    const exitCode = yield* commandExitCode(command).pipe(
+      Effect.mapError((cause) => new RegenerateError({ message: "Formatting failed", cause }))
+    )
+
+    if (exitCode !== 0) {
+      return yield* Effect.fail(new RegenerateError({ message: "Formatting failed", cause: { exitCode } }))
+    }
+  })
+
 const generateTypes = (
   options: GenerateTypesOptions
-): Effect.Effect<void, Error, ChildProcessSpawner.ChildProcessSpawner | Path.Path> =>
+): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner | Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const outputFile = path.join(options.outputDir, "schema.d.ts")
@@ -148,11 +190,11 @@ const generateTypes = (
       stderr: "inherit"
     })
     const exitCode = yield* commandExitCode(command).pipe(
-      Effect.mapError((e) => new Error(`Type generation failed: ${e.message}`))
+      Effect.mapError((cause) => new RegenerateError({ message: "Type generation failed", cause }))
     )
 
     if (exitCode !== 0) {
-      return yield* Effect.fail(new Error(`Type generation failed with exit code ${exitCode}`))
+      return yield* Effect.fail(new RegenerateError({ message: "Type generation failed", cause: { exitCode } }))
     }
   })
 
@@ -191,7 +233,7 @@ const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
       yield* Console.log("Specs are outdated!")
       if (v1Changed) yield* Console.log(`  V1: ${currentV1} -> ${v1Info.version}`)
       if (v2Changed) yield* Console.log(`  V2: ${currentV2} -> ${v2Info.version}`)
-      return yield* Effect.fail(new Error("Specs outdated"))
+      return yield* Effect.fail(new RegenerateError({ message: "Specs outdated" }))
     }
 
     yield* ensureDir(paths.specsDir)
@@ -201,7 +243,7 @@ const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
     if (v1Changed) {
       yield* Console.log(`Fetching V1 spec (${v1Info.version})...`)
       const specPath = path.join(paths.specsDir, `confluence-v1-${v1Info.version}.json`)
-      yield* fetchAndSaveSpec(SPEC_URLS.v1, specPath)
+      yield* fetchAndSaveSpec(paths.packageDir, SPEC_URLS.v1, specPath)
       yield* Console.log(`Saved: ${specPath}`)
 
       yield* Console.log("Generating V1 types...")
@@ -218,7 +260,7 @@ const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
     if (v2Changed) {
       yield* Console.log(`Fetching V2 spec (${v2Info.version})...`)
       const specPath = path.join(paths.specsDir, `confluence-v2-${v2Info.version}.json`)
-      yield* fetchAndSaveSpec(SPEC_URLS.v2, specPath)
+      yield* fetchAndSaveSpec(paths.packageDir, SPEC_URLS.v2, specPath)
       yield* Console.log(`Saved: ${specPath}`)
 
       yield* Console.log("Generating V2 types...")

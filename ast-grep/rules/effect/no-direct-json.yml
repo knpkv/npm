@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-json
+language: tsx
+severity: error
+message: "Use Effect Schema JSON codecs instead of direct JSON.parse/stringify"
+
+rule:
+  any:
+    - pattern: JSON.parse($$$ARGS)
+    - pattern: JSON.stringify($$$ARGS)
+  inside:
+    pattern: Effect.gen($$$BODY)
+    stopBy: end
+
+files:
+  - "packages/clockify-api-client/scripts/**/*.ts"
+  - "packages/confluence-api-client/scripts/**/*.ts"
+  - "packages/jira-api-client/scripts/**/*.ts"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Direct JSON.parse/stringify inside Effect code bypasses Schema validation and
+  keeps parse errors outside Effect's typed error channel.
+
+  Prefer Schema JSON codecs:
+
+  const JsonString = Schema.fromJsonString(Schema.Json)
+  const value = yield* Schema.decodeUnknownEffect(JsonString)(content)
+  const encoded = yield* Schema.encodeEffect(JsonString)(value)

@@ -15,6 +15,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -44,25 +45,12 @@ const TokenStorageLive = Layer.mergeAll(
   HomeDirectoryLive
 )
 
-/**
- * Generate a cryptographically secure UUID v4.
- * Uses Web Crypto API (available in all modern runtimes).
- * Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
- */
-const generateUUID = (): Effect.Effect<string> =>
-  Effect.sync(() => {
-    const bytes = new Uint8Array(16)
-    globalThis.crypto.getRandomValues(bytes)
-
-    // Set version (4) and variant bits per RFC 4122
-    bytes[6] = (bytes[6]! & 0x0f) | 0x40 // version 4
-    bytes[8] = (bytes[8]! & 0x3f) | 0x80 // variant 10xx
-
-    const hex = Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+const generateUUID = (): Effect.Effect<string, OAuthError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    const cryptoService = yield* Crypto.Crypto
+    return yield* cryptoService.randomUUIDv4.pipe(
+      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
+    )
   })
 
 const OAUTH_SCOPES = [
@@ -194,6 +182,7 @@ const saveOAuthConfigOp = (config: OAuthConfig) => saveOAuthConfig(config).pipe(
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const cryptoService = yield* Crypto.Crypto
 
   // Ref to track ongoing refresh operation to prevent concurrent refreshes
   const refreshLock = yield* Ref.make<Option.Option<Deferred.Deferred<OAuthToken, OAuthError | FileSystemError>>>(
@@ -369,7 +358,7 @@ const make = Effect.gen(function*() {
   const login: ConfluenceAuthService["login"] = (options) =>
     Effect.gen(function*() {
       const config = yield* getConfig()
-      const state = yield* generateUUID()
+      const state = yield* generateUUID().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
 
       const { codePromise, port, shutdown } = yield* startCallbackServer(state).pipe(
         Effect.provide(HttpServerFactoryLive)
@@ -572,5 +561,5 @@ const make = Effect.gen(function*() {
 export const layer: Layer.Layer<
   ConfluenceAuth,
   never,
-  HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner
+  HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
 > = Layer.effect(ConfluenceAuth, make)

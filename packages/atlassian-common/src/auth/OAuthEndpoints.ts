@@ -12,8 +12,10 @@
  *
  * @module
  */
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import type * as PlatformError from "effect/PlatformError"
 
 /**
  * OAuth2 authorization endpoint.
@@ -120,23 +122,28 @@ export const buildAuthUrl = (options: BuildAuthUrlOptions): string => {
 
 /**
  * Generate a cryptographically random PKCE code verifier (RFC 7636).
- * Uses Web Crypto API (available in Node 18+, Deno, browsers).
+ * Uses Effect's platform Crypto service.
  *
  * @category PKCE
  */
-export const generateCodeVerifier = (): string => {
-  const bytes = new Uint8Array(32)
-  globalThis.crypto.getRandomValues(bytes)
-  return Encoding.encodeBase64Url(bytes)
-}
+export const generateCodeVerifier = (): Effect.Effect<string, PlatformError.PlatformError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    const cryptoService = yield* Crypto.Crypto
+    const bytes = yield* cryptoService.randomBytes(32)
+    return Encoding.encodeBase64Url(bytes)
+  })
 
 /**
  * Compute S256 code challenge from a code verifier (RFC 7636).
- * Uses Web Crypto `subtle.digest` — returns Effect since digest is async.
+ * Uses Effect's platform Crypto service.
  *
  * @category PKCE
  */
-export const computeCodeChallenge = (verifier: string): Effect.Effect<string> =>
-  Effect.promise(() => globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))).pipe(
-    Effect.map((hash) => Encoding.encodeBase64Url(new Uint8Array(hash)))
-  )
+export const computeCodeChallenge = (
+  verifier: string
+): Effect.Effect<string, PlatformError.PlatformError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    const cryptoService = yield* Crypto.Crypto
+    const hash = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(verifier))
+    return Encoding.encodeBase64Url(hash)
+  })

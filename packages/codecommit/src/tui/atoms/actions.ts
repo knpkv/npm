@@ -1,5 +1,5 @@
 import { AwsClient, CacheService, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
-import { Effect, Stream } from "effect"
+import { Effect, Predicate, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { runtimeAtom } from "./runtime.js"
 
@@ -51,7 +51,7 @@ const copyToClipboard = (text: string) =>
         yield* notificationRepo.addSystem({
           type: "error",
           title: "Clipboard",
-          message: error instanceof Error ? error.message : String(error)
+          message: Predicate.isError(error) ? error.message : String(error)
         })
       })),
     Effect.withSpan("copyToClipboard")
@@ -100,7 +100,7 @@ export const loginToAwsAtom = runtimeAtom.fn((profile: Domain.AwsProfileName) =>
           notificationRepo.addSystem({
             type: "error",
             title: "SSO Login Failed",
-            message: e instanceof Error ? e.message : String(e)
+            message: Predicate.isError(e) ? e.message : String(e)
           })),
         Effect.withSpan("loginToAws", { attributes: { profile } })
       )
@@ -142,7 +142,7 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
           notificationRepo.addSystem({
             type: "error",
             title: "Assume Failed",
-            message: e instanceof Error ? e.message : String(e)
+            message: Predicate.isError(e) ? e.message : String(e)
           })),
         Effect.withSpan("openPr", { attributes: { profile, prId: pr.id } })
       )
@@ -171,7 +171,7 @@ export const openBrowserAtom = runtimeAtom.fn((link: string) =>
           yield* notificationRepo.addSystem({
             type: "error",
             title: "Open Browser",
-            message: error instanceof Error ? error.message : String(error)
+            message: Predicate.isError(error) ? error.message : String(error)
           })
         })),
       Effect.forkDetach,

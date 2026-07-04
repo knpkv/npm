@@ -1,8 +1,15 @@
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import { ConfluenceApiClient, ConfluenceApiConfig, FetchClientError, toEffect } from "../src/index.js"
+
+const isRequest = (input: RequestInfo | URL): input is Request =>
+  Predicate.hasProperty(input, "url") &&
+  Predicate.hasProperty(input, "headers") &&
+  Predicate.hasProperty(input.headers, "entries") &&
+  typeof input.headers.entries === "function"
 
 /**
  * Mock global fetch to capture requests and return canned responses.
@@ -13,11 +20,11 @@ const withMockFetch = <A, E>(
 ): Effect.Effect<A, E> => {
   const capturedRequests: Array<{ url: string; init: RequestInit }> = []
   let requestIndex = 0
-  const originalFetch = globalThis.fetch
+  const originalFetch = fetch
 
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString()
-    const headers = input instanceof Request
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : isRequest(input) ? input.url : input.toString()
+    const headers = isRequest(input)
       ? Object.fromEntries(input.headers.entries())
       : (init?.headers as Record<string, string> | undefined) ?? {}
     capturedRequests.push({ url, init: { ...init, headers } })
@@ -27,12 +34,12 @@ const withMockFetch = <A, E>(
       status: response.status,
       headers: { "content-type": "application/json" }
     })
-  }) as typeof globalThis.fetch
+  })
 
   return Effect.ensuring(
     fn(capturedRequests),
     Effect.sync(() => {
-      globalThis.fetch = originalFetch
+      vi.stubGlobal("fetch", originalFetch)
     })
   )
 }
