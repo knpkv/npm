@@ -23,6 +23,7 @@ pnpm add @knpkv/atlassian-common
 Uses Effect's platform `Crypto` service. PKCE code verifier/challenge use `effect/Encoding` for base64url.
 
 ```typescript
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { Effect } from "effect"
 import {
   generateCodeVerifier,
@@ -34,7 +35,7 @@ import {
 
 const program = Effect.gen(function* () {
   // 1. Generate PKCE pair
-  const codeVerifier = generateCodeVerifier()
+  const codeVerifier = yield* generateCodeVerifier()
   const codeChallenge = yield* computeCodeChallenge(codeVerifier)
 
   // 2. Build authorization URL
@@ -56,7 +57,7 @@ const program = Effect.gen(function* () {
     codeVerifier
   })
   // tokens.access_token, tokens.refresh_token, tokens.expires_in
-})
+}).pipe(Effect.provide(NodeCrypto.layer))
 ```
 
 ## Token And Profile Storage
