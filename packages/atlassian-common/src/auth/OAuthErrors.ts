@@ -16,6 +16,7 @@
  * @module
  */
 import * as Data from "effect/Data"
+import * as Predicate from "effect/Predicate"
 
 /**
  * OAuth flow step for error context.
@@ -48,11 +49,11 @@ export class OAuthError extends Data.TaggedError("OAuthError")<{
   readonly cause?: unknown
 }> {
   override get message(): string {
-    if (this.cause instanceof Error) {
-      return `OAuth ${this.step} failed: ${this.cause.message}`
-    }
     if (typeof this.cause === "string") {
       return `OAuth ${this.step} failed: ${this.cause}`
+    }
+    if (Predicate.hasProperty(this.cause, "message")) {
+      return `OAuth ${this.step} failed: ${String(this.cause.message)}`
     }
     return `OAuth ${this.step} failed`
   }

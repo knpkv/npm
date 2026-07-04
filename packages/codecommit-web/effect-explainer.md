@@ -403,11 +403,13 @@ Every handler maps domain errors to `ApiError` for consistent HTTP error respons
 Bun throws a defect (not typed error) when a port is in use. Convert and retry:
 
 ```typescript
+import * as Predicate from "effect/Predicate"
+
 const startServer = (port: number): Effect.Effect<never> =>
   Effect.logInfo(`Starting on http://localhost:${port}`).pipe(
     Effect.andThen(Effect.suspend(() => Layer.launch(makeServer({ port })))),
     Effect.catchAllDefect((defect) =>
-      defect instanceof Error && defect.message.includes("port") && port < 3010
+      Predicate.isError(defect) && defect.message.includes("port") && port < 3010
         ? Effect.logWarning(`Port ${port} in use`).pipe(Effect.andThen(startServer(port + 1)))
         : Effect.die(defect)
     )

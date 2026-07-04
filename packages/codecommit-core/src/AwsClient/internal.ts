@@ -29,6 +29,7 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import * as DistilledCredentials from "distilled-aws/Credentials"
 import * as DistilledRegion from "distilled-aws/Region"
 import { Duration, Effect, Layer, Schedule, Schema } from "effect"
+import * as Predicate from "effect/Predicate"
 import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig, type AwsClientConfigShape } from "../AwsClientConfig.js"
 import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
@@ -42,10 +43,13 @@ export type { AwsClientError } from "../Errors.js"
  * Inspects structured error properties instead of pretty-printing.
  */
 export const isThrottlingError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null) return false
-  const name = "name" in error ? String(error.name) : ""
-  const code = "code" in error ? String(error.code).toLowerCase() : ""
-  const message = "message" in error ? String(error.message).toLowerCase() : ""
+  const name = Predicate.hasProperty(error, "name") ? String(error.name) : ""
+  const code = Predicate.hasProperty(error, "code") ? String(error.code).toLowerCase() : ""
+  const message = Predicate.isError(error)
+    ? error.message.toLowerCase()
+    : Predicate.hasProperty(error, "message")
+    ? String(error.message).toLowerCase()
+    : ""
   return name === "ThrottlingException"
     || name === "TooManyRequestsException"
     || code === "throttling"

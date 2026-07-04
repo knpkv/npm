@@ -3,8 +3,8 @@
  *
  * **Mental model**
  *
- * - **Service-backed crypto**: {@link hashContent} and {@link hashBuffer} use
- *   the `Crypto` service from Effect context, so applications provide the
+ * - **Service-backed cryptography**: {@link hashContent} and {@link hashBuffer}
+ *   use the `Crypto` service from Effect context, so applications provide the
  *   platform implementation at the runtime edge.
  *
  * **Common tasks**
@@ -27,8 +27,8 @@ const digestSha256 = (
   bytes: Uint8Array
 ): Effect.Effect<ContentHash, PlatformError.PlatformError, Crypto.Crypto> =>
   Effect.gen(function*() {
-    const crypto = yield* Crypto.Crypto
-    const digest = yield* crypto.digest("SHA-256", bytes)
+    const cryptoService = yield* Crypto.Crypto
+    const digest = yield* cryptoService.digest("SHA-256", bytes)
     return ContentHash(Encoding.encodeHex(digest))
   })
 
@@ -41,8 +41,8 @@ const digestSha256 = (
  * import * as Effect from "effect/Effect"
  * import { hashContent } from "@knpkv/atlassian-common"
  *
- * declare const crypto: Crypto.Crypto
- * const hash = Effect.runSync(hashContent("hello world").pipe(Effect.provideService(Crypto.Crypto, crypto)))
+ * declare const cryptoService: Crypto.Crypto
+ * const hash = Effect.runSync(hashContent("hello world").pipe(Effect.provideService(Crypto.Crypto, cryptoService)))
  * // => "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
  * ```
  *

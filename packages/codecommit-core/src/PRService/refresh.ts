@@ -2,7 +2,7 @@
  * @internal
  */
 
-import { Cause, Clock, DateTime, Effect, SubscriptionRef } from "effect"
+import { Cause, Clock, DateTime, Effect, Predicate, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -76,7 +76,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
       Effect.timeout("120 seconds"),
       Effect.catchCause((cause) => {
         const squashed = Cause.squash(cause)
-        const errorStr = (squashed instanceof Error ? squashed.message : String(squashed)) || "Unknown error"
+        const errorStr = (Predicate.isError(squashed) ? squashed.message : String(squashed)) || "Unknown error"
         return SubscriptionRef.update(state, (s) => ({ ...s, status: "error" as const, error: errorStr }))
       })
     )

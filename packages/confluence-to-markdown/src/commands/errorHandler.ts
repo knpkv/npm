@@ -8,6 +8,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import { writeStderr } from "../internal/stdio.js"
 
 /**
@@ -20,14 +21,14 @@ export const handleError = <E>(
     for (const reason of cause.reasons) {
       if (Cause.isFailReason(reason)) {
         const error = reason.error
-        if (error && typeof error === "object" && "message" in error) {
-          yield* writeStderr(`${(error as { message: string }).message}\n`)
+        if (Predicate.hasProperty(error, "message")) {
+          yield* writeStderr(`${String(error.message)}\n`)
         } else {
           yield* writeStderr(`${String(error)}\n`)
         }
       } else if (Cause.isDieReason(reason)) {
         const defect = reason.defect
-        if (defect instanceof Error) {
+        if (Predicate.isError(defect)) {
           yield* writeStderr(`Error: ${defect.message}\n`)
         } else {
           yield* writeStderr(`Error: ${String(defect)}\n`)

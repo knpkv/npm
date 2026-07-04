@@ -17,7 +17,7 @@
  *
  * @module
  */
-import { Clock, Context, Effect, Layer, Stream } from "effect"
+import { Clock, Context, Effect, Layer, Random, Stream } from "effect"
 import type { AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
@@ -91,8 +91,10 @@ export const AwsClientGatedLive: Layer.Layer<
     const promptUser = (params: GateParams): Effect.Effect<"always_allowed" | "allowed", AwsClientError> =>
       Effect.gen(function*() {
         const meta = getOperationMeta(params.operation)
+        const now = yield* Clock.currentTimeMillis
+        const nonce = yield* Random.nextIntBetween(0, 999_999_999)
         const response = yield* gateService.request({
-          id: globalThis.crypto.randomUUID(),
+          id: `gate-${now}-${nonce}`,
           operation: params.operation,
           category: meta.category,
           context: params.context

@@ -20,7 +20,7 @@ pnpm add @knpkv/atlassian-common
 
 ## OAuth2 + PKCE
 
-Uses Web Crypto API (`globalThis.crypto`) — no `node:crypto` dependency. PKCE code verifier/challenge use `effect/Encoding` for base64url.
+Uses Effect's platform `Crypto` service. PKCE code verifier/challenge use `effect/Encoding` for base64url.
 
 ```typescript
 import { Effect } from "effect"

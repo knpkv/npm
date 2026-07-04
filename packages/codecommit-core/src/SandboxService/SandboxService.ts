@@ -6,7 +6,20 @@
  *
  * @module
  */
-import { Cause, Clock, Config, Context, Duration, Effect, Layer, Option, Random, Schedule, Stream } from "effect"
+import {
+  Cause,
+  Clock,
+  Config,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Random,
+  Schedule,
+  Stream
+} from "effect"
 import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
@@ -277,7 +290,7 @@ const makeSandboxService = Effect.gen(function*() {
               Effect.gen(function*() {
                 yield* Effect.logError(`Sandbox ${id} creation failed`, cause)
                 const squashed = Cause.squash(cause)
-                const errorDetail = squashed instanceof Error ? squashed.message : String(squashed)
+                const errorDetail = Predicate.isError(squashed) ? squashed.message : String(squashed)
                 yield* updateStatus(id, "error", { error: errorDetail.slice(0, 500) }).pipe(
                   Effect.catchIf(() =>
                     true, (statusErr) =>
