@@ -1,5 +1,12 @@
 # @knpkv/jira-cli
 
+## 1.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`734f891`](https://github.com/knpkv/npm/commit/734f8911d930cedc8642d5e2bd9fa73c76a99054)]:
+  - @knpkv/atlassian-common@1.0.0
+
 ## 1.1.0
 
 ### Minor Changes

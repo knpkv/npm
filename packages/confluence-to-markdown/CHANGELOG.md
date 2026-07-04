@@ -1,5 +1,18 @@
 # @knpkv/confluence-to-markdown
 
+## 2.0.0
+
+### Major Changes
+
+- Stop importing legacy Confluence OAuth tokens from `~/.confluence/auth.json`.
+
+  Existing users with only the legacy token file must run `confluence auth login` again so credentials are stored as shared Atlassian auth profiles under `~/.config/atlassian/confluence-to-markdown/`. Legacy `~/.confluence/config.json` OAuth client configuration is still migrated.
+
+### Patch Changes
+
+- Updated dependencies [[`734f891`](https://github.com/knpkv/npm/commit/734f8911d930cedc8642d5e2bd9fa73c76a99054)]:
+  - @knpkv/atlassian-common@1.0.0
+
 ## 1.1.0
 
 ### Minor Changes
