@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jira-api-client",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Effect-based Jira Cloud REST API v3 client",
   "license": "MIT",
   "author": "knpkv",

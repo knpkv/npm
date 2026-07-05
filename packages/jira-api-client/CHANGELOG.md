@@ -1,5 +1,11 @@
 # @knpkv/jira-api-client
 
+## 0.3.1
+
+### Patch Changes
+
+- [#111](https://github.com/knpkv/npm/pull/111) [`f7534ae`](https://github.com/knpkv/npm/commit/f7534ae868a010274f9c4a49ef95bd96e9a26506) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update generated Jira API OpenAPI specs.
+
 ## 0.3.0
 
 ### Minor Changes
