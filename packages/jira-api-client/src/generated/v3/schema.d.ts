@@ -2242,6 +2242,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rest/api/3/field/{fieldId}/context/defaultValues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get default values for a custom field grouped by context and issue type
+         * @description Returns a paginated list of default values grouped by custom field context.
+         *
+         *     Each returned \{@code ContextDefaultValuesBean\} has a \{@code contextId\} and a \{@code defaultValues\} list of \{@code IssueTypeDefaultValueBean\} entries \\u2014 one per issue-type-scoped default value configured for the context. An entry with \{@code "isAnyIssueType": true\} represents the catch-all default that applies to every issue type covered by the context that is not covered by a more specific entry; a non-null \{@code issueTypeId\} represents a default that only applies to that issue type.
+         *
+         *     For contexts that have not been converted to the multiple-contexts data model, exactly one entry is returned per context with \{@code isAnyIssueType=true\}. For converted contexts, one entry is returned per configured per-issue-type default.
+         *
+         *     The value object on each entry is the same polymorphic \{@code CustomFieldContextDefaultValueBean\} exposed by the deprecated \{@code GET /defaultValue\} endpoint \\u2014 its concrete subtype depends on the custom field's type (see the list of supported types on that endpoint).
+         *
+         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
+         */
+        get: operations["getContextDefaultValues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rest/api/3/field/{fieldId}/context/issuetypemapping": {
         parameters: {
             query?: never;
@@ -14981,6 +15009,16 @@ export interface components {
             /** @description The scope of the context. */
             scope?: components["schemas"]["Scope"];
         };
+        /** @description Default values grouped by custom field context. */
+        ContextDefaultValues: {
+            /**
+             * Format: int64
+             * @description The ID of the context.
+             */
+            contextId: number;
+            /** @description Per-issue-type default values for this context. May contain a single entry for unconverted contexts, or one entry per issue type for converted contexts. */
+            defaultValues?: components["schemas"]["IssueTypeDefaultValue"][];
+        };
         /** @description The project and issue type mapping with a matching custom field context. */
         ContextForProjectAndIssueType: {
             /** @description The ID of the custom field context. */
@@ -18168,6 +18206,14 @@ export interface components {
              */
             type?: "subtask" | "standard";
         };
+        /** @description A default value associated with an issue type within a context. */
+        IssueTypeDefaultValue: {
+            /** @description True when this default value applies to every issue type covered by the context (no specific issue type). Only present when true; omitted otherwise. */
+            isAnyIssueType?: boolean | null;
+            /** @description The ID of the issue type this default value applies to. Null when isAnyIssueType is true. */
+            issueTypeId?: string | null;
+            value?: components["schemas"]["CustomFieldContextDefaultValue"];
+        };
         /** @description Details about an issue type. */
         IssueTypeDetails: {
             /**
@@ -20335,6 +20381,38 @@ export interface components {
             readonly total?: number;
             /** @description The list of items. */
             readonly values?: components["schemas"]["Context"][];
+        };
+        /** @description A page of items. */
+        PageBeanContextDefaultValues: {
+            /** @description Whether this is the last page. */
+            readonly isLast?: boolean;
+            /**
+             * Format: int32
+             * @description The maximum number of items that could be returned.
+             */
+            readonly maxResults?: number;
+            /**
+             * Format: uri
+             * @description If there is another page of results, the URL of the next page.
+             */
+            readonly nextPage?: string;
+            /**
+             * Format: uri
+             * @description The URL of the page.
+             */
+            readonly self?: string;
+            /**
+             * Format: int64
+             * @description The index of the first item returned.
+             */
+            readonly startAt?: number;
+            /**
+             * Format: int64
+             * @description The number of items returned.
+             */
+            readonly total?: number;
+            /** @description The list of items. */
+            readonly values?: components["schemas"]["ContextDefaultValues"][];
         };
         /** @description A page of items. */
         PageBeanContextForProjectAndIssueType: {
@@ -23820,7 +23898,7 @@ export interface components {
             details?: components["schemas"]["SearchWarningLimitDetails"];
             /** @description A human-readable explanation of the warning suitable for surfacing to end users. */
             readonly message?: string;
-            /** @description The type of warning, e.g. CLAUSE\_LIMIT\_EXCEEDED or CLAUSE\_RESULT\_TRUNCATED. */
+            /** @description The type of warning, e.g. CLAUSE\_LIMIT\_EXCEEDED. */
             readonly type?: string;
         };
         /** @description Experimental. Structured details about a JQL clause exceeding its argument limit. */
@@ -23896,6 +23974,7 @@ export interface components {
              * @example New Security Level
              */
             name?: string;
+            pcri?: components["schemas"]["ProjectCreateResourceIdentifier"];
             /** @description The members of the security level */
             securityLevelMembers?: components["schemas"]["SecurityLevelMemberPayload"][];
         };
@@ -33166,6 +33245,65 @@ export interface operations {
                 };
                 content: {
                     /** @example {"errorMessages":["The context was not found."],"errors":{}} */
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    getContextDefaultValues: {
+        parameters: {
+            query?: {
+                /** @description The IDs of the contexts to return default values for. If omitted, default values for every context the custom field has are returned. */
+                contextId?: number[];
+                /** @description The IDs of the issue types to restrict the returned per-issue-type default values to. If omitted, default values for every issue type are returned. This filter never removes the catch-all \{@code isAnyIssueType\} entry of a context. */
+                issueTypeId?: string[];
+                /** @description The index of the first item to return in a page of results (page offset). */
+                startAt?: number;
+                /** @description The maximum number of items to return per page. */
+                maxResults?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The ID of the custom field, for example `customfield\_10000`. */
+                fieldId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returned if the request is successful. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageBeanContextDefaultValues"];
+                };
+            };
+            /** @description Returned if the authentication credentials are incorrect or missing. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Returned if the user does not have the required permissions. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"errorMessages":["Only Jira administrators can access custom field contexts."],"errors":{}} */
+                    "application/json": unknown;
+                };
+            };
+            /** @description Returned if the custom field is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /** @example {"errorMessages":["The custom field was not found."],"errors":{}} */
                     "application/json": unknown;
                 };
             };
