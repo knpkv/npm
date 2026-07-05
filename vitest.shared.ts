@@ -1,29 +1,41 @@
-import viteTsconfigPaths from "vite-tsconfig-paths"
+import path from "node:path"
+import aliases from "vite-tsconfig-paths"
 import type { ViteUserConfig } from "vitest/config"
 
 const config: ViteUserConfig = {
-  plugins: [viteTsconfigPaths()],
-  resolve: {
-    alias: {
-      "@knpkv/clockify-api-client": new URL("./packages/clockify-api-client/src/index.ts", import.meta.url).pathname,
-      "@knpkv/jira-api-client": new URL("./packages/jira-api-client/src/index.ts", import.meta.url).pathname
-    }
-  },
   esbuild: {
     target: "es2020"
   },
   optimizeDeps: {
     exclude: ["bun:sqlite"]
   },
+  plugins: [aliases()],
+  server: {
+    watch: {
+      ignored: [
+        "**/.context/**",
+        "**/.direnv/**",
+        "**/.lalph/**",
+        "**/.repos/**"
+      ]
+    }
+  },
   test: {
-    setupFiles: [new URL("./vitest.setup.ts", import.meta.url).pathname],
+    exclude: [
+      "**/.context/**",
+      "**/.direnv/**",
+      "**/.lalph/**",
+      "**/.repos/**",
+      "**/node_modules/**"
+    ],
+    setupFiles: [path.join(__dirname, "vitest.setup.ts")],
     fakeTimers: {
       toFake: undefined
     },
     sequence: {
       concurrent: true
     },
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: ["html"],
@@ -33,7 +45,7 @@ const config: ViteUserConfig = {
         "dist/",
         "benchmark/",
         "bundle/",
-        "dtslint/",
+        "typetest/",
         "build/",
         "coverage/",
         "test/utils/",
@@ -41,8 +53,7 @@ const config: ViteUserConfig = {
         "**/*.config.*",
         "**/vitest.setup.*",
         "**/vitest.shared.*"
-      ],
-      all: true
+      ]
     }
   }
 }

@@ -1,122 +1,148 @@
-# Gemini Code Understanding
+This is the Effect library repository, focusing on functional programming patterns and effect systems in TypeScript.
 
-This document provides a comprehensive overview of the `@knpkv` package collection, a monorepo for npm packages. It's designed to be a quick-start guide for developers and a context file for AI assistants.
+## Overview
 
-## Project Overview
+- The git base branch is `main`.
+- Use `pnpm` as the package manager.
+- Keep changes focused and follow established patterns in the repository.
+- Before writing code, read the relevant files in `./.patterns/` and inspect similar existing code.
 
-This is a `pnpm` workspace-based monorepo containing `npm` packages published under the `@knpkv` scope. The project is built with TypeScript and leverages [Effect-TS](https://effect.website) for robust, type-safe functional programming.
+## Think Before Coding
 
-### Key Technologies
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
 
-- **pnpm Workspaces**: Manages the monorepo structure.
-- **TypeScript**: The primary programming language.
-- **Effect-TS**: Used for functional programming patterns and error handling.
-- **Vitest**: The testing framework.
-- **ESLint and Prettier**: For code linting and formatting.
-- **Changesets**: For versioning and changelog generation.
-- **Nix and direnv**: For reproducible development environments.
+Before implementing:
 
-### Repository Structure
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
 
-The repository is organized as follows:
+## Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
 
 ```
-npm/
-├── packages/          # Published npm packages
-├── .github/          # CI/CD workflows for automated checks
-└── scripts/          # Build and maintenance scripts
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-## Building and Running
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-The following commands are essential for working with this project.
+## Workflow
 
-### Installation
+1. Inspect nearby implementation, tests, and pattern docs before editing.
+2. Prefer existing abstractions and conventions over introducing new ones.
+3. For ad hoc runnable code, create a temporary file in `scratchpad/`, run it with `node scratchpad/<file>.ts`, and delete it when done.
+   The local runtime is Node 24, which can run TypeScript files directly; use plain `node` for local TypeScript probes instead of `tsx` unless `node` fails.
+4. Run the validation appropriate to the change type.
+5. Report which validation commands were run and any commands that could not be run.
 
-Install all dependencies using `pnpm`:
+## Validation
 
-```bash
-pnpm install
+Use the narrowest validation that still covers the change:
+
+| Change type                      | Validation                                                                              |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| Code changes                     | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check:tsgo`                 |
+| Tests-only changes               | `pnpm lint-fix`, targeted `pnpm test <test_file.ts>`, `pnpm check:tsgo`                 |
+| Type-level/API type changes      | Targeted `pnpm test-types <filename>`, plus `pnpm check:tsgo` when source types changed |
+| JSDoc text/category/link changes | `pnpm lint`                                                                             |
+| JSDoc example changes            | `pnpm lint`; from the changed package directory, run `pnpm docgen`                      |
+| Docs-only changes                | `pnpm lint-fix`; no tests required unless examples or code changed                      |
+
+## Bundle Size Preview
+
+When asked to show bundle-size impact for a commit, use the existing bundle comparison workflow:
+
+1. For the latest commit, run `pnpm bundle-compare HEAD~1`.
+   For another base, run `pnpm bundle-compare <base-ref>`.
+2. Read the Markdown report from `tmp/bundle-stats.txt` and summarize the non-zero differences.
+3. Leave `tmp/bundle-base` in place unless cleanup is requested. To clean it up, run `git worktree remove --force tmp/bundle-base`.
+
+## Coding Patterns
+
+Read `.patterns/effect.md` before changing Effect code. In particular:
+
+- Prefer `Effect.fnUntraced` over functions that only return `Effect.gen`.
+- Prefer class syntax for `Context.Service`.
+- Do not use `async` / `await` or `try` / `catch`; use Effect APIs such as `Effect.gen`, `Effect.fnUntraced`, and `Effect.tryPromise`.
+- Do not use `Date.now` or `new Date`; use `Clock`, and use `TestClock` in tests.
+
+## Testing
+
+Read `.patterns/testing.md` before writing or changing tests.
+
+- Test files are located in `packages/*/test/`.
+- Main Effect library tests are in `packages/effect/test/`.
+- Use `it.effect` for Effect-returning tests.
+- Use regular `it` for pure synchronous tests.
+- Do not use `Effect.runSync` in tests.
+- Do not use `expect` from Vitest; use `assert` from `@effect/vitest`.
+- Type-level tests are in `packages/*/typetest/` and run with `pnpm test-types <filename>`.
+
+## Documentation
+
+- For AI documentation, read `ai-docs/README.md` very carefully before writing examples.
+- AI documentation changes may include explanatory comments when useful.
+- For public JSDoc `@category` guidance, read `.patterns/jsdoc.md`.
+- When JSDoc examples are localized to a single package, run `pnpm docgen` from that package directory instead of the repository root.
+
+## Generated Files
+
+Do not hand-edit generated files. Run the appropriate generator instead.
+
+- `index.ts` barrel files are generated; run `pnpm codegen` after adding or removing modules.
+
+## Changesets
+
+Create a changeset in `.changeset/` for runtime behavior changes or exported type/API changes:
+
+```md
+---
+"package-name": patch/minor/major
+---
+
+A description of the change.
 ```
 
-### Core Commands
-
-- **Build all packages**:
-
-  ```bash
-  pnpm build
-  ```
-
-- **Run all tests**:
-
-  ```bash
-  pnpm test
-  ```
-
-- **Type-check all packages**:
-
-  ```bash
-  pnpm check
-  ```
-
-- **Lint all packages**:
-
-  ```bash
-  pnpm lint
-  ```
-
-- **Format all packages**:
-  ```bash
-  pnpm format
-  ```
-
-## Development Conventions
-
-This project adheres to a strict set of development standards to ensure code quality and consistency.
-
-### Coding Style
-
-- **Functional Programming**: Code is written using functional programming principles, with a strong emphasis on the Effect-TS library.
-- **Type Safety**: TypeScript's `strict` mode is enabled, and the `any` type is disallowed.
-- **Modularity**: The monorepo is divided into individual packages, each with a specific purpose.
-
-### Testing
-
-- **Comprehensive Tests**: All packages are expected to have comprehensive tests written with `@effect/vitest`.
-- **Test-Driven Development**: While not explicitly stated, the emphasis on testing suggests that TDD is a recommended practice.
-
-### Versioning and Publishing
-
-- **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
-- **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
-
-### Agent Management
-
-- **Sync Agent Commands**:
-  ```bash
-  npx @iannuttall/dotagents
-  ```
-
-### Contribution Guidelines
-
-1.  Create changes with proper documentation and tests.
-2.  Add a changeset by running `pnpm changeset`.
-3.  Commit your changes.
-4.  The CI will create a version PR automatically.
-5.  Merge the version PR to publish the changes.
-
-<!-- effect-reference:start -->
-
-## Effect Source Reference
-
-The Effect beta source is available in this workspace under `repos/effect`. Before changing Effect code, use `rg` there to verify current beta APIs and local idioms.
-
-Recommended checks:
-
-- `rg "Context.Service" repos/effect/packages`
-- `rg "NodeHttpServer" repos/effect/packages`
-- `rg "Clock.currentTimeMillis" repos/effect/packages`
-
-Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
-
-<!-- effect-reference:end -->
+Tests-only changes, internal refactors, docs-only changes, and JSDoc-only maintenance may skip changesets by maintainer decision.

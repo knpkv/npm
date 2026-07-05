@@ -1,35 +1,19 @@
 import * as Glob from "glob"
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
-import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
+import * as Fs from "node:fs"
 
-const dirs = [".", ...Glob.sync("packages/*/", ...Glob.sync("packages/ai/*/"))]
+const dirs = [".", ...Glob.sync("packages/*/"), ...Glob.sync("packages/sql/*/"), ...Glob.sync("packages/tools/*/"), ...Glob.sync("packages/ai/*/"), ...Glob.sync("packages/atom/*/")]
+dirs.forEach((pkg) => {
+  const files = [".tsbuildinfo", "tsconfig.tsbuildinfo", "docs", "build", "dist", "coverage"]
 
-const remove = (path) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    yield* fs.remove(path, { recursive: true }).pipe(Effect.catchCause(() => Effect.void))
+  files.forEach((file) => {
+    if (pkg === "." && file === "docs") {
+      return
+    }
+
+    Fs.rmSync(`${pkg}/${file}`, { recursive: true, force: true }, () => {})
   })
-
-const program = Effect.gen(function* () {
-  yield* Effect.forEach(
-    dirs,
-    (pkg) => {
-      const files = [".tsbuildinfo", "docs", "build", "dist", "coverage"]
-
-      return Effect.forEach(files, (file) => {
-        if (pkg === "." && file === "docs") {
-          return Effect.void
-        }
-
-        return remove(`${pkg}/${file}`)
-      })
-    },
-    { concurrency: "unbounded" }
-  )
-
-  yield* Effect.forEach(Glob.sync("docs/*/"), remove, { concurrency: "unbounded" })
 })
 
-NodeRuntime.runMain(program.pipe(Effect.provide(NodeFileSystem.layer)))
+Glob.sync("docs/*/").forEach((dir) => {
+  Fs.rmSync(dir, { recursive: true, force: true }, () => {})
+})
