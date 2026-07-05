@@ -49,6 +49,18 @@ jobs:
         if: steps.check.outputs.updated == 'true'
         run: pnpm --filter @knpkv/jira-api-client test
 
+      - name: Create changeset
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          mkdir -p .changeset
+          cat > .changeset/jira-api-spec-update.md <<'CHANGESET'
+          ---
+          "@knpkv/jira-api-client": patch
+          ---
+
+          Update generated Jira API OpenAPI specs.
+          CHANGESET
+
       - name: Create Pull Request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@v8
@@ -59,8 +71,11 @@ jobs:
           body: |
             Automated update of Jira API OpenAPI specs.
 
-            Review the spec changes and update the manual client files if needed:
-            - `src/generated/v3/Client.ts`
+            Review the generated schema changes and update wrapper files if needed:
+            - `packages/jira-api-client/src/JiraApiClient.ts`
+            - `packages/jira-api-client/src/generated/v3/index.ts`
+
+            This PR includes a patch changeset so the release workflow can create the version plan.
           branch: chore/jira-api-spec-update
           delete-branch: true
           labels: |
