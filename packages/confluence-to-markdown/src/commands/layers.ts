@@ -49,6 +49,8 @@ const DummyConfluenceClientLayer = Layer.succeed(
     updatePage: () => Effect.die("Not configured"),
     deletePage: () => Effect.die("Not configured"),
     getPageVersions: () => Effect.die("Not configured"),
+    getPageAttachments: () => Effect.die("Not configured"),
+    uploadAttachmentToPage: () => Effect.die("Not configured"),
     getUser: () => Effect.die("Not configured"),
     getSpaceId: () => Effect.die("Not configured"),
     setEditorVersion: () => Effect.die("Not configured")
@@ -237,6 +239,12 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
   // page get needs auth + converter but no existing config
   if (cmd === "page" && subcommand === "get") {
     return "fetch"
+  }
+  if (
+    cmd === "page" && subcommand === "attachment" && argv[2] === "upload" &&
+    (argv.includes("--dry-run") || argv.includes("-n"))
+  ) {
+    return "minimal"
   }
   // skills/help/version don't need config
   if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {

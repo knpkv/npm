@@ -27,7 +27,7 @@
  *      (the sibling blocks between the markers become the panel's body)
  *  - `<!-- adf:TYPE node=BASE64 --> BODY <!-- adf:/TYPE -->` for selected
  *      native block nodes such as code blocks with metadata, task/decision
- *      lists, expands, layouts, cards, and tables
+ *      lists, expands, layouts, cards, tables, and media
  *  - `<u>TEXT</u>`, `<sub>TEXT</sub>`, `<sup>TEXT</sup>`, and exact styled
  *      spans emitted for Confluence-only inline marks
  *  - `[@Name](confluence-mention://ACCOUNT_ID)`            (link mark with a
@@ -80,9 +80,9 @@ const BODIED_EXTENSION_END_RE = /^\s*<!--\s*adf:\/bodiedExtension\s*-->\s*$/
 const PANEL_RE = /^\s*<!--\s*adf:panel(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->\s*$/
 const PANEL_END_RE = /^\s*<!--\s*adf:\/panel\s*-->\s*$/
 const ENCODED_BLOCK_NODE_RE =
-  /^\s*\\*<!--\s*adf:(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard|mediaSingle|mediaGroup)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
 const ENCODED_BLOCK_NODE_END_RE =
-  /^\s*\\*<!--\s*adf:\/(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:\/(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard|mediaSingle|mediaGroup)\s*-->\s*$/
 const PARAGRAPH_MARKS_RE = /^\s*<!--\s*adf:paragraph(?:\s+marks=([\s\S]*?))?\s*-->\s*$/
 const PARAGRAPH_MARKS_END_RE = /^\s*<!--\s*adf:\/paragraph\s*-->\s*$/
 const TOC_RE = /^\s*\[\[toc(?::([^\]]+))?\]\]\s*$/
@@ -396,6 +396,49 @@ const isEncodedBlockNodeEnd = (node: AdfNode, type: string): boolean => {
   return match?.[1] === type
 }
 
+const textContent = (node: AdfNode): string => node.text ?? (node.content ?? []).map(textContent).join("")
+
+const isMeaningfulMarkerBodyNode = (node: AdfNode): boolean =>
+  node.type === "paragraph" ? textContent(node).trim().length > 0 : true
+
+const withoutSingleEmMark = (node: AdfNode): AdfNode => {
+  if (node.type !== "text") return node.content ? { ...node, content: node.content.map(withoutSingleEmMark) } : node
+  const marks = node.marks ?? []
+  const nextMarks = marks.filter((mark) => mark.type !== "em")
+  return nextMarks.length === 0 ? { type: "text", text: node.text ?? "" } : { ...node, marks: nextMarks }
+}
+
+const paragraphCaption = (body: ReadonlyArray<AdfNode>): AdfNode | null => {
+  const meaningfulIndexes: Array<number> = []
+  for (const [index, node] of body.entries()) {
+    if (isMeaningfulMarkerBodyNode(node)) meaningfulIndexes.push(index)
+  }
+
+  let paragraph: { readonly node: AdfNode; readonly index: number } | null = null
+  for (let index = body.length - 1; index >= 0; index--) {
+    const node = body[index]
+    if (node?.type === "paragraph" && textContent(node).trim().length > 0) {
+      paragraph = { node, index }
+      break
+    }
+  }
+  if (paragraph === null) return null
+  if (meaningfulIndexes.length === 1 && meaningfulIndexes[0] === paragraph.index) return null
+  return {
+    type: "caption",
+    content: (paragraph.node.content ?? []).map(withoutSingleEmMark)
+  }
+}
+
+const restoreMediaSingleNode = (node: AdfNode, body: ReadonlyArray<AdfNode>): AdfNode => {
+  const mediaContent = (node.content ?? []).filter((child) => child.type !== "caption")
+  const caption = paragraphCaption(body)
+  return {
+    ...node,
+    content: caption ? [...mediaContent, caption] : mediaContent
+  }
+}
+
 const parseParagraphMarksParagraph = (node: AdfNode): ReadonlyArray<AdfNode> | null => {
   const child = soleTextChild(node)
   if (!child || !child.text) return null
@@ -524,7 +567,11 @@ const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray
       if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
     }
 
-    out.push(marker.node)
+    out.push(
+      marker.type === "mediaSingle" && end !== -1
+        ? restoreMediaSingleNode(marker.node, children.slice(i + 1, end))
+        : marker.node
+    )
     if (end !== -1) i = end
   }
   return out

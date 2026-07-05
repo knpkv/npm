@@ -16,6 +16,12 @@ describe("getLayerType", () => {
     expect(getLayerType(["workspace", "clone", "--help"])).toBe("minimal")
   })
 
+  it("routes attachment upload dry-runs to the config-free minimal layer", () => {
+    expect(getLayerType(["page", "attachment", "upload", "123", "./diagram.svg", "--dry-run"])).toBe("minimal")
+    expect(getLayerType(["page", "attachment", "upload", "123", "./diagram.svg", "-n"])).toBe("minimal")
+    expect(getLayerType(["page", "attachment", "upload", "123", "./diagram.svg"])).toBe("full")
+  })
+
   it("routes removed legacy top-level commands to the full layer", () => {
     expect(getLayerType(["fetch"])).toBe("full")
     expect(getLayerType(["clone"])).toBe("full")

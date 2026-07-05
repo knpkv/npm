@@ -31,7 +31,7 @@ Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
 - Plus `offline_access` (issued automatically) so the CLI stays logged in across runs.
 
 `manage:jira-project` is required to edit a version's description.
-`write:jira-work` is required to manage a version's "Related work" links.
+`write:jira-work` is required to manage a version's "Related work" links and upload issue attachments.
 
 > **Upgrading?** If you authenticated before the `version` command was added, the
 > new scopes are not yet granted to your token. Re-run `jira auth login` to
@@ -91,6 +91,26 @@ jira issue search --by-version "1.0.0" --project PROJ
 | `--output-dir`  | `-o`  | Output directory                         | `./jira-tickets` |
 | `--format`      | `-f`  | `multi` (one file per issue) or `single` | `multi`          |
 | `--max-results` | `-m`  | Max results to fetch                     | `100`            |
+
+### Issue Attachments
+
+Upload a local file to an issue:
+
+```bash
+jira issue attachment upload PROJ-123 ./evidence.svg --no-insert
+```
+
+To place the uploaded attachment into an existing Markdown issue document, add a Markdown image or link placeholder for the local file, then pass the document path:
+
+```markdown
+![Evidence](./evidence.svg)
+```
+
+```bash
+jira issue attachment upload PROJ-123 ./evidence.svg --document ./PROJ-123.md
+```
+
+The command uploads the file, replaces exactly one matching placeholder with the remote attachment reference, and includes hidden `jiraAttachment` metadata so later parses keep the Jira attachment identity.
 
 ### Output Formats
 

@@ -7,5 +7,6 @@
 export { authCommand } from "./auth.js"
 export { handleError } from "./errorHandler.js"
 export { issueCommand } from "./issue.js"
+export { attachmentCommand } from "./issueAttachment.js"
 export { AppLayer, AuthOnlyLayer, getLayerType, MinimalLayer } from "./layers.js"
 export { versionCommand } from "./version.js"

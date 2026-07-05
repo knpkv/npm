@@ -57,6 +57,22 @@ describe("frontmatter", () => {
       expect(data.priority).toBeNull()
       expect(data.assignee).toBeNull()
     })
+
+    it("renders image and SVG attachments as inline previews with identity metadata", () => {
+      const output = serializeIssue(makeIssue({
+        attachments: [{
+          id: "10001",
+          filename: "diagram.svg",
+          url: "https://example.atlassian.net/rest/api/3/attachment/content/10001",
+          mediaType: "application/octet-stream",
+          size: 42
+        }]
+      }))
+      expect(output).toContain(
+        "<!-- jiraAttachment: {\"jiraAttachmentId\":\"10001\",\"mediaType\":\"application/octet-stream\",\"size\":42} -->"
+      )
+      expect(output).toContain("![diagram.svg](https://example.atlassian.net/rest/api/3/attachment/content/10001)")
+    })
   })
 
   describe("extractFrontMatter", () => {

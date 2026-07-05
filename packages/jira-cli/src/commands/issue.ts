@@ -5,9 +5,10 @@
  */
 import { Command } from "effect/unstable/cli"
 import { getCommand } from "./get.js"
+import { attachmentCommand } from "./issueAttachment.js"
 import { searchCommand } from "./search.js"
 
 export const issueCommand = Command.make("issue").pipe(
-  Command.withDescription("Read-only Jira issue commands"),
-  Command.withSubcommands([getCommand, searchCommand])
+  Command.withDescription("Jira issue resource commands"),
+  Command.withSubcommands([attachmentCommand, getCommand, searchCommand])
 )

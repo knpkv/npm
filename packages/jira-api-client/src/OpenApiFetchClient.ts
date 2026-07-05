@@ -76,7 +76,7 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
  */
 export interface OpenApiFetchClient<Paths extends {}> {
   /** Type-safe openapi-fetch client. Use with `toEffect()` to get Effect. */
-  readonly client: Client<Paths, "application/json">
+  readonly client: Client<Paths>
 }
 
 /**
@@ -88,5 +88,5 @@ export const makeOpenApiFetchClient = <Paths extends {}>(
   baseUrl: string,
   headers: Record<string, string>
 ): OpenApiFetchClient<Paths> => ({
-  client: createClient<Paths, "application/json">({ baseUrl, headers })
+  client: createClient<Paths>({ baseUrl, headers })
 })

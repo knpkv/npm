@@ -10,14 +10,16 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Terminal from "effect/Terminal"
 import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
 import type { ApiError, ConversionError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
-import { FileSystemError, StructureError } from "./ConfluenceError.js"
+import { AttachmentResolutionError, FileSystemError, StructureError } from "./ConfluenceError.js"
 import type { GitServiceError } from "./GitService.js"
 import { GitService } from "./GitService.js"
 import type { AdfMetadataSidecar } from "./internal/adfMetadata.js"
@@ -27,6 +29,7 @@ import {
   externalizeAdfMetadata,
   hydrateAdfMetadata
 } from "./internal/adfMetadata.js"
+import { resolveMediaAttachmentReferences, resolveMediaAttachmentUrls } from "./internal/attachments.js"
 import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { UserCache } from "./internal/userCache.js"
@@ -118,6 +121,9 @@ type SyncError =
   | FrontMatterError
   | GitServiceError
   | StructureError
+  | AttachmentResolutionError
+
+const syncErrorMessage = (error: SyncError): string => `${error._tag}: ${String(error.message)}`
 
 /**
  * Pretty-print an ADF JSON wire string for the `.source.json` companion file.
@@ -265,6 +271,26 @@ export const layer: Layer.Layer<
         }
         return hydrateAdfMetadata(markdown, sidecars)
       })
+
+    const adfToAttachmentResolvedMarkdown = (
+      pageId: PageId,
+      adfJson: string
+    ): Effect.Effect<string, SyncError> =>
+      Effect.gen(function*() {
+        const attachments = yield* client.getPageAttachments(pageId)
+        const resolved = resolveMediaAttachmentReferences(adfJson, attachments)
+        if (resolved.unresolvedMediaIds.length > 0) {
+          return yield* Effect.fail(new AttachmentResolutionError({ pageId }))
+        }
+        const markdown = yield* converter.adfToMarkdown(resolved.adfJson)
+        return markdown
+      }).pipe(
+        Effect.retry({
+          schedule: Schedule.spaced("1 second"),
+          times: 5,
+          while: (error) => Predicate.isTagged(error, "AttachmentResolutionError")
+        })
+      )
 
     /**
      * Build a map of relative path (without .md) to pageId for resolving parents.
@@ -436,7 +462,8 @@ export const layer: Layer.Layer<
       version: PageVersionContent,
       title: string,
       parentId?: string,
-      position?: number
+      position?: number,
+      options?: { readonly resolveAttachments?: boolean }
     ): Effect.Effect<{
       markdown: string
       frontMatter: PageFrontMatter
@@ -444,7 +471,10 @@ export const layer: Layer.Layer<
     }, SyncError> =>
       Effect.gen(function*() {
         const adfJson = version.body?.atlas_doc_format?.value ?? ""
-        const rawMarkdown = yield* converter.adfToMarkdown(adfJson)
+        const resolvedAdfJson = options?.resolveAttachments
+          ? resolveMediaAttachmentUrls(adfJson, yield* client.getPageAttachments(pageId))
+          : adfJson
+        const rawMarkdown = yield* converter.adfToMarkdown(resolvedAdfJson)
         const prepared = prepareMarkdownForFile(filePath, rawMarkdown, pageId)
         const { markdown } = prepared
         const contentHash = yield* hashBody(markdown)
@@ -573,7 +603,8 @@ export const layer: Layer.Layer<
               versionContent,
               versionInfo.page?.title ?? fullPage.title,
               effectiveParentId,
-              page.position
+              page.position,
+              { resolveAttachments: versionInfo.number === fullPage.version.number }
             )
 
             // Write file
@@ -616,7 +647,8 @@ export const layer: Layer.Layer<
 
           // Simple pull without history replay
           const adfJson = fullPage.body?.atlas_doc_format?.value ?? ""
-          let rawMarkdown = yield* converter.adfToMarkdown(adfJson)
+          const attachments = yield* client.getPageAttachments(pageId)
+          let rawMarkdown = yield* converter.adfToMarkdown(resolveMediaAttachmentUrls(adfJson, attachments))
 
           // Add child page links for index pages
           if (hasChildren && config.spaceKey) {
@@ -805,7 +837,7 @@ export const layer: Layer.Layer<
           // Fetch canonical content back from Confluence
           const canonicalPage = yield* client.getPage(createdPage.id as PageId)
           const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-          const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+          const rawCanonicalMarkdown = yield* adfToAttachmentResolvedMarkdown(createdPage.id as PageId, canonicalAdf)
           const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, createdPage.id)
           const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
           const canonicalHash = yield* hashBody(canonicalMarkdown)
@@ -859,7 +891,7 @@ export const layer: Layer.Layer<
         // Fetch canonical content back from Confluence
         const canonicalPage = yield* client.getPage(fm.pageId)
         const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-        const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+        const rawCanonicalMarkdown = yield* adfToAttachmentResolvedMarkdown(fm.pageId, canonicalAdf)
         const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, fm.pageId)
         const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
         const canonicalHash = yield* hashBody(canonicalMarkdown)
@@ -988,7 +1020,7 @@ export const layer: Layer.Layer<
                 Effect.succeed({
                   pushed: false,
                   created: false,
-                  error: `Failed: ${error._tag}`
+                  error: `Failed: ${syncErrorMessage(error)}`
                 }))
             )
             if (result.error) errors.push(result.error)
@@ -1067,7 +1099,7 @@ export const layer: Layer.Layer<
               Effect.succeed({
                 pushed: false,
                 created: false,
-                error: `Failed to push ${filePath}: ${error._tag}`
+                error: `Failed to push ${filePath}: ${syncErrorMessage(error)}`
               }))
           )
           if (result.error) errors.push(result.error)

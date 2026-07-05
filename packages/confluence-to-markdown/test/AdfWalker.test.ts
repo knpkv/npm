@@ -458,6 +458,24 @@ describe("AdfWalker", () => {
     expect(r.markdown).toContain("![diagram](https://x.test/d.png)\n_Figure 1_")
   })
 
+  it("renders non-image attachment media as a Markdown link", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [{
+        type: "media",
+        attrs: {
+          id: "m1",
+          filename: "report.pdf",
+          mediaType: "application/pdf",
+          url: "https://x.test/report.pdf"
+        }
+      }]
+    }]))
+
+    expect(r.markdown).toContain("[report.pdf](https://x.test/report.pdf)")
+    expect(r.markdown).not.toContain("![report.pdf]")
+  })
+
   it("renders layout sections and columns as visible markdown content", () => {
     const r = walk(doc([{
       type: "layoutSection",
@@ -543,6 +561,36 @@ describe("AdfWalker", () => {
       }]
     }]))
     expect(r.markdown).toContain("![a (b) c](<https://x.test/a (1).png>)")
+    expect(r.markdown).toContain("<!-- adf:mediaSingle node=")
+    expect(r.markdown).toContain("<!-- adf:/mediaSingle -->")
+  })
+
+  it("preserves original media alt text in hidden media identity", () => {
+    const r = walk(doc([{
+      type: "mediaSingle",
+      content: [{
+        type: "media",
+        attrs: {
+          id: "m1",
+          alt: "Architecture diagram",
+          filename: "diagram.png",
+          mediaType: "image/png",
+          url: "https://x.test/diagram.png"
+        }
+      }]
+    }]))
+
+    const marker = r.markdown.match(/<!-- adf:mediaSingle node=({.*}) -->/)?.[1]
+    expect(marker).toBeTruthy()
+    expect(JSON.parse(marker!)).toMatchObject({
+      content: [{
+        attrs: {
+          id: "m1",
+          alt: "Architecture diagram"
+        }
+      }]
+    })
+    expect(marker).not.toContain("https://x.test/diagram.png")
   })
 
   it("percent-encodes wrapper-breaking characters in unsafe urls", () => {

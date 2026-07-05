@@ -91,6 +91,8 @@ confluence auth remove <profile>
 
 `<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
 
+OAuth profiles created before attachment support need a fresh `confluence auth login` after the OAuth app includes `read:attachment:confluence` and `write:attachment:confluence`.
+
 ```bash
 confluence sync status
 confluence sync diff
@@ -114,26 +116,41 @@ confluence page get --url https://example.atlassian.net/wiki/pages/2333334354 --
 
 By default, one-off fetch preserves Confluence round-trip metadata comments. `--clean-markdown` removes those comments for readable output that is not intended for lossless push-back.
 
+### Upload An Attachment
+
+Add a local file as a page attachment, then insert it into a Markdown page by replacing a matching image or link placeholder:
+
+```markdown
+![Architecture diagram](./diagram.svg)
+```
+
+```bash
+confluence page attachment upload 2333334354 ./diagram.svg --document .confluence/docs/page.md
+```
+
+Images and SVGs are inserted as Markdown image previews with hidden ADF media metadata so the next push writes a native Confluence media node.
+
 ## Command Reference
 
-| Command                      | Class        | Important args and flags                                      | Output                               |
-| ---------------------------- | ------------ | ------------------------------------------------------------- | ------------------------------------ |
-| `confluence auth create`     | Local write  | Opens OAuth app creation page.                                | Human instructions.                  |
-| `confluence auth configure`  | Local write  | `--client-id`, `--client-secret` or prompts.                  | Stores OAuth credentials.            |
-| `confluence auth login`      | Local write  | Optional `--site <url>`.                                      | Stores OAuth tokens.                 |
-| `confluence auth logout`     | Local write  | None.                                                         | Clears local auth state.             |
-| `confluence auth status`     | Read-only    | None.                                                         | Human login status.                  |
-| `confluence workspace clone` | Local write  | `--url` or `--root-page-id` plus `--base-url`.                | Local Markdown workspace.            |
-| `confluence sync status`     | Read-only    | None.                                                         | Local/remote change summary.         |
-| `confluence sync diff`       | Read-only    | `--staged`, `--commit`, optional file.                        | Git-style diff.                      |
-| `confluence sync pull`       | Local write  | `--force`, `--replay-history`.                                | Updates local workspace.             |
-| `confluence sync push`       | Remote write | `--dry-run` / `-n`.                                           | Updates Confluence pages.            |
-| `confluence sync commit`     | Local write  | `--message` / `-m`.                                           | Git commit in workspace.             |
-| `confluence sync log`        | Read-only    | `--limit`, `--oneline`, `--since`, optional file.             | Git history.                         |
-| `confluence page get`        | Read-only    | `--url` or `--page-id` plus `--base-url`, `--clean-markdown`. | Markdown on stdout.                  |
-| `confluence page new`        | Remote write | Interactive prompts.                                          | Creates a page.                      |
-| `confluence page delete`     | Remote write | Interactive prompts.                                          | Deletes a page.                      |
-| `confluence skills install`  | Local write  | Shared installer flags.                                       | Installs the Confluence agent skill. |
+| Command                             | Class        | Important args and flags                                                | Output                                                           |
+| ----------------------------------- | ------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `confluence auth create`            | Local write  | Opens OAuth app creation page.                                          | Human instructions.                                              |
+| `confluence auth configure`         | Local write  | `--client-id`, `--client-secret` or prompts.                            | Stores OAuth credentials.                                        |
+| `confluence auth login`             | Local write  | Optional `--site <url>`.                                                | Stores OAuth tokens.                                             |
+| `confluence auth logout`            | Local write  | None.                                                                   | Clears local auth state.                                         |
+| `confluence auth status`            | Read-only    | None.                                                                   | Human login status.                                              |
+| `confluence workspace clone`        | Local write  | `--url` or `--root-page-id` plus `--base-url`.                          | Local Markdown workspace.                                        |
+| `confluence sync status`            | Read-only    | None.                                                                   | Local/remote change summary.                                     |
+| `confluence sync diff`              | Read-only    | `--staged`, `--commit`, optional file.                                  | Git-style diff.                                                  |
+| `confluence sync pull`              | Local write  | `--force`, `--replay-history`.                                          | Updates local workspace.                                         |
+| `confluence sync push`              | Remote write | `--dry-run` / `-n`.                                                     | Updates Confluence pages.                                        |
+| `confluence sync commit`            | Local write  | `--message` / `-m`.                                                     | Git commit in workspace.                                         |
+| `confluence sync log`               | Read-only    | `--limit`, `--oneline`, `--since`, optional file.                       | Git history.                                                     |
+| `confluence page get`               | Read-only    | `--url` or `--page-id` plus `--base-url`, `--clean-markdown`.           | Markdown on stdout.                                              |
+| `confluence page attachment upload` | Remote write | `<page-id> <file>`, `--document`, `--no-insert`, `--dry-run`, `--json`. | Uploads a page attachment and optionally rewrites a placeholder. |
+| `confluence page new`               | Remote write | Interactive prompts.                                                    | Creates a page.                                                  |
+| `confluence page delete`            | Remote write | Interactive prompts.                                                    | Deletes a page.                                                  |
+| `confluence skills install`         | Local write  | Shared installer flags.                                                 | Installs the Confluence agent skill.                             |
 
 ## Agent Guidance
 
@@ -141,7 +158,7 @@ By default, one-off fetch preserves Confluence round-trip metadata comments. `--
 - Prefer `confluence sync push --dry-run` before any `confluence sync push`.
 - Commit local edits with `confluence sync commit` before pushing a Git-backed workspace.
 - Use `page get --clean-markdown` for one-off reading and default preserving output for sync workflows.
-- Treat `page new`, `page delete`, and `sync push` as remote writes that need explicit confirmation.
+- Treat `page new`, `page delete`, `page attachment upload`, and `sync push` as remote writes that need explicit confirmation.
 
 ## Source Landmarks
 

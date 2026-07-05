@@ -1,6 +1,7 @@
 /**
  * CLI commands for confluence-to-markdown.
  */
+export { attachmentCommand } from "./attachment.js"
 export { authCommand } from "./auth.js"
 export { cloneCommand } from "./clone.js"
 export { deleteCommand } from "./delete.js"

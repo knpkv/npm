@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80" viewBox="0 0 160 80" role="img" aria-label="Inline attachment test asset">
+  <rect width="160" height="80" fill="#f4f7fb"/>
+  <rect x="12" y="12" width="136" height="56" rx="6" fill="#ffffff" stroke="#2f6fed" stroke-width="3"/>
+  <circle cx="40" cy="40" r="13" fill="#ffb000"/>
+  <path d="M66 51h58M66 39h72M66 28h44" stroke="#243b53" stroke-width="6" stroke-linecap="round"/>
+</svg>

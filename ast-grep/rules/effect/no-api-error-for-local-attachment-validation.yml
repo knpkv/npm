@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-api-error-for-local-attachment-validation
+language: tsx
+severity: error
+message: "Do not model local attachment command validation as Confluence ApiError"
+
+rule:
+  pattern: 'new ApiError({ status: 0, message: $MSG, endpoint: "attachment upload", $$$REST })'
+
+files:
+  - "packages/confluence-to-markdown/src/commands/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Missing local placeholders and missing local files are CLI validation errors,
+  not Confluence API failures. Keep `ApiError` for remote Confluence responses.
+
+  Prefer a local validation error such as:
+
+  new ConfigError({ message })

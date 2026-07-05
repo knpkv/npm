@@ -139,10 +139,10 @@ When `saveSource` is enabled, the raw ADF JSON is persisted as `<page>.source.js
 
 #### Known fidelity limitations
 
-Nodes that survive a pull → edit → push round-trip structurally intact: status (unless its text contains `<`), mentions (with an accountId), native Table of Contents syntax (`[[toc]]`, `[[toc:min=2,max=4]]`), and macros (`extension` / `bodiedExtension` / `inlineExtension` — the placeholder comment carries the full macro attrs, including `parameters`, as a base64 blob, and a bodied macro's body is re-attached from the blocks between its `<!-- adf:bodiedExtension … -->` / `<!-- adf:/bodiedExtension -->` markers; a bodied macro inside a table cell keeps only the marker, its body is dropped). TOC macros with unrepresentable attrs such as `localId` or `layout` keep using the exact placeholder form instead of readable syntax. Everything below does **not** fully survive:
+Nodes that survive a pull → edit → push round-trip structurally intact: status (unless its text contains `<`), mentions (with an accountId), native Table of Contents syntax (`[[toc]]`, `[[toc:min=2,max=4]]`), Confluence image/file media identity, and macros (`extension` / `bodiedExtension` / `inlineExtension` — the placeholder comment carries the full macro attrs, including `parameters`, as a base64 blob, and a bodied macro's body is re-attached from the blocks between its `<!-- adf:bodiedExtension … -->` / `<!-- adf:/bodiedExtension -->` markers; a bodied macro inside a table cell keeps only the marker, its body is dropped). TOC macros with unrepresentable attrs such as `localId` or `layout` keep using the exact placeholder form instead of readable syntax. Everything below does **not** fully survive:
 
-- **Attachment media.** Pages with images or other attachments use ADF `mediaSingle` / `mediaInline` nodes that reference attachments by `id` + `collection`. Resolving these to download URLs requires a separate Confluence API call per attachment, which this package does not yet make. Such nodes are currently emitted as `<!-- adf:media id=… -->` placeholders plus a logged `MediaWithoutUrl` warning. A media-resolver hook is on the roadmap.
-- **Media captions.** A `mediaSingle` caption is rendered as an italic line under the media on pull, but pushes back as plain italic text — the structured `caption` node is lost.
+- **Attachment media.** Page attachments are resolved through the Confluence attachment API. Image and SVG attachments render as visible Markdown image previews and keep the Confluence `mediaSingle` / `mediaGroup` identity in hidden ADF metadata, so pushes reconstruct native media nodes instead of external images. Non-image attachments render as Markdown links. If Confluence returns a media node without a matching attachment record, the node still degrades to an `<!-- adf:media id=… -->` placeholder plus a logged `MediaWithoutUrl` warning.
+- **Media captions.** A pulled `mediaSingle` caption is rendered as an italic line under the media, but pushes back as plain italic text — the structured `caption` node is lost.
 - **Link titles.** The official `@atlaskit/editor-markdown-transformer` does not retain link titles when parsing markdown, so `[text](url "title")` round-trips back as `[text](url)`.
 - **Table cell merges.** `colspan`/`rowspan` are flattened — GFM tables have no merged cells.
 
@@ -239,6 +239,8 @@ Confluence may transform your content (normalize whitespace, reorder attributes,
      - `read:page:confluence` - read pages
      - `write:page:confluence` - push changes
      - `delete:page:confluence` - delete pages
+     - `read:attachment:confluence` - resolve page attachments
+     - `write:attachment:confluence` - upload page attachments
    - Add **User Identity API**:
      - `read:me` - get current user info
 5. In **Authorization** tab, set callback URL: `http://localhost:8585/callback`
@@ -265,6 +267,8 @@ confluence auth logout
 ```
 
 Each login is saved as an auth profile keyed by Atlassian account and site. `<profile>` may be a profile ID, profile name, site URL, cloud ID, or account ID.
+
+Existing OAuth profiles created before attachment support need a fresh `confluence auth login` after the OAuth app includes the attachment scopes.
 
 ### API Token (alternative)
 
@@ -377,7 +381,7 @@ contentHash: "7a8b9c..."
 
 ## Known Limitations
 
-- **Attachments**: Image and file attachments are not synced
+- **Attachment deletes and renames**: The CLI can upload or update a page attachment and preserve pulled media nodes, but it does not yet delete remote attachments or model attachment renames as first-class operations.
 - **Comments**: Page comments are not preserved
 
 ## License
