@@ -8,6 +8,10 @@ on:
   # Manual trigger
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   check-spec:
     name: Check Confluence API Spec Updates
@@ -45,6 +49,18 @@ jobs:
         if: steps.check.outputs.updated == 'true'
         run: pnpm --filter @knpkv/confluence-api-client test
 
+      - name: Create changeset
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          mkdir -p .changeset
+          cat > .changeset/confluence-api-spec-update.md <<'CHANGESET'
+          ---
+          "@knpkv/confluence-api-client": patch
+          ---
+
+          Update generated Confluence API OpenAPI specs.
+          CHANGESET
+
       - name: Create Pull Request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@v8
@@ -55,9 +71,12 @@ jobs:
           body: |
             Automated update of Confluence API OpenAPI specs.
 
-            Review the spec changes and update the manual client files if needed:
-            - `src/generated/v1/Client.ts`
-            - `src/generated/v2/Client.ts`
+            Review the generated schema changes and update wrapper files if needed:
+            - `packages/confluence-api-client/src/ConfluenceApiClient.ts`
+            - `packages/confluence-api-client/src/generated/v1/index.ts`
+            - `packages/confluence-api-client/src/generated/v2/index.ts`
+
+            This PR includes a patch changeset so the release workflow can create the version plan.
           branch: chore/confluence-api-spec-update
           delete-branch: true
           labels: |
