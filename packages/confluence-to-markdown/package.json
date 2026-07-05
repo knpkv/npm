@@ -97,25 +97,25 @@
     "link": "npm link"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.87"
+    "effect": "4.0.0-beta.93"
   },
   "dependencies": {
-    "@atlaskit/adf-schema": "^56.0.4",
+    "@atlaskit/adf-schema": "^56.0.15",
     "@atlaskit/editor-json-transformer": "^9.0.1",
     "@atlaskit/editor-markdown-transformer": "^6.0.1",
-    "@effect/platform-node": "4.0.0-beta.87",
+    "@effect/platform-node": "4.0.0-beta.93",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/confluence-api-client": "workspace:^",
     "ajv": "^8.20.0",
     "ajv-draft-04": "^1.0.0",
-    "js-yaml": "^4.2.0"
+    "js-yaml": "^5.2.1"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.87",
+    "@effect/vitest": "4.0.0-beta.93",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.0.0",
-    "effect": "4.0.0-beta.87",
+    "@types/node": "^26.1.0",
+    "effect": "4.0.0-beta.93",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   },

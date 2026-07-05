@@ -109,13 +109,17 @@ This project adheres to a strict set of development standards to ensure code qua
 
 ## Effect Source Reference
 
-The Effect beta source is available in this workspace under `repos/effect`. Before changing Effect code, use `rg` there to verify current beta APIs and local idioms.
+The Effect beta source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current beta APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
+
+Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current beta APIs.
 
 Recommended checks:
 
 - `rg "Context.Service" repos/effect/packages`
 - `rg "NodeHttpServer" repos/effect/packages`
 - `rg "Clock.currentTimeMillis" repos/effect/packages`
+
+The subtree is maintained from the `effect-smol` remote. See `docs/dependency-maintenance.md` for the exact `git subtree pull --prefix=repos/effect effect-smol main --squash` workflow and version-alignment steps.
 
 Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 
