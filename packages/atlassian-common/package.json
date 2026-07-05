@@ -30,6 +30,10 @@
       "import": "./dist/serializers/index.js",
       "types": "./dist/serializers/index.d.ts"
     },
+    "./attachments": {
+      "import": "./dist/attachments.js",
+      "types": "./dist/attachments.d.ts"
+    },
     "./parsers": {
       "import": "./dist/parsers/index.js",
       "types": "./dist/parsers/index.d.ts"

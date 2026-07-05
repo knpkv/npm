@@ -3,6 +3,7 @@
  *
  * @internal
  */
+import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
 import matter from "gray-matter"
 import * as yaml from "js-yaml"
 import { SyncValidationError } from "../../JiraCliError.js"
@@ -180,13 +181,69 @@ const parseAcceptedComments = (content: string): ReadonlyArray<AcceptedComment> 
 }
 
 const serializeAttachments = (attachments: ReadonlyArray<AttachmentReference>): string =>
-  attachments.map((attachment) => `- [${attachment.filename}](${attachment.url})`).join("\n")
+  attachments.map((attachment) => {
+    const metadata = {
+      jiraAttachmentId: attachment.id,
+      mediaType: attachment.mediaType,
+      size: attachment.size
+    }
+    const reference = isPreviewableAttachment(attachment)
+      ? `![${attachment.filename}](${attachment.url})`
+      : `[${attachment.filename}](${attachment.url})`
+    return `<!-- jiraAttachment: ${JSON.stringify(metadata)} -->\n${reference}`
+  }).join("\n\n")
 
-const parseAttachments = (content: string): ReadonlyArray<AttachmentReference> =>
-  content.split(/\r?\n/).flatMap((line) => {
-    const match = /^- \[(.+)]\((.+)\)$/.exec(line.trim())
-    return match?.[1] && match[2] ? [{ filename: match[1], url: match[2] }] : []
-  })
+const parseAttachments = (content: string): ReadonlyArray<AttachmentReference> => {
+  const lines = content.split(/\r?\n/)
+  const attachments: Array<AttachmentReference> = []
+  let pendingMetadata: Partial<Pick<AttachmentReference, "id" | "mediaType" | "size">> = {}
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (line.length === 0) continue
+
+    const metadataMatch = /^<!--\s*jiraAttachment:\s*(\{.*})\s*-->$/.exec(line)
+    if (metadataMatch?.[1]) {
+      pendingMetadata = parseAttachmentMetadata(metadataMatch[1])
+      continue
+    }
+
+    const markdownMatch = /^(?:-\s*)?!?\[(.+)]\((.+)\)$/.exec(line)
+    if (markdownMatch?.[1] && markdownMatch[2]) {
+      attachments.push({
+        id: pendingMetadata.id ?? "",
+        filename: markdownMatch[1],
+        url: markdownMatch[2],
+        mediaType: pendingMetadata.mediaType ?? null,
+        size: pendingMetadata.size ?? null
+      })
+      pendingMetadata = {}
+    }
+  }
+
+  return attachments
+}
+
+const parseAttachmentMetadata = (
+  raw: string
+): Partial<Pick<AttachmentReference, "id" | "mediaType" | "size">> => {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+    const record = parsed as Record<string, unknown>
+    return {
+      id: typeof record["jiraAttachmentId"] === "string"
+        ? record["jiraAttachmentId"]
+        : typeof record["id"] === "string"
+        ? record["id"]
+        : "",
+      mediaType: typeof record["mediaType"] === "string" ? record["mediaType"] : null,
+      size: typeof record["size"] === "number" ? record["size"] : null
+    }
+  } catch {
+    return {}
+  }
+}
 
 const trimOuterBlankLines = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
   let start = 0

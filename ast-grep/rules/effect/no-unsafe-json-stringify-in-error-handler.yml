@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unsafe-json-stringify-in-error-handler
+language: tsx
+severity: error
+message: "Use safe stringification in CLI error handlers"
+
+rule:
+  pattern: "JSON.stringify(Object.keys($PROPS).length > 0 ? $PROPS : $ERROR)"
+
+files:
+  - "packages/*/src/commands/errorHandler.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  CLI error handlers must not throw while formatting an unknown failure. Direct
+  `JSON.stringify` can throw on circular values and hide the original error.
+
+  Prefer a small safe stringification helper with a fallback to `String(value)`
+  or `Cause.pretty(cause)`.

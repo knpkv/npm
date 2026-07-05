@@ -15,6 +15,7 @@
  */
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import createClient, { type Client, type FetchResponse } from "openapi-fetch"
 import type { MediaType } from "openapi-typescript-helpers"
 
@@ -33,6 +34,17 @@ export class FetchClientError extends Data.TaggedError("FetchClientError")<{
 export type SuccessData<T> = T extends { data: infer D; error?: undefined } ? D
   : T extends { data?: infer D } ? NonNullable<D>
   : never
+
+const errorMessage = (error: unknown): string => {
+  if (typeof error === "string") return error
+  if (Predicate.isError(error)) return error.message
+  if (Predicate.hasProperty(error, "message") && typeof error.message === "string") return error.message
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
 
 /**
  * Wrap an openapi-fetch `Promise<FetchResponse>` in Effect.
@@ -63,9 +75,7 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
       new FetchClientError({
         error: (e as Record<string, unknown>).error ?? e,
         status: ((e as Record<string, unknown>).status as number | undefined) ?? 0,
-        message: typeof (e as Record<string, unknown>).error === "string"
-          ? (e as Record<string, unknown>).error as string
-          : JSON.stringify((e as Record<string, unknown>).error ?? e)
+        message: errorMessage((e as Record<string, unknown>).error ?? e)
       })
   })
 
@@ -76,7 +86,7 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
  */
 export interface OpenApiFetchClient<Paths extends {}> {
   /** Type-safe openapi-fetch client. Use with `toEffect()` to get Effect. */
-  readonly client: Client<Paths, "application/json">
+  readonly client: Client<Paths>
 }
 
 /**
@@ -88,5 +98,5 @@ export const makeOpenApiFetchClient = <Paths extends {}>(
   baseUrl: string,
   headers: Record<string, string>
 ): OpenApiFetchClient<Paths> => ({
-  client: createClient<Paths, "application/json">({ baseUrl, headers })
+  client: createClient<Paths>({ baseUrl, headers })
 })

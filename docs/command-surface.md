@@ -34,6 +34,7 @@ This document records the target command shape for the `@knpkv` CLI packages. It
 jira issue get PROJ-123 --output-dir ./jira-tickets
 jira issue search 'project = PROJ' --output-dir ./jira-tickets
 jira issue search --by-version "1.0.0" --project PROJ
+jira issue attachment upload PROJ-123 ./evidence.svg --document ./PROJ-123.md
 
 jira auth status
 jira auth profiles
@@ -54,6 +55,7 @@ Key changes:
 - `jira version view` becomes `jira version get`.
 - `jira version set` becomes `jira version update`.
 - `jira version relatedwork` becomes `jira version related-work`.
+- `jira issue attachment upload` is a Remote Write Command. With `--document`, it uploads the local file and replaces exactly one matching Markdown image/link placeholder with the remote Jira attachment reference.
 
 ### Confluence
 
@@ -75,6 +77,7 @@ confluence sync log
 
 confluence page get --page-id <page-id> --base-url https://example.atlassian.net
 confluence page get --url https://example.atlassian.net/wiki/pages/<page-id>
+confluence page attachment upload <page-id> ./diagram.svg --document ./.confluence/docs/page.md
 confluence page new
 confluence page delete
 ```
@@ -86,6 +89,7 @@ Key changes:
 - `confluence new` becomes `confluence page new`.
 - `confluence delete` becomes `confluence page delete`.
 - `confluence fetch` becomes `confluence page get` when used as a one-off page read.
+- `confluence page attachment upload` is a Remote Write Command. With `--document`, it uploads the local file and replaces matching Markdown image/link placeholders with the attachment reference needed for inline placement.
 
 ### CodeCommit
 

@@ -39,6 +39,6 @@ Effect.gen(function*() {
 }).pipe(
   Effect.provide(NodeTerminal.layer),
   Effect.provide(NodeStdio.layer),
-  Effect.catchCause((cause) => handleError(cause)),
+  Effect.catchCause((cause) => handleError(cause).pipe(Effect.andThen(Effect.failCause(cause)))),
   NodeRuntime.runMain({ disableErrorReporting: true })
 )

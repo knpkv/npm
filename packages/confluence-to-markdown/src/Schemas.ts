@@ -250,6 +250,18 @@ export const PageChildrenResponseSchema = Schema.Struct({
  */
 export type PageChildrenResponse = Schema.Schema.Type<typeof PageChildrenResponseSchema>
 
+export const AttachmentReferenceSchema = Schema.Struct({
+  id: Schema.String,
+  filename: Schema.String,
+  url: Schema.String,
+  mediaType: Schema.NullOr(Schema.String),
+  size: Schema.NullOr(Schema.Number),
+  fileId: Schema.optional(Schema.String),
+  collectionName: Schema.optional(Schema.String)
+})
+
+export type AttachmentReference = Schema.Schema.Type<typeof AttachmentReferenceSchema>
+
 /**
  * Schema for OAuth user info.
  *

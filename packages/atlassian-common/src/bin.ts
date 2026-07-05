@@ -112,4 +112,4 @@ const program = Effect.gen(function*() {
   Effect.catch((error: unknown) => Console.error(String(error)).pipe(Effect.andThen(Effect.fail(error))))
 )
 
-NodeRuntime.runMain(program)
+NodeRuntime.runMain(program, { disableErrorReporting: true })
