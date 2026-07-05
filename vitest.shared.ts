@@ -1,9 +1,8 @@
-import viteTsconfigPaths from "vite-tsconfig-paths"
 import type { ViteUserConfig } from "vitest/config"
 
 const config: ViteUserConfig = {
-  plugins: [viteTsconfigPaths()],
   resolve: {
+    tsconfigPaths: true,
     alias: {
       "@knpkv/clockify-api-client": new URL("./packages/clockify-api-client/src/index.ts", import.meta.url).pathname,
       "@knpkv/jira-api-client": new URL("./packages/jira-api-client/src/index.ts", import.meta.url).pathname

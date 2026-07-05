@@ -1,4 +1,4 @@
-import { assert, describe, it } from "@effect/vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, Stdio } from "effect"
 import { TestConsole } from "effect/testing"
 import { CliOutput, Command, Flag } from "effect/unstable/cli"
@@ -29,11 +29,6 @@ const TestLayer = Layer.mergeAll(
   Stdio.layerTest({})
 )
 
-const inlineSnapshot = (value: string): string => {
-  const normalized = value.replace(/^\n/, "").replace(/\n\s*$/, "").replace(/^        /gm, "")
-  return normalized.slice(1, -1)
-}
-
 const runCommand = Effect.fnUntraced(
   function*(command: ReadonlyArray<string>) {
     yield* Cli.run(command)
@@ -47,7 +42,7 @@ describe("Command help output", () => {
     Effect.gen(function*() {
       const helpText = yield* runCommand(["--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           A comprehensive CLI tool demonstrating all features
 
@@ -76,7 +71,7 @@ describe("Command help output", () => {
           test-failing     Test command that always fails
           app              Application management
           app-nested       Application with nested services"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("aligns flag descriptions when flag names are long", () =>
@@ -96,9 +91,9 @@ describe("Command help output", () => {
       const shortLine = lines.find((line) => line.includes("--short"))
       const longLine = lines.find((line) => line.includes("--this-is-a-very-very-long-flag-name"))
 
-      assert.isDefined(shortLine)
-      assert.isDefined(longLine)
-      assert.strictEqual(shortLine.indexOf("Short flag description"), longLine.indexOf("Long flag description"))
+      expect(shortLine).toBeDefined()
+      expect(longLine).toBeDefined()
+      expect(shortLine!.indexOf("Short flag description")).toBe(longLine!.indexOf("Long flag description"))
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hides flags marked with withHidden from help output", () =>
@@ -115,9 +110,9 @@ describe("Command help output", () => {
       yield* run(["--help"])
 
       const helpText = (yield* TestConsole.logLines).join("\n")
-      assert.include(helpText, "--visible")
-      assert.notInclude(helpText, "--experimental-foo")
-      assert.notInclude(helpText, "Should not appear")
+      expect(helpText).toContain("--visible")
+      expect(helpText).not.toContain("--experimental-foo")
+      expect(helpText).not.toContain("Should not appear")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hidden flag still parses on the command line", () =>
@@ -133,7 +128,7 @@ describe("Command help output", () => {
 
       yield* run(["--experimental-foo", "value"])
 
-      assert.strictEqual(captured, "value")
+      expect(captured).toBe("value")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hidden flag name does not leak through unrecognized-flag suggestions", () =>
@@ -149,7 +144,7 @@ describe("Command help output", () => {
 
       const errorText = (yield* TestConsole.errorLines).join("\n")
       const helpText = (yield* TestConsole.logLines).join("\n")
-      assert.notInclude(errorText + helpText, "experimental-foo")
+      expect(errorText + helpText).not.toContain("experimental-foo")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hides subcommands marked with withHidden from help output", () =>
@@ -169,9 +164,9 @@ describe("Command help output", () => {
       yield* run(["--help"])
 
       const helpText = (yield* TestConsole.logLines).join("\n")
-      assert.include(helpText, "visible")
-      assert.notInclude(helpText, "experimental-foo")
-      assert.notInclude(helpText, "Should not appear")
+      expect(helpText).toContain("visible")
+      expect(helpText).not.toContain("experimental-foo")
+      expect(helpText).not.toContain("Should not appear")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hidden subcommand still parses on the command line", () =>
@@ -192,7 +187,7 @@ describe("Command help output", () => {
 
       yield* run(["experimental-foo"])
 
-      assert.isTrue(invoked)
+      expect(invoked).toBe(true)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("hidden subcommand name does not leak through unknown-subcommand suggestions", () =>
@@ -209,7 +204,7 @@ describe("Command help output", () => {
 
       const errorText = (yield* TestConsole.errorLines).join("\n")
       const helpText = (yield* TestConsole.logLines).join("\n")
-      assert.notInclude(errorText + helpText, "experimental-foo")
+      expect(errorText + helpText).not.toContain("experimental-foo")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("subcommand group with only hidden commands disappears entirely", () =>
@@ -223,8 +218,8 @@ describe("Command help output", () => {
       yield* run(["--help"])
 
       const helpText = (yield* TestConsole.logLines).join("\n")
-      assert.notInclude(helpText, "SUBCOMMANDS")
-      assert.notInclude(helpText, "<subcommand>")
+      expect(helpText).not.toContain("SUBCOMMANDS")
+      expect(helpText).not.toContain("<subcommand>")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders command examples", () =>
@@ -244,7 +239,7 @@ describe("Command help output", () => {
       yield* runLogin(["--help"])
 
       const output = (yield* TestConsole.logLines).join("\n")
-      assert.strictEqual(output, inlineSnapshot(`
+      expect(output).toMatchInlineSnapshot(`
         "DESCRIPTION
           Authenticate with Supabase
 
@@ -269,14 +264,14 @@ describe("Command help output", () => {
 
           # Log in with browser OAuth
           myapp login"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders file command positional arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["copy", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           Copy files or directories
 
@@ -300,14 +295,14 @@ describe("Command help output", () => {
           --version, -v                                                       Show version information
           --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
           --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders variadic arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["remove", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           Remove files or directories
 
@@ -330,14 +325,14 @@ describe("Command help output", () => {
           --version, -v                                                       Show version information
           --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
           --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders deeply nested subcommand help", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "users", "list", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           List all users in the system
 
@@ -358,14 +353,14 @@ describe("Command help output", () => {
           --version, -v                                                       Show version information
           --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
           --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders mixed required and optional positional arguments", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "users", "create", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           Create a new user account
 
@@ -389,14 +384,14 @@ describe("Command help output", () => {
           --version, -v                                                       Show version information
           --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
           --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders intermediate subcommand shared flags and children", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "config", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           Manage application configuration
 
@@ -419,14 +414,14 @@ describe("Command help output", () => {
         SUBCOMMANDS
           set    Set configuration values
           get    Get configuration value"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders variadic arguments with a minimum count", () =>
     Effect.gen(function*() {
       const helpText = yield* runCommand(["admin", "config", "set", "--help"])
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "DESCRIPTION
           Set configuration values
 
@@ -449,7 +444,7 @@ describe("Command help output", () => {
           --version, -v                                                       Show version information
           --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
           --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("shared flags are visible in subcommand help while local flags stay local", () =>
@@ -471,15 +466,15 @@ describe("Command help output", () => {
 
       yield* runRoot(["--help"])
       const rootHelp = yield* TestConsole.logLines
-      assert.isTrue(rootHelp.some((line) => String(line).includes("--workspace")))
-      assert.isTrue(rootHelp.some((line) => String(line).includes("--model")))
+      expect(rootHelp.some((line) => String(line).includes("--workspace"))).toBe(true)
+      expect(rootHelp.some((line) => String(line).includes("--model"))).toBe(true)
 
       yield* runRoot(["chat", "--help"])
       const allHelp = yield* TestConsole.logLines
       const chatHelp = allHelp.slice(rootHelp.length)
-      assert.isFalse(chatHelp.some((line) => String(line).includes("--workspace")))
-      assert.isTrue(chatHelp.some((line) => String(line).includes("--model")))
-      assert.isTrue(chatHelp.some((line) => String(line).includes("--topic")))
+      expect(chatHelp.some((line) => String(line).includes("--workspace"))).toBe(false)
+      expect(chatHelp.some((line) => String(line).includes("--model"))).toBe(true)
+      expect(chatHelp.some((line) => String(line).includes("--topic"))).toBe(true)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders grouped subcommands", () =>
@@ -518,7 +513,7 @@ describe("Command help output", () => {
 
       const helpText = (yield* TestConsole.logLines).join("\n")
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "USAGE
           tool <subcommand> [flags]
 
@@ -543,7 +538,7 @@ describe("Command help output", () => {
         Management APIs:
           projects     Manage cloud projects
           functions    Manage edge functions"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("renders subcommand aliases in listings", () =>
@@ -560,7 +555,7 @@ describe("Command help output", () => {
 
       const helpText = (yield* TestConsole.logLines).join("\n")
 
-      assert.strictEqual(helpText, inlineSnapshot(`
+      expect(helpText).toMatchInlineSnapshot(`
         "USAGE
           tool <subcommand> [flags]
 
@@ -572,6 +567,6 @@ describe("Command help output", () => {
 
         SUBCOMMANDS
           plan, p    Draft a plan in your editor"
-      `))
+      `)
     }).pipe(Effect.provide(TestLayer)))
 })

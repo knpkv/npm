@@ -181,6 +181,7 @@ npx @iannuttall/dotagents  # Sync agent commands
 
 ## Resources
 
+- [Dependency maintenance](docs/dependency-maintenance.md)
 - [Effect-TS Documentation](https://effect.website/docs/introduction)
 - [GitHub Actions Workflows](.github/workflows/README.md)
 

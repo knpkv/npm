@@ -122,6 +122,12 @@ export interface MakeOptions {
    * Whether to disable validation for the schema.
    */
   readonly disableChecks?: boolean | undefined
+
+  /** @internal */
+  readonly "~payload"?: {
+    readonly token: unknown
+    readonly value: unknown
+  }
 }
 
 /**
@@ -1524,7 +1530,7 @@ export const decodeUnknownOption: <S extends ConstraintDecoder<unknown>>(
 export const decodeOption: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
-) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Type"]> = decodeUnknownOption
+) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Type"]> = SchemaParser.decodeOption
 
 /**
  * Decodes an `unknown` input against a schema, returning a `Result` that
@@ -1949,7 +1955,7 @@ export const encodeUnknownOption: <S extends ConstraintEncoder<unknown>>(
 export const encodeOption: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
-) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Encoded"]> = encodeUnknownOption
+) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Encoded"]> = SchemaParser.encodeOption
 
 /**
  * Encodes an `unknown` input against a schema, returning a `Result` that
@@ -2441,6 +2447,7 @@ export interface toType<S extends Constraint> extends
   readonly "~type.make.in": S["~type.make.in"]
   readonly "~type.make": S["~type.make"]
   readonly "Iso": S["Iso"]
+  readonly schema: S
 }
 
 interface toTypeLambda extends Lambda {
@@ -2482,6 +2489,7 @@ export interface toEncoded<S extends Constraint> extends
   readonly "~type.make.in": S["Encoded"]
   readonly "~type.make": S["Encoded"]
   readonly "Iso": S["Encoded"]
+  readonly schema: S
 }
 
 interface toEncodedLambda extends Lambda {
@@ -3054,8 +3062,21 @@ export const BigInt: BigInt = make(SchemaAST.bigInt)
 export interface Void extends Bottom<void, void, never, never, SchemaAST.Void, Void> {}
 
 /**
- * Schema for the `void` type. Accepts `undefined` as the encoded value.
+ * Schema for a TypeScript `void` return value.
  *
+ * **When to use**
+ *
+ * Use when you need to model the return value of a function, RPC, or endpoint
+ * whose result is intentionally ignored.
+ *
+ * **Details**
+ *
+ * Runtime parsing accepts any present value and discards it, producing
+ * `undefined`. The public decoded and encoded TypeScript representation remains
+ * `void`, so typed construction, decoding, and encoding APIs are still modeled
+ * as `void`.
+ *
+ * @see {@link Undefined} for a schema that matches only the exact `undefined` value.
  * @category schemas
  * @since 3.10.0
  */
@@ -8882,6 +8903,7 @@ export interface Redacted<S extends Constraint> extends
  *   into JSON, it will fail with an error. This is useful when the wrapped schema is
  *   sensitive and should not be exposed in JSON.
  *
+ * @see {@link RedactedFromValue} for decoding raw values and wrapping them in `Redacted`.
  * @category Redacted
  * @since 3.10.0
  */
@@ -8984,6 +9006,7 @@ export function redact<S extends Constraint>(schema: S): middlewareDecoding<S, S
  * expects the input to already be a `Redacted` instance, this schema decodes
  * the raw value and wraps it.
  *
+ * @see {@link Redacted} for schemas whose input is already a `Redacted` value.
  * @category Redacted
  * @since 4.0.0
  */
@@ -10958,7 +10981,10 @@ export interface fromJsonString<S extends Constraint> extends decodeTo<S, String
  * @since 4.0.0
  */
 export function fromJsonString<S extends Constraint>(schema: S): fromJsonString<S> {
+  const identifier = SchemaAST.resolveIdentifier(schema.ast)
   return String.annotate({
+    // Give the transport wrapper its own name so the decoded payload keeps its identifier.
+    identifier: identifier === undefined ? undefined : `${identifier}JsonString`,
     expected: "a string that will be decoded as JSON",
     contentMediaType: "application/json",
     contentSchema: SchemaAST.toEncoded(schema.ast)
@@ -12450,6 +12476,8 @@ type InheritStaticMembers<C, Static> = C & Pick<Static, Exclude<keyof Static, ke
 
 const immerable: unique symbol = globalThis.Symbol.for("immer-draftable") as any
 
+const payloadToken = {}
+
 function makeClass<
   Self,
   S extends Struct<Struct.Fields>,
@@ -12466,9 +12494,12 @@ function makeClass<
 
   const out = class extends Inherited {
     constructor(...[input, options]: ReadonlyArray<any>) {
-      input = input ?? {}
-      const validated = struct.make(input, options)
-      super({ ...input, ...validated }, { ...options, disableChecks: true })
+      const internalOptions = options as MakeOptions | undefined
+      const payload = internalOptions?.["~payload"]
+      const value = payload?.token === payloadToken
+        ? payload.value
+        : struct.make(input ?? {}, options)
+      super(value, { ...options, disableChecks: true, "~payload": { token: payloadToken, value } })
     }
 
     static readonly [TypeId] = TypeId
@@ -13326,6 +13357,7 @@ export interface toCodecJson<S extends Constraint> extends
   readonly "~type.make.in": S["~type.make.in"]
   readonly "~type.make": S["~type.make"]
   readonly "Iso": S["Iso"]
+  readonly schema: S
 }
 
 /**
@@ -13336,7 +13368,7 @@ export interface toCodecJson<S extends Constraint> extends
  * @since 4.0.0
  */
 export function toCodecJson<S extends Constraint>(schema: S): toCodecJson<S> {
-  return make(toCodecJsonTop(schema.ast))
+  return make(toCodecJsonTop(schema.ast), { schema })
 }
 
 const toCodecJsonTop = SchemaAST.applyToSelfOrLastLinkEncoding((ast) => {
@@ -13469,6 +13501,7 @@ export interface toCodecStringTree<S extends Constraint> extends
   readonly "~type.make.in": S["~type.make.in"]
   readonly "~type.make": S["~type.make"]
   readonly "Iso": S["Iso"]
+  readonly schema: S
 }
 
 /**
@@ -13484,7 +13517,7 @@ export interface toCodecStringTree<S extends Constraint> extends
  * @since 4.0.0
  */
 export function toCodecStringTree<S extends Constraint>(schema: S): toCodecStringTree<S> {
-  return make(serializerStringTree(schema.ast))
+  return make(serializerStringTree(schema.ast), { schema })
 }
 
 /**
