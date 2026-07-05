@@ -525,22 +525,17 @@ function readPackageMetadata(root: string): Result<PackageMetadata, string> {
     return cached
   }
   const packageJsonPath = path.join(normalizedRoot, "package.json")
-  const parsedResult = Effect.runSync(Effect.try({
-    try: () => JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as unknown,
-    catch: (error) => String(error)
-  }).pipe(Effect.match({
-    onFailure: (error) => ({ _tag: "Failure", error } as const),
-    onSuccess: (value) => ({ _tag: "Success", value } as const)
-  })))
-  if (parsedResult._tag === "Failure") {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
+  } catch (error) {
     const result = {
       _tag: "Failure",
-      error: `unable to read package.json at ${packageJsonPath}: ${parsedResult.error}`
+      error: `unable to read package.json at ${packageJsonPath}: ${String(error)}`
     } as const
     packageMetadataCache.set(normalizedRoot, result)
     return result
   }
-  const parsed = parsedResult.value
   if (!isRecord(parsed)) {
     const result = { _tag: "Failure", error: `package.json at ${packageJsonPath} must be an object` } as const
     packageMetadataCache.set(normalizedRoot, result)
@@ -578,22 +573,17 @@ function parseBarrelExports(indexPath: string): Result<ParsedBarrelExports, stri
   if (cached !== undefined) {
     return cached
   }
-  const sourceResult = Effect.runSync(Effect.try({
-    try: () => fs.readFileSync(normalizedIndexPath, "utf8"),
-    catch: (error) => String(error)
-  }).pipe(Effect.match({
-    onFailure: (error) => ({ _tag: "Failure", error } as const),
-    onSuccess: (value) => ({ _tag: "Success", value } as const)
-  })))
-  if (sourceResult._tag === "Failure") {
+  let source: string
+  try {
+    source = fs.readFileSync(normalizedIndexPath, "utf8")
+  } catch (error) {
     const result = {
       _tag: "Failure",
-      error: `unable to read barrel file ${normalizedIndexPath}: ${sourceResult.error}`
+      error: `unable to read barrel file ${normalizedIndexPath}: ${String(error)}`
     } as const
     barrelExportCache.set(normalizedIndexPath, result)
     return result
   }
-  const source = sourceResult.value
   const sourceFile = ts.createSourceFile(normalizedIndexPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const namespace = new Map<string, string>()
   const flat = new Set<string>()
@@ -1758,6 +1748,7 @@ export interface JSDocModel {
   readonly version: 2
   readonly generatedBy: "@effect/jsdocs"
   readonly generatedAt: string
+  readonly inputHash?: string
   readonly files: ReadonlyArray<JSDocModelFile>
   readonly apis: ReadonlyArray<JSDocApi>
 }
@@ -1771,6 +1762,65 @@ export interface JSDocConfig {
 
 export interface ExtractJSDocsOptions extends JSDocConfig {
   readonly cwd?: string
+}
+
+function addInputFile(files: Set<string>, filename: string) {
+  const normalized = path.resolve(filename)
+  if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
+    files.add(normalized)
+  }
+}
+
+export function computeJSDocInputHash(options: ExtractJSDocsOptions): string {
+  const cwd = path.resolve(options.cwd ?? process.cwd())
+  const hash = crypto.createHash("sha256")
+  const files = new Set<string>()
+
+  hash.update(JSON.stringify({
+    tsconfig: options.tsconfig,
+    include: options.include,
+    exclude: options.exclude ?? [],
+    output: options.output
+  }))
+
+  addInputFile(files, path.join(cwd, "jsdocs.config.json"))
+  addInputFile(files, path.resolve(cwd, options.tsconfig))
+
+  for (
+    const filename of globSync([...options.include], {
+      cwd,
+      absolute: true,
+      nodir: true,
+      ignore: ["**/node_modules/**"]
+    })
+  ) {
+    addInputFile(files, filename)
+  }
+
+  for (
+    const filename of globSync([
+      "package.json",
+      "packages/**/package.json",
+      "tsconfig*.json",
+      "packages/**/tsconfig*.json"
+    ], {
+      cwd,
+      absolute: true,
+      nodir: true,
+      ignore: ["**/node_modules/**"]
+    })
+  ) {
+    addInputFile(files, filename)
+  }
+
+  for (const filename of Array.from(files).sort()) {
+    hash.update("\0")
+    hash.update(normalizeFile(cwd, filename))
+    hash.update("\0")
+    hash.update(hashSource(fs.readFileSync(filename, "utf8")))
+  }
+
+  return hash.digest("hex")
 }
 
 function isIdentifierName(value: string): boolean {
@@ -3281,6 +3331,7 @@ export function extractJSDocsSync(options: ExtractJSDocsOptions): JSDocModel {
     version: 2,
     generatedBy: "@effect/jsdocs",
     generatedAt: new Date().toISOString(),
+    inputHash: computeJSDocInputHash(options),
     files: withPublicSeeDiagnostics.files,
     apis: withPublicSeeDiagnostics.apis
   }
@@ -3297,22 +3348,15 @@ export function writeJSDocModel(cwd: string, output: string, model: JSDocModel) 
 
 export function readJSDocModel(filename: string): Result<JSDocModel, string> {
   if (!fs.existsSync(filename)) return { _tag: "Failure", error: "missing" }
-  return Effect.runSync(Effect.try({
-    try: () => JSON.parse(fs.readFileSync(filename, "utf8")) as JSDocModel,
-    catch: (error) => error
-  }).pipe(Effect.match({
-    onFailure: (error) =>
-      ({
-        _tag: "Failure",
-        error: `Invalid jsdocs model: ${error instanceof Error ? error.message : String(error)}`
-      } as const),
-    onSuccess: (parsed) => {
-      if (parsed.version !== 2) return { _tag: "Failure", error: "Unsupported jsdocs model version" }
-      if (!Array.isArray(parsed.files)) return { _tag: "Failure", error: "Invalid jsdocs model: files must be an array" }
-      if (!Array.isArray(parsed.apis)) return { _tag: "Failure", error: "Invalid jsdocs model: apis must be an array" }
-      return { _tag: "Success", value: parsed }
-    }
-  })))
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filename, "utf8")) as JSDocModel
+    if (parsed.version !== 2) return { _tag: "Failure", error: "Unsupported jsdocs model version" }
+    if (!Array.isArray(parsed.files)) return { _tag: "Failure", error: "Invalid jsdocs model: files must be an array" }
+    if (!Array.isArray(parsed.apis)) return { _tag: "Failure", error: "Invalid jsdocs model: apis must be an array" }
+    return { _tag: "Success", value: parsed }
+  } catch (error) {
+    return { _tag: "Failure", error: `Invalid jsdocs model: ${error instanceof Error ? error.message : String(error)}` }
+  }
 }
 
 export function sourceHash(source: string): string {

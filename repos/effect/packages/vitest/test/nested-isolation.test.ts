@@ -1,4 +1,4 @@
-import { afterAll, assert, beforeAll, describe, layer } from "@effect/vitest"
+import { afterAll, assert, beforeAll, describe, expect, layer } from "@effect/vitest"
 import { Context, Effect, Layer, Ref } from "effect"
 
 describe("nested sibling layers", () => {
@@ -40,7 +40,7 @@ describe("nested sibling layers", () => {
 
     it.layer(Child.Live)("second sibling", (it) => {
       beforeAll(() => {
-        assert.deepStrictEqual(releasedChildIds, [firstChildId])
+        expect(releasedChildIds).toEqual([firstChildId])
       })
 
       it.effect("allocates a fresh child", () =>
@@ -55,9 +55,9 @@ describe("nested sibling layers", () => {
     })
 
     afterAll(() => {
-      assert.strictEqual(firstChildId, 1)
-      assert.strictEqual(secondChildId, 2)
-      assert.deepStrictEqual(releasedChildIds, [1, 2])
+      expect(firstChildId).toEqual(1)
+      expect(secondChildId).toEqual(2)
+      expect(releasedChildIds).toEqual([1, 2])
     })
   })
 })
@@ -112,9 +112,9 @@ describe.concurrent("nested sibling layers in concurrent suites", () => {
     })
 
     afterAll(() => {
-      assert.notStrictEqual(firstSharedId, secondSharedId)
-      assert.strictEqual(nextSharedId, 2)
-      assert.deepStrictEqual([...releasedSharedIds].sort((a, b) => a - b), [1, 2])
+      expect(firstSharedId).not.toEqual(secondSharedId)
+      expect(nextSharedId).toEqual(2)
+      expect([...releasedSharedIds].sort((a, b) => a - b)).toEqual([1, 2])
     })
   })
 })
@@ -204,9 +204,9 @@ describe("nested sibling isolation with provided state graph", () => {
     })
 
     afterAll(() => {
-      assert.strictEqual(firstStateId, 1)
-      assert.strictEqual(secondStateId, 2)
-      assert.strictEqual(nextId, 2)
+      expect(firstStateId).toEqual(1)
+      expect(secondStateId).toEqual(2)
+      expect(nextId).toEqual(2)
     })
   })
 })
