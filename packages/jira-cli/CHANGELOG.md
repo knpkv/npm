@@ -1,5 +1,12 @@
 # @knpkv/jira-cli
 
+## 1.1.2
+
+### Patch Changes
+
+- Updated dependencies [[`f7534ae`](https://github.com/knpkv/npm/commit/f7534ae868a010274f9c4a49ef95bd96e9a26506)]:
+  - @knpkv/jira-api-client@0.3.1
+
 ## 1.1.1
 
 ### Patch Changes
