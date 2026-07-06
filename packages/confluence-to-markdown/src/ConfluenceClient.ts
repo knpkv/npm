@@ -305,13 +305,26 @@ const mapDecodeError = (cause: unknown, endpoint: string, pageId?: string): ApiE
     ...(pageId !== undefined && { pageId })
   })
 
+const normalizeNullPagePosition = (value: unknown): unknown =>
+  isRecord(value) && value.position === null
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== "position"))
+    : value
+
+const normalizeNullPagePositions = (value: unknown): unknown => {
+  if (!isRecord(value) || !Array.isArray(value.results)) return normalizeNullPagePosition(value)
+  return {
+    ...value,
+    results: value.results.map(normalizeNullPagePosition)
+  }
+}
+
 const decodePageResponse = (
   value: unknown,
   endpoint: string,
   pageId?: string
 ): Effect.Effect<PageResponse, ApiError> =>
   Effect.try({
-    try: () => Schema.decodeUnknownSync(PageResponseSchema)(value),
+    try: () => Schema.decodeUnknownSync(PageResponseSchema)(normalizeNullPagePosition(value)),
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
   })
 
@@ -321,7 +334,7 @@ const decodeChildrenResponse = (
   pageId?: string
 ): Effect.Effect<PageChildrenResponse, ApiError> =>
   Effect.try({
-    try: () => Schema.decodeUnknownSync(PageChildrenResponseSchema)(value),
+    try: () => Schema.decodeUnknownSync(PageChildrenResponseSchema)(normalizeNullPagePositions(value)),
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
   })
 

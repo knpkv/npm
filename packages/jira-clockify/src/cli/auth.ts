@@ -19,8 +19,8 @@ class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKey
 
 const ClockifyUser = Schema.Struct({
   id: Schema.String,
-  name: Schema.String,
-  email: Schema.String
+  name: Schema.optional(Schema.String),
+  email: Schema.optional(Schema.String)
 })
 
 const ClockifyWorkspace = Schema.Struct({

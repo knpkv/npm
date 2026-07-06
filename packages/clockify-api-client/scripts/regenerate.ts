@@ -70,7 +70,7 @@ const toStringRecord = (value: unknown): Record<string, string> | undefined => {
 const toClockifySpec = (value: unknown): ClockifySpec => {
   const components = isRecord(value) ? value.components : undefined
   const schemas = isRecord(components) && isRecord(components.schemas) ? components.schemas : undefined
-  return schemas ? { components: { schemas } } : {}
+  return schemas ? { ...value, components: { ...components, schemas } } : {}
 }
 
 const toClockifyPatches = (value: unknown): ClockifyPatches => {
