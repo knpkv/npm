@@ -103,8 +103,8 @@ export function PopupMessage({
 
         <box style={{ height: 1 }} />
 
-        {/* Action buttons */}
-        <box style={{ height: 1, justifyContent: "center", gap: 2 }}>
+        {/* Action buttons — explicit row so multiple buttons sit side by side, not stacked */}
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "center", gap: 2 }}>
           {onRetry ? (
             <box style={{ backgroundColor: retryBg, paddingLeft: 2, paddingRight: 2 }}>
               <text fg="#000000">{retrying ? "Retrying…" : "Retry (r)"}</text>
