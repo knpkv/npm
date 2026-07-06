@@ -50,6 +50,18 @@ const fromBase64 = (b64: string): string => {
   return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))
 }
 
+// Chunked to stay under the argument-count limit for large blobs (a big table
+// node can be tens of KB); Web APIs only, mirroring the decoder above.
+const toBase64 = (s: string): string => {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ""
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
 const parseMetadataValue = (raw: string): unknown | null => {
   const trimmed = raw.trim()
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -139,7 +151,14 @@ const hydrateLine = (line: string, sidecars: ReadonlyMap<string, AdfMetadataSide
   const entry = sidecar.entries[id]
   if (!entry) return line
 
-  return `${line.slice(0, refStart)} ${entry.kind}=${stableStringify(entry.value)} ${line.slice(end)}`
+  // Base64 the blob rather than inlining raw JSON: the hydrated line is fed
+  // straight to the @atlaskit markdown parser on push, which treats a JSON
+  // payload containing `[text](url)`, backticks, etc. as live markdown and
+  // splits the placeholder comment across several inline nodes — the reverter
+  // then fails to match it, so the marker survives as a literal junk paragraph
+  // (and a duplicate table). Base64 has no markdown-active characters, so the
+  // comment stays a single text node; every decoder already accepts base64.
+  return `${line.slice(0, refStart)} ${entry.kind}=${toBase64(stableStringify(entry.value))} ${line.slice(end)}`
 }
 
 export const hydrateAdfMetadata = (

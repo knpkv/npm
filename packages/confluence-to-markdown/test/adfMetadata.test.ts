@@ -129,8 +129,13 @@ describe("ADF metadata sidecars", () => {
       ])
     )
 
-    expect(hydrated).toBe(
-      `<!-- adf:taskList node={"attrs":{"localId":"task-list"},"content":[{"attrs":{"state":"DONE"},"type":"taskItem"}],"type":"taskList"} -->`
+    // The blob is base64-encoded so the @atlaskit markdown parser can't split
+    // the placeholder comment on markdown-active characters in the JSON payload.
+    const match = /<!-- adf:taskList node=(\S+) -->/.exec(hydrated)
+    expect(match).not.toBeNull()
+    expect(match![1]).not.toContain("{")
+    expect(Buffer.from(match![1]!, "base64").toString("utf8")).toBe(
+      `{"attrs":{"localId":"task-list"},"content":[{"attrs":{"state":"DONE"},"type":"taskItem"}],"type":"taskList"}`
     )
   })
 
