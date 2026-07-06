@@ -5,17 +5,27 @@
  *
  * @module
  */
-import { ConfluenceApiClient, ConfluenceApiConfig, type FetchClientError, toEffect } from "@knpkv/confluence-api-client"
+import { ConfluenceApiClient, ConfluenceApiConfig, FetchClientError, toEffect } from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
 import type { PageId } from "./Brand.js"
-import type { RateLimitError } from "./ConfluenceError.js"
-import { ApiError } from "./ConfluenceError.js"
-import type { AtlassianUser, PageChildrenResponse, PageListItem, PageResponse, PageVersion } from "./Schemas.js"
+import { ApiError, RateLimitError } from "./ConfluenceError.js"
+import {
+  type AtlassianUser,
+  AtlassianUserSchema,
+  type PageChildrenResponse,
+  PageChildrenResponseSchema,
+  type PageListItem,
+  type PageResponse,
+  PageResponseSchema,
+  type PageVersion,
+  PageVersionsResponseSchema
+} from "./Schemas.js"
 
 /**
  * Request to create a new page.
@@ -150,28 +160,159 @@ const MAX_PAGINATION_ITERATIONS = 100
 
 /** Default page size for version fetching */
 const VERSIONS_PAGE_SIZE = 50
+const ATLAS_DOC_FORMAT: "atlas_doc_format" = "atlas_doc_format"
 
 /**
  * Rate limit retry schedule with exponential backoff.
  */
-const rateLimitRetry = {
+const rateLimitRetry: {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+  readonly while: (error: ApiError | RateLimitError) => error is RateLimitError
+} = {
   schedule: Schedule.exponential("1 second").pipe(
     Schedule.either(Schedule.spaced("30 seconds"))
   ),
   times: 3,
-  while: (error: unknown) => Predicate.isTagged(error, "RateLimitError")
-} as const
+  while: (error: ApiError | RateLimitError): error is RateLimitError => Predicate.isTagged(error, "RateLimitError")
+}
 
 /**
  * Map API client errors to domain errors.
  */
-const mapApiError = (error: FetchClientError, endpoint: string, pageId?: string): ApiError =>
-  new ApiError({
-    status: error.status,
-    message: error.message,
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const recordOrNull = (value: unknown): Record<string, unknown> | null => isRecord(value) ? value : null
+
+const stringOrUndefined = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
+
+const numberOrUndefined = (value: unknown): number | undefined => typeof value === "number" ? value : undefined
+
+const fetchClientErrorFromUnknown = (error: unknown): FetchClientError =>
+  (() => {
+    const record = recordOrNull(error)
+    if (record?._tag === "FetchClientError") {
+      return new FetchClientError({
+        error: record["error"],
+        status: numberOrUndefined(record["status"]) ?? 0,
+        message: stringOrUndefined(record["message"]) ?? String(record["error"] ?? error)
+      })
+    }
+    return new FetchClientError({
+      error,
+      status: 0,
+      message: String(error)
+    })
+  })()
+
+const mapApiError = (error: unknown, endpoint: string, pageId?: string): ApiError | RateLimitError => {
+  const fetchError = fetchClientErrorFromUnknown(error)
+  if (fetchError.status === 429) {
+    return new RateLimitError()
+  }
+  return new ApiError({
+    status: fetchError.status,
+    message: fetchError.message,
     endpoint,
     ...(pageId !== undefined && { pageId })
   })
+}
+
+const normalizeConfluenceError = (
+  error: unknown,
+  endpoint: string,
+  pageId?: string
+): ApiError | RateLimitError => {
+  const record = recordOrNull(error)
+  if (record?._tag === "ApiError") {
+    const errorPageId = stringOrUndefined(record["pageId"])
+    return new ApiError({
+      status: numberOrUndefined(record["status"]) ?? 0,
+      message: stringOrUndefined(record["message"]) ?? String(error),
+      endpoint: stringOrUndefined(record["endpoint"]) ?? endpoint,
+      ...(errorPageId !== undefined ? { pageId: errorPageId } : {})
+    })
+  }
+  if (record?._tag === "RateLimitError") {
+    const retryAfter = numberOrUndefined(record["retryAfter"])
+    return new RateLimitError(retryAfter !== undefined ? { retryAfter } : undefined)
+  }
+  return mapApiError(error, endpoint, pageId)
+}
+
+const mapDecodeError = (cause: unknown, endpoint: string, pageId?: string): ApiError =>
+  new ApiError({
+    status: 0,
+    message: `Invalid Confluence API response for ${endpoint}: ${String(cause)}`,
+    endpoint,
+    ...(pageId !== undefined && { pageId })
+  })
+
+const decodePageResponse = (
+  value: unknown,
+  endpoint: string,
+  pageId?: string
+): Effect.Effect<PageResponse, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(PageResponseSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint, pageId)
+  })
+
+const decodeChildrenResponse = (
+  value: unknown,
+  endpoint: string,
+  pageId?: string
+): Effect.Effect<PageChildrenResponse, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(PageChildrenResponseSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint, pageId)
+  })
+
+const decodeVersionsResponse = (
+  value: unknown,
+  endpoint: string,
+  pageId?: string
+) =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(PageVersionsResponseSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint, pageId)
+  })
+
+const decodeAtlassianUser = (
+  value: unknown,
+  endpoint: string
+): Effect.Effect<AtlassianUser, ApiError> =>
+  Effect.try({
+    try: () => Schema.decodeUnknownSync(AtlassianUserSchema)(value),
+    catch: (cause) => mapDecodeError(cause, endpoint)
+  })
+
+interface EditorProperty {
+  id?: string
+  version?: {
+    number?: number
+  }
+}
+
+const firstEditorProperty = (value: unknown): EditorProperty | undefined => {
+  const response = recordOrNull(value)
+  const results = response?.["results"]
+  if (!Array.isArray(results)) return undefined
+  const first = recordOrNull(results[0])
+  if (first === null) return undefined
+  const property: EditorProperty = {}
+  const id = stringOrUndefined(first["id"])
+  if (id !== undefined) {
+    property.id = id
+  }
+  const version = recordOrNull(first["version"])
+  const versionNumber = version !== null ? numberOrUndefined(version["number"]) : undefined
+  if (versionNumber !== undefined) {
+    property.version = { number: versionNumber }
+  }
+  return property
+}
 
 /**
  * Create the Confluence client service.
@@ -195,19 +336,23 @@ const make = (
 
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.GET("/pages/{id}", {
-        params: { path: { id: Number(id) }, query: { "body-format": "atlas_doc_format" } }
+        params: { path: { id: Number(id) }, query: { "body-format": ATLAS_DOC_FORMAT } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitRetry)
-      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}`, id)),
+        Effect.flatMap((response) => decodePageResponse(response, `/pages/${id}`, id))
+      )
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.GET("/pages/{id}/children", {
         params: { path: { id: Number(id) } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-        Effect.retry(rateLimitRetry)
-      ) as Effect.Effect<PageChildrenResponse, ApiError | RateLimitError>
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
+        Effect.flatMap((response) => decodeChildrenResponse(response, `/pages/${id}/children`, id))
+      )
 
     const getAllChildren = (id: PageId): Effect.Effect<ReadonlyArray<PageListItem>, ApiError | RateLimitError> =>
       Effect.gen(function*() {
@@ -231,17 +376,17 @@ const make = (
             params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}) } }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-            Effect.retry(rateLimitRetry)
+            Effect.retry(rateLimitRetry),
+            Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
+            Effect.flatMap((rawResponse) => decodeChildrenResponse(rawResponse, `/pages/${id}/children`, id))
           )
 
-          for (const child of (response as { results?: Array<PageListItem> }).results ?? []) {
+          for (const child of response.results) {
             allChildren.push(child)
           }
 
-          cursor = (response as { _links?: { next?: string } })._links?.next
-            ? new URL((response as { _links: { next: string } })._links.next, config.baseUrl).searchParams.get(
-              "cursor"
-            ) ?? undefined
+          cursor = response._links?.next
+            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
             : undefined
 
           iterations++
@@ -261,8 +406,10 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, "/pages")),
-        Effect.retry(rateLimitRetry)
-      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, "/pages")),
+        Effect.flatMap((response) => decodePageResponse(response, "/pages"))
+      )
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.PUT("/pages/{id}", {
@@ -276,8 +423,10 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
-        Effect.retry(rateLimitRetry)
-      ) as Effect.Effect<PageResponse, ApiError | RateLimitError>
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${req.id}`, req.id)),
+        Effect.flatMap((response) => decodePageResponse(response, `/pages/${req.id}`, req.id))
+      )
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.DELETE("/pages/{id}", {
@@ -285,7 +434,8 @@ const make = (
       })).pipe(
         Effect.map(() => void 0),
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitRetry)
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}`, id))
       )
 
     const getPageVersions = (
@@ -313,26 +463,26 @@ const make = (
             params: {
               path: { id: Number(id) },
               query: {
-                ...(options?.includeBody ? { "body-format": "atlas_doc_format" as const } : {}),
+                ...(options?.includeBody ? { "body-format": ATLAS_DOC_FORMAT } : {}),
                 ...(cursor ? { cursor } : {}),
                 limit: VERSIONS_PAGE_SIZE
               }
             }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
-            Effect.retry(rateLimitRetry)
+            Effect.retry(rateLimitRetry),
+            Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/versions`, id)),
+            Effect.flatMap((rawResponse) => decodeVersionsResponse(rawResponse, `/pages/${id}/versions`, id))
           )
 
-          for (const version of (response as { results?: Array<PageVersion> }).results ?? []) {
+          for (const version of response.results) {
             if (options?.since === undefined || (version.number ?? 0) > options.since) {
               allVersions.push(version)
             }
           }
 
-          cursor = (response as { _links?: { next?: string } })._links?.next
-            ? new URL((response as { _links: { next: string } })._links.next, config.baseUrl).searchParams.get(
-              "cursor"
-            ) ?? undefined
+          cursor = response._links?.next
+            ? new URL(response._links.next, config.baseUrl).searchParams.get("cursor") ?? undefined
             : undefined
 
           iterations++
@@ -346,8 +496,10 @@ const make = (
         params: { query: { accountId } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
-        Effect.retry(rateLimitRetry)
-      ) as Effect.Effect<AtlassianUser, ApiError | RateLimitError>
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/user?accountId=${accountId}`)),
+        Effect.flatMap((response) => decodeAtlassianUser(response, `/user?accountId=${accountId}`))
+      )
 
     const getSpaceId = (pageId: PageId): Effect.Effect<string, ApiError | RateLimitError> =>
       Effect.gen(function*() {
@@ -371,12 +523,12 @@ const make = (
         const existing = yield* toEffect(apiClient.v2.client.GET("/pages/{page-id}/properties", {
           params: { path: { "page-id": Number(pageId) }, query: { key: "editor" } }
         })).pipe(
-          Effect.map((resp) => {
-            const results = (resp as { results?: Array<{ id?: string; version?: { number?: number } }> }).results
-            return results?.[0]
-          }),
+          Effect.map(firstEditorProperty),
           Effect.catchIf(
-            (e: FetchClientError) => e.status === 404,
+            (e: unknown) => {
+              const record = recordOrNull(e)
+              return record?._tag === "FetchClientError" && record["status"] === 404
+            },
             () => Effect.succeed(undefined)
           ),
           Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties?key=editor`, pageId))
@@ -402,7 +554,10 @@ const make = (
             Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         }
-      }).pipe(Effect.retry(rateLimitRetry))
+      }).pipe(
+        Effect.retry(rateLimitRetry),
+        Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${pageId}/properties/editor`, pageId))
+      )
 
     return ConfluenceClient.of({
       getPage,

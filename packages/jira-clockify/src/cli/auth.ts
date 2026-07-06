@@ -6,7 +6,7 @@
 import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
 import type { V1 } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Data, Effect, Option, Predicate } from "effect"
+import { Console, Data, Effect, Option, Predicate, Schema } from "effect"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
@@ -16,6 +16,23 @@ class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKey
     return "Invalid API key — check the value and try again"
   }
 }
+
+const ClockifyUser = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: Schema.String
+})
+
+const ClockifyWorkspace = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String
+})
+
+type ClockifyWorkspace = typeof ClockifyWorkspace.Type
+
+const decodeClockifyUser = Schema.decodeUnknownEffect(ClockifyUser)
+const decodeClockifyWorkspaces = Schema.decodeUnknownEffect(Schema.Array(ClockifyWorkspace))
+const emptyWorkspaces = (): ReadonlyArray<ClockifyWorkspace> => []
 
 // ---------------------------------------------------------------------------
 // Jira OAuth
@@ -157,12 +174,14 @@ export const clockifySetup = Command.make(
       })
 
       const user = yield* toEffect(client.GET("/v1/user")).pipe(
+        Effect.flatMap(decodeClockifyUser),
         Effect.catch(() => Effect.fail(new InvalidClockifyApiKeyError()))
       )
-      yield* Console.log(`Authenticated as: ${(user as { name: string }).name} (${(user as { email: string }).email})`)
+      yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
 
       const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
-        Effect.catch(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
+        Effect.flatMap(decodeClockifyWorkspaces),
+        Effect.catch(() => Effect.succeed(emptyWorkspaces()))
       )
 
       if (workspaces.length === 0) {
@@ -173,7 +192,10 @@ export const clockifySetup = Command.make(
       yield* Console.log("")
       yield* Console.log("Workspaces:")
       for (let i = 0; i < workspaces.length; i++) {
-        yield* Console.log(`  ${i + 1}. ${(workspaces[i] as { name: string }).name}`)
+        const workspace = workspaces[i]
+        if (workspace !== undefined) {
+          yield* Console.log(`  ${i + 1}. ${workspace.name}`)
+        }
       }
 
       let selectedIdx = 0
@@ -183,12 +205,12 @@ export const clockifySetup = Command.make(
       }
 
       const workspace = workspaces[selectedIdx]!
-      yield* Console.log(`Selected: ${(workspace as { name: string }).name}`)
+      yield* Console.log(`Selected: ${workspace.name}`)
 
       yield* auth.save({
         apiKey,
-        workspaceId: (workspace as { id: string }).id,
-        userId: (user as { id: string }).id,
+        workspaceId: workspace.id,
+        userId: user.id,
         baseUrl: "https://api.clockify.me/api"
       })
 

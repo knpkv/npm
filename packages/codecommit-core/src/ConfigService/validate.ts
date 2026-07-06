@@ -6,10 +6,12 @@ import * as FileSystem from "effect/FileSystem"
 import { ConfigError } from "../Errors.js"
 import { ConfigPaths, TuiConfig } from "./internal.js"
 
+const emptyErrors: Array<string> = []
+
 export class ConfigValidationResult extends Schema.Class<ConfigValidationResult>("ConfigValidationResult")({
   status: Schema.Literals(["valid", "missing", "corrupted"]),
   path: Schema.String,
-  errors: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([] as Array<string>)))
+  errors: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(emptyErrors)))
 }) {}
 
 export const validate = Effect.gen(function*() {

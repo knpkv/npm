@@ -19,7 +19,8 @@ export function useOptimistic<T>(serverValue: T): readonly [T, (value: T | null)
     }
   }
 
-  return [optimistic ?? serverValue, setOptimistic] as const
+  const result: readonly [T, (value: T | null) => void] = [optimistic ?? serverValue, setOptimistic]
+  return result
 }
 
 /**
@@ -61,5 +62,11 @@ export function useOptimisticSet<T>(serverKey: unknown): readonly [
     })
   }, [])
 
-  return [ids, addOne, addAll, removeOne] as const
+  const result: readonly [
+    ReadonlySet<T>,
+    (id: T) => void,
+    (ids: Iterable<T>) => void,
+    (id: T) => void
+  ] = [ids, addOne, addAll, removeOne]
+  return result
 }

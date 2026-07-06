@@ -124,7 +124,7 @@ const makeSandboxService = Effect.gen(function*() {
     }
   })
 
-  return {
+  const service = {
     create: (params: CreateSandboxParams) =>
       Effect.gen(function*() {
         // Singleton check — one active sandbox per PR
@@ -447,7 +447,8 @@ const makeSandboxService = Effect.gen(function*() {
           { discard: true }
         )
       }).pipe(Effect.catchCause((cause) => Effect.logWarning("Sandbox GC failed", cause)))
-  } as const
+  }
+  return service
 })
 
 export interface SandboxServiceShape extends Success<typeof makeSandboxService> {}

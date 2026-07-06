@@ -9,8 +9,8 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import type { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { Duration, Effect, Semaphore, SubscriptionRef } from "effect"
+import { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -72,7 +72,7 @@ export const NotificationsLive = HttpApiBuilder.group(
                     Effect.gen(function*() {
                       const state = yield* SubscriptionRef.get(prService.state)
                       const account = state.accounts.find((a) => a.profile === payload.profile)
-                      const region = account?.region ?? ("us-east-1" as AwsRegion)
+                      const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
                       const identity = yield* awsClient.getCallerIdentity({
                         profile: payload.profile,
                         region

@@ -54,7 +54,7 @@ const timestampForTitle = (date: Date): string => date.toISOString().replace(/[:
 
 const timestampLine = (label: string, date: Date): string => `${label} at ${date.toISOString()}`
 
-const RAW_ROUND_TRIP_NODE_TYPES = [
+const RAW_ROUND_TRIP_NODE_TYPES: ReadonlyArray<string> = [
   "blockCard",
   "bodiedExtension",
   "codeBlock",
@@ -78,9 +78,9 @@ const RAW_ROUND_TRIP_NODE_TYPES = [
   "tableRow",
   "taskItem",
   "taskList"
-] as const
+]
 
-const RAW_ROUND_TRIP_MARK_TYPES = [
+const RAW_ROUND_TRIP_MARK_TYPES: ReadonlyArray<string> = [
   "alignment",
   "backgroundColor",
   "breakout",
@@ -88,7 +88,7 @@ const RAW_ROUND_TRIP_MARK_TYPES = [
   "subsup",
   "textColor",
   "underline"
-] as const
+]
 
 interface RawAdfEvidence {
   readonly types: Set<string>
@@ -103,6 +103,11 @@ interface RawAdfSnapshot {
   readonly value: string
   readonly evidence: RawAdfEvidence
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const recordOrNull = (value: unknown): Record<string, unknown> | null => isRecord(value) ? value : null
 
 // === Helper Functions ===
 
@@ -368,33 +373,31 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
   const selectedNodeTypes = new Set<string>(RAW_ROUND_TRIP_NODE_TYPES)
   const normalizeAttrs = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(normalizeAttrs)
-    if (value !== null && typeof value === "object") {
-      const entries = Object.entries(value as Record<string, unknown>)
-        .map(([key, v]) => [key, normalizeAttrs(v)] as const)
-        .filter(([key, v]) => {
-          if (key === "localId" || key === "macroMetadata") return false
-          if (key === "layout" && v === "default") return false
-          if (key === "macroId" && v !== null && typeof v === "object") return false
-          if (
-            (key === "macroParams" || key === "parameters") &&
-            v !== null &&
-            typeof v === "object" &&
-            !Array.isArray(v) &&
-            Object.keys(v).length === 0
-          ) {
-            return false
-          }
-          return true
-        })
-      return Object.fromEntries(entries)
+    if (isRecord(value)) {
+      const normalized: Record<string, unknown> = {}
+      for (const [key, rawValue] of Object.entries(value)) {
+        const attr = normalizeAttrs(rawValue)
+        if (key === "localId" || key === "macroMetadata") continue
+        if (key === "layout" && attr === "default") continue
+        if (key === "macroId" && isRecord(attr)) continue
+        if (
+          (key === "macroParams" || key === "parameters") &&
+          isRecord(attr) &&
+          Object.keys(attr).length === 0
+        ) {
+          continue
+        }
+        normalized[key] = attr
+      }
+      return normalized
     }
     return value
   }
   const stableJson = (value: unknown): string => {
     if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
-    if (value !== null && typeof value === "object") {
+    if (isRecord(value)) {
       return `{${
-        Object.entries(value as Record<string, unknown>)
+        Object.entries(value)
           .filter(([, v]) => v !== undefined)
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`)
@@ -408,16 +411,16 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
   const cardUrl = (attrs: Record<string, unknown>): string | null => {
     const url = attrs["url"]
     if (typeof url === "string") return url
-    const data = attrs["data"]
-    if (data !== null && typeof data === "object" && !Array.isArray(data)) {
-      const dataUrl = (data as Record<string, unknown>)["url"]
+    const data = recordOrNull(attrs["data"])
+    if (data !== null) {
+      const dataUrl = data["url"]
       if (typeof dataUrl === "string") return dataUrl
     }
     return null
   }
   const walk = (node: unknown): void => {
-    if (node === null || typeof node !== "object") return
-    const record = node as Record<string, unknown>
+    const record = recordOrNull(node)
+    if (record === null) return
     const type = record["type"]
     if (typeof type === "string") evidence.types.add(type)
     const attrs = record["attrs"]
@@ -429,22 +432,24 @@ const adfEvidence = (adf: unknown): RawAdfEvidence => {
       !Array.isArray(attrs)
     ) {
       const normalized = normalizeAttrs(attrs)
-      const extensionKey = (normalized as Record<string, unknown>)["extensionKey"]
+      const normalizedRecord = recordOrNull(normalized)
+      const extensionKey = normalizedRecord?.["extensionKey"]
       if (!(type === "extension" && extensionKey === "toc")) {
         evidence.attrSignatures.add(`${type}:${stableJson(normalized)}`)
       }
     }
     if (type === "inlineCard") {
-      if (attrs !== null && typeof attrs === "object" && !Array.isArray(attrs)) {
-        const url = cardUrl(attrs as Record<string, unknown>)
+      const attrsRecord = recordOrNull(attrs)
+      if (attrsRecord !== null) {
+        const url = cardUrl(attrsRecord)
         if (url !== null) evidence.inlineCardUrls.add(url)
       }
     }
     const marks = record["marks"]
     if (Array.isArray(marks)) {
       for (const mark of marks) {
-        if (mark === null || typeof mark !== "object" || Array.isArray(mark)) continue
-        const markRecord = mark as Record<string, unknown>
+        const markRecord = recordOrNull(mark)
+        if (markRecord === null) continue
         const markType = markRecord["type"]
         if (typeof markType !== "string") continue
         evidence.markTypes.add(markType)
@@ -478,9 +483,13 @@ const getRemoteAdfSnapshot = (pageId: string) =>
       if (!response.ok) {
         throw new Error(`Confluence returned ${response.status} for page ${pageId}`)
       }
-      const page = await response.json() as { body?: { atlas_doc_format?: { value?: string } } }
-      const value = page.body?.atlas_doc_format?.value ?? "{}"
-      const adf = JSON.parse(value) as unknown
+      const page: unknown = await response.json()
+      const pageRecord = recordOrNull(page)
+      const body = recordOrNull(pageRecord?.["body"])
+      const atlasDocFormat = recordOrNull(body?.["atlas_doc_format"])
+      const rawValue = atlasDocFormat?.["value"]
+      const value = typeof rawValue === "string" ? rawValue : "{}"
+      const adf: unknown = JSON.parse(value)
       return { value, evidence: adfEvidence(adf) }
     },
     catch: (cause) => cause
@@ -555,22 +564,17 @@ const expectSidecarMetadata = (filePath: string, pageId: string, markdown: strin
     expect(markdown).not.toMatch(/<!--\s*adf:[^>]+(?:attrs|node|marks)=/)
     expect(yield* pathExists(sidecarPath)).toBe(true)
 
-    const sidecar = JSON.parse(yield* readText(sidecarPath)) as unknown
+    const sidecar: unknown = JSON.parse(yield* readText(sidecarPath))
     expect(sidecar).toMatchObject({ version: 1 })
 
-    const record = sidecar !== null && typeof sidecar === "object" && !Array.isArray(sidecar)
-      ? sidecar as Record<string, unknown>
-      : {}
-    const entries = record["entries"] !== null && typeof record["entries"] === "object" &&
-        !Array.isArray(record["entries"])
-      ? record["entries"] as Record<string, unknown>
-      : {}
+    const record = recordOrNull(sidecar) ?? {}
+    const entries = recordOrNull(record["entries"]) ?? {}
     expect(Object.keys(entries).length).toBeGreaterThan(0)
     expect(
       Object.values(entries).some((entry) => {
-        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false
-        const value = (entry as Record<string, unknown>)["value"]
-        return value !== null && typeof value === "object"
+        const entryRecord = recordOrNull(entry)
+        if (entryRecord === null) return false
+        return isRecord(entryRecord["value"])
       })
     ).toBe(true)
   })

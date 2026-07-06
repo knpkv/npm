@@ -5,8 +5,8 @@
  *
  * - **Brand = runtime validation + compile-time narrowing**: Each brand combines
  *   an Effect `Brand.make` (throws on invalid values) with an Effect `Schema`
- *   (composable validation). The `Type` property exposes the branded type for use
- *   in type annotations.
+ *   (composable validation). Use `ReturnType<typeof Constructor>` to refer to
+ *   the branded output type.
  * - **Pattern-guarded strings**: `SpaceKey`, `IssueKey`, `ProjectKey` are regex-branded;
  *   `PageId` is non-empty branded; `ContentHash` is SHA256 hex branded.
  *
@@ -34,7 +34,7 @@ import * as Schema from "effect/Schema"
  * import { makeBrandedString } from "@knpkv/atlassian-common"
  *
  * const IssueKey = makeBrandedString("IssueKey", /^[A-Z]+-\d+$/)
- * type IssueKey = typeof IssueKey.Type
+ * type IssueKey = ReturnType<typeof IssueKey>
  *
  * const key = IssueKey("PROJ-123") // OK
  * const bad = IssueKey("invalid")  // Throws
@@ -53,8 +53,7 @@ export const makeBrandedString = <B extends string>(
   const schema = Schema.String.check(Schema.isPattern(pattern)).pipe(Schema.brand(name))
 
   return Object.assign(brand, {
-    schema,
-    Type: undefined as unknown as BrandedType
+    schema
   })
 }
 
@@ -66,7 +65,7 @@ export const makeBrandedString = <B extends string>(
  * import { makeBrandedNonEmptyString } from "@knpkv/atlassian-common"
  *
  * const PageId = makeBrandedNonEmptyString("PageId")
- * type PageId = typeof PageId.Type
+ * type PageId = ReturnType<typeof PageId>
  *
  * const id = PageId("12345") // OK
  * const bad = PageId("")     // Throws
@@ -82,8 +81,7 @@ export const makeBrandedNonEmptyString = <B extends string>(name: B) => {
   const schema = Schema.NonEmptyString.pipe(Schema.brand(name))
 
   return Object.assign(brand, {
-    schema,
-    Type: undefined as unknown as BrandedType
+    schema
   })
 }
 
@@ -95,7 +93,7 @@ export const makeBrandedNonEmptyString = <B extends string>(name: B) => {
  * @category Brand
  */
 export const PageId = makeBrandedNonEmptyString("PageId")
-export type PageId = typeof PageId.Type
+export type PageId = ReturnType<typeof PageId>
 
 /**
  * Confluence Space Key (uppercase alphanumeric).
@@ -103,7 +101,7 @@ export type PageId = typeof PageId.Type
  * @category Brand
  */
 export const SpaceKey = makeBrandedString("SpaceKey", /^[A-Z][A-Z0-9]*$/)
-export type SpaceKey = typeof SpaceKey.Type
+export type SpaceKey = ReturnType<typeof SpaceKey>
 
 /**
  * Jira Issue Key (PROJECT-123 format).
@@ -111,7 +109,7 @@ export type SpaceKey = typeof SpaceKey.Type
  * @category Brand
  */
 export const IssueKey = makeBrandedString("IssueKey", /^[A-Z][A-Z0-9]*-\d+$/)
-export type IssueKey = typeof IssueKey.Type
+export type IssueKey = ReturnType<typeof IssueKey>
 
 /**
  * Jira Project Key (uppercase alphanumeric).
@@ -119,7 +117,7 @@ export type IssueKey = typeof IssueKey.Type
  * @category Brand
  */
 export const ProjectKey = makeBrandedString("ProjectKey", /^[A-Z][A-Z0-9]*$/)
-export type ProjectKey = typeof ProjectKey.Type
+export type ProjectKey = ReturnType<typeof ProjectKey>
 
 /**
  * Content hash (SHA256 hex string).
@@ -127,4 +125,4 @@ export type ProjectKey = typeof ProjectKey.Type
  * @category Brand
  */
 export const ContentHash = makeBrandedString("ContentHash", /^[a-f0-9]{64}$/)
-export type ContentHash = typeof ContentHash.Type
+export type ContentHash = ReturnType<typeof ContentHash>

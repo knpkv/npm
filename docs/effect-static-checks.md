@@ -7,8 +7,9 @@ style preferences into noisy CI failures.
 ## Commands
 
 - `pnpm lint` runs ESLint and ast-grep.
-- `pnpm lint:ast` runs the Effect-specific ast-grep rules in
-  `ast-grep/rules/effect`.
+- `pnpm lint:ast` runs ast-grep rules from `sgconfig.yml`, including the
+  Effect-specific rules in `ast-grep/rules/effect` and TypeScript-wide rules in
+  `ast-grep/rules/typescript`.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm skills:check` verifies product-local agent skills are synced from
   `packages/agent-skills/skills`.
@@ -40,6 +41,13 @@ Use ast-grep for syntactic patterns that are precise without type information:
   calling service methods.
 - Stay on Effect v4 APIs: use `Context.Service`, `Effect.catch`, and
   `Effect.gen({ self: this }, ...)` instead of stale v3 forms.
+
+## Hard TypeScript Guardrails
+
+Type assertions are banned. Do not use `value as Type`, `value as const`, double
+assertions such as `value as unknown as Type`, or any variant of `as` to
+override the checker. Model the value, narrow it, decode it, or use
+`satisfies`.
 
 ## Agent Guidance
 

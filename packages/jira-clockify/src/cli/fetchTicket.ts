@@ -44,7 +44,7 @@ export const fetchTicketByKey = (
     // failure, not a benign logged-out state, so it routes to FetchError.
     const auth = yield* JiraAuth
     const loginCheck: FetchTicketResult | null = yield* auth.isLoggedIn().pipe(
-      Effect.map((loggedIn) => (loggedIn ? null : { _tag: "NotLoggedIn" as const })),
+      Effect.map((loggedIn): FetchTicketResult | null => (loggedIn ? null : { _tag: "NotLoggedIn" })),
       Effect.catch((e) => Effect.succeed<FetchTicketResult>({ _tag: "FetchError", message: e.message }))
     )
     if (loginCheck) return loginCheck
@@ -56,10 +56,15 @@ export const fetchTicketByKey = (
         query: { fields: ["summary", "status", "priority", "assignee", "issuetype", "labels", "updated"] }
       }
     })).pipe(
-      Effect.map((issue): FetchTicketResult => ({
-        _tag: "Found",
-        ticket: mapIssueToTicket(issue as Record<string, unknown>, key)
-      })),
+      Effect.map((issue): FetchTicketResult => {
+        const record = issue !== null && typeof issue === "object" && !Array.isArray(issue)
+          ? Object.fromEntries(Object.entries(issue))
+          : {}
+        return {
+          _tag: "Found",
+          ticket: mapIssueToTicket(record, key)
+        }
+      }),
       Effect.catch((e: FetchClientError) =>
         Effect.succeed<FetchTicketResult>(
           e.status === 404

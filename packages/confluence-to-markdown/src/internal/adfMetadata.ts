@@ -23,10 +23,13 @@ export const AdfMetadataSidecarSchema = Schema.Struct({
 export type AdfMetadataEntry = typeof AdfMetadataEntrySchema.Type
 export type AdfMetadataSidecar = typeof AdfMetadataSidecarSchema.Type
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
-  if (v !== null && typeof v === "object") {
-    const entries = Object.entries(v as Record<string, unknown>)
+  if (isRecord(v)) {
+    const entries = Object.entries(v)
       .filter(([, value]) => value !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([k, value]) => `${JSON.stringify(k)}:${stableStringify(value)}`)
@@ -51,7 +54,7 @@ const parseMetadataValue = (raw: string): unknown | null => {
   const trimmed = raw.trim()
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
-      return JSON.parse(trimmed) as unknown
+      return JSON.parse(trimmed)
     } catch {
       return null
     }
@@ -60,7 +63,7 @@ const parseMetadataValue = (raw: string): unknown | null => {
   try {
     const decoded = fromBase64(trimmed)
     if (!decoded.startsWith("{") && !decoded.startsWith("[")) return null
-    return JSON.parse(decoded) as unknown
+    return JSON.parse(decoded)
   } catch {
     return null
   }

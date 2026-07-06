@@ -15,7 +15,7 @@ import { PRComment } from "../src/Domain.js"
 describe("Schema transforms", () => {
   describe("PRComment roundtrip", () => {
     const raw = {
-      id: "c-1" as const,
+      id: "c-1",
       content: "Nice work",
       author: "alice",
       creationDate: new Date("2024-03-10T10:00:00Z"),
@@ -37,7 +37,7 @@ describe("Schema transforms", () => {
 
     // Reply comments have inReplyTo set — must survive roundtrip
     it("preserves inReplyTo for reply comments", () => {
-      const reply = { ...raw, id: "c-2" as const, inReplyTo: "c-1" as const }
+      const reply = { ...raw, id: "c-2", inReplyTo: "c-1" }
       const decoded = Schema.decodeSync(PRComment)(reply)
       expect(decoded.inReplyTo).toBe("c-1")
 
@@ -48,7 +48,7 @@ describe("Schema transforms", () => {
     // Optional fields absent → should decode as undefined, encode without them
     it("handles absent optional fields", () => {
       const minimal = {
-        id: "c-3" as const,
+        id: "c-3",
         content: "ok",
         author: "bob",
         creationDate: new Date(),

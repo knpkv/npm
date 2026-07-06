@@ -4,7 +4,18 @@
  * @internal
  */
 
-export const FIELD_SHAPES = [
+export type FieldShape =
+  | "text"
+  | "multilineText"
+  | "number"
+  | "boolean"
+  | "date"
+  | "singleSelect"
+  | "multiSelect"
+  | "user"
+  | "cascadingSelect"
+
+export const FIELD_SHAPES: ReadonlyArray<FieldShape> = [
   "text",
   "multilineText",
   "number",
@@ -14,9 +25,7 @@ export const FIELD_SHAPES = [
   "multiSelect",
   "user",
   "cascadingSelect"
-] as const
-
-export type FieldShape = typeof FIELD_SHAPES[number]
+]
 
 export interface RequestedCustomField {
   readonly displayName: string

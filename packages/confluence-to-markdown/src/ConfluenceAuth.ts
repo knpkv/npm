@@ -76,7 +76,7 @@ const TokenStorageLive = Layer.mergeAll(
 
 const parseJsonOrNull = (content: string): unknown | null => {
   try {
-    return JSON.parse(content) as unknown
+    return JSON.parse(content)
   } catch {
     return null
   }
@@ -242,16 +242,15 @@ export class ConfluenceAuth extends Context.Service<
   ConfluenceAuthService
 >()("@knpkv/confluence-to-markdown/ConfluenceAuth") {}
 
+type RefreshError = OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+type RefreshDeferred = Deferred.Deferred<OAuthToken, RefreshError>
+
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cryptoService = yield* Crypto.Crypto
 
-  const refreshLock = yield* Ref.make<
-    Option.Option<
-      Deferred.Deferred<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-    >
-  >(
+  const refreshLock = yield* Ref.make<Option.Option<RefreshDeferred>>(
     Option.none()
   )
 
@@ -430,14 +429,11 @@ const make = Effect.gen(function*() {
         return token.access_token
       }
 
-      const deferred = yield* Deferred.make<
-        OAuthToken,
-        OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-      >()
+      const deferred = yield* Deferred.make<OAuthToken, RefreshError>()
       const existing = yield* Ref.modify(refreshLock, (current) =>
         Option.isSome(current)
-          ? [current.value, current] as const
-          : [deferred, Option.some(deferred)] as const)
+          ? ([current.value, current] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>])
+          : ([deferred, Option.some(deferred)] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>]))
 
       if (existing !== deferred) {
         const refreshed = yield* Deferred.await(existing)

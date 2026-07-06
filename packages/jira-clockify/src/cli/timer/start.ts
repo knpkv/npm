@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, type Project } from "@knpkv/clockify-api-client"
 import { Clock, Console, Effect, Option, SubscriptionRef } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
@@ -13,6 +13,13 @@ import { TimerService } from "../../services/TimerService.js"
 import { formatElapsed, parseDuration, parseStartTime } from "../../utils/time.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 import { fuzzySelect } from "../fuzzySelect.js"
+
+type RunningTimerAction = "replace" | "keep"
+
+const replaceTimerAction: RunningTimerAction = "replace"
+const keepTimerAction: RunningTimerAction = "keep"
+const emptyProjects = (): ReadonlyArray<Project> => []
+const noSelectedKey = (): string | null => null
 
 export const start = Command.make(
   "start",
@@ -95,8 +102,8 @@ export const start = Command.make(
         const action = yield* Prompt.select({
           message: "What to do?",
           choices: [
-            { title: "Stop current and start new", value: "replace" as const },
-            { title: "Keep current timer", value: "keep" as const }
+            { title: "Stop current and start new", value: replaceTimerAction },
+            { title: "Keep current timer", value: keepTimerAction }
           ]
         })
         if (action === "keep") return
@@ -121,7 +128,7 @@ export const start = Command.make(
             title: `${t.key.padEnd(12)} ${t.summary.slice(0, 45).padEnd(45)} [${t.status}]`,
             value: t.key
           }))
-        }).pipe(Effect.catch(() => Effect.succeed(null as string | null)))
+        }).pipe(Effect.catch(() => Effect.succeed(noSelectedKey())))
 
         if (!selectedKey) return
         const found = allTickets.find((t) => t.key === selectedKey)
@@ -158,7 +165,7 @@ export const start = Command.make(
           const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
           if (auth) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-              Effect.catch(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed(emptyProjects()))
             )
             if (projects.length > 0) {
               const selected = yield* Prompt.select({
@@ -188,7 +195,7 @@ export const start = Command.make(
         let projectName: string | null = null
         if (projectId && auth) {
           const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-            Effect.catch(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed(emptyProjects()))
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }

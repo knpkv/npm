@@ -38,7 +38,7 @@ const outputDirOption = Options.directory("output-dir").pipe(
 const formatOption = Options.choice("format", ["multi", "single"]).pipe(
   Options.withAlias("f"),
   Options.withDescription("Output format: multi (one file per issue) or single (combined file)"),
-  Options.withDefault("multi" as const)
+  Options.withDefault("multi")
 )
 
 const maxResultsOption = Options.integer("max-results").pipe(

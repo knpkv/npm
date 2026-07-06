@@ -17,6 +17,8 @@ import { Separator } from "./ui/separator.js"
 
 type StatusFilter = "all" | "on" | "off"
 
+const STATUS_FILTERS: ReadonlyArray<StatusFilter> = ["all", "on", "off"]
+
 interface ConfigData {
   readonly accounts: ReadonlyArray<{
     readonly profile: string
@@ -49,7 +51,7 @@ export function SettingsAccounts() {
 
   const saveWithDebounce = useCallback(
     (payload: {
-      accounts: Array<{ profile: string; regions: string[]; enabled: boolean }>
+      accounts: Array<{ profile: string; regions: Array<string>; enabled: boolean }>
       autoDetect: boolean
       autoRefresh: boolean
       refreshIntervalSeconds: number
@@ -214,7 +216,7 @@ function AccountsList({
               />
             </div>
             <ButtonGroup>
-              {(["all", "on", "off"] as const).map((f) => (
+              {STATUS_FILTERS.map((f) => (
                 <Button
                   key={f}
                   variant={statusFilter === f ? "default" : "outline"}

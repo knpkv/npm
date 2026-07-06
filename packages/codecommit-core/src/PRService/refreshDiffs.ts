@@ -9,12 +9,15 @@
  * @internal
  */
 
-import { Effect, Ref, SubscriptionRef } from "effect"
+import { Effect, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
-import type { AwsProfileName, AwsRegion } from "../Domain.js"
+import { AwsProfileName, AwsRegion } from "../Domain.js"
 import type { PRState } from "./internal.js"
+
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 
 const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
   function*(row: CachedPullRequest) {
@@ -24,8 +27,8 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
     // closed PRs whose branches still exist. Failures are caught below.
     const stats = yield* awsClient.getDifferences({
       account: {
-        profile: row.accountProfile as AwsProfileName,
-        region: row.accountRegion as AwsRegion
+        profile: decodeAwsProfileName(row.accountProfile),
+        region: decodeAwsRegion(row.accountRegion)
       },
       repositoryName: row.repositoryName,
       beforeCommitSpecifier: row.destinationBranch,

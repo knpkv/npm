@@ -72,10 +72,10 @@ const makeIntegrationLayer = (config: IntegrationConfig) => {
   const configLayer = Layer.succeed(JiraApiConfig, {
     baseUrl: config.baseUrl,
     auth: {
-      type: "basic" as const,
+      type: "basic",
       email: config.email,
       apiToken: config.apiKey
-    }
+    } satisfies { readonly type: "basic"; readonly email: string; readonly apiToken: typeof config.apiKey }
   })
 
   return MarkdownWriterLayer.pipe(
@@ -111,7 +111,7 @@ const parseFrontMatter = (markdown: string): Record<string, unknown> => {
   const match = /^---\n([\s\S]*?)\n---/.exec(markdown)
   const parsed = match?.[1] ? yaml.load(match[1]) : {}
   return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
+    ? Object.fromEntries(Object.entries(parsed))
     : {}
 }
 

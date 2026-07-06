@@ -43,11 +43,6 @@ export interface PaginatedAuditLog {
   readonly nextCursor?: number
 }
 
-type NoServices<T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
-  Effect.Success<T>,
-  Effect.Error<T>
->
-
 export interface AuditLogRepoShape {
   readonly log: (entry: NewAuditLogEntry) => Effect.Effect<void, CacheError>
   readonly findAll: (opts?: {
@@ -141,8 +136,8 @@ const makeAuditLogRepo = Effect.gen(function*() {
           sql`SELECT * FROM audit_log WHERE ${where} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`.pipe(
             Effect.map((rows) => rows.map((r) => Schema.decodeUnknownSync(AuditLogEntry)(r)))
           ),
-          sql`SELECT count(*) as count FROM audit_log WHERE ${where}`.pipe(
-            Effect.map((rows) => (rows[0] as unknown as { count: number })?.count ?? 0)
+          sql<{ count: number }>`SELECT count(*) as count FROM audit_log WHERE ${where}`.pipe(
+            Effect.map((rows) => rows[0]?.count ?? 0)
           )
         ]).pipe(
           Effect.map(([items, total]) => ({
@@ -154,9 +149,10 @@ const makeAuditLogRepo = Effect.gen(function*() {
         )
       }
 
+      const voidRequest: void = undefined
       return Effect.all([
-        findAll_({ limit, offset }) as NoServices<ReturnType<typeof findAll_>>,
-        countAll(undefined as void) as NoServices<ReturnType<typeof countAll>>
+        findAll_({ limit, offset }),
+        countAll(voidRequest)
       ]).pipe(
         Effect.map(([items, { count }]) => ({
           items,
@@ -190,16 +186,18 @@ const makeAuditLogRepo = Effect.gen(function*() {
       readonly to?: string | undefined
     }): Effect.Effect<ReadonlyArray<AuditLogEntry>, CacheError> => {
       if (opts?.from && opts?.to) {
+        const from = opts.from
+        const to = opts.to
+        const voidRequest: void = undefined
         const exportFiltered = SqlSchema.findAll({
           Result: AuditLogEntry,
           Request: Schema.Void,
-          execute: () =>
-            sql`SELECT * FROM audit_log WHERE timestamp >= ${opts.from!} AND timestamp <= ${opts
-              .to!} ORDER BY id DESC`
+          execute: () => sql`SELECT * FROM audit_log WHERE timestamp >= ${from} AND timestamp <= ${to} ORDER BY id DESC`
         })
-        return exportFiltered(undefined as void).pipe(cacheError("exportAll"))
+        return exportFiltered(voidRequest).pipe(cacheError("exportAll"))
       }
-      return exportAllQuery(undefined as void).pipe(cacheError("exportAll"))
+      const voidRequest: void = undefined
+      return exportAllQuery(voidRequest).pipe(cacheError("exportAll"))
     }
   } satisfies AuditLogRepoShape
 })

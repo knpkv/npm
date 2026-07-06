@@ -11,6 +11,9 @@ import { FrontMatterError } from "../ConfluenceError.js"
 import type { NewPageFrontMatter, PageFrontMatter } from "../Schemas.js"
 import { NewPageFrontMatterSchema, PageFrontMatterSchema } from "../Schemas.js"
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
 /**
  * Parsed markdown file with front-matter.
  */
@@ -41,9 +44,7 @@ const parseRawMarkdown = (content: string): { readonly data: Record<string, unkn
     ? content.slice(afterClosingStart + 1)
     : content.slice(afterClosingStart)
   const loaded = yaml.load(header)
-  const data = loaded !== null && typeof loaded === "object" && !Array.isArray(loaded)
-    ? loaded as Record<string, unknown>
-    : {}
+  const data = isRecord(loaded) ? loaded : {}
   return { data, content: afterClosing }
 }
 
@@ -86,7 +87,7 @@ export const parseMarkdown = (
         // Try to parse as new page front-matter
         Schema.decodeUnknownEffect(NewPageFrontMatterSchema)(parsed.data).pipe(
           Effect.map((fm) => ({
-            frontMatter: fm as NewPageFrontMatter,
+            frontMatter: fm,
             content: parsed.content.trim(),
             isNew: true
           })),

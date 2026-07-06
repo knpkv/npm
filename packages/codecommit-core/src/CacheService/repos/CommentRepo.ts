@@ -39,7 +39,7 @@ const makeCommentRepo = Effect.gen(function*() {
 
   const publish = hub.publish(RepoChange.Comments())
 
-  return {
+  const repo = {
     find: (awsAccountId: string, prId: string) =>
       find_({ awsAccountId, pullRequestId: prId }).pipe(
         Effect.flatMap(
@@ -47,8 +47,7 @@ const makeCommentRepo = Effect.gen(function*() {
             onNone: () => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()),
             onSome: (r) =>
               decodeCommentLocations(r.locationsJson).pipe(
-                // PRCommentLocationJson is structurally compatible with PRCommentLocation for diff/count
-                Effect.map((decoded) => Option.some(decoded as unknown as ReadonlyArray<PRCommentLocation>))
+                Effect.map((decoded) => Option.some(decoded))
               )
           })
         ),
@@ -56,7 +55,9 @@ const makeCommentRepo = Effect.gen(function*() {
       ),
     upsert: (awsAccountId: string, prId: string, locationsJson: string) =>
       upsert_(awsAccountId, prId, locationsJson).pipe(Effect.tap(() => publish), cacheError("upsert"))
-  } as const
+  }
+
+  return repo
 })
 
 export interface CommentRepoShape extends Success<typeof makeCommentRepo> {}

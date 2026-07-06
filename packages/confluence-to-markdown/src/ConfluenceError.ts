@@ -332,6 +332,7 @@ export type ConfluenceError =
  */
 export const isConfluenceError = (error: unknown): error is ConfluenceError =>
   Predicate.hasProperty(error, "_tag") &&
+  typeof error._tag === "string" &&
   [
     "ConfigNotFoundError",
     "ConfigParseError",
@@ -347,4 +348,4 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "OAuthError",
     "FrontMatterError",
     "StructureError"
-  ].includes((error as { _tag: string })._tag)
+  ].includes(error._tag)

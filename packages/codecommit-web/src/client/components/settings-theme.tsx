@@ -3,13 +3,15 @@ import { cn } from "../lib/utils.js"
 import { useTheme } from "./theme-provider.js"
 import { Separator } from "./ui/separator.js"
 
+type ThemeOption = "dark" | "light" | "system"
+
 export function SettingsTheme() {
   const { setTheme, theme } = useTheme()
 
-  const options = [
-    { id: "light" as const, label: "Light", icon: <SunIcon className="size-5" /> },
-    { id: "dark" as const, label: "Dark", icon: <MoonIcon className="size-5" /> },
-    { id: "system" as const, label: "System", icon: <MonitorIcon className="size-5" /> }
+  const options: ReadonlyArray<{ readonly id: ThemeOption; readonly label: string; readonly icon: React.ReactNode }> = [
+    { id: "light", label: "Light", icon: <SunIcon className="size-5" /> },
+    { id: "dark", label: "Dark", icon: <MoonIcon className="size-5" /> },
+    { id: "system", label: "System", icon: <MonitorIcon className="size-5" /> }
   ]
 
   return (

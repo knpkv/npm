@@ -22,8 +22,8 @@ function resolveTuiTheme(json: TuiThemeJson, mode: "dark" | "light"): Theme {
     if (typeof c === "string") {
       if (c === "transparent" || c === "none") return RGBA.fromInts(0, 0, 0, 0)
       if (c.startsWith("#")) return parseColor(c)
-      if (defs[c] != null) return resolveColor(defs[c] as ColorValue)
-      if (json.theme[c] !== undefined) return resolveColor(json.theme[c] as ColorValue)
+      if (defs[c] != null) return resolveColor(defs[c])
+      if (json.theme[c] !== undefined) return resolveColor(json.theme[c])
       return RGBA.fromInts(128, 128, 128, 255)
     }
     return resolveColor(c[mode])

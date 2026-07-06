@@ -118,7 +118,7 @@ const makeNotificationRepo = Effect.gen(function*() {
 
   const publish = hub.publish(RepoChange.Notifications())
 
-  return {
+  const service = {
     findAll: (opts?: {
       readonly unreadOnly?: boolean
       readonly limit?: number
@@ -187,7 +187,8 @@ const makeNotificationRepo = Effect.gen(function*() {
         Effect.map((rows) => rows[0]?.count ?? 0),
         cacheError("unreadCount")
       )
-  } as const
+  }
+  return service
 })
 
 export interface NotificationRepoShape extends Success<typeof makeNotificationRepo> {}

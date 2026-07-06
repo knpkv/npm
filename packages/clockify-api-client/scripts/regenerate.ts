@@ -13,7 +13,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as PlatformError from "effect/PlatformError"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -55,6 +55,47 @@ interface ClockifySchemaPatch {
 
 interface ClockifyPatches {
   readonly schemas?: Record<string, ClockifySchemaPatch>
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
+const toStringRecord = (value: unknown): Record<string, string> | undefined => {
+  if (!isRecord(value)) return undefined
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  )
+}
+
+const toClockifySpec = (value: unknown): ClockifySpec => {
+  const components = isRecord(value) ? value.components : undefined
+  const schemas = isRecord(components) && isRecord(components.schemas) ? components.schemas : undefined
+  return schemas ? { components: { schemas } } : {}
+}
+
+const toClockifyPatches = (value: unknown): ClockifyPatches => {
+  const schemas = isRecord(value) && isRecord(value.schemas) ? value.schemas : undefined
+  if (!schemas) return {}
+  return {
+    schemas: Object.fromEntries(
+      Object.entries(schemas).flatMap(([schemaName, patch]) => {
+        if (!isRecord(patch)) return []
+        const renameProperties = toStringRecord(patch.renameProperties)
+        const required = Array.isArray(patch.required)
+          ? patch.required.filter((item): item is string => typeof item === "string")
+          : undefined
+        return [[
+          schemaName,
+          {
+            ...(renameProperties ? { renameProperties } : {}),
+            ...(isRecord(patch.addProperties) ? { addProperties: patch.addProperties } : {}),
+            ...(isRecord(patch.patchProperties) ? { patchProperties: patch.patchProperties } : {}),
+            ...(required ? { required } : {})
+          } satisfies ClockifySchemaPatch
+        ]]
+      })
+    )
+  }
 }
 
 class RegenerateError extends Data.TaggedError("RegenerateError")<{
@@ -164,8 +205,8 @@ const applyPatches = (
     ]).pipe(
       Effect.mapError((cause) => new RegenerateError({ message: "Patch parse failed", cause }))
     )
-    const spec = specJson as ClockifySpec
-    const patches = patchJson as ClockifyPatches
+    const spec = toClockifySpec(specJson)
+    const patches = toClockifyPatches(patchJson)
 
     yield* Effect.try({
       try: () => {
@@ -243,7 +284,9 @@ const formatFile = (
     }
   })
 
-const generateTypes = (paths: ScriptPaths): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
+const generateTypes = (
+  paths: ScriptPaths
+): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function*() {
     const command = ChildProcess.make("pnpm", ["exec", "openapi-typescript", paths.specFile, "-o", paths.outputFile], {
       cwd: paths.packageDir,

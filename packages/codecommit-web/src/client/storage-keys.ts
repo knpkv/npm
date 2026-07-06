@@ -5,11 +5,20 @@
  * (dockerDismissed, grantedDismissed), theme, desktop notification
  * toggle, review reminder toggle, and reminder interval (ms).
  */
-export const StorageKeys = {
+type StorageKeyMap = {
+  readonly desktopNotifications: "codecommit:desktopNotifications"
+  readonly dockerDismissed: "codecommit-docker-dismissed"
+  readonly grantedDismissed: "codecommit-granted-dismissed"
+  readonly reminderInterval: "codecommit:reminderInterval"
+  readonly reminders: "codecommit:reminders"
+  readonly theme: "codecommit-theme"
+}
+
+export const StorageKeys: StorageKeyMap = {
   dockerDismissed: "codecommit-docker-dismissed",
   grantedDismissed: "codecommit-granted-dismissed",
   theme: "codecommit-theme",
   desktopNotifications: "codecommit:desktopNotifications",
   reminders: "codecommit:reminders",
   reminderInterval: "codecommit:reminderInterval"
-} as const
+}

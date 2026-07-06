@@ -44,9 +44,7 @@ function ErrorFallback({ error }: { readonly error: Error }) {
       }}
     >
       <box style={{ backgroundColor: "#880000", padding: 1, flexDirection: "column" }}>
-        <text fg="#FFFFFF" style={{ fontWeight: "bold" } as any}>
-          CRITICAL ERROR
-        </text>
+        <text fg="#FFFFFF">CRITICAL ERROR</text>
         <text fg="#FFFFFF">{error.message}</text>
         <text fg="#A0AEC0">{error.stack}</text>
       </box>

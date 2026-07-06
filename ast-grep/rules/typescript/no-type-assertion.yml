@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-type-assertion
+language: tsx
+severity: error
+message: "Do not use TypeScript `as` assertions; model the value, narrow it, decode it, or use `satisfies` instead."
+
+rule:
+  any:
+    - pattern: $VALUE as $TYPE
+    - pattern: $VALUE as const
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+  - "scripts/**/*.mjs"
+  - "scratchpad/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  Type assertions bypass the checker. Prefer explicit annotations, `satisfies`,
+  Schema decoding, branded constructors, structural guards, or typed API
+  boundaries that prove the value shape without overriding TypeScript.

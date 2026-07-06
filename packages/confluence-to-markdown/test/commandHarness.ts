@@ -3,7 +3,7 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Terminal from "effect/Terminal"
 import { Command } from "effect/unstable/cli"
-import type { PageId } from "../src/Brand.js"
+import { PageId } from "../src/Brand.js"
 import type { ConfluenceCommandOptions } from "../src/commands/root.js"
 import { makeConfluenceCommand } from "../src/commands/root.js"
 import { ConfluenceAuth } from "../src/ConfluenceAuth.js"
@@ -123,7 +123,7 @@ const DummyConfluenceClientLayer = Layer.succeed(
 )
 
 const ConfigLayer = ConfluenceConfigLayerFromValues({
-  rootPageId: "dummy" as PageId,
+  rootPageId: PageId("dummy"),
   baseUrl: "https://dummy.atlassian.net",
   docsPath: ".confluence/docs",
   excludePatterns: [],

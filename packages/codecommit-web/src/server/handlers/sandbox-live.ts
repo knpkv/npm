@@ -1,7 +1,7 @@
 import { SandboxService } from "@knpkv/codecommit-core"
 import type { SandboxRow } from "@knpkv/codecommit-core/CacheService.js"
-import type { SandboxStatus } from "@knpkv/codecommit-core/Domain.js"
-import { Effect } from "effect"
+import { SandboxStatus } from "@knpkv/codecommit-core/Domain.js"
+import { Effect, Schema } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi, type SandboxResponse } from "../Api.js"
 
@@ -15,7 +15,7 @@ export const encodeSandbox = (row: SandboxRow): typeof SandboxResponse.Type => (
   sourceBranch: row.sourceBranch,
   containerId: row.containerId,
   port: row.port,
-  status: row.status as SandboxStatus,
+  status: Schema.decodeUnknownSync(SandboxStatus)(row.status),
   statusDetail: row.statusDetail,
   logs: row.logs,
   error: row.error,

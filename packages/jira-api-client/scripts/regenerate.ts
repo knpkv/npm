@@ -4,7 +4,6 @@
  *
  * Fetches OpenAPI specs from Atlassian and regenerates openapi-typescript types.
  */
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Console from "effect/Console"
@@ -12,16 +11,17 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as PlatformError from "effect/PlatformError"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import { Command, Flag as Options } from "effect/unstable/cli"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import pkg from "../package.json" with { type: "json" }
 
-const SPEC_URLS = {
+const SPEC_URLS: Readonly<Record<"v3", string>> = {
   v3: "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json"
-} as const
+}
 
 interface SpecInfo {
   version: string
@@ -234,8 +234,7 @@ const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
 
     yield* writeVersion(paths.versionV3File, v3Info.version)
     yield* Console.log("Done!")
-  })
-).pipe(Command.withDescription("Regenerate Jira API types from OpenAPI specs"))
+  })).pipe(Command.withDescription("Regenerate Jira API types from OpenAPI specs"))
 
 const cli = Command.run(regenerate, {
   name: pkg.name,

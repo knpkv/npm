@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest"
 import { revertPlaceholders } from "../src/AdfPlaceholders.js"
+import type { AdfNode } from "../src/AdfPlaceholders.js"
 
-const docOf = (content: ReadonlyArray<unknown>) => ({ version: 1, type: "doc", content })
-const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] })
+const docOf = (content: ReadonlyArray<AdfNode>): AdfNode => ({ type: "doc", content })
+const para = (text: string): AdfNode => ({ type: "paragraph", content: [{ type: "text", text }] })
 const b64 = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("revertPlaceholders", () => {
   it("rewrites a status span placeholder into a status node", () => {
     const out = revertPlaceholders(
       docOf([para(`Some <span class="adf-status" data-color="blue">TESTING</span> here`)])
-    ) as { content: Array<{ content: Array<{ type: string; attrs?: Record<string, unknown> }> }> }
+    )
 
     const cellContent = out.content[0]!.content
     expect(cellContent).toHaveLength(3)
@@ -24,7 +25,7 @@ describe("revertPlaceholders", () => {
   it("replaces a single-comment paragraph with a block extension node", () => {
     const out = revertPlaceholders(
       docOf([para(`<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->`)])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown> }> }
+    )
 
     expect(out.content[0]).toMatchObject({
       type: "extension",
@@ -33,9 +34,7 @@ describe("revertPlaceholders", () => {
   })
 
   it("rewrites native TOC syntax into a Confluence core extension node", () => {
-    const out = revertPlaceholders(docOf([para("[[toc]]")])) as {
-      content: Array<{ type: string; attrs?: Record<string, unknown> }>
-    }
+    const out = revertPlaceholders(docOf([para("[[toc]]")]))
 
     expect(out.content[0]).toEqual({
       type: "extension",
@@ -47,9 +46,7 @@ describe("revertPlaceholders", () => {
   })
 
   it("rewrites native TOC syntax with levels into macro parameters", () => {
-    const out = revertPlaceholders(docOf([para("[[toc:min=2,max=4]]")])) as {
-      content: Array<{ type: string; attrs?: Record<string, unknown> }>
-    }
+    const out = revertPlaceholders(docOf([para("[[toc:min=2,max=4]]")]))
 
     expect(out.content[0]).toEqual({
       type: "extension",
@@ -67,13 +64,11 @@ describe("revertPlaceholders", () => {
   })
 
   it("leaves invalid or code-marked native TOC syntax as text", () => {
-    const invalid = revertPlaceholders(docOf([para("[[toc:min=0]]")])) as {
-      content: Array<{ type: string; content?: ReadonlyArray<unknown> }>
-    }
+    const invalid = revertPlaceholders(docOf([para("[[toc:min=0]]")]))
     const quoted = revertPlaceholders(docOf([{
       type: "paragraph",
       content: [{ type: "text", text: "[[toc]]", marks: [{ type: "code" }] }]
-    }])) as { content: Array<{ type: string; content?: ReadonlyArray<unknown> }> }
+    }]))
 
     expect(invalid.content[0]!.type).toBe("paragraph")
     expect(quoted.content[0]!.type).toBe("paragraph")
@@ -97,15 +92,7 @@ describe("revertPlaceholders", () => {
           ]
         }]
       }])
-    ) as {
-      content: Array<{
-        content: Array<{
-          content: Array<{
-            content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }>
-          }>
-        }>
-      }>
-    }
+    )
 
     const cells = out.content[0]!.content[0]!.content
     // First cell: paragraph wrapping a status node
@@ -123,7 +110,7 @@ describe("revertPlaceholders", () => {
   it("rewrites inlineExtension placeholders inline", () => {
     const out = revertPlaceholders(
       docOf([para(`before <!-- adf:inlineExtension key=jira type=t --> after`)])
-    ) as { content: Array<{ content: Array<{ type: string; attrs?: Record<string, unknown> }> }> }
+    )
 
     const inlineContent = out.content[0]!.content
     expect(inlineContent).toHaveLength(3)
@@ -140,11 +127,7 @@ describe("revertPlaceholders", () => {
           `<span style="color:#ff5630">Colored text</span>, ` +
           `<span style="background-color:#f8e6a0">highlighted text</span>.`
       )])
-    ) as {
-      content: Array<{
-        content: Array<{ type: string; text?: string; marks?: ReadonlyArray<{ type: string; attrs?: unknown }> }>
-      }>
-    }
+    )
 
     const inlineContent = out.content[0]!.content
     expect(inlineContent).toContainEqual({
@@ -178,7 +161,7 @@ describe("revertPlaceholders", () => {
     const attrs = { url: "https://www.atlassian.com" }
     const out = revertPlaceholders(
       docOf([para(`Inline smart link: <!-- adf:inlineCard attrs=${b64(attrs)} -->.`)])
-    ) as { content: Array<{ content: Array<{ type: string; attrs?: Record<string, unknown> }> }> }
+    )
 
     expect(out.content[0]!.content[1]).toEqual({ type: "inlineCard", attrs })
   })
@@ -188,7 +171,7 @@ describe("revertPlaceholders", () => {
     const emoji = { type: "emoji", attrs: { shortName: ":white_check_mark:", text: "✅" } }
     const out = revertPlaceholders(
       docOf([para(`Example <!-- adf:date node=${b64(date)} --> <!-- adf:emoji node=${b64(emoji)} -->`)])
-    ) as { content: Array<{ content: Array<unknown> }> }
+    )
 
     expect(out.content[0]!.content).toContainEqual(date)
     expect(out.content[0]!.content).toContainEqual(emoji)
@@ -205,7 +188,7 @@ describe("revertPlaceholders", () => {
     const blob = Buffer.from(JSON.stringify(attrs)).toString("base64")
     const out = revertPlaceholders(
       docOf([para(`<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=${blob} -->`)])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown> }> }
+    )
 
     expect(out.content[0]).toEqual({ type: "extension", attrs })
   })
@@ -214,7 +197,7 @@ describe("revertPlaceholders", () => {
     // "aGVsbG8=" is valid base64 but decodes to "hello", which is not JSON.
     const out = revertPlaceholders(
       docOf([para(`<!-- adf:extension key=toc type=t attrs=aGVsbG8= -->`)])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown> }> }
+    )
 
     expect(out.content[0]).toEqual({
       type: "extension",
@@ -233,7 +216,7 @@ describe("revertPlaceholders", () => {
         para(`<!-- adf:/bodiedExtension -->`),
         para("after")
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content).toHaveLength(2)
     expect(out.content[0]).toEqual({
@@ -254,7 +237,7 @@ describe("revertPlaceholders", () => {
         para(`<!-- adf:/panel -->`),
         para("after")
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content).toHaveLength(2)
     expect(out.content[0]).toEqual({
@@ -273,7 +256,7 @@ describe("revertPlaceholders", () => {
         para("Centered paragraph for alignment validation."),
         para(`<!-- adf:/paragraph -->`)
       ])
-    ) as { content: Array<{ type: string; marks?: unknown; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content).toEqual([{
       type: "paragraph",
@@ -343,7 +326,7 @@ describe("revertPlaceholders", () => {
         para("https://www.atlassian.com/software/confluence"),
         para("<!-- adf:/embedCard -->")
       ])
-    ) as { content: Array<unknown> }
+    )
 
     expect(out.content).toEqual([taskList, decisionList, expand, table, layoutSection, blockCard, embedCard])
   })
@@ -361,7 +344,7 @@ describe("revertPlaceholders", () => {
         codeBlock,
         para(`<!-- adf:/codeBlock -->`)
       ])
-    ) as { content: Array<unknown> }
+    )
 
     expect(out.content).toEqual([codeBlock])
   })
@@ -373,7 +356,7 @@ describe("revertPlaceholders", () => {
         para(`<!-- adf:extension key=inner type=com.example -->`),
         para(`<!-- adf:/bodiedExtension -->`)
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content[0]).toEqual({
       type: "bodiedExtension",
@@ -388,7 +371,7 @@ describe("revertPlaceholders", () => {
         para(`<!-- adf:bodiedExtension key=details type=com.example -->`),
         para("just a paragraph, no end marker")
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown> }> }
+    )
 
     expect(out.content[0]).toEqual({
       type: "extension",
@@ -403,7 +386,7 @@ describe("revertPlaceholders", () => {
         para(`<!-- adf:bodiedExtension key=excerpt type=com.example -->`),
         para(`<!-- adf:/bodiedExtension -->`)
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content[0]).toEqual({
       type: "bodiedExtension",
@@ -421,7 +404,7 @@ describe("revertPlaceholders", () => {
         para("modern body"),
         para(`<!-- adf:/bodiedExtension -->`)
       ])
-    ) as { content: Array<{ type: string; attrs?: Record<string, unknown>; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content).toEqual([
       { type: "extension", attrs: { extensionKey: "legacy", extensionType: "com.example" } },
@@ -446,7 +429,7 @@ describe("revertPlaceholders", () => {
           para(`<!-- adf:/bodiedExtension -->`)
         ]
       }])
-    ) as { content: Array<{ type: string; content?: ReadonlyArray<unknown> }> }
+    )
 
     expect(out.content[0]!.content).toEqual([
       { type: "extension", attrs: { extensionKey: "k", extensionType: "t" } },
@@ -457,7 +440,7 @@ describe("revertPlaceholders", () => {
   it("drops a stray end marker", () => {
     const out = revertPlaceholders(
       docOf([para("before"), para(`<!-- adf:/bodiedExtension -->`), para("after")])
-    ) as { content: Array<unknown> }
+    )
 
     expect(out.content).toEqual([para("before"), para("after")])
   })
@@ -504,7 +487,7 @@ describe("revertPlaceholders", () => {
           marks: [{ type: "link", attrs: { href: "confluence-mention://557057%3Aabc-123" } }]
         }]
       }])
-    ) as { content: Array<{ content: Array<{ type: string; attrs?: Record<string, unknown> }> }> }
+    )
 
     expect(out.content[0]!.content[0]).toMatchObject({
       type: "mention",

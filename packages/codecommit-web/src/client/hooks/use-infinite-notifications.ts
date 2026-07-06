@@ -95,5 +95,5 @@ export function useInfiniteNotifications(filters: NotificationFilters = {}) {
     return [...base, ...extraPages.flatMap((p) => p.items)]
   }, [firstPage?.items, extraPages])
 
-  return { items, hasMore, isLoading, loadMore: fetchMore } as const
+  return { items, hasMore, isLoading, loadMore: fetchMore }
 }

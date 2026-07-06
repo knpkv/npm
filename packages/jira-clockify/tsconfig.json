@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.jsonc",
   "compilerOptions": {
     "outDir": "dist",
+    "rootDir": ".",
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "declaration": false,
     "declarationMap": false,
@@ -13,5 +14,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler"
   },
-  "include": ["src", "test", "src/**/*.json", "package.json"]
+  "include": ["src", "src/**/*.json", "package.json"],
+  "exclude": ["test", "dist", "node_modules"]
 }

@@ -7,7 +7,7 @@
  */
 import { useAtom } from "@effect/atom-react"
 import { ArrowLeftIcon, DownloadIcon, SearchIcon } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { auditExportAtom, auditLogQueryAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
@@ -16,6 +16,12 @@ import { Input } from "./ui/input.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 
 const PAGE_SIZE = 50
+type BadgeVariant = ComponentProps<typeof Badge>["variant"]
+
+const secondaryVariant: BadgeVariant = "secondary"
+const defaultVariant: BadgeVariant = "default"
+const destructiveVariant: BadgeVariant = "destructive"
+const outlineVariant: BadgeVariant = "outline"
 
 interface AuditEntry {
   readonly id: number
@@ -28,18 +34,40 @@ interface AuditEntry {
   readonly durationMs: number | null
 }
 
-const stateBadgeVariant = (state: string) => {
+const isAuditEntry = (value: unknown): value is AuditEntry => {
+  if (typeof value !== "object" || value === null) return false
+  const id = Reflect.get(value, "id")
+  const timestamp = Reflect.get(value, "timestamp")
+  const operation = Reflect.get(value, "operation")
+  const accountProfile = Reflect.get(value, "accountProfile")
+  const region = Reflect.get(value, "region")
+  const permissionState = Reflect.get(value, "permissionState")
+  const context = Reflect.get(value, "context")
+  const durationMs = Reflect.get(value, "durationMs")
+  return (
+    typeof id === "number" &&
+    typeof timestamp === "string" &&
+    typeof operation === "string" &&
+    typeof accountProfile === "string" &&
+    typeof region === "string" &&
+    typeof permissionState === "string" &&
+    typeof context === "string" &&
+    (typeof durationMs === "number" || durationMs === null)
+  )
+}
+
+const stateBadgeVariant = (state: string): BadgeVariant => {
   switch (state) {
     case "always_allowed":
-      return "secondary" as const
+      return secondaryVariant
     case "allowed":
-      return "default" as const
+      return defaultVariant
     case "denied":
-      return "destructive" as const
+      return destructiveVariant
     case "timed_out":
-      return "outline" as const
+      return outlineVariant
     default:
-      return "outline" as const
+      return outlineVariant
   }
 }
 
@@ -70,7 +98,7 @@ export function AuditLogPage() {
     fetchLog({ query: urlParams })
       .then((result) => {
         if (cancelled) return
-        setEntries(result.items as ReadonlyArray<AuditEntry>)
+        setEntries(result.items.filter(isAuditEntry))
         setTotal(result.total)
         setLoading(false)
       })

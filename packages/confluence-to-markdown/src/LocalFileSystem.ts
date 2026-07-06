@@ -18,6 +18,10 @@ import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { pageToDir, pageToPath } from "./internal/pathUtils.js"
 import type { NewPageFrontMatter, PageFrontMatter } from "./Schemas.js"
 
+const toPageFrontMatter = (
+  frontMatter: ParsedMarkdown["frontMatter"]
+): PageFrontMatter | null => frontMatter && "pageId" in frontMatter ? frontMatter : null
+
 /**
  * Local markdown file representation.
  */
@@ -162,9 +166,7 @@ export const layer: Layer.Layer<LocalFileSystem, never, FileSystem.FileSystem | 
 
         return {
           path: filePath,
-          frontMatter: parsed.frontMatter && "pageId" in parsed.frontMatter
-            ? parsed.frontMatter as PageFrontMatter
-            : null,
+          frontMatter: toPageFrontMatter(parsed.frontMatter),
           content: parsed.content,
           contentHash,
           isNew: parsed.isNew

@@ -27,6 +27,24 @@ const roundTrip = (source: string) =>
     return yield* converter.adfToMarkdown(adf)
   })
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const contentOf = (value: unknown): ReadonlyArray<unknown> => {
+  if (!isRecord(value) || !Array.isArray(value["content"])) {
+    throw new Error("Expected ADF node with content array")
+  }
+  return value["content"]
+}
+
+const parsedContent = (json: string): ReadonlyArray<unknown> => contentOf(JSON.parse(json))
+
+const nodeType = (value: unknown): string | null => {
+  if (!isRecord(value)) return null
+  const type = value["type"]
+  return typeof type === "string" ? type : null
+}
+
 describe("MarkdownConverter round-trip", () => {
   it.effect("preserves nested headings", () =>
     Effect.gen(function*() {
@@ -60,8 +78,8 @@ describe("MarkdownConverter round-trip", () => {
       expect(md).toContain("```ts")
       expect(md).toContain("const x: number = 1")
 
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips metadata-bearing code blocks containing bracket text", () =>
@@ -81,8 +99,8 @@ describe("MarkdownConverter round-trip", () => {
         }]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("pushes legacy escaped raw code-block metadata markers as native ADF", () =>
@@ -97,19 +115,18 @@ describe("MarkdownConverter round-trip", () => {
           text: "{\n  \"mentions\": [\"[Add Engineer]\", \"[Add Reviewer]\"],\n  \"supportsADF\": true\n}"
         }]
       }
+      const codeText = codeBlock.content[0]?.text ?? ""
       const legacyMarkdown = [
         `\\<!-- adf:codeBlock node=${JSON.stringify(codeBlock)} -->`,
         "",
         "```json",
-        codeBlock.content[0]!.text,
+        codeText,
         "```",
         "",
         "\\<!-- adf:/codeBlock -->"
       ].join("\n")
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(legacyMarkdown)) as {
-        content: Array<unknown>
-      }
-      expect(adfOut.content[0]).toEqual(codeBlock)
+      const content = parsedContent(yield* converter.markdownToAdf(legacyMarkdown))
+      expect(content[0]).toEqual(codeBlock)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("preserves a blockquote", () =>
@@ -233,10 +250,8 @@ describe("MarkdownConverter round-trip", () => {
         type: "doc",
         content: [{ type: "extension", attrs }]
       }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string; attrs: Record<string, unknown> }>
-      }
-      expect(adfOut.content[0]).toEqual({ type: "extension", attrs })
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual({ type: "extension", attrs })
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips Confluence TOC macroMetadata through the placeholder attrs blob", () =>
@@ -261,10 +276,8 @@ describe("MarkdownConverter round-trip", () => {
       }))
       expect(md).toContain("<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=")
       expect(md).not.toContain("[[toc")
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string; attrs: Record<string, unknown> }>
-      }
-      expect(adfOut.content[0]).toEqual({ type: "extension", attrs })
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual({ type: "extension", attrs })
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips a bodiedExtension with its body re-attached", () =>
@@ -283,12 +296,10 @@ describe("MarkdownConverter round-trip", () => {
           ]
         }]
       }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string; attrs: Record<string, unknown>; content: Array<unknown> }>
-      }
-      expect(adfOut.content).toHaveLength(1)
-      expect(adfOut.content[0]).toMatchObject({ type: "bodiedExtension", attrs })
-      expect(adfOut.content[0]!.content).toEqual([
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content).toHaveLength(1)
+      expect(content[0]).toMatchObject({ type: "bodiedExtension", attrs })
+      expect(contentOf(content[0])).toEqual([
         { type: "paragraph", content: [{ type: "text", text: "first body paragraph" }] },
         { type: "paragraph", content: [{ type: "text", text: "second body paragraph" }] }
       ])
@@ -307,10 +318,8 @@ describe("MarkdownConverter round-trip", () => {
           content: [{ type: "paragraph", content: [{ type: "text", text: "watch this" }] }]
         }]
       }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string; attrs: Record<string, unknown>; content: Array<unknown> }>
-      }
-      expect(adfOut.content[0]).toEqual({
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual({
         type: "panel",
         attrs,
         content: [{ type: "paragraph", content: [{ type: "text", text: "watch this" }] }]
@@ -335,8 +344,8 @@ describe("MarkdownConverter round-trip", () => {
         }]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips paragraph alignment and indentation marks", () =>
@@ -364,8 +373,8 @@ describe("MarkdownConverter round-trip", () => {
         ]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content).toEqual(source.content)
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content).toEqual(source.content)
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips inline smart links as native inlineCard nodes", () =>
@@ -384,8 +393,8 @@ describe("MarkdownConverter round-trip", () => {
         }]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips task lists as native task nodes", () =>
@@ -412,8 +421,8 @@ describe("MarkdownConverter round-trip", () => {
         }]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips decision lists as native decision nodes", () =>
@@ -433,8 +442,8 @@ describe("MarkdownConverter round-trip", () => {
         }]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content[0]).toEqual(source.content[0])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content[0]).toEqual(source.content[0])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("round-trips expand, table, layout, cards, date, and emoji as native nodes", () =>
@@ -509,8 +518,8 @@ describe("MarkdownConverter round-trip", () => {
         ]
       }
       const md = yield* converter.adfToMarkdown(JSON.stringify(source))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as typeof source
-      expect(adfOut.content).toEqual(source.content)
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content).toEqual(source.content)
     }).pipe(Effect.provide(TestLayer)))
 
   // Regression: `|` in a cell was escaped twice (escapeText + the table-cell
@@ -544,10 +553,8 @@ describe("MarkdownConverter round-trip", () => {
     Effect.gen(function*() {
       const converter = yield* MarkdownConverter
       const source = `Use \`<span class="adf-status" data-color="green">DONE</span>\` in docs\n`
-      const adf = JSON.parse(yield* converter.markdownToAdf(source)) as {
-        content: Array<{ content: Array<{ type: string }> }>
-      }
-      expect(adf.content[0]!.content.some((n) => n.type === "status")).toBe(false)
+      const adfContent = parsedContent(yield* converter.markdownToAdf(source))
+      expect(contentOf(adfContent[0]).some((node) => nodeType(node) === "status")).toBe(false)
     }).pipe(Effect.provide(TestLayer)))
 
   // Regression: '# x' / '> x' / '+ x' paragraph text became real headings,
@@ -561,10 +568,8 @@ describe("MarkdownConverter round-trip", () => {
         type: "doc",
         content: [paragraph("# not a heading"), paragraph("> not a quote"), paragraph("+ not a list")]
       }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string }>
-      }
-      expect(adfOut.content.map((n) => n.type)).toEqual(["paragraph", "paragraph", "paragraph"])
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(content.map(nodeType)).toEqual(["paragraph", "paragraph", "paragraph"])
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("keeps the bodied kind for an empty-body bodied extension", () =>
@@ -576,10 +581,8 @@ describe("MarkdownConverter round-trip", () => {
         type: "doc",
         content: [{ type: "bodiedExtension", attrs, content: [{ type: "paragraph", content: [] }] }]
       }))
-      const adfOut = JSON.parse(yield* converter.markdownToAdf(md)) as {
-        content: Array<{ type: string }>
-      }
-      expect(adfOut.content[0]!.type).toBe("bodiedExtension")
+      const content = parsedContent(yield* converter.markdownToAdf(md))
+      expect(nodeType(content[0])).toBe("bodiedExtension")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("preserves a mention's accountId through round-trip", () =>

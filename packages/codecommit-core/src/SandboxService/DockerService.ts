@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import type { Success } from "effect/Effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { DockerError } from "../Errors.js"
@@ -34,6 +34,36 @@ export interface ContainerInfo {
   }
 }
 
+const ContainerInfoSchema = Schema.Struct({
+  Id: Schema.String,
+  State: Schema.Struct({
+    Status: Schema.String,
+    Running: Schema.Boolean
+  }),
+  NetworkSettings: Schema.Struct({
+    Ports: Schema.Record(
+      Schema.String,
+      Schema.NullOr(Schema.Array(Schema.Struct({ HostPort: Schema.String })))
+    )
+  })
+})
+
+const DockerPsRow = Schema.Struct({
+  ID: Schema.String,
+  State: Schema.String,
+  Labels: Schema.String
+})
+
+interface DockerPsContainer {
+  readonly Id: string
+  readonly State: string
+  readonly Labels: Record<string, string>
+}
+
+const decodeContainerInfoArray = Schema.decodeUnknownSync(Schema.Array(ContainerInfoSchema))
+const decodeDockerPsRow = Schema.decodeUnknownSync(DockerPsRow)
+const emptyDockerPsContainers = (): Array<DockerPsContainer> => []
+
 const dockerError = (operation: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new DockerError({ operation, cause })),
@@ -47,7 +77,7 @@ const makeDockerService = Effect.gen(function*() {
   const docker = (...args: Array<string>) =>
     spawner.string(ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`]))
 
-  return {
+  const service = {
     isAvailable: () =>
       docker("info").pipe(
         Effect.map(() => true),
@@ -108,9 +138,9 @@ const makeDockerService = Effect.gen(function*() {
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
-              const arr = JSON.parse(output) as Array<ContainerInfo>
+              const arr = decodeContainerInfoArray(JSON.parse(output))
               if (arr.length === 0) return undefined
-              return arr[0]!
+              return arr[0]
             },
             catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
           })
@@ -131,9 +161,9 @@ const makeDockerService = Effect.gen(function*() {
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
-              if (!output) return [] as Array<{ Id: string; State: string; Labels: Record<string, string> }>
+              if (!output) return emptyDockerPsContainers()
               return output.split("\n").map((line) => {
-                const obj = JSON.parse(line) as { ID: string; State: string; Labels: string }
+                const obj = decodeDockerPsRow(JSON.parse(line))
                 return {
                   Id: obj.ID,
                   State: obj.State,
@@ -145,7 +175,8 @@ const makeDockerService = Effect.gen(function*() {
           })
         )
       )
-  } as const
+  }
+  return service
 })
 
 export interface DockerServiceShape extends Success<typeof makeDockerService> {}

@@ -82,8 +82,9 @@ const makeSandboxRepo = Effect.gen(function*() {
     Request: Schema.Void,
     execute: () => sql`SELECT * FROM sandboxes ORDER BY created_at DESC`
   })
+  const voidRequest: void = undefined
 
-  return {
+  const service = {
     insert: (sandbox: InsertSandbox) =>
       sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, workspace_path, status, created_at, last_activity_at)
             VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.sourceBranch}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
@@ -125,9 +126,9 @@ const makeSandboxRepo = Effect.gen(function*() {
     findByPr: (awsAccountId: string, pullRequestId: string) =>
       findByPr_({ awsAccountId, pullRequestId }).pipe(cacheError("findByPr")),
 
-    findActive: () => findActive_(undefined as void).pipe(cacheError("findActive")),
+    findActive: () => findActive_(voidRequest).pipe(cacheError("findActive")),
 
-    findAll: () => findAll_(undefined as void).pipe(cacheError("findAll")),
+    findAll: () => findAll_(voidRequest).pipe(cacheError("findAll")),
 
     delete: (id: SandboxId) =>
       sql`DELETE FROM sandboxes WHERE id = ${id}`.pipe(
@@ -166,7 +167,8 @@ const makeSandboxRepo = Effect.gen(function*() {
         Effect.flatMap((now) => sql`UPDATE sandboxes SET last_activity_at = ${now} WHERE id = ${id}`),
         cacheError("updateActivity")
       )
-  } as const
+  }
+  return service
 })
 
 export interface SandboxRepoShape extends Success<typeof makeSandboxRepo> {}

@@ -4,8 +4,8 @@
  * @internal
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useKeyboard } from "@opentui/react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
 import type { JiraWorklogOutcome, TimerState, WorklogParams } from "../services/TimerService.js"
@@ -73,7 +73,7 @@ function AppContent({ onQuit }: AppProps) {
   const [resultMsg, setResultMsg] = useState<{
     title: string
     lines: Array<{ text: string; color?: string }>
-    type: "success" | "error"
+    type: "success" | "error" | "info"
   } | null>(null)
 
   const ticketsResult = useAtomValue(ticketsAtom)
@@ -280,7 +280,7 @@ function AppContent({ onQuit }: AppProps) {
             setResultMsg({
               title: "Timer discarded",
               lines: [{ text: "Clockify entry deleted.", color: "#888888" }],
-              type: "info" as "success"
+              type: "info"
             })
           }}
         />

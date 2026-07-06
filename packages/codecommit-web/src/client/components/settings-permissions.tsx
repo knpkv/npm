@@ -10,6 +10,13 @@ import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.js"
 
+type PermissionState = "always_allow" | "allow" | "deny"
+
+const alwaysAllow: PermissionState = "always_allow"
+
+const isPermissionState = (value: string): value is PermissionState =>
+  value === "always_allow" || value === "allow" || value === "deny"
+
 export function SettingsPermissions() {
   const result = useAtomValue(permissionsQueryAtom)
   const update = useAtomSet(permissionUpdateAtom)
@@ -22,7 +29,7 @@ export function SettingsPermissions() {
   const allowAll = () => {
     for (const p of items) {
       if (p.state !== "always_allow") {
-        update({ payload: { operation: p.operation, state: "always_allow" as const } })
+        update({ payload: { operation: p.operation, state: alwaysAllow } })
       }
     }
   }
@@ -43,9 +50,11 @@ export function SettingsPermissions() {
           </div>
           <Select
             value={p.state}
-            onValueChange={(v) =>
-              update({ payload: { operation: p.operation, state: v as "always_allow" | "allow" | "deny" } })
-            }
+            onValueChange={(v) => {
+              if (isPermissionState(v)) {
+                update({ payload: { operation: p.operation, state: v } })
+              }
+            }}
           >
             <SelectTrigger className="w-36 shrink-0">
               <SelectValue />

@@ -10,7 +10,7 @@ import { decodeCachedPR, type PRState } from "./internal.js"
 
 export const calculateHealthScores = (
   state: PRState
-): Effect.Effect<void, unknown, unknown> => (Effect.gen(function*() {
+): Effect.Effect<void, never, PullRequestRepo> => (Effect.gen(function*() {
   const prRepo = yield* PullRequestRepo
 
   yield* SubscriptionRef.update(state, (s) => ({

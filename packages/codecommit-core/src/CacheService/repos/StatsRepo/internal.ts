@@ -11,7 +11,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { CacheError } from "../../CacheError.js"
 import type { CommentLocationJson, CommentThreadJson } from "../commentLocations.js"
 
-export { CommentLocationsFromJson, decodeCommentLocations } from "../commentLocations.js"
+export { decodeCommentLocationJson, decodeCommentLocations } from "../commentLocations.js"
 
 // ---------------------------------------------------------------------------
 // Row types for SQL query results

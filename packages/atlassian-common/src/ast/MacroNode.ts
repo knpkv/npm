@@ -19,7 +19,14 @@ import { RawSource, SchemaVersion, SimpleBlockNode } from "./BlockNode.js"
  *
  * @category MacroNode
  */
-export const PanelTypes = ["info", "warning", "note", "tip", "error", "panel"] as const
+export const PanelTypes: ReadonlyArray<"info" | "warning" | "note" | "tip" | "error" | "panel"> = [
+  "info",
+  "warning",
+  "note",
+  "tip",
+  "error",
+  "panel"
+]
 
 /**
  * Panel type for info/warning/note macros.

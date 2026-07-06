@@ -50,6 +50,32 @@ export class StateWriter extends Context.Service<StateWriter, StateWriterShape>(
 const STATE_DIR = ".jcf"
 const STATE_FILE = "state.json"
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
+const parseStateFile = (content: string): TimerStateFile => {
+  const parsed: unknown = JSON.parse(content)
+  if (!isRecord(parsed)) return emptyState
+  return {
+    active: typeof parsed.active === "boolean" ? parsed.active : emptyState.active,
+    ticketKey: typeof parsed.ticketKey === "string" || parsed.ticketKey === null
+      ? parsed.ticketKey
+      : emptyState.ticketKey,
+    summary: typeof parsed.summary === "string" || parsed.summary === null ? parsed.summary : emptyState.summary,
+    project: typeof parsed.project === "string" || parsed.project === null ? parsed.project : emptyState.project,
+    startedAt: typeof parsed.startedAt === "string" || parsed.startedAt === null
+      ? parsed.startedAt
+      : emptyState.startedAt,
+    startedAt_unix: typeof parsed.startedAt_unix === "number" || parsed.startedAt_unix === null
+      ? parsed.startedAt_unix
+      : emptyState.startedAt_unix,
+    elapsed: typeof parsed.elapsed === "number" ? parsed.elapsed : emptyState.elapsed,
+    clockifyEntryId: typeof parsed.clockifyEntryId === "string" || parsed.clockifyEntryId === null
+      ? parsed.clockifyEntryId
+      : emptyState.clockifyEntryId
+  }
+}
+
 export const layer = Layer.effect(
   StateWriter,
   Effect.gen(function*() {
@@ -78,7 +104,7 @@ export const layer = Layer.effect(
         if (!exists) return emptyState
         const content = yield* fs.readFileString(filePath)
         return yield* Effect.try({
-          try: () => JSON.parse(content) as TimerStateFile,
+          try: () => parseStateFile(content),
           catch: () => emptyState
         })
       }).pipe(Effect.catch(() => Effect.succeed(emptyState))),

@@ -1,23 +1,31 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { BoxIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
+import type { ComponentProps } from "react"
 import { useNavigate } from "react-router"
 import { appStateAtom, deleteSandboxAtom, restartSandboxAtom, stopSandboxAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 
-const statusVariant = (status: string) => {
+type BadgeVariant = ComponentProps<typeof Badge>["variant"]
+
+const defaultVariant: BadgeVariant = "default"
+const secondaryVariant: BadgeVariant = "secondary"
+const destructiveVariant: BadgeVariant = "destructive"
+const outlineVariant: BadgeVariant = "outline"
+
+const statusVariant = (status: string): BadgeVariant => {
   switch (status) {
     case "running":
-      return "default" as const
+      return defaultVariant
     case "creating":
     case "cloning":
     case "starting":
-      return "secondary" as const
+      return secondaryVariant
     case "error":
-      return "destructive" as const
+      return destructiveVariant
     default:
-      return "outline" as const
+      return outlineVariant
   }
 }
 

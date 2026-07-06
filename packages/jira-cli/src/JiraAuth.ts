@@ -226,17 +226,16 @@ export class JiraAuth extends Context.Service<
   JiraAuthService
 >()("@knpkv/jira-cli/JiraAuth") {}
 
+type RefreshError = OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
+type RefreshDeferred = Deferred.Deferred<OAuthToken, RefreshError>
+
 const make = Effect.gen(function*() {
   const httpClient = yield* HttpClient.HttpClient
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cryptoService = yield* Crypto.Crypto
 
   // Ref to track ongoing refresh operation to prevent concurrent refreshes
-  const refreshLock = yield* Ref.make<
-    Option.Option<
-      Deferred.Deferred<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-    >
-  >(
+  const refreshLock = yield* Ref.make<Option.Option<RefreshDeferred>>(
     Option.none()
   )
 
@@ -422,14 +421,11 @@ const make = Effect.gen(function*() {
       }
 
       // Atomically check-then-set refresh lock to avoid TOCTOU race
-      const deferred = yield* Deferred.make<
-        OAuthToken,
-        OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-      >()
+      const deferred = yield* Deferred.make<OAuthToken, RefreshError>()
       const existing = yield* Ref.modify(refreshLock, (current) =>
         Option.isSome(current)
-          ? [current.value, current] as const
-          : [deferred, Option.some(deferred)] as const)
+          ? ([current.value, current] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>])
+          : ([deferred, Option.some(deferred)] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>]))
 
       // Another fiber is already refreshing — just await its result
       if (existing !== deferred) {

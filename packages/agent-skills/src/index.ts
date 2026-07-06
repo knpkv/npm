@@ -7,11 +7,11 @@ import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import { Command, Flag as Options } from "effect/unstable/cli"
 
-export const allSkillNames = ["codecommit", "confluence", "jira", "jcf"] as const
-
-export type SkillName = typeof allSkillNames[number]
+export type SkillName = "codecommit" | "confluence" | "jira" | "jcf"
 export type Agent = "codex" | "claude"
 export type AgentSelection = Agent | "all"
+
+export const allSkillNames: ReadonlyArray<SkillName> = ["codecommit", "confluence", "jira", "jcf"]
 
 export type InstallOptions = {
   readonly agent: AgentSelection
@@ -100,11 +100,13 @@ const installSkill = (params: {
     const targetExists = yield* fs.exists(destination)
 
     if (params.dryRun) {
-      return { agent: params.agent, destination, skill: params.skill, status: "dry-run" as const }
+      const result: InstallResult = { agent: params.agent, destination, skill: params.skill, status: "dry-run" }
+      return result
     }
 
     if (targetExists && !params.force) {
-      return { agent: params.agent, destination, skill: params.skill, status: "skipped" as const }
+      const result: InstallResult = { agent: params.agent, destination, skill: params.skill, status: "skipped" }
+      return result
     }
 
     if (targetExists) {
@@ -113,7 +115,8 @@ const installSkill = (params: {
 
     yield* fs.makeDirectory(params.destinationRoot, { recursive: true })
     yield* fs.copy(source, destination)
-    return { agent: params.agent, destination, skill: params.skill, status: "copied" as const }
+    const result: InstallResult = { agent: params.agent, destination, skill: params.skill, status: "copied" }
+    return result
   })
 
 export const installSkills = (
@@ -150,7 +153,7 @@ export const renderInstallResult = (result: InstallResult): string => {
 
 export const agentOption = Options.choice("agent", ["codex", "claude", "all"]).pipe(
   Options.withDescription("Agent skill home to install into"),
-  Options.withDefault("all" as const)
+  Options.withDefault("all")
 )
 
 export const codexDirOption = Options.directory("codex-dir").pipe(

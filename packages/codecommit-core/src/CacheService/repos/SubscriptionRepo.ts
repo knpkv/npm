@@ -52,22 +52,24 @@ const makeSubscriptionRepo = Effect.gen(function*() {
   })
 
   const publish = hub.publish(RepoChange.Subscriptions())
+  const voidRequest: void = undefined
 
-  return {
+  const service = {
     subscribe: (awsAccountId: string, prId: string) =>
       subscribe_({ awsAccountId, prId }).pipe(Effect.tap(() => publish), cacheError("subscribe")),
 
     unsubscribe: (awsAccountId: string, prId: string) =>
       unsubscribe_({ awsAccountId, prId }).pipe(Effect.tap(() => publish), cacheError("unsubscribe")),
 
-    findAll: () => findAll_(undefined as void).pipe(cacheError("findAll")),
+    findAll: () => findAll_(voidRequest).pipe(cacheError("findAll")),
 
     isSubscribed: (awsAccountId: string, prId: string) =>
       isSubscribed_({ awsAccountId, prId }).pipe(
         Effect.map((o) => o._tag === "Some"),
         cacheError("isSubscribed")
       )
-  } as const
+  }
+  return service
 })
 
 export interface SubscriptionRepoShape extends Success<typeof makeSubscriptionRepo> {}

@@ -12,6 +12,7 @@ const SiteUrl = Schema.String.pipe(
 )
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1)))
+const FilenameModes: readonly ["convention", "custom"] = ["convention", "custom"]
 
 export const FieldShapeSchema = Schema.Literals(FIELD_SHAPES)
 
@@ -23,7 +24,7 @@ export const RequestedCustomFieldSchema = Schema.Struct({
 })
 
 export const WorkspaceConfigSchema = Schema.Struct({
-  version: Schema.Literal(1).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(1 as const))),
+  version: Schema.Literal(1).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(1))),
   siteUrl: SiteUrl,
   documentsDir: NonEmptyString.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed("issues"))),
   customFields: Schema.Array(RequestedCustomFieldSchema).pipe(
@@ -35,7 +36,7 @@ export const ManifestIssueSchema = Schema.Struct({
   issueId: NonEmptyString,
   issueKey: NonEmptyString,
   documentPath: NonEmptyString,
-  filenameMode: Schema.Literals(["convention", "custom"] as const)
+  filenameMode: Schema.Literals(FilenameModes)
 })
 
 export const SyncManifestSchema = Schema.Struct({

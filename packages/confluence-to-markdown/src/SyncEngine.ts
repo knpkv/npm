@@ -246,7 +246,7 @@ export const layer: Layer.Layer<
           Effect.mapError((cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause }))
         )
         const parsed = yield* Effect.try({
-          try: () => JSON.parse(raw) as unknown,
+          try: (): unknown => JSON.parse(raw),
           catch: (cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause })
         })
         return yield* Schema.decodeUnknownEffect(AdfMetadataSidecarSchema)(parsed).pipe(
@@ -457,7 +457,7 @@ export const layer: Layer.Layer<
           version: version.number,
           title,
           updated: new Date(version.createdAt),
-          ...(parentId ? { parentId: parentId as PageId } : {}),
+          ...(parentId ? { parentId: PageId(parentId) } : {}),
           ...(position !== undefined ? { position } : {}),
           contentHash,
           ...(version.message ? { versionMessage: version.message } : {}),
@@ -484,7 +484,7 @@ export const layer: Layer.Layer<
       Terminal.Terminal
     > =>
       Effect.gen(function*() {
-        const pageId = page.id as PageId
+        const pageId = PageId(page.id)
         // Get children to determine if this is a folder
         const children = yield* client.getAllChildren(pageId)
         const hasChildren = children.length > 0
@@ -563,7 +563,7 @@ export const layer: Layer.Layer<
               body: {
                 atlas_doc_format: {
                   value: bodyContent,
-                  representation: "atlas_doc_format" as const
+                  representation: "atlas_doc_format"
                 }
               }
             }
@@ -645,7 +645,7 @@ export const layer: Layer.Layer<
             version: fullPage.version.number,
             title: fullPage.title,
             updated: updatedAt,
-            ...(effectiveParentId ? { parentId: effectiveParentId as PageId } : {}),
+            ...(effectiveParentId ? { parentId: PageId(effectiveParentId) } : {}),
             ...(page.position !== undefined ? { position: page.position } : {}),
             contentHash,
             ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
@@ -719,7 +719,7 @@ export const layer: Layer.Layer<
             pulled: result.pulled,
             skipped: 0,
             commits: result.commits,
-            errors: [] as ReadonlyArray<string>
+            errors: []
           }
         })
 
@@ -795,7 +795,8 @@ export const layer: Layer.Layer<
           })
 
           // Set editor version to v2 (new editor)
-          yield* client.setEditorVersion(createdPage.id as PageId, "v2").pipe(
+          const createdPageId = PageId(createdPage.id)
+          yield* client.setEditorVersion(createdPageId, "v2").pipe(
             Effect.catchIf(() => true, (error) => {
               // Log warning but don't fail the push
               return Effect.logWarning(`Failed to set editor v2 for page ${createdPage.id}: ${error.message}`)
@@ -803,7 +804,7 @@ export const layer: Layer.Layer<
           )
 
           // Fetch canonical content back from Confluence
-          const canonicalPage = yield* client.getPage(createdPage.id as PageId)
+          const canonicalPage = yield* client.getPage(createdPageId)
           const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
           const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
           const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, createdPage.id)
@@ -815,11 +816,11 @@ export const layer: Layer.Layer<
 
           // Write canonical content with full front-matter
           const newFrontMatter: PageFrontMatter = {
-            pageId: createdPage.id as PageId,
+            pageId: createdPageId,
             version: createdPage.version.number,
             title,
             updated: updatedAt,
-            parentId: parentId as PageId,
+            parentId: PageId(parentId),
             contentHash: canonicalHash
           }
           yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)
@@ -996,7 +997,7 @@ export const layer: Layer.Layer<
             if (result.created) created++
           }
 
-          return { pushed, created, deleted: 0, skipped: 0, errors: errors as ReadonlyArray<string> }
+          return { pushed, created, deleted: 0, skipped: 0, errors }
         }
 
         // Git mode: push current HEAD state to Confluence
@@ -1010,7 +1011,7 @@ export const layer: Layer.Layer<
         // Get the most recent unpushed commit message for the revision
         const unpushedCommits = yield* findUnpushedCommits()
         if (unpushedCommits.length === 0) {
-          return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] as ReadonlyArray<string> }
+          return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] }
         }
 
         if (options.dryRun) {
@@ -1019,7 +1020,7 @@ export const layer: Layer.Layer<
             created: 0,
             skipped: 0,
             deleted: 0,
-            errors: [] as ReadonlyArray<string>
+            errors: []
           }
         }
 
@@ -1086,7 +1087,7 @@ export const layer: Layer.Layer<
           yield* git.updateBranch("origin/confluence", "HEAD")
         }
 
-        return { pushed, created, skipped: 0, deleted, errors: errors as ReadonlyArray<string> }
+        return { pushed, created, skipped: 0, deleted, errors }
       })
 
     const status = (): Effect.Effect<StatusResult, SyncError> =>
@@ -1154,7 +1155,7 @@ export const layer: Layer.Layer<
           conflicts,
           localOnly,
           remoteOnly,
-          files: statuses as ReadonlyArray<SyncStatus>
+          files: statuses
         }
       })
 

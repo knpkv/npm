@@ -19,8 +19,7 @@ export const parseWorkspaceConfig = (
       try: () => yaml.load(content) ?? {},
       catch: (cause) => new SyncWorkspaceError({ message: "Failed to parse workspace config YAML", path, cause })
     })
-    const config = yield* Schema.decodeUnknownEffect(WorkspaceConfigSchema)(raw).pipe(
-      Effect.map((config) => config as WorkspaceConfig),
+    const config: WorkspaceConfig = yield* Schema.decodeUnknownEffect(WorkspaceConfigSchema)(raw).pipe(
       Effect.mapError((cause) =>
         new SyncValidationError({ message: "Invalid Jira Markdown Sync workspace config", path, cause })
       )

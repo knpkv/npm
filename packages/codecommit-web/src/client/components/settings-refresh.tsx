@@ -6,13 +6,13 @@ import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
 import { Button, ButtonGroup } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
 
-const INTERVAL_OPTIONS = [
+const INTERVAL_OPTIONS: ReadonlyArray<{ readonly label: string; readonly value: number }> = [
   { label: "1 min", value: 60 },
   { label: "5 min", value: 300 },
   { label: "10 min", value: 600 },
   { label: "15 min", value: 900 },
   { label: "30 min", value: 1800 }
-] as const
+]
 
 interface RefreshConfig {
   autoRefresh: boolean

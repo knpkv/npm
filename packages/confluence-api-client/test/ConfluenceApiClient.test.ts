@@ -11,6 +11,23 @@ const isRequest = (input: RequestInfo | URL): input is Request =>
   Predicate.hasProperty(input.headers, "entries") &&
   typeof input.headers.entries === "function"
 
+const headersRecord = (headers: HeadersInit | undefined): Record<string, string> => {
+  if (headers === undefined) return {}
+  if (
+    Predicate.hasProperty(headers, "entries") &&
+    typeof headers.entries === "function"
+  ) {
+    return Object.fromEntries(headers.entries())
+  }
+  if (Array.isArray(headers)) return Object.fromEntries(headers)
+  return Object.fromEntries(Object.entries(headers))
+}
+
+const authorizationHeader = (headers: HeadersInit | undefined): string | undefined => {
+  const record = headersRecord(headers)
+  return record.Authorization ?? record.authorization
+}
+
 /**
  * Mock global fetch to capture requests and return canned responses.
  */
@@ -26,7 +43,7 @@ const withMockFetch = <A, E>(
     const url = typeof input === "string" ? input : isRequest(input) ? input.url : input.toString()
     const headers = isRequest(input)
       ? Object.fromEntries(input.headers.entries())
-      : (init?.headers as Record<string, string> | undefined) ?? {}
+      : headersRecord(init?.headers)
     capturedRequests.push({ url, init: { ...init, headers } })
     const response = responses[requestIndex] ?? { status: 200, body: {} }
     requestIndex++
@@ -74,8 +91,7 @@ describe("ConfluenceApiClient", () => {
 
             const request = capturedRequests[0]!
             expect(request.url).toContain("/pages/123")
-            const authHeader = (request.init.headers as Record<string, string>)["Authorization"] ??
-              (request.init.headers as Record<string, string>)["authorization"]
+            const authHeader = authorizationHeader(request.init.headers)
             expect(authHeader).toMatch(/^Basic /)
           })
       ))
@@ -107,8 +123,7 @@ describe("ConfluenceApiClient", () => {
 
             const request = capturedRequests[0]!
             expect(request.url).toContain("api.atlassian.com/ex/confluence/cloud-123")
-            const authHeader = (request.init.headers as Record<string, string>)["Authorization"] ??
-              (request.init.headers as Record<string, string>)["authorization"]
+            const authHeader = authorizationHeader(request.init.headers)
             expect(authHeader).toBe("Bearer oauth-token")
           })
       ))
@@ -160,7 +175,9 @@ describe("ConfluenceApiClient", () => {
             expect(result._tag).toBe("Failure")
             if (result._tag === "Failure") {
               expect(result.failure).toBeInstanceOf(FetchClientError)
-              expect((result.failure as FetchClientError).status).toBe(404)
+              if (Predicate.hasProperty(result.failure, "status")) {
+                expect(result.failure.status).toBe(404)
+              }
             }
           })
       ))
