@@ -140,7 +140,12 @@ export const layer = Layer.effect(
           }
         }
       })).pipe(
-        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e }))
+        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e })),
+        Effect.flatMap((result) =>
+          result === undefined
+            ? Effect.fail(new TicketError({ message: "Jira search returned no response body" }))
+            : Effect.succeed(result)
+        )
       )
 
       const tickets: Array<JiraTicket> = (result.issues ?? []).filter(isRecord).map((issue) => mapIssueToTicket(issue))
