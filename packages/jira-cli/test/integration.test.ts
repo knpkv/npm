@@ -18,11 +18,14 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as yaml from "js-yaml"
+import { AttachmentService, layer as AttachmentServiceLayer } from "../src/AttachmentService.js"
+import { insertJiraAttachmentReference } from "../src/internal/attachmentInsertion.js"
 import { IssueService, layer as IssueServiceLayer, SiteUrl } from "../src/IssueService.js"
 import { layer as MarkdownWriterLayer, MarkdownWriter } from "../src/MarkdownWriter.js"
 
 const DEFAULT_BASE_URL = "https://knpkv.atlassian.net"
 const DEFAULT_ISSUE_KEY = "KAN-1"
+const INTEGRATION_ATTACHMENT_FILENAME = "inline-attachment.svg"
 
 interface IntegrationConfig {
   readonly baseUrl: string
@@ -54,6 +57,20 @@ const SHOULD_RUN_INTEGRATION = Effect.runSync(
   )
 )
 
+const SHOULD_RUN_ATTACHMENT_INTEGRATION = Effect.runSync(
+  Effect.all([
+    Config.option(Config.string("JIRA_INTEGRATION")),
+    Config.option(Config.string("JIRA_ATTACHMENT_INTEGRATION"))
+  ]).pipe(
+    Effect.map(([integration, attachment]) =>
+      Option.isSome(integration) &&
+      envFlagEnabled(integration.value) &&
+      Option.isSome(attachment) &&
+      envFlagEnabled(attachment.value)
+    )
+  )
+)
+
 const readIntegrationConfig = Effect.gen(function*() {
   const baseUrl = yield* Config.option(Config.string("JIRA_BASE_URL"))
   const issueKey = yield* Config.option(Config.string("JIRA_ISSUE_KEY"))
@@ -79,6 +96,7 @@ const makeIntegrationLayer = (config: IntegrationConfig) => {
   })
 
   return MarkdownWriterLayer.pipe(
+    Layer.provideMerge(AttachmentServiceLayer),
     Layer.provideMerge(IssueServiceLayer),
     Layer.provideMerge(Layer.succeed(SiteUrl, config.baseUrl)),
     Layer.provideMerge(JiraApiClient.layer),
@@ -102,10 +120,43 @@ const readText = (filePath: string) =>
     Effect.flatMap((fs) => fs.readFileString(filePath))
   )
 
+const writeText = (filePath: string, content: string) =>
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) => fs.writeFileString(filePath, content))
+  )
+
 const pathExists = (filePath: string) =>
   FileSystem.FileSystem.pipe(
     Effect.flatMap((fs) => fs.exists(filePath))
   )
+
+const integrationAttachmentFixturePath = Path.Path.pipe(
+  Effect.flatMap((path) =>
+    path.fromFileUrl(new URL("../../atlassian-common/test/fixtures/attachments/inline-attachment.svg", import.meta.url))
+  )
+)
+
+const copyIntegrationAttachmentAsset = (testDir: string) =>
+  Effect.gen(function*() {
+    const source = yield* integrationAttachmentFixturePath
+    const target = yield* joinPath(testDir, INTEGRATION_ATTACHMENT_FILENAME)
+    yield* writeText(target, yield* readText(source))
+    return target
+  })
+
+const expectCanonicalIssueIncludesAttachmentMedia = (
+  config: IntegrationConfig,
+  issue: { readonly attachments: ReadonlyArray<{ readonly filename: string }> },
+  markdown: string
+) => {
+  if (config.issueKey !== DEFAULT_ISSUE_KEY) return
+
+  expect(issue.attachments.some((attachment) => attachment.filename === INTEGRATION_ATTACHMENT_FILENAME)).toBe(true)
+  expect(markdown).toContain("## Attachments")
+  expect(markdown).toContain(`![${INTEGRATION_ATTACHMENT_FILENAME}](`)
+  expect(markdown).toContain("jiraAttachmentId")
+  expect(markdown).toContain("image/svg+xml")
+}
 
 const parseFrontMatter = (markdown: string): Record<string, unknown> => {
   const match = /^---\n([\s\S]*?)\n---/.exec(markdown)
@@ -140,6 +191,7 @@ const getIssueAsMarkdown = (config: IntegrationConfig, testDir: string) =>
     expect(frontMatter.summary).toBe(issue.summary)
     expect(typeof frontMatter.status).toBe("string")
     expect(markdown).toContain(`# ${config.issueKey}:`)
+    expectCanonicalIssueIncludesAttachmentMedia(config, issue, markdown)
 
     return { frontMatter, issue }
   })
@@ -177,6 +229,43 @@ describe("Jira integration", () => {
           const { frontMatter, issue } = yield* getIssueAsMarkdown(config, testDir)
           yield* searchIssueAsSingleMarkdown(config, testDir)
           expect(frontMatter.key).toBe(issue.key)
+        }).pipe(
+          Effect.provide(makeIntegrationLayer(config)),
+          Effect.scoped
+        )
+      }),
+    120000
+  )
+
+  it.effect.skipIf(!SHOULD_RUN_ATTACHMENT_INTEGRATION)(
+    "uploads an SVG attachment and inserts a Markdown attachment reference",
+    () =>
+      Effect.gen(function*() {
+        const config = yield* readIntegrationConfig
+        return yield* Effect.gen(function*() {
+          const testDir = yield* makeTempRoot
+          const assetPath = yield* copyIntegrationAttachmentAsset(testDir)
+          const documentPath = yield* joinPath(testDir, `${config.issueKey}.md`)
+          yield* writeText(documentPath, `# ${config.issueKey}\n\n![Attachment proof](${assetPath})\n`)
+
+          const attachmentService = yield* AttachmentService
+          const issueService = yield* IssueService
+          const attachment = yield* attachmentService.uploadToIssue(config.issueKey, { filePath: assetPath })
+          expect(attachment.id).toBeTruthy()
+          expect(attachment.filename).toBe(INTEGRATION_ATTACHMENT_FILENAME)
+          expect(attachment.mediaType === null || attachment.mediaType.includes("svg")).toBe(true)
+
+          const issue = yield* issueService.getByKey(config.issueKey)
+          expect(issue.attachments.some((candidate) => candidate.id === attachment.id)).toBe(true)
+
+          const insertion = insertJiraAttachmentReference(yield* readText(documentPath), assetPath, attachment)
+          expect(insertion.replacements).toBe(1)
+          yield* writeText(documentPath, insertion.content)
+
+          const updated = yield* readText(documentPath)
+          expect(updated).toContain(`"jiraAttachmentId":"${attachment.id}"`)
+          expect(updated).toContain(`![${INTEGRATION_ATTACHMENT_FILENAME}](`)
+          expect(updated).not.toContain(`![Attachment proof](${assetPath})`)
         }).pipe(
           Effect.provide(makeIntegrationLayer(config)),
           Effect.scoped

@@ -302,6 +302,23 @@ export class StructureError extends Data.TaggedError("StructureError")<{
 }> {}
 
 /**
+ * Error thrown when Confluence media nodes cannot be resolved to attachment URLs.
+ *
+ * @category Errors
+ */
+export class AttachmentResolutionError extends Data.TaggedError("AttachmentResolutionError")<{
+  readonly pageId: string
+  readonly message: string
+}> {
+  constructor(params: { pageId: string }) {
+    super({
+      pageId: params.pageId,
+      message: `Could not resolve Confluence media attachments for page ${params.pageId}`
+    })
+  }
+}
+
+/**
  * Union of all Confluence errors.
  *
  * @category Errors
@@ -321,6 +338,7 @@ export type ConfluenceError =
   | OAuthError
   | FrontMatterError
   | StructureError
+  | AttachmentResolutionError
 
 /**
  * Type guard to check if error is a ConfluenceError.
@@ -347,5 +365,6 @@ export const isConfluenceError = (error: unknown): error is ConfluenceError =>
     "FileSystemError",
     "OAuthError",
     "FrontMatterError",
-    "StructureError"
+    "StructureError",
+    "AttachmentResolutionError"
   ].includes(error._tag)

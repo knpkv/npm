@@ -18,6 +18,7 @@
  *
  * @module
  */
+import { normalizeAttachmentMediaType } from "@knpkv/atlassian-common/attachments"
 import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -40,6 +41,8 @@ export interface Attachment {
   readonly id: string
   readonly filename: string
   readonly url: string
+  readonly mediaType: string | null
+  /** Backwards-compatible alias for consumers that still read Jira's MIME field name. */
   readonly mimeType: string
   readonly size: number
 }
@@ -234,13 +237,20 @@ const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string)
   // Extract attachments
   const attachmentField = fields["attachment"]
   const attachments: Array<Attachment> = Array.isArray(attachmentField)
-    ? recordArray(attachmentField).map((att) => ({
-      id: String(att["id"] ?? ""),
-      filename: String(att["filename"] ?? ""),
-      url: String(att["content"] ?? ""),
-      mimeType: String(att["mimeType"] ?? ""),
-      size: Number(att["size"] ?? 0)
-    }))
+    ? recordArray(attachmentField).map((att) => {
+      const mediaType = normalizeAttachmentMediaType(
+        undefined,
+        typeof att["mimeType"] === "string" ? att["mimeType"] : null
+      )
+      return {
+        id: String(att["id"] ?? ""),
+        filename: String(att["filename"] ?? ""),
+        url: String(att["content"] ?? ""),
+        mediaType,
+        mimeType: mediaType ?? "",
+        size: Number(att["size"] ?? 0)
+      }
+    })
     : []
 
   // Extract comments

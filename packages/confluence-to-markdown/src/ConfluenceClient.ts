@@ -8,7 +8,9 @@
 import { ConfluenceApiClient, ConfluenceApiConfig, FetchClientError, toEffect } from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
@@ -18,6 +20,7 @@ import { ApiError, RateLimitError } from "./ConfluenceError.js"
 import {
   type AtlassianUser,
   AtlassianUserSchema,
+  type AttachmentReference,
   type PageChildrenResponse,
   PageChildrenResponseSchema,
   type PageListItem,
@@ -59,6 +62,12 @@ export interface UpdatePageRequest {
     readonly representation: "atlas_doc_format"
     readonly value: string
   }
+}
+
+export interface UploadAttachmentInput {
+  readonly filePath: string
+  readonly filename?: string | undefined
+  readonly mediaType?: string | undefined
 }
 
 /**
@@ -120,6 +129,21 @@ export class ConfluenceClient extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<PageVersion>, ApiError | RateLimitError>
 
     /**
+     * Get attachments for a page.
+     */
+    readonly getPageAttachments: (
+      id: PageId
+    ) => Effect.Effect<ReadonlyArray<AttachmentReference>, ApiError | RateLimitError>
+
+    /**
+     * Upload or update an attachment on a page.
+     */
+    readonly uploadAttachmentToPage: (
+      pageId: PageId,
+      input: UploadAttachmentInput
+    ) => Effect.Effect<AttachmentReference, ApiError | RateLimitError, FileSystem.FileSystem | Path.Path>
+
+    /**
      * Get user info by account ID.
      */
     readonly getUser: (accountId: string) => Effect.Effect<AtlassianUser, ApiError | RateLimitError>
@@ -162,24 +186,6 @@ const MAX_PAGINATION_ITERATIONS = 100
 const VERSIONS_PAGE_SIZE = 50
 const ATLAS_DOC_FORMAT: "atlas_doc_format" = "atlas_doc_format"
 
-/**
- * Rate limit retry schedule with exponential backoff.
- */
-const rateLimitRetry: {
-  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
-  readonly times: number
-  readonly while: (error: ApiError | RateLimitError) => error is RateLimitError
-} = {
-  schedule: Schedule.exponential("1 second").pipe(
-    Schedule.either(Schedule.spaced("30 seconds"))
-  ),
-  times: 3,
-  while: (error: ApiError | RateLimitError): error is RateLimitError => Predicate.isTagged(error, "RateLimitError")
-}
-
-/**
- * Map API client errors to domain errors.
- */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -189,6 +195,56 @@ const stringOrUndefined = (value: unknown): string | undefined => typeof value =
 
 const numberOrUndefined = (value: unknown): number | undefined => typeof value === "number" ? value : undefined
 
+const isTransientApiError = (error: unknown): boolean => {
+  if (Predicate.isTagged(error, "RateLimitError")) return true
+  if (!Predicate.isTagged(error, "ApiError")) return false
+
+  const status = numberOrUndefined(recordOrNull(error)?.["status"])
+  return typeof status === "number" && (status === 0 || status === 408 || status === 429 || status >= 500)
+}
+
+/** @internal */
+export const isConfluenceReadRetryError = isTransientApiError
+
+/** @internal */
+export const isConfluenceWriteRetryError = (error: unknown): boolean => {
+  if (Predicate.isTagged(error, "RateLimitError")) return true
+  if (!Predicate.isTagged(error, "ApiError")) return false
+
+  const status = numberOrUndefined(recordOrNull(error)?.["status"])
+  return status === 429
+}
+
+/**
+ * Retry schedule for transient Confluence read failures.
+ */
+const readRequestRetry: {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+  readonly while: (error: unknown) => boolean
+} = {
+  schedule: Schedule.exponential("1 second"),
+  times: 3,
+  while: isConfluenceReadRetryError
+}
+
+/**
+ * Retry schedule for Confluence writes. Non-idempotent writes are retried only
+ * when Atlassian explicitly rate-limits the request.
+ */
+const writeRequestRetry: {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+  readonly while: (error: unknown) => boolean
+} = {
+  schedule: Schedule.spaced("30 seconds"),
+  times: 3,
+  while: isConfluenceWriteRetryError
+}
+
+/**
+ * Map API client errors to domain errors.
+ */
 const fetchClientErrorFromUnknown = (error: unknown): FetchClientError =>
   (() => {
     const record = recordOrNull(error)
@@ -314,6 +370,112 @@ const firstEditorProperty = (value: unknown): EditorProperty | undefined => {
   return property
 }
 
+interface AttachmentResponseLinks {
+  readonly download?: string | undefined
+  readonly downloadLink?: string | undefined
+  readonly base?: string | undefined
+  readonly context?: string | undefined
+}
+
+const trimTrailingSlash = (value: string): string => value.endsWith("/") ? value.slice(0, -1) : value
+
+/** @internal */
+export const makeConfluenceAttachmentUrl = (
+  siteBaseUrl: string,
+  href: string,
+  links?: AttachmentResponseLinks | undefined
+): string => {
+  if (href.startsWith("http://") || href.startsWith("https://")) return href
+
+  const context = links?.context && links.context !== "/" ? trimTrailingSlash(links.context) : undefined
+  if (context && href.startsWith("/") && href !== context && !href.startsWith(`${context}/`)) {
+    return new URL(`${context}${href}`, siteBaseUrl).toString()
+  }
+
+  const baseUrl = links?.base ?? siteBaseUrl
+  if (href.startsWith("/")) {
+    const base = new URL(baseUrl)
+    const basePath = base.pathname === "/" ? undefined : trimTrailingSlash(base.pathname)
+    if (basePath && href !== basePath && !href.startsWith(`${basePath}/`)) {
+      return new URL(`${basePath}${href}`, base.origin).toString()
+    }
+    return new URL(href, base.origin).toString()
+  }
+
+  return new URL(href, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString()
+}
+
+const AttachmentResponseSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.optional(Schema.String),
+  filename: Schema.optional(Schema.String),
+  downloadLink: Schema.optional(Schema.String),
+  mediaType: Schema.optional(Schema.NullOr(Schema.String)),
+  fileSize: Schema.optional(Schema.NullOr(Schema.Number)),
+  size: Schema.optional(Schema.NullOr(Schema.Number)),
+  fileId: Schema.optional(Schema.String),
+  collectionName: Schema.optional(Schema.String),
+  metadata: Schema.optional(Schema.Struct({
+    mediaType: Schema.optional(Schema.NullOr(Schema.String))
+  })),
+  extensions: Schema.optional(Schema.Struct({
+    mediaType: Schema.optional(Schema.NullOr(Schema.String)),
+    fileSize: Schema.optional(Schema.NullOr(Schema.Number)),
+    fileId: Schema.optional(Schema.String),
+    collectionName: Schema.optional(Schema.String)
+  })),
+  _links: Schema.optional(Schema.Struct({
+    download: Schema.optional(Schema.String),
+    downloadLink: Schema.optional(Schema.String),
+    base: Schema.optional(Schema.String),
+    context: Schema.optional(Schema.String)
+  }))
+})
+
+const decodeAttachment = (
+  raw: unknown,
+  baseUrl: string,
+  endpoint: string,
+  pageId?: string
+): Effect.Effect<AttachmentReference, ApiError> =>
+  Schema.decodeUnknownEffect(AttachmentResponseSchema)(raw).pipe(
+    Effect.mapError((cause) =>
+      new ApiError({
+        status: 0,
+        message: `Confluence returned an invalid attachment response for ${endpoint}: ${cause}`,
+        endpoint,
+        ...(pageId !== undefined ? { pageId } : {})
+      })
+    ),
+    Effect.flatMap((record) => {
+      const download = record.downloadLink ?? record._links?.download ?? record._links?.downloadLink
+      const filename = record.title ?? record.filename
+      if (record.id.length === 0 || !filename || !download) {
+        return Effect.fail(
+          new ApiError({
+            status: 0,
+            message: `Confluence returned an attachment without id, filename, or download URL for ${endpoint}`,
+            endpoint,
+            ...(pageId !== undefined ? { pageId } : {})
+          })
+        )
+      }
+      const mediaType = record.mediaType ?? record.metadata?.mediaType ?? record.extensions?.mediaType ?? null
+      const size = record.fileSize ?? record.size ?? record.extensions?.fileSize ?? null
+      const fileId = record.fileId ?? record.extensions?.fileId
+      const collectionName = record.collectionName ?? record.extensions?.collectionName
+      return Effect.succeed({
+        id: record.id,
+        filename,
+        url: makeConfluenceAttachmentUrl(baseUrl, download, record._links),
+        mediaType,
+        size,
+        ...(fileId ? { fileId } : {}),
+        ...(collectionName ? { collectionName } : {})
+      })
+    })
+  )
+
 /**
  * Create the Confluence client service.
  */
@@ -333,13 +495,12 @@ const make = (
       Effect.provide(ConfluenceApiClient.layer),
       Effect.provide(apiConfigLayer)
     )
-
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
       toEffect(apiClient.v2.client.GET("/pages/{id}", {
         params: { path: { id: Number(id) }, query: { "body-format": ATLAS_DOC_FORMAT } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}`, id)),
         Effect.flatMap((response) => decodePageResponse(response, `/pages/${id}`, id))
       )
@@ -349,7 +510,7 @@ const make = (
         params: { path: { id: Number(id) } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
         Effect.flatMap((response) => decodeChildrenResponse(response, `/pages/${id}/children`, id))
       )
@@ -376,7 +537,7 @@ const make = (
             params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}) } }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
-            Effect.retry(rateLimitRetry),
+            Effect.retry(readRequestRetry),
             Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
             Effect.flatMap((rawResponse) => decodeChildrenResponse(rawResponse, `/pages/${id}/children`, id))
           )
@@ -406,7 +567,7 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, "/pages")),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, "/pages")),
         Effect.flatMap((response) => decodePageResponse(response, "/pages"))
       )
@@ -423,7 +584,7 @@ const make = (
         }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${req.id}`, req.id)),
         Effect.flatMap((response) => decodePageResponse(response, `/pages/${req.id}`, req.id))
       )
@@ -434,7 +595,7 @@ const make = (
       })).pipe(
         Effect.map(() => void 0),
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}`, id))
       )
 
@@ -470,7 +631,7 @@ const make = (
             }
           })).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
-            Effect.retry(rateLimitRetry),
+            Effect.retry(readRequestRetry),
             Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/versions`, id)),
             Effect.flatMap((rawResponse) => decodeVersionsResponse(rawResponse, `/pages/${id}/versions`, id))
           )
@@ -491,12 +652,124 @@ const make = (
         return allVersions
       })
 
+    const getPageAttachments = (
+      id: PageId
+    ): Effect.Effect<ReadonlyArray<AttachmentReference>, ApiError | RateLimitError> =>
+      Effect.gen(function*() {
+        const allAttachments: Array<AttachmentReference> = []
+        let cursor: string | undefined
+        let iterations = 0
+
+        do {
+          if (iterations >= MAX_PAGINATION_ITERATIONS) {
+            return yield* Effect.fail(
+              new ApiError({
+                status: 0,
+                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of attachments`,
+                endpoint: `/pages/${id}/attachments`,
+                pageId: id
+              })
+            )
+          }
+
+          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/attachments", {
+            params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}), limit: 50 } }
+          })).pipe(
+            Effect.mapError((e) => mapApiError(e, `/pages/${id}/attachments`, id)),
+            Effect.retry(readRequestRetry),
+            Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/attachments`, id))
+          )
+
+          const responseRecord = recordOrNull(response)
+          const results = responseRecord?.["results"]
+          if (Array.isArray(results)) {
+            for (const attachment of results) {
+              allAttachments.push(yield* decodeAttachment(attachment, config.baseUrl, `/pages/${id}/attachments`, id))
+            }
+          }
+
+          const nextLink = stringOrUndefined(recordOrNull(responseRecord?.["_links"])?.["next"])
+          cursor = nextLink
+            ? new URL(nextLink, config.baseUrl).searchParams.get("cursor") ?? undefined
+            : undefined
+
+          iterations++
+        } while (cursor)
+
+        return allAttachments
+      })
+
+    const uploadAttachmentToPage = (
+      pageId: PageId,
+      input: UploadAttachmentInput
+    ): Effect.Effect<AttachmentReference, ApiError | RateLimitError, FileSystem.FileSystem | Path.Path> =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const bytes = yield* fs.readFile(input.filePath).pipe(
+          Effect.mapError((cause) =>
+            new ApiError({
+              status: 0,
+              message: `Failed to read attachment file ${input.filePath}: ${cause}`,
+              endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
+              pageId
+            })
+          )
+        )
+        const buffer = new ArrayBuffer(bytes.byteLength)
+        new Uint8Array(buffer).set(bytes)
+        const filename = input.filename ?? path.basename(input.filePath)
+        const form = new FormData()
+        form.append("file", new Blob([buffer], input.mediaType ? { type: input.mediaType } : undefined), filename)
+        form.append("minorEdit", "true")
+
+        const response = yield* toEffect(apiClient.v1.client.PUT("/wiki/rest/api/content/{id}/child/attachment", {
+          params: { path: { id: pageId }, query: { status: "current" } },
+          headers: { "X-Atlassian-Token": "nocheck" },
+          body: { file: filename, minorEdit: "true" },
+          bodySerializer: () => form
+        })).pipe(
+          Effect.mapError((e) => mapApiError(e, `/wiki/rest/api/content/${pageId}/child/attachment`, pageId)),
+          Effect.retry(writeRequestRetry),
+          Effect.mapError((e) =>
+            normalizeConfluenceError(e, `/wiki/rest/api/content/${pageId}/child/attachment`, pageId)
+          )
+        )
+
+        const attachment = extractUploadedAttachment(response)
+        if (attachment === null) {
+          return yield* Effect.fail(
+            new ApiError({
+              status: 0,
+              message: `Confluence did not return an attachment for ${filename}`,
+              endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
+              pageId
+            })
+          )
+        }
+        const decodedAttachment = yield* decodeAttachment(
+          attachment,
+          config.baseUrl,
+          `/wiki/rest/api/content/${pageId}/child/attachment`,
+          pageId
+        )
+        return yield* getPageAttachments(pageId).pipe(
+          Effect.map((attachments) =>
+            attachments.find((candidate) =>
+              candidate.id === decodedAttachment.id ||
+              (candidate.filename === decodedAttachment.filename && candidate.fileId !== undefined)
+            ) ?? decodedAttachment
+          ),
+          Effect.catchCause(() => Effect.succeed(decodedAttachment))
+        )
+      })
+
     const getUser = (accountId: string): Effect.Effect<AtlassianUser, ApiError | RateLimitError> =>
       toEffect(apiClient.v1.client.GET("/wiki/rest/api/user", {
         params: { query: { accountId } }
       })).pipe(
         Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
-        Effect.retry(rateLimitRetry),
+        Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/user?accountId=${accountId}`)),
         Effect.flatMap((response) => decodeAtlassianUser(response, `/user?accountId=${accountId}`))
       )
@@ -555,7 +828,7 @@ const make = (
           )
         }
       }).pipe(
-        Effect.retry(rateLimitRetry),
+        Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${pageId}/properties/editor`, pageId))
       )
 
@@ -567,6 +840,8 @@ const make = (
       updatePage,
       deletePage,
       getPageVersions,
+      getPageAttachments,
+      uploadAttachmentToPage,
       getUser,
       getSpaceId,
       setEditorVersion
@@ -603,6 +878,15 @@ const make = (
  *
  * @category Layers
  */
-export const layer = (
-  config: ConfluenceClientConfig
-): Layer.Layer<ConfluenceClient> => Layer.effect(ConfluenceClient, make(config))
+export const layer = (config: ConfluenceClientConfig): Layer.Layer<ConfluenceClient> =>
+  Layer.effect(ConfluenceClient, make(config))
+
+const extractUploadedAttachment = (response: unknown): unknown | null => {
+  const record = recordOrNull(response)
+  if (record === null) return null
+  const results = record["results"]
+  if (Array.isArray(results) && results[0] !== undefined) return results[0]
+  const page = record["page"]
+  if (Array.isArray(page) && page[0] !== undefined) return page[0]
+  return null
+}

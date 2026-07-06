@@ -110,8 +110,7 @@ export class JiraApiClient extends Context.Service<JiraApiClient, JiraApiClientS
 
       const headers = {
         Authorization: authHeader,
-        Accept: "application/json",
-        "Content-Type": "application/json"
+        Accept: "application/json"
       }
 
       return {

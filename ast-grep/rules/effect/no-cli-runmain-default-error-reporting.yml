@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-cli-runmain-default-error-reporting
+language: tsx
+severity: error
+message: "Disable NodeRuntime error reporting when CLI code handles and re-fails errors"
+
+rule:
+  pattern: NodeRuntime.runMain($PROGRAM)
+
+files:
+  - "packages/atlassian-common/src/bin.ts"
+  - "packages/jira-cli/src/bin.ts"
+
+ignores:
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  CLI entrypoints in this repo print command errors explicitly before re-failing
+  so the process exits non-zero. Leaving NodeRuntime error reporting enabled can
+  print a second Effect runtime report for the same failure.
+
+  Prefer:
+
+  NodeRuntime.runMain(program, { disableErrorReporting: true })

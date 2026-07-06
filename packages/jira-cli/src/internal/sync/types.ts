@@ -132,8 +132,11 @@ export interface AcceptedComment {
 }
 
 export interface AttachmentReference {
+  readonly id: string
   readonly filename: string
   readonly url: string
+  readonly mediaType: string | null
+  readonly size: number | null
 }
 
 export interface IssueDocument {

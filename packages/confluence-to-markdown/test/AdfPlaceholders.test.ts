@@ -248,6 +248,64 @@ describe("revertPlaceholders", () => {
     expect(out.content[1]).toEqual(para("after"))
   })
 
+  it("rebuilds mediaSingle captions from the editable marker body", () => {
+    const mediaSingle = {
+      type: "mediaSingle",
+      attrs: { layout: "center" },
+      content: [
+        { type: "media", attrs: { id: "file-1", type: "file", collection: "contentId-1" } },
+        { type: "caption", content: [{ type: "text", text: "Old caption" }] }
+      ]
+    }
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:mediaSingle node=${b64(mediaSingle)} -->`),
+        {
+          type: "mediaSingle",
+          content: [{ type: "media", attrs: { type: "external", url: "https://x.test/diagram.png" } }]
+        },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "New caption", marks: [{ type: "em" }] }]
+        },
+        para("<!-- adf:/mediaSingle -->")
+      ])
+    )
+
+    expect(out.content).toEqual([{
+      type: "mediaSingle",
+      attrs: { layout: "center" },
+      content: [
+        { type: "media", attrs: { id: "file-1", type: "file", collection: "contentId-1" } },
+        { type: "caption", content: [{ type: "text", text: "New caption" }] }
+      ]
+    }])
+  })
+
+  it("does not restore a sole non-image media link as a caption", () => {
+    const mediaSingle = {
+      type: "mediaSingle",
+      attrs: { layout: "center" },
+      content: [{ type: "media", attrs: { id: "file-1", type: "file", collection: "contentId-1" } }]
+    }
+    const out = revertPlaceholders(
+      docOf([
+        para(`<!-- adf:mediaSingle node=${b64(mediaSingle)} -->`),
+        {
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "document.pdf",
+            marks: [{ type: "link", attrs: { href: "https://x.test/document.pdf" } }]
+          }]
+        },
+        para("<!-- adf:/mediaSingle -->")
+      ])
+    )
+
+    expect(out.content).toEqual([mediaSingle])
+  })
+
   it("re-attaches paragraph-level marks from paragraph markers", () => {
     const marks = [{ type: "alignment", attrs: { align: "center" } }]
     const out = revertPlaceholders(

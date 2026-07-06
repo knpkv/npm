@@ -16,6 +16,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { AttachmentService, layer as AttachmentServiceLayer } from "../AttachmentService.js"
 import { IssueService, layer as IssueServiceLayer, SiteUrl } from "../IssueService.js"
 import { JiraAuth, layer as JiraAuthLayer } from "../JiraAuth.js"
 import { layer as MarkdownWriterLayer, MarkdownWriter } from "../MarkdownWriter.js"
@@ -28,6 +29,13 @@ const DummyIssueServiceLayer = Layer.succeed(
     getByKey: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     search: () => Effect.die(new Error("Not configured - run 'jira auth login' first")),
     searchAll: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
+  })
+)
+
+const DummyAttachmentServiceLayer = Layer.succeed(
+  AttachmentService,
+  AttachmentService.of({
+    uploadToIssue: () => Effect.die(new Error("Not configured - run 'jira auth login' first"))
   })
 )
 
@@ -110,6 +118,7 @@ const SiteUrlLive = Layer.unwrap(
  * @category Layers
  */
 export const AppLayer = MarkdownWriterLayer.pipe(
+  Layer.provideMerge(AttachmentServiceLayer),
   Layer.provideMerge(IssueServiceLayer),
   Layer.provideMerge(VersionServiceLayer),
   Layer.provideMerge(SiteUrlLive),
@@ -125,6 +134,7 @@ export const AppLayer = MarkdownWriterLayer.pipe(
  * @category Layers
  */
 export const AuthOnlyLayer = DummyIssueServiceLayer.pipe(
+  Layer.provideMerge(DummyAttachmentServiceLayer),
   Layer.provideMerge(DummyMarkdownWriterLayer),
   Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(AuthLive),
@@ -138,6 +148,7 @@ export const AuthOnlyLayer = DummyIssueServiceLayer.pipe(
  * @category Layers
  */
 export const MinimalLayer = DummyIssueServiceLayer.pipe(
+  Layer.provideMerge(DummyAttachmentServiceLayer),
   Layer.provideMerge(DummyMarkdownWriterLayer),
   Layer.provideMerge(DummyVersionServiceLayer),
   Layer.provideMerge(DummyJiraAuthLayer),
@@ -156,6 +167,12 @@ export const getLayerType = (args: ReadonlyArray<string>): "full" | "auth" | "mi
   }
   if (cmd === "auth") {
     return "auth"
+  }
+  if (
+    cmd === "issue" && args[1] === "attachment" && args[2] === "upload" &&
+    (args.includes("--dry-run") || args.includes("-n"))
+  ) {
+    return "minimal"
   }
   if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {
     return "minimal"

@@ -15,6 +15,7 @@
  */
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import createClient, { type Client, type FetchResponse } from "openapi-fetch"
 import type { MediaType } from "openapi-typescript-helpers"
 
@@ -43,7 +44,14 @@ const errorStatus = (value: unknown): number => isRecord(value) && typeof value.
 
 const errorMessage = (value: unknown): string => {
   const payload = errorPayload(value)
-  return typeof payload === "string" ? payload : JSON.stringify(payload)
+  if (typeof payload === "string") return payload
+  if (Predicate.isError(payload)) return payload.message
+  if (Predicate.hasProperty(payload, "message") && typeof payload.message === "string") return payload.message
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return String(payload)
+  }
 }
 
 /**
@@ -89,7 +97,7 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
  */
 export interface OpenApiFetchClient<Paths extends {}> {
   /** Type-safe openapi-fetch client. Use with `toEffect()` to get Effect. */
-  readonly client: Client<Paths, "application/json">
+  readonly client: Client<Paths>
 }
 
 /**
@@ -101,5 +109,5 @@ export const makeOpenApiFetchClient = <Paths extends {}>(
   baseUrl: string,
   headers: Record<string, string>
 ): OpenApiFetchClient<Paths> => ({
-  client: createClient<Paths, "application/json">({ baseUrl, headers })
+  client: createClient<Paths>({ baseUrl, headers })
 })

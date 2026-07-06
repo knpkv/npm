@@ -41,6 +41,14 @@ Use ast-grep for syntactic patterns that are precise without type information:
   calling service methods.
 - Stay on Effect v4 APIs: use `Context.Service`, `Effect.catch`, and
   `Effect.gen({ self: this }, ...)` instead of stale v3 forms.
+- Preserve CLI failure semantics: when a CLI entrypoint formats command failures
+  and then re-fails, call `NodeRuntime.runMain` with
+  `{ disableErrorReporting: true }` to avoid duplicate runtime reports.
+- Keep attachment command validation precise: local placeholder/file validation
+  is not a remote API error, and optional document content should be modeled
+  without non-null assertions.
+- Keep CLI error formatters total: unknown-object formatting must not be able to
+  throw while reporting the original failure.
 
 ## Hard TypeScript Guardrails
 

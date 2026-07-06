@@ -6,6 +6,9 @@
  *
  * @module
  */
+import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
+import { sanitizeConfluenceMediaAlt } from "./internal/mediaAlt.js"
+
 /**
  * Warning emitted by the walker. Surfaced via `Effect.logWarning` at the
  * facade boundary; never escalated to errors so a single weird node cannot
@@ -60,12 +63,15 @@ const escapeHtml = (s: string): string =>
 // escape the wrapper itself.
 const safeHref = (href: string): string =>
   /[() <>\\]/.test(href) ? `<${href.replace(/[<>\\]/g, (c) => encodeURIComponent(c))}>` : href
-// Alt text is substituted rather than escaped: @atlaskit's media markdown
-// plugin throws on `\[`/`\]` in alt (making the page un-pushable), and
-// newlines split the construct outright.
-const sanitizeAlt = (s: string): string =>
-  s.replace(/\[/g, "(").replace(/\]/g, ")").replace(/\\/g, "/").replace(/\s+/g, " ").trim()
-
+const filenameFromUrl = (href: string): string | undefined => {
+  try {
+    const pathname = new URL(href).pathname
+    const name = pathname.split("/").filter(Boolean).at(-1)
+    return name ? decodeURIComponent(name) : undefined
+  } catch {
+    return undefined
+  }
+}
 // ESCAPE_RE deliberately skips characters that are only special at line
 // start, so lines assembled from paragraph text (including after hardBreak)
 // must neutralize leading block markers: ATX headings, blockquotes, list
@@ -590,10 +596,32 @@ const blockCard = (n: AdfNode, ctx: Ctx): string => {
 const renderMedia = (media: AdfNode | undefined, ctx: Ctx): string => {
   const id = (media && attrStr(media, "id")) ?? ""
   const alt = (media && attrStr(media, "alt")) ?? ""
+  const filename = media && attrStr(media, "filename")
+  const mediaType = media && attrStr(media, "mediaType")
   const url = media && attrStr(media, "url")
-  if (url) return `![${sanitizeAlt(alt)}](${safeHref(url)})`
+  if (url) {
+    const urlFilename = filenameFromUrl(url)
+    const previewName = filename || urlFilename || alt || id
+    const linkLabel = filename || alt || urlFilename || id
+    return isPreviewableAttachment({ filename: previewName, mediaType })
+      ? `![${sanitizeConfluenceMediaAlt(alt || filename || "")}](${safeHref(url)})`
+      : `[${escapeText(linkLabel)}](${safeHref(url)})`
+  }
   ctx.warnings.push({ _tag: "MediaWithoutUrl", mediaId: id })
   return `<!-- adf:media id=${id} -->`
+}
+
+const mediaIdentityNode = (n: AdfNode): AdfNode => {
+  if (n.type === "media") {
+    const attrs = { ...(n.attrs ?? {}) }
+    delete attrs["url"]
+    delete attrs["filename"]
+    delete attrs["mediaType"]
+    return { ...n, attrs }
+  }
+  return n.content
+    ? { ...n, content: n.content.filter((child) => child.type !== "caption").map(mediaIdentityNode) }
+    : n
 }
 
 const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
@@ -601,15 +629,15 @@ const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
   const rendered = renderMedia(children.find((c) => c.type === "media"), ctx)
   const caption = children.find((c) => c.type === "caption")
   const captionText = caption ? inline(caption.content, ctx).trim() : ""
-  if (captionText.length === 0) return rendered
+  if (captionText.length === 0) return encodedBlockNode(mediaIdentityNode(n), rendered, ctx)
   // An em-marked caption already renders as `_…_`; wrapping again would make
   // `__…__` (strong). Leave captions that touch an underscore unwrapped.
   const line = captionText.startsWith("_") || captionText.endsWith("_") ? captionText : `_${captionText}_`
-  return `${rendered}\n${line}`
+  return encodedBlockNode(mediaIdentityNode(n), `${rendered}\n${line}`, ctx)
 }
 
 const mediaGroup = (n: AdfNode, ctx: Ctx): string =>
-  (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n")
+  encodedBlockNode(mediaIdentityNode(n), (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n"), ctx)
 
 /**
  * Walk an ADF document and emit GFM markdown. Always synchronous; warnings

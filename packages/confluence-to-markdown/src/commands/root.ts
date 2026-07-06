@@ -5,6 +5,7 @@ import { makeInstallCommand } from "@knpkv/agent-skills"
 import * as Console from "effect/Console"
 import { Command } from "effect/unstable/cli"
 import {
+  attachmentCommand,
   authCommand,
   cloneCommand,
   commitCommand,
@@ -66,11 +67,12 @@ const pageCommand = (pageGet: typeof pageGetCommand) =>
   Command.make(
     "page",
     {},
-    () => Console.log("Usage: confluence page get|new|delete")
+    () => Console.log("Usage: confluence page get|new|delete|attachment")
   ).pipe(
     Command.withDescription("Confluence page resource commands"),
     Command.withSubcommands([
       pageGet,
+      attachmentCommand,
       newCommand,
       deleteCommand
     ])

@@ -377,6 +377,50 @@ describe("MarkdownConverter round-trip", () => {
       expect(content).toEqual(source.content)
     }).pipe(Effect.provide(TestLayer)))
 
+  it.effect("round-trips media identity behind visible Markdown image previews", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const source = {
+        version: 1,
+        type: "doc",
+        content: [{
+          type: "mediaSingle",
+          attrs: { layout: "center" },
+          content: [{
+            type: "media",
+            attrs: {
+              id: "file-id-1",
+              type: "file",
+              collection: "contentId-123",
+              alt: "diagram",
+              url: "https://example.atlassian.net/wiki/download/attachments/123/diagram.svg"
+            }
+          }]
+        }]
+      }
+      const expected = {
+        ...source,
+        content: [{
+          ...source.content[0],
+          content: [{
+            type: "media",
+            attrs: {
+              id: "file-id-1",
+              type: "file",
+              collection: "contentId-123",
+              alt: "diagram"
+            }
+          }]
+        }]
+      }
+
+      const md = yield* converter.adfToMarkdown(JSON.stringify(source))
+      expect(md).toContain("![diagram](https://example.atlassian.net/wiki/download/attachments/123/diagram.svg)")
+      expect(md).toContain("<!-- adf:mediaSingle node=")
+      const adfOutContent = parsedContent(yield* converter.markdownToAdf(md))
+      expect(adfOutContent).toEqual(expected.content)
+    }).pipe(Effect.provide(TestLayer)))
+
   it.effect("round-trips inline smart links as native inlineCard nodes", () =>
     Effect.gen(function*() {
       const converter = yield* MarkdownConverter

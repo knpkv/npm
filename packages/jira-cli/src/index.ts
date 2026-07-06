@@ -5,6 +5,12 @@
  */
 
 export {
+  AttachmentService,
+  type AttachmentServiceShape,
+  layer as AttachmentServiceLayer,
+  type UploadAttachmentInput
+} from "./AttachmentService.js"
+export {
   type Attachment,
   type Comment,
   type Issue,

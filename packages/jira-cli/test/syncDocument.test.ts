@@ -29,7 +29,13 @@ const document: IssueDocument = {
     created: "2026-06-27",
     body: "Existing Jira comment."
   }],
-  attachments: [{ filename: "evidence.png", url: "https://example.atlassian.net/evidence.png" }],
+  attachments: [{
+    id: "30001",
+    filename: "evidence.png",
+    url: "https://example.atlassian.net/evidence.png",
+    mediaType: "image/png",
+    size: 1234
+  }],
   localNotes: "Private local note."
 }
 
@@ -65,5 +71,28 @@ describe("Issue Document parsing", () => {
   it("rejects malformed comment draft markers", () => {
     const serialized = serializeIssueDocument(document).replace("<!-- draftId: draft-1 -->", "<!-- draft: draft-1 -->")
     expect(() => parseIssueDocument("PROJ-123.md", serialized)).toThrow(SyncValidationError)
+  })
+
+  it("renders image attachments inline with hidden identity metadata", () => {
+    const serialized = serializeIssueDocument(document)
+    expect(serialized).toContain(
+      "<!-- jiraAttachment: {\"jiraAttachmentId\":\"30001\",\"mediaType\":\"image/png\",\"size\":1234} -->"
+    )
+    expect(serialized).toContain("![evidence.png](https://example.atlassian.net/evidence.png)")
+  })
+
+  it("keeps parsing legacy attachment link lines", () => {
+    const serialized = serializeIssueDocument(document).replace(
+      /<!-- jiraAttachment:[\s\S]*?\n!\[evidence\.png]\(https:\/\/example\.atlassian\.net\/evidence\.png\)/,
+      "- [evidence.png](https://example.atlassian.net/evidence.png)"
+    )
+    const parsed = parseIssueDocument("PROJ-123.md", serialized)
+    expect(parsed.attachments).toEqual([{
+      id: "",
+      filename: "evidence.png",
+      url: "https://example.atlassian.net/evidence.png",
+      mediaType: null,
+      size: null
+    }])
   })
 })

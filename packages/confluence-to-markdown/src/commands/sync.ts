@@ -4,6 +4,7 @@
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import { Command, Flag as Options } from "effect/unstable/cli"
+import { ConfigError } from "../ConfluenceError.js"
 import { GitService } from "../GitService.js"
 import { writeStdout } from "../internal/stdio.js"
 import type { ProgressCallback } from "../SyncEngine.js"
@@ -42,6 +43,7 @@ export const pullCommand = Command.make(
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
+        return yield* Effect.fail(new ConfigError({ message: `Pull failed:\n${result.errors.join("\n")}` }))
       }
     })
 ).pipe(Command.withDescription("Local write: download pages from Confluence to local markdown"))
@@ -76,6 +78,7 @@ export const pushCommand = Command.make(
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
+        return yield* Effect.fail(new ConfigError({ message: `Push failed:\n${result.errors.join("\n")}` }))
       }
     })
 ).pipe(Command.withDescription("Remote write: upload local markdown changes to Confluence"))

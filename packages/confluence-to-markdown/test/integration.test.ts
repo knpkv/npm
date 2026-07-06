@@ -9,7 +9,7 @@
  * - CONFLUENCE_API_KEY + CONFLUENCE_EMAIL env vars for raw ADF verification
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { Config, Effect, Option } from "effect"
+import { Config, Effect, Option, Schedule } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -53,6 +53,9 @@ const state: TestState = {
 const timestampForTitle = (date: Date): string => date.toISOString().replace(/[:.]/g, "-")
 
 const timestampLine = (label: string, date: Date): string => `${label} at ${date.toISOString()}`
+
+const INTEGRATION_ATTACHMENT_FILENAME = "inline-attachment.svg"
+const SEED_ATTACHMENT_SECTION_RE = /\n*# Attachment media\n\n<!-- adf:mediaSingle[\s\S]*?<!-- adf:\/mediaSingle -->\n*/g
 
 const RAW_ROUND_TRIP_NODE_TYPES: ReadonlyArray<string> = [
   "blockCard",
@@ -111,6 +114,14 @@ const recordOrNull = (value: unknown): Record<string, unknown> | null => isRecor
 
 // === Helper Functions ===
 
+const integrationHttpRetry: {
+  readonly schedule: Schedule.Schedule<unknown, unknown, unknown>
+  readonly times: number
+} = {
+  schedule: Schedule.exponential("1 second"),
+  times: 3
+}
+
 const runPlatform = <A, E>(effect: Effect.Effect<A, E, NodeServices.NodeServices>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)))
 
@@ -148,6 +159,19 @@ const joinPath = (...parts: ReadonlyArray<string>) =>
   Path.Path.pipe(
     Effect.map((path) => path.join(...parts))
   )
+
+const integrationAttachmentFixturePath = Path.Path.pipe(
+  Effect.flatMap((path) =>
+    path.fromFileUrl(new URL("../../atlassian-common/test/fixtures/attachments/inline-attachment.svg", import.meta.url))
+  )
+)
+
+const copyIntegrationAttachmentAsset = Effect.gen(function*() {
+  const source = yield* integrationAttachmentFixturePath
+  const target = yield* joinPath(state.testDir, INTEGRATION_ATTACHMENT_FILENAME)
+  yield* writeText(target, yield* readText(source))
+  return target
+})
 
 const dirname = (filePath: string) =>
   Path.Path.pipe(
@@ -214,6 +238,17 @@ const findSeedMarkdownFile = Effect.gen(function*() {
   return path.isAbsolute(entry) ? entry : path.join(docsDir, entry)
 })
 
+const expectSeedAssetIncludesAttachmentMedia = Effect.gen(function*() {
+  const seedPath = yield* findSeedMarkdownFile
+  expect(seedPath).not.toBeNull()
+  const content = yield* readText(seedPath!)
+  const attachmentSections = content.match(SEED_ATTACHMENT_SECTION_RE) ?? []
+  expect(attachmentSections).toHaveLength(1)
+  expect(content).toContain("# Attachment media")
+  expect(content).toContain("<!-- adf:mediaSingle")
+  expect(content).toContain(INTEGRATION_ATTACHMENT_FILENAME)
+})
+
 const findPageByPageId = (pageId: string) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -269,7 +304,7 @@ const createPageFromSeed = Effect.gen(function*() {
 
   const seedContent = yield* readText(seedPath!)
   const contentMatch = seedContent.match(/^---[\s\S]*?---\s*([\s\S]*)$/)
-  const bodyContent = contentMatch ? contentMatch[1]!.trim() : seedContent
+  const bodyContent = removeSeedAttachmentMedia(contentMatch ? contentMatch[1]!.trim() : seedContent)
   const seedPageId = extractPageIdFromMarkdown(seedContent)
 
   const templateDir = yield* dirname(seedPath!)
@@ -341,6 +376,9 @@ const extractPageIdFromMarkdown = (content: string): string | null => {
   const match = content.match(/pageId:\s*["']?(\d+)/)
   return match ? match[1]! : null
 }
+
+const removeSeedAttachmentMedia = (content: string): string =>
+  content.replace(SEED_ATTACHMENT_SECTION_RE, "\n\n").trim()
 
 /**
  * Modify page content.
@@ -493,7 +531,7 @@ const getRemoteAdfSnapshot = (pageId: string) =>
       return { value, evidence: adfEvidence(adf) }
     },
     catch: (cause) => cause
-  })
+  }).pipe(Effect.retry(integrationHttpRetry))
 
 const deleteRemotePageIfPresent = (pageId: string) =>
   Effect.tryPromise({
@@ -509,7 +547,7 @@ const deleteRemotePageIfPresent = (pageId: string) =>
       }
     },
     catch: (cause) => cause
-  })
+  }).pipe(Effect.retry(integrationHttpRetry))
 
 const expectNativePanelsIfPresent = (pageId: string, markdown: string) =>
   Effect.gen(function*() {
@@ -518,6 +556,47 @@ const expectNativePanelsIfPresent = (pageId: string, markdown: string) =>
     }
     const snapshot = yield* getRemoteAdfSnapshot(pageId)
     expect(snapshot.evidence.types.has("panel")).toBe(true)
+  })
+
+const expectRemoteMediaAttachment = (pageId: string) =>
+  Effect.gen(function*() {
+    if (!HAS_API_AUTH_CONFIG) {
+      return
+    }
+    const snapshot = yield* getRemoteAdfSnapshot(pageId)
+    expect(snapshot.evidence.types.has("media")).toBe(true)
+    expect(snapshot.evidence.types.has("mediaSingle") || snapshot.evidence.types.has("mediaGroup")).toBe(true)
+  })
+
+const uploadSvgAttachmentToPage = (filePath: string, pageId: string) =>
+  Effect.gen(function*() {
+    yield* copyIntegrationAttachmentAsset
+    const content = yield* readText(filePath)
+    yield* writeText(filePath, `${content}\n\n![Attachment proof](${INTEGRATION_ATTACHMENT_FILENAME})\n`)
+
+    const output = yield* runCli([
+      "page",
+      "attachment",
+      "upload",
+      pageId,
+      INTEGRATION_ATTACHMENT_FILENAME,
+      "--document",
+      filePath,
+      "--json"
+    ], { timeout: 90000 })
+    const parsed = recordOrNull(JSON.parse(output.trim())) ?? {}
+    const attachment = recordOrNull(parsed["attachment"])
+
+    expect(parsed["inserted"]).toBe(true)
+    expect(attachment?.["id"]).toBeTruthy()
+    expect(attachment?.["filename"]).toBe(INTEGRATION_ATTACHMENT_FILENAME)
+
+    const updated = yield* readText(filePath)
+    expect(updated).toContain("<!-- adf:mediaSingle")
+    expect(updated).toContain("<!-- adf:/mediaSingle")
+    expect(updated).toContain("![Attachment proof]")
+    expect(updated).toContain("\"alt\":\"Attachment proof\"")
+    expect(updated).not.toContain(`![Attachment proof](${INTEGRATION_ATTACHMENT_FILENAME})`)
   })
 
 const expectRawRoundTripTypes = (
@@ -600,6 +679,7 @@ describe("CLI Integration - Page Creation Flow", () => {
       await runPlatform(Effect.gen(function*() {
         // 1. Clone pages from Confluence
         yield* clonePages
+        yield* expectSeedAssetIncludesAttachmentMedia
 
         // 2. Create new page from template
         const { createMarker, file, seedPageId, timestamp } = yield* createPageFromSeed
@@ -631,13 +711,23 @@ describe("CLI Integration - Page Creation Flow", () => {
           yield* expectRawRoundTripTypes(seedRawAdf, createdRawAdf)
         }
 
-        // 4. Pull should be no-op (already in sync)
+        // 4. Upload an SVG attachment, insert it inline, and push the media node.
+        yield* uploadSvgAttachmentToPage(file, pageId!)
+        yield* commitChanges(`Add integration test attachment ${timestamp}`)
+        const pushAttachmentResult = yield* pushChanges
+        expect(pushAttachmentResult.pushed).toBe(1)
+
+        const contentAfterAttachment = yield* readText(file)
+        yield* expectSidecarMetadata(file, pageId!, contentAfterAttachment)
+        yield* expectRemoteMediaAttachment(pageId!)
+
+        // 5. Pull should be no-op (already in sync)
         const contentBeforePull = yield* readText(file)
         yield* pullChanges
         const contentAfterPull = yield* readText(file)
         expect(contentAfterPull).toBe(contentBeforePull)
 
-        // 5. Modify page, commit, and push
+        // 6. Modify page, commit, and push
         const modifiedAt = new Date()
         const modifyMarker = timestampLine("Modified by integration test", modifiedAt)
         yield* modifyPage(file, modifyMarker)
@@ -655,7 +745,7 @@ describe("CLI Integration - Page Creation Flow", () => {
           yield* expectRawRoundTripTypes(createdRawAdf, modifiedRawAdf)
         }
 
-        // 6. Remove and re-clone - verify idempotency
+        // 7. Remove and re-clone - verify idempotency
         const contentBeforeReclone = yield* readText(file)
         yield* removeConfluenceDir
         yield* clonePages
@@ -669,15 +759,16 @@ describe("CLI Integration - Page Creation Flow", () => {
         expect(contentAfterReclone).toContain(createMarker)
         expect(contentAfterReclone).toContain(modifyMarker)
         yield* expectSidecarMetadata(reclonedFile!, pageId!, contentAfterReclone)
+        yield* expectRemoteMediaAttachment(pageId!)
 
-        // 7. Delete page via git workflow
+        // 8. Delete page via git workflow
         yield* deleteLocalFile(reclonedFile!)
         yield* commitChanges(`Delete integration test page ${timestampForTitle(new Date())}`)
 
         const pushResult3 = yield* pushChanges
         expect(pushResult3.deleted).toBe(1)
 
-        // 8. Verify deletion - re-clone should not include the page
+        // 9. Verify deletion - re-clone should not include the page
         yield* removeConfluenceDir
         yield* clonePages
 
