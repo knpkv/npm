@@ -1,7 +1,9 @@
+import { useTerminalDimensions } from "@opentui/react"
 import type { DisplayMode } from "../atoms/ui.js"
 
+/** Live terminal width in columns, tracking resizes (was previously hardcoded to 80). */
 export function useTerminalSize() {
-  return 80
+  return useTerminalDimensions().width
 }
 
 export function useDisplayMode(): DisplayMode {
