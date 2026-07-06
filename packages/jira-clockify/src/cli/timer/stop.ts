@@ -11,7 +11,7 @@ import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import type { JiraWorklogOutcome, TimerError } from "../../services/TimerService.js"
 import { TimerService } from "../../services/TimerService.js"
-import { formatDuration, parseDuration, parseStartTime } from "../../utils/time.js"
+import { formatClock, formatDuration, parseDuration, parseStartTime, resolveCorrectedEnd } from "../../utils/time.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 
 /** Final one-line Jira worklog status, including the reason a non-retried failure stuck. */
@@ -136,14 +136,21 @@ export const stop = Command.make(
       Options.withAlias("b"),
       Options.withDescription("Mark as billable"),
       Options.optional
+    ),
+    at: Options.string("at").pipe(
+      Options.withDescription(
+        "Correct the end time (HH:MM today or ISO); a future HH:MM rolls back to yesterday. Skips the confirm."
+      ),
+      Options.optional
     )
   },
-  ({ billable, project }) =>
+  ({ at, billable, project }) =>
     Effect.gen(function*() {
       const timer = yield* TimerService
 
       const flagProjectId = Option.isSome(project) ? project.value : undefined
       const flagBillable = Option.isSome(billable) ? billable.value : undefined
+      const flagAt = Option.isSome(at) ? at.value : undefined
 
       // Correction flow: log a completed interval when no timer was ever started.
       // Reuses the same project/billable prompts as the normal stop path below.
@@ -239,15 +246,51 @@ export const stop = Command.make(
         return
       }
 
-      // Check if project/billable need to be set
       const currentTimer = yield* SubscriptionRef.get(timer.state)
-      const current = { projectId: currentTimer.projectId, billable: currentTimer.billable }
+
+      // End Correction (first, before project/billable/comment): confirm the end,
+      // defaulting to "now". If the user forgot to stop, they correct it here. The
+      // --at flag is Explicit Intent and skips the confirm. Resolved bounds live in
+      // `resolveCorrectedEnd`; `now` is captured once so the confirm and re-prompt agree.
+      const nowMs = yield* Clock.currentTimeMillis
+      const now = new Date(nowMs)
+      const startedAt = currentTimer.startedAt
+      let endedAt: Date | undefined
+      if (flagAt !== undefined) {
+        const resolved = resolveCorrectedEnd({ start: startedAt ?? now, input: flagAt, now })
+        if (!resolved.ok) {
+          yield* Console.log(resolved.error)
+          return
+        }
+        endedAt = resolved.end
+      } else if (startedAt) {
+        const elapsedSec = Math.max(0, Math.floor((nowMs - startedAt.getTime()) / 1000))
+        const correct = yield* Prompt.confirm({
+          message: `Started ${formatClock(startedAt)} · ends now ${formatClock(now)} (${
+            formatDuration(elapsedSec)
+          }) — end time correct?`,
+          initial: true
+        })
+        if (!correct) {
+          // Prompt.text re-runs `validate` until it succeeds, so this is the re-prompt loop.
+          const entered = yield* Prompt.text({
+            message: "Real end time (HH:MM today or ISO):",
+            default: formatClock(now),
+            validate: (value) => {
+              const r = resolveCorrectedEnd({ start: startedAt, input: value, now })
+              return r.ok ? Effect.succeed(value) : Effect.fail(r.error)
+            }
+          })
+          const r = resolveCorrectedEnd({ start: startedAt, input: entered, now })
+          if (r.ok) endedAt = r.end
+        }
+      }
 
       // Prompt for project if not set on start and not provided via flag.
-      const stopProjectId = yield* resolveStopProject({ currentProjectId: current.projectId, flagProjectId })
+      const stopProjectId = yield* resolveStopProject({ currentProjectId: currentTimer.projectId, flagProjectId })
 
       // Prompt for billable if not set.
-      const stopBillable = yield* resolveStopBillable({ currentBillable: current.billable, flagBillable })
+      const stopBillable = yield* resolveStopBillable({ currentBillable: currentTimer.billable, flagBillable })
 
       // Optional comment for Jira worklog
       const comment = yield* Prompt.text({ message: "Comment (empty to skip):" })
@@ -255,7 +298,8 @@ export const stop = Command.make(
       const result = yield* timer.stop({
         projectId: stopProjectId,
         billable: stopBillable,
-        comment: comment.trim() || undefined
+        comment: comment.trim() || undefined,
+        ...(endedAt ? { endedAt } : {})
       }).pipe(
         Effect.catch((e: TimerError) =>
           Console.log(`Error: ${e.message}`).pipe(Effect.flatMap(() => Effect.succeed(null)))
@@ -270,6 +314,7 @@ export const stop = Command.make(
         yield* Console.log(
           `Timer stopped: ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
         )
+        if (endedAt) yield* Console.log(`  Ended at: ${formatClock(endedAt)} (corrected)`)
         yield* Console.log(`  Clockify: ${result.clockifyLogged ? "✓" : "✗"}`)
 
         // Clockify saved but the Jira worklog failed — show why, and offer to retry just the
