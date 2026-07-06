@@ -2,9 +2,12 @@
  * @internal
  */
 
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { ConfigService } from "../ConfigService/index.js"
-import type { AwsProfileName, AwsRegion } from "../Domain.js"
+import { type AwsProfileName, AwsRegion } from "../Domain.js"
+
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
+const defaultAwsRegion = decodeAwsRegion("us-east-1")
 
 export const makeSetAllAccounts = (
   refresh: Effect.Effect<void>
@@ -20,7 +23,7 @@ export const makeSetAllAccounts = (
       const det = detected.find((d) => d.name === profile)
       return {
         profile,
-        regions: existing?.regions ?? [det?.region ?? ("us-east-1" as AwsRegion)],
+        regions: existing?.regions ?? [det?.region ?? defaultAwsRegion],
         enabled
       }
     })

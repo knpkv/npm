@@ -22,7 +22,10 @@ import type { Issue } from "../IssueService.js"
  * @internal
  */
 const yamlEngine = {
-  parse: (str: string): object => (yaml.load(str) as object) ?? {},
+  parse: (str: string): object => {
+    const parsed = yaml.load(str)
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+  },
   stringify: (data: object): string => yaml.dump(data)
 }
 

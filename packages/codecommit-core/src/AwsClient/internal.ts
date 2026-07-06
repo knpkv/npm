@@ -66,6 +66,15 @@ interface AwsCredentialIdentity {
   readonly expiration?: Date
 }
 
+const decodeAwsCredentialIdentity = (
+  identity: Awaited<ReturnType<ReturnType<typeof fromNodeProviderChain>>>
+): AwsCredentialIdentity => ({
+  accessKeyId: identity.accessKeyId,
+  secretAccessKey: identity.secretAccessKey,
+  ...(identity.sessionToken === undefined ? {} : { sessionToken: identity.sessionToken }),
+  ...(identity.expiration === undefined ? {} : { expiration: identity.expiration })
+})
+
 type AwsRuntimeEnv =
   | AwsClientConfig
   | DistilledCredentials.Credentials
@@ -115,7 +124,8 @@ export const acquireCredentials = (
 ): Effect.Effect<AwsCredentialIdentity, AwsCredentialError, AwsClientConfig> =>
   Effect.flatMap(AwsClientConfig, (config) =>
     Effect.tryPromise({
-      try: async () => await fromNodeProviderChain(profile === "default" ? {} : { profile })() as AwsCredentialIdentity,
+      try: async () =>
+        decodeAwsCredentialIdentity(await fromNodeProviderChain(profile === "default" ? {} : { profile })()),
       catch: (cause) => new AwsCredentialError({ profile, region, cause })
     }).pipe(
       Effect.timeout(config.credentialTimeout),

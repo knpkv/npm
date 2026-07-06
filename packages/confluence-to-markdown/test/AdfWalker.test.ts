@@ -1,14 +1,15 @@
-import type { DocNode } from "@atlaskit/adf-schema"
 import { describe, expect, it } from "vitest"
 import { walk } from "../src/AdfWalker.js"
 
-const doc = (content: ReadonlyArray<unknown>): DocNode => ({ version: 1, type: "doc", content } as unknown as DocNode)
+const doc = (content: ReadonlyArray<unknown>): unknown => ({ version: 1, type: "doc", content })
+
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v)
 
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
-  if (v !== null && typeof v === "object") {
+  if (isRecord(v)) {
     return `{${
-      Object.entries(v as Record<string, unknown>)
+      Object.entries(v)
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([k, value]) => `${JSON.stringify(k)}:${stableStringify(value)}`)
         .join(",")

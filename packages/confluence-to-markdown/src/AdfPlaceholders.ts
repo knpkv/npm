@@ -41,13 +41,18 @@
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
-interface AdfNode {
+export interface AdfNode {
   readonly type: string
   readonly attrs?: Record<string, unknown>
   readonly content?: ReadonlyArray<AdfNode>
   readonly text?: string
   readonly marks?: ReadonlyArray<AdfNode>
 }
+
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null
+
+const isAdfNode = (value: unknown): value is AdfNode => isRecord(value) && typeof value.type === "string"
 
 const STATUS_RE = /<span class="adf-status"\s+data-color="([^"]+)">([^<]*)<\/span>/g
 const INLINE_NODE_RE = /<!--\s*adf:(date|emoji)(?:\s+node=([\s\S]*?))?\s*-->/g
@@ -124,7 +129,7 @@ const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null =>
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw))
     const decoded = decodeAttrsBlob(parsed)
     return Option.isSome(decoded) ? decoded.value : null
   } catch {
@@ -158,12 +163,8 @@ const decodeMarks = (b64: string | undefined): ReadonlyArray<AdfNode> => {
   if (!b64) return []
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("[") ? raw : fromBase64(raw)) as unknown
-    return Array.isArray(parsed)
-      ? parsed.filter((mark): mark is AdfNode =>
-        mark !== null && typeof mark === "object" && typeof (mark as Record<string, unknown>)["type"] === "string"
-      )
-      : []
+    const parsed = parsePlaceholderJson(raw.startsWith("[") ? raw : fromBase64(raw))
+    return Array.isArray(parsed) ? parsed.filter(isAdfNode) : []
   } catch {
     return []
   }
@@ -173,11 +174,8 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
-    return parsed !== null && typeof parsed === "object" &&
-        typeof (parsed as Record<string, unknown>)["type"] === "string"
-      ? parsed as AdfNode
-      : null
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw))
+    return isAdfNode(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -185,12 +183,12 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
 
 const parsePlaceholderJson = (json: string): unknown => {
   try {
-    return JSON.parse(json) as unknown
+    return JSON.parse(json)
   } catch {
     // @atlaskit's markdown parser may insert markdown escapes into placeholder
     // text before we restore it. Square brackets are common inside code-block
     // JSON samples and `\[` / `\]` are invalid JSON escapes.
-    return JSON.parse(json.replace(/\\(["[\]])/g, "$1")) as unknown
+    return JSON.parse(json.replace(/\\(["[\]])/g, "$1"))
   }
 }
 
@@ -648,4 +646,9 @@ const transform = (node: AdfNode): AdfNode => {
 }
 
 /** Walk the document tree and rewrite placeholder text into proper ADF nodes. */
-export const revertPlaceholders = (doc: unknown): unknown => transform(doc as AdfNode)
+export const revertPlaceholders = (doc: unknown): AdfNode => {
+  if (!isAdfNode(doc)) {
+    throw new TypeError("ADF document must be an object with a string type")
+  }
+  return transform(doc)
+}

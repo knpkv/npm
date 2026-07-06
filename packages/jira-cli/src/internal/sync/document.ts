@@ -12,11 +12,25 @@ import type {
   AttachmentReference,
   CommentDraft,
   IssueDocument,
-  IssueDocumentFrontMatter
+  IssueDocumentFrontMatter,
+  UserFieldValue
 } from "./types.js"
 
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((item) => typeof item === "string")
+
+const isFrontMatterCustomFields = (
+  value: unknown
+): value is IssueDocumentFrontMatter["customFields"] => isRecord(value)
+
 const yamlEngine = {
-  parse: (str: string): object => (yaml.load(str) as object) ?? {},
+  parse: (str: string): object => {
+    const value = yaml.load(str)
+    return isRecord(value) ? value : {}
+  },
   stringify: (data: object): string => yaml.dump(data)
 }
 
@@ -79,40 +93,41 @@ const section = (name: string, content: string): string => {
 const parseFrontMatter = (path: string, data: Record<string, unknown>): IssueDocumentFrontMatter => {
   const requiredString = (key: string): string => {
     const value = data[key]
-    if (typeof value !== "string") fail(path, `Missing or invalid front matter field "${key}"`)
-    return value as string
+    if (typeof value === "string") return value
+    return fail(path, `Missing or invalid front matter field "${key}"`)
   }
 
   const nullableString = (key: string): string | null => {
     const value = data[key]
     if (value === null || value === undefined) return null
-    if (typeof value !== "string") fail(path, `Invalid front matter field "${key}"`)
-    return value as string
+    if (typeof value === "string") return value
+    return fail(path, `Invalid front matter field "${key}"`)
   }
 
-  const userValue = (key: string) => {
+  const userValue = (key: string): UserFieldValue | null => {
     const value = data[key]
     if (value === null || value === undefined) return null
-    if (typeof value !== "object") fail(path, `Invalid user field "${key}"`)
-    const record = value as Record<string, unknown>
-    if (typeof record["accountId"] !== "string" || typeof record["displayName"] !== "string") {
-      fail(path, `Invalid user field "${key}"`)
+    const record = isRecord(value) ? value : fail(path, `Invalid user field "${key}"`)
+    const accountId = record["accountId"]
+    const displayName = record["displayName"]
+    if (typeof accountId === "string" && typeof displayName === "string") {
+      return {
+        accountId,
+        displayName
+      }
     }
-    return {
-      accountId: record["accountId"] as string,
-      displayName: record["displayName"] as string
-    }
+    return fail(path, `Invalid user field "${key}"`)
   }
 
   const labels = data["labels"]
-  if (!Array.isArray(labels) || labels.some((label) => typeof label !== "string")) {
-    fail(path, `Missing or invalid front matter field "labels"`)
-  }
+  const parsedLabels = isStringArray(labels)
+    ? labels
+    : fail(path, `Missing or invalid front matter field "labels"`)
 
   const customFields = data["customFields"]
-  if (customFields === null || typeof customFields !== "object" || Array.isArray(customFields)) {
-    fail(path, `Missing or invalid front matter field "customFields"`)
-  }
+  const parsedCustomFields = isFrontMatterCustomFields(customFields)
+    ? customFields
+    : fail(path, `Missing or invalid front matter field "customFields"`)
 
   return {
     issueId: requiredString("issueId"),
@@ -123,8 +138,8 @@ const parseFrontMatter = (path: string, data: Record<string, unknown>): IssueDoc
     priority: nullableString("priority"),
     assignee: userValue("assignee"),
     reporter: userValue("reporter"),
-    labels: labels as ReadonlyArray<string>,
-    customFields: customFields as IssueDocumentFrontMatter["customFields"]
+    labels: parsedLabels,
+    customFields: parsedCustomFields
   }
 }
 
@@ -228,17 +243,16 @@ const parseAttachmentMetadata = (
   raw: string
 ): Partial<Pick<AttachmentReference, "id" | "mediaType" | "size">> => {
   try {
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-    const record = parsed as Record<string, unknown>
+    const parsed = JSON.parse(raw)
+    if (!isRecord(parsed)) return {}
     return {
-      id: typeof record["jiraAttachmentId"] === "string"
-        ? record["jiraAttachmentId"]
-        : typeof record["id"] === "string"
-        ? record["id"]
+      id: typeof parsed["jiraAttachmentId"] === "string"
+        ? parsed["jiraAttachmentId"]
+        : typeof parsed["id"] === "string"
+        ? parsed["id"]
         : "",
-      mediaType: typeof record["mediaType"] === "string" ? record["mediaType"] : null,
-      size: typeof record["size"] === "number" ? record["size"] : null
+      mediaType: typeof parsed["mediaType"] === "string" ? parsed["mediaType"] : null,
+      size: typeof parsed["size"] === "number" ? parsed["size"] : null
     }
   } catch {
     return {}

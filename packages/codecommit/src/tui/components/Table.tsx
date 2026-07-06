@@ -90,7 +90,7 @@ export function Table<T>({
                   <box
                     key={j}
                     style={{
-                      width: (col.width === "auto" ? 0 : col.width) as any,
+                      ...(col.width === "auto" ? {} : { width: col.width }),
                       flexGrow: col.width === "auto" || !col.width ? 1 : 0,
                       paddingRight: 1
                     }}

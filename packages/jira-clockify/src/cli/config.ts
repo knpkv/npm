@@ -48,7 +48,7 @@ const configSetProject = Command.make(
         return
       }
       const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-        Effect.catch(() => Effect.succeed([] as const))
+        Effect.catch(() => Effect.succeed([]))
       )
       if (projects.length === 0) {
         yield* Console.log("No projects found in Clockify workspace.")

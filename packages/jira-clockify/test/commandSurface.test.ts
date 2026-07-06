@@ -11,7 +11,7 @@ const run = (args: ReadonlyArray<string>) =>
   )
 
 describe("jcf command surface", () => {
-  const canonicalCommands = [
+  const canonicalCommands: ReadonlyArray<ReadonlyArray<string>> = [
     ["timer"],
     ["timer", "start", "--help"],
     ["timer", "stop", "--help"],
@@ -21,7 +21,7 @@ describe("jcf command surface", () => {
     ["timer", "edit", "--help"],
     ["issue", "list", "--help"],
     ["sync", "reconcile", "--help"]
-  ] as const
+  ]
 
   for (const args of canonicalCommands) {
     it.effect(`accepts canonical command: jcf ${args.join(" ")}`, () =>
@@ -32,7 +32,7 @@ describe("jcf command surface", () => {
       }))
   }
 
-  const legacyCommands = [
+  const legacyCommands: ReadonlyArray<ReadonlyArray<string>> = [
     ["start"],
     ["stop"],
     ["discard"],
@@ -41,7 +41,7 @@ describe("jcf command surface", () => {
     ["edit"],
     ["list"],
     ["reconcile"]
-  ] as const
+  ]
 
   for (const args of legacyCommands) {
     it.effect(`rejects removed legacy command: jcf ${args.join(" ")}`, () =>

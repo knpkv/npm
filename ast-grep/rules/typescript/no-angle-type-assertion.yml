@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-angle-type-assertion
+language: tsx
+severity: error
+message: "Do not use TypeScript angle-bracket type assertions; model the value, narrow it, decode it, or use `satisfies` instead."
+
+rule:
+  all:
+    - kind: program
+    - regex: '(=|return|\(|,|\[|:)\s*<[A-Za-z_$][A-Za-z0-9_$.<> ,]*>\s*[A-Za-z_$]'
+
+files:
+  - "packages/**/*.ts"
+  - "scripts/**/*.ts"
+  - "scratchpad/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  Angle-bracket type assertions bypass the checker just like `as` assertions.
+  They are valid in `.ts` files and must not become an escape hatch for the
+  no-type-assertion rule.

@@ -46,7 +46,7 @@ export const fetchAndUpsertPRs = (params: {
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
   readonly staleThreshold: string
-}): Effect.Effect<void, unknown, unknown> =>
+}): Effect.Effect<void, never, AwsClient | PullRequestRepo | NotificationRepo | SubscriptionRepo> =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo

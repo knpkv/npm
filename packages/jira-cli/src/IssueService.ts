@@ -113,6 +113,24 @@ interface SearchJqlResponse {
   readonly nextPageToken?: string
 }
 
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const recordOrEmpty = (value: unknown): Readonly<Record<PropertyKey, unknown>> => isRecord(value) ? value : {}
+
+const recordArray = (value: unknown): ReadonlyArray<Readonly<Record<PropertyKey, unknown>>> =>
+  Array.isArray(value) ? value.filter(isRecord) : []
+
+const parseSearchJqlResponse = (value: unknown): SearchJqlResponse => {
+  const record = recordOrEmpty(value)
+  const nextPageToken = typeof record.nextPageToken === "string" ? record.nextPageToken : undefined
+  return {
+    issues: Array.isArray(record.issues) ? record.issues : [],
+    isLast: typeof record.isLast === "boolean" ? record.isLast : nextPageToken === undefined,
+    ...(nextPageToken !== undefined ? { nextPageToken } : {})
+  }
+}
+
 /**
  * IssueService interface.
  *
@@ -175,10 +193,9 @@ const FIELDS = [
 const extractDisplayName = (field: unknown): string | null => {
   if (field === null || field === undefined) return null
   if (typeof field === "string") return field
-  if (typeof field === "object") {
-    const obj = field as Record<string, unknown>
-    if (typeof obj["displayName"] === "string") return obj["displayName"]
-    if (typeof obj["name"] === "string") return obj["name"]
+  if (isRecord(field)) {
+    if (typeof field.displayName === "string") return field.displayName
+    if (typeof field.name === "string") return field.name
   }
   return null
 }
@@ -191,9 +208,8 @@ const extractNameArray = (field: unknown): ReadonlyArray<string> => {
   return field
     .map((item) => {
       if (typeof item === "string") return item
-      if (typeof item === "object" && item !== null) {
-        const obj = item as Record<string, unknown>
-        if (typeof obj["name"] === "string") return obj["name"]
+      if (isRecord(item)) {
+        if (typeof item.name === "string") return item.name
       }
       return null
     })
@@ -213,17 +229,16 @@ const parseDate = (val: unknown): Date => {
 /**
  * Map IssueBean from API to our Issue type.
  */
-const mapIssue = (bean: Record<string, unknown>, baseUrl: string): Issue => {
-  const fields = (bean["fields"] ?? {}) as Record<string, unknown>
-  const renderedFields = (bean["renderedFields"] ?? {}) as Record<string, unknown>
+const mapIssue = (bean: Readonly<Record<PropertyKey, unknown>>, baseUrl: string): Issue => {
+  const fields = recordOrEmpty(bean.fields)
+  const renderedFields = recordOrEmpty(bean.renderedFields)
   const key = String(bean["key"] ?? "")
   const id = String(bean["id"] ?? "")
 
   // Extract attachments
   const attachmentField = fields["attachment"]
   const attachments: Array<Attachment> = Array.isArray(attachmentField)
-    ? attachmentField.map((a) => {
-      const att = a as Record<string, unknown>
+    ? recordArray(attachmentField).map((att) => {
       const mediaType = normalizeAttachmentMediaType(
         undefined,
         typeof att["mimeType"] === "string" ? att["mimeType"] : null
@@ -240,12 +255,9 @@ const mapIssue = (bean: Record<string, unknown>, baseUrl: string): Issue => {
     : []
 
   // Extract comments
-  const commentField = fields["comment"] as Record<string, unknown> | undefined
-  const commentList = (commentField?.["comments"] ?? []) as Array<Record<string, unknown>>
-  const renderedComments =
-    ((renderedFields["comment"] as Record<string, unknown> | undefined)?.["comments"] ?? []) as Array<
-      Record<string, unknown>
-    >
+  const commentField = recordOrEmpty(fields["comment"])
+  const commentList = recordArray(commentField.comments)
+  const renderedComments = recordArray(recordOrEmpty(renderedFields.comment).comments)
 
   // Build map of rendered comments by ID for accurate matching
   const renderedMap = new Map<string, Record<string, unknown>>()
@@ -255,7 +267,7 @@ const mapIssue = (bean: Record<string, unknown>, baseUrl: string): Issue => {
   }
 
   const comments: Array<Comment> = commentList.map((c) => {
-    const author = c["author"] as Record<string, unknown> | undefined
+    const author = recordOrEmpty(c.author)
     const commentId = String(c["id"] ?? "")
     const rendered = renderedMap.get(commentId)
     const renderedBody = rendered?.["body"]
@@ -294,6 +306,8 @@ const mapIssue = (bean: Record<string, unknown>, baseUrl: string): Issue => {
   }
 }
 
+const mapIssueUnknown = (bean: unknown, baseUrl: string): Issue => mapIssue(recordOrEmpty(bean), baseUrl)
+
 const make = Effect.gen(function*() {
   const client = yield* JiraApiClient
   const siteUrl = yield* SiteUrl
@@ -305,7 +319,7 @@ const make = Effect.gen(function*() {
         query: { fields: FIELDS, expand: "renderedFields" }
       }
     })).pipe(
-      Effect.map((result) => mapIssue(result as unknown as Record<string, unknown>, siteUrl)),
+      Effect.map((result) => mapIssueUnknown(result, siteUrl)),
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to get issue ${key}`, cause }))
     )
 
@@ -325,7 +339,7 @@ const make = Effect.gen(function*() {
         }
       }
     })).pipe(
-      Effect.map((result) => result as SearchJqlResponse),
+      Effect.map(parseSearchJqlResponse),
       Effect.mapError((cause) => new JiraApiError({ message: "Failed to search issues", cause }))
     )
 
@@ -335,7 +349,7 @@ const make = Effect.gen(function*() {
         const issues = result.issues ?? []
         const mappedIssues: Array<Issue> = []
         for (const bean of issues) {
-          mappedIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
+          mappedIssues.push(mapIssueUnknown(bean, siteUrl))
         }
         return {
           issues: mappedIssues,
@@ -351,35 +365,36 @@ const make = Effect.gen(function*() {
   const searchAll = (
     jql: string,
     options?: { readonly maxResults?: number }
-  ): Effect.Effect<ReadonlyArray<Issue>, JiraApiError> => (Effect.gen(function*() {
-    const allIssues: Array<Issue> = []
-    const maxResults = options?.maxResults ?? 100
-    let nextPageToken: string | undefined = undefined
-    let pageCount = 0
+  ): Effect.Effect<ReadonlyArray<Issue>, JiraApiError> =>
+    Effect.gen(function*() {
+      const allIssues: Array<Issue> = []
+      const maxResults = options?.maxResults ?? 100
+      let nextPageToken: string | undefined = undefined
+      let pageCount = 0
 
-    // Fetch first page
-    let result = yield* searchJql(jql, maxResults, nextPageToken)
-    let issues = result.issues ?? []
-    pageCount++
-
-    for (const bean of issues) {
-      allIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
-    }
-
-    // Fetch remaining pages with iteration guard
-    while (!result.isLast && result.nextPageToken && pageCount < MAX_PAGES) {
-      nextPageToken = result.nextPageToken
-      result = yield* searchJql(jql, maxResults, nextPageToken)
-      issues = result.issues ?? []
+      // Fetch first page
+      let result = yield* searchJql(jql, maxResults, nextPageToken)
+      let issues = result.issues ?? []
       pageCount++
 
       for (const bean of issues) {
-        allIssues.push(mapIssue(bean as unknown as Record<string, unknown>, siteUrl))
+        allIssues.push(mapIssueUnknown(bean, siteUrl))
       }
-    }
 
-    return allIssues
-  }) as Effect.Effect<ReadonlyArray<Issue>, JiraApiError>)
+      // Fetch remaining pages with iteration guard
+      while (!result.isLast && result.nextPageToken && pageCount < MAX_PAGES) {
+        nextPageToken = result.nextPageToken
+        result = yield* searchJql(jql, maxResults, nextPageToken)
+        issues = result.issues ?? []
+        pageCount++
+
+        for (const bean of issues) {
+          allIssues.push(mapIssueUnknown(bean, siteUrl))
+        }
+      }
+
+      return allIssues
+    })
 
   return IssueService.of({ getByKey, search, searchAll })
 })

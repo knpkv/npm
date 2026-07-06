@@ -47,7 +47,7 @@ export const compareIssueFields = (input: CompareIssueFieldsInput): CompareIssue
   ])
 
   for (const name of customFieldNames) {
-    const field = `customFields.${name}` as const
+    const field: SyncFieldPath = `customFields.${name}`
     const baseline = input.baseline.customFields[name]?.value
     const jira = input.jira.customFields[name]?.value
     const document = input.document.customFields[name]?.value

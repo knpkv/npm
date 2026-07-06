@@ -235,7 +235,7 @@ export type PageListItem = Schema.Schema.Type<typeof PageListItemSchema>
  * @category Schema
  */
 export const PageChildrenResponseSchema = Schema.Struct({
-  results: Schema.Array(PageListItemSchema),
+  results: Schema.Array(PageListItemSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   _links: Schema.optional(
     Schema.Struct({
       next: Schema.optional(Schema.String)
@@ -449,7 +449,7 @@ export type PageVersionContent = Schema.Schema.Type<typeof PageVersionContentSch
  * @category Schema
  */
 export const PageVersionsResponseSchema = Schema.Struct({
-  results: Schema.Array(PageVersionSchema),
+  results: Schema.Array(PageVersionSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   _links: Schema.optional(
     Schema.Struct({
       next: Schema.optional(Schema.String)

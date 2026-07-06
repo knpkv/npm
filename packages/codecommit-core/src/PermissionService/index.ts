@@ -25,6 +25,8 @@ export { allOperations, getOperationMeta, registerOperation }
 
 export const PermissionState = Schema.Literals(["always_allow", "allow", "deny"])
 export type PermissionState = typeof PermissionState.Type
+const emptyPermissions: Record<string, PermissionState> = {}
+const defaultPermissionState: PermissionState = "allow"
 
 const AuditConfig = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),
@@ -33,7 +35,7 @@ const AuditConfig = Schema.Struct({
 
 const PermissionsConfig = Schema.Struct({
   permissions: Schema.Record(Schema.String, PermissionState).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed({} as Record<string, PermissionState>))
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(emptyPermissions))
   ),
   audit: AuditConfig.pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Schema.decodeSync(AuditConfig)({})))
@@ -93,7 +95,7 @@ const makePermissionService = Effect.gen(function*() {
   // O(1) — Ref.get + property lookup. The "allow" default is the key invariant:
   // missing operation → prompt the user.
   const check = (operation: OperationName): Effect.Effect<PermissionState> =>
-    Ref.get(configRef).pipe(Effect.map((c) => c.permissions[operation] ?? ("allow" as const)))
+    Ref.get(configRef).pipe(Effect.map((c) => c.permissions[operation] ?? defaultPermissionState))
 
   const set = (operation: OperationName, state: PermissionState): Effect.Effect<void> =>
     Effect.gen(function*() {

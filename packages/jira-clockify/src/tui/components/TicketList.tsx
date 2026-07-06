@@ -4,11 +4,18 @@
  * @internal
  */
 import { useAtomValue } from "@effect/atom-react"
+import type { JSX } from "@opentui/react/jsx-runtime"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import type { TicketState } from "../../services/TicketService.js"
 import { ticketsAtom } from "../atoms/tickets.js"
 import { filterTextAtom, isFilteringAtom, selectedIndexAtom } from "../atoms/ui.js"
 import { TicketRow } from "./TicketRow.js"
+
+type BoxStyle = NonNullable<JSX.IntrinsicElements["box"]["style"]>
+
+const fillStyle = { flexGrow: 1, paddingLeft: 2 } satisfies BoxStyle
+const listStyle = { flexDirection: "column", flexGrow: 1 } satisfies BoxStyle
+const sectionHeaderStyle = { height: 1, paddingLeft: 2, paddingTop: 1 } satisfies BoxStyle
 
 export function TicketList() {
   const ticketResult = useAtomValue(ticketsAtom)
@@ -20,7 +27,7 @@ export function TicketList() {
 
   if (!ticketState || ticketState.loading) {
     return (
-      <box style={{ flexGrow: 1, paddingLeft: 2 } as any}>
+      <box style={fillStyle}>
         <text fg="#FFCC00">Loading tickets...</text>
       </box>
     )
@@ -28,7 +35,7 @@ export function TicketList() {
 
   if (ticketState.error) {
     return (
-      <box style={{ flexGrow: 1, paddingLeft: 2 } as any}>
+      <box style={fillStyle}>
         <text fg="#FF4444">Error: {ticketState.error}</text>
       </box>
     )
@@ -48,27 +55,17 @@ export function TicketList() {
 
   if (tickets.length === 0) {
     return (
-      <box style={{ flexGrow: 1, paddingLeft: 2 } as any}>
+      <box style={fillStyle}>
         <text fg="#888888">{filterText ? `No tickets matching "${filterText}"` : "No tickets found"}</text>
       </box>
     )
   }
 
   return (
-    <box style={{ flexDirection: "column", flexGrow: 1 }}>
+    <box style={listStyle}>
       {/* Section header */}
-      <box
-        style={
-          {
-            height: 1,
-            paddingLeft: 2,
-            paddingTop: 1
-          } as any
-        }
-      >
-        <text fg="#FFCC00" style={{ fontWeight: "bold" } as any}>
-          TICKETS
-        </text>
+      <box style={sectionHeaderStyle}>
+        <text fg="#FFCC00">TICKETS</text>
         <text fg="#888888">{` (${tickets.length})`}</text>
         {isFiltering ? <text fg="#00CCFF">{` filter: ${filterText}│`}</text> : null}
       </box>

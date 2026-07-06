@@ -19,7 +19,7 @@ import * as Layer from "effect/Layer"
 import { AdfSchemaError, type AdfSchemaIssue } from "./ConfluenceError.js"
 
 const ajv = new Ajv({ strict: false, allErrors: true })
-const validate = ajv.compile(adfJsonSchema as object)
+const validate = ajv.compile<DocNode>(adfJsonSchema)
 
 /**
  * Effect service that runtime-validates ADF documents against the canonical
@@ -48,7 +48,7 @@ export const layer: Layer.Layer<AdfSchemaValidator> = Layer.succeed(
   AdfSchemaValidator.of({
     check: (doc, direction) =>
       validate(doc)
-        ? Effect.succeed(doc as DocNode)
+        ? Effect.succeed(doc)
         : Effect.fail(
           new AdfSchemaError({
             direction,

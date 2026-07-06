@@ -18,7 +18,7 @@
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
-import { type CommentThreadJson, decodeCommentLocations } from "../commentLocations.js"
+import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 
 export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>) => {
@@ -76,7 +76,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     execute: (req) => sql`DELETE FROM pull_requests WHERE status = 'OPEN' AND fetched_at < ${req.olderThan}`
   })
 
-  return {
+  const repo = {
     upsert: (input: UpsertInput) => upsert_(input).pipe(Effect.tap(() => publish), cacheError("upsert")),
 
     upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
@@ -158,7 +158,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
           `
           for (const row of rows) {
-            const parsed = yield* decodeCommentLocations(row.locationsJson)
+            const parsed = yield* decodeCommentLocationJson(row.locationsJson)
             const commenters = new Set<string>()
             const walk = (threads: ReadonlyArray<CommentThreadJson>) => {
               for (const t of threads) {
@@ -186,5 +186,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         Effect.asVoid,
         cacheError("propagateRepoAccountId")
       )
-  } as const
+  }
+
+  return repo
 }

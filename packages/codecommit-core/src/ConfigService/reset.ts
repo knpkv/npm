@@ -9,6 +9,8 @@ import { backup } from "./backup.js"
 import { ConfigPaths, type DetectedProfile, makeDefaultConfig } from "./internal.js"
 import { save } from "./save.js"
 
+const emptyDetectedProfiles = (): ReadonlyArray<DetectedProfile> => []
+
 export const makeReset = (
   detectProfiles: Effect.Effect<
     ReadonlyArray<DetectedProfile>,
@@ -30,7 +32,7 @@ export const makeReset = (
     }
 
     const detected = yield* detectProfiles.pipe(
-      Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+      Effect.catchCause(() => Effect.succeed(emptyDetectedProfiles()))
     )
 
     const config = makeDefaultConfig(detected)

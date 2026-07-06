@@ -10,7 +10,6 @@
  *
  * @module
  */
-import type { DocNode } from "@atlaskit/adf-schema"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -124,7 +123,7 @@ export const layer: Layer.Layer<
                     ).join(" | ")
                   }`
                 )
-                return raw as DocNode
+                return raw
               })
               : Effect.fail(toConversionError("adfToMarkdown")(err)))
         )

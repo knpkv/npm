@@ -20,6 +20,7 @@ import {
   ShieldCheckIcon,
   UserIcon
 } from "lucide-react"
+import type { ReactNode } from "react"
 import { useNavigate, useParams } from "react-router"
 import { type SettingsTab, SettingsTabs } from "../atoms/ui.js"
 import { cn } from "../lib/utils.js"
@@ -34,7 +35,7 @@ import { SettingsSandbox } from "./settings-sandbox.js"
 import { SettingsTheme } from "./settings-theme.js"
 import { Button } from "./ui/button.js"
 
-const TabIcons: Record<SettingsTab, React.ReactNode> = {
+const TabIcons: Record<SettingsTab, ReactNode> = {
   accounts: <UserIcon className="size-4" />,
   refresh: <RefreshCwIcon className="size-4" />,
   sandbox: <BoxIcon className="size-4" />,
@@ -58,7 +59,7 @@ const TabLabels: Record<SettingsTab, string> = {
   about: "About"
 }
 
-const isSettingsTab = (v: string | undefined): v is SettingsTab => SettingsTabs.includes(v as SettingsTab)
+const isSettingsTab = (v: string | undefined): v is SettingsTab => SettingsTabs.some((tab) => tab === v)
 
 export function SettingsPage() {
   const { tab } = useParams<{ tab: string }>()

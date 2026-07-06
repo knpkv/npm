@@ -31,8 +31,20 @@ export class FetchClientError extends Data.TaggedError("FetchClientError")<{
 
 /** Extract success `data` from a FetchResponse discriminated union. */
 export type SuccessData<T> = T extends { data: infer D; error?: undefined } ? D
-  : T extends { data?: infer D } ? NonNullable<D>
-  : never
+  : T extends { data?: infer D } ? D | undefined
+  : undefined
+
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null
+
+const errorPayload = (value: unknown): unknown => isRecord(value) && "error" in value ? value.error : value
+
+const errorStatus = (value: unknown): number => isRecord(value) && typeof value.status === "number" ? value.status : 0
+
+const errorMessage = (value: unknown): string => {
+  const payload = errorPayload(value)
+  return typeof payload === "string" ? payload : JSON.stringify(payload)
+}
 
 /**
  * Wrap an openapi-fetch `Promise<FetchResponse>` in Effect.
@@ -57,15 +69,13 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
         if (error !== undefined || !response.ok) {
           throw { error, status: response.status }
         }
-        return data as SuccessData<FetchResponse<T, O, M>>
+        return data
       }),
     catch: (e) =>
       new FetchClientError({
-        error: (e as Record<string, unknown>).error ?? e,
-        status: ((e as Record<string, unknown>).status as number | undefined) ?? 0,
-        message: typeof (e as Record<string, unknown>).error === "string"
-          ? (e as Record<string, unknown>).error as string
-          : JSON.stringify((e as Record<string, unknown>).error ?? e)
+        error: errorPayload(e),
+        status: errorStatus(e),
+        message: errorMessage(e)
       })
   })
 

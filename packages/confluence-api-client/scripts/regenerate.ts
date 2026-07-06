@@ -4,7 +4,6 @@
  *
  * Fetches OpenAPI specs from Atlassian, compares versions, and regenerates types if needed.
  */
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Console from "effect/Console"
@@ -12,17 +11,18 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as PlatformError from "effect/PlatformError"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import { Command, Flag as Options } from "effect/unstable/cli"
 import { HttpClient } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import pkg from "../package.json" with { type: "json" }
 
-const SPEC_URLS = {
+const SPEC_URLS: Readonly<Record<"v1" | "v2", string>> = {
   v1: "https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json",
   v2: "https://dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json"
-} as const
+}
 
 interface SpecInfo {
   version: string

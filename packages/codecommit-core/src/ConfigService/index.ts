@@ -85,7 +85,7 @@ export const ConfigServiceLive = Layer.effect(
 
     const provide = <A, E>(
       effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ConfigPaths>
-    ): Effect.Effect<A, E> => Effect.provide(effect, ctx) as Effect.Effect<A, E>
+    ): Effect.Effect<A, E> => Effect.provide(effect, ctx)
 
     const detectProfilesLive = detectProfiles.pipe(
       Effect.mapError((cause) => new ProfileDetectionError({ message: "Failed to detect AWS profiles", cause }))

@@ -31,14 +31,14 @@
  * @internal
  */
 import type { Credentials, Region } from "distilled-aws"
-import type { ListPullRequestsInput, ListPullRequestsOutput } from "distilled-aws/codecommit"
+import type { ListPullRequestsError, ListPullRequestsInput, ListPullRequestsOutput } from "distilled-aws/codecommit"
 import * as codecommit from "distilled-aws/codecommit"
 import * as DistilledCredentials from "distilled-aws/Credentials"
 import * as DistilledRegion from "distilled-aws/Region"
 import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
-import { Account, ApprovalRule, codecommitConsoleUrl, PullRequest } from "../Domain.js"
+import { Account, ApprovalRule, codecommitConsoleUrl, PullRequest, type PullRequestStatus } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { parseRuleContent } from "./approvalRuleContent.js"
 import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
@@ -46,9 +46,10 @@ import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, 
 type AwsMethodEnv = AwsClientConfig | Credentials.Credentials | Region.Region | HttpClient.HttpClient
 type AwsStreamEnv = Credentials.Credentials | Region.Region | HttpClient.HttpClient
 
-const listPullRequestsPages = codecommit.listPullRequests.pages as (
+const listPullRequestsPages = (
   input: ListPullRequestsInput
-) => Stream.Stream<ListPullRequestsOutput, unknown, AwsStreamEnv>
+): Stream.Stream<ListPullRequestsOutput, ListPullRequestsError, AwsStreamEnv> =>
+  codecommit.listPullRequests.pages(input)
 
 // ---------------------------------------------------------------------------
 // Sub-helpers
@@ -62,6 +63,16 @@ const decodeAccount = Schema.decodeSync(Account)
 const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const EpochFallback = new Date(0)
+
+const emptyApprovers = (): { readonly names: Array<string>; readonly arns: Array<string> } => ({
+  names: [],
+  arns: []
+})
+
+const decodeRawStatus = (rawStatus: string | undefined, isMerged: boolean): PullRequestStatus => {
+  if (isMerged) return "MERGED"
+  return rawStatus === "OPEN" ? "OPEN" : "CLOSED"
+}
 
 /**
  * Evaluate which approval rules are satisfied/not, returning just the boolean + satisfied rule names.
@@ -166,7 +177,7 @@ export const fetchApprovers = (
         arns: approved.map((a) => a.userArn)
       }
     }),
-    Effect.catchCause(() => Effect.succeed({ names: [] as Array<string>, arns: [] as Array<string> }))
+    Effect.catchCause(() => Effect.succeed(emptyApprovers()))
   )
 
 /**
@@ -238,7 +249,7 @@ const RawToPullRequest = RawPullRequest.pipe(
           region: raw.accountRegion,
           repoAccountId: raw.repoAccountId
         }),
-        status: isMerged ? "MERGED" as const : raw.pullRequestStatus === "OPEN" ? "OPEN" as const : "CLOSED" as const,
+        status: decodeRawStatus(raw.pullRequestStatus, isMerged),
         sourceBranch,
         destinationBranch,
         isMergeable: raw.isMergeable,
@@ -289,7 +300,7 @@ const listAllRepositories = () =>
 
 export const fetchRepoAccountId = (
   repoName: string
-): Effect.Effect<string, unknown, unknown> =>
+): Effect.Effect<string, never, AwsStreamEnv> =>
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => r.repositoryMetadata?.accountId ?? ""),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
@@ -312,49 +323,55 @@ const listPullRequestIds = (
 export const getPullRequests = (
   account: AccountParams,
   options?: { status?: "OPEN" | "CLOSED" }
-): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> =>
-  Stream.unwrap(
-    Effect.gen(function*() {
-      const config = yield* AwsClientConfig
-      const httpClient = yield* HttpClient.HttpClient
-      const credentials = yield* acquireCredentials(account.profile, account.region)
-      const status = options?.status ?? "OPEN"
+): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
+  const pullRequestsEffect: Effect.Effect<
+    Stream.Stream<PullRequest, AwsClientError, AwsClientConfig>,
+    AwsClientError,
+    AwsClientConfig | HttpClient.HttpClient
+  > = Effect.gen(function*() {
+    const config = yield* AwsClientConfig
+    const httpClient = yield* HttpClient.HttpClient
+    const credentials = yield* acquireCredentials(account.profile, account.region)
+    const status = options?.status ?? "OPEN"
 
-      // Cache repo account IDs (one getRepository call per repo, not per PR)
-      const repoAccountCache = new Map<string, string>()
-      const getRepoAccount = (repoName: string) =>
-        repoAccountCache.has(repoName)
-          ? Effect.succeed(repoAccountCache.get(repoName)!)
-          : fetchRepoAccountId(repoName).pipe(
-            Effect.tap((id) => Effect.sync(() => repoAccountCache.set(repoName, id)))
-          )
-
-      const stream = listAllRepositories().pipe(
-        Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
-        Stream.mapEffect(
-          ({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)),
-          { concurrency: 3 }
-        ),
-        Stream.mapEffect((pr) =>
-          getRepoAccount(pr.repoName).pipe(
-            Effect.flatMap((repoAcct) =>
-              decodePullRequest({
-                ...pr,
-                accountProfile: account.profile,
-                accountRegion: account.region,
-                repoAccountId: repoAcct
-              })
-            )
-          )
-        ),
-        Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
+    // Cache repo account IDs (one getRepository call per repo, not per PR)
+    const repoAccountCache = new Map<string, string>()
+    const getRepoAccount = (repoName: string) => {
+      const cached = repoAccountCache.get(repoName)
+      if (cached !== undefined) return Effect.succeed(cached)
+      return fetchRepoAccountId(repoName).pipe(
+        Effect.tap((id) => Effect.sync(() => repoAccountCache.set(repoName, id)))
       )
+    }
 
-      return stream.pipe(
-        Stream.provide(DistilledCredentials.fromCredentials(credentials)),
-        Stream.provideService(HttpClient.HttpClient, httpClient),
-        Stream.provideService(DistilledRegion.Region, account.region),
-        Stream.timeout(config.streamTimeout)
-      )
-    })
-  ) as Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient>
+    const stream = listAllRepositories().pipe(
+      Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
+      Stream.mapEffect(
+        ({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)),
+        { concurrency: 3 }
+      ),
+      Stream.mapEffect((pr) =>
+        getRepoAccount(pr.repoName).pipe(
+          Effect.flatMap((repoAcct) =>
+            decodePullRequest({
+              ...pr,
+              accountProfile: account.profile,
+              accountRegion: account.region,
+              repoAccountId: repoAcct
+            })
+          )
+        )
+      ),
+      Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
+    )
+
+    return stream.pipe(
+      Stream.provide(DistilledCredentials.fromCredentials(credentials)),
+      Stream.provideService(HttpClient.HttpClient, httpClient),
+      Stream.provideService(DistilledRegion.Region, account.region),
+      Stream.timeout(config.streamTimeout)
+    )
+  })
+
+  return Stream.unwrap(pullRequestsEffect)
+}

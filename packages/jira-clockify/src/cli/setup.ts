@@ -14,6 +14,47 @@ import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 declare const Bun: unknown
 
+interface ClockifySetupUser {
+  readonly id: string
+  readonly name: string
+  readonly email: string
+}
+
+interface ClockifySetupWorkspace {
+  readonly id: string
+  readonly name: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const stringField = (record: Record<string, unknown>, key: string): string | null => {
+  const value = record[key]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+const clockifyUserFrom = (value: unknown): ClockifySetupUser | null => {
+  if (!isRecord(value)) return null
+  const id = stringField(value, "id")
+  const name = stringField(value, "name")
+  const email = stringField(value, "email")
+  if (id === null || name === null || email === null) return null
+  return { id, name, email }
+}
+
+const clockifyWorkspaceFrom = (value: unknown): ClockifySetupWorkspace | null => {
+  if (!isRecord(value)) return null
+  const id = stringField(value, "id")
+  const name = stringField(value, "name")
+  if (id === null || name === null) return null
+  return { id, name }
+}
+
+const clockifyWorkspaceListFrom = (value: unknown): ReadonlyArray<ClockifySetupWorkspace> =>
+  Array.isArray(value)
+    ? value.map(clockifyWorkspaceFrom).filter((workspace): workspace is ClockifySetupWorkspace => workspace !== null)
+    : []
+
 // ---------------------------------------------------------------------------
 // First-run setup
 // ---------------------------------------------------------------------------
@@ -76,35 +117,40 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     })
 
     const user = yield* toEffect(client.GET("/v1/user")).pipe(
+      Effect.map(clockifyUserFrom),
       Effect.catch(() => Effect.succeed(null))
     )
     if (!user) {
       yield* Console.log("✗ Invalid API key. Run: jcf auth clockify setup\n")
       return false
     }
-    yield* Console.log(`Authenticated as: ${(user as { name: string }).name} (${(user as { email: string }).email})`)
+    yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
 
     const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
-      Effect.catch(() => Effect.succeed([] as ReadonlyArray<{ id: string; name: string }>))
+      Effect.map(clockifyWorkspaceListFrom),
+      Effect.catch(() => Effect.succeed<ReadonlyArray<ClockifySetupWorkspace>>([]))
     )
     let workspaceId = ""
     let workspaceName = ""
     if (workspaces.length === 1) {
-      workspaceId = (workspaces[0] as { id: string }).id
-      workspaceName = (workspaces[0] as { name: string }).name
+      const workspace = workspaces[0]
+      if (workspace !== undefined) {
+        workspaceId = workspace.id
+        workspaceName = workspace.name
+      }
     } else if (workspaces.length > 1) {
       workspaceId = yield* Prompt.select({
         message: "Select workspace:",
-        choices: workspaces.map((w) => ({ title: (w as { name: string }).name, value: (w as { id: string }).id }))
+        choices: workspaces.map((workspace) => ({ title: workspace.name, value: workspace.id }))
       })
-      workspaceName = workspaces.find((w) => (w as { id: string }).id === workspaceId)?.name ?? ""
+      workspaceName = workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? ""
     }
 
     if (workspaceId) {
       yield* clockifyAuth.save({
         apiKey,
         workspaceId,
-        userId: (user as { id: string }).id,
+        userId: user.id,
         baseUrl: "https://api.clockify.me/api"
       })
       yield* Console.log(`✓ Clockify configured (workspace: ${workspaceName})\n`)

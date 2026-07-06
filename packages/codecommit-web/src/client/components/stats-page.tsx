@@ -116,8 +116,14 @@ function LifecycleDetailTable({
 function LifecycleMetrics({ data, goToPR }: { data: WeeklyStats; goToPR: (awsAccountId: string, id: string) => void }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const toggle = (key: string) => setExpanded((prev) => (prev === key ? null : key))
+  type LifecycleDetail = WeeklyStats["mergeTimeDetails"][number]
 
-  const metrics = [
+  const metrics: ReadonlyArray<{
+    readonly key: string
+    readonly label: string
+    readonly value: number | null
+    readonly details: ReadonlyArray<LifecycleDetail>
+  }> = [
     { key: "merge", label: "Median Time to Merge", value: data.medianTimeToMerge, details: data.mergeTimeDetails },
     {
       key: "review",
@@ -131,7 +137,7 @@ function LifecycleMetrics({ data, goToPR }: { data: WeeklyStats; goToPR: (awsAcc
       value: data.medianTimeToAddressFeedback,
       details: data.feedbackDetails
     }
-  ] as const
+  ]
 
   return (
     <div className="space-y-2">

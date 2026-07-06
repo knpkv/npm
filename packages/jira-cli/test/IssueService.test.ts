@@ -45,7 +45,7 @@ const JiraClientLayer = Layer.succeed(
             : Promise.resolve({ data: {}, response: { ok: false, status: 404 } })
       }
     }
-  } as never)
+  })
 )
 
 const TestLayer = IssueServiceLayer.pipe(

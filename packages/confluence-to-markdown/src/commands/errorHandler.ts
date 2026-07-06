@@ -25,9 +25,10 @@ const formatUnknownError = (error: unknown): string => {
   }
   if (error !== null && typeof error === "object") {
     const tag = Predicate.hasProperty(error, "_tag") ? `${String(error._tag)}: ` : ""
-    const props = Object.fromEntries(
-      Object.getOwnPropertyNames(error).map((key) => [key, (error as Record<string, unknown>)[key]])
-    )
+    const props: Record<string, unknown> = {}
+    for (const key of Object.getOwnPropertyNames(error)) {
+      props[key] = Reflect.get(error, key)
+    }
     return `${tag}${safeStringify(Object.keys(props).length > 0 ? props : error) ?? String(error)}`
   }
   return String(error)

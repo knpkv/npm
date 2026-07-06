@@ -80,7 +80,7 @@ export const statusCmd = Command.make(
           let projectName = "none"
           if (entry.projectId) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-              Effect.catch(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed([]))
             )
             projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
           }
@@ -90,7 +90,7 @@ export const statusCmd = Command.make(
           // Show tags
           if (entry.tagIds && entry.tagIds.length > 0) {
             const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
-              Effect.catch(() => Effect.succeed([] as const))
+              Effect.catch(() => Effect.succeed([]))
             )
             const tagNames = entry.tagIds
               .map((id) => allTags.find((t) => t.id === id)?.name ?? id)

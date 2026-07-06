@@ -15,14 +15,14 @@ interface DialogProps {
 export function Dialog({ children, fullscreen = false, title }: DialogProps) {
   const { theme } = useTheme()
 
-  const containerStyle = fullscreen
-    ? ({ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" } as const)
-    : ({ position: "absolute", top: "15%", left: "15%", width: "70%", height: "auto" } as const)
-
   return (
     <box
       style={{
-        ...containerStyle,
+        position: "absolute",
+        top: fullscreen ? 0 : "15%",
+        left: fullscreen ? 0 : "15%",
+        width: fullscreen ? "100%" : "70%",
+        height: fullscreen ? "100%" : "auto",
         flexDirection: "column",
         backgroundColor: theme.backgroundPanel,
         padding: 0

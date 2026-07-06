@@ -94,7 +94,8 @@ const make = Effect.gen(function*() {
       const result = yield* toEffect(client.v3.client.POST("/rest/api/3/issue/{issueIdOrKey}/attachments", {
         params: { path: { issueIdOrKey } },
         headers: { "X-Atlassian-Token": "no-check" },
-        body: form as never
+        body: [{ name: filename, originalFilename: filename, size: bytes.byteLength }],
+        bodySerializer: () => form
       })).pipe(
         Effect.mapError((cause) =>
           new JiraApiError({ message: `Failed to upload attachment to ${issueIdOrKey}`, cause })
@@ -102,7 +103,7 @@ const make = Effect.gen(function*() {
       )
 
       return yield* decodeFirstUploadedAttachment(result)
-    }) as Effect.Effect<Attachment, JiraApiError>
+    })
 
   return AttachmentService.of({ uploadToIssue })
 })

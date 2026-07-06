@@ -9,7 +9,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import type { PageId } from "./Brand.js"
+import { PageId } from "./Brand.js"
 import { ConfigNotFoundError, ConfigParseError } from "./ConfluenceError.js"
 import type { ConfluenceConfigFile } from "./Schemas.js"
 import { ConfluenceConfigFileSchema } from "./Schemas.js"
@@ -82,7 +82,7 @@ const loadConfig = (
     )
 
     const json = yield* Effect.try({
-      try: () => JSON.parse(content) as unknown,
+      try: () => JSON.parse(content),
       catch: (cause) => new ConfigParseError({ path: configPath, cause })
     })
 
@@ -210,7 +210,7 @@ export const createConfigFile = (
     const resolvedPath = configPath ?? pathService.join(configDir, CONFIG_FILE_NAME)
 
     const config: ConfluenceConfigFile = {
-      rootPageId: rootPageId as PageId,
+      rootPageId: PageId(rootPageId),
       baseUrl,
       docsPath: ".confluence/docs",
       excludePatterns: [],

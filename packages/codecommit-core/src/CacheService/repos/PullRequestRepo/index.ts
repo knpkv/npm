@@ -23,7 +23,7 @@ const makePullRequestRepo = Effect.gen(function*() {
   const hub = yield* EventsHub
   const publish = hub.publish(RepoChange.PullRequests())
 
-  return {
+  const service = {
     findAll: Q.findAll(sql),
     findMissingDiffStats: Q.findMissingDiffStats(sql),
     findByAccountAndId: Q.findByAccountAndId(sql),
@@ -31,7 +31,8 @@ const makePullRequestRepo = Effect.gen(function*() {
     findStaleOpen: Q.findStaleOpen(sql),
     findOpenInRange: Q.findOpenInRange(sql),
     ...mutations(sql, publish)
-  } as const
+  }
+  return service
 })
 
 export interface PullRequestRepoShape extends Success<typeof makePullRequestRepo> {}

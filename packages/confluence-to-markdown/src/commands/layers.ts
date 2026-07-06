@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
-import type { PageId } from "../Brand.js"
+import { PageId } from "../Brand.js"
 import { ConfluenceAuth, layer as ConfluenceAuthLayer } from "../ConfluenceAuth.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import {
@@ -30,7 +30,7 @@ const ConverterPipeline = MarkdownConverterLayer.pipe(
 
 // Dummy config layer for help/init
 const DummyConfigLayer = ConfluenceConfigLayerFromValues({
-  rootPageId: "dummy" as PageId,
+  rootPageId: PageId("dummy"),
   baseUrl: "https://dummy.atlassian.net",
   docsPath: ".confluence/docs",
   excludePatterns: [],

@@ -1,23 +1,39 @@
 /**
  * @internal
  */
+import type { Credentials, Region } from "distilled-aws"
+import type { ListBranchesError } from "distilled-aws/codecommit"
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect, Option, Stream } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { type ListBranchesParams, makeApiError, withAwsContext } from "./internal.js"
 
+type BranchPageError = ListBranchesError
+type BranchPageEnv = Credentials.Credentials | Region.Region | HttpClient.HttpClient
+
+const firstPageToken: string | undefined = undefined
+
+const nextPageToken = (token: string | undefined): Option.Option<string | undefined> =>
+  token === undefined ? Option.none() : Option.some(token)
+
+const branchPage = (
+  branches: ReadonlyArray<string>,
+  nextToken: Option.Option<string | undefined>
+): readonly [ReadonlyArray<string>, Option.Option<string | undefined>] => [branches, nextToken]
+
+const branchPageRequest = (repositoryName: string, nextToken: string | undefined) =>
+  nextToken === undefined ? { repositoryName } : { repositoryName, nextToken }
+
 const fetchBranchPages = (repositoryName: string) =>
-  Stream.paginate(
-    undefined as string | undefined,
+  Stream.paginate<string | undefined, string, BranchPageError, BranchPageEnv>(
+    firstPageToken,
     (nextToken) =>
-      codecommit.listBranches({
-        repositoryName,
-        ...(nextToken && { nextToken })
-      }).pipe(
+      codecommit.listBranches(branchPageRequest(repositoryName, nextToken)).pipe(
         Effect.map((resp) =>
-          [
+          branchPage(
             resp.branches ?? [],
-            resp.nextToken ? Option.some(resp.nextToken) : Option.none()
-          ] as const
+            nextPageToken(resp.nextToken)
+          )
         )
       )
   ).pipe(

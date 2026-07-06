@@ -6,6 +6,10 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { ConfluenceAuth } from "../ConfluenceAuth.js"
 
+type AuthConfigValue =
+  | { readonly type: "token"; readonly email: string; readonly token: string }
+  | { readonly type: "oauth2"; readonly accessToken: string; readonly cloudId: string }
+
 const AuthConfig = Config.all({
   apiKey: Config.string("CONFLUENCE_API_KEY"),
   email: Config.string("CONFLUENCE_EMAIL")
@@ -18,7 +22,7 @@ export const getAuth = () =>
   Effect.gen(function*() {
     // 1. Try env vars first (backwards compat)
     const envAuth = yield* AuthConfig.pipe(
-      Effect.map(({ apiKey, email }) => ({ type: "token" as const, email, token: apiKey })),
+      Effect.map(({ apiKey, email }): AuthConfigValue => ({ type: "token", email, token: apiKey })),
       Effect.option
     )
 
@@ -31,5 +35,5 @@ export const getAuth = () =>
     const accessToken = yield* auth.getAccessToken()
     const cloudId = yield* auth.getCloudId()
 
-    return { type: "oauth2" as const, accessToken, cloudId }
+    return { type: "oauth2", accessToken, cloudId } satisfies AuthConfigValue
   })

@@ -90,10 +90,10 @@ const JiraConfigLive = Layer.unwrap(
     return Layer.succeed(JiraApiConfig, {
       baseUrl: "",
       auth: {
-        type: "oauth2" as const,
+        type: "oauth2",
         accessToken,
         cloudId
-      }
+      } satisfies { readonly type: "oauth2"; readonly accessToken: typeof accessToken; readonly cloudId: string }
     })
   })
 )

@@ -62,9 +62,8 @@ const makePRService = Effect.gen(function*() {
   })
 
   const refreshSem = yield* Semaphore.make(1)
-  const refresh = refreshSem.withPermits(1)(
-    provide(makeRefresh(state) as unknown as Effect.Effect<void, never, RefreshDeps>)
-  ) as Effect.Effect<void>
+  const refreshEffect: Effect.Effect<void, never, RefreshDeps> = makeRefresh(state)
+  const refresh: Effect.Effect<void> = refreshSem.withPermits(1)(provide(refreshEffect))
   const toggleAccount = makeToggleAccount(refresh)
   const setAllAccounts = makeSetAllAccounts(refresh)
   const refreshSinglePR = makeRefreshSinglePR(state)
@@ -72,10 +71,8 @@ const makePRService = Effect.gen(function*() {
   return {
     state,
     refresh,
-    toggleAccount: (profile: AwsProfileName) =>
-      provide(toggleAccount(profile) as Effect.Effect<void, never, RefreshDeps>),
-    setAllAccounts: (enabled: boolean, profiles?: Array<AwsProfileName>) =>
-      provide(setAllAccounts(enabled, profiles) as Effect.Effect<void, never, RefreshDeps>),
+    toggleAccount: (profile: AwsProfileName) => provide(toggleAccount(profile)),
+    setAllAccounts: (enabled: boolean, profiles?: Array<AwsProfileName>) => provide(setAllAccounts(enabled, profiles)),
     // Cache delegates – absorb CacheError at the PRService boundary
     searchPullRequests: (
       query: string,
@@ -107,7 +104,7 @@ const makePRService = Effect.gen(function*() {
     getCachedComments: (awsAccountId: string, prId: PullRequestId) =>
       commentRepo.find(awsAccountId, prId).pipe(
         Effect.catchCause(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
-      ) as Effect.Effect<Option.Option<ReadonlyArray<PRCommentLocation>>>,
+      ),
     refreshSinglePR: (awsAccountId: string, prId: PullRequestId) => provide(refreshSinglePR(awsAccountId, prId))
   }
 })

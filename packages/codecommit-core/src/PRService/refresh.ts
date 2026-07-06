@@ -11,12 +11,16 @@ import type { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/inde
 import type { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import type { ConfigService } from "../ConfigService/index.js"
+import type { AppStatus } from "../Domain.js"
 import type { PRState } from "./internal.js"
 import { enrichDiffs } from "./refreshDiffs.js"
 import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
 import { resolveAccounts } from "./refreshResolve.js"
 import { calculateHealthScores } from "./refreshScore.js"
+
+const idleStatus: AppStatus = "idle"
+const errorStatus: AppStatus = "error"
 
 export type RefreshDeps =
   | ConfigService
@@ -53,7 +57,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     const now = yield* Clock.currentTimeMillis
     yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
-      status: "idle" as const,
+      status: idleStatus,
       lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now))
     }))
 
@@ -77,7 +81,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
       Effect.catchCause((cause) => {
         const squashed = Cause.squash(cause)
         const errorStr = (Predicate.isError(squashed) ? squashed.message : String(squashed)) || "Unknown error"
-        return SubscriptionRef.update(state, (s) => ({ ...s, status: "error" as const, error: errorStr }))
+        return SubscriptionRef.update(state, (s) => ({ ...s, status: errorStatus, error: errorStr }))
       })
     )
 )

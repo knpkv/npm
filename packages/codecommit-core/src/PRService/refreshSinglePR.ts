@@ -9,7 +9,7 @@
  * @internal
  */
 
-import { Cause, Effect, Option, SubscriptionRef } from "effect"
+import { Cause, Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -23,12 +23,12 @@ import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import {
-  type AwsProfileName,
-  type AwsRegion,
+  AwsProfileName,
+  AwsRegion,
   codecommitConsoleUrl,
   type PRCommentLocation,
   type PullRequestId,
-  type PullRequestStatus
+  PullRequestStatus
 } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 
@@ -36,6 +36,15 @@ interface ResolvedAccount {
   readonly profile: AwsProfileName
   readonly region: AwsRegion
 }
+
+const decodeAwsProfileName = Schema.decodeUnknownSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeUnknownSync(AwsRegion)
+const decodePullRequestStatus = Schema.decodeUnknownSync(PullRequestStatus)
+
+const resolvedAccount = (profile: string, region: string): ResolvedAccount => ({
+  profile: decodeAwsProfileName(profile),
+  region: decodeAwsRegion(region)
+})
 
 type RefreshSinglePREnv =
   | AwsClient
@@ -54,10 +63,7 @@ const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: str
     )
     const sibling = allCached.find((p) => p.awsAccountId === awsAccountId)
     if (sibling) {
-      return {
-        profile: sibling.accountProfile as AwsProfileName,
-        region: sibling.accountRegion as AwsRegion
-      } satisfies ResolvedAccount
+      return resolvedAccount(sibling.accountProfile, sibling.accountRegion)
     }
 
     // Fall back to config — match by profile name (awsAccountId might be the profile name from URL)
@@ -65,7 +71,7 @@ const resolveAccountFromCache = (prRepo: PullRequestRepoShape, awsAccountId: str
     const config = yield* configService.load.pipe(Effect.catchCause(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
     if (configAccount && configAccount.regions?.[0]) {
-      return { profile: configAccount.profile, region: configAccount.regions[0] } satisfies ResolvedAccount
+      return resolvedAccount(configAccount.profile, configAccount.regions[0])
     }
 
     return undefined
@@ -93,12 +99,9 @@ export const makeRefreshSinglePR = (
 
     // Resolve account: from state PR → cached PR → any cached PR with same awsAccountId → config
     const account: ResolvedAccount | undefined = pr
-      ? { profile: pr.account.profile as AwsProfileName, region: pr.account.region as AwsRegion }
+      ? resolvedAccount(pr.account.profile, pr.account.region)
       : Option.isSome(cachedPR)
-      ? {
-        profile: cachedPR.value.accountProfile as AwsProfileName,
-        region: cachedPR.value.accountRegion as AwsRegion
-      }
+      ? resolvedAccount(cachedPR.value.accountProfile, cachedPR.value.accountRegion)
       : yield* resolveAccountFromCache(prRepo, awsAccountId)
 
     if (!account) return
@@ -132,7 +135,7 @@ export const makeRefreshSinglePR = (
       repositoryName: detail.repositoryName,
       creationDate: detail.creationDate.toISOString(),
       lastModifiedDate: cached?.lastModifiedDate.toISOString() ?? new Date().toISOString(),
-      status: detail.status as PullRequestStatus,
+      status: decodePullRequestStatus(detail.status),
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
       isMergeable: cached ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
@@ -194,6 +197,6 @@ export const makeRefreshSinglePR = (
       )
     ))
 
-  return (awsAccountId: string, prId: PullRequestId) =>
-    refreshSinglePR(awsAccountId, prId) as Effect.Effect<void, never, RefreshSinglePREnv>
+  return (awsAccountId: string, prId: PullRequestId): Effect.Effect<void, never, RefreshSinglePREnv> =>
+    refreshSinglePR(awsAccountId, prId)
 }

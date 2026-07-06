@@ -12,11 +12,25 @@
  */
 
 import { Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
-import { AwsClient } from "../AwsClient/index.js"
+import { AwsClient, type CallerIdentity } from "../AwsClient/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { ConfigService } from "../ConfigService/index.js"
 import { parseISOWeek } from "../DateUtils.js"
+import type { AppStatus } from "../Domain.js"
 import { decodeCachedPR, type PRState, prToUpsertInput } from "./internal.js"
+
+type CachedPullRequestDomain = ReturnType<typeof decodeCachedPR>
+
+const loadingStatus: AppStatus = "loading"
+const idleStatus: AppStatus = "idle"
+const errorStatus: AppStatus = "error"
+
+const fallbackIdentity = (accountId: string): CallerIdentity => ({
+  accountId,
+  username: ""
+})
+
+const emptyCachedPullRequestDomains = (): Array<CachedPullRequestDomain> => []
 
 export const syncWeek = Effect.fn("syncWeek")(
   function*(state: PRState, week: string) {
@@ -44,7 +58,7 @@ export const syncWeek = Effect.fn("syncWeek")(
 
       yield* SubscriptionRef.update(state, (s) => ({
         ...s,
-        status: "loading" as const,
+        status: loadingStatus,
         statusDetail: `syncing ${week}`
       }))
 
@@ -67,7 +81,7 @@ export const syncWeek = Effect.fn("syncWeek")(
             const identity = yield* awsClient
               .getCallerIdentity({ profile: account.profile, region })
               .pipe(
-                Effect.catchIf(() => true, () => Effect.succeed({ accountId: account.profile as string, arn: "" }))
+                Effect.catchIf(() => true, () => Effect.succeed(fallbackIdentity(account.profile)))
               )
             const awsAccountId = identity.accountId
 
@@ -164,12 +178,12 @@ export const syncWeek = Effect.fn("syncWeek")(
       // Reload PRs from DB so SSE clients get fresh data (incl. approvedBy, commentedBy)
       const freshPRs = yield* prRepo.findAll().pipe(
         Effect.map((rows) => rows.map((r) => decodeCachedPR(r))),
-        Effect.catchIf(() => true, () => Effect.succeed([] as Array<ReturnType<typeof decodeCachedPR>>))
+        Effect.catchIf(() => true, () => Effect.succeed(emptyCachedPullRequestDomains()))
       )
 
       yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
         ...s,
-        status: "idle" as const,
+        status: idleStatus,
         pullRequests: freshPRs
       }))
     }).pipe(
@@ -178,7 +192,7 @@ export const syncWeek = Effect.fn("syncWeek")(
           yield* Effect.logWarning("syncWeek failed", e)
           yield* SubscriptionRef.update(state, (s) => ({
             ...s,
-            status: "error" as const,
+            status: errorStatus,
             error: `History sync failed: ${String(e)}`
           }))
         }))

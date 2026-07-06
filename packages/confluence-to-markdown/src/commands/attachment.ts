@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
-import type { PageId } from "../Brand.js"
+import { PageId } from "../Brand.js"
 import { ConfluenceClient } from "../ConfluenceClient.js"
 import { ApiError, ConfigError, FileSystemError } from "../ConfluenceError.js"
 import { insertConfluenceAttachmentReference, renderConfluenceAttachmentReference } from "../internal/attachments.js"
@@ -103,7 +103,8 @@ const uploadCommand = Command.make(
       }
 
       const client = yield* ConfluenceClient
-      const attachment = yield* client.uploadAttachmentToPage(pageId as PageId, { filePath: file })
+      const brandedPageId = PageId(pageId)
+      const attachment = yield* client.uploadAttachmentToPage(brandedPageId, { filePath: file })
       let inserted = false
 
       if (documentInput !== null) {

@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { Command, Flag as Options } from "effect/unstable/cli"
-import type { PageId } from "../Brand.js"
+import { PageId } from "../Brand.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { ConfigError } from "../ConfluenceError.js"
 import { cleanMarkdown as removeRoundTripMetadata } from "../internal/cleanMarkdown.js"
@@ -79,7 +79,7 @@ export const makeFetchCommand = (options: FetchCommandOptions = {}) => {
         })
         const auth = yield* getAuth()
         const clientConfig: ConfluenceClientConfig = { baseUrl: input.baseUrl, auth }
-        const markdown = yield* fetchPageMarkdown(input.pageId as PageId, { cleanMarkdown }).pipe(
+        const markdown = yield* fetchPageMarkdown(PageId(input.pageId), { cleanMarkdown }).pipe(
           Effect.provide(makeClientLayer(clientConfig))
         )
 

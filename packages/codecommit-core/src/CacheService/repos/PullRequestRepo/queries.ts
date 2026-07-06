@@ -11,17 +11,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import { AwsProfileName, AwsRegion } from "../../../Domain.js"
 import type { CacheError } from "../../CacheError.js"
-import {
-  type CachedPullRequest,
-  CachedPullRequest as CachedPullRequestSchema,
-  cacheError,
-  type SearchResult
-} from "./internal.js"
-
-type NoServices<T extends Effect.Effect<unknown, unknown, unknown>> = Effect.Effect<
-  Effect.Success<T>,
-  Effect.Error<T>
->
+import { CachedPullRequest as CachedPullRequestSchema, cacheError, type SearchResult } from "./internal.js"
 
 const StaleOpenRow = Schema.Struct({
   id: Schema.String,
@@ -36,7 +26,8 @@ export const findAll = (sql: SqlClient.SqlClient) => {
     Request: Schema.Void,
     execute: () => sql`SELECT * FROM pull_requests ORDER BY creation_date DESC`
   })
-  return () => run(undefined as void).pipe(cacheError("findAll"))
+  const voidRequest: void = undefined
+  return () => run(voidRequest).pipe(cacheError("findAll"))
 }
 
 export const findMissingDiffStats = (sql: SqlClient.SqlClient) => {
@@ -45,7 +36,8 @@ export const findMissingDiffStats = (sql: SqlClient.SqlClient) => {
     Request: Schema.Void,
     execute: () => sql`SELECT * FROM pull_requests WHERE files_added IS NULL ORDER BY creation_date DESC`
   })
-  return () => run(undefined as void).pipe(cacheError("findMissingDiffStats"))
+  const voidRequest: void = undefined
+  return () => run(voidRequest).pipe(cacheError("findMissingDiffStats"))
 }
 
 export const findByAccountAndId = (sql: SqlClient.SqlClient) => {
@@ -89,16 +81,17 @@ export const search = (sql: SqlClient.SqlClient) => {
     const stripped = query.replace(/[*^"]/g, "").replace(/\b(NEAR|OR|NOT|AND)\b/gi, "")
     const escaped = stripped.replace(/"/g, `""`)
     const ftsQuery = `"${escaped}"`
+    const emptySearchResult: SearchResult = { items: [], total: 0, hasMore: false }
     return Effect.all({
-      items: search_({ query: ftsQuery, limit, offset }) as NoServices<ReturnType<typeof search_>>,
+      items: search_({ query: ftsQuery, limit, offset }),
       total: searchCount_({ query: ftsQuery }).pipe(
         Effect.map((r) => r.count)
-      ) as Effect.Effect<number, Effect.Error<ReturnType<typeof searchCount_>>>
+      )
     }).pipe(
       Effect.map(({ items, total }) => ({ items, total, hasMore: offset + items.length < total })),
       Effect.catchTag("SqlError", () =>
         Effect.logWarning("FTS search failed").pipe(
-          Effect.as({ items: [] as ReadonlyArray<CachedPullRequest>, total: 0, hasMore: false })
+          Effect.as(emptySearchResult)
         )),
       cacheError("search")
     )

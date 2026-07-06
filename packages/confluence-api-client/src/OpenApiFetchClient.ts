@@ -32,17 +32,25 @@ export class FetchClientError extends Data.TaggedError("FetchClientError")<{
 
 /** Extract success `data` from a FetchResponse discriminated union. */
 export type SuccessData<T> = T extends { data: infer D; error?: undefined } ? D
-  : T extends { data?: infer D } ? NonNullable<D>
-  : never
+  : T extends { data?: infer D } ? D | undefined
+  : undefined
 
-const errorMessage = (error: unknown): string => {
-  if (typeof error === "string") return error
-  if (Predicate.isError(error)) return error.message
-  if (Predicate.hasProperty(error, "message") && typeof error.message === "string") return error.message
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null
+
+const errorPayload = (value: unknown): unknown => isRecord(value) && "error" in value ? value.error : value
+
+const errorStatus = (value: unknown): number => isRecord(value) && typeof value.status === "number" ? value.status : 0
+
+const errorMessage = (value: unknown): string => {
+  const payload = errorPayload(value)
+  if (typeof payload === "string") return payload
+  if (Predicate.isError(payload)) return payload.message
+  if (Predicate.hasProperty(payload, "message") && typeof payload.message === "string") return payload.message
   try {
-    return JSON.stringify(error)
+    return JSON.stringify(payload)
   } catch {
-    return String(error)
+    return String(payload)
   }
 }
 
@@ -69,13 +77,13 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
         if (error !== undefined || !response.ok) {
           throw { error, status: response.status }
         }
-        return data as SuccessData<FetchResponse<T, O, M>>
+        return data
       }),
     catch: (e) =>
       new FetchClientError({
-        error: (e as Record<string, unknown>).error ?? e,
-        status: ((e as Record<string, unknown>).status as number | undefined) ?? 0,
-        message: errorMessage((e as Record<string, unknown>).error ?? e)
+        error: errorPayload(e),
+        status: errorStatus(e),
+        message: errorMessage(e)
       })
   })
 

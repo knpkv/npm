@@ -240,10 +240,11 @@ const AutoRefresh = Layer.effectDiscard(
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
     const configService = yield* ConfigService.ConfigService
+    const defaultRefreshConfig = { autoRefresh: true, refreshIntervalSeconds: 300 }
 
     const refreshIteration = Effect.gen(function*() {
       const config = yield* configService.load.pipe(
-        Effect.catchIf(() => true, () => Effect.succeed({ autoRefresh: true, refreshIntervalSeconds: 300 } as const))
+        Effect.catchIf(() => true, () => Effect.succeed(defaultRefreshConfig))
       )
       if (config.autoRefresh) {
         yield* Effect.sleep(Duration.seconds(config.refreshIntervalSeconds))

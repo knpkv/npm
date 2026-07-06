@@ -1,7 +1,8 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type { Domain } from "@knpkv/codecommit-core"
+import { Domain } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { useKeyboard } from "@opentui/react"
+import { Schema } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useMemo, useRef } from "react"
 import { loginToAwsAtom } from "../atoms/actions.js"
@@ -28,6 +29,9 @@ import { useDialog } from "../context/dialog.js"
 import { extractScope } from "../ListBuilder.js"
 import { themes } from "../theme/themes.js"
 import { DialogCommand } from "../ui/DialogCommand.js"
+
+const settingsFilterModes: ReadonlyArray<string> = ["", "on:", "off:"]
+const decodeAwsProfileName = Schema.decodeSync(Domain.AwsProfileName)
 
 const defaultState: Domain.AppState = {
   status: "loading",
@@ -185,7 +189,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
       } else if (key.name === "backspace") {
         setSettingsFilter(settingsFilter.slice(0, -1))
       } else if (key.name === "left" || key.name === "right") {
-        const modes = ["", "on:", "off:"] as const
+        const modes = settingsFilterModes
         const currentPrefix = settingsFilter.startsWith("on:") ? "on:" : settingsFilter.startsWith("off:") ? "off:" : ""
         const nameFilter = currentPrefix ? settingsFilter.slice(currentPrefix.length) : settingsFilter
         const idx = modes.indexOf(currentPrefix)
@@ -279,7 +283,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           return
         }
         if (key.name === "left" || key.name === "right") {
-          const modes = ["", "on:", "off:"] as const
+          const modes = settingsFilterModes
           const currentPrefix = settingsFilter.startsWith("on:")
             ? "on:"
             : settingsFilter.startsWith("off:")
@@ -342,7 +346,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
           if (selected) {
             const profile = selected.title.replace(/\s*\(.*$/, "")
             if (/ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials/i.test(selected.message)) {
-              loginToAws((profile || selected.title) as Domain.AwsProfileName)
+              loginToAws(decodeAwsProfileName(profile || selected.title))
             }
           }
         }

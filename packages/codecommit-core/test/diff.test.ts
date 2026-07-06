@@ -6,17 +6,20 @@
  * multi-rule detection, and optional title/profile omission.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { Schema } from "effect"
 import { diffApprovalPools } from "../src/CacheService/diff.js"
-import type { ApprovalRule } from "../src/Domain.js"
+import { ApprovalRule } from "../src/Domain.js"
+
+const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const makeRule = (overrides: Partial<ApprovalRule> = {}): ApprovalRule =>
-  ({
+  decodeApprovalRule({
     ruleName: "Rule",
     requiredApprovals: 1,
     poolMembers: [],
     satisfied: false,
     ...overrides
-  }) as ApprovalRule
+  })
 
 describe("diffApprovalPools", () => {
   it("returns empty when no currentUser", () => {

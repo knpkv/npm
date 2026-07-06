@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { JiraApiClient } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
+import { JiraApiClient, type JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraAuth, type JiraAuthService } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type { paths as V3Paths } from "../../jira-api-client/src/generated/v3/schema.js"
+import { makeOpenApiFetchClient } from "../../jira-api-client/src/OpenApiFetchClient.js"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
 
 // ---------------------------------------------------------------------------
@@ -16,25 +18,38 @@ import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
 const makeJiraLayer = (
   resolve: () => { data?: unknown; error?: unknown; response: { ok: boolean; status: number } }
 ) =>
-  Layer.succeed(JiraApiClient, {
-    v3: {
-      client: {
-        GET: () => Promise.resolve(resolve())
+  Layer.succeed(
+    JiraApiClient,
+    {
+      v3: {
+        client: Object.assign(makeOpenApiFetchClient<V3Paths>("https://jira.test", {}).client, {
+          GET: () => Promise.resolve(resolve())
+        })
       }
-    }
-  } as never)
+    } satisfies JiraApiClientShape
+  )
+
+const makeAuthService = (isLoggedIn: JiraAuthService["isLoggedIn"]): JiraAuthService => ({
+  configure: () => Effect.die("unused JiraAuth mock method"),
+  isConfigured: () => Effect.die("unused JiraAuth mock method"),
+  login: () => Effect.die("unused JiraAuth mock method"),
+  logout: () => Effect.die("unused JiraAuth mock method"),
+  getAccessToken: () => Effect.die("unused JiraAuth mock method"),
+  getCloudId: () => Effect.die("unused JiraAuth mock method"),
+  getSiteUrl: () => Effect.die("unused JiraAuth mock method"),
+  getCurrentUser: () => Effect.die("unused JiraAuth mock method"),
+  getActiveProfile: () => Effect.die("unused JiraAuth mock method"),
+  listProfiles: () => Effect.die("unused JiraAuth mock method"),
+  switchProfile: () => Effect.die("unused JiraAuth mock method"),
+  removeProfile: () => Effect.die("unused JiraAuth mock method"),
+  isLoggedIn
+})
 
 // JiraAuth mock — only `isLoggedIn` matters for fetchTicketByKey.
-const makeAuthLayer = (loggedIn: boolean) =>
-  Layer.succeed(JiraAuth, {
-    isLoggedIn: () => Effect.succeed(loggedIn)
-  } as never)
+const makeAuthLayer = (loggedIn: boolean) => Layer.succeed(JiraAuth, makeAuthService(() => Effect.succeed(loggedIn)))
 
 // JiraAuth whose isLoggedIn fails with a platform error (e.g. unreadable token file).
-const makeAuthFailLayer = (message: string) =>
-  Layer.succeed(JiraAuth, {
-    isLoggedIn: () => Effect.fail({ message })
-  } as never)
+const makeAuthFailLayer = (message: string) => Layer.succeed(JiraAuth, makeAuthService(() => Effect.fail({ message })))
 
 const LoggedIn = makeAuthLayer(true)
 

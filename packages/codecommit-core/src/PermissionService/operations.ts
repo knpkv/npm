@@ -29,7 +29,7 @@ export interface OperationMeta {
 
 const op = (category: "read" | "write", description: string): OperationMeta => ({ category, description })
 
-const BuiltinOperations = {
+const BuiltinOperations: Record<string, OperationMeta> = {
   getCallerIdentity: op("read", "Get current user identity"),
   listRepositories: op("read", "List all repositories"),
   listPullRequests: op("read", "List PR IDs for a repo"),
@@ -47,7 +47,7 @@ const BuiltinOperations = {
   createApprovalRule: op("write", "Create approval rule"),
   updateApprovalRule: op("write", "Update approval rule"),
   deleteApprovalRule: op("write", "Delete approval rule")
-} as const satisfies Record<string, OperationMeta>
+}
 
 export type BuiltinOperation = keyof typeof BuiltinOperations
 

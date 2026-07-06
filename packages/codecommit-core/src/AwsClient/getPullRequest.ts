@@ -25,7 +25,6 @@
  */
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
-import type { AwsClientError } from "../Errors.js"
 import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
@@ -127,5 +126,5 @@ export const getPullRequest = (params: GetPullRequestParams) =>
   withAwsContext(
     "getPullRequest",
     params.account,
-    callGetPullRequest(params) as Effect.Effect<PullRequestDetail, unknown, never>
-  ) as Effect.Effect<PullRequestDetail, AwsClientError>
+    callGetPullRequest(params)
+  )

@@ -3,15 +3,26 @@
  * Phases 1+2: Load cached PRs, resolve config/identity/subscriptions.
  */
 
-import { Clock, DateTime, Effect, Ref, SubscriptionRef } from "effect"
+import { Clock, DateTime, Effect, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import type { AwsRegion } from "../Domain.js"
+import { type AppStatus, AwsRegion } from "../Domain.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
+
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
+const defaultAwsRegion = decodeAwsRegion("us-east-1")
+const emptyAwsRegion = decodeAwsRegion("")
+const loadingStatus: AppStatus = "loading"
+const idleStatus: AppStatus = "idle"
+
+const accountRegion = (region: string | undefined): AwsRegion =>
+  region === undefined ? emptyAwsRegion : decodeAwsRegion(region)
+
+const primaryRegion = (account: AccountConfig): AwsRegion => account.regions[0] ?? defaultAwsRegion
 
 export interface ResolvedAccounts {
   readonly enabledAccounts: ReadonlyArray<AccountConfig>
@@ -23,7 +34,7 @@ export interface ResolvedAccounts {
 const resolveIdentity = (
   accountIdRef: Ref.Ref<Map<string, string>>,
   account: AccountConfig,
-  region: string,
+  region: AwsRegion,
   options?: {
     readonly updateCurrentUser?: (username: string) => Effect.Effect<void>
     readonly clearCurrentUser?: Effect.Effect<void>
@@ -36,7 +47,7 @@ const resolveIdentity = (
 
     const identity = yield* awsClient.getCallerIdentity({
       profile: account.profile,
-      region: region as AwsRegion
+      region
     }).pipe(Effect.catchIf(() => true, () => Effect.succeed(undefined)))
 
     if (!identity) {
@@ -67,7 +78,7 @@ export const resolveAccounts = (state: PRState) =>
     yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
       ...s,
       pullRequests: cachedPRs.map(decodeCachedPR),
-      status: "loading" as const,
+      status: loadingStatus,
       ...(cachedPRs.length > 0 ? { statusDetail: "loading from cache..." } : {})
     }))
 
@@ -78,7 +89,7 @@ export const resolveAccounts = (state: PRState) =>
       const configured = config.accounts.find((a) => a.profile === d.name)
       return {
         profile: d.name,
-        region: configured?.regions?.[0] ?? d.region ?? ("" as AwsRegion),
+        region: configured?.regions?.[0] ?? accountRegion(d.region),
         enabled: configured?.enabled ?? false
       }
     })
@@ -91,15 +102,16 @@ export const resolveAccounts = (state: PRState) =>
       const now = yield* Clock.currentTimeMillis
       yield* SubscriptionRef.update(
         state,
-        (s) => ({ ...s, status: "idle" as const, lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)) })
+        (s) => ({ ...s, status: idleStatus, lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)) })
       )
       return undefined
     }
 
     // --- Phase 2: Resolve AWS account IDs ---
     const accountIdRef = yield* Ref.make(new Map<string, string>())
-    const firstAccount = enabledAccounts[0]!
-    const firstRegion = firstAccount.regions?.[0] ?? ("us-east-1" as AwsRegion)
+    const [firstAccount, ...remainingAccounts] = enabledAccounts
+    if (firstAccount === undefined) return undefined
+    const firstRegion = primaryRegion(firstAccount)
 
     yield* resolveIdentity(
       accountIdRef,
@@ -112,9 +124,9 @@ export const resolveAccounts = (state: PRState) =>
     )
 
     yield* Effect.forEach(
-      enabledAccounts.slice(1),
+      remainingAccounts,
       (account) => {
-        const region = account.regions?.[0] ?? ("us-east-1" as AwsRegion)
+        const region = primaryRegion(account)
         return resolveIdentity(accountIdRef, account, region)
       },
       { concurrency: 3, discard: true }

@@ -22,7 +22,7 @@ const makePR = (overrides: Partial<{
     lastModifiedDate: overrides.lastModifiedDate ?? new Date("2024-01-01"),
     link: "https://example.com",
     account: { profile: "dev", region: "us-east-1" },
-    status: "OPEN" as const,
+    status: "OPEN",
     sourceBranch: "feature/x",
     destinationBranch: "main",
     isMergeable: overrides.isMergeable ?? true,

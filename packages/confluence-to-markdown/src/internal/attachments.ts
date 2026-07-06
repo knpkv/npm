@@ -18,6 +18,9 @@ interface AdfNode {
   readonly [key: string]: unknown
 }
 
+const isAdfNode = (value: unknown): value is AdfNode =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
 export interface MediaAttachmentResolution {
   readonly adfJson: string
   readonly unresolvedMediaIds: ReadonlyArray<string>
@@ -33,7 +36,8 @@ export const resolveMediaAttachmentReferences = (
   attachments: ReadonlyArray<AttachmentReference>
 ): MediaAttachmentResolution => {
   try {
-    const parsed = JSON.parse(adfJson) as AdfNode
+    const parsed = JSON.parse(adfJson)
+    if (!isAdfNode(parsed)) return { adfJson, unresolvedMediaIds: [] }
     const unresolvedMediaIds: Array<string> = []
     const resolved = resolveNode(parsed, attachmentLookup(attachments), unresolvedMediaIds)
     return { adfJson: JSON.stringify(resolved), unresolvedMediaIds }

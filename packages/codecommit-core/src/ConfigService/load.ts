@@ -8,6 +8,8 @@ import { ConfigError, ConfigParseError } from "../Errors.js"
 import type { ProfileDetectionError } from "../Errors.js"
 import { accountsFromDetected, ConfigPaths, type DetectedProfile, makeDefaultConfig, TuiConfig } from "./internal.js"
 
+const emptyDetectedProfiles = (): ReadonlyArray<DetectedProfile> => []
+
 export const makeLoad = (
   detectProfiles: Effect.Effect<
     ReadonlyArray<DetectedProfile>,
@@ -26,7 +28,7 @@ export const makeLoad = (
 
     if (!exists) {
       const detected = yield* detectProfiles.pipe(
-        Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+        Effect.catchCause(() => Effect.succeed(emptyDetectedProfiles()))
       )
       if (detected.length > 0) {
         return makeDefaultConfig(detected)
@@ -44,7 +46,7 @@ export const makeLoad = (
 
     if (config.autoDetect && config.accounts.length === 0) {
       const detected = yield* detectProfiles.pipe(
-        Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<DetectedProfile>))
+        Effect.catchCause(() => Effect.succeed(emptyDetectedProfiles()))
       )
       if (detected.length > 0) {
         return {

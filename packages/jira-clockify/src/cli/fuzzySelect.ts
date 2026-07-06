@@ -28,7 +28,19 @@ interface State<A> {
 }
 
 const ESC = "\x1b"
-const ANSI = {
+const ANSI: {
+  readonly clearLine: string
+  readonly moveUp: (n: number) => string
+  readonly col0: string
+  readonly hideCursor: string
+  readonly showCursor: string
+  readonly bold: string
+  readonly dim: string
+  readonly cyan: string
+  readonly yellow: string
+  readonly green: string
+  readonly reset: string
+} = {
   clearLine: `${ESC}[2K`,
   moveUp: (n: number) => `${ESC}[${n}A`,
   col0: `${ESC}[0G`,
@@ -40,7 +52,7 @@ const ANSI = {
   yellow: `${ESC}[33m`,
   green: `${ESC}[32m`,
   reset: `${ESC}[0m`
-} as const
+}
 
 const fuzzyMatch = (haystack: string, needle: string): boolean => {
   const words = needle.toLowerCase().split(/\s+/).filter(Boolean)

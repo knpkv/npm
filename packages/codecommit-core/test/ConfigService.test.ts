@@ -40,7 +40,7 @@ const makeMockFS = (files: Record<string, string>) => {
   }
   return {
     store,
-    layer: Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of(partial as FileSystem.FileSystem))
+    layer: Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of(partial))
   }
 }
 

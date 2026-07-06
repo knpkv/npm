@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { JiraApiClient } from "@knpkv/jira-api-client"
+import { JiraApiClient, type JiraApiClientShape } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type { paths as V3Paths } from "../../jira-api-client/src/generated/v3/schema.js"
+import { makeOpenApiFetchClient } from "../../jira-api-client/src/OpenApiFetchClient.js"
 import { stripEmails } from "../src/commands/version.js"
 import type { Version } from "../src/VersionService.js"
 import {
@@ -218,22 +220,25 @@ const versionsFixture = [
  * (so the contributor scan resolves to empty without further calls).
  */
 const makeJiraLayer = () =>
-  Layer.succeed(JiraApiClient, {
-    v3: {
-      client: {
-        GET: (path: string) =>
-          path === "/rest/api/3/project/{projectIdOrKey}/version"
-            ? Promise.resolve({
-              data: { values: versionsFixture, isLast: true },
-              response: { ok: true, status: 200 }
-            })
-            : Promise.resolve({
-              data: { issues: [], isLast: true },
-              response: { ok: true, status: 200 }
-            })
+  Layer.succeed(
+    JiraApiClient,
+    {
+      v3: {
+        client: Object.assign(makeOpenApiFetchClient<V3Paths>("https://jira.test", {}).client, {
+          GET: (path: string) =>
+            path === "/rest/api/3/project/{projectIdOrKey}/version"
+              ? Promise.resolve({
+                data: { values: versionsFixture, isLast: true },
+                response: { ok: true, status: 200 }
+              })
+              : Promise.resolve({
+                data: { issues: [], isLast: true },
+                response: { ok: true, status: 200 }
+              })
+        })
       }
-    }
-  } as never)
+    } satisfies JiraApiClientShape
+  )
 
 describe("listProjectVersions filtering", () => {
   it.effect("returns all versions when neither flag is set", () =>

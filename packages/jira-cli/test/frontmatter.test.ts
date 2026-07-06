@@ -10,7 +10,10 @@ import type { Issue } from "../src/IssueService.js"
  */
 const parseFrontMatter = (output: string): Record<string, unknown> => {
   const match = output.match(/^---\n([\s\S]*?)\n---/)
-  return match ? (yaml.load(match[1]) as Record<string, unknown>) : {}
+  const parsed = match ? yaml.load(match[1]) : {}
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? Object.fromEntries(Object.entries(parsed))
+    : {}
 }
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue => ({

@@ -66,53 +66,51 @@ export function BigTimer() {
   return (
     <box style={{ flexDirection: "column", flexGrow: 1, width: "100%" }}>
       {/* Spacer */}
-      <box style={{ flexGrow: 1 } as any} />
+      <box style={{ flexGrow: 1 }} />
 
       {/* Ticket info — centered */}
-      <box style={{ height: 1 } as any}>
-        <text fg="#00CCFF" style={{ fontWeight: "bold" } as any}>
-          {centerPad(timerState?.ticketKey ?? "", cols)}
-        </text>
+      <box style={{ height: 1 }}>
+        <text fg="#00CCFF">{centerPad(timerState?.ticketKey ?? "", cols)}</text>
       </box>
-      <box style={{ height: 1 } as any}>
+      <box style={{ height: 1 }}>
         <text fg="#888888">{centerPad(timerState?.summary?.slice(0, 60) ?? "", cols)}</text>
       </box>
 
       {/* Spacer */}
-      <box style={{ height: 1 } as any} />
+      <box style={{ height: 1 }} />
 
       {/* Big digits — centered */}
       {rows.map((row, i) => (
-        <box key={i} style={{ height: 1 } as any}>
+        <box key={i} style={{ height: 1 }}>
           <text fg="#7aa87a">{centerPad(row, cols)}</text>
         </box>
       ))}
 
       {/* Spacer */}
-      <box style={{ height: 1 } as any} />
+      <box style={{ height: 1 }} />
 
       {/* Progress bar — centered */}
-      <box style={{ height: 1 } as any}>
+      <box style={{ height: 1 }}>
         <text fg="#3a5a3a">{centerPad(bar, cols)}</text>
       </box>
 
       {/* Spacer */}
-      <box style={{ height: 1 } as any} />
+      <box style={{ height: 1 }} />
 
       {/* Controls — centered */}
-      <box style={{ height: 1 } as any}>
+      <box style={{ height: 1 }}>
         <text fg="#888888">{centerPad("x stop    d discard    l tickets    q quit", cols)}</text>
       </box>
 
       {/* Meta — centered */}
       {meta ? (
-        <box style={{ height: 1 } as any}>
+        <box style={{ height: 1 }}>
           <text fg="#555555">{centerPad(meta, cols)}</text>
         </box>
       ) : null}
 
       {/* Spacer */}
-      <box style={{ flexGrow: 1 } as any} />
+      <box style={{ flexGrow: 1 }} />
     </box>
   )
 }

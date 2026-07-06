@@ -12,7 +12,14 @@ import * as Schema from "effect/Schema"
 import type { HttpClient } from "effect/unstable/http"
 import type { OAuthError } from "../auth/OAuthErrors.js"
 import { refreshToken } from "../auth/OAuthOperations.js"
-import { type AuthProfile, findProfile, loadProfiles, saveProfiles, saveProfileToken } from "./AuthProfiles.js"
+import {
+  type AuthProfile,
+  type AuthProfilesFile,
+  findProfile,
+  loadProfiles,
+  saveProfiles,
+  saveProfileToken
+} from "./AuthProfiles.js"
 import { getProfilesPath, type HomeDirectoryError, HomeDirectoryTag } from "./ConfigPaths.js"
 import { type OAuthToken, OAuthTokenSchema } from "./OAuthSchemas.js"
 import { FileSystemError, isTokenExpired, loadOAuthConfig } from "./TokenStorage.js"
@@ -26,24 +33,24 @@ export interface AtlassianToolDefinition {
   readonly requiredScopes: ReadonlyArray<string>
 }
 
-export const JIRA_REQUIRED_SCOPES = [
+export const JIRA_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:jira-work",
   "write:jira-work",
   "manage:jira-project",
   "read:jira-user",
   "read:me",
   "offline_access"
-] as const
+]
 
-export const CONFLUENCE_REQUIRED_SCOPES = [
+export const CONFLUENCE_REQUIRED_SCOPES: ReadonlyArray<string> = [
   "read:page:confluence",
   "write:page:confluence",
   "delete:page:confluence",
   "read:me",
   "offline_access"
-] as const
+]
 
-export const ATLASSIAN_TOOLS = [
+export const ATLASSIAN_TOOLS: ReadonlyArray<AtlassianToolDefinition> = [
   {
     toolName: "jira-cli",
     label: "Jira CLI",
@@ -64,7 +71,7 @@ export const ATLASSIAN_TOOLS = [
     loginHint: "jcf auth jira login",
     requiredScopes: JIRA_REQUIRED_SCOPES
   }
-] as const satisfies ReadonlyArray<AtlassianToolDefinition>
+]
 
 export type ProfileTokenStatus = "valid" | "expired"
 
@@ -97,6 +104,11 @@ export interface ToolProfileStatus {
 
 const authStoreName = (tool: AtlassianToolDefinition): string => tool.authStoreName ?? tool.toolName
 
+const toolStorePair = (
+  tool: AtlassianToolDefinition,
+  store: AuthProfilesFile
+): readonly [AtlassianToolDefinition, AuthProfilesFile] => [tool, store]
+
 const uniqueAuthTools = (tools: ReadonlyArray<AtlassianToolDefinition>): ReadonlyArray<AtlassianToolDefinition> =>
   tools.filter((tool, index) =>
     tools.findIndex((candidate) => authStoreName(candidate) === authStoreName(tool)) === index
@@ -122,7 +134,7 @@ const loadLegacyToken = (
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: authPath, cause }))
     )
     const parsed = yield* Effect.try({
-      try: () => JSON.parse(content) as unknown,
+      try: () => JSON.parse(content),
       catch: (cause) => cause
     }).pipe(Effect.catch(() => Effect.succeed(null)))
     if (parsed === null) return null
@@ -186,7 +198,7 @@ export const useProfileForAllTools = (
   Effect.gen(function*() {
     const authTools = uniqueAuthTools(tools)
     const stores = yield* Effect.forEach(authTools, (tool) =>
-      loadProfiles(authStoreName(tool)).pipe(Effect.map((store) => [tool, store] as const)))
+      loadProfiles(authStoreName(tool)).pipe(Effect.map((store) => toolStorePair(tool, store))))
     const selected = stores.map(([, store]) =>
       findProfile(store.profiles, selector)
     ).find((profile): profile is AuthProfile =>

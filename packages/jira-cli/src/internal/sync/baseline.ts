@@ -15,13 +15,13 @@ export const parseSyncBaseline = (
 ): Effect.Effect<SyncBaseline, SyncWorkspaceError | SyncValidationError> =>
   Effect.gen(function*() {
     const raw = yield* Effect.try({
-      try: () => JSON.parse(content) as unknown,
+      try: (): unknown => JSON.parse(content),
       catch: (cause) => new SyncWorkspaceError({ message: "Failed to parse Sync Baseline JSON", path, cause })
     })
-    return yield* Schema.decodeUnknownEffect(SyncBaselineSchema)(raw).pipe(
-      Effect.map((baseline) => baseline as SyncBaseline),
+    const baseline: SyncBaseline = yield* Schema.decodeUnknownEffect(SyncBaselineSchema)(raw).pipe(
       Effect.mapError((cause) => new SyncValidationError({ message: "Invalid Sync Baseline", path, cause }))
     )
+    return baseline
   })
 
 export const serializeSyncBaseline = (baseline: SyncBaseline): string => `${JSON.stringify(baseline, null, 2)}\n`

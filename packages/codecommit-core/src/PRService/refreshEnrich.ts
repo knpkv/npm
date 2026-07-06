@@ -3,15 +3,18 @@
  * Phase 4: Fetch comments for each PR, diff, cache, and count.
  */
 
-import { Effect, Option, Ref, SubscriptionRef } from "effect"
+import { Effect, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffComments } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
-import type { AwsProfileName, AwsRegion, PRCommentLocation } from "../Domain.js"
+import { AwsProfileName, AwsRegion, type PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
+
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 
 const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>) =>
   Effect.gen(function*() {
@@ -24,8 +27,8 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
 
     const locs = yield* awsClient.getCommentsForPullRequest({
       account: {
-        profile: row.accountProfile as AwsProfileName,
-        region: row.accountRegion as AwsRegion
+        profile: decodeAwsProfileName(row.accountProfile),
+        region: decodeAwsRegion(row.accountRegion)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
@@ -67,7 +70,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
 export const enrichComments = (params: {
   readonly state: PRState
   readonly subscribedRef: Ref.Ref<Set<string>>
-}): Effect.Effect<void, unknown, unknown> =>
+}): Effect.Effect<void, never, AwsClient | CommentRepo | NotificationRepo | PullRequestRepo> =>
   Effect.gen(function*() {
     const prRepo = yield* PullRequestRepo
 

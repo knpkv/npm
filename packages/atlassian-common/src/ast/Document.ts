@@ -98,4 +98,4 @@ export const isDocument = (value: unknown): value is Document =>
   typeof value === "object" &&
   value !== null &&
   "children" in value &&
-  Array.isArray((value as Document).children)
+  Array.isArray(Reflect.get(value, "children"))

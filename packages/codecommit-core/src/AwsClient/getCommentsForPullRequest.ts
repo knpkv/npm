@@ -1,8 +1,11 @@
 /**
  * @internal
  */
+import type { Credentials, Region } from "distilled-aws"
+import type { GetCommentsForPullRequestError } from "distilled-aws/codecommit"
 import * as codecommit from "distilled-aws/codecommit"
 import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"
 import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 
@@ -11,6 +14,8 @@ import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, wi
 // ---------------------------------------------------------------------------
 
 const EpochFallback = new Date(0)
+type CommentPageError = GetCommentsForPullRequestError | Schema.SchemaError
+type CommentPageEnv = Credentials.Credentials | Region.Region | HttpClient.HttpClient
 
 // Bidirectional Schema: raw AWS comment (enriched with location) ↔ PRComment
 const RawComment = Schema.Struct({
@@ -108,27 +113,40 @@ const RawToCommentLocation = RawCommentLocation.pipe(
 
 // Effectful decode — ParseError in error channel instead of thrown defect
 const decodeCommentLocation = (raw: unknown) =>
-  Schema.decodeUnknownEffect(RawToCommentLocation)(raw).pipe(
-    Effect.map((result) => result as unknown as PRCommentLocation)
-  )
+  Schema.decodeUnknownEffect(RawToCommentLocation)(raw).pipe(Effect.map((result): PRCommentLocation => ({
+    ...(result.filePath === undefined ? {} : { filePath: result.filePath }),
+    ...(result.beforeCommitId === undefined ? {} : { beforeCommitId: result.beforeCommitId }),
+    ...(result.afterCommitId === undefined ? {} : { afterCommitId: result.afterCommitId }),
+    comments: result.comments
+  })))
+
+const firstPageToken: string | undefined = undefined
+
+const nextPageToken = (token: string | undefined): Option.Option<string | undefined> =>
+  token === undefined ? Option.none() : Option.some(token)
+
+const commentPage = (
+  locations: ReadonlyArray<PRCommentLocation>,
+  nextToken: Option.Option<string | undefined>
+): readonly [ReadonlyArray<PRCommentLocation>, Option.Option<string | undefined>] => [locations, nextToken]
+
+const commentPageRequest = (pullRequestId: string, nextToken: string | undefined) =>
+  nextToken === undefined ? { pullRequestId } : { pullRequestId, nextToken }
 
 // NOTE: repositoryName is intentionally omitted — passing it without
 // beforeCommitId/afterCommitId triggers CommitIdRequiredException.
 const fetchCommentPages = (pullRequestId: string) =>
-  Stream.paginate(
-    undefined as string | undefined,
+  Stream.paginate<string | undefined, PRCommentLocation, CommentPageError, CommentPageEnv>(
+    firstPageToken,
     (nextToken) =>
-      codecommit.getCommentsForPullRequest({
-        pullRequestId,
-        ...(nextToken && { nextToken })
-      }).pipe(
+      codecommit.getCommentsForPullRequest(commentPageRequest(pullRequestId, nextToken)).pipe(
         Effect.flatMap((resp) =>
           Effect.forEach(resp.commentsForPullRequestData ?? [], decodeCommentLocation).pipe(
             Effect.map((locations) =>
-              [
+              commentPage(
                 locations,
-                resp.nextToken ? Option.some(resp.nextToken) : Option.none()
-              ] as const
+                nextPageToken(resp.nextToken)
+              )
             )
           )
         )

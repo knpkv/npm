@@ -2,6 +2,7 @@
 
 ruleDirs:
   - ast-grep/rules/effect
+  - ast-grep/rules/typescript
 
 languageGlobs:
   tsx:

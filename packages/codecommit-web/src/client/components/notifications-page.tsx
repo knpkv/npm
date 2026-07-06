@@ -1,4 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
+import { Option, Schema } from "effect"
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -10,8 +12,6 @@ import {
   MailOpenIcon,
   TriangleAlertIcon
 } from "lucide-react"
-import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
-import { Option, Schema } from "effect"
 import { useState } from "react"
 import { useNavigate } from "react-router"
 import {
@@ -32,6 +32,8 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.js"
 
 const isAuthError = (message: string) =>
   /ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials|expired/i.test(message)
+
+const isNotificationFilter = (value: string): value is "system" | "prs" => value === "system" || value === "prs"
 
 const typeIcon = (type: string) => {
   switch (type) {
@@ -100,7 +102,7 @@ export function NotificationsPage() {
     })
   const state = useAtomValue(appStateAtom)
   const navigate = useNavigate()
-  const { items: rawItems, hasMore, isLoading, loadMore } = useInfiniteNotifications({ filter, unreadOnly })
+  const { hasMore, isLoading, items: rawItems, loadMore } = useInfiniteNotifications({ filter, unreadOnly })
   const markRead = useAtomSet(markNotificationReadAtom)
   const markUnread = useAtomSet(markNotificationUnreadAtom)
   const markAllRead = useAtomSet(markAllNotificationsReadAtom)
@@ -146,7 +148,7 @@ export function NotificationsPage() {
         <ToggleGroup
           type="single"
           value={filter ?? "all"}
-          onValueChange={(v: string) => setFilter(v === "all" || v === "" ? undefined : (v as "system" | "prs"))}
+          onValueChange={(v: string) => setFilter(isNotificationFilter(v) ? v : undefined)}
           variant="outline"
           size="sm"
         >

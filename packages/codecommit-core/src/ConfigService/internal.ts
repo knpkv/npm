@@ -11,6 +11,18 @@ import type { ConfigError, ProfileDetectionError } from "../Errors.js"
 
 const decodingDefault = <A>(value: A): Effect.Effect<A, Schema.SchemaError, never> => Effect.succeed(value)
 
+interface SandboxVolumeMountDefault {
+  readonly hostPath: string
+  readonly containerPath: string
+  readonly readonly: boolean
+}
+
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
+const emptyStrings: Array<string> = []
+const emptyEnv: Record<string, string> = {}
+const emptyVolumeMounts: Array<SandboxVolumeMountDefault> = []
+const defaultAccountRegions: Array<AwsRegion> = [decodeAwsRegion("us-east-1")]
+
 export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProfile")({
   name: Schema.NonEmptyString.pipe(Schema.brand("AwsProfileName")),
   region: Schema.optionalKey(AwsRegion)
@@ -18,12 +30,12 @@ export class DetectedProfile extends Schema.Class<DetectedProfile>("DetectedProf
 
 export const SandboxConfig = Schema.Struct({
   image: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault("codercom/code-server:latest"))),
-  extensions: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(decodingDefault([] as Array<string>))),
+  extensions: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(emptyStrings))),
   setupCommands: Schema.Array(Schema.String).pipe(
-    Schema.withDecodingDefaultTypeKey(decodingDefault([] as Array<string>))
+    Schema.withDecodingDefaultTypeKey(decodingDefault(emptyStrings))
   ),
   env: Schema.Record(Schema.String, Schema.String).pipe(
-    Schema.withDecodingDefaultTypeKey(decodingDefault({} as Record<string, string>))
+    Schema.withDecodingDefaultTypeKey(decodingDefault(emptyEnv))
   ),
   volumeMounts: Schema.Array(
     Schema.Struct({
@@ -33,7 +45,7 @@ export const SandboxConfig = Schema.Struct({
     })
   ).pipe(
     Schema.withDecodingDefaultTypeKey(
-      decodingDefault([] as Array<{ hostPath: string; containerPath: string; readonly: boolean }>)
+      decodingDefault(emptyVolumeMounts)
     )
   ),
   cloneDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
@@ -48,7 +60,7 @@ export const defaultSandboxConfig: SandboxConfig = Schema.decodeSync(SandboxConf
 export const AccountConfig = Schema.Struct({
   profile: AwsProfileName,
   regions: Schema.Array(AwsRegion).pipe(
-    Schema.withDecodingDefaultTypeKey(decodingDefault(["us-east-1" as AwsRegion]))
+    Schema.withDecodingDefaultTypeKey(decodingDefault(defaultAccountRegions))
   ),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(decodingDefault(true)))
 })

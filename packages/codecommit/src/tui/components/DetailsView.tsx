@@ -11,6 +11,7 @@ import { type AppState, appStateAtom } from "../atoms/app.js"
 import { selectedPrIdAtom, showDetailsCommentsAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"
 import { Badge } from "./Badge.js"
+import type { BadgeVariant } from "./Badge.js"
 import { StatusRow } from "./StatusRow.js"
 
 const defaultState: AppState = {
@@ -18,6 +19,12 @@ const defaultState: AppState = {
   pullRequests: [],
   accounts: []
 }
+
+const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
+const successVariant: BadgeVariant = "success"
+const warningVariant: BadgeVariant = "warning"
+const neutralVariant: BadgeVariant = "neutral"
+const errorVariant: BadgeVariant = "error"
 
 const formatRelativeDate = (date: Date): string => {
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -93,7 +100,7 @@ function CommentsSection({
   }, [pr, fetchComments])
 
   const loading = AsyncResult.isInitial(commentsResult)
-  const comments = AsyncResult.getOrElse(commentsResult, () => [] as Array<Domain.PRCommentLocation>)
+  const comments = AsyncResult.getOrElse(commentsResult, emptyCommentLocations)
   const totalCount = comments.reduce((sum, loc) => sum + loc.comments.reduce((s, t) => s + countThread(t), 0), 0)
 
   return (
@@ -142,12 +149,12 @@ export function DetailsView() {
   const tier = score ? getScoreTier(score.total) : undefined
   const scoreBadgeVariant =
     tier === "green"
-      ? ("success" as const)
+      ? successVariant
       : tier === "yellow"
-        ? ("warning" as const)
+        ? warningVariant
         : tier === undefined
-          ? ("neutral" as const)
-          : ("error" as const)
+          ? neutralVariant
+          : errorVariant
 
   // Reset comments visibility on PR change
   useEffect(() => {

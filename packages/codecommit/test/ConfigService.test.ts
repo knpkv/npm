@@ -6,11 +6,9 @@ import { describe, expect, it } from "vitest"
 
 const MockPath = Path.layer
 
-const makeMockFileSystem = (partial: Partial<FileSystem.FileSystem>) =>
-  Layer.succeed(
-    FileSystem.FileSystem,
-    FileSystem.FileSystem.of(partial as FileSystem.FileSystem)
-  )
+const makeMockFileSystem = (partial: Partial<FileSystem.FileSystem>) => {
+  return FileSystem.layerNoop(partial)
+}
 
 const runWithConfig = <A>(
   program: Effect.Effect<A, unknown, ConfigService.ConfigService>,
@@ -22,7 +20,7 @@ const runWithConfig = <A>(
       ConfigService.ConfigServiceLive.pipe(
         Layer.provide(Layer.mergeAll(fileSystem, MockPath, CacheService.EventsHub.Default))
       )
-    ) as Effect.Effect<A, unknown>
+    )
   )
 
 describe("ConfigService", () => {

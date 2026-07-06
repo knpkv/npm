@@ -31,7 +31,7 @@ describe("Domain", () => {
       lastModifiedDate: new Date("2024-01-16"),
       link: "https://console.aws.amazon.com",
       account: { profile: "dev", region: "us-east-1" },
-      status: "OPEN" as const,
+      status: "OPEN",
       sourceBranch: "feature/x",
       destinationBranch: "main",
       isMergeable: true,
@@ -129,13 +129,13 @@ describe("Domain", () => {
       lastModifiedDate: new Date("2024-01-16"),
       link: "https://console.aws.amazon.com",
       account: { profile: "dev", region: "us-east-1" },
-      status: "OPEN" as const,
+      status: "OPEN",
       sourceBranch: "feature/x",
       destinationBranch: "main",
       isMergeable: true,
       isApproved: false,
-      approvedBy: [] as Array<string>,
-      commentedBy: [] as Array<string>
+      approvedBy: [],
+      commentedBy: []
     }
 
     it.effect("returns false when no currentUser", () =>

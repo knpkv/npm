@@ -8,12 +8,14 @@
  * {@link makeApiError} (factory produces AwsApiError with correct fields).
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { parseRuleContent } from "../src/AwsClient/approvalRuleContent.js"
 import { isThrottlingError, makeApiError, normalizeAuthor } from "../src/AwsClient/internal.js"
-import type { AwsProfileName, AwsRegion } from "../src/Domain.js"
+import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 
 const runParse = (content?: string) => Effect.runSync(parseRuleContent(content))
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 
 describe("AwsClient internals", () => {
   describe("normalizeAuthor", () => {
@@ -184,7 +186,12 @@ describe("AwsClient internals", () => {
   describe("makeApiError", () => {
     // Factory should produce AwsApiError with correct tag and fields
     it("creates AwsApiError with correct fields", () => {
-      const err = makeApiError("getPullRequest", "dev" as AwsProfileName, "us-east-1" as AwsRegion, new Error("boom"))
+      const err = makeApiError(
+        "getPullRequest",
+        decodeAwsProfileName("dev"),
+        decodeAwsRegion("us-east-1"),
+        new Error("boom")
+      )
       expect(err._tag).toBe("AwsApiError")
       expect(err.operation).toBe("getPullRequest")
       expect(err.profile).toBe("dev")
