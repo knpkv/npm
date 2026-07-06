@@ -31,8 +31,8 @@ export class FetchClientError extends Data.TaggedError("FetchClientError")<{
 
 /** Extract success `data` from a FetchResponse discriminated union. */
 export type SuccessData<T> = T extends { data: infer D; error?: undefined } ? D
-  : T extends { data?: infer D } ? NonNullable<D>
-  : never
+  : T extends { data?: infer D } ? D | undefined
+  : undefined
 
 const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
   typeof value === "object" && value !== null
@@ -68,9 +68,6 @@ export const toEffect = <T extends Record<string | number, any>, O, M extends Me
       promise.then(({ data, error, response }) => {
         if (error !== undefined || !response.ok) {
           throw { error, status: response.status }
-        }
-        if (data === undefined) {
-          throw { error: "OpenAPI response did not contain data", status: response.status }
         }
         return data
       }),

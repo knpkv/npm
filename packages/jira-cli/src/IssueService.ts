@@ -123,10 +123,11 @@ const recordArray = (value: unknown): ReadonlyArray<Readonly<Record<PropertyKey,
 
 const parseSearchJqlResponse = (value: unknown): SearchJqlResponse => {
   const record = recordOrEmpty(value)
+  const nextPageToken = typeof record.nextPageToken === "string" ? record.nextPageToken : undefined
   return {
     issues: Array.isArray(record.issues) ? record.issues : [],
-    isLast: typeof record.isLast === "boolean" ? record.isLast : true,
-    ...(typeof record.nextPageToken === "string" ? { nextPageToken: record.nextPageToken } : {})
+    isLast: typeof record.isLast === "boolean" ? record.isLast : nextPageToken === undefined,
+    ...(nextPageToken !== undefined ? { nextPageToken } : {})
   }
 }
 
