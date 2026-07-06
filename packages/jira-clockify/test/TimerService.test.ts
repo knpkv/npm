@@ -3,6 +3,7 @@ import type { ClockifyApiClientShape, TimeEntry, V1 } from "@knpkv/clockify-api-
 import { ClockifyApiClient, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
 import { FetchClientError, JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -531,6 +532,54 @@ describe("TimerService", () => {
         yield* svc.start(makeTicket())
         const result = yield* svc.stop()
         expect(result.needsProjectId).toBe(true)
+      }).pipe(Effect.provide(TestLayer)))
+  })
+
+  // End Correction: a corrected `endedAt` (user forgot to stop) is used verbatim when in
+  // bounds and rejected — never clamped — when out of bounds, before any Clockify write.
+  describe("End Correction (endedAt)", () => {
+    const T0 = Date.parse("2025-01-01T09:00:00.000Z") // timer start
+    const NOW = Date.parse("2025-01-01T12:00:00.000Z") // when the user finally runs stop
+
+    it.effect("logs the corrected end (not now) on the Clockify entry and duration", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        yield* TestClock.setTime(T0)
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket())
+        yield* TestClock.setTime(NOW)
+        const end = new Date(Date.parse("2025-01-01T10:30:00.000Z")) // 90m after start
+        const result = yield* svc.stop({ endedAt: end })
+        expect(Duration.toSeconds(result.duration)).toBe(5400)
+        expect(updatedEntries).toHaveLength(1)
+        const params = paramsRecord(updatedEntries[0]!.params)
+        expect(params["end"]).toBe(end.toISOString())
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("rejects a corrected end at or before the start, writing nothing", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        yield* TestClock.setTime(T0)
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket())
+        yield* TestClock.setTime(NOW)
+        const exit = yield* svc.stop({ endedAt: new Date(T0 - 60_000) }).pipe(Effect.flip)
+        expect(exit).toBeInstanceOf(TimerError)
+        expect(exit.message).toContain("at or before")
+        expect(updatedEntries).toHaveLength(0)
+      }).pipe(Effect.provide(TestLayer)))
+
+    it.effect("rejects a corrected end in the future, writing nothing", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        yield* TestClock.setTime(T0)
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket())
+        yield* TestClock.setTime(NOW)
+        const exit = yield* svc.stop({ endedAt: new Date(NOW + 60_000) }).pipe(Effect.flip)
+        expect(exit).toBeInstanceOf(TimerError)
+        expect(exit.message).toContain("future")
+        expect(updatedEntries).toHaveLength(0)
       }).pipe(Effect.provide(TestLayer)))
   })
 

@@ -14,6 +14,10 @@ interface PopupMessageProps {
   readonly onRetry?: (() => void) | undefined
   /** Disables the retry action while a retry is in flight. */
   readonly retrying?: boolean
+  /** When provided, shows an "Edit (e)" action — e.g. correct a timer's end before stopping. */
+  readonly onEdit?: (() => void) | undefined
+  /** Label for the dismiss action (defaults to "OK"). */
+  readonly dismissLabel?: string
 }
 
 const typeColors = {
@@ -28,13 +32,26 @@ const typeIcons = {
   info: "●"
 }
 
-export function PopupMessage({ lines, onDismiss, onRetry, retrying = false, title, type = "info" }: PopupMessageProps) {
+export function PopupMessage({
+  dismissLabel = "OK",
+  lines,
+  onDismiss,
+  onEdit,
+  onRetry,
+  retrying = false,
+  title,
+  type = "info"
+}: PopupMessageProps) {
   const color = typeColors[type]
   const icon = typeIcons[type]
 
   useKeyboard((key: { name: string; ctrl?: boolean; char?: string }) => {
     if (onRetry && !retrying && (key.name === "r" || key.char === "r")) {
       onRetry()
+      return
+    }
+    if (onEdit && (key.name === "e" || key.char === "e")) {
+      onEdit()
       return
     }
     if (key.name === "return" || key.name === "escape" || key.name === "q") {
@@ -93,8 +110,13 @@ export function PopupMessage({ lines, onDismiss, onRetry, retrying = false, titl
               <text fg="#000000">{retrying ? "Retrying…" : "Retry (r)"}</text>
             </box>
           ) : null}
+          {onEdit ? (
+            <box style={{ backgroundColor: "#FFAA00", paddingLeft: 2, paddingRight: 2 }}>
+              <text fg="#000000">Edit end (e)</text>
+            </box>
+          ) : null}
           <box style={{ backgroundColor: color, paddingLeft: 2, paddingRight: 2 }}>
-            <text fg="#000000">OK (enter)</text>
+            <text fg="#000000">{`${dismissLabel} (enter)`}</text>
           </box>
         </box>
       </box>

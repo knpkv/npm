@@ -142,6 +142,12 @@ export interface StopOptions {
   readonly projectId?: string | undefined
   readonly billable?: boolean | undefined
   readonly comment?: string | undefined
+  /**
+   * End Correction: the real time work stopped, when the user forgot to stop and
+   * is pulling the end back from "now". Rejected (not clamped) if out of bounds —
+   * see the two-param note on {@link internalStop}. Omit to end at the current time.
+   */
+  readonly endedAt?: Date | undefined
 }
 
 /** A completed interval logged retroactively when the timer was never started. */
@@ -389,6 +395,17 @@ export const layer = Layer.effect(
         yield* SubscriptionRef.set(ref, newState)
       })
 
+    // Two ways the end can be moved off "now", with deliberately opposite
+    // out-of-bounds behaviour:
+    //
+    // - `options.endedAt` (public End Correction, from a user who forgot to stop):
+    //   REJECTED if it isn't `start < end <= now`. We never clamp a bad user end,
+    //   because clamping would silently log the full forgotten duration — the exact
+    //   bug this feature exists to fix. Validated up front, before any Clockify
+    //   write, so a rejected end is a clean no-op the caller can re-prompt on.
+    // - `endAt` (internal, from `start` auto-closing the previous entry at a
+    //   backdated new-start): CLAMPED to `now` if it would fall before the entry
+    //   began, so the two Clockify intervals never overlap. No user is choosing it.
     const internalStop = (options?: StopOptions, endAt?: Date) =>
       Effect.gen(function*() {
         const auth = yield* getAuth
@@ -398,10 +415,22 @@ export const layer = Layer.effect(
           return yield* Effect.fail(new TimerError({ message: "No active timer" }))
         }
 
-        // `endAt` lets `start` close the previous entry at the new (possibly
-        // backdated) start time so the two Clockify intervals never overlap.
-        // Never end before the entry began.
-        const now = endAt && endAt.getTime() >= current.startedAt.getTime() ? endAt : yield* DateTime.nowAsDate
+        const realNow = yield* DateTime.nowAsDate
+        let now: Date
+        if (options?.endedAt) {
+          const corrected = options.endedAt
+          if (corrected.getTime() <= current.startedAt.getTime()) {
+            return yield* Effect.fail(new TimerError({ message: "Corrected end is at or before the timer start." }))
+          }
+          if (corrected.getTime() > realNow.getTime()) {
+            return yield* Effect.fail(new TimerError({ message: "Corrected end is in the future." }))
+          }
+          now = corrected
+        } else if (endAt && endAt.getTime() >= current.startedAt.getTime()) {
+          now = endAt
+        } else {
+          now = realNow
+        }
         const durationMs = now.getTime() - current.startedAt.getTime()
         const duration = Duration.millis(durationMs)
 

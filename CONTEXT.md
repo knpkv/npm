@@ -92,6 +92,14 @@ _Avoid_: Pull request command, CodeCommit review command
 A Resource Command that operates on Jira-backed Clockify timer state.
 _Avoid_: Time command, worklog command
 
+**End Correction**:
+Pulling a still-running Timer's end back to when work actually stopped, applied before the Clockify entry and Jira worklog are written so the logged duration reflects reality rather than the moment the user remembered to stop.
+_Avoid_: Edit, adjust, stop-time fix
+
+**Reconstructed Interval**:
+A completed time interval logged after the fact when a Timer was never started, built from a ticket, duration, and start time rather than from a running Timer.
+_Avoid_: Correction interval, manual log, backfill
+
 **Jira Custom Field**:
 A Jira issue field defined by a Jira site or project outside Jira's built-in issue fields, identified operationally by a site-specific field id and often shown to users by a display name.
 _Avoid_: Extra field, metadata field

@@ -9,6 +9,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
 import type { JiraWorklogOutcome, TimerState, WorklogParams } from "../services/TimerService.js"
+import { formatClock, formatDuration, resolveCorrectedEnd } from "../utils/time.js"
 import { refreshAtom, ticketsAtom } from "./atoms/tickets.js"
 import {
   detectRunningAtom,
@@ -65,6 +66,13 @@ function AppContent({ onQuit }: AppProps) {
   const [showTickets, setShowTickets] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   const [isDiscarding, setIsDiscarding] = useState(false)
+  // End Correction popups: confirm the end (default keep now), then optionally edit it,
+  // before the comment popup. `correctedEnd` carries the chosen end into the stop call.
+  const [endConfirm, setEndConfirm] = useState(false)
+  const [endEditing, setEndEditing] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
+  const [endDefault, setEndDefault] = useState("")
+  const [correctedEnd, setCorrectedEnd] = useState<Date | null>(null)
   // Params to retry a Jira worklog after a partial stop (Clockify saved, Jira failed)
   const [retryParams, setRetryParams] = useState<WorklogParams | null>(null)
   const [isRetrying, setIsRetrying] = useState(false)
@@ -85,7 +93,7 @@ function AppContent({ onQuit }: AppProps) {
   const timerActive = timerState?.active ?? false
 
   // Auto-switch views — frozen while popup is showing
-  const hasPopup = isStopping || isDiscarding || resultMsg !== null
+  const hasPopup = isStopping || isDiscarding || resultMsg !== null || endConfirm || endEditing
   useEffect(() => {
     if (hasPopup) return // don't switch while popup is open
     if (timerActive) setShowTickets(false)
@@ -163,14 +171,63 @@ function AppContent({ onQuit }: AppProps) {
     retryWorklog(retryParams)
   }, [retryParams, isRetrying, retryWorklog])
 
-  // Stop handler with comment — freeze view so popup stays visible
+  // Stop handler with comment — freeze view so popup stays visible. Carries the
+  // End Correction end (if the user corrected it in the confirm/edit popups).
   const handleStop = useCallback(
     (comment: string) => {
       setFrozenOnTimer(true) // keep big timer visible while popup shows
       setIsStopping(false)
-      stopTimer({ comment: comment.trim() || undefined })
+      stopTimer({ comment: comment.trim() || undefined, ...(correctedEnd ? { endedAt: correctedEnd } : {}) })
     },
-    [stopTimer]
+    [stopTimer, correctedEnd]
+  )
+
+  // Open the End Correction flow: confirm the end before the comment popup.
+  // Don't freeze the view here — the timer is still active (so the big timer stays
+  // visible on its own) and only `handleStop` should set `frozenOnTimer`, which the
+  // result observer reads as "a stop was actually committed". Freezing earlier would
+  // let a cancel re-surface a *previous* stop's result popup.
+  const beginStop = useCallback(() => {
+    setCorrectedEnd(null)
+    setEndError(null)
+    setEndConfirm(true)
+  }, [])
+
+  // "Keep now" — accept the current end and move on to the comment popup.
+  const keepEndNow = useCallback(() => {
+    setEndConfirm(false)
+    setCorrectedEnd(null)
+    setIsStopping(true)
+  }, [])
+
+  // "Edit end" — swap the confirm for the end-time input, prefilled with now.
+  const editEnd = useCallback(() => {
+    setEndConfirm(false)
+    setEndError(null)
+    setEndDefault(formatClock(new Date()))
+    setEndEditing(true)
+  }, [])
+
+  // Validate the entered end; on success advance to the comment popup, else re-prompt.
+  const submitEnd = useCallback(
+    (value: string) => {
+      const startedAt = timerState?.startedAt
+      if (!startedAt) {
+        setEndEditing(false)
+        setIsStopping(true)
+        return
+      }
+      const r = resolveCorrectedEnd({ start: startedAt, input: value, now: new Date() })
+      if (!r.ok) {
+        setEndError(r.error)
+        return
+      }
+      setCorrectedEnd(r.end)
+      setEndError(null)
+      setEndEditing(false)
+      setIsStopping(true)
+    },
+    [timerState]
   )
 
   useKeyboard((key: { name: string; ctrl?: boolean; meta?: boolean; char?: string }) => {
@@ -179,8 +236,8 @@ function AppContent({ onQuit }: AppProps) {
       return
     }
 
-    // Popup open — block all keys (input handles its own)
-    if (isStopping || resultMsg) return
+    // Popup open — block all keys (the popup handles its own)
+    if (isStopping || resultMsg || endConfirm || endEditing) return
 
     // Filter mode
     if (isFiltering) {
@@ -236,7 +293,7 @@ function AppContent({ onQuit }: AppProps) {
         break
       }
       case "x":
-        if (timerActive) setIsStopping(true)
+        if (timerActive) beginStop()
         break
       case "d":
         if (timerActive) setIsDiscarding(true)
@@ -283,6 +340,35 @@ function AppContent({ onQuit }: AppProps) {
               type: "info"
             })
           }}
+        />
+      ) : null}
+      {endConfirm && timerState?.startedAt
+        ? (() => {
+            const now = new Date()
+            const started = timerState.startedAt
+            const elapsed = Math.max(0, Math.floor((now.getTime() - started.getTime()) / 1000))
+            return (
+              <PopupMessage
+                title="Stop timer"
+                lines={[
+                  { text: `Started ${formatClock(started)} · ends now ${formatClock(now)}`, color: "#CCCCCC" },
+                  { text: `Worked ${formatDuration(elapsed)} — end time correct?`, color: "#888888" }
+                ]}
+                type="info"
+                dismissLabel="Keep now"
+                onEdit={editEnd}
+                onDismiss={keepEndNow}
+              />
+            )
+          })()
+        : null}
+      {endEditing ? (
+        <PopupInput
+          title="Real end time (HH:MM today or ISO)"
+          defaultValue={endDefault}
+          error={endError ?? undefined}
+          onSubmit={submitEnd}
+          onCancel={() => setEndEditing(false)}
         />
       ) : null}
       {isStopping ? (
