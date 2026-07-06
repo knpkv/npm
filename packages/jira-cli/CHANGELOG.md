@@ -1,5 +1,23 @@
 # @knpkv/jira-cli
 
+## 1.2.0
+
+### Minor Changes
+
+- [#114](https://github.com/knpkv/npm/pull/114) [`904d3d7`](https://github.com/knpkv/npm/commit/904d3d75948d94558484094cf225b5ea6585663e) Thanks [@konopkov](https://github.com/konopkov)! - Add Jira and Confluence attachment support.
+
+  - Add shared attachment rendering and placeholder replacement helpers.
+  - Support multipart attachment upload calls in Jira and Confluence API clients.
+  - Render Jira attachments as inline image previews or links with hidden attachment metadata.
+  - Resolve Confluence media attachments to visible Markdown previews while preserving native media ADF identity.
+  - Add explicit Jira and Confluence attachment upload commands with optional Markdown placeholder insertion.
+
+### Patch Changes
+
+- Updated dependencies [[`904d3d7`](https://github.com/knpkv/npm/commit/904d3d75948d94558484094cf225b5ea6585663e)]:
+  - @knpkv/atlassian-common@1.1.0
+  - @knpkv/jira-api-client@0.4.0
+
 ## 1.1.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/confluence-to-markdown",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sync Confluence Cloud pages to local GitHub Flavored Markdown files",
   "license": "MIT",
   "author": "knpkv",
