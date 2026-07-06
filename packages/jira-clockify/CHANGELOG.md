@@ -1,5 +1,30 @@
 # @knpkv/jira-clockify
 
+## 1.1.0
+
+### Minor Changes
+
+- [#117](https://github.com/knpkv/npm/pull/117) [`3d2e60f`](https://github.com/knpkv/npm/commit/3d2e60fd7d54852c9345a8577a411c82511e2fd3) Thanks [@konopkov](https://github.com/konopkov)! - Add End Correction to `jcf timer stop` — for when you forget to stop a running timer.
+
+  - Stopping a running timer now always confirms the end first (`Started HH:MM · ends now HH:MM (…)`), defaulting to now on Enter.
+  - Declining the confirm prompts for the real end as `HH:MM` (today) or a full ISO timestamp; a bare `HH:MM` that lands in the future rolls back to yesterday (the overnight "forgot to stop" case).
+  - Add `jcf timer stop --at <HH:MM|ISO>` to set the corrected end non-interactively (skips the confirm).
+  - The corrected end is validated (`start < end <= now`) and re-prompted on failure — never clamped, so a bad value can't silently log the full forgotten duration. The Clockify entry and Jira worklog both use the corrected end.
+  - The TUI stop flow gains the same confirm/edit step before the comment popup.
+
+### Patch Changes
+
+- [#118](https://github.com/knpkv/npm/pull/118) [`da19038`](https://github.com/knpkv/npm/commit/da19038c59ade8e0b553874c02ad6017a0ed5d26) Thanks [@konopkov](https://github.com/konopkov)! - Fix the TUI stop confirmation popup: action buttons stacked vertically and overflowed the dialog box because the button row lacked `flexDirection: "row"`. Multiple buttons (e.g. "Edit end" + "Keep now", or "Retry" + "OK") now sit side by side inside the box.
+
+- [#119](https://github.com/knpkv/npm/pull/119) [`468c3a2`](https://github.com/knpkv/npm/commit/468c3a2e84677d70cd887e343fd0f70059c3b2e0) Thanks [@konopkov](https://github.com/konopkov)! - Center the title and message lines in the TUI popup dialog (`PopupMessage`) so all content — title, lines, and action buttons — is horizontally centered, instead of the title/lines being left-aligned while the buttons were centered.
+
+- [#120](https://github.com/knpkv/npm/pull/120) [`408828e`](https://github.com/knpkv/npm/commit/408828e252c3765758e64794848c48fb98f4e004) Thanks [@konopkov](https://github.com/konopkov)! - Fix the TUI big-timer view rendering left-of-center: `useTerminalSize()` was hardcoded to 80 columns, so the ticket, digits, progress bar, and controls were centered within the leftmost 80 columns instead of the full terminal width. It now reads the live terminal width (via `useTerminalDimensions`), so the timer centers correctly and tracks resizes.
+
+- Updated dependencies [[`904d3d7`](https://github.com/knpkv/npm/commit/904d3d75948d94558484094cf225b5ea6585663e)]:
+  - @knpkv/atlassian-common@1.1.0
+  - @knpkv/jira-api-client@0.4.0
+  - @knpkv/jira-cli@1.2.0
+
 ## 1.0.2
 
 ### Patch Changes
