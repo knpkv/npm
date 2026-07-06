@@ -88,7 +88,7 @@ export function PopupMessage({
         }}
       >
         {/* Title */}
-        <box style={{ height: 1 }}>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "center" }}>
           <text fg={color}>{`${icon} ${title}`}</text>
         </box>
 
@@ -96,8 +96,8 @@ export function PopupMessage({
 
         {/* Result lines */}
         {lines.map((line, i) => (
-          <box key={i} style={{ height: 1 }}>
-            <text fg={line.color ?? "#CCCCCC"}>{`  ${line.text}`}</text>
+          <box key={i} style={{ height: 1, flexDirection: "row", justifyContent: "center" }}>
+            <text fg={line.color ?? "#CCCCCC"}>{line.text}</text>
           </box>
         ))}
 
