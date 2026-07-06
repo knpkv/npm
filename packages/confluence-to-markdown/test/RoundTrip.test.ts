@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../src/AtlaskitTransformers.js"
+import { externalizeAdfMetadata, hydrateAdfMetadata } from "../src/internal/adfMetadata.js"
 import { layer as MarkdownConverterLayer, MarkdownConverter } from "../src/MarkdownConverter.js"
 
 const TestLayer = MarkdownConverterLayer.pipe(
@@ -127,6 +128,48 @@ describe("MarkdownConverter round-trip", () => {
       ].join("\n")
       const content = parsedContent(yield* converter.markdownToAdf(legacyMarkdown))
       expect(content[0]).toEqual(codeBlock)
+    }).pipe(Effect.provide(TestLayer)))
+
+  it.effect("hydrated table whose cell text contains `<` pushes to a single table (no junk paragraph)", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      // A cell whose text contains `<` (here the real idp `<!DOCTYPE` symptom):
+      // when the sidecar blob is hydrated as raw JSON, the @atlaskit markdown
+      // parser reads the `<` as an HTML tag and splits the placeholder comment
+      // across inline nodes, so the reverter can't match it — the marker used to
+      // survive as a literal junk paragraph *alongside* the real table.
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Alert" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              content: [{
+                type: "paragraph",
+                content: [{ type: "text", text: `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` }]
+              }]
+            }]
+          }
+        ]
+      }
+      // Emulate the sync path: pull → externalize to sidecar+ref, push → hydrate.
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      expect(content.filter((n) => nodeType(n) === "table")).toHaveLength(1)
+      // no leftover placeholder text survives as a literal paragraph
+      expect(JSON.stringify(content)).not.toContain("adf:table node=")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("preserves a blockquote", () =>
