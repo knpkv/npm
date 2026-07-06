@@ -17,8 +17,8 @@
  *
  * @module
  */
-import { Clock, Context, Effect, Layer, Random, Stream } from "effect"
-import type { AwsProfileName, AwsRegion } from "../Domain.js"
+import { Clock, Context, Effect, Layer, Random, Schema, Stream } from "effect"
+import { AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
 import { PermissionService } from "../PermissionService/index.js"
@@ -39,11 +39,18 @@ interface GateParams {
   readonly region: string
 }
 
+type PromptAllowedState = "always_allowed" | "allowed"
+
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
+const alwaysAllowedState: PromptAllowedState = "always_allowed"
+const allowedState: PromptAllowedState = "allowed"
+
 const toDeniedError = (p: GateParams, reason: "denied" | "timeout") =>
   new AwsApiError({
     operation: p.operation,
-    profile: p.accountProfile as AwsProfileName,
-    region: p.region as AwsRegion,
+    profile: decodeAwsProfileName(p.accountProfile),
+    region: decodeAwsRegion(p.region),
     cause: new PermissionDeniedError({ operation: p.operation, reason })
   })
 
@@ -102,14 +109,14 @@ export const AwsClientGatedLive: Layer.Layer<
 
         if (response === "always_allow") {
           yield* permService.set(params.operation, "always_allow")
-          return "always_allowed" as const
+          return alwaysAllowedState
         }
         if (response === "deny") {
           yield* permService.set(params.operation, "deny")
           yield* logAudit(params, "denied", null)
           return yield* Effect.fail(toDeniedError(params, "denied"))
         }
-        return "allowed" as const
+        return allowedState
       })
 
     const checkPermission = (
@@ -118,7 +125,7 @@ export const AwsClientGatedLive: Layer.Layer<
       Effect.gen(function*() {
         const state = yield* permService.check(params.operation)
         if (state === "always_allow") {
-          return "always_allowed" as const
+          return alwaysAllowedState
         }
         if (state === "deny") {
           yield* logAudit(params, "denied", null)

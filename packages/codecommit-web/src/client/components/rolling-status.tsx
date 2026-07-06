@@ -1,5 +1,5 @@
 import { CheckIcon } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type CSSProperties, useEffect, useRef, useState } from "react"
 
 interface RollingStatusProps {
   readonly statusDetail: string | undefined
@@ -15,6 +15,8 @@ interface ParsedMessage {
   readonly current?: number
   readonly total?: number
 }
+
+type RollingLineStyle = CSSProperties & { readonly "--rolling-opacity": number }
 
 const PROGRESS_RE = /^fetching (comments|diffs) \((\d+)\/(\d+)\)$/
 const FETCH_PR_RE = /^(.+?) #(\S+) (.+)$/
@@ -172,16 +174,15 @@ function PhaseRow({ phase }: { phase: PhaseState }) {
         {phase.items.map((item, i) => {
           const fromEnd = phase.items.length - 1 - i
           const opacity = fromEnd === 0 ? 0.7 : fromEnd === 1 ? 0.35 : 0.15
+          const style: RollingLineStyle = {
+            "--rolling-opacity": opacity,
+            opacity
+          }
           return (
             <span
               key={item.id}
               className="rolling-line truncate font-mono text-[11px] leading-relaxed text-muted-foreground"
-              style={
-                {
-                  "--rolling-opacity": opacity,
-                  opacity
-                } as React.CSSProperties
-              }
+              style={style}
             >
               {item.text}
             </span>

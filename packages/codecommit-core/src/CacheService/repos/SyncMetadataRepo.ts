@@ -38,7 +38,7 @@ const makeSyncMetadataRepo = Effect.gen(function*() {
             VALUES (${req.accountId}, ${req.region}, datetime('now'))`
   })
 
-  return {
+  const service = {
     getLastSyncedAt: (accountId: string, region: string) =>
       getLastSyncedAt_({ accountId, region }).pipe(
         Effect.map(Option.map((r) => r.lastSyncedAt)),
@@ -46,7 +46,8 @@ const makeSyncMetadataRepo = Effect.gen(function*() {
       ),
 
     update: (accountId: string, region: string) => update_({ accountId, region }).pipe(cacheError("update"))
-  } as const
+  }
+  return service
 })
 
 export interface SyncMetadataRepoShape extends Success<typeof makeSyncMetadataRepo> {}

@@ -21,7 +21,7 @@ import { reviewerData } from "./reviewerData.js"
 const makeStatsRepo = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
-  return {
+  const service = {
     weeklyVolume: Q.weeklyVolume(sql),
     topContributors: Q.topContributors(sql),
     mostActivePRs: Q.mostActivePRs(sql),
@@ -36,7 +36,8 @@ const makeStatsRepo = Effect.gen(function*() {
     mergeTimeDetails: Q.mergeTimeDetails(sql),
     avgTimeToMerge: Q.avgTimeToMerge(sql),
     dataAvailableSince: Q.dataAvailableSince(sql)
-  } as const
+  }
+  return service
 })
 
 export interface StatsRepoShape extends Success<typeof makeStatsRepo> {}

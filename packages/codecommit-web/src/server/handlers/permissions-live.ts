@@ -9,6 +9,8 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
+const defaultPermissionState = "allow"
+
 export const PermissionsLive = HttpApiBuilder.group(
   CodeCommitApi,
   "permissions",
@@ -29,7 +31,7 @@ export const PermissionsLive = HttpApiBuilder.group(
             const ops = PermissionService.allOperations()
             return ops.map(([name, meta]) => ({
               operation: name,
-              state: permissions[name] ?? ("allow" as const),
+              state: permissions[name] ?? defaultPermissionState,
               category: meta.category,
               description: meta.description
             }))

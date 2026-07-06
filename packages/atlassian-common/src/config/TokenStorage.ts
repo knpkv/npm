@@ -29,7 +29,7 @@ import { type OAuthConfig, OAuthConfigSchema, type OAuthToken, OAuthTokenSchema 
 
 const parseJsonOrNull = (content: string): unknown | null => {
   try {
-    return JSON.parse(content) as unknown
+    return JSON.parse(content)
   } catch {
     return null
   }

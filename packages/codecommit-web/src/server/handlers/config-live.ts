@@ -5,6 +5,12 @@ import * as FileSystem from "effect/FileSystem"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
+interface ConfigAccountFallback {
+  readonly profile: string
+  readonly regions: ReadonlyArray<string>
+  readonly enabled: boolean
+}
+
 export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handlers) =>
   Effect.gen(function*() {
     const configService = yield* ConfigService.ConfigService
@@ -15,13 +21,21 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const config = yield* configService.load.pipe(
             Effect.catchIf(() => true, () =>
-              Effect.succeed({
-                accounts: [] as Array<{ profile: string; regions: Array<string>; enabled: boolean }>,
-                autoDetect: true,
-                autoRefresh: true,
-                refreshIntervalSeconds: 300,
-                sandbox: ConfigService.defaultSandboxConfig
-              }))
+              Effect.succeed(
+                {
+                  accounts: [],
+                  autoDetect: true,
+                  autoRefresh: true,
+                  refreshIntervalSeconds: 300,
+                  sandbox: ConfigService.defaultSandboxConfig
+                } satisfies {
+                  readonly accounts: ReadonlyArray<ConfigAccountFallback>
+                  readonly autoDetect: boolean
+                  readonly autoRefresh: boolean
+                  readonly refreshIntervalSeconds: number
+                  readonly sandbox: typeof ConfigService.defaultSandboxConfig
+                }
+              ))
           )
           const state = yield* SubscriptionRef.get(prService.state)
           return {
@@ -101,7 +115,10 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const backupPath = yield* configService.backup.pipe(
             Effect.map((p): string | undefined => p),
-            Effect.catchIf(() => true, () => Effect.succeed(undefined as string | undefined))
+            Effect.catchIf(() => true, () => {
+              const backupPath: string | undefined = undefined
+              return Effect.succeed(backupPath)
+            })
           )
           const config = yield* configService.reset
           yield* prService.refresh.pipe(

@@ -3,9 +3,9 @@ import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { NodeHttpClient } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ConfigService, type Domain } from "@knpkv/codecommit-core"
-import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { makeServer } from "@knpkv/codecommit-web"
-import { Console, Effect, Layer, Stream } from "effect"
+import { Console, Effect, Layer, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
@@ -14,6 +14,13 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import pkg from "../package.json"
 import { FILTER_PRESETS, matchesRepoAuthor } from "./filterPresets.js"
 import { FilterService, FilterServiceLive } from "./FilterService.js"
+
+const DEFAULT_PR_STATUS: "OPEN" = "OPEN"
+
+const makeAccount = (profile: string, region: string) => ({
+  profile: Schema.decodeUnknownSync(AwsProfileName)(profile),
+  region: Schema.decodeUnknownSync(AwsRegion)(region)
+})
 
 // TUI Command
 const launchTui = Effect.gen(function*() {
@@ -81,7 +88,7 @@ const prCreate = Command.make("create", {
     yield* Console.log(`Creating PR: ${source} -> ${destination} in ${repo}`)
 
     const prId = yield* aws.createPullRequest({
-      account: { profile: profile as AwsProfileName, region: region as AwsRegion },
+      account: makeAccount(profile, region),
       repositoryName: repo,
       title,
       ...(description._tag === "Some" && { description: description.value }),
@@ -116,7 +123,7 @@ const prList = Command.make("list", {
   status: Options.choice("status", ["OPEN", "CLOSED"]).pipe(
     Options.withAlias("s"),
     Options.withDescription("Filter by PR status (ignored when --filter is set — presets are OPEN-only)"),
-    Options.withDefault("OPEN" as const)
+    Options.withDefault(DEFAULT_PR_STATUS)
   ),
   all: Options.boolean("all").pipe(
     Options.withAlias("a"),
@@ -208,7 +215,7 @@ const prList = Command.make("list", {
     }
 
     // ── Single-account path (original behaviour) ─────────────────────────────
-    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+    const account = makeAccount(profile, region)
 
     const statusLabel = all ? "all" : status.toLowerCase()
     yield* Console.log(`Fetching ${statusLabel} PRs...`)
@@ -308,7 +315,7 @@ const prExport = Command.make("export", {
   Effect.gen(function*() {
     const aws = yield* AwsClient.AwsClient
     const fs = yield* FileSystem.FileSystem
-    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+    const account = makeAccount(profile, region)
 
     yield* Console.log(`Fetching PR ${prId}...`)
 
@@ -385,7 +392,7 @@ const prUpdate = Command.make("update", {
 }, ({ description, prId, profile, region, title }) =>
   Effect.gen(function*() {
     const aws = yield* AwsClient.AwsClient
-    const account = { profile: profile as AwsProfileName, region: region as AwsRegion }
+    const account = makeAccount(profile, region)
 
     if (title._tag === "None" && description._tag === "None") {
       yield* Console.log("Error: At least one of --title or --description must be provided")

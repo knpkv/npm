@@ -70,7 +70,11 @@ export const JiraApiConfigLive = Layer.effect(
     const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
     return {
       baseUrl: "",
-      auth: { type: "oauth2" as const, accessToken, cloudId }
+      auth: { type: "oauth2", accessToken, cloudId } satisfies {
+        readonly type: "oauth2"
+        readonly accessToken: typeof accessToken
+        readonly cloudId: string
+      }
     }
   })
 ).pipe(Layer.provide(JiraAuthLive))

@@ -32,3 +32,6 @@ export * from "./config/index.js"
 
 // Auth utilities
 export * from "./auth/index.js"
+
+// Attachment utilities
+export * from "./attachments.js"

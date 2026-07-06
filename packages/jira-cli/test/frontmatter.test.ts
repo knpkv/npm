@@ -10,7 +10,10 @@ import type { Issue } from "../src/IssueService.js"
  */
 const parseFrontMatter = (output: string): Record<string, unknown> => {
   const match = output.match(/^---\n([\s\S]*?)\n---/)
-  return match ? (yaml.load(match[1]) as Record<string, unknown>) : {}
+  const parsed = match ? yaml.load(match[1]) : {}
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? Object.fromEntries(Object.entries(parsed))
+    : {}
 }
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue => ({
@@ -56,6 +59,22 @@ describe("frontmatter", () => {
       const data = parseFrontMatter(output)
       expect(data.priority).toBeNull()
       expect(data.assignee).toBeNull()
+    })
+
+    it("renders image and SVG attachments as inline previews with identity metadata", () => {
+      const output = serializeIssue(makeIssue({
+        attachments: [{
+          id: "10001",
+          filename: "diagram.svg",
+          url: "https://example.atlassian.net/rest/api/3/attachment/content/10001",
+          mediaType: "application/octet-stream",
+          size: 42
+        }]
+      }))
+      expect(output).toContain(
+        "<!-- jiraAttachment: {\"jiraAttachmentId\":\"10001\",\"mediaType\":\"application/octet-stream\",\"size\":42} -->"
+      )
+      expect(output).toContain("![diagram.svg](https://example.atlassian.net/rest/api/3/attachment/content/10001)")
     })
   })
 

@@ -174,14 +174,14 @@ const makeStatsService = Effect.gen(function*() {
         Effect.catchCause((cause) =>
           Effect.logWarning("StatsService.getWeeklyStats failed", cause).pipe(Effect.as(fallback))
         )
-      ) as Effect.Effect<WeeklyStats>
+      )
     },
 
     syncWeek: (week: string, state: SubscriptionRef.SubscriptionRef<AppState>): Effect.Effect<void> =>
       syncWeekImpl(state, week).pipe(
         Effect.provide(depsLayer),
         Effect.catchCause((cause) => Effect.logWarning("StatsService.syncWeek failed", cause))
-      ) as Effect.Effect<void>,
+      ),
 
     currentWeek: () =>
       DateTime.now.pipe(

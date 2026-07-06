@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { FetchClientError, JiraApiClient } from "@knpkv/jira-api-client"
+import type { ClockifyApiClientShape, TimeEntry, V1 } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
+import { FetchClientError, JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -48,21 +48,31 @@ const resetCaptures = () => {
   stoppedTimers = []
 }
 
-const makeTimeEntry = (id: string, description: string, startedAt: Date, projectId?: string) => ({
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const paramsRecord = (value: unknown): Record<string, unknown> => {
+  if (!isRecord(value)) {
+    throw new Error("Expected captured params to be a record")
+  }
+  return value
+}
+
+const makeTimeEntry = (id: string, description: string, startedAt: Date, projectId?: string): TimeEntry => ({
   id,
   description,
-  billable: true as const,
+  billable: true,
   ...(projectId ? { projectId } : {}),
   userId: USER_ID,
   workspaceId: WORKSPACE_ID,
   timeInterval: { start: startedAt.toISOString() },
-  tagIds: [] as Array<string>,
-  type: "REGULAR" as const,
+  tagIds: [],
+  type: "REGULAR",
   isLocked: false
 })
 
 const mockClockify: ClockifyApiClientShape = {
-  api: {} as any,
+  api: makeOpenApiFetchClient<V1.paths>("https://api.clockify.me/api", {}),
   getUser: () =>
     Effect.succeed({
       id: USER_ID,
@@ -104,7 +114,18 @@ const mockClockify: ClockifyApiClientShape = {
 const MockClockifyLayer = Layer.succeed(ClockifyApiClient, mockClockify)
 
 // JiraApiClient — unused by start/stop logic directly, but required by layer construction
-const MockJiraApiClientLayer = Layer.succeed(JiraApiClient, { v3: {} } as any)
+const MockJiraApiClientLayer = JiraApiClient.layer.pipe(
+  Layer.provide(
+    Layer.succeed(JiraApiConfig, {
+      baseUrl: "https://test.atlassian.net",
+      auth: {
+        type: "basic",
+        email: "test@example.com",
+        apiToken: Redacted.make("jira-api-token")
+      }
+    })
+  )
+)
 
 const MockClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
   getConfig: Effect.succeed({
@@ -496,9 +517,9 @@ describe("TimerService", () => {
         expect(result.needsBillable).toBe(false)
         // Check that the updateTimeEntry was called with the overridden values
         expect(updatedEntries).toHaveLength(1)
-        const params = updatedEntries[0]!.params as { projectId?: string; billable?: boolean }
-        expect(params.projectId).toBe("proj-override")
-        expect(params.billable).toBe(false)
+        const params = paramsRecord(updatedEntries[0]!.params)
+        expect(params["projectId"]).toBe("proj-override")
+        expect(params["billable"]).toBe(false)
       }).pipe(Effect.provide(TestLayer)))
 
     // needsProjectId=true signals TUI to prompt user — must be true when no project resolved
@@ -531,8 +552,8 @@ describe("TimerService", () => {
         const result = yield* svc.stop({ endedAt: end })
         expect(Duration.toSeconds(result.duration)).toBe(5400)
         expect(updatedEntries).toHaveLength(1)
-        const params = updatedEntries[0]!.params as { end?: string }
-        expect(params.end).toBe(end.toISOString())
+        const params = paramsRecord(updatedEntries[0]!.params)
+        expect(params["end"]).toBe(end.toISOString())
       }).pipe(Effect.provide(TestLayer)))
 
     it.effect("rejects a corrected end at or before the start, writing nothing", () =>
@@ -577,10 +598,10 @@ describe("TimerService", () => {
         expect(result.clockifyLogged).toBe(true)
         expect(result.jiraWorklogLogged).toBe(true)
         expect(createdEntries).toHaveLength(1)
-        const params = createdEntries[0]!.params as { start: string; end: string; description: string }
-        expect(params.start).toBe(start.toISOString())
-        expect(params.end).toBe(new Date(start.getTime() + 1800 * 1000).toISOString())
-        expect(params.description).toBe("[PROJ-123] Fix the widget")
+        const params = paramsRecord(createdEntries[0]!.params)
+        expect(params["start"]).toBe(start.toISOString())
+        expect(params["end"]).toBe(new Date(start.getTime() + 1800 * 1000).toISOString())
+        expect(params["description"]).toBe("[PROJ-123] Fix the widget")
       }).pipe(Effect.provide(TestLayer)))
 
     // A correction must never disturb the running-timer state (there was no running timer)
@@ -613,9 +634,9 @@ describe("TimerService", () => {
         })
         expect(result.projectId).toBe("proj-x")
         expect(result.billable).toBe(false)
-        const params = createdEntries[0]!.params as { projectId?: string; billable?: boolean }
-        expect(params.projectId).toBe("proj-x")
-        expect(params.billable).toBe(false)
+        const params = paramsRecord(createdEntries[0]!.params)
+        expect(params["projectId"]).toBe("proj-x")
+        expect(params["billable"]).toBe(false)
       }).pipe(Effect.provide(TestLayer)))
 
     // A failing Clockify createTimeEntry must flip clockifyLogged to false (not crash)
@@ -795,8 +816,8 @@ describe("TimerService", () => {
         const svc = yield* TimerService
         const startedAt = new Date("2025-01-01T08:30:00.000Z")
         yield* svc.start(makeTicket(), { startedAt })
-        const params = createdEntries[0]!.params as { start: string }
-        expect(params.start).toBe(startedAt.toISOString())
+        const params = paramsRecord(createdEntries[0]!.params)
+        expect(params["start"]).toBe(startedAt.toISOString())
         const state = yield* SubscriptionRef.get(svc.state)
         expect(state.startedAt?.toISOString()).toBe(startedAt.toISOString())
       }).pipe(Effect.provide(TestLayer)))

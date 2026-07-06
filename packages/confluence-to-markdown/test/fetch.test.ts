@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { PageId } from "../src/Brand.js"
+import { PageId } from "../src/Brand.js"
 import { fetchPageMarkdown } from "../src/commands/fetch.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
@@ -30,6 +30,8 @@ const TestLayer = Layer.mergeAll(
       updatePage: () => Effect.die("unused"),
       deletePage: () => Effect.die("unused"),
       getPageVersions: () => Effect.die("unused"),
+      getPageAttachments: () => Effect.die("unused"),
+      uploadAttachmentToPage: () => Effect.die("unused"),
       getUser: () => Effect.die("unused"),
       getSpaceId: () => Effect.die("unused"),
       setEditorVersion: () => Effect.die("unused")
@@ -47,14 +49,14 @@ const TestLayer = Layer.mergeAll(
 describe("fetchPageMarkdown", () => {
   it.effect("returns preserving markdown by default", () =>
     Effect.gen(function*() {
-      const markdown = yield* fetchPageMarkdown("2333334354" as PageId, { cleanMarkdown: false })
+      const markdown = yield* fetchPageMarkdown(PageId("2333334354"), { cleanMarkdown: false })
 
       expect(markdown).toContain("<!-- adf:panel attrs={} -->")
     }).pipe(Effect.provide(TestLayer)))
 
   it.effect("can return clean markdown", () =>
     Effect.gen(function*() {
-      const markdown = yield* fetchPageMarkdown("2333334354" as PageId, { cleanMarkdown: true })
+      const markdown = yield* fetchPageMarkdown(PageId("2333334354"), { cleanMarkdown: true })
 
       expect(markdown).toBe("# Fetched Page\n\nBody\n")
     }).pipe(Effect.provide(TestLayer)))

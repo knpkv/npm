@@ -14,78 +14,85 @@ interface PopupInputProps {
   readonly onCancel: () => void
 }
 
-export function PopupInput({ defaultValue, error, onCancel, onSubmit, placeholder, title }: PopupInputProps) {
+export function PopupInput({
+  defaultValue,
+  error,
+  onCancel: _onCancel,
+  onSubmit,
+  placeholder,
+  title
+}: PopupInputProps) {
+  function handleSubmit(value: string): void
+  function handleSubmit(_event: object): void
+  function handleSubmit(valueOrEvent: string | object): void {
+    if (typeof valueOrEvent === "string") {
+      onSubmit(valueOrEvent)
+    }
+  }
+
   return (
     <box
-      style={
-        {
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        justifyContent: "center",
+        alignItems: "center"
+      }}
+    >
+      {/* Overlay background */}
+      <box
+        style={{
           position: "absolute",
           top: 0,
           left: 0,
           width: "100%",
           height: "100%",
-          justifyContent: "center",
-          alignItems: "center"
-        } as any
-      }
-    >
-      {/* Overlay background */}
-      <box
-        style={
-          {
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            backgroundColor: "rgba(0,0,0,0.6)"
-          } as any
-        }
+          backgroundColor: "rgba(0,0,0,0.6)"
+        }}
       />
 
       {/* Dialog box — one row taller when a validation error is shown */}
       <box
-        style={
-          {
-            width: 60,
-            height: error ? 8 : 7,
-            flexDirection: "column",
-            backgroundColor: "#1a1a2e",
-            border: 1,
-            borderColor: error ? "#FF4444" : "#444466",
-            paddingLeft: 2,
-            paddingRight: 2,
-            paddingTop: 1
-          } as any
-        }
+        style={{
+          width: 60,
+          height: error ? 8 : 7,
+          flexDirection: "column",
+          backgroundColor: "#1a1a2e",
+          border: true,
+          borderColor: error ? "#FF4444" : "#444466",
+          paddingLeft: 2,
+          paddingRight: 2,
+          paddingTop: 1
+        }}
       >
         {/* Title */}
         <box style={{ height: 1 }}>
-          <text fg="#FFCC00" style={{ fontWeight: "bold" } as any}>
-            {title}
-          </text>
+          <text fg="#FFCC00">{title}</text>
         </box>
 
         {/* Input field */}
-        <box style={{ height: 1, marginTop: 1 } as any}>
+        <box style={{ height: 1, marginTop: 1 }}>
           <input
             focused
             value={defaultValue ?? ""}
             placeholder={placeholder ?? ""}
-            onSubmit={((value: string) => onSubmit(value)) as any}
-            style={{ width: "100%", backgroundColor: "#0f0f1a", fg: "#FFFFFF" } as any}
+            onSubmit={handleSubmit}
+            style={{ width: "100%", backgroundColor: "#0f0f1a", textColor: "#FFFFFF" }}
           />
         </box>
 
         {/* Validation error (re-prompt loop) */}
         {error ? (
-          <box style={{ height: 1, marginTop: 1 } as any}>
+          <box style={{ height: 1, marginTop: 1 }}>
             <text fg="#FF6666">{error}</text>
           </box>
         ) : null}
 
         {/* Hints */}
-        <box style={{ height: 1, marginTop: 1 } as any}>
+        <box style={{ height: 1, marginTop: 1 }}>
           <text fg="#888888">enter: confirm esc: cancel</text>
         </box>
       </box>

@@ -87,23 +87,38 @@ jira version related-work add 10042 \
 
 Related-work links are the Confluence links surfaced on Jira release reports.
 
+### Upload Issue Evidence
+
+Upload a local file to an issue and optionally replace a matching Markdown placeholder in an issue document:
+
+```markdown
+![Screenshot](./screenshot.svg)
+```
+
+```bash
+jira issue attachment upload PROJ-123 ./screenshot.svg --document ./PROJ-123.md
+```
+
+The command writes hidden attachment metadata next to the rendered image/link so later parses keep the Jira attachment identity.
+
 ## Command Reference
 
-| Command                               | Class        | Important args and flags                                                                    | Output                         |
-| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- | ------------------------------ |
-| `jira auth create`                    | Local write  | Opens OAuth app creation page.                                                              | Human instructions.            |
-| `jira auth configure`                 | Local write  | `--client-id`, `--client-secret` or prompts.                                                | Stores OAuth credentials.      |
-| `jira auth login`                     | Local write  | Optional `--site <url>`.                                                                    | Stores access/refresh tokens.  |
-| `jira auth logout`                    | Local write  | None.                                                                                       | Clears local auth state.       |
-| `jira auth status`                    | Read-only    | None.                                                                                       | Human login status.            |
-| `jira issue get <key>`                | Local write  | `--output-dir`, default `./jira-tickets`.                                                   | Markdown file for one issue.   |
-| `jira issue search [jql]`             | Local write  | `--by-version`, `--project`, `--format multi\|single`, `--max-results`, `--output-dir`.     | Markdown issue exports.        |
-| `jira version list`                   | Read-only    | `--project`, `--released`, `--unreleased`, `--custom-field`, `--max`, `--json`, `--emails`. | Table or JSON array.           |
-| `jira version get <id>`               | Read-only    | `--json`, `--emails`.                                                                       | Summary or JSON object.        |
-| `jira version update <id>`            | Remote write | `--description`, optional `--json`.                                                         | Updated version.               |
-| `jira version related-work list <id>` | Read-only    | Optional `--json`.                                                                          | Related-work links.            |
-| `jira version related-work add <id>`  | Remote write | `--title`, `--url`, `--category`, optional `--json`.                                        | Created link.                  |
-| `jira skills install`                 | Local write  | Shared installer flags.                                                                     | Installs the Jira agent skill. |
+| Command                               | Class        | Important args and flags                                                                    | Output                                                             |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `jira auth create`                    | Local write  | Opens OAuth app creation page.                                                              | Human instructions.                                                |
+| `jira auth configure`                 | Local write  | `--client-id`, `--client-secret` or prompts.                                                | Stores OAuth credentials.                                          |
+| `jira auth login`                     | Local write  | Optional `--site <url>`.                                                                    | Stores access/refresh tokens.                                      |
+| `jira auth logout`                    | Local write  | None.                                                                                       | Clears local auth state.                                           |
+| `jira auth status`                    | Read-only    | None.                                                                                       | Human login status.                                                |
+| `jira issue get <key>`                | Local write  | `--output-dir`, default `./jira-tickets`.                                                   | Markdown file for one issue.                                       |
+| `jira issue search [jql]`             | Local write  | `--by-version`, `--project`, `--format multi\|single`, `--max-results`, `--output-dir`.     | Markdown issue exports.                                            |
+| `jira issue attachment upload`        | Remote write | `<issue> <file>`, `--document`, `--no-insert`, `--dry-run`, `--json`.                       | Uploads an issue attachment and optionally rewrites a placeholder. |
+| `jira version list`                   | Read-only    | `--project`, `--released`, `--unreleased`, `--custom-field`, `--max`, `--json`, `--emails`. | Table or JSON array.                                               |
+| `jira version get <id>`               | Read-only    | `--json`, `--emails`.                                                                       | Summary or JSON object.                                            |
+| `jira version update <id>`            | Remote write | `--description`, optional `--json`.                                                         | Updated version.                                                   |
+| `jira version related-work list <id>` | Read-only    | Optional `--json`.                                                                          | Related-work links.                                                |
+| `jira version related-work add <id>`  | Remote write | `--title`, `--url`, `--category`, optional `--json`.                                        | Created link.                                                      |
+| `jira skills install`                 | Local write  | Shared installer flags.                                                                     | Installs the Jira agent skill.                                     |
 
 ## JSON Contract
 
@@ -120,7 +135,7 @@ Use `--emails` only when the caller explicitly needs personal email addresses.
 ## Agent Guidance
 
 - Start with `jira auth status`, `jira version list --json`, or `jira version get --json`.
-- Do not run `jira version update` or `jira version related-work add` without explicit user intent.
+- Do not run `jira issue attachment upload`, `jira version update`, or `jira version related-work add` without explicit user intent.
 - Prefer `--json` for version inspection and Markdown exports for issue context.
 - Use numeric version ids. A release name belongs in `--by-version`, not in `jira version get`.
 

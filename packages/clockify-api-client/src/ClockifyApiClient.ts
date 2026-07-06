@@ -25,12 +25,7 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { ClockifyApiConfig } from "./ClockifyApiConfig.js"
 import type { components, paths } from "./generated/schema.js"
-import {
-  type FetchClientError,
-  makeOpenApiFetchClient,
-  type OpenApiFetchClient,
-  toEffect
-} from "./OpenApiFetchClient.js"
+import { FetchClientError, makeOpenApiFetchClient, type OpenApiFetchClient, toEffect } from "./OpenApiFetchClient.js"
 
 // ---------------------------------------------------------------------------
 // Domain types — derived from patched OpenAPI spec schema
@@ -52,6 +47,63 @@ export interface GetTimeEntriesParams {
   readonly page?: number | undefined
   readonly pageSize?: number | undefined
 }
+
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null
+
+const isUser = (value: unknown): value is User => isRecord(value)
+
+const isWorkspace = (value: unknown): value is Workspace => isRecord(value)
+
+const isProject = (value: unknown): value is Project => isRecord(value) && typeof value.name === "string"
+
+const isTag = (value: unknown): value is Tag => isRecord(value) && typeof value.name === "string"
+
+const isTimeEntry = (value: unknown): value is TimeEntry => isRecord(value)
+
+const isArrayOf = <A>(
+  value: unknown,
+  predicate: (item: unknown) => item is A
+): value is ReadonlyArray<A> => Array.isArray(value) && value.every(predicate)
+
+const typedResponse = <A>(
+  effect: Effect.Effect<unknown, FetchClientError>,
+  predicate: (value: unknown) => value is A,
+  label: string
+): Effect.Effect<A, FetchClientError> =>
+  Effect.flatMap(effect, (value) =>
+    predicate(value)
+      ? Effect.succeed(value)
+      : Effect.fail(
+        new FetchClientError({
+          error: value,
+          message: `Clockify response did not match expected ${label} shape`,
+          status: 0
+        })
+      ))
+
+const voidResponse = (
+  effect: Effect.Effect<unknown, FetchClientError>
+): Effect.Effect<void, FetchClientError> => Effect.asVoid(effect)
+
+const userResponse = (effect: Effect.Effect<unknown, FetchClientError>) => typedResponse(effect, isUser, "User")
+
+const workspacesResponse = (effect: Effect.Effect<unknown, FetchClientError>) =>
+  typedResponse(effect, (value): value is ReadonlyArray<Workspace> => isArrayOf(value, isWorkspace), "Workspace[]")
+
+const projectsResponse = (effect: Effect.Effect<unknown, FetchClientError>) =>
+  typedResponse(effect, (value): value is ReadonlyArray<Project> => isArrayOf(value, isProject), "Project[]")
+
+const timeEntryResponse = (effect: Effect.Effect<unknown, FetchClientError>) =>
+  typedResponse(effect, isTimeEntry, "TimeEntry")
+
+const timeEntriesResponse = (effect: Effect.Effect<unknown, FetchClientError>) =>
+  typedResponse(effect, (value): value is ReadonlyArray<TimeEntry> => isArrayOf(value, isTimeEntry), "TimeEntry[]")
+
+const tagResponse = (effect: Effect.Effect<unknown, FetchClientError>) => typedResponse(effect, isTag, "Tag")
+
+const tagsResponse = (effect: Effect.Effect<unknown, FetchClientError>) =>
+  typedResponse(effect, (value): value is ReadonlyArray<Tag> => isArrayOf(value, isTag), "Tag[]")
 
 // ---------------------------------------------------------------------------
 // Client shape
@@ -121,39 +173,35 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
       return {
         api,
 
-        getUser: () => toEffect(client.GET("/v1/user")) as Effect.Effect<User, FetchClientError>,
+        getUser: () => userResponse(toEffect(client.GET("/v1/user"))),
 
-        getWorkspaces: () =>
-          toEffect(client.GET("/v1/workspaces")) as unknown as Effect.Effect<
-            ReadonlyArray<Workspace>,
-            FetchClientError
-          >,
+        getWorkspaces: () => workspacesResponse(toEffect(client.GET("/v1/workspaces"))),
 
         getProjects: (workspaceId) =>
-          toEffect(
+          projectsResponse(toEffect(
             client.GET("/v1/workspaces/{workspaceId}/projects", {
               params: {
                 path: { workspaceId },
                 query: { archived: false, "page-size": 500 }
               }
             })
-          ) as Effect.Effect<ReadonlyArray<Project>, FetchClientError>,
+          )),
 
         getProjectByName: (workspaceId, name) =>
           Effect.gen(function*() {
-            const projects = yield* toEffect(
+            const projects = yield* projectsResponse(toEffect(
               client.GET("/v1/workspaces/{workspaceId}/projects", {
                 params: {
                   path: { workspaceId },
                   query: { name, archived: false }
                 }
               })
-            ) as Effect.Effect<ReadonlyArray<Project>, FetchClientError>
+            ))
             return projects.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? null
           }),
 
         createTimeEntry: (workspaceId, params) =>
-          toEffect(
+          timeEntryResponse(toEffect(
             client.POST("/v1/workspaces/{workspaceId}/time-entries", {
               params: { path: { workspaceId } },
               body: {
@@ -166,18 +214,18 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
                 ...(params.tagIds !== undefined ? { tagIds: [...params.tagIds] } : {})
               }
             })
-          ) as Effect.Effect<TimeEntry, FetchClientError>,
+          )),
 
         stopTimer: (workspaceId, userId, params) =>
-          toEffect(
+          timeEntryResponse(toEffect(
             client.PATCH("/v1/workspaces/{workspaceId}/user/{userId}/time-entries", {
               params: { path: { workspaceId, userId } },
               body: { end: params.end }
             })
-          ) as Effect.Effect<TimeEntry, FetchClientError>,
+          )),
 
         getTimeEntries: (workspaceId, userId, params) =>
-          toEffect(
+          timeEntriesResponse(toEffect(
             client.GET("/v1/workspaces/{workspaceId}/user/{userId}/time-entries", {
               params: {
                 path: { workspaceId, userId },
@@ -189,30 +237,30 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
                 }
               }
             })
-          ) as Effect.Effect<ReadonlyArray<TimeEntry>, FetchClientError>,
+          )),
 
         getRunningTimer: (workspaceId, userId) =>
           Effect.gen(function*() {
-            const entries = yield* toEffect(
+            const entries = yield* timeEntriesResponse(toEffect(
               client.GET("/v1/workspaces/{workspaceId}/user/{userId}/time-entries", {
                 params: {
                   path: { workspaceId, userId },
                   query: { "in-progress": true, "page-size": 1 }
                 }
               })
-            ) as Effect.Effect<ReadonlyArray<TimeEntry>, FetchClientError>
+            ))
             return entries.length > 0 ? entries[0]! : null
           }),
 
         getTimeEntry: (workspaceId, timeEntryId) =>
-          toEffect(
+          timeEntryResponse(toEffect(
             client.GET("/v1/workspaces/{workspaceId}/time-entries/{id}", {
               params: { path: { workspaceId, id: timeEntryId } }
             })
-          ) as Effect.Effect<TimeEntry, FetchClientError>,
+          )),
 
         updateTimeEntry: (workspaceId, timeEntryId, params) =>
-          toEffect(
+          timeEntryResponse(toEffect(
             client.PUT("/v1/workspaces/{workspaceId}/time-entries/{id}", {
               params: { path: { workspaceId, id: timeEntryId } },
               body: {
@@ -224,52 +272,52 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
                 ...(params.tagIds !== undefined ? { tagIds: [...params.tagIds] } : {})
               }
             })
-          ) as Effect.Effect<TimeEntry, FetchClientError>,
+          )),
 
         getTags: (workspaceId) =>
-          toEffect(
+          tagsResponse(toEffect(
             client.GET("/v1/workspaces/{workspaceId}/tags", {
               params: {
                 path: { workspaceId },
                 query: { archived: false, "page-size": 200 }
               }
             })
-          ) as Effect.Effect<ReadonlyArray<Tag>, FetchClientError>,
+          )),
 
         createTag: (workspaceId, name) =>
-          toEffect(
+          tagResponse(toEffect(
             client.POST("/v1/workspaces/{workspaceId}/tags", {
               params: { path: { workspaceId } },
               body: { name }
             })
-          ) as Effect.Effect<Tag, FetchClientError>,
+          )),
 
         findOrCreateTag: (workspaceId, name) =>
           Effect.gen(function*() {
-            const tags = yield* toEffect(
+            const tags = yield* tagsResponse(toEffect(
               client.GET("/v1/workspaces/{workspaceId}/tags", {
                 params: {
                   path: { workspaceId },
                   query: { name, archived: false }
                 }
               })
-            ) as Effect.Effect<ReadonlyArray<Tag>, FetchClientError>
+            ))
             const existing = tags.find((t) => t.name.toLowerCase() === name.toLowerCase())
             if (existing) return existing
-            return yield* toEffect(
+            return yield* tagResponse(toEffect(
               client.POST("/v1/workspaces/{workspaceId}/tags", {
                 params: { path: { workspaceId } },
                 body: { name }
               })
-            ) as Effect.Effect<Tag, FetchClientError>
+            ))
           }),
 
         deleteTimeEntry: (workspaceId, timeEntryId) =>
-          toEffect(
+          voidResponse(toEffect(
             client.DELETE("/v1/workspaces/{workspaceId}/time-entries/{id}", {
               params: { path: { workspaceId, id: timeEntryId } }
             })
-          ) as Effect.Effect<void, FetchClientError>
+          ))
       }
     })
   )

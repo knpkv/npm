@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
-import type { PageId } from "../Brand.js"
+import { PageId } from "../Brand.js"
 import { ConfluenceAuth, layer as ConfluenceAuthLayer } from "../ConfluenceAuth.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import {
@@ -30,7 +30,7 @@ const ConverterPipeline = MarkdownConverterLayer.pipe(
 
 // Dummy config layer for help/init
 const DummyConfigLayer = ConfluenceConfigLayerFromValues({
-  rootPageId: "dummy" as PageId,
+  rootPageId: PageId("dummy"),
   baseUrl: "https://dummy.atlassian.net",
   docsPath: ".confluence/docs",
   excludePatterns: [],
@@ -49,6 +49,8 @@ const DummyConfluenceClientLayer = Layer.succeed(
     updatePage: () => Effect.die("Not configured"),
     deletePage: () => Effect.die("Not configured"),
     getPageVersions: () => Effect.die("Not configured"),
+    getPageAttachments: () => Effect.die("Not configured"),
+    uploadAttachmentToPage: () => Effect.die("Not configured"),
     getUser: () => Effect.die("Not configured"),
     getSpaceId: () => Effect.die("Not configured"),
     setEditorVersion: () => Effect.die("Not configured")
@@ -237,6 +239,12 @@ export const getLayerType = (argv: ReadonlyArray<string>): "full" | "auth" | "cl
   // page get needs auth + converter but no existing config
   if (cmd === "page" && subcommand === "get") {
     return "fetch"
+  }
+  if (
+    cmd === "page" && subcommand === "attachment" && argv[2] === "upload" &&
+    (argv.includes("--dry-run") || argv.includes("-n"))
+  ) {
+    return "minimal"
   }
   // skills/help/version don't need config
   if (!cmd || cmd === "skills" || cmd === "--help" || cmd === "-h" || cmd === "--version") {

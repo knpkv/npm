@@ -10,6 +10,19 @@ const TestLayer = MarkdownConverterLayer.pipe(
   Layer.provide(AdfSchemaValidatorLayer)
 )
 
+const isAdfDoc = (
+  value: unknown
+): value is {
+  readonly type: string
+  readonly version: number
+  readonly content: ReadonlyArray<{ readonly type: string }>
+} =>
+  value !== null &&
+  typeof value === "object" &&
+  Reflect.get(value, "type") === "doc" &&
+  typeof Reflect.get(value, "version") === "number" &&
+  Array.isArray(Reflect.get(value, "content"))
+
 const minimalDoc = (content: ReadonlyArray<unknown>): string => JSON.stringify({ version: 1, type: "doc", content })
 
 describe("MarkdownConverter", () => {
@@ -139,7 +152,9 @@ describe("MarkdownConverter", () => {
       Effect.gen(function*() {
         const converter = yield* MarkdownConverter
         const adf = yield* converter.markdownToAdf("# Title\n\nBody")
-        const parsed = JSON.parse(adf) as { type: string; version: number; content: ReadonlyArray<{ type: string }> }
+        const parsed: unknown = JSON.parse(adf)
+        expect(isAdfDoc(parsed)).toBe(true)
+        if (!isAdfDoc(parsed)) return
         expect(parsed.type).toBe("doc")
         expect(parsed.version).toBe(1)
         expect(parsed.content[0]?.type).toBe("heading")

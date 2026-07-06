@@ -64,41 +64,35 @@ export function PopupMessage({
 
   return (
     <box
-      style={
-        {
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          justifyContent: "center",
-          alignItems: "center"
-        } as any
-      }
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        justifyContent: "center",
+        alignItems: "center"
+      }}
     >
       <box
-        style={
-          {
-            width: 56,
-            height,
-            flexDirection: "column",
-            backgroundColor: "#1a1a2e",
-            border: 1,
-            borderColor: color,
-            paddingLeft: 2,
-            paddingRight: 2,
-            paddingTop: 1
-          } as any
-        }
+        style={{
+          width: 56,
+          height,
+          flexDirection: "column",
+          backgroundColor: "#1a1a2e",
+          border: true,
+          borderColor: color,
+          paddingLeft: 2,
+          paddingRight: 2,
+          paddingTop: 1
+        }}
       >
         {/* Title */}
         <box style={{ height: 1 }}>
-          <text fg={color} style={{ fontWeight: "bold" } as any}>
-            {`${icon} ${title}`}
-          </text>
+          <text fg={color}>{`${icon} ${title}`}</text>
         </box>
 
-        <box style={{ height: 1 } as any} />
+        <box style={{ height: 1 }} />
 
         {/* Result lines */}
         {lines.map((line, i) => (
@@ -107,28 +101,22 @@ export function PopupMessage({
           </box>
         ))}
 
-        <box style={{ height: 1 } as any} />
+        <box style={{ height: 1 }} />
 
         {/* Action buttons */}
-        <box style={{ height: 1, justifyContent: "center", gap: 2 } as any}>
+        <box style={{ height: 1, justifyContent: "center", gap: 2 }}>
           {onRetry ? (
-            <box style={{ backgroundColor: retryBg, paddingLeft: 2, paddingRight: 2 } as any}>
-              <text fg="#000000" style={{ fontWeight: "bold" } as any}>
-                {retrying ? "Retrying…" : "Retry (r)"}
-              </text>
+            <box style={{ backgroundColor: retryBg, paddingLeft: 2, paddingRight: 2 }}>
+              <text fg="#000000">{retrying ? "Retrying…" : "Retry (r)"}</text>
             </box>
           ) : null}
           {onEdit ? (
-            <box style={{ backgroundColor: "#FFAA00", paddingLeft: 2, paddingRight: 2 } as any}>
-              <text fg="#000000" style={{ fontWeight: "bold" } as any}>
-                Edit end (e)
-              </text>
+            <box style={{ backgroundColor: "#FFAA00", paddingLeft: 2, paddingRight: 2 }}>
+              <text fg="#000000">Edit end (e)</text>
             </box>
           ) : null}
-          <box style={{ backgroundColor: color, paddingLeft: 2, paddingRight: 2 } as any}>
-            <text fg="#000000" style={{ fontWeight: "bold" } as any}>
-              {`${dismissLabel} (enter)`}
-            </text>
+          <box style={{ backgroundColor: color, paddingLeft: 2, paddingRight: 2 }}>
+            <text fg="#000000">{`${dismissLabel} (enter)`}</text>
           </box>
         </box>
       </box>

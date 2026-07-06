@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-upload-array-first-non-null
+language: tsx
+severity: error
+message: "Decode upload responses to the returned attachment instead of returning array[0]!"
+
+rule:
+  pattern: return $VALUE[0]!
+
+files:
+  - "packages/jira-cli/src/AttachmentService.ts"
+  - "packages/confluence-to-markdown/src/ConfluenceClient.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  If an upload endpoint returns an array but only the first uploaded attachment
+  is meaningful, decode and validate that first element in one helper.
+
+  Prefer a helper returning `Effect<Attachment, Error>` directly instead of
+  returning an array and recovering the element with a non-null assertion.

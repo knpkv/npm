@@ -116,6 +116,7 @@ export default tseslint.config(
       ],
       "@typescript-eslint/no-use-before-define": "off",
       "@typescript-eslint/prefer-for-of": "off",
+      "@typescript-eslint/prefer-as-const": "off",
       "@typescript-eslint/unified-signatures": "off",
 
       "@effect/dprint": [

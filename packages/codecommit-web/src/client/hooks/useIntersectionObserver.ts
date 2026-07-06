@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useRef } from "react"
+import { type RefCallback, useCallback, useRef } from "react"
 
 /**
  * Returns a callback ref that fires `onIntersect` when the element enters the viewport.
@@ -7,7 +7,7 @@ import { type RefObject, useCallback, useRef } from "react"
 export function useIntersectionObserver<T extends HTMLElement = HTMLElement>(
   onIntersect: () => void,
   options?: IntersectionObserverInit
-): RefObject<T | null> {
+): RefCallback<T> {
   const observerRef = useRef<IntersectionObserver | null>(null)
   const callbackRef = useRef(onIntersect)
   callbackRef.current = onIntersect
@@ -29,5 +29,5 @@ export function useIntersectionObserver<T extends HTMLElement = HTMLElement>(
     [JSON.stringify(options)]
   )
 
-  return ref as unknown as RefObject<T | null>
+  return ref
 }

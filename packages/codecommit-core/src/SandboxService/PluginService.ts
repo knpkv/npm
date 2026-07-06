@@ -32,7 +32,7 @@ export interface SandboxPlugin {
 const makePluginService = Effect.gen(function*() {
   const plugins = yield* Ref.make<ReadonlyArray<SandboxPlugin>>([])
 
-  return {
+  const service = {
     register: (plugin: SandboxPlugin) =>
       Ref.update(plugins, (ps) => [...ps, plugin]).pipe(
         Effect.tap(() => Effect.logInfo(`Plugin registered: ${plugin.name}`))
@@ -53,7 +53,8 @@ const makePluginService = Effect.gen(function*() {
       ),
 
     listPlugins: () => Ref.get(plugins).pipe(Effect.map((ps) => ps.map((p) => p.name)))
-  } as const
+  }
+  return service
 })
 
 export interface PluginServiceShape extends Success<typeof makePluginService> {}

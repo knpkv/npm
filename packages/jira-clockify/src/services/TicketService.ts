@@ -60,6 +60,9 @@ const emptyState: TicketState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
 const extractField = (fields: Record<string, unknown> | null | undefined, key: string): unknown => fields?.[key] ?? null
 
 const extractString = (fields: Record<string, unknown> | null | undefined, key: string): string | null => {
@@ -73,8 +76,8 @@ const extractNested = (
   nested: string
 ): string | null => {
   const val = extractField(fields, key)
-  if (val && typeof val === "object" && nested in val) {
-    const v = (val as Record<string, unknown>)[nested]
+  if (isRecord(val)) {
+    const v = val[nested]
     return typeof v === "string" ? v : null
   }
   return null
@@ -86,8 +89,10 @@ const extractNested = (
  * reused by {@link fetchTicketByKey} so the two never drift.
  */
 export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: string): JiraTicket => {
-  const fields = issue["fields"] as Record<string, unknown> | null | undefined
+  const rawFields = issue["fields"]
+  const fields = isRecord(rawFields) ? rawFields : null
   const key = typeof issue["key"] === "string" ? issue["key"] : (fallbackKey ?? "?")
+  const rawLabels = fields?.["labels"]
   return {
     key,
     summary: extractString(fields, "summary") ?? (fallbackKey ?? "(no summary)"),
@@ -95,7 +100,7 @@ export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: s
     priority: extractNested(fields, "priority", "name"),
     assignee: extractNested(fields, "assignee", "displayName"),
     type: extractNested(fields, "issuetype", "name") ?? "Task",
-    labels: Array.isArray(fields?.["labels"]) ? (fields["labels"] as Array<string>) : [],
+    labels: Array.isArray(rawLabels) ? rawLabels.filter((label): label is string => typeof label === "string") : [],
     updated: extractString(fields, "updated") ?? new Date().toISOString()
   }
 }
@@ -135,12 +140,15 @@ export const layer = Layer.effect(
           }
         }
       })).pipe(
-        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e }))
+        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e })),
+        Effect.flatMap((result) =>
+          result === undefined
+            ? Effect.fail(new TicketError({ message: "Jira search returned no response body" }))
+            : Effect.succeed(result)
+        )
       )
 
-      const tickets: Array<JiraTicket> = (result.issues ?? []).map((issue) =>
-        mapIssueToTicket(issue as Record<string, unknown>)
-      )
+      const tickets: Array<JiraTicket> = (result.issues ?? []).filter(isRecord).map((issue) => mapIssueToTicket(issue))
 
       yield* SubscriptionRef.set(ref, {
         tickets,

@@ -20,6 +20,7 @@ const decodePR = Schema.decodeSync(Domain.PullRequest)
 
 const acc1 = decodeAccount({ profile: "dev-account", region: "us-east-1" })
 const acc2 = decodeAccount({ profile: "prod-account", region: "eu-west-1" })
+const openStatus: Domain.PullRequestStatus = "OPEN"
 
 const base = {
   author: "alice",
@@ -27,7 +28,7 @@ const base = {
   creationDate: new Date("2024-01-15T10:00:00Z"),
   lastModifiedDate: new Date("2024-01-16T10:00:00Z"),
   link: "https://example.com",
-  status: "OPEN" as const,
+  status: openStatus,
   sourceBranch: "feature/auth",
   destinationBranch: "main",
   isMergeable: true,
@@ -55,8 +56,8 @@ const pr4 = decodePR({
 })
 
 const accs = (enabled1 = true, enabled2 = true): Domain.AppState["accounts"] => [
-  { profile: "dev-account" as Domain.AwsProfileName, region: "us-east-1" as Domain.AwsRegion, enabled: enabled1 },
-  { profile: "prod-account" as Domain.AwsProfileName, region: "eu-west-1" as Domain.AwsRegion, enabled: enabled2 }
+  { ...decodeAccount({ profile: "dev-account", region: "us-east-1" }), enabled: enabled1 },
+  { ...decodeAccount({ profile: "prod-account", region: "eu-west-1" }), enabled: enabled2 }
 ]
 
 const state = (prs = [pr1, pr2, pr3, pr4], accounts = accs()): Domain.AppState => ({
@@ -269,7 +270,7 @@ describe("buildListItems", () => {
       profile: "",
       createdAt: new Date().toISOString(),
       read: 0
-    } as const
+    }
 
     // Notifications view wraps each notification in a ListItem.
     it("returns notification items", () => {

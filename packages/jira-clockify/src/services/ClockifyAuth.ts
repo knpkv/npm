@@ -77,7 +77,7 @@ export const layer = Layer.effect(
           Effect.mapError(() => new ClockifyAuthMissingError({ message: "Failed to read Clockify auth file" }))
         )
         const json = yield* Effect.try({
-          try: () => JSON.parse(content) as unknown,
+          try: () => JSON.parse(content),
           catch: () => new ClockifyAuthMissingError({ message: "Invalid JSON in Clockify auth file" })
         })
         const stored = yield* decodeStoredAuth(json).pipe(

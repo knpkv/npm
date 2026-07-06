@@ -19,8 +19,8 @@ interface RepoOption {
   readonly account: Domain.Account
 }
 
-const defaultState = {
-  status: "loading" as const,
+const defaultState: Domain.AppState = {
+  status: "loading",
   pullRequests: [],
   accounts: []
 }

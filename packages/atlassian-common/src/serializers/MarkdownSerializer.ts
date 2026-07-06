@@ -22,8 +22,10 @@
  * @module
  */
 import * as Effect from "effect/Effect"
+import type { BlockNode, BlockQuote, List } from "../ast/BlockNode.js"
 import type { Document, DocumentNode } from "../ast/Document.js"
 import type { InlineNode } from "../ast/InlineNode.js"
+import type { ExpandMacro, InfoPanel } from "../ast/MacroNode.js"
 import type { SerializeError } from "../SerializeError.js"
 
 /**
@@ -242,28 +244,18 @@ const serializeTable = (
     return lines.join("\n")
   })
 
-// Simple block type for list items - use unknown for flexibility
-type SimpleBlock = unknown
-
-// List item type
-type ListItemType = {
-  readonly _tag: "ListItem"
-  readonly checked?: boolean | undefined
-  readonly children: ReadonlyArray<unknown>
-}
-
 /**
  * Serialize list.
  */
 const serializeList = (
-  node: { ordered: boolean; start?: number | undefined; children: ReadonlyArray<unknown> },
+  node: List,
   options: SerializeOptions
 ): Effect.Effect<string, SerializeError> =>
   Effect.gen(function*() {
     const lines: Array<string> = []
     let counter = node.start ?? 1
 
-    for (const item of node.children as ReadonlyArray<ListItemType>) {
+    for (const item of node.children) {
       const prefix = node.ordered ? `${counter}.` : "-"
       const checkbox = item.checked !== undefined ? (item.checked ? "[x] " : "[ ] ") : ""
 
@@ -291,38 +283,31 @@ const serializeList = (
  * Serialize simple block (for nested content).
  */
 const serializeSimpleBlock = (
-  node: SimpleBlock,
+  node: BlockNode,
   options: SerializeOptions
 ): Effect.Effect<string, SerializeError> =>
   Effect.gen(function*() {
-    const tagged = node as { readonly _tag: string }
-    switch (tagged._tag) {
+    switch (node._tag) {
       case "Heading":
-        return yield* serializeHeading(
-          node as unknown as { level: 1 | 2 | 3 | 4 | 5 | 6; children: ReadonlyArray<InlineNode> }
-        )
+        return yield* serializeHeading(node)
       case "Paragraph":
-        return yield* serializeParagraph(node as unknown as { children: ReadonlyArray<InlineNode> })
+        return yield* serializeParagraph(node)
       case "CodeBlock":
-        return serializeCodeBlock(node as unknown as { code: string; language?: string | undefined })
+        return serializeCodeBlock(node)
       case "ThematicBreak":
         return "---"
       case "Image":
-        return serializeImage(
-          node as unknown as { src: string; alt?: string | undefined; title?: string | undefined },
-          options
-        )
+        return serializeImage(node, options)
       case "Table":
-        return yield* serializeTable(
-          node as unknown as {
-            header?: { cells: ReadonlyArray<{ children: ReadonlyArray<InlineNode> }> } | undefined
-            rows: ReadonlyArray<{ cells: ReadonlyArray<{ children: ReadonlyArray<InlineNode> }> }>
-          }
-        )
-      case "UnsupportedBlock": {
-        const unsupported = node as unknown as { rawMarkdown?: string; rawHtml?: string; rawAdf?: string }
-        return unsupported.rawMarkdown ?? unsupported.rawHtml ?? unsupported.rawAdf ?? ""
-      }
+        return yield* serializeTable(node)
+      case "List":
+        return yield* serializeList(node, options)
+      case "BlockQuote":
+        return yield* serializeBlockQuote(node, options)
+      case "TaskList":
+        return yield* serializeTaskList(node.children, options)
+      case "UnsupportedBlock":
+        return node.rawMarkdown ?? node.rawHtml ?? node.rawAdf ?? ""
       default:
         return ""
     }
@@ -332,7 +317,7 @@ const serializeSimpleBlock = (
  * Serialize block quote.
  */
 const serializeBlockQuote = (
-  node: { children: ReadonlyArray<unknown> },
+  node: BlockQuote,
   options: SerializeOptions
 ): Effect.Effect<string, SerializeError> =>
   Effect.gen(function*() {
@@ -349,7 +334,7 @@ const serializeBlockQuote = (
  * Serialize info panel to container syntax.
  */
 const serializeInfoPanel = (
-  node: { panelType: string; title?: string | undefined; children: ReadonlyArray<unknown> },
+  node: InfoPanel,
   options: SerializeOptions
 ): Effect.Effect<string, SerializeError> =>
   Effect.gen(function*() {
@@ -370,7 +355,7 @@ const serializeInfoPanel = (
  * Serialize expand macro.
  */
 const serializeExpandMacro = (
-  node: { title?: string | undefined; children: ReadonlyArray<unknown> },
+  node: ExpandMacro,
   options: SerializeOptions
 ): Effect.Effect<string, SerializeError> =>
   Effect.gen(function*() {

@@ -7,8 +7,9 @@ style preferences into noisy CI failures.
 ## Commands
 
 - `pnpm lint` runs ESLint and ast-grep.
-- `pnpm lint:ast` runs the Effect-specific ast-grep rules in
-  `ast-grep/rules/effect`.
+- `pnpm lint:ast` runs ast-grep rules from `sgconfig.yml`, including the
+  Effect-specific rules in `ast-grep/rules/effect` and TypeScript-wide rules in
+  `ast-grep/rules/typescript`.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm skills:check` verifies product-local agent skills are synced from
   `packages/agent-skills/skills`.
@@ -40,6 +41,21 @@ Use ast-grep for syntactic patterns that are precise without type information:
   calling service methods.
 - Stay on Effect v4 APIs: use `Context.Service`, `Effect.catch`, and
   `Effect.gen({ self: this }, ...)` instead of stale v3 forms.
+- Preserve CLI failure semantics: when a CLI entrypoint formats command failures
+  and then re-fails, call `NodeRuntime.runMain` with
+  `{ disableErrorReporting: true }` to avoid duplicate runtime reports.
+- Keep attachment command validation precise: local placeholder/file validation
+  is not a remote API error, and optional document content should be modeled
+  without non-null assertions.
+- Keep CLI error formatters total: unknown-object formatting must not be able to
+  throw while reporting the original failure.
+
+## Hard TypeScript Guardrails
+
+Type assertions are banned. Do not use `value as Type`, `value as const`, double
+assertions such as `value as unknown as Type`, or any variant of `as` to
+override the checker. Model the value, narrow it, decode it, or use
+`satisfies`.
 
 ## Agent Guidance
 

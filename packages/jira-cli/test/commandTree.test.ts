@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Terminal from "effect/Terminal"
 import { Command } from "effect/unstable/cli"
+import { AttachmentService } from "../src/AttachmentService.js"
 import { issueCommand } from "../src/commands/issue.js"
 import { versionCommand } from "../src/commands/version.js"
 import { type Issue, IssueService } from "../src/IssueService.js"
@@ -13,6 +14,7 @@ import { type RelatedWork, type Version, VersionService } from "../src/VersionSe
 interface CommandCalls {
   readonly issueGet: number
   readonly issueSearch: number
+  readonly issueAttachmentUpload: number
   readonly versionList: number
   readonly versionGet: number
   readonly versionUpdate: number
@@ -23,6 +25,7 @@ interface CommandCalls {
 
 const emptyCalls: CommandCalls = {
   issueGet: 0,
+  issueAttachmentUpload: 0,
   issueSearch: 0,
   relatedWorkAdd: 0,
   relatedWorkList: 0,
@@ -50,6 +53,15 @@ const sampleIssue: Issue = {
   type: "Task",
   updated: new Date("2026-01-01T00:00:00.000Z"),
   url: "https://example.atlassian.net/browse/PROJ-123"
+}
+
+const sampleAttachment = {
+  id: "30001",
+  filename: "evidence.png",
+  url: "https://example.atlassian.net/rest/api/3/attachment/content/30001",
+  mediaType: "image/png",
+  mimeType: "image/png",
+  size: 123
 }
 
 const sampleVersion: Version = {
@@ -88,6 +100,16 @@ const CaptureTerminalLayer = (stdout: Ref.Ref<string>) =>
 
 const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
   Layer.mergeAll(
+    Layer.succeed(
+      AttachmentService,
+      AttachmentService.of({
+        uploadToIssue: () =>
+          Ref.update(calls, (state) => ({
+            ...state,
+            issueAttachmentUpload: state.issueAttachmentUpload + 1
+          })).pipe(Effect.as(sampleAttachment))
+      })
+    ),
     Layer.succeed(
       IssueService,
       IssueService.of({
@@ -158,24 +180,40 @@ describe("Jira command tree", () => {
       const calls = yield* Ref.make(emptyCalls)
       const getOutput = yield* Ref.make("")
       const searchOutput = yield* Ref.make("")
+      const uploadOutput = yield* Ref.make("")
       const legacyGetOutput = yield* Ref.make("")
       const legacySearchOutput = yield* Ref.make("")
 
       const getExit = yield* runJiraCommand(["issue", "get", "PROJ-123"], calls, getOutput)
       const searchExit = yield* runJiraCommand(["issue", "search", "project = PROJ"], calls, searchOutput)
+      const uploadExit = yield* runJiraCommand(
+        [
+          "issue",
+          "attachment",
+          "upload",
+          "PROJ-123",
+          "./evidence.png",
+          "--no-insert"
+        ],
+        calls,
+        uploadOutput
+      )
       const legacyGetExit = yield* runJiraCommand(["get", "PROJ-123"], calls, legacyGetOutput)
       const legacySearchExit = yield* runJiraCommand(["search", "project = PROJ"], calls, legacySearchOutput)
 
       expect(getExit._tag).toBe("Success")
       expect(searchExit._tag).toBe("Success")
+      expect(uploadExit._tag).toBe("Success")
       expect(legacyGetExit._tag).toBe("Failure")
       expect(legacySearchExit._tag).toBe("Failure")
 
       expect(yield* Ref.get(calls)).toMatchObject({
         issueGet: 1,
+        issueAttachmentUpload: 1,
         issueSearch: 1,
         writeMulti: 2
       })
+      expect(sampleAttachment.mimeType).toBe(sampleAttachment.mediaType)
     }))
 
   it.effect("exposes canonical version commands and rejects legacy names", () =>

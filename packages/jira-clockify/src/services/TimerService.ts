@@ -114,9 +114,12 @@ const summariseJiraError = (status: number, body: string): string => {
   const trimmed = body.trim()
   if (!trimmed) return `HTTP ${status}`
   try {
-    const parsed = JSON.parse(trimmed) as { errorMessages?: ReadonlyArray<string> }
-    if (parsed.errorMessages && parsed.errorMessages.length > 0) {
-      return `HTTP ${status}: ${parsed.errorMessages.join("; ")}`
+    const parsed: unknown = JSON.parse(trimmed)
+    const errorMessages = parsed !== null && typeof parsed === "object"
+      ? Reflect.get(parsed, "errorMessages")
+      : undefined
+    if (Array.isArray(errorMessages) && errorMessages.every((message) => typeof message === "string")) {
+      return `HTTP ${status}: ${errorMessages.join("; ")}`
     }
   } catch {
     // Non-JSON body — fall through to the raw snippet.
@@ -302,10 +305,17 @@ export const layer = Layer.effect(
             })
           )
         ).pipe(
-          Effect.map((response) => ({ ok: true as const, response })),
+          Effect.map((
+            response
+          ) => ({ ok: true, response } satisfies { readonly ok: true; readonly response: typeof response })),
           Effect.catch((e) =>
             Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(
-              Effect.as({ ok: false as const, message: `Network error: ${String(e)}` })
+              Effect.as(
+                { ok: false, message: `Network error: ${String(e)}` } satisfies {
+                  readonly ok: false
+                  readonly message: string
+                }
+              )
             )
           )
         )
@@ -346,7 +356,7 @@ export const layer = Layer.effect(
         let projectName: string | null = cfg.defaultProjectName ?? null
         if (projectId && !projectName) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.catch(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed([]))
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
@@ -570,7 +580,7 @@ export const layer = Layer.effect(
         let resolvedProjectName: string | null = null
         if (running.projectId) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.catch(() => Effect.succeed([] as const))
+            Effect.catch(() => Effect.succeed([]))
           )
           resolvedProjectName = projects.find((p) => p.id === running.projectId)?.name ?? null
         }

@@ -379,9 +379,9 @@ const make = Effect.gen(function*() {
         Context.add(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
       )
 
-  // Helper to provide deps to an effect - uses any for R since we know depsContext covers all needs
-  const provideDeps = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E> =>
-    Effect.provide(effect, depsContext) as Effect.Effect<A, E>
+  const provideDeps = <A, E>(
+    effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner>
+  ): Effect.Effect<A, E> => Effect.provide(effect, depsContext)
 
   // Ensure initialized helper using captured values
   const ensureInitialized = ensureInitializedFn(fs, gitDir)

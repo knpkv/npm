@@ -3,11 +3,22 @@
  *
  * @module
  */
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, type Project, type Tag } from "@knpkv/clockify-api-client"
 import { Console, Effect, SubscriptionRef } from "effect"
 import { Command, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { TimerService } from "../../services/TimerService.js"
+
+type EditableField = "project" | "billable" | "tags"
+type TagEditAction = "add" | "remove"
+
+const projectField: EditableField = "project"
+const billableField: EditableField = "billable"
+const tagsField: EditableField = "tags"
+const addTagAction: TagEditAction = "add"
+const removeTagAction: TagEditAction = "remove"
+const emptyProjects = (): ReadonlyArray<Project> => []
+const emptyTags = (): ReadonlyArray<Tag> => []
 
 export const edit = Command.make(
   "edit",
@@ -39,21 +50,21 @@ export const edit = Command.make(
         choices: [
           {
             title: `Project (current: ${current.projectName ?? current.projectId ?? "none"})`,
-            value: "project" as const
+            value: projectField
           },
           {
             title: `Billable (current: ${
               current.billable === true ? "yes" : current.billable === false ? "no" : "unset"
             })`,
-            value: "billable" as const
+            value: billableField
           },
-          { title: "Tags", value: "tags" as const }
+          { title: "Tags", value: tagsField }
         ]
       })
 
       if (what === "project") {
         const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-          Effect.catch(() => Effect.succeed([] as const))
+          Effect.catch(() => Effect.succeed(emptyProjects()))
         )
         const selected = yield* Prompt.select({
           message: "Select project:",
@@ -101,7 +112,7 @@ export const edit = Command.make(
 
       if (what === "tags") {
         const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
-          Effect.catch(() => Effect.succeed([] as const))
+          Effect.catch(() => Effect.succeed(emptyTags()))
         )
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
           Effect.catch(() => Effect.succeed(null))
@@ -116,8 +127,8 @@ export const edit = Command.make(
         const action = yield* Prompt.select({
           message: "Action:",
           choices: [
-            { title: "Add tag", value: "add" as const },
-            { title: "Remove tag", value: "remove" as const }
+            { title: "Add tag", value: addTagAction },
+            { title: "Remove tag", value: removeTagAction }
           ]
         })
 

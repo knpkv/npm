@@ -229,6 +229,8 @@ export const createPrAtom = runtimeAtom.fn((input: CreatePRInput) =>
  * Fetch comments for a specific PR and return them
  * @category atoms
  */
+const emptyCommentLocations = (): Array<Domain.PRCommentLocation> => []
+
 export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient.AwsClient
@@ -239,9 +241,9 @@ export const fetchPrCommentsAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
       repositoryName: pr.repositoryName
     }).pipe(
       Effect.tapError((e) => notifyError("Fetch Comments Failed", e)),
-      Effect.catchTag("AwsApiError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
-      Effect.catchTag("AwsCredentialError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
-      Effect.catchTag("AwsThrottleError", () => Effect.succeed([] as Array<Domain.PRCommentLocation>)),
+      Effect.catchTag("AwsApiError", () => Effect.succeed(emptyCommentLocations())),
+      Effect.catchTag("AwsCredentialError", () => Effect.succeed(emptyCommentLocations())),
+      Effect.catchTag("AwsThrottleError", () => Effect.succeed(emptyCommentLocations())),
       Effect.withSpan("fetchPrComments", { attributes: { prId: pr.id } })
     )
   })

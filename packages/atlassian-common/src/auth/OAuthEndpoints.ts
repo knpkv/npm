@@ -61,6 +61,8 @@ export const CONFLUENCE_SCOPES = [
   "read:page:confluence",
   "write:page:confluence",
   "delete:page:confluence",
+  "read:attachment:confluence",
+  "write:attachment:confluence",
   "read:me",
   "offline_access"
 ]

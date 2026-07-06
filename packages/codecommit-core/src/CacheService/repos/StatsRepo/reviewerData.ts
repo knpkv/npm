@@ -13,7 +13,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import {
   cacheError,
   type CommentRow,
-  decodeCommentLocations,
+  decodeCommentLocationJson,
   extractComments,
   type Filters,
   type PRForReviewRow,
@@ -105,7 +105,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           const prInfo = prAuthors.get(key)
           if (!prInfo) continue
 
-          const parsed = yield* decodeCommentLocations(row.locationsJson)
+          const parsed = yield* decodeCommentLocationJson(row.locationsJson)
           const allComments = extractComments(parsed)
           const sorted = [...allComments].sort((a, b) => a.creationDate.getTime() - b.creationDate.getTime())
 
@@ -202,12 +202,13 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           .slice(0, 10)
 
         const avg = (arr: Array<number>) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : null
+        const avgTimeToMerge: number | null = null
 
         return {
           topReviewers,
           topApprovers,
           avgTimeToFirstReview: avg(firstReviewDeltas),
-          avgTimeToMerge: null as number | null, // computed separately from PR dates
+          avgTimeToMerge, // computed separately from PR dates
           avgTimeToAddressFeedback: avg(feedbackDeltas),
           firstReviewDetails,
           feedbackDetails

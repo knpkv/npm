@@ -52,6 +52,28 @@ export interface FilterResult {
 
 type FilterCollectError = Errors.AwsApiError | Errors.AwsCredentialError | Errors.AwsThrottleError
 
+interface CallerLookup {
+  readonly profile: AwsProfileName
+  readonly username: string | null
+}
+
+interface AccountCollection {
+  readonly ok: ReadonlyArray<Domain.PullRequest>
+  readonly failed: string | null
+}
+
+const unresolvedCaller = (profile: AwsProfileName): CallerLookup => ({ profile, username: null })
+
+const collectedPullRequests = (prs: Iterable<Domain.PullRequest>): AccountCollection => ({
+  ok: Array.from(prs),
+  failed: null
+})
+
+const failedAccount = (acct: FilterTarget, message: string): AccountCollection => ({
+  ok: [],
+  failed: `${acct.profile}/${acct.region}: ${message}`
+})
+
 /**
  * Cross-account filter orchestration service.
  *
@@ -97,14 +119,12 @@ const make: Effect.Effect<
         const callers = yield* Effect.forEach(
           uniqueProfiles,
           (acct) =>
-            Effect.catchIf(
-              Effect.map(aws.getCallerIdentity(acct), (id): { profile: string; username: string | null } => ({
+            aws.getCallerIdentity(acct).pipe(
+              Effect.map((id): CallerLookup => ({
                 profile: acct.profile,
                 username: id.username
               })),
-              () => true,
-              () => Effect.succeed({ profile: acct.profile, username: null as string | null }),
-              () => Effect.succeed({ profile: acct.profile, username: null as string | null })
+              Effect.catchIf(() => true, () => Effect.succeed(unresolvedCaller(acct.profile)))
             ),
           { concurrency: 4 }
         )
@@ -117,28 +137,16 @@ const make: Effect.Effect<
       const collected = yield* Effect.forEach(
         targets,
         (acct) =>
-          Effect.catchIf(
-            aws.getPullRequests(acct, { status: "OPEN" }).pipe(
-              Stream.filter((pr) =>
-                matchesPreset(preset, pr, callerByProfile, effectiveNow) &&
-                matchesRepoAuthor(pr, opts.repo, opts.author)
-              ),
-              Stream.runCollect,
-              Effect.map((chunk) => ({ ok: Array.from(chunk), failed: null as string | null }))
+          aws.getPullRequests(acct, { status: "OPEN" }).pipe(
+            Stream.filter((pr) =>
+              matchesPreset(preset, pr, callerByProfile, effectiveNow) &&
+              matchesRepoAuthor(pr, opts.repo, opts.author)
             ),
-            () => true,
+            Stream.runCollect,
+            Effect.map(collectedPullRequests),
             // Don't silently coalesce auth/permission failures to "no matches" —
             // collect the failure so it can be surfaced after the results.
-            (e) =>
-              Effect.succeed({
-                ok: [] as Array<Domain.PullRequest>,
-                failed: `${acct.profile}/${acct.region}: ${e.message}`
-              }),
-            (e) =>
-              Effect.succeed({
-                ok: [] as Array<Domain.PullRequest>,
-                failed: `${acct.profile}/${acct.region}: ${e.message}`
-              })
+            Effect.catchIf(() => true, (e: FilterCollectError) => Effect.succeed(failedAccount(acct, e.message)))
           ),
         { concurrency: 4 }
       )
@@ -148,9 +156,10 @@ const make: Effect.Effect<
       const failures = collected.flatMap((r) => (r.failed === null ? [] : [r.failed]))
 
       return { prs, failures, unresolvedProfiles: unresolvedCallerProfiles }
-    }) as Effect.Effect<FilterResult, FilterCollectError>
+    })
 
-  return { resolveTargets, collect } as const satisfies FilterServiceShape
+  const service: FilterServiceShape = { resolveTargets, collect }
+  return service
 })
 
 /**

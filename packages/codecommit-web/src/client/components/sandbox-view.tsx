@@ -1,24 +1,31 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { ArrowLeftIcon, CodeIcon, LoaderIcon, PlayIcon, ScrollTextIcon, SquareIcon, Trash2Icon } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { appStateAtom, deleteSandboxAtom, restartSandboxAtom, stopSandboxAtom } from "../atoms/app.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 
-const statusVariant = (status: string) => {
+type BadgeVariant = ComponentProps<typeof Badge>["variant"]
+
+const defaultVariant: BadgeVariant = "default"
+const secondaryVariant: BadgeVariant = "secondary"
+const destructiveVariant: BadgeVariant = "destructive"
+const outlineVariant: BadgeVariant = "outline"
+
+const statusVariant = (status: string): BadgeVariant => {
   switch (status) {
     case "running":
-      return "default" as const
+      return defaultVariant
     case "creating":
     case "cloning":
     case "starting":
-      return "secondary" as const
+      return secondaryVariant
     case "error":
-      return "destructive" as const
+      return destructiveVariant
     default:
-      return "outline" as const
+      return outlineVariant
   }
 }
 
@@ -36,12 +43,13 @@ function LogPanel({ logs }: { readonly logs: string }) {
     >
       {lines.map((line, i) => {
         const match = line.match(/^\[([^\]]+)\]\s*(.*)$/)
-        if (!match)
+        if (!match) {
           return (
             <div key={i} className="text-muted-foreground">
               {line}
             </div>
           )
+        }
         const [, ts, msg] = match
         return (
           <div key={i} className="flex gap-3">

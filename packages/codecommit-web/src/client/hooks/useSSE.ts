@@ -10,8 +10,7 @@
  *
  * **Gotchas**
  *
- * - `as AppState` cast works because only consoleUrl getter is missing from
- *   wire objects (it's a Schema.Class getter, not serialized)
+ * - SSE payloads are decoded before they enter app state.
  *
  * **Common tasks**
  *
@@ -20,7 +19,7 @@
  *
  * @module
  */
-import { AppStatus, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, AwsProfileName, AwsRegion, PullRequest, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -121,6 +120,43 @@ const SsePayload = Schema.Struct({
 })
 
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(SsePayload))
+const decodeAwsProfileName = Schema.decodeUnknownSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeUnknownSync(AwsRegion)
+const decodePullRequest = Schema.decodeUnknownSync(PullRequest)
+
+const normalizeNotifications = (
+  notifications: NonNullable<typeof SsePayload.Type["notifications"]>
+): NonNullable<AppState["notifications"]> => ({
+  items: notifications.items,
+  ...(notifications.nextCursor !== undefined ? { nextCursor: notifications.nextCursor } : {})
+})
+
+const toAppState = (payload: typeof SsePayload.Type): AppState => {
+  const notifications = payload.notifications === undefined
+    ? undefined
+    : normalizeNotifications(payload.notifications)
+
+  return {
+    pullRequests: payload.pullRequests.map((pr) => decodePullRequest(pr)),
+    accounts: payload.accounts.map((account) => ({
+      profile: decodeAwsProfileName(account.profile),
+      region: decodeAwsRegion(account.region),
+      enabled: account.enabled
+    })),
+    status: payload.status,
+    pendingReviewCount: payload.pendingReviewCount,
+    ...(payload.statusDetail !== undefined ? { statusDetail: payload.statusDetail } : {}),
+    ...(payload.error !== undefined ? { error: payload.error } : {}),
+    ...(payload.lastUpdated !== undefined ? { lastUpdated: payload.lastUpdated } : {}),
+    ...(payload.currentUser !== undefined ? { currentUser: payload.currentUser } : {}),
+    ...(payload.unreadNotificationCount !== undefined
+      ? { unreadNotificationCount: payload.unreadNotificationCount }
+      : {}),
+    ...(notifications !== undefined ? { notifications } : {}),
+    ...(payload.sandboxes !== undefined ? { sandboxes: payload.sandboxes } : {}),
+    ...(payload.permissionPrompt !== undefined ? { permissionPrompt: payload.permissionPrompt } : {})
+  }
+}
 
 export type ConnectionState = "connected" | "reconnecting" | "disconnected"
 
@@ -155,7 +191,7 @@ export function useSSE(
 
       es.onmessage = (event) => {
         try {
-          const state = decode(event.data) as unknown as AppState
+          const state = toAppState(decode(event.data))
 
           // Toast for genuinely new notifications
           const notifications = state.notifications?.items ?? []

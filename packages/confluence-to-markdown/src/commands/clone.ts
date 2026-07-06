@@ -10,7 +10,7 @@ import * as Option from "effect/Option"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { layer as AdfSchemaValidatorLayer } from "../AdfSchemaValidator.js"
 import { layer as AtlaskitTransformersLayer } from "../AtlaskitTransformers.js"
-import type { PageId } from "../Brand.js"
+import { PageId } from "../Brand.js"
 import { type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { createConfigFile, layerFromValues as ConfluenceConfigLayerFromValues } from "../ConfluenceConfig.js"
 import { ConfigError } from "../ConfluenceError.js"
@@ -108,7 +108,7 @@ export const cloneCommand = Command.make(
 
       // Build layers for the clone operation
       const configLayer = ConfluenceConfigLayerFromValues({
-        rootPageId: pageId as PageId,
+        rootPageId: PageId(pageId),
         baseUrl: url,
         docsPath: ".confluence/docs",
         excludePatterns: [],
@@ -139,6 +139,12 @@ export const cloneCommand = Command.make(
           onProgress: (current, total, message) =>
             writeStdout(`\r  Replaying history: ${current}/${total} - ${message}`)
         })
+        if (pullResult.errors.length > 0) {
+          yield* writeStdout("\r" + " ".repeat(80) + "\r")
+          return yield* Effect.fail(
+            new ConfigError({ message: `Clone failed:\n${pullResult.errors.join("\n")}` })
+          )
+        }
 
         // Create origin/confluence branch at HEAD to track remote state
         yield* gitService.createBranch("origin/confluence")

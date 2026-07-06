@@ -8,8 +8,7 @@
  */
 import { NodeServices, NodeTerminal } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, type ClockifyApiClientShape, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -21,11 +20,27 @@ const WORKSPACE_ID = "ws-1"
 
 let savedPatches: Array<unknown> = []
 
-const mockClockify: Partial<ClockifyApiClientShape> = {
-  getProjects: () => Effect.succeed([])
+const unused = () => Effect.die("unused Clockify mock method")
+
+const mockClockify: ClockifyApiClientShape = {
+  api: makeOpenApiFetchClient("https://api.clockify.test", {}),
+  getUser: unused,
+  getWorkspaces: unused,
+  getProjects: () => Effect.succeed([]),
+  getProjectByName: unused,
+  createTimeEntry: unused,
+  stopTimer: unused,
+  getTimeEntries: unused,
+  getRunningTimer: unused,
+  getTags: unused,
+  createTag: unused,
+  findOrCreateTag: unused,
+  getTimeEntry: unused,
+  deleteTimeEntry: unused,
+  updateTimeEntry: unused
 }
 
-const MockClockifyLayer = Layer.succeed(ClockifyApiClient, mockClockify as ClockifyApiClientShape)
+const MockClockifyLayer = Layer.succeed(ClockifyApiClient, mockClockify)
 
 const MockClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
   getConfig: Effect.succeed({

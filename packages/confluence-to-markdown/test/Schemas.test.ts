@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import type { ContentHash, PageId } from "../src/Brand.js"
+import { ContentHash, PageId } from "../src/Brand.js"
 import {
   ConfluenceConfigFileSchema,
   OAuthConfigSchema,
@@ -58,11 +58,11 @@ describe("Schemas", () => {
   })
 
   describe("PageFrontMatterSchema", () => {
-    const validHash = "a".repeat(64) as ContentHash
+    const validHash = ContentHash("a".repeat(64))
 
     it("decodes valid front matter", () => {
       const fm = {
-        pageId: "123" as PageId,
+        pageId: PageId("123"),
         version: 1,
         title: "Test Page",
         updated: new Date().toISOString(),
@@ -74,11 +74,11 @@ describe("Schemas", () => {
 
     it("decodes front matter with optional fields", () => {
       const fm = {
-        pageId: "123" as PageId,
+        pageId: PageId("123"),
         version: 2,
         title: "Test Page",
         updated: new Date().toISOString(),
-        parentId: "456" as PageId,
+        parentId: PageId("456"),
         position: 0,
         contentHash: validHash
       }

@@ -27,7 +27,7 @@
  *      (the sibling blocks between the markers become the panel's body)
  *  - `<!-- adf:TYPE node=BASE64 --> BODY <!-- adf:/TYPE -->` for selected
  *      native block nodes such as code blocks with metadata, task/decision
- *      lists, expands, layouts, cards, and tables
+ *      lists, expands, layouts, cards, tables, and media
  *  - `<u>TEXT</u>`, `<sub>TEXT</sub>`, `<sup>TEXT</sup>`, and exact styled
  *      spans emitted for Confluence-only inline marks
  *  - `[@Name](confluence-mention://ACCOUNT_ID)`            (link mark with a
@@ -41,13 +41,18 @@
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
-interface AdfNode {
+export interface AdfNode {
   readonly type: string
   readonly attrs?: Record<string, unknown>
   readonly content?: ReadonlyArray<AdfNode>
   readonly text?: string
   readonly marks?: ReadonlyArray<AdfNode>
 }
+
+const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
+  typeof value === "object" && value !== null
+
+const isAdfNode = (value: unknown): value is AdfNode => isRecord(value) && typeof value.type === "string"
 
 const STATUS_RE = /<span class="adf-status"\s+data-color="([^"]+)">([^<]*)<\/span>/g
 const INLINE_NODE_RE = /<!--\s*adf:(date|emoji)(?:\s+node=([\s\S]*?))?\s*-->/g
@@ -80,9 +85,9 @@ const BODIED_EXTENSION_END_RE = /^\s*<!--\s*adf:\/bodiedExtension\s*-->\s*$/
 const PANEL_RE = /^\s*<!--\s*adf:panel(?:\s+type=(\S+?))?(?:\s+attrs=([\s\S]*?))?\s*-->\s*$/
 const PANEL_END_RE = /^\s*<!--\s*adf:\/panel\s*-->\s*$/
 const ENCODED_BLOCK_NODE_RE =
-  /^\s*\\*<!--\s*adf:(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard|mediaSingle|mediaGroup)(?:\s+node=([\s\S]*?))?\s*-->\s*$/
 const ENCODED_BLOCK_NODE_END_RE =
-  /^\s*\\*<!--\s*adf:\/(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard)\s*-->\s*$/
+  /^\s*\\*<!--\s*adf:\/(codeBlock|taskList|decisionList|expand|nestedExpand|table|layoutSection|blockCard|embedCard|mediaSingle|mediaGroup)\s*-->\s*$/
 const PARAGRAPH_MARKS_RE = /^\s*<!--\s*adf:paragraph(?:\s+marks=([\s\S]*?))?\s*-->\s*$/
 const PARAGRAPH_MARKS_END_RE = /^\s*<!--\s*adf:\/paragraph\s*-->\s*$/
 const TOC_RE = /^\s*\[\[toc(?::([^\]]+))?\]\]\s*$/
@@ -124,7 +129,7 @@ const decodeAttrs = (b64: string | undefined): Record<string, unknown> | null =>
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw))
     const decoded = decodeAttrsBlob(parsed)
     return Option.isSome(decoded) ? decoded.value : null
   } catch {
@@ -158,12 +163,8 @@ const decodeMarks = (b64: string | undefined): ReadonlyArray<AdfNode> => {
   if (!b64) return []
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("[") ? raw : fromBase64(raw)) as unknown
-    return Array.isArray(parsed)
-      ? parsed.filter((mark): mark is AdfNode =>
-        mark !== null && typeof mark === "object" && typeof (mark as Record<string, unknown>)["type"] === "string"
-      )
-      : []
+    const parsed = parsePlaceholderJson(raw.startsWith("[") ? raw : fromBase64(raw))
+    return Array.isArray(parsed) ? parsed.filter(isAdfNode) : []
   } catch {
     return []
   }
@@ -173,11 +174,8 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
   if (!b64) return null
   try {
     const raw = b64.trim()
-    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw)) as unknown
-    return parsed !== null && typeof parsed === "object" &&
-        typeof (parsed as Record<string, unknown>)["type"] === "string"
-      ? parsed as AdfNode
-      : null
+    const parsed = parsePlaceholderJson(raw.startsWith("{") ? raw : fromBase64(raw))
+    return isAdfNode(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -185,12 +183,12 @@ const decodeNode = (b64: string | undefined): AdfNode | null => {
 
 const parsePlaceholderJson = (json: string): unknown => {
   try {
-    return JSON.parse(json) as unknown
+    return JSON.parse(json)
   } catch {
     // @atlaskit's markdown parser may insert markdown escapes into placeholder
     // text before we restore it. Square brackets are common inside code-block
     // JSON samples and `\[` / `\]` are invalid JSON escapes.
-    return JSON.parse(json.replace(/\\(["[\]])/g, "$1")) as unknown
+    return JSON.parse(json.replace(/\\(["[\]])/g, "$1"))
   }
 }
 
@@ -396,6 +394,49 @@ const isEncodedBlockNodeEnd = (node: AdfNode, type: string): boolean => {
   return match?.[1] === type
 }
 
+const textContent = (node: AdfNode): string => node.text ?? (node.content ?? []).map(textContent).join("")
+
+const isMeaningfulMarkerBodyNode = (node: AdfNode): boolean =>
+  node.type === "paragraph" ? textContent(node).trim().length > 0 : true
+
+const withoutSingleEmMark = (node: AdfNode): AdfNode => {
+  if (node.type !== "text") return node.content ? { ...node, content: node.content.map(withoutSingleEmMark) } : node
+  const marks = node.marks ?? []
+  const nextMarks = marks.filter((mark) => mark.type !== "em")
+  return nextMarks.length === 0 ? { type: "text", text: node.text ?? "" } : { ...node, marks: nextMarks }
+}
+
+const paragraphCaption = (body: ReadonlyArray<AdfNode>): AdfNode | null => {
+  const meaningfulIndexes: Array<number> = []
+  for (const [index, node] of body.entries()) {
+    if (isMeaningfulMarkerBodyNode(node)) meaningfulIndexes.push(index)
+  }
+
+  let paragraph: { readonly node: AdfNode; readonly index: number } | null = null
+  for (let index = body.length - 1; index >= 0; index--) {
+    const node = body[index]
+    if (node?.type === "paragraph" && textContent(node).trim().length > 0) {
+      paragraph = { node, index }
+      break
+    }
+  }
+  if (paragraph === null) return null
+  if (meaningfulIndexes.length === 1 && meaningfulIndexes[0] === paragraph.index) return null
+  return {
+    type: "caption",
+    content: (paragraph.node.content ?? []).map(withoutSingleEmMark)
+  }
+}
+
+const restoreMediaSingleNode = (node: AdfNode, body: ReadonlyArray<AdfNode>): AdfNode => {
+  const mediaContent = (node.content ?? []).filter((child) => child.type !== "caption")
+  const caption = paragraphCaption(body)
+  return {
+    ...node,
+    content: caption ? [...mediaContent, caption] : mediaContent
+  }
+}
+
 const parseParagraphMarksParagraph = (node: AdfNode): ReadonlyArray<AdfNode> | null => {
   const child = soleTextChild(node)
   if (!child || !child.text) return null
@@ -524,7 +565,11 @@ const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray
       if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
     }
 
-    out.push(marker.node)
+    out.push(
+      marker.type === "mediaSingle" && end !== -1
+        ? restoreMediaSingleNode(marker.node, children.slice(i + 1, end))
+        : marker.node
+    )
     if (end !== -1) i = end
   }
   return out
@@ -601,4 +646,9 @@ const transform = (node: AdfNode): AdfNode => {
 }
 
 /** Walk the document tree and rewrite placeholder text into proper ADF nodes. */
-export const revertPlaceholders = (doc: unknown): unknown => transform(doc as AdfNode)
+export const revertPlaceholders = (doc: unknown): AdfNode => {
+  if (!isAdfNode(doc)) {
+    throw new TypeError("ADF document must be an object with a string type")
+  }
+  return transform(doc)
+}

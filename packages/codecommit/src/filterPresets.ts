@@ -11,8 +11,8 @@ import { identityMatches, needsMyReview, type PullRequest } from "@knpkv/codecom
 import { Option } from "effect"
 
 /** Named presets that fan out across all enabled accounts. */
-export const FILTER_PRESETS = ["mine", "needs-my-review", "stale", "conflicting"] as const
-export type FilterPreset = typeof FILTER_PRESETS[number]
+export type FilterPreset = "mine" | "needs-my-review" | "stale" | "conflicting"
+export const FILTER_PRESETS: ReadonlyArray<FilterPreset> = ["mine", "needs-my-review", "stale", "conflicting"]
 
 /** Inactivity threshold (in days) for the `stale` preset. */
 export const STALE_DAYS = 7

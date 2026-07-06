@@ -46,7 +46,7 @@ const VISIBLE_KEYS: ReadonlyArray<FilterKey> = [
   "size"
 ]
 
-function extractOptionsFromPRs(prs: ReadonlyArray<PullRequest>, currentUser: string | undefined) {
+function extractOptionsFromPRs(prs: ReadonlyArray<PullRequest>) {
   const authors = new Set<string>()
   const accounts = new Set<string>()
   const scopes = new Set<string>()
@@ -134,7 +134,7 @@ function matchesPR(pr: PullRequest, entry: FilterEntry): boolean {
   }
 }
 
-const OPEN_SUB_STATUSES = ["approved", "pending", "mergeable", "conflicts"] as const
+const OPEN_SUB_STATUSES: ReadonlyArray<string> = ["approved", "pending", "mergeable", "conflicts"]
 
 const STATUS_AXIS: Record<string, string> = {
   open: "lifecycle",
@@ -258,7 +258,6 @@ export function FilterSidebar() {
       },
       { replace: true }
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const selectedMap = useMemo(() => {
@@ -290,12 +289,12 @@ export function FilterSidebar() {
               if (prev.getAll("f").length === 0) prev.append("f", "")
               return prev
             }
-            const subs = OPEN_SUB_STATUSES.map((s) => `status:${s}`)
+            const subs: ReadonlyArray<string> = OPEN_SUB_STATUSES.map((s) => `status:${s}`)
             const lifecycle = new Set(["status:merged", "status:closed"])
             const allPresent = subs.every((s) => existing.includes(s))
             prev.delete("f")
             for (const raw of existing) {
-              if (subs.includes(raw as (typeof subs)[number]) || lifecycle.has(raw)) continue
+              if (subs.includes(raw) || lifecycle.has(raw)) continue
               prev.append("f", raw)
             }
             if (!allPresent) {
@@ -306,11 +305,7 @@ export function FilterSidebar() {
           },
           { replace: true }
         )
-      } else if (
-        key === "status" &&
-        (OPEN_SUB_STATUSES as ReadonlyArray<string>).includes(value) &&
-        selectedMap.get("status")?.includes("open")
-      ) {
+      } else if (key === "status" && OPEN_SUB_STATUSES.includes(value) && selectedMap.get("status")?.includes("open")) {
         setSearchParams(
           (prev) => {
             let existing = prev.getAll("f")
@@ -338,26 +333,35 @@ export function FilterSidebar() {
   )
 
   const cascadedOptions = useMemo(() => {
-    const byGroup = new Map<string, ReadonlyArray<FilterEntry>>()
+    const byGroup = new Map<string, Array<FilterEntry>>()
     for (const f of state.filters) {
       const groupKey = f.key === "status" ? `status:${STATUS_AXIS[f.value] ?? f.value}` : f.key
       const arr = byGroup.get(groupKey)
-      if (arr) (arr as Array<FilterEntry>).push(f)
+      if (arr) arr.push(f)
       else byGroup.set(groupKey, [f])
     }
 
-    const result: Record<string, ReadonlyArray<string>> = {}
+    const result: Record<FilterKey, ReadonlyArray<string>> = {
+      account: [],
+      author: [],
+      approver: [],
+      commenter: [],
+      scope: [],
+      repo: [],
+      status: [],
+      size: []
+    }
     for (const key of VISIBLE_KEYS) {
       const otherGroups = [...byGroup.entries()].filter(([k]) => k !== key && !k.startsWith(`${key}:`))
       let subset = prs
       if (otherGroups.length > 0) {
         subset = prs.filter((pr) => otherGroups.every(([, group]) => group.some((f) => matchesPR(pr, f))))
       }
-      const opts = extractOptionsFromPRs(subset, currentUser)
+      const opts = extractOptionsFromPRs(subset)
       result[key] = opts[key] ?? []
     }
 
-    return result as Record<FilterKey, ReadonlyArray<string>>
+    return result
   }, [prs, currentUser, state.filters])
 
   const hasDateRange = !!state.from || !!state.to
@@ -490,7 +494,7 @@ export function FilterSidebar() {
           options={cascadedOptions[key]}
           selected={selectedMap.get(key) ?? []}
           onToggle={handleToggle}
-          {...(key === "status" ? { groups: { open: OPEN_SUB_STATUSES as unknown as Array<string> } } : {})}
+          {...(key === "status" ? { groups: { open: Array.from(OPEN_SUB_STATUSES) } } : {})}
         />
       ))}
     </aside>

@@ -1,7 +1,13 @@
-import type * as Layer from "effect/Layer"
+import { Context, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { AtomHttpApi } from "effect/unstable/reactivity"
 import { CodeCommitApi } from "../../server/Api.js"
+
+const AtomHttpApiRuntimeMarker = Context.Service<unknown, unknown>("@knpkv/codecommit-web/AtomHttpApiRuntimeMarker")
+const HttpClientLive = Layer.merge(
+  FetchHttpClient.layer,
+  Layer.succeed(AtomHttpApiRuntimeMarker, undefined)
+)
 
 /**
  * API Client using AtomHttpApi pattern
@@ -10,7 +16,7 @@ import { CodeCommitApi } from "../../server/Api.js"
 export const ApiClient = AtomHttpApi.Service()("ApiClient", {
   api: CodeCommitApi,
   baseUrl: "/",
-  httpClient: FetchHttpClient.layer as Layer.Layer<unknown>
+  httpClient: HttpClientLive
 })
 
 /**

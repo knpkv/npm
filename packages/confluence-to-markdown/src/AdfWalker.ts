@@ -6,7 +6,8 @@
  *
  * @module
  */
-import type { DocNode } from "@atlaskit/adf-schema"
+import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
+import { sanitizeConfluenceMediaAlt } from "./internal/mediaAlt.js"
 
 /**
  * Warning emitted by the walker. Surfaced via `Effect.logWarning` at the
@@ -62,12 +63,15 @@ const escapeHtml = (s: string): string =>
 // escape the wrapper itself.
 const safeHref = (href: string): string =>
   /[() <>\\]/.test(href) ? `<${href.replace(/[<>\\]/g, (c) => encodeURIComponent(c))}>` : href
-// Alt text is substituted rather than escaped: @atlaskit's media markdown
-// plugin throws on `\[`/`\]` in alt (making the page un-pushable), and
-// newlines split the construct outright.
-const sanitizeAlt = (s: string): string =>
-  s.replace(/\[/g, "(").replace(/\]/g, ")").replace(/\\/g, "/").replace(/\s+/g, " ").trim()
-
+const filenameFromUrl = (href: string): string | undefined => {
+  try {
+    const pathname = new URL(href).pathname
+    const name = pathname.split("/").filter(Boolean).at(-1)
+    return name ? decodeURIComponent(name) : undefined
+  } catch {
+    return undefined
+  }
+}
 // ESCAPE_RE deliberately skips characters that are only special at line
 // start, so lines assembled from paragraph text (including after hardBreak)
 // must neutralize leading block markers: ATX headings, blockquotes, list
@@ -93,9 +97,12 @@ const attrNum = (n: AdfNode, key: string): number | undefined => {
   const v = n.attrs?.[key]
   return typeof v === "number" ? v : undefined
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v)
+
 const attrRecord = (n: AdfNode, key: string): Record<string, unknown> | undefined => {
   const v = n.attrs?.[key]
-  return v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : undefined
+  return isRecord(v) ? v : undefined
 }
 
 const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
@@ -106,14 +113,30 @@ const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
 // push → pull a byte-level fixed point (and contentHash stable).
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
-  if (v !== null && typeof v === "object") {
-    const entries = Object.entries(v as Record<string, unknown>)
+  if (isRecord(v)) {
+    const entries = Object.entries(v)
       .filter(([, value]) => value !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([k, value]) => `${JSON.stringify(k)}:${stableStringify(value)}`)
     return `{${entries.join(",")}}`
   }
   return JSON.stringify(v) ?? "null"
+}
+
+const toAdfNode = (value: unknown): AdfNode => {
+  if (!isRecord(value)) return { type: "unknown" }
+  const type = Reflect.get(value, "type")
+  const attrs = Reflect.get(value, "attrs")
+  const content = Reflect.get(value, "content")
+  const text = Reflect.get(value, "text")
+  const marks = Reflect.get(value, "marks")
+  return {
+    type: typeof type === "string" ? type : "unknown",
+    ...(isRecord(attrs) ? { attrs } : {}),
+    ...(Array.isArray(content) ? { content: content.map(toAdfNode) } : {}),
+    ...(typeof text === "string" ? { text } : {}),
+    ...(Array.isArray(marks) ? { marks: marks.map(toAdfNode) } : {})
+  }
 }
 
 const toBase64 = (s: string): string => {
@@ -217,8 +240,8 @@ const isOnlyKeys = (v: Record<string, unknown> | undefined, keys: ReadonlyArray<
 const tocLevel = (macroParams: Record<string, unknown> | undefined, key: "minLevel" | "maxLevel"): string | null => {
   const param = macroParams?.[key]
   if (param === undefined) return null
-  if (param === null || typeof param !== "object" || Array.isArray(param)) return null
-  const record = param as Record<string, unknown>
+  if (!isRecord(param)) return null
+  const record = param
   if (!isOnlyKeys(record, ["value"])) return null
   const value = record["value"]
   return typeof value === "string" && /^[1-6]$/.test(value) ? value : null
@@ -235,8 +258,8 @@ const tocMarkdown = (n: AdfNode): string | null => {
   if (!isOnlyKeys(parameters, ["macroParams"])) return null
 
   const macroParams = parameters["macroParams"]
-  if (macroParams === null || typeof macroParams !== "object" || Array.isArray(macroParams)) return null
-  const macroParamRecord = macroParams as Record<string, unknown>
+  if (!isRecord(macroParams)) return null
+  const macroParamRecord = macroParams
   if (!isOnlyKeys(macroParamRecord, ["minLevel", "maxLevel"])) return null
 
   const minLevel = tocLevel(macroParamRecord, "minLevel")
@@ -573,10 +596,32 @@ const blockCard = (n: AdfNode, ctx: Ctx): string => {
 const renderMedia = (media: AdfNode | undefined, ctx: Ctx): string => {
   const id = (media && attrStr(media, "id")) ?? ""
   const alt = (media && attrStr(media, "alt")) ?? ""
+  const filename = media && attrStr(media, "filename")
+  const mediaType = media && attrStr(media, "mediaType")
   const url = media && attrStr(media, "url")
-  if (url) return `![${sanitizeAlt(alt)}](${safeHref(url)})`
+  if (url) {
+    const urlFilename = filenameFromUrl(url)
+    const previewName = filename || urlFilename || alt || id
+    const linkLabel = filename || alt || urlFilename || id
+    return isPreviewableAttachment({ filename: previewName, mediaType })
+      ? `![${sanitizeConfluenceMediaAlt(alt || filename || "")}](${safeHref(url)})`
+      : `[${escapeText(linkLabel)}](${safeHref(url)})`
+  }
   ctx.warnings.push({ _tag: "MediaWithoutUrl", mediaId: id })
   return `<!-- adf:media id=${id} -->`
+}
+
+const mediaIdentityNode = (n: AdfNode): AdfNode => {
+  if (n.type === "media") {
+    const attrs = { ...(n.attrs ?? {}) }
+    delete attrs["url"]
+    delete attrs["filename"]
+    delete attrs["mediaType"]
+    return { ...n, attrs }
+  }
+  return n.content
+    ? { ...n, content: n.content.filter((child) => child.type !== "caption").map(mediaIdentityNode) }
+    : n
 }
 
 const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
@@ -584,23 +629,23 @@ const mediaSingle = (n: AdfNode, ctx: Ctx): string => {
   const rendered = renderMedia(children.find((c) => c.type === "media"), ctx)
   const caption = children.find((c) => c.type === "caption")
   const captionText = caption ? inline(caption.content, ctx).trim() : ""
-  if (captionText.length === 0) return rendered
+  if (captionText.length === 0) return encodedBlockNode(mediaIdentityNode(n), rendered, ctx)
   // An em-marked caption already renders as `_…_`; wrapping again would make
   // `__…__` (strong). Leave captions that touch an underscore unwrapped.
   const line = captionText.startsWith("_") || captionText.endsWith("_") ? captionText : `_${captionText}_`
-  return `${rendered}\n${line}`
+  return encodedBlockNode(mediaIdentityNode(n), `${rendered}\n${line}`, ctx)
 }
 
 const mediaGroup = (n: AdfNode, ctx: Ctx): string =>
-  (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n")
+  encodedBlockNode(mediaIdentityNode(n), (n.content ?? []).map((media) => renderMedia(media, ctx)).join("\n\n"), ctx)
 
 /**
  * Walk an ADF document and emit GFM markdown. Always synchronous; warnings
  * are collected, not thrown.
  */
-export const walk = (doc: DocNode): WalkResult => {
+export const walk = (doc: unknown): WalkResult => {
   const ctx: Ctx = { inTable: false, warnings: [] }
-  const root = doc as unknown as AdfNode
+  const root = toAdfNode(doc)
   const blocks = (root.content ?? []).map((c) => block(c, ctx))
   const body = blocks.join("\n\n")
   const markdown = body.endsWith("\n") ? body : body + "\n"

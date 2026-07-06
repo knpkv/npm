@@ -27,5 +27,5 @@ export function useDismissable(storageKey: string) {
     setVisible(false)
   }, [])
 
-  return { cancel, dismiss, dontRemind, isDismissed, setDontRemind, show, visible } as const
+  return { cancel, dismiss, dontRemind, isDismissed, setDontRemind, show, visible }
 }

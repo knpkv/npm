@@ -54,7 +54,7 @@ export const resolveStopProject = (params: {
     if (!auth) return undefined
 
     const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-      Effect.catch(() => Effect.succeed([] as const))
+      Effect.catch(() => Effect.succeed([]))
     )
     if (projects.length === 0) return undefined
 

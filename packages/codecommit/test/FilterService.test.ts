@@ -16,14 +16,15 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { AwsClient, ConfigService, Errors } from "@knpkv/codecommit-core"
-import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import type { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { AwsProfileName, AwsRegion, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { FilterService, FilterServiceLive, type FilterTarget } from "../src/FilterService.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
 const NOW = new Date("2024-06-19T12:00:00Z")
+const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
+const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 
 interface PROverrides {
   readonly id?: string
@@ -56,8 +57,8 @@ const mkPR = (o: PROverrides = {}): PullRequest =>
   })
 
 const target = (profile: string, region = "us-east-1"): FilterTarget => ({
-  profile: profile as AwsProfileName,
-  region: region as AwsRegion
+  profile: decodeAwsProfileName(profile),
+  region: decodeAwsRegion(region)
 })
 
 const opts = { repo: Option.none<string>(), author: Option.none<string>() }

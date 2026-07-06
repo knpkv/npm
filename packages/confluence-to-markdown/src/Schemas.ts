@@ -235,7 +235,7 @@ export type PageListItem = Schema.Schema.Type<typeof PageListItemSchema>
  * @category Schema
  */
 export const PageChildrenResponseSchema = Schema.Struct({
-  results: Schema.Array(PageListItemSchema),
+  results: Schema.Array(PageListItemSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   _links: Schema.optional(
     Schema.Struct({
       next: Schema.optional(Schema.String)
@@ -249,6 +249,18 @@ export const PageChildrenResponseSchema = Schema.Struct({
  * @category Types
  */
 export type PageChildrenResponse = Schema.Schema.Type<typeof PageChildrenResponseSchema>
+
+export const AttachmentReferenceSchema = Schema.Struct({
+  id: Schema.String,
+  filename: Schema.String,
+  url: Schema.String,
+  mediaType: Schema.NullOr(Schema.String),
+  size: Schema.NullOr(Schema.Number),
+  fileId: Schema.optional(Schema.String),
+  collectionName: Schema.optional(Schema.String)
+})
+
+export type AttachmentReference = Schema.Schema.Type<typeof AttachmentReferenceSchema>
 
 /**
  * Schema for OAuth user info.
@@ -437,7 +449,7 @@ export type PageVersionContent = Schema.Schema.Type<typeof PageVersionContentSch
  * @category Schema
  */
 export const PageVersionsResponseSchema = Schema.Struct({
-  results: Schema.Array(PageVersionSchema),
+  results: Schema.Array(PageVersionSchema).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   _links: Schema.optional(
     Schema.Struct({
       next: Schema.optional(Schema.String)

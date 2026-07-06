@@ -19,7 +19,7 @@ import { useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router"
 import { FILTER_KEYS, type FilterEntry, type FilterKey, type FilterState } from "../atoms/ui.js"
 
-const isFilterKey = (k: string): k is FilterKey => (FILTER_KEYS as ReadonlyArray<string>).includes(k)
+const isFilterKey = (k: string): k is FilterKey => FILTER_KEYS.some((key) => key === k)
 
 const DEFAULT_FILTERS: ReadonlyArray<FilterEntry> = [{ key: "status", value: "open" }]
 const DEFAULT_FILTER_PARAMS = DEFAULT_FILTERS.map((f) => `${f.key}:${f.value}`)
@@ -197,5 +197,5 @@ export function useFilterParams() {
     setMineScope,
     setFilterText,
     clearAll
-  } as const
+  }
 }

@@ -7,7 +7,8 @@
  *
  * Uses `@effect/vitest` for consistency with the rest of the codebase.
  */
-import type { Domain } from "@knpkv/codecommit-core"
+import { Domain } from "@knpkv/codecommit-core"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   applySettingsFilter,
@@ -20,13 +21,12 @@ import type { ListItem } from "../src/tui/ListBuilder.js"
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
+const decodeAccount = Schema.decodeSync(Domain.Account)
+const decodePullRequest = Schema.decodeSync(Domain.PullRequest)
+
 const mkAccount = (profile: string, enabled: boolean): ListItem => ({
   type: "account",
-  account: {
-    profile: profile as Domain.AwsProfileName,
-    region: "us-east-1" as Domain.AwsRegion,
-    enabled
-  }
+  account: { ...decodeAccount({ profile, region: "us-east-1" }), enabled }
 })
 
 const mkHeader = (label: string, count: number): ListItem => ({
@@ -37,7 +37,7 @@ const mkHeader = (label: string, count: number): ListItem => ({
 
 const mkPR = (id: string, description?: string): ListItem => ({
   type: "pr",
-  pr: {
+  pr: decodePullRequest({
     id,
     title: `PR ${id}`,
     description,
@@ -51,8 +51,10 @@ const mkPR = (id: string, description?: string): ListItem => ({
     sourceBranch: "feat",
     destinationBranch: "main",
     isMergeable: true,
-    isApproved: false
-  } as any
+    isApproved: false,
+    approvedBy: [],
+    commentedBy: []
+  })
 })
 
 const empty: ListItem = { type: "empty" }

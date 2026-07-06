@@ -9,7 +9,7 @@ import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { ContentHash } from "../Brand.js"
+import { ContentHash } from "../Brand.js"
 
 /**
  * Hash computation service.
@@ -46,7 +46,7 @@ export const makeHashServiceLive = (
     {
       computeSha256: (content: string) =>
         Effect.promise(() => hashFn(content)).pipe(
-          Effect.map((hash) => hash as ContentHash)
+          Effect.map((hash) => ContentHash(hash))
         )
     }
   )
@@ -65,9 +65,11 @@ const HashServiceFromCrypto: Layer.Layer<HashServiceTag, never, Crypto.Crypto> =
         cryptoService.digest("SHA-256", new TextEncoder().encode(content)).pipe(
           Effect.orDie,
           Effect.map((hashArray) =>
-            Array.from(hashArray)
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("") as ContentHash
+            ContentHash(
+              Array.from(hashArray)
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("")
+            )
           )
         )
     }

@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-attachment-document-non-null-assertion
+language: tsx
+severity: error
+message: "Keep attachment document state total instead of using documentContent!"
+
+rule:
+  pattern: documentContent!
+
+files:
+  - "packages/jira-cli/src/commands/**/*Attachment.ts"
+  - "packages/confluence-to-markdown/src/commands/**/*attachment.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Attachment upload commands should model optional document input with a local
+  value that carries both path and content after validation.
+
+  Prefer:
+
+  const documentInput = shouldInsert
+    ? { path: documentPath, content: yield* readDocument(documentPath) }
+    : null
+
+  if (documentInput !== null) {
+    // documentInput.content is a plain string here.
+  }

@@ -10,14 +10,16 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Terminal from "effect/Terminal"
 import { PageId } from "./Brand.js"
 import { ConfluenceClient } from "./ConfluenceClient.js"
 import { ConfluenceConfig } from "./ConfluenceConfig.js"
 import type { ApiError, ConversionError, FrontMatterError, RateLimitError } from "./ConfluenceError.js"
-import { FileSystemError, StructureError } from "./ConfluenceError.js"
+import { AttachmentResolutionError, FileSystemError, StructureError } from "./ConfluenceError.js"
 import type { GitServiceError } from "./GitService.js"
 import { GitService } from "./GitService.js"
 import type { AdfMetadataSidecar } from "./internal/adfMetadata.js"
@@ -27,6 +29,7 @@ import {
   externalizeAdfMetadata,
   hydrateAdfMetadata
 } from "./internal/adfMetadata.js"
+import { resolveMediaAttachmentReferences, resolveMediaAttachmentUrls } from "./internal/attachments.js"
 import { parseMarkdown } from "./internal/frontmatter.js"
 import { computeHash, HashServiceLive } from "./internal/hashUtils.js"
 import { UserCache } from "./internal/userCache.js"
@@ -118,6 +121,9 @@ type SyncError =
   | FrontMatterError
   | GitServiceError
   | StructureError
+  | AttachmentResolutionError
+
+const syncErrorMessage = (error: SyncError): string => `${error._tag}: ${String(error.message)}`
 
 /**
  * Pretty-print an ADF JSON wire string for the `.source.json` companion file.
@@ -246,7 +252,7 @@ export const layer: Layer.Layer<
           Effect.mapError((cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause }))
         )
         const parsed = yield* Effect.try({
-          try: () => JSON.parse(raw) as unknown,
+          try: (): unknown => JSON.parse(raw),
           catch: (cause) => new FileSystemError({ operation: "read", path: sidecarPath, cause })
         })
         return yield* Schema.decodeUnknownEffect(AdfMetadataSidecarSchema)(parsed).pipe(
@@ -265,6 +271,26 @@ export const layer: Layer.Layer<
         }
         return hydrateAdfMetadata(markdown, sidecars)
       })
+
+    const adfToAttachmentResolvedMarkdown = (
+      pageId: PageId,
+      adfJson: string
+    ): Effect.Effect<string, SyncError> =>
+      Effect.gen(function*() {
+        const attachments = yield* client.getPageAttachments(pageId)
+        const resolved = resolveMediaAttachmentReferences(adfJson, attachments)
+        if (resolved.unresolvedMediaIds.length > 0) {
+          return yield* Effect.fail(new AttachmentResolutionError({ pageId }))
+        }
+        const markdown = yield* converter.adfToMarkdown(resolved.adfJson)
+        return markdown
+      }).pipe(
+        Effect.retry({
+          schedule: Schedule.spaced("1 second"),
+          times: 5,
+          while: (error) => Predicate.isTagged(error, "AttachmentResolutionError")
+        })
+      )
 
     /**
      * Build a map of relative path (without .md) to pageId for resolving parents.
@@ -436,7 +462,8 @@ export const layer: Layer.Layer<
       version: PageVersionContent,
       title: string,
       parentId?: string,
-      position?: number
+      position?: number,
+      options?: { readonly resolveAttachments?: boolean }
     ): Effect.Effect<{
       markdown: string
       frontMatter: PageFrontMatter
@@ -444,7 +471,10 @@ export const layer: Layer.Layer<
     }, SyncError> =>
       Effect.gen(function*() {
         const adfJson = version.body?.atlas_doc_format?.value ?? ""
-        const rawMarkdown = yield* converter.adfToMarkdown(adfJson)
+        const resolvedAdfJson = options?.resolveAttachments
+          ? resolveMediaAttachmentUrls(adfJson, yield* client.getPageAttachments(pageId))
+          : adfJson
+        const rawMarkdown = yield* converter.adfToMarkdown(resolvedAdfJson)
         const prepared = prepareMarkdownForFile(filePath, rawMarkdown, pageId)
         const { markdown } = prepared
         const contentHash = yield* hashBody(markdown)
@@ -457,7 +487,7 @@ export const layer: Layer.Layer<
           version: version.number,
           title,
           updated: new Date(version.createdAt),
-          ...(parentId ? { parentId: parentId as PageId } : {}),
+          ...(parentId ? { parentId: PageId(parentId) } : {}),
           ...(position !== undefined ? { position } : {}),
           contentHash,
           ...(version.message ? { versionMessage: version.message } : {}),
@@ -484,7 +514,7 @@ export const layer: Layer.Layer<
       Terminal.Terminal
     > =>
       Effect.gen(function*() {
-        const pageId = page.id as PageId
+        const pageId = PageId(page.id)
         // Get children to determine if this is a folder
         const children = yield* client.getAllChildren(pageId)
         const hasChildren = children.length > 0
@@ -563,7 +593,7 @@ export const layer: Layer.Layer<
               body: {
                 atlas_doc_format: {
                   value: bodyContent,
-                  representation: "atlas_doc_format" as const
+                  representation: "atlas_doc_format"
                 }
               }
             }
@@ -573,7 +603,8 @@ export const layer: Layer.Layer<
               versionContent,
               versionInfo.page?.title ?? fullPage.title,
               effectiveParentId,
-              page.position
+              page.position,
+              { resolveAttachments: versionInfo.number === fullPage.version.number }
             )
 
             // Write file
@@ -616,7 +647,8 @@ export const layer: Layer.Layer<
 
           // Simple pull without history replay
           const adfJson = fullPage.body?.atlas_doc_format?.value ?? ""
-          let rawMarkdown = yield* converter.adfToMarkdown(adfJson)
+          const attachments = yield* client.getPageAttachments(pageId)
+          let rawMarkdown = yield* converter.adfToMarkdown(resolveMediaAttachmentUrls(adfJson, attachments))
 
           // Add child page links for index pages
           if (hasChildren && config.spaceKey) {
@@ -645,7 +677,7 @@ export const layer: Layer.Layer<
             version: fullPage.version.number,
             title: fullPage.title,
             updated: updatedAt,
-            ...(effectiveParentId ? { parentId: effectiveParentId as PageId } : {}),
+            ...(effectiveParentId ? { parentId: PageId(effectiveParentId) } : {}),
             ...(page.position !== undefined ? { position: page.position } : {}),
             contentHash,
             ...(fullPage.version.message ? { versionMessage: fullPage.version.message } : {}),
@@ -719,7 +751,7 @@ export const layer: Layer.Layer<
             pulled: result.pulled,
             skipped: 0,
             commits: result.commits,
-            errors: [] as ReadonlyArray<string>
+            errors: []
           }
         })
 
@@ -795,7 +827,8 @@ export const layer: Layer.Layer<
           })
 
           // Set editor version to v2 (new editor)
-          yield* client.setEditorVersion(createdPage.id as PageId, "v2").pipe(
+          const createdPageId = PageId(createdPage.id)
+          yield* client.setEditorVersion(createdPageId, "v2").pipe(
             Effect.catchIf(() => true, (error) => {
               // Log warning but don't fail the push
               return Effect.logWarning(`Failed to set editor v2 for page ${createdPage.id}: ${error.message}`)
@@ -803,9 +836,9 @@ export const layer: Layer.Layer<
           )
 
           // Fetch canonical content back from Confluence
-          const canonicalPage = yield* client.getPage(createdPage.id as PageId)
+          const canonicalPage = yield* client.getPage(createdPageId)
           const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-          const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+          const rawCanonicalMarkdown = yield* adfToAttachmentResolvedMarkdown(createdPageId, canonicalAdf)
           const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, createdPage.id)
           const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
           const canonicalHash = yield* hashBody(canonicalMarkdown)
@@ -815,11 +848,11 @@ export const layer: Layer.Layer<
 
           // Write canonical content with full front-matter
           const newFrontMatter: PageFrontMatter = {
-            pageId: createdPage.id as PageId,
+            pageId: createdPageId,
             version: createdPage.version.number,
             title,
             updated: updatedAt,
-            parentId: parentId as PageId,
+            parentId: PageId(parentId),
             contentHash: canonicalHash
           }
           yield* writePreparedMarkdownWithAdfMetadata(filePath, newFrontMatter, preparedCanonicalMarkdown)
@@ -859,7 +892,7 @@ export const layer: Layer.Layer<
         // Fetch canonical content back from Confluence
         const canonicalPage = yield* client.getPage(fm.pageId)
         const canonicalAdf = canonicalPage.body?.atlas_doc_format?.value ?? ""
-        const rawCanonicalMarkdown = yield* converter.adfToMarkdown(canonicalAdf)
+        const rawCanonicalMarkdown = yield* adfToAttachmentResolvedMarkdown(fm.pageId, canonicalAdf)
         const preparedCanonicalMarkdown = prepareMarkdownForFile(filePath, rawCanonicalMarkdown, fm.pageId)
         const { markdown: canonicalMarkdown } = preparedCanonicalMarkdown
         const canonicalHash = yield* hashBody(canonicalMarkdown)
@@ -988,7 +1021,7 @@ export const layer: Layer.Layer<
                 Effect.succeed({
                   pushed: false,
                   created: false,
-                  error: `Failed: ${error._tag}`
+                  error: `Failed: ${syncErrorMessage(error)}`
                 }))
             )
             if (result.error) errors.push(result.error)
@@ -996,7 +1029,7 @@ export const layer: Layer.Layer<
             if (result.created) created++
           }
 
-          return { pushed, created, deleted: 0, skipped: 0, errors: errors as ReadonlyArray<string> }
+          return { pushed, created, deleted: 0, skipped: 0, errors }
         }
 
         // Git mode: push current HEAD state to Confluence
@@ -1010,7 +1043,7 @@ export const layer: Layer.Layer<
         // Get the most recent unpushed commit message for the revision
         const unpushedCommits = yield* findUnpushedCommits()
         if (unpushedCommits.length === 0) {
-          return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] as ReadonlyArray<string> }
+          return { pushed: 0, created: 0, skipped: 0, deleted: 0, errors: [] }
         }
 
         if (options.dryRun) {
@@ -1019,7 +1052,7 @@ export const layer: Layer.Layer<
             created: 0,
             skipped: 0,
             deleted: 0,
-            errors: [] as ReadonlyArray<string>
+            errors: []
           }
         }
 
@@ -1067,7 +1100,7 @@ export const layer: Layer.Layer<
               Effect.succeed({
                 pushed: false,
                 created: false,
-                error: `Failed to push ${filePath}: ${error._tag}`
+                error: `Failed to push ${filePath}: ${syncErrorMessage(error)}`
               }))
           )
           if (result.error) errors.push(result.error)
@@ -1086,7 +1119,7 @@ export const layer: Layer.Layer<
           yield* git.updateBranch("origin/confluence", "HEAD")
         }
 
-        return { pushed, created, skipped: 0, deleted, errors: errors as ReadonlyArray<string> }
+        return { pushed, created, skipped: 0, deleted, errors }
       })
 
     const status = (): Effect.Effect<StatusResult, SyncError> =>
@@ -1154,7 +1187,7 @@ export const layer: Layer.Layer<
           conflicts,
           localOnly,
           remoteOnly,
-          files: statuses as ReadonlyArray<SyncStatus>
+          files: statuses
         }
       })
 

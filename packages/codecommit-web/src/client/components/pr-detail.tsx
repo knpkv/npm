@@ -52,7 +52,7 @@ import {
   RefreshCwIcon,
   TrashIcon
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
@@ -90,7 +90,9 @@ const tierColor = (tier: "green" | "yellow" | "red") =>
 const tierBorder = (tier: "green" | "yellow" | "red") =>
   tier === "green" ? "border-green-500/30" : tier === "yellow" ? "border-yellow-500/30" : "border-red-500/30"
 
-const categoryBadgeVariant = (status: CategoryStatus) =>
+type BadgeVariant = ComponentProps<typeof Badge>["variant"]
+
+const categoryBadgeVariant = (status: CategoryStatus): BadgeVariant =>
   status === "positive" ? "outline" : status === "neutral" ? "secondary" : "destructive"
 
 const categoryBadgeClass = (status: CategoryStatus) =>
@@ -168,7 +170,7 @@ function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) 
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium">{cat.label}</span>
                 <Badge
-                  variant={categoryBadgeVariant(cat.status) as "outline" | "secondary" | "destructive"}
+                  variant={categoryBadgeVariant(cat.status)}
                   className={`text-[10px] px-1.5 py-0 ${categoryBadgeClass(cat.status)}`}
                 >
                   {cat.statusLabel}
@@ -468,7 +470,7 @@ function ApproversCard({
           <div className="flex flex-col gap-2 rounded-md border p-2 bg-muted/30">
             {addable.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {addable.map(([name, arn]) => (
+                {addable.map(([name]) => (
                   <Button
                     key={name}
                     variant="outline"

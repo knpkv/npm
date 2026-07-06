@@ -51,10 +51,11 @@ export const makeBrandedString = <B extends string>(
   const brand = Brand.make<BrandedType>((s) => pattern.test(s) || `Invalid ${name}: ${s} does not match ${pattern}`)
 
   const schema = Schema.String.check(Schema.isPattern(pattern)).pipe(Schema.brand(name))
+  const Type: BrandedType = undefined!
 
   return Object.assign(brand, {
     schema,
-    Type: undefined as unknown as BrandedType
+    Type
   })
 }
 
@@ -80,10 +81,11 @@ export const makeBrandedNonEmptyString = <B extends string>(name: B) => {
   const brand = Brand.make<BrandedType>((s) => s.length > 0 || `${name} cannot be empty`)
 
   const schema = Schema.NonEmptyString.pipe(Schema.brand(name))
+  const Type: BrandedType = undefined!
 
   return Object.assign(brand, {
     schema,
-    Type: undefined as unknown as BrandedType
+    Type
   })
 }
 

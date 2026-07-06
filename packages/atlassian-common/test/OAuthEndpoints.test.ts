@@ -2,11 +2,24 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { it as effectIt } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { describe, expect, it } from "vitest"
-import { AUTH_URL, buildAuthUrl, computeCodeChallenge, generateCodeVerifier } from "../src/auth/OAuthEndpoints.js"
+import {
+  AUTH_URL,
+  buildAuthUrl,
+  computeCodeChallenge,
+  CONFLUENCE_SCOPES,
+  generateCodeVerifier
+} from "../src/auth/OAuthEndpoints.js"
 
 const withCrypto = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provide(NodeCrypto.layer))
 
 describe("OAuthEndpoints", () => {
+  describe("CONFLUENCE_SCOPES", () => {
+    it("includes attachment read and write scopes", () => {
+      expect(CONFLUENCE_SCOPES).toContain("read:attachment:confluence")
+      expect(CONFLUENCE_SCOPES).toContain("write:attachment:confluence")
+    })
+  })
+
   // ---- PKCE ----
 
   describe("generateCodeVerifier", () => {

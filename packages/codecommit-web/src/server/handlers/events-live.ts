@@ -74,7 +74,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     const lastUnreadRef = yield* Ref.make(initialCount)
     const initialNotifications = yield* notificationRepo.findAll({ limit: 20 }).pipe(
-      Effect.catchIf(() => true, () => Effect.succeed({ items: [] as ReadonlyArray<typeof NotificationResponse.Type> }))
+      Effect.catchIf(() => true, () => {
+        const items: ReadonlyArray<typeof NotificationResponse.Type> = []
+        return Effect.succeed({ items })
+      })
     )
     const lastNotificationsRef = yield* Ref.make(initialNotifications)
 
@@ -101,7 +104,10 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
 
         const sandboxes = yield* sandboxRepo.findAll().pipe(
           Effect.map((rows) => rows.map(encodeSandbox)),
-          Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<typeof SandboxResponse.Type>))
+          Effect.catchCause(() => {
+            const sandboxes: ReadonlyArray<typeof SandboxResponse.Type> = []
+            return Effect.succeed(sandboxes)
+          })
         )
 
         const pendingPrompt = yield* permGate.getFirstPending().pipe(

@@ -25,6 +25,9 @@ export interface HealthScore {
 export type HealthScoreTier = "green" | "yellow" | "red"
 
 const MS_PER_DAY = 86_400_000
+const greenTier: HealthScoreTier = "green"
+const yellowTier: HealthScoreTier = "yellow"
+const redTier: HealthScoreTier = "red"
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
 
@@ -139,7 +142,7 @@ export const scoreTotalOr = (pr: PullRequest, now: Date, fallback: number): numb
 
 export const getScoreTier = (score: number): HealthScoreTier =>
   Match.value(score).pipe(
-    Match.when((s) => s >= 7, () => "green" as const),
-    Match.when((s) => s >= 4, () => "yellow" as const),
-    Match.orElse(() => "red" as const)
+    Match.when((s) => s >= 7, () => greenTier),
+    Match.when((s) => s >= 4, () => yellowTier),
+    Match.orElse(() => redTier)
   )

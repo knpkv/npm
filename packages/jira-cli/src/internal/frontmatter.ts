@@ -8,6 +8,7 @@
  *
  * @internal
  */
+import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
 import matter from "gray-matter"
 import * as yaml from "js-yaml"
 import type { Issue } from "../IssueService.js"
@@ -21,7 +22,10 @@ import type { Issue } from "../IssueService.js"
  * @internal
  */
 const yamlEngine = {
-  parse: (str: string): object => (yaml.load(str) as object) ?? {},
+  parse: (str: string): object => {
+    const parsed = yaml.load(str)
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+  },
   stringify: (data: object): string => yaml.dump(data)
 }
 
@@ -114,9 +118,19 @@ export const buildMarkdownContent = (issue: Issue): string => {
     parts.push("## Attachments")
     parts.push("")
     for (const attachment of issue.attachments) {
-      parts.push(`- [${attachment.filename}](${attachment.url})`)
+      const reference = isPreviewableAttachment(attachment)
+        ? `![${attachment.filename}](${attachment.url})`
+        : `[${attachment.filename}](${attachment.url})`
+      parts.push(`<!-- jiraAttachment: ${
+        JSON.stringify({
+          jiraAttachmentId: attachment.id,
+          mediaType: attachment.mediaType,
+          size: attachment.size
+        })
+      } -->`)
+      parts.push(reference)
+      parts.push("")
     }
-    parts.push("")
   }
 
   // Comments

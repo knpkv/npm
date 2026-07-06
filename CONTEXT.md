@@ -293,8 +293,24 @@ A former Comment Draft that Jira has created and returned as a read-only Jira co
 _Avoid_: Draft comment, editable comment
 
 **Attachment Reference**:
-A read-only representation of a Jira attachment in a Jira Markdown Document.
-_Avoid_: Synced attachment, local attachment
+A read-only representation of a Jira or Confluence attachment in a local Markdown document. Its remote attachment id is identity; filename and URL are presentation, so Markdown renderings may carry hidden metadata to preserve remote identity.
+_Avoid_: Synced attachment, local attachment, downloaded attachment
+
+**Inline Attachment Preview**:
+An Attachment Reference rendered directly in Markdown because the referenced attachment is an image, including SVG. Confluence Inline Attachment Previews preserve page-body placement, while Jira Inline Attachment Previews appear in the Issue Document's attachments area.
+_Avoid_: Thumbnail sync, embedded file, downloaded preview
+
+**Attachment Upload**:
+A user-requested Remote Write that adds a local file as a Jira or Confluence attachment.
+_Avoid_: Implicit sync, local attachment sync, automatic upload
+
+**Attachment Insertion**:
+A Local Write that adds an Attachment Reference or Inline Attachment Preview to a local Markdown document after an Attachment Upload or lookup.
+_Avoid_: Attachment upload, binary sync, remote attachment edit
+
+**Attachment Placeholder**:
+A local Markdown image or link that names a local file to be uploaded and replaced by an Attachment Reference.
+_Avoid_: Attachment Reference, remote image, implicit upload
 
 **Tracked Issue**:
 An existing Jira issue that has a Jira Markdown Document and Sync Baseline under Jira Markdown Sync.
