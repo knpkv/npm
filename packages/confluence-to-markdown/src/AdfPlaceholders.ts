@@ -545,6 +545,100 @@ const groupPanels = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> =
   return out
 }
 
+const isTableRow = (node: AdfNode): boolean => node.type === "tableRow"
+const isTableCell = (node: AdfNode): boolean => node.type === "tableCell" || node.type === "tableHeader"
+
+const attrNumber = (attrs: Record<string, unknown> | undefined, key: string): number | null => {
+  const value = attrs?.[key]
+  return typeof value === "number" ? value : null
+}
+
+// A merged cell spans more than one grid column/row, so the flat GFM grid the
+// user edits can't be aligned to it by index — the counts won't line up. When
+// the sidecar table carries any, we can't safely reconcile and bail to it.
+const hasMergedCell = (cell: AdfNode): boolean => {
+  const colspan = attrNumber(cell.attrs, "colspan")
+  const rowspan = attrNumber(cell.attrs, "rowspan")
+  return (colspan !== null && colspan > 1) || (rowspan !== null && rowspan > 1)
+}
+
+// Keep the sidecar cell's identity (tableHeader vs tableCell) and its attrs
+// (colwidth, background, localId, …); take only the freshly edited body from
+// the GFM-parsed cell — that content is what the human typed in the markdown.
+const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
+  const content = gfmCell.content ?? []
+  return sidecarCell.attrs
+    ? { type: sidecarCell.type, attrs: sidecarCell.attrs, content }
+    : { type: sidecarCell.type, content }
+}
+
+const mergeTableRow = (sidecarRow: AdfNode, gfmRow: AdfNode): AdfNode | null => {
+  const sidecarCells = sidecarRow.content ?? []
+  const gfmCells = gfmRow.content ?? []
+  const cells: Array<AdfNode> = []
+  for (let c = 0; c < gfmCells.length; c++) {
+    const gfmCell = gfmCells[c]!
+    if (!isTableCell(gfmCell)) return null
+    const sidecarCell = sidecarCells[c]
+    // Columns present in the sidecar keep its attrs; a column added in the GFM
+    // has no counterpart, so its parsed cell is used verbatim.
+    cells.push(sidecarCell && isTableCell(sidecarCell) ? mergeTableCell(sidecarCell, gfmCell) : gfmCell)
+  }
+  return sidecarRow.attrs
+    ? { type: "tableRow", attrs: sidecarRow.attrs, content: cells }
+    : { type: "tableRow", content: cells }
+}
+
+/**
+ * Merge the GFM-parsed table (the user's editable content) over the sidecar
+ * table node (the authoritative attrs). Cell text and whole added/removed rows
+ * come from the GFM table; table/row/cell attrs and header-vs-cell identity
+ * come from the sidecar, aligned by index. Returns null — signalling "fall
+ * back to the sidecar node unchanged" — when the shapes can't be reconciled:
+ * merged cells in the sidecar, a non-rectangular structure, or a missing GFM
+ * table. That keeps a push from silently corrupting a table it can't edit.
+ */
+const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
+  if (sidecar.type !== "table" || gfm.type !== "table") return null
+  const sidecarRows = sidecar.content ?? []
+  const gfmRows = gfm.content ?? []
+  if (gfmRows.length === 0) return null
+  if (!sidecarRows.every(isTableRow) || !gfmRows.every(isTableRow)) return null
+  for (const row of sidecarRows) {
+    for (const cell of row.content ?? []) {
+      if (hasMergedCell(cell)) return null
+    }
+  }
+
+  const rows: Array<AdfNode> = []
+  for (let r = 0; r < gfmRows.length; r++) {
+    const gfmRow = gfmRows[r]!
+    const sidecarRow = sidecarRows[r]
+    if (!sidecarRow) {
+      // A row appended in the GFM beyond the sidecar's rows — use it verbatim.
+      rows.push(gfmRow)
+      continue
+    }
+    const merged = mergeTableRow(sidecarRow, gfmRow)
+    if (merged === null) return null
+    rows.push(merged)
+  }
+  return { ...sidecar, content: rows }
+}
+
+const resolveEncodedBlockNode = (
+  marker: { readonly type: string; readonly node: AdfNode },
+  body: ReadonlyArray<AdfNode>
+): AdfNode => {
+  if (marker.type === "mediaSingle") return restoreMediaSingleNode(marker.node, body)
+  if (marker.type === "table") {
+    const gfm = body.find((node) => node.type === "table")
+    const merged = gfm ? mergeTableWithGfm(marker.node, gfm) : null
+    if (merged) return merged
+  }
+  return marker.node
+}
+
 const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> => {
   const out: Array<AdfNode> = []
   for (let i = 0; i < children.length; i++) {
@@ -565,11 +659,7 @@ const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray
       if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
     }
 
-    out.push(
-      marker.type === "mediaSingle" && end !== -1
-        ? restoreMediaSingleNode(marker.node, children.slice(i + 1, end))
-        : marker.node
-    )
+    out.push(end === -1 ? marker.node : resolveEncodedBlockNode(marker, children.slice(i + 1, end)))
     if (end !== -1) i = end
   }
   return out
