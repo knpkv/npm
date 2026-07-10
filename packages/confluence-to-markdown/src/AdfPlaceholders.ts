@@ -626,10 +626,13 @@ const nodeText = (node: AdfNode): string => {
 
 const cellText = (cell: AdfNode): string => nodeText(cell).trim()
 
-const rowFingerprint = (row: AdfNode): string => (row.content ?? []).map(cellText).join("\u0000")
+// NUL can't appear in ADF text, so joins can't collide across cells.
+const FP_SEP = "\u0000"
+
+const rowFingerprint = (row: AdfNode): string => (row.content ?? []).map(cellText).join(FP_SEP)
 
 const columnFingerprint = (rows: ReadonlyArray<AdfNode>, col: number): string =>
-  rows.map((row) => cellText((row.content ?? [])[col] ?? { type: "tableCell" })).join("\u0000")
+  rows.map((row) => cellText((row.content ?? [])[col] ?? { type: "tableCell" })).join(FP_SEP)
 
 /**
  * Decide, for every GFM item (row or column), which sidecar item supplies its
@@ -818,50 +821,88 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   // Changing rows and columns in the same push leaves no reliable axis to
   // fingerprint against — one change at a time.
   if (gfmRows.length !== sidecarRows.length && gfmWidth !== sidecarWidth) return null
-  const rowMap = alignByFingerprint(sidecarRows.map(rowFingerprint), gfmRows.map(rowFingerprint))
-  if (rowMap === null) return null
-  // Column identity is judged on the rows the two tables share — with an
-  // inserted/deleted row folded into the column fingerprints, every column
-  // would mismatch and a simultaneous column reorder would masquerade as
-  // harmless in-place edits, gluing attrs to the wrong columns.
-  const alignedSidecarRows: Array<AdfNode> = []
-  const alignedGfmRows: Array<AdfNode> = []
-  for (let r = 0; r < gfmRows.length; r++) {
-    const sr = rowMap[r]
-    if (sr === null || sr === undefined) continue
-    alignedSidecarRows.push(sidecarRows[sr]!)
-    alignedGfmRows.push(gfmRows[r]!)
+  // Each axis' identity must be judged on the parts of the other axis that
+  // both tables share — a resized or reordered other-axis folded into the
+  // fingerprints would make every item mismatch and a simultaneous reorder
+  // masquerade as harmless in-place edits, gluing attrs to old positions.
+  // When the widths differ the row counts are equal, so columns are aligned
+  // first (over all rows) and rows are then judged on the shared columns;
+  // otherwise rows are aligned first and columns judged on the shared rows.
+  let rowMap: Array<number | null>
+  let colMap: Array<number | null>
+  if (gfmWidth === sidecarWidth) {
+    const rows = alignByFingerprint(sidecarRows.map(rowFingerprint), gfmRows.map(rowFingerprint))
+    if (rows === null) return null
+    rowMap = rows
+    const alignedSidecarRows: Array<AdfNode> = []
+    const alignedGfmRows: Array<AdfNode> = []
+    for (let r = 0; r < gfmRows.length; r++) {
+      const sr = rowMap[r]
+      if (sr === null || sr === undefined) continue
+      alignedSidecarRows.push(sidecarRows[sr]!)
+      alignedGfmRows.push(gfmRows[r]!)
+    }
+    if (alignedSidecarRows.length === 0) return null
+    const cols = alignByFingerprint(
+      Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(alignedSidecarRows, col)),
+      Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(alignedGfmRows, col))
+    )
+    if (cols === null) return null
+    colMap = cols
+  } else {
+    const cols = alignByFingerprint(
+      Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(sidecarRows, col)),
+      Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(gfmRows, col))
+    )
+    if (cols === null) return null
+    colMap = cols
+    const sharedSidecarCols: Array<number> = []
+    const sharedGfmCols: Array<number> = []
+    for (let c = 0; c < colMap.length; c++) {
+      const sc = colMap[c]
+      if (sc === null || sc === undefined) continue
+      sharedSidecarCols.push(sc)
+      sharedGfmCols.push(c)
+    }
+    if (sharedSidecarCols.length === 0) return null
+    const rowOverCols = (row: AdfNode, cols_: ReadonlyArray<number>): string =>
+      cols_.map((c) => cellText((row.content ?? [])[c] ?? { type: "tableCell" })).join(FP_SEP)
+    const rows = alignByFingerprint(
+      sidecarRows.map((row) => rowOverCols(row, sharedSidecarCols)),
+      gfmRows.map((row) => rowOverCols(row, sharedGfmCols))
+    )
+    if (rows === null) return null
+    rowMap = rows
   }
-  if (alignedSidecarRows.length === 0) return null
-  const colMap = alignByFingerprint(
-    Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(alignedSidecarRows, col)),
-    Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(alignedGfmRows, col))
-  )
-  if (colMap === null) return null
   // Reordering both axes at once is invisible to per-axis fingerprints (every
   // row fp embeds the old column order and vice versa), so both maps
   // degenerate to identity and attrs would stay at their old coordinates. Its
-  // signature: cells still mismatch under the chosen maps, yet the multiset
-  // of cell texts is unchanged — nothing was edited, everything just moved.
+  // signature: cells still mismatch under the chosen maps, yet most of the
+  // mismatched texts are conserved elsewhere in the grid — moved, not edited.
+  // Genuine edits produce novel text; when the moved-looking cells dominate,
+  // refuse to guess. (Runs on same-size grids only; resized axes are handled
+  // by the alignment above.)
   if (gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth) {
-    const mapped = (r: number, c: number): string | null => {
-      const sr = rowMap[r]
-      const sc = colMap[c]
-      if (sr === null || sr === undefined || sc === null || sc === undefined) return null
-      return cellText((sidecarRows[sr]!.content ?? [])[sc] ?? { type: "tableCell" })
+    const sidecarTexts = new Set<string>()
+    for (const row of sidecarRows) {
+      for (let c = 0; c < sidecarWidth; c++) sidecarTexts.add(cellText((row.content ?? [])[c] ?? { type: "tableCell" }))
     }
-    let mismatch = false
-    const sidecarTexts: Array<string> = []
-    const gfmTexts: Array<string> = []
+    let conservedMoved = 0
+    let novel = 0
     for (let r = 0; r < gfmRows.length; r++) {
       for (let c = 0; c < gfmWidth; c++) {
+        const sr = rowMap[r]
+        const sc = colMap[c]
+        if (sr === null || sr === undefined || sc === null || sc === undefined) continue
         const gfmText = cellText((gfmRows[r]!.content ?? [])[c] ?? { type: "tableCell" })
-        gfmTexts.push(gfmText)
-        sidecarTexts.push(cellText((sidecarRows[r]!.content ?? [])[c] ?? { type: "tableCell" }))
-        if (mapped(r, c) !== gfmText) mismatch = true
+        if (gfmText === cellText((sidecarRows[sr]!.content ?? [])[sc] ?? { type: "tableCell" })) continue
+        // A blanked cell matches other blank cells without being "moved".
+        const blank = gfmText === "" || gfmText === "<paragraph>" || gfmText === "<tableCell>"
+        if (!blank && sidecarTexts.has(gfmText)) conservedMoved++
+        else novel++
       }
     }
-    if (mismatch && JSON.stringify(sidecarTexts.sort()) === JSON.stringify(gfmTexts.sort())) return null
+    if (conservedMoved >= 2 && conservedMoved > novel) return null
   }
 
   const rows: Array<AdfNode> = []
