@@ -877,32 +877,36 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   // Reordering both axes at once is invisible to per-axis fingerprints (every
   // row fp embeds the old column order and vice versa), so both maps
   // degenerate to identity and attrs would stay at their old coordinates. Its
-  // signature: cells still mismatch under the chosen maps, yet most of the
-  // mismatched texts are conserved elsewhere in the grid — moved, not edited.
-  // Genuine edits produce novel text; when the moved-looking cells dominate,
-  // refuse to guess. (Runs on same-size grids only; resized axes are handled
-  // by the alignment above.)
+  // signature: a mismatched cell whose text is still found at a *vacated*
+  // sidecar position — one whose own text is gone from its mapped spot — is
+  // moved content, while an edit that merely copies a value that still sits
+  // matched at its source is a genuine edit. Two or more moved-looking cells
+  // mean a reorder the maps didn't capture — refuse to guess. (Runs on
+  // same-size grids only; resized axes are handled by the alignment above.)
   if (gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth) {
-    const sidecarTexts = new Set<string>()
-    for (const row of sidecarRows) {
-      for (let c = 0; c < sidecarWidth; c++) sidecarTexts.add(cellText((row.content ?? [])[c] ?? { type: "tableCell" }))
-    }
-    let conservedMoved = 0
-    let novel = 0
+    const cellAt = (rows: ReadonlyArray<AdfNode>, r: number, c: number): string =>
+      cellText((rows[r]!.content ?? [])[c] ?? { type: "tableCell" })
+    const vacatedTexts = new Set<string>()
+    const mismatchedGfmTexts: Array<string> = []
     for (let r = 0; r < gfmRows.length; r++) {
       for (let c = 0; c < gfmWidth; c++) {
         const sr = rowMap[r]
         const sc = colMap[c]
         if (sr === null || sr === undefined || sc === null || sc === undefined) continue
-        const gfmText = cellText((gfmRows[r]!.content ?? [])[c] ?? { type: "tableCell" })
-        if (gfmText === cellText((sidecarRows[sr]!.content ?? [])[sc] ?? { type: "tableCell" })) continue
-        // A blanked cell matches other blank cells without being "moved".
-        const blank = gfmText === "" || gfmText === "<paragraph>" || gfmText === "<tableCell>"
-        if (!blank && sidecarTexts.has(gfmText)) conservedMoved++
-        else novel++
+        const gfmText = cellAt(gfmRows, r, c)
+        const sidecarText = cellAt(sidecarRows, sr, sc)
+        if (gfmText === sidecarText) continue
+        vacatedTexts.add(sidecarText)
+        mismatchedGfmTexts.push(gfmText)
       }
     }
-    if (conservedMoved >= 2 && conservedMoved > novel) return null
+    let moved = 0
+    for (const text of mismatchedGfmTexts) {
+      // A blanked cell matches other blank cells without being "moved".
+      const blank = text === "" || text === "<paragraph>" || text === "<tableCell>"
+      if (!blank && vacatedTexts.has(text)) moved++
+    }
+    if (moved >= 2) return null
   }
 
   const rows: Array<AdfNode> = []
