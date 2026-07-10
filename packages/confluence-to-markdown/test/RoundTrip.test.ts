@@ -1607,6 +1607,184 @@ describe("MarkdownConverter round-trip", () => {
       expect(firstHeader["attrs"]).toEqual({ colwidth: [111] })
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: swapping rows that carry lossy (multi-block) cells must not
+  // produce hybrid rows (old lossy body + moved simple text). The moved-cells
+  // guard sees the swapped simple cells land in vacated positions and bails.
+  it.effect("falls back when rows containing lossy cells are swapped", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: { background: "#ffcccc" },
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "one-a" }] },
+                  { type: "paragraph", content: [{ type: "text", text: "one-b" }] }
+                ]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "simple1" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: { background: "#ccccff" },
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "two-a" }] },
+                  { type: "paragraph", content: [{ type: "text", text: "two-b" }] }
+                ]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "simple2" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const rowOne = markdown.split("\n").find((line) => line.includes("simple1"))
+      const rowTwo = markdown.split("\n").find((line) => line.includes("simple2"))
+      if (!rowOne || !rowTwo) throw new Error("expected both data rows in markdown")
+      const edited = markdown.replace(`${rowOne}\n${rowTwo}`, `${rowTwo}\n${rowOne}`)
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      // Ambiguous — the sidecar wins unchanged; no hybrid rows.
+      const firstData = contentOf(rows[1])[0]
+      if (!isRecord(firstData)) throw new Error("expected cell")
+      expect(JSON.stringify(firstData)).toContain("one-a")
+      expect(firstData["attrs"]).toEqual({ background: "#ffcccc" })
+      expect(JSON.stringify(contentOf(rows[1])[1])).toContain("simple1")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: a header-only table has no body rows to testify to a
+  // header *column*, so the first data row added via Markdown must keep its
+  // plain tableCell identity instead of being rewritten into headers.
+  it.effect("keeps body-cell identity for the first row added to a header-only table", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("| --- | --- |", "| --- | --- |\n| 1 | 2 |")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      expect(rows).toHaveLength(2)
+      const newCells = contentOf(rows[1])
+      const firstNew = newCells[0]
+      const secondNew = newCells[1]
+      if (!isRecord(firstNew) || !isRecord(secondNew)) throw new Error("expected cells")
+      expect(firstNew["type"]).toBe("tableCell")
+      expect(secondNew["type"]).toBe("tableCell")
+      expect(JSON.stringify(rows[1])).toContain("1")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: a blank line inside the table marker splits the GFM table
+  // into two fragments. Merging only the first fragment would silently drop
+  // every row after the blank line — the merge must fall back instead.
+  it.effect("falls back when a blank line splits the table inside its marker", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "keepA" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "keepB" }] }]
+            }]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Accidentally split the table with a blank line before the last row.
+      const edited = markdown.replace("\n| keepB |", "\n\n| keepB |")
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      expect(content.filter((n) => nodeType(n) === "table")).toHaveLength(1)
+      // Nothing after the blank line is lost — the sidecar wins unchanged.
+      const rows = contentOf(content[0])
+      expect(rows).toHaveLength(3)
+      expect(JSON.stringify(content)).toContain("keepA")
+      expect(JSON.stringify(content)).toContain("keepB")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge

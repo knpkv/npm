@@ -746,16 +746,22 @@ const alignByFingerprint = (
 // A header column exists in ADF (every row's cell in that column is a
 // tableHeader) but GFM can only mark the first *row* as headers, so a row
 // inserted in Markdown parses its header-column cells as plain tableCell —
-// restore the column's identity from the sidecar.
+// restore the column's identity from the sidecar. Only the sidecar's *body*
+// rows can testify to a header column: the header row is tableHeader across
+// every column, so a header-only table would otherwise turn a freshly added
+// data row into another header row.
 const restoreHeaderColumnCells = (
   gfmRow: AdfNode,
   sidecarRows: ReadonlyArray<AdfNode>,
   colMap: ReadonlyArray<number | null>
 ): AdfNode => {
+  const first = sidecarRows[0]
+  const bodyRows = first !== undefined && isAllHeaderRow(first) ? sidecarRows.slice(1) : sidecarRows
+  if (bodyRows.length === 0) return gfmRow
   const cells = (gfmRow.content ?? []).map((cell, c) => {
     const sc = colMap[c]
     if (sc === null || sc === undefined || cell.type !== "tableCell") return cell
-    const isHeaderColumn = sidecarRows.every((row) => (row.content ?? [])[sc]?.type === "tableHeader")
+    const isHeaderColumn = bodyRows.every((row) => (row.content ?? [])[sc]?.type === "tableHeader")
     return isHeaderColumn ? { ...cell, type: "tableHeader" } : cell
   })
   return { ...gfmRow, content: cells }
@@ -958,7 +964,11 @@ const resolveEncodedBlockNode = (
 ): AdfNode => {
   if (marker.type === "mediaSingle") return restoreMediaSingleNode(marker.node, body)
   if (marker.type === "table") {
-    const gfm = body.find((node) => node.type === "table")
+    // The walker emits exactly one table between the markers. Anything else —
+    // e.g. a blank line splitting the GFM table into two fragments — means
+    // part of the editable content would be silently dropped if the first
+    // fragment were merged; fall back to the sidecar node instead.
+    const gfm = body.length === 1 && body[0]!.type === "table" ? body[0]! : null
     const merged = gfm ? mergeTableWithGfm(marker.node, gfm) : null
     if (merged) return merged
   }
