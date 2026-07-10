@@ -2480,6 +2480,64 @@ describe("MarkdownConverter round-trip", () => {
       expect(cells[3]).toEqual(literalSpanCell)
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: swapping two values within one row is an ordinary edit —
+  // it cannot be a row reorder, and a real column reorder would move every
+  // row — so it must merge instead of falling back.
+  it.effect("honors swapping two cell values within one row", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: { background: "#ffcccc" },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "y" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("| x | y |", "| y | x |")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      const first = cells[0]
+      if (!isRecord(first)) throw new Error("expected cell")
+      // The swap landed as a positional edit; cell attrs stay put.
+      expect(JSON.stringify(first)).toContain("y")
+      expect(first["attrs"]).toEqual({ background: "#ffcccc" })
+      expect(JSON.stringify(cells[1])).toContain("x")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge

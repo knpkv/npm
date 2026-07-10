@@ -1073,15 +1073,17 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   // signature: a mismatched cell whose text is still found at a *vacated*
   // sidecar position — one whose own text is gone from its mapped spot — is
   // moved content, while an edit that merely copies a value that still sits
-  // matched at its source is a genuine edit. Two or more moved-looking cells
-  // mean a reorder the maps didn't capture — refuse to guess. (Runs over the
-  // mapped overlap, so it also catches a reorder smuggled in alongside a
-  // row/column insert or delete.)
+  // matched at its source is a genuine edit. For same-size grids only moves
+  // that cross rows count: a swap *within* one row cannot be a row reorder,
+  // and a real column reorder moves every row so the column map catches it —
+  // in-row value swaps are ordinary edits. Resized merges keep the strict
+  // rule (any two moved cells bail), which also catches a reorder smuggled
+  // in alongside a row/column insert or delete.
   {
     const cellAt = (rows: ReadonlyArray<AdfNode>, r: number, c: number): string =>
       cellText((rows[r]!.content ?? [])[c] ?? { type: "tableCell" })
-    const vacatedTexts = new Set<string>()
-    const mismatchedGfmTexts: Array<string> = []
+    const vacated: Array<{ readonly row: number; readonly text: string }> = []
+    const mismatched: Array<{ readonly row: number; readonly text: string }> = []
     for (let r = 0; r < gfmRows.length; r++) {
       for (let c = 0; c < gfmWidth; c++) {
         const sr = rowMap[r]
@@ -1090,17 +1092,23 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
         const gfmText = cellAt(gfmRows, r, c)
         const sidecarText = cellAt(sidecarRows, sr, sc)
         if (gfmText === sidecarText) continue
-        vacatedTexts.add(sidecarText)
-        mismatchedGfmTexts.push(gfmText)
+        vacated.push({ row: sr, text: sidecarText })
+        mismatched.push({ row: sr, text: gfmText })
       }
     }
     let moved = 0
-    for (const text of mismatchedGfmTexts) {
+    let crossRowMoved = 0
+    for (const cell of mismatched) {
       // A blanked cell matches other blank cells without being "moved".
-      const blank = text === "" || text === "<paragraph>" || text === "<tableCell>"
-      if (!blank && vacatedTexts.has(text)) moved++
+      const blank = cell.text === "" || cell.text === "<paragraph>" || cell.text === "<tableCell>"
+      if (blank) continue
+      const sources = vacated.filter((v) => v.text === cell.text)
+      if (sources.length === 0) continue
+      moved++
+      if (sources.some((v) => v.row !== cell.row)) crossRowMoved++
     }
-    if (moved >= 2) return null
+    const sameDims = gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth
+    if ((sameDims ? crossRowMoved : moved) >= 2) return null
   }
 
   const rows: Array<AdfNode> = []
