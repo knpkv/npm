@@ -2538,6 +2538,133 @@ describe("MarkdownConverter round-trip", () => {
       expect(JSON.stringify(cells[1])).toContain("x")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: relabeling a link must not strip the title the Markdown
+  // parser drops — the sidecar link mark is grafted onto the reparsed node
+  // by matching hrefs.
+  it.effect("keeps the link title when only the link label is edited", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              attrs: {},
+              content: [{
+                type: "paragraph",
+                content: [{
+                  type: "text",
+                  text: "docs",
+                  marks: [{ type: "link", attrs: { href: "https://example.com/", title: "Example" } }]
+                }]
+              }]
+            }]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("[docs]", "[documentation]")
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cell = contentOf(rows[1])[0]
+      const para = contentOf(cell)[0]
+      const linkNode = contentOf(para)[0]
+      if (!isRecord(linkNode)) throw new Error("expected link text node")
+      expect(linkNode["text"]).toBe("documentation")
+      expect(JSON.stringify(linkNode)).toContain("\"title\":\"Example\"")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: further encodings that don't round-trip — quoted hrefs
+  // (percent-encoded on parse), code+link mark combos (link dropped), literal
+  // newlines in cell text (row truncates), and alignment-marked paragraphs
+  // must all survive a no-op push.
+  it.effect("preserves quoted hrefs, code links, newline text, and aligned paragraphs on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const quotedHrefCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "q",
+            marks: [{ type: "link", attrs: { href: "https://x.example/a\"b" } }]
+          }]
+        }]
+      }
+      const codeLinkCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "x",
+            marks: [{ type: "code" }, { type: "link", attrs: { href: "https://example.com/" } }]
+          }]
+        }]
+      }
+      const newlineCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "text", text: "first\nsecond" }]
+        }]
+      }
+      const alignedCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          marks: [{ type: "alignment", attrs: { align: "end" } }],
+          content: [{ type: "text", text: "aligned" }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: ["A", "B", "C", "D"].map((t) => ({
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: t }] }]
+            }))
+          },
+          { type: "tableRow", content: [quotedHrefCell, codeLinkCell, newlineCell, alignedCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      expect(cells[0]).toEqual(quotedHrefCell)
+      expect(cells[1]).toEqual(codeLinkCell)
+      expect(cells[2]).toEqual(newlineCell)
+      expect(cells[3]).toEqual(alignedCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge

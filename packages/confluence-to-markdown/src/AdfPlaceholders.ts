@@ -575,7 +575,7 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 // angle-bracket destinations), HTML entity sequences are decoded, and
 // non-ASCII characters come back percent-encoded. Bare `&` and balanced
 // parens survive.
-const LOSSY_HREF_RE = /[| <>\\]|[^\x20-\x7E]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/
+const LOSSY_HREF_RE = /[| <>\\"[\]{}]|[^\x20-\x7E]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/
 
 // Comment placeholders embed raw JSON: a value containing `-->` terminates
 // the comment early and the payload degrades to literal text.
@@ -634,6 +634,8 @@ const inlineRoundTrips = (node: AdfNode): boolean => {
   switch (node.type) {
     case "text": {
       const text = node.text ?? ""
+      // A literal newline lands in the GFM row and truncates the cell.
+      if (text.includes("\n")) return false
       if (PLACEHOLDER_LOOKALIKE_RE.test(text)) return false
       return (node.marks ?? []).every((mark) => markRoundTrips(mark, text))
     }
@@ -676,6 +678,8 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
     // splits apart (`<u>**text**</u>` → literal `<u>` around a strong node),
     // and stacked spans break each other's `[^<]*` body match.
     if (marks.length > 1 && marks.some((mark) => HTML_SPAN_MARK_TYPES.has(mark.type))) return true
+    // A code span combined with a link parses back without the link mark.
+    if (marks.some((mark) => mark.type === "code") && marks.some((mark) => mark.type === "link")) return true
     // `_`-emphasis is not recognised intraword: a word character in the
     // adjacent inline text glues to the delimiter (`foo_bar_baz`).
     if (marks.some((mark) => mark.type === "em")) {
@@ -710,8 +714,23 @@ const graftInlineNodes = (
   const pool = [...sidecarInline]
   return gfmInline.map((node) => {
     const idx = pool.findIndex((candidate) => nodeText(candidate) === nodeText(node))
-    if (idx === -1) return node
-    return pool.splice(idx, 1)[0]!
+    if (idx !== -1) return pool.splice(idx, 1)[0]!
+    // An edited link label still points at the same destination — carry the
+    // sidecar's link mark (title, …) over to the reparsed node so relabeling
+    // a link doesn't strip the attrs the Markdown can't express.
+    const gfmHref = (node.marks ?? []).find((mark) => mark.type === "link")?.attrs?.["href"]
+    if (node.type === "text" && typeof gfmHref === "string") {
+      const candIdx = pool.findIndex((candidate) =>
+        candidate.type === "text" &&
+        (candidate.marks ?? []).some((mark) => mark.type === "link" && mark.attrs?.["href"] === gfmHref)
+      )
+      if (candIdx !== -1) {
+        const candidate = pool.splice(candIdx, 1)[0]!
+        const sidecarLink = (candidate.marks ?? []).find((mark) => mark.type === "link")!
+        return { ...node, marks: (node.marks ?? []).map((mark) => (mark.type === "link" ? sidecarLink : mark)) }
+      }
+    }
+    return node
   })
 }
 
@@ -799,7 +818,19 @@ const nodeText = (node: AdfNode): string => {
   return wrap(`<${node.type} ${attrsFingerprint(attrs)}>`)
 }
 
-const cellText = (cell: AdfNode): string => nodeText(cell).trim()
+// Paragraph-level marks (alignment, indentation) are omitted from the GFM
+// emission and grafted back from the sidecar on merge, so they must not
+// participate in the fingerprint — a marked paragraph would otherwise never
+// match its GFM copy and structural changes would misalign around it.
+const cellText = (cell: AdfNode): string => {
+  const blocks = cell.content ?? []
+  const stripped = blocks.map((block) => {
+    if (block.type !== "paragraph" || block.marks === undefined) return block
+    const { marks: _ignored, ...rest } = block
+    return rest
+  })
+  return nodeText({ ...cell, content: stripped }).trim()
+}
 
 // NUL can't appear in ADF text, so joins can't collide across cells.
 const FP_SEP = "\u0000"
