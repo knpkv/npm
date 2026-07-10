@@ -569,11 +569,17 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 // text; boundary whitespace is trimmed by the GFM cell delimiters. In all of
 // those cases the GFM-parsed cell is a degraded copy of the sidecar body —
 // even on an unchanged push.
-// Hrefs containing these are rewritten on the way out — table-cell pipe
-// escaping parses back as %7C, and safeHref percent-encodes `<`/`>`/`\` (and
-// wraps for spaces, which are unverified in angle-bracket destinations) — so
-// they parse back changed. Balanced parens survive inside the wrapper.
-const LOSSY_HREF_RE = /[| <>\\]/
+// Hrefs containing these are rewritten on the way out or normalized by the
+// parser on the way back — table-cell pipe escaping parses back as %7C,
+// safeHref percent-encodes `<`/`>`/`\` (and wraps for spaces, unverified in
+// angle-bracket destinations), `&` sequences are entity-decoded, and
+// non-ASCII characters come back percent-encoded. Balanced parens survive
+// inside the wrapper.
+const LOSSY_HREF_RE = /[| <>\\&]|[^\x20-\x7E]/
+
+// Comment placeholders embed raw JSON: a value containing `-->` terminates
+// the comment early and the payload degrades to literal text.
+const breaksCommentPlaceholder = (node: AdfNode): boolean => JSON.stringify(node).includes("-->")
 
 // Marks emitted as HTML span placeholders: their reverter regexes match the
 // span body with `[^<]*`, so a literal `<` in the marked text breaks
@@ -612,12 +618,12 @@ const inlineRoundTrips = (node: AdfNode): boolean => {
       const attrs = node.attrs ?? {}
       const data = attrs["data"]
       const url = attrs["url"] ?? (isRecord(data) ? data["url"] : undefined)
-      return typeof url === "string" && url.length > 0
+      return typeof url === "string" && url.length > 0 && !breaksCommentPlaceholder(node)
     }
     case "date":
     case "emoji":
     case "inlineExtension":
-      return true
+      return !breaksCommentPlaceholder(node)
     default:
       return false
   }
@@ -642,6 +648,24 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
 // the GFM-parsed cell — that content is what the human typed in the markdown.
 // Cells whose body was flattened on pull keep the authoritative sidecar body
 // instead (edits to them are documented-lossy, like merged-cell tables).
+// Swap each GFM inline node for its sidecar original when the projected
+// fingerprints agree — visually identical content, but the sidecar copy
+// carries the attrs the Markdown can't express (status localId/style, link
+// titles, …). Untouched inline nodes thus survive an edit to *other* text in
+// the same cell; genuinely edited nodes keep their parsed form. Candidates
+// are consumed in order so duplicates pair up deterministically.
+const graftInlineNodes = (
+  gfmInline: ReadonlyArray<AdfNode>,
+  sidecarInline: ReadonlyArray<AdfNode>
+): ReadonlyArray<AdfNode> => {
+  const pool = [...sidecarInline]
+  return gfmInline.map((node) => {
+    const idx = pool.findIndex((candidate) => nodeText(candidate) === nodeText(node))
+    if (idx === -1) return node
+    return pool.splice(idx, 1)[0]!
+  })
+}
+
 const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
   if (cellBodyFlattenedOnPull(sidecarCell)) return sidecarCell
   // Identical projected fingerprints mean nothing Markdown-visible changed —
@@ -652,10 +676,12 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
   const sidecarPara = (sidecarCell.content ?? [])[0]
   const gfmPara = gfmContent.length === 1 && gfmContent[0]!.type === "paragraph" ? gfmContent[0]! : null
   // Paragraph-level attrs/marks (localId, alignment, …) aren't expressible in
-  // a GFM cell; graft them back on when the shape still lines up.
-  const content = sidecarPara && gfmPara && (sidecarPara.attrs !== undefined || sidecarPara.marks !== undefined)
+  // a GFM cell; graft them — and each unchanged inline node's sidecar
+  // original — back on when the shape still lines up.
+  const content = sidecarPara && gfmPara
     ? [{
       ...gfmPara,
+      content: graftInlineNodes(gfmPara.content ?? [], sidecarPara.content ?? []),
       ...(sidecarPara.attrs !== undefined ? { attrs: sidecarPara.attrs } : {}),
       ...(sidecarPara.marks !== undefined ? { marks: sidecarPara.marks } : {})
     }]

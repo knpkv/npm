@@ -2126,6 +2126,113 @@ describe("MarkdownConverter round-trip", () => {
       expect(JSON.stringify(underlineCell)).not.toContain("<u>")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: editing text beside an untouched inline node must not
+  // strip the attrs Markdown can't express — the sidecar original is grafted
+  // back wherever the projected fingerprints agree.
+  it.effect("keeps status localId when editing adjacent text in the same cell", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const status = { type: "status", attrs: { text: "DONE", color: "green", localId: "st-1", style: "bold" } }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              attrs: {},
+              content: [{
+                type: "paragraph",
+                content: [status, { type: "text", text: " oldnote" }]
+              }]
+            }]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("oldnote", "newnote")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cell = contentOf(rows[1])[0]
+      const para = contentOf(cell)[0]
+      const inline = contentOf(para)
+      // The untouched status keeps its full attrs; the edit lands.
+      expect(inline[0]).toEqual(status)
+      expect(JSON.stringify(inline[1])).toContain("newnote")
+      expect(JSON.stringify(content)).not.toContain("oldnote")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: hrefs the parser normalizes (entities, non-ASCII) and
+  // comment placeholders whose payload contains `-->` don't round-trip —
+  // such cells stay sidecar-owned on a no-op push.
+  it.effect("keeps sidecar bodies for normalized hrefs and comment-breaking cards on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const entityLinkCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "q",
+            marks: [{ type: "link", attrs: { href: "https://x.example/?a=1&amp;b=2" } }]
+          }]
+        }]
+      }
+      const arrowCardCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "inlineCard", attrs: { url: "https://x.example/a-->b" } }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          { type: "tableRow", content: [entityLinkCell, arrowCardCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      expect(cells[0]).toEqual(entityLinkCell)
+      expect(cells[1]).toEqual(arrowCardCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
