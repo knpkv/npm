@@ -563,12 +563,24 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 }
 
 // A cell body only survives the GFM round-trip when it is at most one
-// paragraph: anything richer (multiple blocks, lists, code blocks, …) was
-// flattened into <br>-joined Markdown on pull, so the GFM-parsed cell is a
-// degraded copy of the sidecar body — even on an unchanged push.
+// paragraph of round-trippable inline content. Anything richer (multiple
+// blocks, lists, code blocks, …) was flattened into <br>-joined Markdown on
+// pull; hardBreaks are emitted as literal `<br>` and parse back as plain
+// text; boundary whitespace is trimmed by the GFM cell delimiters. In all of
+// those cases the GFM-parsed cell is a degraded copy of the sidecar body —
+// even on an unchanged push.
 const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
   const blocks = cell.content ?? []
-  return blocks.length > 1 || (blocks.length === 1 && blocks[0]!.type !== "paragraph")
+  if (blocks.length > 1) return true
+  const only = blocks[0]
+  if (only === undefined) return false
+  if (only.type !== "paragraph") return true
+  const inline = only.content ?? []
+  if (inline.some((node) => node.type === "hardBreak")) return true
+  const first = inline[0]
+  if (first?.type === "text" && first.text !== undefined && first.text !== first.text.trimStart()) return true
+  const last = inline[inline.length - 1]
+  return last?.type === "text" && last.text !== undefined && last.text !== last.text.trimEnd()
 }
 
 // Keep the sidecar cell's identity (tableHeader vs tableCell) and its attrs
@@ -821,6 +833,18 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   // Changing rows and columns in the same push leaves no reliable axis to
   // fingerprint against — one change at a time.
   if (gfmRows.length !== sidecarRows.length && gfmWidth !== sidecarWidth) return null
+  // A cell flattened on pull can never fingerprint-match its GFM copy, so
+  // under a structural change the alignment would misattribute its row or
+  // column (e.g. an inserted row maps onto the lossy row, whose sidecar-
+  // authoritative body then swallows the inserted content). Cell edits on
+  // the unchanged shape still work; structural changes fall back.
+  if (gfmRows.length !== sidecarRows.length || gfmWidth !== sidecarWidth) {
+    for (const row of sidecarRows) {
+      for (const cell of row.content ?? []) {
+        if (cellBodyFlattenedOnPull(cell)) return null
+      }
+    }
+  }
   // Each axis' identity must be judged on the parts of the other axis that
   // both tables share — a resized or reordered other-axis folded into the
   // fingerprints would make every item mismatch and a simultaneous reorder
@@ -881,9 +905,10 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   // sidecar position — one whose own text is gone from its mapped spot — is
   // moved content, while an edit that merely copies a value that still sits
   // matched at its source is a genuine edit. Two or more moved-looking cells
-  // mean a reorder the maps didn't capture — refuse to guess. (Runs on
-  // same-size grids only; resized axes are handled by the alignment above.)
-  if (gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth) {
+  // mean a reorder the maps didn't capture — refuse to guess. (Runs over the
+  // mapped overlap, so it also catches a reorder smuggled in alongside a
+  // row/column insert or delete.)
+  {
     const cellAt = (rows: ReadonlyArray<AdfNode>, r: number, c: number): string =>
       cellText((rows[r]!.content ?? [])[c] ?? { type: "tableCell" })
     const vacatedTexts = new Set<string>()

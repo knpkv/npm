@@ -1456,6 +1456,157 @@ describe("MarkdownConverter round-trip", () => {
       expect(newSecondCell["type"]).toBe("tableCell")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: hardBreaks are emitted as literal `<br>` and come back as
+  // plain text — such cells must stay sidecar-authoritative or a no-op push
+  // rewrites the cell body.
+  it.effect("round-trips a hardBreak cell unchanged on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const breakCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "line one" },
+            { type: "hardBreak" },
+            { type: "text", text: "line two" }
+          ]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          { type: "tableRow", content: [breakCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      // The hardBreak structure survives; no literal "<br>" text appears.
+      expect(contentOf(rows[1])[0]).toEqual(breakCell)
+      expect(JSON.stringify(content)).not.toContain("<br>")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: a lossy (multi-block) cell can never fingerprint-match its
+  // flattened GFM copy, so a row inserted before it used to be mapped onto
+  // the lossy row — swallowing the inserted content into the sidecar body.
+  // Structural changes on tables with lossy cells must fall back.
+  it.effect("falls back when a row is inserted into a table with a multi-block cell", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const complexCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "para one" }] },
+          { type: "paragraph", content: [{ type: "text", text: "para two" }] }
+        ]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          { type: "tableRow", content: [complexCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Insert a row before the complex row.
+      const edited = markdown.replace("| para one<br>para two |", "| inserted |\n| para one<br>para two |")
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      // Ambiguous — the sidecar wins unchanged; nothing is swallowed.
+      expect(rows).toHaveLength(2)
+      expect(JSON.stringify(content)).not.toContain("inserted")
+      expect(contentOf(rows[1])[0]).toEqual(complexCell)
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: a column swap plus a mid-table row insert used to pass the
+  // row aligner positionally (the swapped columns make every row fingerprint
+  // look edited), gluing old attrs onto the wrong rows. The moved-cells guard
+  // over the mapped overlap must catch it.
+  it.effect("falls back when a column swap is combined with a mid-table row insert", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: { colwidth: [111] },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: { colwidth: [222] },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "2" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Swap the columns and insert a row before the data row.
+      const edited = markdown
+        .replace("| A | B |", "| B | A |")
+        .replace("| 1 | 2 |", "| ins1 | ins2 |\n| 2 | 1 |")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      // Ambiguous — the sidecar wins unchanged, colwidths stay put.
+      expect(rows).toHaveLength(2)
+      expect(JSON.stringify(content)).not.toContain("ins1")
+      const firstHeader = contentOf(rows[0])[0]
+      if (!isRecord(firstHeader)) throw new Error("expected header cell")
+      expect(JSON.stringify(firstHeader)).toContain("A")
+      expect(firstHeader["attrs"]).toEqual({ colwidth: [111] })
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
