@@ -581,10 +581,35 @@ const LOSSY_HREF_RE = /[| <>\\]|[^\x20-\x7E]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]
 // the comment early and the payload degrades to literal text.
 const breaksCommentPlaceholder = (node: AdfNode): boolean => JSON.stringify(node).includes("-->")
 
-// Marks emitted as HTML span placeholders: their reverter regexes match the
-// span body with `[^<]*`, so a literal `<` in the marked text breaks
-// rehydration and the push degrades to literal HTML.
-const HTML_SPAN_MARKS = new Set(["underline", "subsup", "textColor", "backgroundColor"])
+// Whether a text mark's emission survives the GFM round-trip for the given
+// marked text. HTML span placeholders (`<u>`, `<sub>`, color spans) match
+// their body with `[^<]*`, so a literal `<` breaks rehydration; code spans
+// get the cell's pipe escaping baked into their literal content;
+// delimiter-based emphasis is flanking-sensitive, so a run that starts or
+// ends with whitespace parses back as literal marker characters; and marks
+// the walker can't serialize at all (annotation, …) are emitted as plain
+// text with a LossyMark warning.
+const markRoundTrips = (mark: AdfNode, text: string): boolean => {
+  switch (mark.type) {
+    case "link": {
+      const href = mark.attrs?.["href"]
+      return typeof href === "string" && !LOSSY_HREF_RE.test(href)
+    }
+    case "underline":
+    case "subsup":
+    case "textColor":
+    case "backgroundColor":
+      return !text.includes("<")
+    case "code":
+      return !text.includes("|")
+    case "strong":
+    case "em":
+    case "strike":
+      return text === text.trim() && text.length > 0
+    default:
+      return false
+  }
+}
 
 // Whether an inline node survives the GFM round-trip inside a table cell.
 // Plain text round-trips — the parser unescapes what the walker escaped,
@@ -596,17 +621,7 @@ const HTML_SPAN_MARKS = new Set(["underline", "subsup", "textColor", "background
 const inlineRoundTrips = (node: AdfNode): boolean => {
   switch (node.type) {
     case "text":
-      return (node.marks ?? []).every((mark) => {
-        if (mark.type === "link") {
-          const href = mark.attrs?.["href"]
-          return typeof href === "string" && !LOSSY_HREF_RE.test(href)
-        }
-        if (HTML_SPAN_MARKS.has(mark.type)) return !(node.text ?? "").includes("<")
-        // The cell's pipe escaping runs after code spans are wrapped, and
-        // code content is literal — the added backslash survives the parse.
-        if (mark.type === "code") return !(node.text ?? "").includes("|")
-        return true
-      })
+      return (node.marks ?? []).every((mark) => markRoundTrips(mark, node.text ?? ""))
     case "status": {
       // STATUS_RE's body can't cross a literal `<`.
       const text = node.attrs?.["text"]

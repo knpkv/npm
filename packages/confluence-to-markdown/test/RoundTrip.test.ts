@@ -2323,6 +2323,69 @@ describe("MarkdownConverter round-trip", () => {
       expect(JSON.stringify(cells[2])).toContain("<paragraph>")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: marks the walker can't serialize (annotation) and
+  // flanking-unsafe emphasis (a marked run that starts/ends with whitespace
+  // mid-line) don't round-trip — such cells stay sidecar-owned.
+  it.effect("keeps sidecar bodies for annotation marks and flanking-unsafe emphasis", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const annotationCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "commented",
+            marks: [{ type: "annotation", attrs: { id: "anno-1", annotationType: "inlineComment" } }]
+          }]
+        }]
+      }
+      const paddedStrongCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "x" },
+            { type: "text", text: " padded ", marks: [{ type: "strong" }] },
+            { type: "text", text: "z" }
+          ]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          { type: "tableRow", content: [annotationCell, paddedStrongCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      expect(cells[0]).toEqual(annotationCell)
+      expect(cells[1]).toEqual(paddedStrongCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
