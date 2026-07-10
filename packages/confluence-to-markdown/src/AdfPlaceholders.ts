@@ -595,9 +595,30 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
     : { type: sidecarCell.type, content }
 }
 
+// Plain-text fingerprint used to verify index alignment. Both sides are ADF
+// (the sidecar node and the GFM-parsed node), so concatenated text nodes are
+// comparable; anything that doesn't round-trip textually simply won't match,
+// which errs on the safe side (bail to the sidecar).
+const nodeText = (node: AdfNode): string => (node.text ?? "") + (node.content ?? []).map(nodeText).join("")
+
+const cellText = (cell: AdfNode): string => nodeText(cell).trim()
+
+const rowFingerprint = (row: AdfNode): string => (row.content ?? []).map(cellText).join("\u0000")
+
 const mergeTableRow = (sidecarRow: AdfNode, gfmRow: AdfNode): AdfNode | null => {
   const sidecarCells = sidecarRow.content ?? []
   const gfmCells = gfmRow.content ?? []
+  // Cell attrs and header-vs-cell identity are aligned by column index, which
+  // is only meaningful when the column structure changed at the tail. A column
+  // inserted or deleted mid-row would shift every subsequent sidecar cell's
+  // attrs onto the wrong content — when the counts differ, require the
+  // overlapping prefix to still match by text and bail otherwise.
+  if (gfmCells.length !== sidecarCells.length) {
+    const shared = Math.min(gfmCells.length, sidecarCells.length)
+    for (let c = 0; c < shared; c++) {
+      if (cellText(gfmCells[c]!) !== cellText(sidecarCells[c]!)) return null
+    }
+  }
   const cells: Array<AdfNode> = []
   for (let c = 0; c < gfmCells.length; c++) {
     const gfmCell = gfmCells[c]!
@@ -629,8 +650,10 @@ const isEmptyCellBody = (cell: AdfNode): boolean =>
  * that has no sidecar counterpart — it is dropped before aligning. Returns
  * null — signalling "fall back to the sidecar node unchanged" — when the
  * shapes can't be reconciled: merged cells in the sidecar, a non-rectangular
- * structure, text typed into the synthetic header row, or a missing GFM
- * table. That keeps a push from silently corrupting a table it can't edit.
+ * structure, text typed into the synthetic header row, a missing GFM table,
+ * or a row/column count change whose surviving prefix no longer text-matches
+ * the sidecar (a mid-table insert/delete would shift attrs onto the wrong
+ * content). That keeps a push from silently corrupting a table it can't edit.
  */
 const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   if (sidecar.type !== "table" || gfm.type !== "table") return null
@@ -649,6 +672,17 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
     if (!isAllHeaderRow(gfmFirst) || !(gfmFirst.content ?? []).every(isEmptyCellBody)) return null
     gfmRows = gfmRows.slice(1)
     if (gfmRows.length === 0) return null
+  }
+  // Row attrs are aligned by index, which is only meaningful when the row
+  // structure changed at the tail. A row inserted or deleted mid-table would
+  // shift every subsequent sidecar row's attrs onto the wrong content — when
+  // the counts differ, require the overlapping prefix to still match by text
+  // and bail otherwise.
+  if (gfmRows.length !== sidecarRows.length) {
+    const shared = Math.min(gfmRows.length, sidecarRows.length)
+    for (let r = 0; r < shared; r++) {
+      if (rowFingerprint(gfmRows[r]!) !== rowFingerprint(sidecarRows[r]!)) return null
+    }
   }
 
   const rows: Array<AdfNode> = []
