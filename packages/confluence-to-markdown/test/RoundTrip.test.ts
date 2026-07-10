@@ -2386,6 +2386,100 @@ describe("MarkdownConverter round-trip", () => {
       expect(cells[1]).toEqual(paddedStrongCell)
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: encodings the parser mangles — space-padded code spans,
+  // intraword `_`-emphasis, HTML-span marks combined with Markdown marks, and
+  // literal text spelling the placeholder syntax — stay sidecar-owned.
+  it.effect("keeps sidecar bodies for parser-mangled inline encodings on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const paddedCodeCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "x" },
+            { type: "text", text: " a ", marks: [{ type: "code" }] },
+            { type: "text", text: "z" }
+          ]
+        }]
+      }
+      const intrawordEmCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "foo" },
+            { type: "text", text: "bar", marks: [{ type: "em" }] },
+            { type: "text", text: "baz" }
+          ]
+        }]
+      }
+      const boldUnderlineCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "text", text: "both", marks: [{ type: "strong" }, { type: "underline" }] }]
+        }]
+      }
+      const literalSpanCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "use <span class=\"adf-status\" data-color=\"blue\">TEST</span> here"
+          }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "C" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "D" }] }]
+              }
+            ]
+          },
+          { type: "tableRow", content: [paddedCodeCell, intrawordEmCell, boldUnderlineCell, literalSpanCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      expect(cells[0]).toEqual(paddedCodeCell)
+      expect(cells[1]).toEqual(intrawordEmCell)
+      expect(cells[2]).toEqual(boldUnderlineCell)
+      expect(cells[3]).toEqual(literalSpanCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge

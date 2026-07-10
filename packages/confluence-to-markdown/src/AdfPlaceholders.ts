@@ -589,11 +589,13 @@ const breaksCommentPlaceholder = (node: AdfNode): boolean => JSON.stringify(node
 // ends with whitespace parses back as literal marker characters; and marks
 // the walker can't serialize at all (annotation, …) are emitted as plain
 // text with a LossyMark warning.
+const HTML_SPAN_MARK_TYPES = new Set(["underline", "subsup", "textColor", "backgroundColor"])
+
 const markRoundTrips = (mark: AdfNode, text: string): boolean => {
   switch (mark.type) {
     case "link": {
       const href = mark.attrs?.["href"]
-      return typeof href === "string" && !LOSSY_HREF_RE.test(href)
+      return typeof href === "string" && !LOSSY_HREF_RE.test(href) && !href.startsWith(MENTION_SCHEME)
     }
     case "underline":
     case "subsup":
@@ -601,7 +603,9 @@ const markRoundTrips = (mark: AdfNode, text: string): boolean => {
     case "backgroundColor":
       return !text.includes("<")
     case "code":
-      return !text.includes("|")
+      // Pipe escaping bakes a backslash into the literal code content, and
+      // boundary spaces are eaten as code-span padding by the parser.
+      return !text.includes("|") && text === text.trim()
     case "strong":
     case "em":
     case "strike":
@@ -610,6 +614,14 @@ const markRoundTrips = (mark: AdfNode, text: string): boolean => {
       return false
   }
 }
+
+// Literal text that spells the walker's own placeholder syntax (a quoted
+// status span, `[[toc]]`, an adf comment, …) gets escaped on pull, but the
+// parser strips the escape and this module then expands it into a real node
+// — the GFM copy is no longer the literal documentation text.
+const PLACEHOLDER_LOOKALIKE_RE = new RegExp(
+  `${COMBINED_INLINE_RE.source}|\\[\\[toc(?::[^\\]]+)?\\]\\]|<!--\\s*adf:`
+)
 
 // Whether an inline node survives the GFM round-trip inside a table cell.
 // Plain text round-trips — the parser unescapes what the walker escaped,
@@ -620,8 +632,11 @@ const markRoundTrips = (mark: AdfNode, text: string): boolean => {
 // as a comment this module does not expand, so the GFM copy degrades to text.
 const inlineRoundTrips = (node: AdfNode): boolean => {
   switch (node.type) {
-    case "text":
-      return (node.marks ?? []).every((mark) => markRoundTrips(mark, node.text ?? ""))
+    case "text": {
+      const text = node.text ?? ""
+      if (PLACEHOLDER_LOOKALIKE_RE.test(text)) return false
+      return (node.marks ?? []).every((mark) => markRoundTrips(mark, text))
+    }
     case "status": {
       // STATUS_RE's body can't cross a literal `<`.
       const text = node.attrs?.["text"]
@@ -655,6 +670,22 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
   if (only.type !== "paragraph") return true
   const inline = only.content ?? []
   if (inline.some((node) => !inlineRoundTrips(node))) return true
+  for (let i = 0; i < inline.length; i++) {
+    const marks = inline[i]!.marks ?? []
+    // Combined HTML-span + Markdown marks emit nested syntax the parser
+    // splits apart (`<u>**text**</u>` → literal `<u>` around a strong node),
+    // and stacked spans break each other's `[^<]*` body match.
+    if (marks.length > 1 && marks.some((mark) => HTML_SPAN_MARK_TYPES.has(mark.type))) return true
+    // `_`-emphasis is not recognised intraword: a word character in the
+    // adjacent inline text glues to the delimiter (`foo_bar_baz`).
+    if (marks.some((mark) => mark.type === "em")) {
+      const prev = inline[i - 1]
+      const next = inline[i + 1]
+      const prevChar = prev?.type === "text" ? (prev.text ?? "").slice(-1) : ""
+      const nextChar = next?.type === "text" ? (next.text ?? "").charAt(0) : ""
+      if (/\w/.test(prevChar) || /\w/.test(nextChar)) return true
+    }
+  }
   const first = inline[0]
   if (first?.type === "text" && first.text !== undefined && first.text !== first.text.trimStart()) return true
   const last = inline[inline.length - 1]
