@@ -50,7 +50,9 @@ interface Ctx {
 // (line-start only), `(`/`)` (only meaningful right after `]`, which we
 // escape), `!` (only meaningful right before `[`, ditto) and `{`/`}` (not
 // special in GFM at all) — escaping those produced noise like `\(v2\)`.
-const ESCAPE_RE = /[\\`*_[\]<|]/g
+// `~` would parse back as GFM strikethrough and `&` as an HTML entity —
+// literal text containing either must survive an unedited round trip.
+const ESCAPE_RE = /[\\`*_[\]<|~&]/g
 const escapeText = (s: string): string => s.replace(ESCAPE_RE, "\\$&")
 const escapeAttr = (s: string): string => s.replace(/[\\"]/g, "\\$&")
 // For text inside HTML *blocks* (`<details>`/`<summary>`): CommonMark treats

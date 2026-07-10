@@ -545,6 +545,690 @@ const groupPanels = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> =
   return out
 }
 
+const isTableRow = (node: AdfNode): boolean => node.type === "tableRow"
+const isTableCell = (node: AdfNode): boolean => node.type === "tableCell" || node.type === "tableHeader"
+
+const attrNumber = (attrs: Record<string, unknown> | undefined, key: string): number | null => {
+  const value = attrs?.[key]
+  return typeof value === "number" ? value : null
+}
+
+// A merged cell spans more than one grid column/row, so the flat GFM grid the
+// user edits can't be aligned to it by index — the counts won't line up. When
+// the sidecar table carries any, we can't safely reconcile and bail to it.
+const hasMergedCell = (cell: AdfNode): boolean => {
+  const colspan = attrNumber(cell.attrs, "colspan")
+  const rowspan = attrNumber(cell.attrs, "rowspan")
+  return (colspan !== null && colspan > 1) || (rowspan !== null && rowspan > 1)
+}
+
+// A cell body only survives the GFM round-trip when it is at most one
+// paragraph of round-trippable inline content. Anything richer (multiple
+// blocks, lists, code blocks, …) was flattened into <br>-joined Markdown on
+// pull; hardBreaks are emitted as literal `<br>` and parse back as plain
+// text; boundary whitespace is trimmed by the GFM cell delimiters. In all of
+// those cases the GFM-parsed cell is a degraded copy of the sidecar body —
+// even on an unchanged push.
+// Hrefs containing these are rewritten on the way out or normalized by the
+// parser on the way back — table-cell pipe escaping parses back as %7C,
+// safeHref percent-encodes `<`/`>`/`\` (and wraps for spaces, unverified in
+// angle-bracket destinations), HTML entity sequences are decoded, and
+// non-ASCII characters come back percent-encoded. Bare `&` and balanced
+// parens survive.
+const LOSSY_HREF_RE = /[| <>\\"[\]{}]|[^\x20-\x7E]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/
+
+// Comment placeholders embed raw JSON: a value containing `-->` terminates
+// the comment early and the payload degrades to literal text.
+const breaksCommentPlaceholder = (node: AdfNode): boolean => JSON.stringify(node).includes("-->")
+
+// Whether a text mark's emission survives the GFM round-trip for the given
+// marked text. HTML span placeholders (`<u>`, `<sub>`, color spans) match
+// their body with `[^<]*`, so a literal `<` breaks rehydration; code spans
+// get the cell's pipe escaping baked into their literal content;
+// delimiter-based emphasis is flanking-sensitive, so a run that starts or
+// ends with whitespace parses back as literal marker characters; and marks
+// the walker can't serialize at all (annotation, …) are emitted as plain
+// text with a LossyMark warning.
+const HTML_SPAN_MARK_TYPES = new Set(["underline", "subsup", "textColor", "backgroundColor"])
+
+const markRoundTrips = (mark: AdfNode, text: string): boolean => {
+  switch (mark.type) {
+    case "link": {
+      const href = mark.attrs?.["href"]
+      return typeof href === "string" && !LOSSY_HREF_RE.test(href) && !href.startsWith(MENTION_SCHEME)
+    }
+    case "underline":
+    case "subsup":
+    case "textColor":
+    case "backgroundColor":
+      return !text.includes("<")
+    case "code":
+      // Pipe escaping bakes a backslash into the literal code content, and
+      // boundary spaces are eaten as code-span padding by the parser.
+      return !text.includes("|") && text === text.trim()
+    case "strong":
+    case "em":
+    case "strike":
+      return text === text.trim() && text.length > 0
+    default:
+      return false
+  }
+}
+
+// Literal text that spells the walker's own placeholder syntax (a quoted
+// status span, `[[toc]]`, an adf comment, …) gets escaped on pull, but the
+// parser strips the escape and this module then expands it into a real node
+// — the GFM copy is no longer the literal documentation text.
+const PLACEHOLDER_LOOKALIKE_RE = new RegExp(
+  `${COMBINED_INLINE_RE.source}|\\[\\[toc(?::[^\\]]+)?\\]\\]|<!--\\s*adf:`
+)
+
+// Whether an inline node survives the GFM round-trip inside a table cell.
+// Plain text round-trips — the parser unescapes what the walker escaped,
+// including inside span placeholder bodies and mention link labels (verified
+// empirically). Date, emoji and inlineExtension are full-fidelity base64
+// placeholders; status/mention/inlineCard survive their narrower encodings
+// except where noted. Anything else (mediaInline, placeholder, …) is emitted
+// as a comment this module does not expand, so the GFM copy degrades to text.
+const inlineRoundTrips = (node: AdfNode): boolean => {
+  switch (node.type) {
+    case "text": {
+      const text = node.text ?? ""
+      // A literal newline lands in the GFM row and truncates the cell.
+      if (text.includes("\n")) return false
+      if (PLACEHOLDER_LOOKALIKE_RE.test(text)) return false
+      return (node.marks ?? []).every((mark) => markRoundTrips(mark, text))
+    }
+    case "status": {
+      // STATUS_RE's body can't cross a literal `<`.
+      const text = node.attrs?.["text"]
+      return typeof text !== "string" || !text.includes("<")
+    }
+    case "mention": {
+      const id = node.attrs?.["id"]
+      const text = node.attrs?.["text"]
+      return typeof id === "string" && id.length > 0 && typeof text === "string" && text.startsWith("@")
+    }
+    case "inlineCard": {
+      const attrs = node.attrs ?? {}
+      const data = attrs["data"]
+      const url = attrs["url"] ?? (isRecord(data) ? data["url"] : undefined)
+      return typeof url === "string" && url.length > 0 && !breaksCommentPlaceholder(node)
+    }
+    case "date":
+    case "emoji":
+    case "inlineExtension":
+      return !breaksCommentPlaceholder(node)
+    default:
+      return false
+  }
+}
+
+const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
+  const blocks = cell.content ?? []
+  if (blocks.length > 1) return true
+  const only = blocks[0]
+  if (only === undefined) return false
+  if (only.type !== "paragraph") return true
+  const inline = only.content ?? []
+  if (inline.some((node) => !inlineRoundTrips(node))) return true
+  for (let i = 0; i < inline.length; i++) {
+    const marks = inline[i]!.marks ?? []
+    // Combined HTML-span + Markdown marks emit nested syntax the parser
+    // splits apart (`<u>**text**</u>` → literal `<u>` around a strong node),
+    // and stacked spans break each other's `[^<]*` body match.
+    if (marks.length > 1 && marks.some((mark) => HTML_SPAN_MARK_TYPES.has(mark.type))) return true
+    // A code span combined with any other mark parses back degraded: the
+    // link is dropped, and emphasis markers land inside or around the
+    // literal code content.
+    if (marks.length > 1 && marks.some((mark) => mark.type === "code")) return true
+    // `_`-emphasis is not recognised intraword: a word character in the
+    // adjacent inline text glues to the delimiter (`foo_bar_baz`).
+    if (marks.some((mark) => mark.type === "em")) {
+      const prev = inline[i - 1]
+      const next = inline[i + 1]
+      const prevChar = prev?.type === "text" ? (prev.text ?? "").slice(-1) : ""
+      const nextChar = next?.type === "text" ? (next.text ?? "").charAt(0) : ""
+      if (/\w/.test(prevChar) || /\w/.test(nextChar)) return true
+    }
+  }
+  const first = inline[0]
+  if (first?.type === "text" && first.text !== undefined && first.text !== first.text.trimStart()) return true
+  const last = inline[inline.length - 1]
+  return last?.type === "text" && last.text !== undefined && last.text !== last.text.trimEnd()
+}
+
+// Keep the sidecar cell's identity (tableHeader vs tableCell) and its attrs
+// (colwidth, background, localId, …); take only the freshly edited body from
+// the GFM-parsed cell — that content is what the human typed in the markdown.
+// Cells whose body was flattened on pull keep the authoritative sidecar body
+// instead (edits to them are documented-lossy, like merged-cell tables).
+// Swap each GFM inline node for its sidecar original when the projected
+// fingerprints agree — visually identical content, but the sidecar copy
+// carries the attrs the Markdown can't express (status localId/style, link
+// titles, …). Untouched inline nodes thus survive an edit to *other* text in
+// the same cell; genuinely edited nodes keep their parsed form. Candidates
+// are consumed in order so duplicates pair up deterministically.
+const graftInlineNodes = (
+  gfmInline: ReadonlyArray<AdfNode>,
+  sidecarInline: ReadonlyArray<AdfNode>
+): ReadonlyArray<AdfNode> => {
+  // Pass 1: pair exact fingerprint matches per group, so an unchanged
+  // sibling is consumed before the fallbacks consider edited nodes. When
+  // fewer copies of a fingerprint survive than the sidecar had and the
+  // sidecar copies aren't identical, the survivors' pairing is ambiguous —
+  // leave those parsed nodes alone and retire the candidates.
+  const pool = [...sidecarInline]
+  const results: Array<AdfNode | null> = gfmInline.map(() => null)
+  const byFp = new Map<string, Array<number>>()
+  gfmInline.forEach((node, i) => {
+    const fp = nodeText(node)
+    const group = byFp.get(fp) ?? []
+    group.push(i)
+    byFp.set(fp, group)
+  })
+  for (const [fp, gfmIndices] of byFp) {
+    const candidates = pool.filter((candidate) => nodeText(candidate) === fp)
+    if (candidates.length === 0) continue
+    const identical = candidates.every((candidate) => JSON.stringify(candidate) === JSON.stringify(candidates[0]))
+    if (candidates.length > gfmIndices.length && !identical) {
+      // Ambiguous partial survival of look-alike nodes — retire them all.
+      for (const candidate of candidates) pool.splice(pool.indexOf(candidate), 1)
+      continue
+    }
+    gfmIndices.forEach((gfmIndex, k) => {
+      const candidate = candidates[Math.min(k, candidates.length - 1)]
+      if (candidate === undefined || k >= candidates.length) return
+      results[gfmIndex] = candidate
+      pool.splice(pool.indexOf(candidate), 1)
+    })
+  }
+  // Pass 2: edited nodes fall back to identity-preserving grafts against the
+  // remaining pool.
+  return gfmInline.map((node, i) => {
+    const exact = results[i]
+    if (exact !== null && exact !== undefined) return exact
+    // An edited link label still points at the same destination — carry the
+    // sidecar's link mark (title, …) over to the reparsed node so relabeling
+    // a link doesn't strip the attrs the Markdown can't express.
+    const gfmHref = (node.marks ?? []).find((mark) => mark.type === "link")?.attrs?.["href"]
+    if (node.type === "text" && typeof gfmHref === "string") {
+      const candidates = pool.filter((candidate) =>
+        candidate.type === "text" &&
+        (candidate.marks ?? []).some((mark) => mark.type === "link" && mark.attrs?.["href"] === gfmHref)
+      )
+      const links = candidates.map((candidate) => (candidate.marks ?? []).find((mark) => mark.type === "link")!)
+      // Several same-href candidates with differing hidden attrs make the
+      // pairing ambiguous — leave the parsed mark alone rather than guess.
+      const unambiguous = links.length === 1 ||
+        (links.length > 1 && links.every((link) => JSON.stringify(link) === JSON.stringify(links[0])))
+      if (candidates.length > 0 && unambiguous) {
+        const candidate = candidates[0]!
+        pool.splice(pool.indexOf(candidate), 1)
+        const sidecarLink = links[0]!
+        return { ...node, marks: (node.marks ?? []).map((mark) => (mark.type === "link" ? sidecarLink : mark)) }
+      }
+    }
+    // A relabeled status lozenge keeps its identity — carry the sidecar's
+    // hidden attrs (localId, style, …) under the newly typed text/color when
+    // a single candidate makes the pairing unambiguous.
+    if (node.type === "status") {
+      const candidates = pool.filter((candidate) => candidate.type === "status")
+      if (candidates.length === 1) {
+        const candidate = candidates[0]!
+        pool.splice(pool.indexOf(candidate), 1)
+        return { ...node, attrs: { ...candidate.attrs, ...node.attrs } }
+      }
+    }
+    return node
+  })
+}
+
+const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
+  if (cellBodyFlattenedOnPull(sidecarCell)) return sidecarCell
+  // Identical projected fingerprints mean nothing Markdown-visible changed —
+  // keep the sidecar body wholesale so attrs the Markdown can't express
+  // (status localId/style, link titles, …) survive a no-op push.
+  if (cellText(sidecarCell) === cellText(gfmCell)) return sidecarCell
+  const gfmContent = gfmCell.content ?? []
+  const sidecarPara = (sidecarCell.content ?? [])[0]
+  const gfmPara = gfmContent.length === 1 && gfmContent[0]!.type === "paragraph" ? gfmContent[0]! : null
+  // Paragraph-level attrs/marks (localId, alignment, …) aren't expressible in
+  // a GFM cell; graft them — and each unchanged inline node's sidecar
+  // original — back on when the shape still lines up.
+  const content = sidecarPara && gfmPara
+    ? [{
+      ...gfmPara,
+      content: graftInlineNodes(gfmPara.content ?? [], sidecarPara.content ?? []),
+      ...(sidecarPara.attrs !== undefined ? { attrs: sidecarPara.attrs } : {}),
+      ...(sidecarPara.marks !== undefined ? { marks: sidecarPara.marks } : {})
+    }]
+    : gfmContent
+  return sidecarCell.attrs
+    ? { type: sidecarCell.type, attrs: sidecarCell.attrs, content }
+    : { type: sidecarCell.type, content }
+}
+
+// Content fingerprint used to verify index alignment. Both sides are ADF
+// (the sidecar node and the GFM-parsed node), so the serialization is
+// comparable; anything that doesn't round-trip identically simply won't
+// match, which errs on the safe side (bail to the sidecar). Marks are folded
+// in so `foo` and `**foo**` stay distinct, and leaves without text or
+// children (status, date, emoji, …) serialize their attrs so distinct leaves
+// don't all collapse to the empty string — either collapse would make moved
+// content look unchanged and glue attrs to the wrong position.
+// Attrs are projected down to what the walker's Markdown emission actually
+// encodes — a status keeps only text/color, a mention only id/text, a link
+// mark only href. That way a sidecar node carrying extra attrs the Markdown
+// can't express (localId, style, title, …) still fingerprint-matches its GFM
+// round-trip, letting the merge recognise "unchanged" and keep the richer
+// sidecar body instead of adopting the stripped GFM copy.
+const PROJECTED_NODE_ATTRS: Record<string, ReadonlyArray<string>> = {
+  status: ["color", "text"],
+  mention: ["id", "text"]
+}
+const PROJECTED_MARK_ATTRS: Record<string, ReadonlyArray<string>> = {
+  link: ["href"]
+}
+
+const projectAttrs = (
+  attrs: Record<string, unknown>,
+  keys: ReadonlyArray<string> | undefined
+): Record<string, unknown> => {
+  if (keys === undefined) return attrs
+  const out: Record<string, unknown> = {}
+  for (const key of keys) if (key in attrs) out[key] = attrs[key]
+  return out
+}
+
+const attrsFingerprint = (attrs: Record<string, unknown>): string =>
+  Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`).join(" ")
+
+const markFingerprint = (mark: AdfNode): string => {
+  const attrs = mark.attrs === undefined ? undefined : projectAttrs(mark.attrs, PROJECTED_MARK_ATTRS[mark.type])
+  return attrs === undefined || Object.keys(attrs).length === 0
+    ? mark.type
+    : `${mark.type}(${attrsFingerprint(attrs)})`
+}
+
+const nodeText = (node: AdfNode): string => {
+  const children = node.content ?? []
+  const marks = node.marks ?? []
+  const wrap = (body: string): string =>
+    marks.length === 0 ? body : `[${marks.map(markFingerprint).sort().join(",")}](${body})`
+  if (node.text !== undefined || children.length > 0) {
+    // Escape the characters the structural sentinels use, so literal cell
+    // text like `<paragraph>` can't collide with an empty paragraph's
+    // fingerprint and mask an edit.
+    const raw = (node.text ?? "").replace(/[\\<[]/g, "\\$&")
+    return wrap(raw + children.map(nodeText).join(""))
+  }
+  const attrs = node.attrs === undefined ? undefined : projectAttrs(node.attrs, PROJECTED_NODE_ATTRS[node.type])
+  if (attrs === undefined || Object.keys(attrs).length === 0) return wrap(`<${node.type}>`)
+  return wrap(`<${node.type} ${attrsFingerprint(attrs)}>`)
+}
+
+// Paragraph-level marks (alignment, indentation) are omitted from the GFM
+// emission and grafted back from the sidecar on merge, so they must not
+// participate in the fingerprint — a marked paragraph would otherwise never
+// match its GFM copy and structural changes would misalign around it.
+const cellText = (cell: AdfNode): string => {
+  const blocks = cell.content ?? []
+  const stripped = blocks.map((block) => {
+    if (block.type !== "paragraph" || block.marks === undefined) return block
+    const { marks: _ignored, ...rest } = block
+    return rest
+  })
+  return nodeText({ ...cell, content: stripped }).trim()
+}
+
+// NUL can't appear in ADF text, so joins can't collide across cells.
+const FP_SEP = "\u0000"
+
+const rowFingerprint = (row: AdfNode): string => (row.content ?? []).map(cellText).join(FP_SEP)
+
+const columnFingerprint = (rows: ReadonlyArray<AdfNode>, col: number): string =>
+  rows.map((row) => cellText((row.content ?? [])[col] ?? { type: "tableCell" })).join(FP_SEP)
+
+/**
+ * Decide, for every GFM item (row or column), which sidecar item supplies its
+ * attrs — `null` marks a freshly inserted item. Works on plain-text
+ * fingerprints, so it can only reason about what survives the GFM round trip;
+ * every ambiguous case returns null (= fall back to the sidecar). Supported
+ * shapes:
+ *  - equal length, same text per position: identity (a no-op or attr-only
+ *    sidecar difference)
+ *  - equal length with in-place edits: positions correspond one-to-one
+ *  - equal length pure reorder: every changed item's text is found at exactly
+ *    one other position, so attrs travel with the moved content; a mix of
+ *    moved and edited items is refused
+ *  - one clean contiguous inserted/deleted block anywhere (no edits): the
+ *    matched prefix and suffix meet exactly
+ *  - edits combined with a tail insert/delete: the overlap pairs by index —
+ *    guarded by refusing when a mismatched sidecar item reappears later in
+ *    the GFM (the signature of a mid-sequence shift) or when the surplus
+ *    items duplicate existing text (indistinguishable from a shifted
+ *    duplicate)
+ */
+const alignByFingerprint = (
+  sidecar: ReadonlyArray<string>,
+  gfm: ReadonlyArray<string>
+): Array<number | null> | null => {
+  const n = sidecar.length
+  const m = gfm.length
+  if (n === m) {
+    const map: Array<number | null> = gfm.map((fp, i) => (fp === sidecar[i] ? i : null))
+    if (!map.includes(null)) return map
+    // Try to recognise moved content among the changed positions: a moved
+    // item keeps its text, an edited item keeps its position. Counts are
+    // global — a duplicate that stayed anchored in place still makes its
+    // moved twin ambiguous (either copy could be the one that moved).
+    const count = (fps: ReadonlyArray<string>): Map<string, number> => {
+      const totals = new Map<string, number>()
+      for (const fp of fps) totals.set(fp, (totals.get(fp) ?? 0) + 1)
+      return totals
+    }
+    const sidecarCount = count(sidecar)
+    const gfmCount = count(gfm)
+    const changedSidecar = new Map<string, number>()
+    for (let j = 0; j < n; j++) {
+      if (gfm[j] !== sidecar[j]) changedSidecar.set(sidecar[j]!, j)
+    }
+    let moved = 0
+    let edited = 0
+    for (let i = 0; i < m; i++) {
+      if (map[i] !== null) continue
+      const source = changedSidecar.get(gfm[i]!)
+      if (source === undefined) {
+        edited++
+        continue
+      }
+      // The moved text must be unique in BOTH tables, or several assignments
+      // fit and each distributes attrs differently.
+      if (sidecarCount.get(gfm[i]!) !== 1 || gfmCount.get(gfm[i]!) !== 1) return null
+      map[i] = source
+      moved++
+    }
+    // Every changed position is an in-place edit — identity.
+    if (moved === 0) return gfm.map((_, i) => i)
+    // Moves mixed with edits: an edited row is indistinguishable from a moved
+    // row that was also edited, so the alignment is ambiguous.
+    if (edited > 0) return null
+    return map
+  }
+  const shared = Math.min(n, m)
+  let prefix = 0
+  while (prefix < shared && gfm[prefix] === sidecar[prefix]) prefix++
+  let suffix = 0
+  while (suffix < shared && gfm[m - 1 - suffix] === sidecar[n - 1 - suffix]) suffix++
+  // Prefix and suffix overlap: duplicates surround the change, several
+  // alignments fit, and each assigns attrs differently — refuse to guess.
+  if (prefix + suffix > shared) return null
+  if (prefix + suffix === shared) {
+    // One clean inserted/deleted block between the matched prefix and suffix.
+    return m > n
+      ? gfm.map((_, i) => (i < prefix ? i : i < m - suffix ? null : i - (m - n)))
+      : gfm.map((_, i) => (i < prefix ? i : i + (n - m)))
+  }
+  // Mismatches beyond a single block mean edits: pair the overlap by index
+  // and treat the surplus as a tail insert/delete — unless something looks
+  // shifted instead of edited.
+  if (m > n) {
+    for (let i = 0; i < n; i++) {
+      if (gfm[i] !== sidecar[i] && gfm.indexOf(sidecar[i]!, i + 1) !== -1) return null
+    }
+    for (const fp of gfm.slice(n)) if (sidecar.includes(fp)) return null
+    return gfm.map((_, i) => (i < n ? i : null))
+  }
+  for (let i = 0; i < m; i++) {
+    if (gfm[i] !== sidecar[i] && sidecar.indexOf(gfm[i]!, i + 1) !== -1) return null
+  }
+  for (const fp of sidecar.slice(m)) if (gfm.includes(fp)) return null
+  return gfm.map((_, i) => i)
+}
+
+// A header column exists in ADF (every row's cell in that column is a
+// tableHeader) but GFM can only mark the first *row* as headers, so a row
+// inserted in Markdown parses its header-column cells as plain tableCell —
+// restore the column's identity from the sidecar. Only the sidecar's *body*
+// rows can testify to a header column: the header row is tableHeader across
+// every column, so a header-only table would otherwise turn a freshly added
+// data row into another header row.
+const restoreHeaderColumnCells = (
+  gfmRow: AdfNode,
+  sidecarRows: ReadonlyArray<AdfNode>,
+  colMap: ReadonlyArray<number | null>
+): AdfNode => {
+  const first = sidecarRows[0]
+  const bodyRows = first !== undefined && isAllHeaderRow(first) ? sidecarRows.slice(1) : sidecarRows
+  if (bodyRows.length === 0) return gfmRow
+  const cells = (gfmRow.content ?? []).map((cell, c) => {
+    const sc = colMap[c]
+    if (sc === null || sc === undefined || cell.type !== "tableCell") return cell
+    const isHeaderColumn = bodyRows.every((row) => (row.content ?? [])[sc]?.type === "tableHeader")
+    return isHeaderColumn ? { ...cell, type: "tableHeader" } : cell
+  })
+  return { ...gfmRow, content: cells }
+}
+
+const mergeTableRow = (
+  sidecarRow: AdfNode,
+  gfmRow: AdfNode,
+  colMap: ReadonlyArray<number | null>
+): AdfNode | null => {
+  const sidecarCells = sidecarRow.content ?? []
+  const gfmCells = gfmRow.content ?? []
+  const cells: Array<AdfNode> = []
+  for (let c = 0; c < gfmCells.length; c++) {
+    const gfmCell = gfmCells[c]!
+    if (!isTableCell(gfmCell)) return null
+    const sc = colMap[c]
+    const sidecarCell = sc !== null && sc !== undefined ? sidecarCells[sc] : undefined
+    // Columns present in the sidecar keep its attrs; a column added in the GFM
+    // has no counterpart, so its parsed cell is used verbatim.
+    cells.push(sidecarCell && isTableCell(sidecarCell) ? mergeTableCell(sidecarCell, gfmCell) : gfmCell)
+  }
+  return sidecarRow.attrs
+    ? { type: "tableRow", attrs: sidecarRow.attrs, content: cells }
+    : { type: "tableRow", content: cells }
+}
+
+const isAllHeaderRow = (row: AdfNode): boolean => {
+  const cells = row.content ?? []
+  return cells.length > 0 && cells.every((cell) => cell.type === "tableHeader")
+}
+
+const isEmptyCellBody = (cell: AdfNode): boolean =>
+  (cell.content ?? []).every((block) => block.type === "paragraph" && (block.content ?? []).length === 0)
+
+/**
+ * Merge the GFM-parsed table (the user's editable content) over the sidecar
+ * table node (the authoritative attrs). Cell text comes from the GFM table;
+ * table/row/cell attrs and header-vs-cell identity come from the sidecar,
+ * aligned via `alignByFingerprint` on both axes — cell edits merge freely
+ * when the shape is unchanged, and row/column inserts or deletions merge when
+ * the alignment is unambiguous. A headerless sidecar table was emitted with a
+ * synthetic empty GFM header row (Markdown tables require one) that has no
+ * sidecar counterpart — it is dropped before aligning. Returns null —
+ * signalling "fall back to the sidecar node unchanged" — when the shapes
+ * can't be reconciled: merged cells or a ragged (non-rectangular) grid in
+ * the sidecar (the walker pads those rows, so a positional merge would mutate
+ * them on a no-op push), text typed into the synthetic header row, rows and
+ * columns changed in the same push, an ambiguous alignment, or a missing GFM
+ * table. That keeps a push from silently corrupting a table it can't edit.
+ */
+const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
+  if (sidecar.type !== "table" || gfm.type !== "table") return null
+  const sidecarRows = sidecar.content ?? []
+  let gfmRows = gfm.content ?? []
+  if (gfmRows.length === 0 || sidecarRows.length === 0) return null
+  if (!sidecarRows.every(isTableRow) || !gfmRows.every(isTableRow)) return null
+  for (const row of sidecarRows) {
+    for (const cell of row.content ?? []) {
+      // Schema drift (a non-cell row child) can't be aligned to the GFM grid.
+      if (!isTableCell(cell)) return null
+      if (hasMergedCell(cell)) return null
+    }
+  }
+  const width = (row: AdfNode): number => (row.content ?? []).length
+  const sidecarWidth = width(sidecarRows[0]!)
+  const gfmWidth = width(gfmRows[0]!)
+  if (!sidecarRows.every((row) => width(row) === sidecarWidth)) return null
+  if (!gfmRows.every((row) => width(row) === gfmWidth)) return null
+  const sidecarFirst = sidecarRows[0]!
+  if (!isAllHeaderRow(sidecarFirst)) {
+    const gfmFirst = gfmRows[0]!
+    if (!isAllHeaderRow(gfmFirst) || !(gfmFirst.content ?? []).every(isEmptyCellBody)) return null
+    gfmRows = gfmRows.slice(1)
+    if (gfmRows.length === 0) return null
+  }
+  // Changing rows and columns in the same push leaves no reliable axis to
+  // fingerprint against — one change at a time.
+  if (gfmRows.length !== sidecarRows.length && gfmWidth !== sidecarWidth) return null
+  // A cell flattened on pull can never fingerprint-match its GFM copy, so
+  // under a structural change the alignment would misattribute its row or
+  // column (e.g. an inserted row maps onto the lossy row, whose sidecar-
+  // authoritative body then swallows the inserted content). Cell edits on
+  // the unchanged shape still work; structural changes fall back.
+  if (gfmRows.length !== sidecarRows.length || gfmWidth !== sidecarWidth) {
+    for (const row of sidecarRows) {
+      for (const cell of row.content ?? []) {
+        if (cellBodyFlattenedOnPull(cell)) return null
+      }
+    }
+  }
+  // Each axis' identity must be judged on the parts of the other axis that
+  // both tables share — a resized or reordered other-axis folded into the
+  // fingerprints would make every item mismatch and a simultaneous reorder
+  // masquerade as harmless in-place edits, gluing attrs to old positions.
+  // When the widths differ the row counts are equal, so columns are aligned
+  // first (over all rows) and rows are then judged on the shared columns;
+  // otherwise rows are aligned first and columns judged on the shared rows.
+  let rowMap: Array<number | null>
+  let colMap: Array<number | null>
+  if (gfmWidth === sidecarWidth) {
+    const rows = alignByFingerprint(sidecarRows.map(rowFingerprint), gfmRows.map(rowFingerprint))
+    if (rows === null) return null
+    rowMap = rows
+    const alignedSidecarRows: Array<AdfNode> = []
+    const alignedGfmRows: Array<AdfNode> = []
+    for (let r = 0; r < gfmRows.length; r++) {
+      const sr = rowMap[r]
+      if (sr === null || sr === undefined) continue
+      alignedSidecarRows.push(sidecarRows[sr]!)
+      alignedGfmRows.push(gfmRows[r]!)
+    }
+    if (alignedSidecarRows.length === 0) return null
+    const cols = alignByFingerprint(
+      Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(alignedSidecarRows, col)),
+      Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(alignedGfmRows, col))
+    )
+    if (cols === null) return null
+    colMap = cols
+  } else {
+    const cols = alignByFingerprint(
+      Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(sidecarRows, col)),
+      Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(gfmRows, col))
+    )
+    if (cols === null) return null
+    colMap = cols
+    const sharedSidecarCols: Array<number> = []
+    const sharedGfmCols: Array<number> = []
+    for (let c = 0; c < colMap.length; c++) {
+      const sc = colMap[c]
+      if (sc === null || sc === undefined) continue
+      sharedSidecarCols.push(sc)
+      sharedGfmCols.push(c)
+    }
+    if (sharedSidecarCols.length === 0) return null
+    const rowOverCols = (row: AdfNode, cols_: ReadonlyArray<number>): string =>
+      cols_.map((c) => cellText((row.content ?? [])[c] ?? { type: "tableCell" })).join(FP_SEP)
+    const rows = alignByFingerprint(
+      sidecarRows.map((row) => rowOverCols(row, sharedSidecarCols)),
+      gfmRows.map((row) => rowOverCols(row, sharedGfmCols))
+    )
+    if (rows === null) return null
+    rowMap = rows
+  }
+  // Reordering both axes at once is invisible to per-axis fingerprints (every
+  // row fp embeds the old column order and vice versa), so both maps
+  // degenerate to identity and attrs would stay at their old coordinates. Its
+  // signature: a mismatched cell whose text is still found at a *vacated*
+  // sidecar position — one whose own text is gone from its mapped spot — is
+  // moved content, while an edit that merely copies a value that still sits
+  // matched at its source is a genuine edit. For same-size grids only moves
+  // that cross rows count: a swap *within* one row cannot be a row reorder,
+  // and a real column reorder moves every row so the column map catches it —
+  // in-row value swaps are ordinary edits. Resized merges keep the strict
+  // rule (any two moved cells bail), which also catches a reorder smuggled
+  // in alongside a row/column insert or delete.
+  {
+    const cellAt = (rows: ReadonlyArray<AdfNode>, r: number, c: number): string =>
+      cellText((rows[r]!.content ?? [])[c] ?? { type: "tableCell" })
+    const vacated: Array<{ readonly row: number; readonly text: string }> = []
+    const mismatched: Array<{ readonly row: number; readonly text: string }> = []
+    for (let r = 0; r < gfmRows.length; r++) {
+      for (let c = 0; c < gfmWidth; c++) {
+        const sr = rowMap[r]
+        const sc = colMap[c]
+        if (sr === null || sr === undefined || sc === null || sc === undefined) continue
+        const gfmText = cellAt(gfmRows, r, c)
+        const sidecarText = cellAt(sidecarRows, sr, sc)
+        if (gfmText === sidecarText) continue
+        vacated.push({ row: sr, text: sidecarText })
+        mismatched.push({ row: sr, text: gfmText })
+      }
+    }
+    let moved = 0
+    let crossRowMoved = 0
+    for (const cell of mismatched) {
+      // A blanked cell matches other blank cells without being "moved".
+      const blank = cell.text === "" || cell.text === "<paragraph>" || cell.text === "<tableCell>"
+      if (blank) continue
+      const sources = vacated.filter((v) => v.text === cell.text)
+      if (sources.length === 0) continue
+      moved++
+      if (sources.some((v) => v.row !== cell.row)) crossRowMoved++
+    }
+    const sameDims = gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth
+    if ((sameDims ? crossRowMoved : moved) >= 2) return null
+  }
+
+  const rows: Array<AdfNode> = []
+  for (let r = 0; r < gfmRows.length; r++) {
+    const gfmRow = gfmRows[r]!
+    const sr = rowMap[r]
+    const sidecarRow = sr !== null && sr !== undefined ? sidecarRows[sr] : undefined
+    if (!sidecarRow) {
+      // A row inserted in the GFM has no sidecar counterpart — use its cells
+      // verbatim, except that header-column cells regain their identity.
+      rows.push(restoreHeaderColumnCells(gfmRow, sidecarRows, colMap))
+      continue
+    }
+    const merged = mergeTableRow(sidecarRow, gfmRow, colMap)
+    if (merged === null) return null
+    rows.push(merged)
+  }
+  return { ...sidecar, content: rows }
+}
+
+const resolveEncodedBlockNode = (
+  marker: { readonly type: string; readonly node: AdfNode },
+  body: ReadonlyArray<AdfNode>
+): AdfNode => {
+  if (marker.type === "mediaSingle") return restoreMediaSingleNode(marker.node, body)
+  if (marker.type === "table") {
+    // The walker emits exactly one table between the markers. Anything else —
+    // e.g. a blank line splitting the GFM table into two fragments — means
+    // part of the editable content would be silently dropped if the first
+    // fragment were merged; fall back to the sidecar node instead.
+    const gfm = body.length === 1 && body[0]!.type === "table" ? body[0]! : null
+    const merged = gfm ? mergeTableWithGfm(marker.node, gfm) : null
+    if (merged) return merged
+  }
+  return marker.node
+}
+
 const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray<AdfNode> => {
   const out: Array<AdfNode> = []
   for (let i = 0; i < children.length; i++) {
@@ -565,11 +1249,7 @@ const groupEncodedBlockNodes = (children: ReadonlyArray<AdfNode>): ReadonlyArray
       if (parseEncodedBlockNodeParagraph(children[j]!) !== null) break
     }
 
-    out.push(
-      marker.type === "mediaSingle" && end !== -1
-        ? restoreMediaSingleNode(marker.node, children.slice(i + 1, end))
-        : marker.node
-    )
+    out.push(end === -1 ? marker.node : resolveEncodedBlockNode(marker, children.slice(i + 1, end)))
     if (end !== -1) i = end
   }
   return out
