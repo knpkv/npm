@@ -1957,6 +1957,80 @@ describe("MarkdownConverter round-trip", () => {
       expect(JSON.stringify(content)).not.toContain("editme")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: encodings that don't survive the GFM round trip — a no-URL
+  // smart link (emitted as nothing), a status whose text needs escaping, a
+  // link href with a raw pipe (rewritten to %7C) — must keep the sidecar
+  // body on an unedited push instead of adopting the degraded GFM copy.
+  it.effect("keeps sidecar bodies for non-round-trippable inline encodings on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const cardCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "inlineCard", attrs: { data: { name: "payload-only card" } } }]
+        }]
+      }
+      const statusCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "status", attrs: { text: "a<b", color: "red" } }]
+        }]
+      }
+      const linkCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "query",
+            marks: [{ type: "link", attrs: { href: "https://example.com/?q=a|b" } }]
+          }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "C" }] }]
+              }
+            ]
+          },
+          { type: "tableRow", content: [cardCell, statusCell, linkCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      expect(cells[0]).toEqual(cardCell)
+      expect(cells[1]).toEqual(statusCell)
+      expect(cells[2]).toEqual(linkCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
