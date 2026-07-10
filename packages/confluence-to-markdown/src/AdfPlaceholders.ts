@@ -572,10 +572,10 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 // Hrefs containing these are rewritten on the way out or normalized by the
 // parser on the way back — table-cell pipe escaping parses back as %7C,
 // safeHref percent-encodes `<`/`>`/`\` (and wraps for spaces, unverified in
-// angle-bracket destinations), `&` sequences are entity-decoded, and
-// non-ASCII characters come back percent-encoded. Balanced parens survive
-// inside the wrapper.
-const LOSSY_HREF_RE = /[| <>\\&]|[^\x20-\x7E]/
+// angle-bracket destinations), HTML entity sequences are decoded, and
+// non-ASCII characters come back percent-encoded. Bare `&` and balanced
+// parens survive.
+const LOSSY_HREF_RE = /[| <>\\]|[^\x20-\x7E]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/
 
 // Comment placeholders embed raw JSON: a value containing `-->` terminates
 // the comment early and the payload degrades to literal text.
@@ -602,6 +602,9 @@ const inlineRoundTrips = (node: AdfNode): boolean => {
           return typeof href === "string" && !LOSSY_HREF_RE.test(href)
         }
         if (HTML_SPAN_MARKS.has(mark.type)) return !(node.text ?? "").includes("<")
+        // The cell's pipe escaping runs after code spans are wrapped, and
+        // code content is literal — the added backslash survives the parse.
+        if (mark.type === "code") return !(node.text ?? "").includes("|")
         return true
       })
     case "status": {
@@ -739,7 +742,11 @@ const nodeText = (node: AdfNode): string => {
   const wrap = (body: string): string =>
     marks.length === 0 ? body : `[${marks.map(markFingerprint).sort().join(",")}](${body})`
   if (node.text !== undefined || children.length > 0) {
-    return wrap((node.text ?? "") + children.map(nodeText).join(""))
+    // Escape the characters the structural sentinels use, so literal cell
+    // text like `<paragraph>` can't collide with an empty paragraph's
+    // fingerprint and mask an edit.
+    const raw = (node.text ?? "").replace(/[\\<[]/g, "\\$&")
+    return wrap(raw + children.map(nodeText).join(""))
   }
   const attrs = node.attrs === undefined ? undefined : projectAttrs(node.attrs, PROJECTED_NODE_ATTRS[node.type])
   if (attrs === undefined || Object.keys(attrs).length === 0) return wrap(`<${node.type}>`)

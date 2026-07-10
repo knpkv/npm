@@ -2233,6 +2233,96 @@ describe("MarkdownConverter round-trip", () => {
       expect(cells[1]).toEqual(arrowCardCell)
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: a raw ampersand in a query URL round-trips — it must not
+  // disable editing of adjacent text; a code span containing a pipe bakes in
+  // a literal backslash and stays sidecar-owned; and literal cell text that
+  // spells a structural sentinel must not mask an edit.
+  it.effect("handles raw-ampersand links, piped code spans, and sentinel-like text", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const codeCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{ type: "text", text: "a|b", marks: [{ type: "code" }] }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "C" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{
+                  type: "paragraph",
+                  content: [
+                    {
+                      type: "text",
+                      text: "link",
+                      marks: [{ type: "link", attrs: { href: "https://x.example/?a=1&b=2" } }]
+                    },
+                    { type: "text", text: " olda" }
+                  ]
+                }]
+              },
+              codeCell,
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Edit beside the raw-& link and type sentinel-looking text into the
+      // empty cell.
+      const edited = markdown.replace("olda", "newa")
+      const editedLines = edited.split("\n").map((line) =>
+        line.includes("newa") ? line.replace(/\|(\s*)\|$/, "| \\<paragraph> |") : line
+      ).join("\n")
+      const hydrated = hydrateAdfMetadata(editedLines, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      // The edit beside the raw-& link lands and the href is unchanged.
+      const linkCell = JSON.stringify(cells[0])
+      expect(linkCell).toContain("newa")
+      expect(linkCell).toContain("https://x.example/?a=1&b=2")
+      // The piped code span stays sidecar-owned — no baked-in backslash.
+      expect(cells[1]).toEqual(codeCell)
+      // The sentinel-looking text landed as literal text in the third cell.
+      expect(JSON.stringify(cells[2])).toContain("<paragraph>")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
