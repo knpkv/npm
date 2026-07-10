@@ -964,6 +964,136 @@ describe("MarkdownConverter round-trip", () => {
       }
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: with a row appended, the extra row used to be folded into
+  // the column fingerprints, so a simultaneous column swap looked like
+  // in-place edits and kept column attrs at their old positions. Column
+  // identity must be judged on the rows both tables share.
+  it.effect("honors a column swap combined with a row append in one push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: { colwidth: [111] },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: { colwidth: [222] },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "2" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Swap the columns and append a row in the same push.
+      const edited = markdown
+        .replace("| A | B |", "| B | A |")
+        .replace("| 1 | 2 |", "| 2 | 1 |\n| y | x |")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      expect(rows).toHaveLength(3)
+      const headerCells = contentOf(rows[0])
+      const nowFirstHeader = headerCells[0]
+      const nowSecondHeader = headerCells[1]
+      if (!isRecord(nowFirstHeader) || !isRecord(nowSecondHeader)) throw new Error("expected header cells")
+      // Each colwidth travelled with its column content.
+      expect(JSON.stringify(nowFirstHeader)).toContain("B")
+      expect(nowFirstHeader["attrs"]).toEqual({ colwidth: [222] })
+      expect(JSON.stringify(nowSecondHeader)).toContain("A")
+      expect(nowSecondHeader["attrs"]).toEqual({ colwidth: [111] })
+      expect(JSON.stringify(rows[2])).toContain("y")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: `foo` and `**foo**` used to share a fingerprint, so
+  // reordering them looked like "unchanged" and each row's attrs stuck to its
+  // old position. Marks are part of the fingerprint now, making the reorder
+  // visible so attrs travel with the moved rows.
+  it.effect("keeps row attrs with their content when formatting-only twins are reordered", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: { background: "#ffcccc" },
+                content: [{ type: "paragraph", content: [{ type: "text", text: "foo" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: { background: "#ccccff" },
+                content: [{
+                  type: "paragraph",
+                  content: [{ type: "text", text: "foo", marks: [{ type: "strong" }] }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("| foo |\n| **foo** |", "| **foo** |\n| foo |")
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const nowFirst = contentOf(rows[1])[0]
+      const nowSecond = contentOf(rows[2])[0]
+      if (!isRecord(nowFirst) || !isRecord(nowSecond)) throw new Error("expected cells")
+      // The bold row moved up and brought its background along.
+      expect(JSON.stringify(nowFirst)).toContain("strong")
+      expect(nowFirst["attrs"]).toEqual({ background: "#ccccff" })
+      expect(JSON.stringify(nowSecond)).not.toContain("strong")
+      expect(nowSecond["attrs"]).toEqual({ background: "#ffcccc" })
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: when one copy of a duplicate row stays anchored and another
   // moves, either copy could be the moved one — each choice assigns the
   // duplicates' attrs differently. The merge must refuse to guess.

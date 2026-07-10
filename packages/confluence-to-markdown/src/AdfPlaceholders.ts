@@ -595,22 +595,33 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
     : { type: sidecarCell.type, content }
 }
 
-// Plain-text fingerprint used to verify index alignment. Both sides are ADF
-// (the sidecar node and the GFM-parsed node), so concatenated text nodes are
-// comparable; anything that doesn't round-trip textually simply won't match,
-// which errs on the safe side (bail to the sidecar). Leaves without text or
-// children (status, date, emoji, …) carry their visible content in attrs —
-// fold those in so distinct leaves don't all collapse to the empty string
-// and make moved content look unchanged.
+// Content fingerprint used to verify index alignment. Both sides are ADF
+// (the sidecar node and the GFM-parsed node), so the serialization is
+// comparable; anything that doesn't round-trip identically simply won't
+// match, which errs on the safe side (bail to the sidecar). Marks are folded
+// in so `foo` and `**foo**` stay distinct, and leaves without text or
+// children (status, date, emoji, …) serialize their attrs so distinct leaves
+// don't all collapse to the empty string — either collapse would make moved
+// content look unchanged and glue attrs to the wrong position.
+const attrsFingerprint = (attrs: Record<string, unknown>): string =>
+  Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`).join(" ")
+
+const markFingerprint = (mark: AdfNode): string =>
+  mark.attrs === undefined || Object.keys(mark.attrs).length === 0
+    ? mark.type
+    : `${mark.type}(${attrsFingerprint(mark.attrs)})`
+
 const nodeText = (node: AdfNode): string => {
   const children = node.content ?? []
+  const marks = node.marks ?? []
+  const wrap = (body: string): string =>
+    marks.length === 0 ? body : `[${marks.map(markFingerprint).sort().join(",")}](${body})`
   if (node.text !== undefined || children.length > 0) {
-    return (node.text ?? "") + children.map(nodeText).join("")
+    return wrap((node.text ?? "") + children.map(nodeText).join(""))
   }
   const attrs = node.attrs
-  if (attrs === undefined || Object.keys(attrs).length === 0) return `<${node.type}>`
-  const parts = Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`)
-  return `<${node.type} ${parts.join(" ")}>`
+  if (attrs === undefined || Object.keys(attrs).length === 0) return wrap(`<${node.type}>`)
+  return wrap(`<${node.type} ${attrsFingerprint(attrs)}>`)
 }
 
 const cellText = (cell: AdfNode): string => nodeText(cell).trim()
@@ -809,9 +820,22 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   if (gfmRows.length !== sidecarRows.length && gfmWidth !== sidecarWidth) return null
   const rowMap = alignByFingerprint(sidecarRows.map(rowFingerprint), gfmRows.map(rowFingerprint))
   if (rowMap === null) return null
+  // Column identity is judged on the rows the two tables share — with an
+  // inserted/deleted row folded into the column fingerprints, every column
+  // would mismatch and a simultaneous column reorder would masquerade as
+  // harmless in-place edits, gluing attrs to the wrong columns.
+  const alignedSidecarRows: Array<AdfNode> = []
+  const alignedGfmRows: Array<AdfNode> = []
+  for (let r = 0; r < gfmRows.length; r++) {
+    const sr = rowMap[r]
+    if (sr === null || sr === undefined) continue
+    alignedSidecarRows.push(sidecarRows[sr]!)
+    alignedGfmRows.push(gfmRows[r]!)
+  }
+  if (alignedSidecarRows.length === 0) return null
   const colMap = alignByFingerprint(
-    Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(sidecarRows, col)),
-    Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(gfmRows, col))
+    Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(alignedSidecarRows, col)),
+    Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(alignedGfmRows, col))
   )
   if (colMap === null) return null
   // Reordering both axes at once is invisible to per-axis fingerprints (every
