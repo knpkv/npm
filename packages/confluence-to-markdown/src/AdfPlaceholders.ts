@@ -678,8 +678,10 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
     // splits apart (`<u>**text**</u>` → literal `<u>` around a strong node),
     // and stacked spans break each other's `[^<]*` body match.
     if (marks.length > 1 && marks.some((mark) => HTML_SPAN_MARK_TYPES.has(mark.type))) return true
-    // A code span combined with a link parses back without the link mark.
-    if (marks.some((mark) => mark.type === "code") && marks.some((mark) => mark.type === "link")) return true
+    // A code span combined with any other mark parses back degraded: the
+    // link is dropped, and emphasis markers land inside or around the
+    // literal code content.
+    if (marks.length > 1 && marks.some((mark) => mark.type === "code")) return true
     // `_`-emphasis is not recognised intraword: a word character in the
     // adjacent inline text glues to the delimiter (`foo_bar_baz`).
     if (marks.some((mark) => mark.type === "em")) {
@@ -728,6 +730,17 @@ const graftInlineNodes = (
         const candidate = pool.splice(candIdx, 1)[0]!
         const sidecarLink = (candidate.marks ?? []).find((mark) => mark.type === "link")!
         return { ...node, marks: (node.marks ?? []).map((mark) => (mark.type === "link" ? sidecarLink : mark)) }
+      }
+    }
+    // A relabeled status lozenge keeps its identity — carry the sidecar's
+    // hidden attrs (localId, style, …) under the newly typed text/color when
+    // a single candidate makes the pairing unambiguous.
+    if (node.type === "status") {
+      const candidates = pool.filter((candidate) => candidate.type === "status")
+      if (candidates.length === 1) {
+        const candidate = candidates[0]!
+        pool.splice(pool.indexOf(candidate), 1)
+        return { ...node, attrs: { ...candidate.attrs, ...node.attrs } }
       }
     }
     return node
@@ -1015,6 +1028,8 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   if (!sidecarRows.every(isTableRow) || !gfmRows.every(isTableRow)) return null
   for (const row of sidecarRows) {
     for (const cell of row.content ?? []) {
+      // Schema drift (a non-cell row child) can't be aligned to the GFM grid.
+      if (!isTableCell(cell)) return null
       if (hasMergedCell(cell)) return null
     }
   }
