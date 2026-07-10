@@ -562,11 +562,34 @@ const hasMergedCell = (cell: AdfNode): boolean => {
   return (colspan !== null && colspan > 1) || (rowspan !== null && rowspan > 1)
 }
 
+// A cell body only survives the GFM round-trip when it is at most one
+// paragraph: anything richer (multiple blocks, lists, code blocks, …) was
+// flattened into <br>-joined Markdown on pull, so the GFM-parsed cell is a
+// degraded copy of the sidecar body — even on an unchanged push.
+const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
+  const blocks = cell.content ?? []
+  return blocks.length > 1 || (blocks.length === 1 && blocks[0]!.type !== "paragraph")
+}
+
 // Keep the sidecar cell's identity (tableHeader vs tableCell) and its attrs
 // (colwidth, background, localId, …); take only the freshly edited body from
 // the GFM-parsed cell — that content is what the human typed in the markdown.
+// Cells whose body was flattened on pull keep the authoritative sidecar body
+// instead (edits to them are documented-lossy, like merged-cell tables).
 const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
-  const content = gfmCell.content ?? []
+  if (cellBodyFlattenedOnPull(sidecarCell)) return sidecarCell
+  const gfmContent = gfmCell.content ?? []
+  const sidecarPara = (sidecarCell.content ?? [])[0]
+  const gfmPara = gfmContent.length === 1 && gfmContent[0]!.type === "paragraph" ? gfmContent[0]! : null
+  // Paragraph-level attrs/marks (localId, alignment, …) aren't expressible in
+  // a GFM cell; graft them back on when the shape still lines up.
+  const content = sidecarPara && gfmPara && (sidecarPara.attrs !== undefined || sidecarPara.marks !== undefined)
+    ? [{
+      ...gfmPara,
+      ...(sidecarPara.attrs !== undefined ? { attrs: sidecarPara.attrs } : {}),
+      ...(sidecarPara.marks !== undefined ? { marks: sidecarPara.marks } : {})
+    }]
+    : gfmContent
   return sidecarCell.attrs
     ? { type: sidecarCell.type, attrs: sidecarCell.attrs, content }
     : { type: sidecarCell.type, content }
@@ -589,25 +612,43 @@ const mergeTableRow = (sidecarRow: AdfNode, gfmRow: AdfNode): AdfNode | null => 
     : { type: "tableRow", content: cells }
 }
 
+const isAllHeaderRow = (row: AdfNode): boolean => {
+  const cells = row.content ?? []
+  return cells.length > 0 && cells.every((cell) => cell.type === "tableHeader")
+}
+
+const isEmptyCellBody = (cell: AdfNode): boolean =>
+  (cell.content ?? []).every((block) => block.type === "paragraph" && (block.content ?? []).length === 0)
+
 /**
  * Merge the GFM-parsed table (the user's editable content) over the sidecar
  * table node (the authoritative attrs). Cell text and whole added/removed rows
  * come from the GFM table; table/row/cell attrs and header-vs-cell identity
- * come from the sidecar, aligned by index. Returns null — signalling "fall
- * back to the sidecar node unchanged" — when the shapes can't be reconciled:
- * merged cells in the sidecar, a non-rectangular structure, or a missing GFM
+ * come from the sidecar, aligned by index. A headerless sidecar table was
+ * emitted with a synthetic empty GFM header row (Markdown tables require one)
+ * that has no sidecar counterpart — it is dropped before aligning. Returns
+ * null — signalling "fall back to the sidecar node unchanged" — when the
+ * shapes can't be reconciled: merged cells in the sidecar, a non-rectangular
+ * structure, text typed into the synthetic header row, or a missing GFM
  * table. That keeps a push from silently corrupting a table it can't edit.
  */
 const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   if (sidecar.type !== "table" || gfm.type !== "table") return null
   const sidecarRows = sidecar.content ?? []
-  const gfmRows = gfm.content ?? []
+  let gfmRows = gfm.content ?? []
   if (gfmRows.length === 0) return null
   if (!sidecarRows.every(isTableRow) || !gfmRows.every(isTableRow)) return null
   for (const row of sidecarRows) {
     for (const cell of row.content ?? []) {
       if (hasMergedCell(cell)) return null
     }
+  }
+  const sidecarFirst = sidecarRows[0]
+  if (sidecarFirst && !isAllHeaderRow(sidecarFirst)) {
+    const gfmFirst = gfmRows[0]!
+    if (!isAllHeaderRow(gfmFirst) || !(gfmFirst.content ?? []).every(isEmptyCellBody)) return null
+    gfmRows = gfmRows.slice(1)
+    if (gfmRows.length === 0) return null
   }
 
   const rows: Array<AdfNode> = []

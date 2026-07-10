@@ -406,6 +406,223 @@ describe("MarkdownConverter round-trip", () => {
       expect(spanningCell["attrs"]).toEqual({ colspan: 2 })
     }).pipe(Effect.provide(TestLayer)))
 
+  // Regression: a headerless table is emitted with a synthetic empty GFM
+  // header row (Markdown tables require one). The merge used to align that
+  // synthetic row with the sidecar's first *data* row, blanking it and
+  // shifting every row down by one on an unchanged push.
+  it.effect("round-trips a headerless table without blanking or shifting rows", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "first1" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "first2" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "second1" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "second2" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // Edit a cell in the second row; the synthetic header must not consume a row.
+      const edited = markdown.replace("second1", "EDITED")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      expect(content.filter((n) => nodeType(n) === "table")).toHaveLength(1)
+      const rows = contentOf(content[0])
+      expect(rows).toHaveLength(2)
+      const firstCell = contentOf(rows[0])[0]
+      if (!isRecord(firstCell)) throw new Error("expected first cell")
+      // The first data row keeps its identity and text — not blanked into a header.
+      expect(firstCell["type"]).toBe("tableCell")
+      expect(JSON.stringify(rows[0])).toContain("first1")
+      expect(JSON.stringify(rows[1])).toContain("EDITED")
+      expect(JSON.stringify(content)).not.toContain("second1")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Safety: text typed into the synthetic header row of a headerless table has
+  // no sidecar row to merge with — the merge must bail to the sidecar node
+  // rather than shift every row's attrs off by one.
+  it.effect("falls back to the sidecar when text is typed into a synthetic header row", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "only1" }] }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "only2" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      // The emitted table starts with an all-empty header row; type into it.
+      expect(markdown).toContain("|  |")
+      const edited = markdown.replace("|  |", "| NewHeader |")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      expect(content.filter((n) => nodeType(n) === "table")).toHaveLength(1)
+      expect(JSON.stringify(content)).not.toContain("NewHeader")
+      const rows = contentOf(content[0])
+      expect(rows).toHaveLength(1)
+      expect(JSON.stringify(rows[0])).toContain("only1")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Regression: a cell body richer than one paragraph is flattened to
+  // <br>-joined Markdown on pull, so the GFM-parsed cell is a degraded copy.
+  // The merge used to adopt that degraded copy even on an unchanged push,
+  // collapsing the block structure. The sidecar body must stay authoritative
+  // for such cells while simple cells in the same table remain editable.
+  it.effect("keeps the sidecar body for a multi-block cell while honoring simple-cell edits", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const complexCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "para one" }] },
+          { type: "paragraph", content: [{ type: "text", text: "para two" }] }
+        ]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              complexCell,
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "simple" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("simple", "EDITED")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      expect(content.filter((n) => nodeType(n) === "table")).toHaveLength(1)
+      const rows = contentOf(content[0])
+      const pushedComplex = contentOf(rows[1])[0]
+      // The two-paragraph body survives untouched — no <br>/hardBreak collapse.
+      expect(pushedComplex).toEqual(complexCell)
+      expect(JSON.stringify(rows[1])).toContain("EDITED")
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Paragraph-level attrs/marks can't be expressed in a GFM cell; when the
+  // cell still parses back as a single paragraph they must be grafted onto
+  // the edited content rather than dropped.
+  it.effect("keeps paragraph attrs on an edited single-paragraph cell", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{
+                  type: "paragraph",
+                  attrs: { localId: "para-1" },
+                  content: [{ type: "text", text: "OldText" }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("OldText", "NewText")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cell = contentOf(rows[1])[0]
+      const para = contentOf(cell)[0]
+      if (!isRecord(para)) throw new Error("expected paragraph")
+      expect(para["attrs"]).toEqual({ localId: "para-1" })
+      expect(JSON.stringify(para)).toContain("NewText")
+      expect(JSON.stringify(content)).not.toContain("OldText")
+    }).pipe(Effect.provide(TestLayer)))
+
   it.effect("preserves a blockquote", () =>
     Effect.gen(function*() {
       const md = yield* roundTrip("> a quote\n")
