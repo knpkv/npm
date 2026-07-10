@@ -2031,6 +2031,101 @@ describe("MarkdownConverter round-trip", () => {
       expect(cells[2]).toEqual(linkCell)
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: encodings that DO round-trip (escaped mention labels,
+  // parenthesized hrefs wrapped in angle brackets) must not disable editing
+  // of adjacent text in the same cell; a `<` inside an HTML span placeholder
+  // does not survive and stays sidecar-owned.
+  it.effect("honors edits beside round-trippable mentions and paren links", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "C" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{
+                  type: "paragraph",
+                  content: [
+                    { type: "mention", attrs: { id: "abc", text: "@Jo_hn" } },
+                    { type: "text", text: " oldm" }
+                  ]
+                }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{
+                  type: "paragraph",
+                  content: [
+                    {
+                      type: "text",
+                      text: "paren",
+                      marks: [{ type: "link", attrs: { href: "https://example.com/a(b)" } }]
+                    },
+                    { type: "text", text: " oldl" }
+                  ]
+                }]
+              },
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{
+                  type: "paragraph",
+                  content: [{ type: "text", text: "a<b", marks: [{ type: "underline" }] }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("oldm", "newm").replace("oldl", "newl")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      // Edits beside the mention and the paren link land; both nodes survive.
+      const mentionCell = JSON.stringify(cells[0])
+      expect(mentionCell).toContain("newm")
+      expect(mentionCell).toContain("@Jo_hn")
+      expect(mentionCell).toContain("mention")
+      const linkCell = JSON.stringify(cells[1])
+      expect(linkCell).toContain("newl")
+      expect(linkCell).toContain("https://example.com/a(b)")
+      // The `<`-bearing underline cell stays sidecar-owned, not literal HTML.
+      const underlineCell = cells[2]
+      if (!isRecord(underlineCell)) throw new Error("expected cell")
+      expect(JSON.stringify(underlineCell)).toContain("underline")
+      expect(JSON.stringify(underlineCell)).not.toContain("<u>")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge

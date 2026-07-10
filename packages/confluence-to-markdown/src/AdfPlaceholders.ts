@@ -569,42 +569,49 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 // text; boundary whitespace is trimmed by the GFM cell delimiters. In all of
 // those cases the GFM-parsed cell is a degraded copy of the sidecar body —
 // even on an unchanged push.
-// Mirrors AdfWalker's ESCAPE_RE: emission escapes these characters, and the
-// status/mention placeholders capture the *escaped* form, so only
-// escape-free text survives those encodings exactly.
-const NEEDS_ESCAPE_RE = /[\\`*_[\]<|~&]/
+// Hrefs containing these are rewritten on the way out — table-cell pipe
+// escaping parses back as %7C, and safeHref percent-encodes `<`/`>`/`\` (and
+// wraps for spaces, which are unverified in angle-bracket destinations) — so
+// they parse back changed. Balanced parens survive inside the wrapper.
+const LOSSY_HREF_RE = /[| <>\\]/
 
-// Hrefs containing these are rewritten on the way out (table-cell pipe
-// escaping, angle-bracket destination wrapping with percent-encoding) and
-// parse back changed.
-const LOSSY_HREF_RE = /[|() <>\\]/
+// Marks emitted as HTML span placeholders: their reverter regexes match the
+// span body with `[^<]*`, so a literal `<` in the marked text breaks
+// rehydration and the push degrades to literal HTML.
+const HTML_SPAN_MARKS = new Set(["underline", "subsup", "textColor", "backgroundColor"])
 
 // Whether an inline node survives the GFM round-trip inside a table cell.
-// Plain text round-trips (unless a link mark's href gets rewritten); date,
-// emoji and inlineExtension are emitted as full-fidelity base64 placeholders;
-// status/mention/inlineCard only survive the narrower encodings the walker
-// uses for them. Anything else (mediaInline, placeholder, …) is emitted as a
-// comment this module does not expand, so the GFM copy degrades to text.
+// Plain text round-trips — the parser unescapes what the walker escaped,
+// including inside span placeholder bodies and mention link labels (verified
+// empirically). Date, emoji and inlineExtension are full-fidelity base64
+// placeholders; status/mention/inlineCard survive their narrower encodings
+// except where noted. Anything else (mediaInline, placeholder, …) is emitted
+// as a comment this module does not expand, so the GFM copy degrades to text.
 const inlineRoundTrips = (node: AdfNode): boolean => {
   switch (node.type) {
     case "text":
       return (node.marks ?? []).every((mark) => {
-        if (mark.type !== "link") return true
-        const href = mark.attrs?.["href"]
-        return typeof href === "string" && !LOSSY_HREF_RE.test(href)
+        if (mark.type === "link") {
+          const href = mark.attrs?.["href"]
+          return typeof href === "string" && !LOSSY_HREF_RE.test(href)
+        }
+        if (HTML_SPAN_MARKS.has(mark.type)) return !(node.text ?? "").includes("<")
+        return true
       })
     case "status": {
+      // STATUS_RE's body can't cross a literal `<`.
       const text = node.attrs?.["text"]
-      return typeof text !== "string" || !NEEDS_ESCAPE_RE.test(text)
+      return typeof text !== "string" || !text.includes("<")
     }
     case "mention": {
       const id = node.attrs?.["id"]
       const text = node.attrs?.["text"]
-      return typeof id === "string" && id.length > 0 &&
-        typeof text === "string" && text.startsWith("@") && !NEEDS_ESCAPE_RE.test(text)
+      return typeof id === "string" && id.length > 0 && typeof text === "string" && text.startsWith("@")
     }
     case "inlineCard": {
-      const url = node.attrs?.["url"]
+      const attrs = node.attrs ?? {}
+      const data = attrs["data"]
+      const url = attrs["url"] ?? (isRecord(data) ? data["url"] : undefined)
       return typeof url === "string" && url.length > 0
     }
     case "date":
