@@ -569,6 +569,12 @@ const hasMergedCell = (cell: AdfNode): boolean => {
 // text; boundary whitespace is trimmed by the GFM cell delimiters. In all of
 // those cases the GFM-parsed cell is a degraded copy of the sidecar body —
 // even on an unchanged push.
+// Inline nodes that survive the GFM round-trip inside a table cell: plain
+// text (with marks) and the placeholder-restored Confluence inline nodes.
+// Anything else (mediaInline, placeholder, …) is emitted as a comment this
+// module does not expand, so the GFM copy degrades to literal text.
+const ROUND_TRIPPABLE_INLINE = new Set(["text", "status", "date", "emoji", "mention", "inlineCard", "inlineExtension"])
+
 const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
   const blocks = cell.content ?? []
   if (blocks.length > 1) return true
@@ -576,7 +582,7 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
   if (only === undefined) return false
   if (only.type !== "paragraph") return true
   const inline = only.content ?? []
-  if (inline.some((node) => node.type === "hardBreak")) return true
+  if (inline.some((node) => !ROUND_TRIPPABLE_INLINE.has(node.type))) return true
   const first = inline[0]
   if (first?.type === "text" && first.text !== undefined && first.text !== first.text.trimStart()) return true
   const last = inline[inline.length - 1]

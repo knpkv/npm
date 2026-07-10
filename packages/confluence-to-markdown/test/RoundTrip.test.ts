@@ -1785,6 +1785,95 @@ describe("MarkdownConverter round-trip", () => {
       expect(JSON.stringify(content)).toContain("keepB")
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: literal text that looks like Markdown/HTML syntax must
+  // survive an unedited round trip — `&amp;` must not become `&` and
+  // `~~keep~~` must not become struck-through text.
+  it.effect("round-trips literal entity and tilde cell text unchanged on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const entityCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{ type: "paragraph", content: [{ type: "text", text: "A &amp; B" }] }]
+      }
+      const tildeCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{ type: "paragraph", content: [{ type: "text", text: "~~keep~~" }] }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              }
+            ]
+          },
+          { type: "tableRow", content: [entityCell, tildeCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      expect(contentOf(rows[1])[0]).toEqual(entityCell)
+      expect(contentOf(rows[1])[1]).toEqual(tildeCell)
+    }).pipe(Effect.provide(TestLayer)))
+
+  // Codex review: inline nodes this module cannot restore (e.g. mediaInline)
+  // are emitted as comment placeholders that come back as literal text — such
+  // cells must stay sidecar-authoritative on a no-op push.
+  it.effect("round-trips a mediaInline cell unchanged on a no-op push", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const mediaCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [
+            { type: "text", text: "see " },
+            { type: "mediaInline", attrs: { type: "file", id: "media-1", collection: "contentId-1" } }
+          ]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          { type: "tableRow", content: [mediaCell] }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const hydrated = hydrateAdfMetadata(markdown, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      expect(contentOf(rows[1])[0]).toEqual(mediaCell)
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
