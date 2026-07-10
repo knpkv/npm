@@ -598,8 +598,20 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
 // Plain-text fingerprint used to verify index alignment. Both sides are ADF
 // (the sidecar node and the GFM-parsed node), so concatenated text nodes are
 // comparable; anything that doesn't round-trip textually simply won't match,
-// which errs on the safe side (bail to the sidecar).
-const nodeText = (node: AdfNode): string => (node.text ?? "") + (node.content ?? []).map(nodeText).join("")
+// which errs on the safe side (bail to the sidecar). Leaves without text or
+// children (status, date, emoji, …) carry their visible content in attrs —
+// fold those in so distinct leaves don't all collapse to the empty string
+// and make moved content look unchanged.
+const nodeText = (node: AdfNode): string => {
+  const children = node.content ?? []
+  if (node.text !== undefined || children.length > 0) {
+    return (node.text ?? "") + children.map(nodeText).join("")
+  }
+  const attrs = node.attrs
+  if (attrs === undefined || Object.keys(attrs).length === 0) return `<${node.type}>`
+  const parts = Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`)
+  return `<${node.type} ${parts.join(" ")}>`
+}
 
 const cellText = (cell: AdfNode): string => nodeText(cell).trim()
 
@@ -638,30 +650,33 @@ const alignByFingerprint = (
     const map: Array<number | null> = gfm.map((fp, i) => (fp === sidecar[i] ? i : null))
     if (!map.includes(null)) return map
     // Try to recognise moved content among the changed positions: a moved
-    // item keeps its text, an edited item keeps its position.
-    const leftoverSidecar = new Map<string, Array<number>>()
-    for (let j = 0; j < n; j++) {
-      if (gfm[j] === sidecar[j]) continue
-      const positions = leftoverSidecar.get(sidecar[j]!) ?? []
-      positions.push(j)
-      leftoverSidecar.set(sidecar[j]!, positions)
+    // item keeps its text, an edited item keeps its position. Counts are
+    // global — a duplicate that stayed anchored in place still makes its
+    // moved twin ambiguous (either copy could be the one that moved).
+    const count = (fps: ReadonlyArray<string>): Map<string, number> => {
+      const totals = new Map<string, number>()
+      for (const fp of fps) totals.set(fp, (totals.get(fp) ?? 0) + 1)
+      return totals
     }
-    const leftoverGfm = new Map<string, number>()
-    for (let i = 0; i < m; i++) {
-      if (map[i] === null) leftoverGfm.set(gfm[i]!, (leftoverGfm.get(gfm[i]!) ?? 0) + 1)
+    const sidecarCount = count(sidecar)
+    const gfmCount = count(gfm)
+    const changedSidecar = new Map<string, number>()
+    for (let j = 0; j < n; j++) {
+      if (gfm[j] !== sidecar[j]) changedSidecar.set(sidecar[j]!, j)
     }
     let moved = 0
     let edited = 0
     for (let i = 0; i < m; i++) {
       if (map[i] !== null) continue
-      const candidates = leftoverSidecar.get(gfm[i]!)
-      if (candidates === undefined) {
+      const source = changedSidecar.get(gfm[i]!)
+      if (source === undefined) {
         edited++
         continue
       }
-      // Duplicate text among the moved items: several assignments fit.
-      if (candidates.length !== 1 || leftoverGfm.get(gfm[i]!) !== 1) return null
-      map[i] = candidates[0]!
+      // The moved text must be unique in BOTH tables, or several assignments
+      // fit and each distributes attrs differently.
+      if (sidecarCount.get(gfm[i]!) !== 1 || gfmCount.get(gfm[i]!) !== 1) return null
+      map[i] = source
       moved++
     }
     // Every changed position is an in-place edit — identity.
@@ -799,6 +814,31 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
     Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(gfmRows, col))
   )
   if (colMap === null) return null
+  // Reordering both axes at once is invisible to per-axis fingerprints (every
+  // row fp embeds the old column order and vice versa), so both maps
+  // degenerate to identity and attrs would stay at their old coordinates. Its
+  // signature: cells still mismatch under the chosen maps, yet the multiset
+  // of cell texts is unchanged — nothing was edited, everything just moved.
+  if (gfmRows.length === sidecarRows.length && gfmWidth === sidecarWidth) {
+    const mapped = (r: number, c: number): string | null => {
+      const sr = rowMap[r]
+      const sc = colMap[c]
+      if (sr === null || sr === undefined || sc === null || sc === undefined) return null
+      return cellText((sidecarRows[sr]!.content ?? [])[sc] ?? { type: "tableCell" })
+    }
+    let mismatch = false
+    const sidecarTexts: Array<string> = []
+    const gfmTexts: Array<string> = []
+    for (let r = 0; r < gfmRows.length; r++) {
+      for (let c = 0; c < gfmWidth; c++) {
+        const gfmText = cellText((gfmRows[r]!.content ?? [])[c] ?? { type: "tableCell" })
+        gfmTexts.push(gfmText)
+        sidecarTexts.push(cellText((sidecarRows[r]!.content ?? [])[c] ?? { type: "tableCell" }))
+        if (mapped(r, c) !== gfmText) mismatch = true
+      }
+    }
+    if (mismatch && JSON.stringify(sidecarTexts.sort()) === JSON.stringify(gfmTexts.sort())) return null
+  }
 
   const rows: Array<AdfNode> = []
   for (let r = 0; r < gfmRows.length; r++) {
