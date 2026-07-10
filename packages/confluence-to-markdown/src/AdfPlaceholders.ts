@@ -713,10 +713,41 @@ const graftInlineNodes = (
   gfmInline: ReadonlyArray<AdfNode>,
   sidecarInline: ReadonlyArray<AdfNode>
 ): ReadonlyArray<AdfNode> => {
+  // Pass 1: pair exact fingerprint matches per group, so an unchanged
+  // sibling is consumed before the fallbacks consider edited nodes. When
+  // fewer copies of a fingerprint survive than the sidecar had and the
+  // sidecar copies aren't identical, the survivors' pairing is ambiguous —
+  // leave those parsed nodes alone and retire the candidates.
   const pool = [...sidecarInline]
-  return gfmInline.map((node) => {
-    const idx = pool.findIndex((candidate) => nodeText(candidate) === nodeText(node))
-    if (idx !== -1) return pool.splice(idx, 1)[0]!
+  const results: Array<AdfNode | null> = gfmInline.map(() => null)
+  const byFp = new Map<string, Array<number>>()
+  gfmInline.forEach((node, i) => {
+    const fp = nodeText(node)
+    const group = byFp.get(fp) ?? []
+    group.push(i)
+    byFp.set(fp, group)
+  })
+  for (const [fp, gfmIndices] of byFp) {
+    const candidates = pool.filter((candidate) => nodeText(candidate) === fp)
+    if (candidates.length === 0) continue
+    const identical = candidates.every((candidate) => JSON.stringify(candidate) === JSON.stringify(candidates[0]))
+    if (candidates.length > gfmIndices.length && !identical) {
+      // Ambiguous partial survival of look-alike nodes — retire them all.
+      for (const candidate of candidates) pool.splice(pool.indexOf(candidate), 1)
+      continue
+    }
+    gfmIndices.forEach((gfmIndex, k) => {
+      const candidate = candidates[Math.min(k, candidates.length - 1)]
+      if (candidate === undefined || k >= candidates.length) return
+      results[gfmIndex] = candidate
+      pool.splice(pool.indexOf(candidate), 1)
+    })
+  }
+  // Pass 2: edited nodes fall back to identity-preserving grafts against the
+  // remaining pool.
+  return gfmInline.map((node, i) => {
+    const exact = results[i]
+    if (exact !== null && exact !== undefined) return exact
     // An edited link label still points at the same destination — carry the
     // sidecar's link mark (title, …) over to the reparsed node so relabeling
     // a link doesn't strip the attrs the Markdown can't express.

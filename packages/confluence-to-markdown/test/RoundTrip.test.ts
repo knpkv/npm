@@ -2715,6 +2715,57 @@ describe("MarkdownConverter round-trip", () => {
       expect(statusNode["attrs"]).toEqual({ text: "NEW", color: "green", localId: "st-1", style: "bold" })
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: relabeling one of several status lozenges must still graft
+  // the relabeled one's hidden attrs — the unchanged sibling is paired by
+  // exact fingerprint first, leaving a single unambiguous candidate.
+  it.effect("grafts hidden attrs when one of two statuses is relabeled", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableHeader",
+              attrs: {},
+              content: [{ type: "paragraph", content: [{ type: "text", text: "H" }] }]
+            }]
+          },
+          {
+            type: "tableRow",
+            content: [{
+              type: "tableCell",
+              attrs: {},
+              content: [{
+                type: "paragraph",
+                content: [
+                  { type: "status", attrs: { text: "OLD", color: "green", localId: "st-1" } },
+                  { type: "text", text: " " },
+                  { type: "status", attrs: { text: "KEEP", color: "red", localId: "st-2" } }
+                ]
+              }]
+            }]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace(">OLD<", ">NEW<")
+      expect(edited).not.toBe(markdown)
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const inline = contentOf(contentOf(contentOf(rows[1])[0])[0])
+      const first = inline[0]
+      const last = inline[inline.length - 1]
+      if (!isRecord(first) || !isRecord(last)) throw new Error("expected status nodes")
+      expect(first["attrs"]).toEqual({ text: "NEW", color: "green", localId: "st-1" })
+      expect(last["attrs"]).toEqual({ text: "KEEP", color: "red", localId: "st-2" })
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
