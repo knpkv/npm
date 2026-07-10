@@ -614,7 +614,12 @@ const columnFingerprint = (rows: ReadonlyArray<AdfNode>, col: number): string =>
  * fingerprints, so it can only reason about what survives the GFM round trip;
  * every ambiguous case returns null (= fall back to the sidecar). Supported
  * shapes:
- *  - equal length: positions correspond one-to-one (edits allowed anywhere)
+ *  - equal length, same text per position: identity (a no-op or attr-only
+ *    sidecar difference)
+ *  - equal length with in-place edits: positions correspond one-to-one
+ *  - equal length pure reorder: every changed item's text is found at exactly
+ *    one other position, so attrs travel with the moved content; a mix of
+ *    moved and edited items is refused
  *  - one clean contiguous inserted/deleted block anywhere (no edits): the
  *    matched prefix and suffix meet exactly
  *  - edits combined with a tail insert/delete: the overlap pairs by index —
@@ -629,7 +634,43 @@ const alignByFingerprint = (
 ): Array<number | null> | null => {
   const n = sidecar.length
   const m = gfm.length
-  if (n === m) return gfm.map((_, i) => i)
+  if (n === m) {
+    const map: Array<number | null> = gfm.map((fp, i) => (fp === sidecar[i] ? i : null))
+    if (!map.includes(null)) return map
+    // Try to recognise moved content among the changed positions: a moved
+    // item keeps its text, an edited item keeps its position.
+    const leftoverSidecar = new Map<string, Array<number>>()
+    for (let j = 0; j < n; j++) {
+      if (gfm[j] === sidecar[j]) continue
+      const positions = leftoverSidecar.get(sidecar[j]!) ?? []
+      positions.push(j)
+      leftoverSidecar.set(sidecar[j]!, positions)
+    }
+    const leftoverGfm = new Map<string, number>()
+    for (let i = 0; i < m; i++) {
+      if (map[i] === null) leftoverGfm.set(gfm[i]!, (leftoverGfm.get(gfm[i]!) ?? 0) + 1)
+    }
+    let moved = 0
+    let edited = 0
+    for (let i = 0; i < m; i++) {
+      if (map[i] !== null) continue
+      const candidates = leftoverSidecar.get(gfm[i]!)
+      if (candidates === undefined) {
+        edited++
+        continue
+      }
+      // Duplicate text among the moved items: several assignments fit.
+      if (candidates.length !== 1 || leftoverGfm.get(gfm[i]!) !== 1) return null
+      map[i] = candidates[0]!
+      moved++
+    }
+    // Every changed position is an in-place edit — identity.
+    if (moved === 0) return gfm.map((_, i) => i)
+    // Moves mixed with edits: an edited row is indistinguishable from a moved
+    // row that was also edited, so the alignment is ambiguous.
+    if (edited > 0) return null
+    return map
+  }
   const shared = Math.min(n, m)
   let prefix = 0
   while (prefix < shared && gfm[prefix] === sidecar[prefix]) prefix++
@@ -659,6 +700,24 @@ const alignByFingerprint = (
   }
   for (const fp of sidecar.slice(m)) if (gfm.includes(fp)) return null
   return gfm.map((_, i) => i)
+}
+
+// A header column exists in ADF (every row's cell in that column is a
+// tableHeader) but GFM can only mark the first *row* as headers, so a row
+// inserted in Markdown parses its header-column cells as plain tableCell —
+// restore the column's identity from the sidecar.
+const restoreHeaderColumnCells = (
+  gfmRow: AdfNode,
+  sidecarRows: ReadonlyArray<AdfNode>,
+  colMap: ReadonlyArray<number | null>
+): AdfNode => {
+  const cells = (gfmRow.content ?? []).map((cell, c) => {
+    const sc = colMap[c]
+    if (sc === null || sc === undefined || cell.type !== "tableCell") return cell
+    const isHeaderColumn = sidecarRows.every((row) => (row.content ?? [])[sc]?.type === "tableHeader")
+    return isHeaderColumn ? { ...cell, type: "tableHeader" } : cell
+  })
+  return { ...gfmRow, content: cells }
 }
 
 const mergeTableRow = (
@@ -747,8 +806,9 @@ const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
     const sr = rowMap[r]
     const sidecarRow = sr !== null && sr !== undefined ? sidecarRows[sr] : undefined
     if (!sidecarRow) {
-      // A row inserted in the GFM has no sidecar counterpart — use it verbatim.
-      rows.push(gfmRow)
+      // A row inserted in the GFM has no sidecar counterpart — use its cells
+      // verbatim, except that header-column cells regain their identity.
+      rows.push(restoreHeaderColumnCells(gfmRow, sidecarRows, colMap))
       continue
     }
     const merged = mergeTableRow(sidecarRow, gfmRow, colMap)
