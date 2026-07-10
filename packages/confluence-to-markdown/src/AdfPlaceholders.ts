@@ -605,25 +605,75 @@ const cellText = (cell: AdfNode): string => nodeText(cell).trim()
 
 const rowFingerprint = (row: AdfNode): string => (row.content ?? []).map(cellText).join("\u0000")
 
-const mergeTableRow = (sidecarRow: AdfNode, gfmRow: AdfNode): AdfNode | null => {
+const columnFingerprint = (rows: ReadonlyArray<AdfNode>, col: number): string =>
+  rows.map((row) => cellText((row.content ?? [])[col] ?? { type: "tableCell" })).join("\u0000")
+
+/**
+ * Decide, for every GFM item (row or column), which sidecar item supplies its
+ * attrs — `null` marks a freshly inserted item. Works on plain-text
+ * fingerprints, so it can only reason about what survives the GFM round trip;
+ * every ambiguous case returns null (= fall back to the sidecar). Supported
+ * shapes:
+ *  - equal length: positions correspond one-to-one (edits allowed anywhere)
+ *  - one clean contiguous inserted/deleted block anywhere (no edits): the
+ *    matched prefix and suffix meet exactly
+ *  - edits combined with a tail insert/delete: the overlap pairs by index —
+ *    guarded by refusing when a mismatched sidecar item reappears later in
+ *    the GFM (the signature of a mid-sequence shift) or when the surplus
+ *    items duplicate existing text (indistinguishable from a shifted
+ *    duplicate)
+ */
+const alignByFingerprint = (
+  sidecar: ReadonlyArray<string>,
+  gfm: ReadonlyArray<string>
+): Array<number | null> | null => {
+  const n = sidecar.length
+  const m = gfm.length
+  if (n === m) return gfm.map((_, i) => i)
+  const shared = Math.min(n, m)
+  let prefix = 0
+  while (prefix < shared && gfm[prefix] === sidecar[prefix]) prefix++
+  let suffix = 0
+  while (suffix < shared && gfm[m - 1 - suffix] === sidecar[n - 1 - suffix]) suffix++
+  // Prefix and suffix overlap: duplicates surround the change, several
+  // alignments fit, and each assigns attrs differently — refuse to guess.
+  if (prefix + suffix > shared) return null
+  if (prefix + suffix === shared) {
+    // One clean inserted/deleted block between the matched prefix and suffix.
+    return m > n
+      ? gfm.map((_, i) => (i < prefix ? i : i < m - suffix ? null : i - (m - n)))
+      : gfm.map((_, i) => (i < prefix ? i : i + (n - m)))
+  }
+  // Mismatches beyond a single block mean edits: pair the overlap by index
+  // and treat the surplus as a tail insert/delete — unless something looks
+  // shifted instead of edited.
+  if (m > n) {
+    for (let i = 0; i < n; i++) {
+      if (gfm[i] !== sidecar[i] && gfm.indexOf(sidecar[i]!, i + 1) !== -1) return null
+    }
+    for (const fp of gfm.slice(n)) if (sidecar.includes(fp)) return null
+    return gfm.map((_, i) => (i < n ? i : null))
+  }
+  for (let i = 0; i < m; i++) {
+    if (gfm[i] !== sidecar[i] && sidecar.indexOf(gfm[i]!, i + 1) !== -1) return null
+  }
+  for (const fp of sidecar.slice(m)) if (gfm.includes(fp)) return null
+  return gfm.map((_, i) => i)
+}
+
+const mergeTableRow = (
+  sidecarRow: AdfNode,
+  gfmRow: AdfNode,
+  colMap: ReadonlyArray<number | null>
+): AdfNode | null => {
   const sidecarCells = sidecarRow.content ?? []
   const gfmCells = gfmRow.content ?? []
-  // Cell attrs and header-vs-cell identity are aligned by column index, which
-  // is only meaningful when the column structure changed at the tail. A column
-  // inserted or deleted mid-row would shift every subsequent sidecar cell's
-  // attrs onto the wrong content — when the counts differ, require the
-  // overlapping prefix to still match by text and bail otherwise.
-  if (gfmCells.length !== sidecarCells.length) {
-    const shared = Math.min(gfmCells.length, sidecarCells.length)
-    for (let c = 0; c < shared; c++) {
-      if (cellText(gfmCells[c]!) !== cellText(sidecarCells[c]!)) return null
-    }
-  }
   const cells: Array<AdfNode> = []
   for (let c = 0; c < gfmCells.length; c++) {
     const gfmCell = gfmCells[c]!
     if (!isTableCell(gfmCell)) return null
-    const sidecarCell = sidecarCells[c]
+    const sc = colMap[c]
+    const sidecarCell = sc !== null && sc !== undefined ? sidecarCells[sc] : undefined
     // Columns present in the sidecar keep its attrs; a column added in the GFM
     // has no counterpart, so its parsed cell is used verbatim.
     cells.push(sidecarCell && isTableCell(sidecarCell) ? mergeTableCell(sidecarCell, gfmCell) : gfmCell)
@@ -643,58 +693,65 @@ const isEmptyCellBody = (cell: AdfNode): boolean =>
 
 /**
  * Merge the GFM-parsed table (the user's editable content) over the sidecar
- * table node (the authoritative attrs). Cell text and whole added/removed rows
- * come from the GFM table; table/row/cell attrs and header-vs-cell identity
- * come from the sidecar, aligned by index. A headerless sidecar table was
- * emitted with a synthetic empty GFM header row (Markdown tables require one)
- * that has no sidecar counterpart — it is dropped before aligning. Returns
- * null — signalling "fall back to the sidecar node unchanged" — when the
- * shapes can't be reconciled: merged cells in the sidecar, a non-rectangular
- * structure, text typed into the synthetic header row, a missing GFM table,
- * or a row/column count change whose surviving prefix no longer text-matches
- * the sidecar (a mid-table insert/delete would shift attrs onto the wrong
- * content). That keeps a push from silently corrupting a table it can't edit.
+ * table node (the authoritative attrs). Cell text comes from the GFM table;
+ * table/row/cell attrs and header-vs-cell identity come from the sidecar,
+ * aligned via `alignByFingerprint` on both axes — cell edits merge freely
+ * when the shape is unchanged, and row/column inserts or deletions merge when
+ * the alignment is unambiguous. A headerless sidecar table was emitted with a
+ * synthetic empty GFM header row (Markdown tables require one) that has no
+ * sidecar counterpart — it is dropped before aligning. Returns null —
+ * signalling "fall back to the sidecar node unchanged" — when the shapes
+ * can't be reconciled: merged cells or a ragged (non-rectangular) grid in
+ * the sidecar (the walker pads those rows, so a positional merge would mutate
+ * them on a no-op push), text typed into the synthetic header row, rows and
+ * columns changed in the same push, an ambiguous alignment, or a missing GFM
+ * table. That keeps a push from silently corrupting a table it can't edit.
  */
 const mergeTableWithGfm = (sidecar: AdfNode, gfm: AdfNode): AdfNode | null => {
   if (sidecar.type !== "table" || gfm.type !== "table") return null
   const sidecarRows = sidecar.content ?? []
   let gfmRows = gfm.content ?? []
-  if (gfmRows.length === 0) return null
+  if (gfmRows.length === 0 || sidecarRows.length === 0) return null
   if (!sidecarRows.every(isTableRow) || !gfmRows.every(isTableRow)) return null
   for (const row of sidecarRows) {
     for (const cell of row.content ?? []) {
       if (hasMergedCell(cell)) return null
     }
   }
-  const sidecarFirst = sidecarRows[0]
-  if (sidecarFirst && !isAllHeaderRow(sidecarFirst)) {
+  const width = (row: AdfNode): number => (row.content ?? []).length
+  const sidecarWidth = width(sidecarRows[0]!)
+  const gfmWidth = width(gfmRows[0]!)
+  if (!sidecarRows.every((row) => width(row) === sidecarWidth)) return null
+  if (!gfmRows.every((row) => width(row) === gfmWidth)) return null
+  const sidecarFirst = sidecarRows[0]!
+  if (!isAllHeaderRow(sidecarFirst)) {
     const gfmFirst = gfmRows[0]!
     if (!isAllHeaderRow(gfmFirst) || !(gfmFirst.content ?? []).every(isEmptyCellBody)) return null
     gfmRows = gfmRows.slice(1)
     if (gfmRows.length === 0) return null
   }
-  // Row attrs are aligned by index, which is only meaningful when the row
-  // structure changed at the tail. A row inserted or deleted mid-table would
-  // shift every subsequent sidecar row's attrs onto the wrong content — when
-  // the counts differ, require the overlapping prefix to still match by text
-  // and bail otherwise.
-  if (gfmRows.length !== sidecarRows.length) {
-    const shared = Math.min(gfmRows.length, sidecarRows.length)
-    for (let r = 0; r < shared; r++) {
-      if (rowFingerprint(gfmRows[r]!) !== rowFingerprint(sidecarRows[r]!)) return null
-    }
-  }
+  // Changing rows and columns in the same push leaves no reliable axis to
+  // fingerprint against — one change at a time.
+  if (gfmRows.length !== sidecarRows.length && gfmWidth !== sidecarWidth) return null
+  const rowMap = alignByFingerprint(sidecarRows.map(rowFingerprint), gfmRows.map(rowFingerprint))
+  if (rowMap === null) return null
+  const colMap = alignByFingerprint(
+    Array.from({ length: sidecarWidth }, (_, col) => columnFingerprint(sidecarRows, col)),
+    Array.from({ length: gfmWidth }, (_, col) => columnFingerprint(gfmRows, col))
+  )
+  if (colMap === null) return null
 
   const rows: Array<AdfNode> = []
   for (let r = 0; r < gfmRows.length; r++) {
     const gfmRow = gfmRows[r]!
-    const sidecarRow = sidecarRows[r]
+    const sr = rowMap[r]
+    const sidecarRow = sr !== null && sr !== undefined ? sidecarRows[sr] : undefined
     if (!sidecarRow) {
-      // A row appended in the GFM beyond the sidecar's rows — use it verbatim.
+      // A row inserted in the GFM has no sidecar counterpart — use it verbatim.
       rows.push(gfmRow)
       continue
     }
-    const merged = mergeTableRow(sidecarRow, gfmRow)
+    const merged = mergeTableRow(sidecarRow, gfmRow, colMap)
     if (merged === null) return null
     rows.push(merged)
   }
