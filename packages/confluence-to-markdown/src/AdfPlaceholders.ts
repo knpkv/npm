@@ -753,13 +753,19 @@ const graftInlineNodes = (
     // a link doesn't strip the attrs the Markdown can't express.
     const gfmHref = (node.marks ?? []).find((mark) => mark.type === "link")?.attrs?.["href"]
     if (node.type === "text" && typeof gfmHref === "string") {
-      const candIdx = pool.findIndex((candidate) =>
+      const candidates = pool.filter((candidate) =>
         candidate.type === "text" &&
         (candidate.marks ?? []).some((mark) => mark.type === "link" && mark.attrs?.["href"] === gfmHref)
       )
-      if (candIdx !== -1) {
-        const candidate = pool.splice(candIdx, 1)[0]!
-        const sidecarLink = (candidate.marks ?? []).find((mark) => mark.type === "link")!
+      const links = candidates.map((candidate) => (candidate.marks ?? []).find((mark) => mark.type === "link")!)
+      // Several same-href candidates with differing hidden attrs make the
+      // pairing ambiguous — leave the parsed mark alone rather than guess.
+      const unambiguous = links.length === 1 ||
+        (links.length > 1 && links.every((link) => JSON.stringify(link) === JSON.stringify(links[0])))
+      if (candidates.length > 0 && unambiguous) {
+        const candidate = candidates[0]!
+        pool.splice(pool.indexOf(candidate), 1)
+        const sidecarLink = links[0]!
         return { ...node, marks: (node.marks ?? []).map((mark) => (mark.type === "link" ? sidecarLink : mark)) }
       }
     }
