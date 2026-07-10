@@ -596,6 +596,10 @@ const cellBodyFlattenedOnPull = (cell: AdfNode): boolean => {
 // instead (edits to them are documented-lossy, like merged-cell tables).
 const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
   if (cellBodyFlattenedOnPull(sidecarCell)) return sidecarCell
+  // Identical projected fingerprints mean nothing Markdown-visible changed —
+  // keep the sidecar body wholesale so attrs the Markdown can't express
+  // (status localId/style, link titles, …) survive a no-op push.
+  if (cellText(sidecarCell) === cellText(gfmCell)) return sidecarCell
   const gfmContent = gfmCell.content ?? []
   const sidecarPara = (sidecarCell.content ?? [])[0]
   const gfmPara = gfmContent.length === 1 && gfmContent[0]!.type === "paragraph" ? gfmContent[0]! : null
@@ -621,13 +625,39 @@ const mergeTableCell = (sidecarCell: AdfNode, gfmCell: AdfNode): AdfNode => {
 // children (status, date, emoji, …) serialize their attrs so distinct leaves
 // don't all collapse to the empty string — either collapse would make moved
 // content look unchanged and glue attrs to the wrong position.
+// Attrs are projected down to what the walker's Markdown emission actually
+// encodes — a status keeps only text/color, a mention only id/text, a link
+// mark only href. That way a sidecar node carrying extra attrs the Markdown
+// can't express (localId, style, title, …) still fingerprint-matches its GFM
+// round-trip, letting the merge recognise "unchanged" and keep the richer
+// sidecar body instead of adopting the stripped GFM copy.
+const PROJECTED_NODE_ATTRS: Record<string, ReadonlyArray<string>> = {
+  status: ["color", "text"],
+  mention: ["id", "text"]
+}
+const PROJECTED_MARK_ATTRS: Record<string, ReadonlyArray<string>> = {
+  link: ["href"]
+}
+
+const projectAttrs = (
+  attrs: Record<string, unknown>,
+  keys: ReadonlyArray<string> | undefined
+): Record<string, unknown> => {
+  if (keys === undefined) return attrs
+  const out: Record<string, unknown> = {}
+  for (const key of keys) if (key in attrs) out[key] = attrs[key]
+  return out
+}
+
 const attrsFingerprint = (attrs: Record<string, unknown>): string =>
   Object.keys(attrs).sort().map((key) => `${key}=${JSON.stringify(attrs[key])}`).join(" ")
 
-const markFingerprint = (mark: AdfNode): string =>
-  mark.attrs === undefined || Object.keys(mark.attrs).length === 0
+const markFingerprint = (mark: AdfNode): string => {
+  const attrs = mark.attrs === undefined ? undefined : projectAttrs(mark.attrs, PROJECTED_MARK_ATTRS[mark.type])
+  return attrs === undefined || Object.keys(attrs).length === 0
     ? mark.type
-    : `${mark.type}(${attrsFingerprint(mark.attrs)})`
+    : `${mark.type}(${attrsFingerprint(attrs)})`
+}
 
 const nodeText = (node: AdfNode): string => {
   const children = node.content ?? []
@@ -637,7 +667,7 @@ const nodeText = (node: AdfNode): string => {
   if (node.text !== undefined || children.length > 0) {
     return wrap((node.text ?? "") + children.map(nodeText).join(""))
   }
-  const attrs = node.attrs
+  const attrs = node.attrs === undefined ? undefined : projectAttrs(node.attrs, PROJECTED_NODE_ATTRS[node.type])
   if (attrs === undefined || Object.keys(attrs).length === 0) return wrap(`<${node.type}>`)
   return wrap(`<${node.type} ${attrsFingerprint(attrs)}>`)
 }

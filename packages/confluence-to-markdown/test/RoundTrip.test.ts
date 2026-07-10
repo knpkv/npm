@@ -1874,6 +1874,89 @@ describe("MarkdownConverter round-trip", () => {
       expect(contentOf(rows[1])[0]).toEqual(mediaCell)
     }).pipe(Effect.provide(TestLayer)))
 
+  // Codex review: attrs the Markdown can't express (status localId/style,
+  // link titles) must survive when the cell itself is untouched — even while
+  // another cell in the same table is being edited.
+  it.effect("keeps invisible inline attrs on untouched cells while editing another cell", () =>
+    Effect.gen(function*() {
+      const converter = yield* MarkdownConverter
+      const statusCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "status",
+            attrs: { text: "DONE", color: "green", localId: "status-1", style: "bold" }
+          }]
+        }]
+      }
+      const linkCell = {
+        type: "tableCell",
+        attrs: {},
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "text",
+            text: "docs",
+            marks: [{ type: "link", attrs: { href: "https://example.com/", title: "Example" } }]
+          }]
+        }]
+      }
+      const table = {
+        type: "table",
+        attrs: { layout: "default" },
+        content: [
+          {
+            type: "tableRow",
+            content: [
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "A" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }]
+              },
+              {
+                type: "tableHeader",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "C" }] }]
+              }
+            ]
+          },
+          {
+            type: "tableRow",
+            content: [
+              statusCell,
+              linkCell,
+              {
+                type: "tableCell",
+                attrs: {},
+                content: [{ type: "paragraph", content: [{ type: "text", text: "editme" }] }]
+              }
+            ]
+          }
+        ]
+      }
+      const md = yield* converter.adfToMarkdown(JSON.stringify({ version: 1, type: "doc", content: [table] }))
+      const { markdown, sidecar } = externalizeAdfMetadata(md, "./page.adf.json")
+      const edited = markdown.replace("editme", "edited")
+      const hydrated = hydrateAdfMetadata(edited, new Map([["./page.adf.json", sidecar!]]))
+
+      const content = parsedContent(yield* converter.markdownToAdf(hydrated))
+      const rows = contentOf(content[0])
+      const cells = contentOf(rows[1])
+      // Untouched cells keep their full sidecar bodies (localId, style, title).
+      expect(cells[0]).toEqual(statusCell)
+      expect(cells[1]).toEqual(linkCell)
+      // The edit still lands.
+      expect(JSON.stringify(cells[2])).toContain("edited")
+      expect(JSON.stringify(content)).not.toContain("editme")
+    }).pipe(Effect.provide(TestLayer)))
+
   // Safety: the walker pads a ragged (non-rectangular) table with empty cells
   // so it can be shown as GFM. Merging that padded grid back would add cells
   // the sidecar never had, mutating the table on a no-op push — the merge
