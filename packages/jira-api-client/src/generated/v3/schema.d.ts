@@ -11754,58 +11754,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/rest/api/3/workflow/transitions/{transitionId}/properties": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get workflow transition properties
-         * @deprecated
-         * @description This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); fetch transition properties from [Bulk get workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-post) instead.
-         *
-         *     Returns the properties on a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        get: operations["getWorkflowTransitionProperties"];
-        /**
-         * Update workflow transition property
-         * @deprecated
-         * @description This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); update transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.
-         *
-         *     Updates a workflow transition by changing the property value. Trying to update a property that does not exist results in a new property being added to the transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        put: operations["updateWorkflowTransitionProperty"];
-        /**
-         * Create workflow transition property
-         * @deprecated
-         * @description This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); add transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.
-         *
-         *     Adds a property to a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        post: operations["createWorkflowTransitionProperty"];
-        /**
-         * Delete workflow transition property
-         * @deprecated
-         * @description This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); delete transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.
-         *
-         *     Deletes a property from a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).
-         *
-         *     **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
-         */
-        delete: operations["deleteWorkflowTransitionProperty"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/rest/api/3/workflow/{entityId}": {
         parameters: {
             query?: never;
@@ -16506,6 +16454,10 @@ export interface components {
             searcherKey?: string;
             /** @description The stable ID of the field. */
             stableId?: string;
+            /** @description The translated (i18n) description of the field for the current locale. Returned for custom fields. */
+            translatedDescription?: string;
+            /** @description The translated (i18n) name of the field for the current locale. Returned for custom fields. */
+            translatedName?: string;
             /** @description The display name of the field type */
             typeDisplayName?: string;
         };
@@ -23074,7 +23026,7 @@ export interface components {
              * @description The type of the project role. This is "DEFAULT" or "GUEST\_ROLE".
              * @enum {string}
              */
-            readonly type?: "DEFAULT" | "GUEST_ROLE";
+            readonly type?: "DEFAULT" | "GUEST_ROLE" | "AI_AGENT_ROLE";
         };
         /** @description Details of the group associated with the role. */
         ProjectRoleGroup: {
@@ -23453,7 +23405,7 @@ export interface components {
              * @example EDITABLE
              * @enum {string}
              */
-            type?: "HIDDEN" | "VIEWABLE" | "EDITABLE" | "GUEST";
+            type?: "HIDDEN" | "VIEWABLE" | "AI_AGENT" | "EDITABLE" | "GUEST";
         };
         RolesCapabilityPayload: {
             /** @description A map of role PCRI (can be ID or REF) to a list of user or group PCRI IDs to associate with the role and project. */
@@ -26827,17 +26779,6 @@ export interface components {
              */
             toPort?: number | null;
         } | null;
-        /** @description Details about the server Jira is running on. */
-        WorkflowTransitionProperty: {
-            /** @description The ID of the transition property. */
-            readonly id?: string;
-            /** @description The key of the transition property. Also known as the name of the transition property. */
-            readonly key?: string;
-            /** @description The value of the transition property. */
-            value: string;
-        } & {
-            [key: string]: unknown;
-        };
         /** @description A workflow transition rule. */
         WorkflowTransitionRule: {
             /** @description EXPERIMENTAL. The configuration of the transition rule. */
@@ -59599,273 +59540,6 @@ export interface operations {
                     /** @example {"errorMessages":["Only Jira administrators can access workflows."],"errors":{}} */
                     "application/json": components["schemas"]["ErrorCollection"];
                 };
-            };
-        };
-    };
-    getWorkflowTransitionProperties: {
-        parameters: {
-            query: {
-                /** @description Some properties with keys that have the *jira.* prefix are reserved, which means they are not editable. To include these properties in the results, set this parameter to *true*. */
-                includeReservedKeys?: boolean;
-                /** @description The key of the property being returned, also known as the name of the property. If this parameter is not specified, all properties on the transition are returned. */
-                key?: string;
-                /** @description The name of the workflow that the transition belongs to. */
-                workflowName: string;
-                /** @description The workflow status. Set to *live* for active and inactive workflows, or *draft* for draft workflows. */
-                workflowMode?: "live" | "draft";
-            };
-            header?: never;
-            path: {
-                /** @description The ID of the transition. To get the ID, view the workflow in text mode in the Jira administration console. The ID is shown next to the transition. */
-                transitionId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 200 response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example [{"id":"jira.i18n.title","key":"jira.i18n.title","value":"some.title"},{"id":"jira.permission","key":"jira.permission","value":"createissue"}] */
-                    "application/json": components["schemas"]["WorkflowTransitionProperty"];
-                };
-            };
-            /** @description Returned if the request is invalid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the authentication credentials are incorrect or missing. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the user does not have admin permission */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the workflow transition or property is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    updateWorkflowTransitionProperty: {
-        parameters: {
-            query: {
-                /** @description The key of the property being updated, also known as the name of the property. Set this to the same value as the `key` defined in the request body. */
-                key: string;
-                /** @description The name of the workflow that the transition belongs to. */
-                workflowName: string;
-                /** @description The workflow status. Set to `live` for inactive workflows or `draft` for draft workflows. Active workflows cannot be edited. */
-                workflowMode?: "live" | "draft";
-            };
-            header?: never;
-            path: {
-                /** @description The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition. */
-                transitionId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "value": "createissue"
-                 *     }
-                 */
-                "application/json": components["schemas"]["WorkflowTransitionProperty"];
-            };
-        };
-        responses: {
-            /** @description 200 response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"key":"jira.i18n.title","value":"some.title","id":"jira.i18n.title"} */
-                    "application/json": components["schemas"]["WorkflowTransitionProperty"];
-                };
-            };
-            /** @description Returned if no changes were made by the request. For example, attempting to update a property with its current value. */
-            304: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the request is invalid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the authentication credentials are incorrect or missing. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the user does not have the necessary permission. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the workflow transition is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    createWorkflowTransitionProperty: {
-        parameters: {
-            query: {
-                /** @description The key of the property being added, also known as the name of the property. Set this to the same value as the `key` defined in the request body. */
-                key: string;
-                /** @description The name of the workflow that the transition belongs to. */
-                workflowName: string;
-                /** @description The workflow status. Set to *live* for inactive workflows or *draft* for draft workflows. Active workflows cannot be edited. */
-                workflowMode?: "live" | "draft";
-            };
-            header?: never;
-            path: {
-                /** @description The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition. */
-                transitionId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                /**
-                 * @example {
-                 *       "value": "createissue"
-                 *     }
-                 */
-                "application/json": components["schemas"]["WorkflowTransitionProperty"];
-            };
-        };
-        responses: {
-            /** @description 200 response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /** @example {"key":"jira.i18n.title","value":"some.title","id":"jira.i18n.title"} */
-                    "application/json": components["schemas"]["WorkflowTransitionProperty"];
-                };
-            };
-            /** @description Returned if a workflow property with the same key is present on the transition. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the authentication credentials are incorrect or missing. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the user does not have the necessary permission. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the workflow transition is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    deleteWorkflowTransitionProperty: {
-        parameters: {
-            query: {
-                /** @description The name of the transition property to delete, also known as the name of the property. */
-                key: string;
-                /** @description The name of the workflow that the transition belongs to. */
-                workflowName: string;
-                /** @description The workflow status. Set to `live` for inactive workflows or `draft` for draft workflows. Active workflows cannot be edited. */
-                workflowMode?: "live" | "draft";
-            };
-            header?: never;
-            path: {
-                /** @description The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition. */
-                transitionId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 200 response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if no changes were made by the request. For example, trying to delete a property that cannot be found. */
-            304: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the request is invalid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the authentication credentials are incorrect or missing. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the user does not have the necessary permission. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Returned if the workflow transition is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
