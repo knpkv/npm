@@ -13,6 +13,7 @@ export {
 } from "./ClockifyApiClient.js"
 
 export type {
+  AuthenticatedClockifyApi,
   CreateTimeEntryParams,
   GetTimeEntriesParams,
   Project,

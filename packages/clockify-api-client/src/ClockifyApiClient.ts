@@ -16,6 +16,7 @@ import type { SchemaError } from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { ClockifyApiConfig } from "./ClockifyApiConfig.js"
 import * as Generated from "./generated/ClockifyApi.js"
 
@@ -30,6 +31,10 @@ export type TimeInterval = NonNullable<TimeEntry["timeInterval"]>
 export type CreateTimeEntryParams = Generated.CreateTimeEntryRequestJson
 export type StopTimeEntryParams = Generated.StopRunningTimeEntryRequestJson
 export type UpdateTimeEntryParams = Generated.UpdateTimeEntryRequestJson
+
+export type AuthenticatedClockifyApi = Omit<Generated.ClockifyApi, "uploadImage"> & {
+  readonly uploadImage: (input: { readonly file: Blob }) => Effect.Effect<Generated.UploadImage200, ClockifyClientError>
+}
 
 export interface GetTimeEntriesParams {
   readonly start?: string | undefined
@@ -85,14 +90,27 @@ export interface ClockifyApiClientShape {
 export const make = (
   httpClient: HttpClient.HttpClient,
   options: { readonly apiKey: Redacted.Redacted<string>; readonly baseUrl: string }
-): Generated.ClockifyApi =>
-  Generated.make(httpClient.pipe(
+): AuthenticatedClockifyApi => {
+  const api = Generated.make(httpClient.pipe(
     HttpClient.mapRequest(flow(
       HttpClientRequest.prependUrl(options.baseUrl),
-      HttpClientRequest.setHeader("X-Api-Key", Redacted.value(options.apiKey)),
-      HttpClientRequest.setHeader("Content-Type", "application/json")
+      HttpClientRequest.setHeader("X-Api-Key", Redacted.value(options.apiKey))
     ))
   ))
+  return {
+    ...api,
+    uploadImage: (input) => {
+      const form = new FormData()
+      form.append("file", input.file)
+      return api.httpClient.execute(
+        HttpClientRequest.post("/v1/file/image").pipe(HttpClientRequest.bodyFormData(form))
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(Generated.UploadImage200))
+      )
+    }
+  }
+}
 
 export class ClockifyApiClient extends Context.Service<ClockifyApiClient, ClockifyApiClientShape>()(
   "@knpkv/clockify-api-client/ClockifyApiClient"

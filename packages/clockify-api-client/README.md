@@ -33,12 +33,14 @@ Effect.runPromise(program.pipe(Effect.provide(ClockifyLive)))
 
 `ClockifyApiClient` exposes the timer application's domain conveniences. The
 complete generated client is exported as `ClockifyApi`, and `make` constructs
-it directly from any Effect `HttpClient`:
+an authenticated `AuthenticatedClockifyApi` wrapper from any Effect
+`HttpClient`. Its `uploadImage` method accepts a `Blob` and builds valid native
+`FormData`:
 
 ```typescript
-import { ClockifyApi, make } from "@knpkv/clockify-api-client"
+import { type AuthenticatedClockifyApi, make } from "@knpkv/clockify-api-client"
 
-const raw: ClockifyApi.ClockifyApi = make(httpClient, {
+const raw: AuthenticatedClockifyApi = make(httpClient, {
   apiKey: Redacted.make("key"),
   baseUrl: "https://api.clockify.me/api"
 })
@@ -70,11 +72,20 @@ pnpm --filter @knpkv/clockify-api-client test
 2. Parse and canonicalize it as JSON.
 3. Save the unmodified upstream document to `.specs/clockify-v1.json`.
 4. Apply `.specs/clockify-v1.patch.json` in memory as RFC 6902 JSON Patch.
+   The patch corrects known upstream schema mismatches, including Clockify's
+   string-valued account status and nullable `end`/`duration` fields on running
+   time entries. The V1 `end` patch replaces the property and omits its
+   `date-time` format because the current generator drops `null` from a
+   formatted nullable string; the runtime value remains an ISO date-time string
+   when present.
 5. Remove unreliable `examples` and `default` schema annotations. Clockify's
    document currently contains metadata whose values contradict its schemas.
 6. Generate `src/generated/ClockifyApi.ts` with
    `@effect/openapi-generator`'s `httpclient` format.
-7. Record the upstream version in `.specs/VERSION`.
+7. Normalize generated multipart request construction to Effect's record-aware
+   `bodyFormDataRecord` helper. The exported `uploadImage` method accepts a
+   `Blob`, so the runtime builds a real `FormData` body and boundary.
+8. Record the upstream version in `.specs/VERSION`.
 
 Never edit `src/generated/ClockifyApi.ts` or the committed upstream spec by
 hand. API corrections belong in `clockify-v1.patch.json`; generator behavior

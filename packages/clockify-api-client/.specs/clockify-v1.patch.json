@@ -1,5 +1,14 @@
 [
   {
+    "op": "replace",
+    "path": "/components/schemas/AccountStatus",
+    "value": {
+      "type": "string",
+      "description": "Represents account status enum.",
+      "enum": ["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"]
+    }
+  },
+  {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/activeWorkspace",
     "value": { "type": "string" }
@@ -75,6 +84,20 @@
     "op": "add",
     "path": "/components/schemas/TimeIntervalDto/properties/duration",
     "value": { "type": "string", "nullable": true }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeIntervalDtoV1/properties/end",
+    "value": {
+      "type": "string",
+      "description": "Represents an end date in yyyy-MM-ddThh:mm:ssZ format.",
+      "nullable": true
+    }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeIntervalDtoV1/properties/duration/nullable",
+    "value": true
   },
   {
     "op": "add",

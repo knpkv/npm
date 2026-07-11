@@ -5,7 +5,7 @@ import * as Redacted from "effect/Redacted"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { ClockifyApiClient, ClockifyApiConfig } from "../src/index.js"
+import { ClockifyApiClient, ClockifyApiConfig, make } from "../src/index.js"
 
 const clientLayer = (
   response: { readonly status: number; readonly body: unknown },
@@ -42,15 +42,75 @@ describe("ClockifyApiClient", () => {
       const client = yield* ClockifyApiClient
       const user = yield* client.getUser()
       expect(user.id).toBe("user-1")
+      expect(user.status).toBe("ACTIVE")
       expect(requests).toHaveLength(1)
       expect(requests[0]?.url).toBe("https://clockify.test/api/v1/user")
       expect(requests[0]?.headers["x-api-key"]).toBe("secret")
     }).pipe(
       Effect.provide(clientLayer({
         status: 200,
-        body: { id: "user-1", name: "Ada", email: "ada@example.com" }
+        body: { id: "user-1", name: "Ada", email: "ada@example.com", status: "ACTIVE" }
       }, requests))
     )
+  })
+
+  it.effect("decodes nullable interval fields for a running time entry", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      const entry = yield* client.getRunningTimer("workspace-1", "user-1")
+      expect(entry?.timeInterval?.end).toBeNull()
+      expect(entry?.timeInterval?.duration).toBeNull()
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 200,
+        body: [{
+          id: "entry-1",
+          description: "In progress",
+          billable: false,
+          userId: "user-1",
+          workspaceId: "workspace-1",
+          timeInterval: {
+            start: "2026-07-11T08:00:00Z",
+            end: null,
+            duration: null
+          }
+        }]
+      }, requests))
+    )
+  })
+
+  it.effect("leaves multipart content type unset so the transport can add its boundary", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const httpClient = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request)
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(JSON.stringify({ name: "avatar.png", url: "https://clockify.test/avatar.png" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        )
+      })
+    )
+    const client = make(httpClient, {
+      apiKey: Redacted.make("secret"),
+      baseUrl: "https://clockify.test/api"
+    })
+
+    return Effect.gen(function*() {
+      yield* client.uploadImage({ file: new Blob(["avatar bytes"], { type: "image/png" }) })
+      expect(requests[0]?.headers["content-type"]).toBeUndefined()
+      expect(requests[0]?.body._tag).toBe("FormData")
+      if (requests[0]?.body._tag !== "FormData") throw new Error("Expected a FormData request body")
+      const file = requests[0].body.formData.get("file")
+      expect(requests[0].body.formData).toBeInstanceOf(FormData)
+      expect(typeof file).not.toBe("string")
+      if (file === null || typeof file === "string") throw new Error("Expected a file field")
+      expect(yield* Effect.promise(() => file.text())).toBe("avatar bytes")
+      expect(requests[0]?.headers["x-api-key"]).toBe("secret")
+    })
   })
 
   it.effect("fails when a successful response violates the generated schema", () =>

@@ -122,6 +122,15 @@ const removeUnusedErrorDecoder = (source: string): string => {
   return cleaned
 }
 
+/**
+ * The generator currently passes record-shaped multipart payloads to
+ * `bodyFormData`, which expects an already-built Web FormData value. Use the
+ * record-aware Effect helper so strings and Blob/File values are serialized
+ * with a real multipart boundary by the runtime.
+ */
+const normalizeMultipartBodies = (source: string): string =>
+  source.replaceAll("HttpClientRequest.bodyFormData(", "HttpClientRequest.bodyFormDataRecord(")
+
 const generate = Effect.fn("Clockify.regenerate.generate")(function*(
   scriptPaths: ScriptPaths,
   upstream: Schema.Json
@@ -154,7 +163,7 @@ const generate = Effect.fn("Clockify.regenerate.generate")(function*(
   )
   yield* fs.writeFileString(
     scriptPaths.outputFile,
-    stripTrailingWhitespace(removeUnusedErrorDecoder(generated))
+    stripTrailingWhitespace(normalizeMultipartBodies(removeUnusedErrorDecoder(generated)))
   ).pipe(
     Effect.mapError((cause) => new RegenerateError({ message: "Could not write generated Clockify client", cause }))
   )

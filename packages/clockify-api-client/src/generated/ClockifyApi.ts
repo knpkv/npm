@@ -7,8 +7,8 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 // non-recursive definitions
-export type AccountStatus = never
-export const AccountStatus = Schema.Never
+export type AccountStatus = "ACTIVE" | "PENDING_EMAIL_VERIFICATION" | "DELETED" | "NOT_REGISTERED" | "LIMITED" | "LIMITED_DELETED"
+export const AccountStatus = Schema.Literals(["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"]).annotate({ "description": "Represents account status enum." })
 export type AddUserToWorkspaceRequest = { readonly "email": string }
 export const AddUserToWorkspaceRequest = Schema.Struct({ "email": Schema.String.annotate({ "description": "Represents an email address of the user." }).check(Schema.isMinLength(1)) })
 export type ApplyTaxes = never
@@ -241,8 +241,8 @@ export type TimeEstimateRequest = { readonly "active"?: boolean, readonly "estim
 export const TimeEstimateRequest = Schema.Struct({ "active": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Flag whether to include only active or inactive estimates." })), "estimate": Schema.optionalKey(Schema.String.annotate({ "description": "Represents a time duration in ISO-8601 format." })), "includeNonBillable": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Flag whether to include non-billable expenses." })), "resetOption": Schema.optionalKey(Schema.Literals(["WEEKLY", "MONTHLY", "YEARLY"]).annotate({ "description": "Represents a reset option enum." })), "type": Schema.optionalKey(Schema.Literals(["AUTO", "MANUAL"]).annotate({ "description": "Represents an estimate type enum." })) }).annotate({ "description": "Represents project time estimate request object." })
 export type TimeIntervalDto = { readonly "duration"?: string | null, readonly "end"?: string, readonly "offsetEnd"?: number, readonly "offsetStart"?: number, readonly "start": string, readonly "timeZone"?: string, readonly "zonedEnd"?: string, readonly "zonedStart"?: string }
 export const TimeIntervalDto = Schema.Struct({ "duration": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "end": Schema.optionalKey(Schema.Union([Schema.String.annotate({ "format": "date-time" })])), "offsetEnd": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt())), "offsetStart": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt())), "start": Schema.String.annotate({ "format": "date-time" }), "timeZone": Schema.optionalKey(Schema.String), "zonedEnd": Schema.optionalKey(Schema.String.annotate({ "format": "date-time" })), "zonedStart": Schema.optionalKey(Schema.String.annotate({ "format": "date-time" })) }).annotate({ "description": "Represents a time interval object." })
-export type TimeIntervalDtoV1 = { readonly "duration"?: string, readonly "end"?: string, readonly "start"?: string }
-export const TimeIntervalDtoV1 = Schema.Struct({ "duration": Schema.optionalKey(Schema.String.annotate({ "description": "Represents a time duration." })), "end": Schema.optionalKey(Schema.String.annotate({ "description": "Represents an end date in yyyy-MM-ddThh:mm:ssZ format.", "format": "date-time" })), "start": Schema.optionalKey(Schema.String.annotate({ "description": "Represents a start date in yyyy-MM-ddThh:mm:ssZ format.", "format": "date-time" })) }).annotate({ "description": "Represents a time interval object." })
+export type TimeIntervalDtoV1 = { readonly "duration"?: string | null, readonly "end"?: string | null, readonly "start"?: string }
+export const TimeIntervalDtoV1 = Schema.Struct({ "duration": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "Represents a time duration." })), "end": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "Represents an end date in yyyy-MM-ddThh:mm:ssZ format." })), "start": Schema.optionalKey(Schema.String.annotate({ "description": "Represents a start date in yyyy-MM-ddThh:mm:ssZ format.", "format": "date-time" })) }).annotate({ "description": "Represents a time interval object." })
 export type TimeOffRequestStatus = { readonly "changedAt"?: string, readonly "changedByUserId"?: string, readonly "changedByUserName"?: string, readonly "changedForUserName"?: string, readonly "note"?: string, readonly "statusType"?: "PENDING" | "APPROVED" | "REJECTED" | "ALL" }
 export const TimeOffRequestStatus = Schema.Struct({ "changedAt": Schema.optionalKey(Schema.String.annotate({ "format": "date-time" })), "changedByUserId": Schema.optionalKey(Schema.String), "changedByUserName": Schema.optionalKey(Schema.String), "changedForUserName": Schema.optionalKey(Schema.String), "note": Schema.optionalKey(Schema.String), "statusType": Schema.optionalKey(Schema.Literals(["PENDING", "APPROVED", "REJECTED", "ALL"])) }).annotate({ "description": "Represents the status the time off request." })
 export type TimeRangeRequestDtoV1 = { readonly "issue-date-end"?: string, readonly "issue-date-start"?: string }
@@ -1173,7 +1173,7 @@ export const make = (
   return {
     httpClient,
     "uploadImage": (options) => HttpClientRequest.post(`/v1/file/image`).pipe(
-    HttpClientRequest.bodyFormData(options.payload as any),
+    HttpClientRequest.bodyFormDataRecord(options.payload as any),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UploadImage200),
       orElse: unexpectedStatus
@@ -1348,7 +1348,7 @@ export const make = (
     }))
   ),
     "createExpense": (workspaceId, options) => HttpClientRequest.post(`/v1/workspaces/${workspaceId}/expenses`).pipe(
-    HttpClientRequest.bodyFormData(options.payload as any),
+    HttpClientRequest.bodyFormDataRecord(options.payload as any),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateExpense201),
       orElse: unexpectedStatus
@@ -1395,7 +1395,7 @@ export const make = (
     }))
   ),
     "updateExpense": (workspaceId, expenseId, options) => HttpClientRequest.put(`/v1/workspaces/${workspaceId}/expenses/${expenseId}`).pipe(
-    HttpClientRequest.bodyFormData(options.payload as any),
+    HttpClientRequest.bodyFormDataRecord(options.payload as any),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateExpense200),
       orElse: unexpectedStatus
