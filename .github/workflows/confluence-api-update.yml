@@ -1,22 +1,23 @@
 name: Confluence API Spec Check
 
 on:
-  # Daily at 6 AM UTC
   schedule:
     - cron: "0 6 * * *"
-
-  # Manual trigger
   workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: confluence-api-spec-update
+  cancel-in-progress: true
+
 jobs:
   check-spec:
     name: Check Confluence API Spec Updates
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -27,27 +28,32 @@ jobs:
         with:
           node-version: "24.10.0"
 
-      - name: Check for spec updates
-        id: check
-        run: |
-          if pnpm --filter @knpkv/confluence-api-client regenerate:check; then
-            echo "updated=false" >> $GITHUB_OUTPUT
-          else
-            echo "updated=true" >> $GITHUB_OUTPUT
-          fi
-        continue-on-error: true
-
-      - name: Regenerate specs
-        if: steps.check.outputs.updated == 'true'
+      - name: Regenerate clients
         run: pnpm --filter @knpkv/confluence-api-client regenerate
 
-      - name: Build package
-        if: steps.check.outputs.updated == 'true'
-        run: pnpm --filter @knpkv/confluence-api-client build
+      - name: Detect generated changes
+        id: check
+        shell: bash
+        run: |
+          if git diff --quiet -- packages/confluence-api-client/.specs packages/confluence-api-client/src/generated; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Run tests
+      - name: Build generated client and consumer
         if: steps.check.outputs.updated == 'true'
-        run: pnpm --filter @knpkv/confluence-api-client test
+        run: |
+          pnpm --filter @knpkv/confluence-api-client build
+          pnpm --filter @knpkv/confluence-to-markdown build
+
+      - name: Run generated-client and consumer tests
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          pnpm --filter @knpkv/confluence-api-client check
+          pnpm --filter @knpkv/confluence-api-client test
+          pnpm --filter @knpkv/confluence-to-markdown check
+          pnpm --filter @knpkv/confluence-to-markdown test
 
       - name: Create changeset
         if: steps.check.outputs.updated == 'true'
@@ -56,27 +62,33 @@ jobs:
           cat > .changeset/confluence-api-spec-update.md <<'CHANGESET'
           ---
           "@knpkv/confluence-api-client": patch
+          "@knpkv/confluence-to-markdown": patch
           ---
 
-          Update generated Confluence API OpenAPI specs.
+          Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications.
           CHANGESET
 
-      - name: Create Pull Request
+      - name: Create pull request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(confluence-api-client): update OpenAPI specs"
-          title: "chore(confluence-api-client): update OpenAPI specs"
+          commit-message: "chore(confluence-api-client): update OpenAPI clients"
+          title: "chore(confluence-api-client): update OpenAPI clients"
           body: |
-            Automated update of Confluence API OpenAPI specs.
+            Automated update from Atlassian's current Confluence V1 and V2 OpenAPI documents.
 
-            Review the generated schema changes and update wrapper files if needed:
-            - `packages/confluence-api-client/src/ConfluenceApiClient.ts`
-            - `packages/confluence-api-client/src/generated/v1/index.ts`
-            - `packages/confluence-api-client/src/generated/v2/index.ts`
+            The workflow compared the complete raw specifications, applied the
+            committed JSON patches, regenerated both Schema-backed Effect
+            clients, and built and tested their confluence-to-markdown consumer.
 
-            This PR includes a patch changeset so the release workflow can create the version plan.
+            Review these files closely:
+            - `packages/confluence-api-client/.specs/confluence-v1.json`
+            - `packages/confluence-api-client/.specs/confluence-v2.json`
+            - `packages/confluence-api-client/.specs/confluence-v1.patch.json`
+            - `packages/confluence-api-client/.specs/confluence-v2.patch.json`
+            - `packages/confluence-api-client/src/generated/ConfluenceV1Api.ts`
+            - `packages/confluence-api-client/src/generated/ConfluenceV2Api.ts`
           branch: chore/confluence-api-spec-update
           delete-branch: true
           labels: |

@@ -83,6 +83,63 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 ---
 
+### Clockify API Spec Check (`clockify-api-update.yml`)
+
+**Purpose**: Detect upstream Clockify OpenAPI changes and open a tested client-regeneration pull request.
+
+**Triggers**:
+
+- Daily at 07:00 UTC
+- Manual workflow dispatch
+
+**Pipeline**:
+
+1. Regenerate from the current upstream document; operational failures fail the job.
+2. Continue only when the raw spec or generated client differs from the repository.
+3. Build both `clockify-api-client` and its `jira-clockify` consumer.
+4. Run both packages' test suites.
+5. Add a patch changeset and create/update `chore/clockify-api-spec-update`.
+
+The regeneration contract and local review commands are documented in
+`packages/clockify-api-client/README.md`.
+
+---
+
+### Jira API Spec Check (`jira-api-update.yml`)
+
+**Purpose**: Detect structural changes to Atlassian's Jira OpenAPI document and open a tested regeneration pull request.
+
+**Pipeline**:
+
+1. Regenerate from the complete upstream document; operational failures fail the job.
+2. Continue only when the raw spec or generated client differs from the repository.
+3. Build and test `jira-api-client`, `jira-cli`, and `jira-clockify`.
+4. Add release changesets and create/update `chore/jira-api-spec-update`.
+
+The generator also normalizes bodyless error responses so non-success statuses
+remain failures in the typed Effect error channel. Offline regeneration and the
+patch policy are documented in `packages/jira-api-client/README.md`.
+
+---
+
+### Confluence API Spec Check (`confluence-api-update.yml`)
+
+**Purpose**: Detect structural changes to both Confluence OpenAPI documents and open a tested regeneration pull request.
+
+**Pipeline**:
+
+1. Regenerate from both complete upstream documents; operational failures fail the job.
+2. Continue only when a raw spec or generated client differs from the repository.
+3. Build and test `confluence-api-client` and `confluence-to-markdown`.
+4. Add release changesets and create/update `chore/confluence-api-spec-update`.
+
+The comparison deliberately does not trust `info.version`: Atlassian's
+Confluence documents can change while continuing to report `1.0.0` and
+`2.0.0`. See `packages/confluence-api-client/README.md` for offline
+regeneration and patch-review instructions.
+
+---
+
 ### Release (`release.yml`)
 
 **Purpose**: Automated npm publishing workflow for releasing packages to npm registry.

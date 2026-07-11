@@ -12,11 +12,15 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: jira-api-spec-update
+  cancel-in-progress: true
+
 jobs:
   check-spec:
     name: Check Jira API Spec Updates
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -27,53 +31,68 @@ jobs:
         with:
           node-version: "24.10.0"
 
-      - name: Check for spec updates
-        id: check
+      - name: Regenerate and detect spec updates
+        id: regenerate
         run: |
-          if pnpm --filter @knpkv/jira-api-client regenerate:check; then
+          pnpm --filter @knpkv/jira-api-client regenerate
+          if git diff --quiet -- \
+            packages/jira-api-client/.specs/jira-v3.json \
+            packages/jira-api-client/src/generated/JiraApi.ts; then
             echo "updated=false" >> $GITHUB_OUTPUT
           else
             echo "updated=true" >> $GITHUB_OUTPUT
           fi
-        continue-on-error: true
 
-      - name: Regenerate specs
-        if: steps.check.outputs.updated == 'true'
-        run: pnpm --filter @knpkv/jira-api-client regenerate
+      - name: Check generated client
+        if: steps.regenerate.outputs.updated == 'true'
+        run: pnpm --filter @knpkv/jira-api-client check
 
-      - name: Build package
-        if: steps.check.outputs.updated == 'true'
-        run: pnpm --filter @knpkv/jira-api-client build
+      - name: Build client and consumers
+        if: steps.regenerate.outputs.updated == 'true'
+        run: |
+          pnpm --filter @knpkv/jira-api-client build
+          pnpm --filter @knpkv/jira-cli build
+          pnpm --filter @knpkv/jira-clockify build
 
-      - name: Run tests
-        if: steps.check.outputs.updated == 'true'
-        run: pnpm --filter @knpkv/jira-api-client test
+      - name: Run client and consumer tests
+        if: steps.regenerate.outputs.updated == 'true'
+        run: |
+          pnpm --filter @knpkv/jira-api-client test
+          pnpm --filter @knpkv/jira-cli test
+          pnpm --filter @knpkv/jira-clockify test
 
       - name: Create changeset
-        if: steps.check.outputs.updated == 'true'
+        if: steps.regenerate.outputs.updated == 'true'
         run: |
           mkdir -p .changeset
           cat > .changeset/jira-api-spec-update.md <<'CHANGESET'
           ---
           "@knpkv/jira-api-client": patch
+          "@knpkv/jira-cli": patch
+          "@knpkv/jira-clockify": patch
           ---
 
-          Update generated Jira API OpenAPI specs.
+          Update the generated Schema-backed Jira API client.
           CHANGESET
 
       - name: Create Pull Request
-        if: steps.check.outputs.updated == 'true'
+        if: steps.regenerate.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(jira-api-client): update OpenAPI specs"
-          title: "chore(jira-api-client): update OpenAPI specs"
+          commit-message: "chore(jira-api-client): update OpenAPI client"
+          title: "chore(jira-api-client): update OpenAPI client"
           body: |
-            Automated update of Jira API OpenAPI specs.
+            Automated update of the Jira OpenAPI specification and generated Effect client.
 
-            Review the generated schema changes and update wrapper files if needed:
+            The workflow compared the complete upstream document, regenerated the
+            Schema-backed client, and built and tested both downstream consumers.
+
+            Review:
+            - `packages/jira-api-client/.specs/jira-v3.json`
+            - `packages/jira-api-client/.specs/jira-v3.patch.json`
             - `packages/jira-api-client/src/JiraApiClient.ts`
-            - `packages/jira-api-client/src/generated/v3/index.ts`
+            - `packages/jira-api-client/src/generated/JiraApi.ts`
 
             This PR includes a patch changeset so the release workflow can create the version plan.
           branch: chore/jira-api-spec-update

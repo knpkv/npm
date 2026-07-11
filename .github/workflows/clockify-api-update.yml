@@ -1,0 +1,91 @@
+name: Clockify API Spec Check
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: clockify-api-spec-update
+  cancel-in-progress: true
+
+jobs:
+  check-spec:
+    name: Check Clockify API Spec Updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: "24.10.0"
+
+      - name: Regenerate client
+        run: pnpm --filter @knpkv/clockify-api-client regenerate
+
+      - name: Detect generated changes
+        id: check
+        shell: bash
+        run: |
+          if git diff --quiet -- packages/clockify-api-client/.specs packages/clockify-api-client/src/generated; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build generated client and consumers
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          pnpm --filter @knpkv/clockify-api-client build
+          pnpm --filter @knpkv/jira-clockify build
+
+      - name: Run generated-client tests
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          pnpm --filter @knpkv/clockify-api-client check
+          pnpm --filter @knpkv/clockify-api-client test
+          pnpm --filter @knpkv/jira-clockify test
+
+      - name: Create changeset
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          mkdir -p .changeset
+          cat > .changeset/clockify-api-spec-update.md <<'CHANGESET'
+          ---
+          "@knpkv/clockify-api-client": patch
+          ---
+
+          Update the generated Clockify API client from the latest OpenAPI specification.
+          CHANGESET
+
+      - name: Create pull request
+        if: steps.check.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(clockify-api-client): update OpenAPI client"
+          title: "chore(clockify-api-client): update OpenAPI client"
+          body: |
+            Automated update from Clockify's current OpenAPI document.
+
+            The workflow fetched and compared the raw specification, applied
+            the committed JSON Patch, regenerated the Schema-backed Effect
+            client, built its jira-clockify consumer, and ran both test suites.
+
+            Review these files closely:
+            - `packages/clockify-api-client/.specs/clockify-v1.json`
+            - `packages/clockify-api-client/src/generated/ClockifyApi.ts`
+            - `packages/clockify-api-client/.specs/clockify-v1.patch.json`
+          branch: chore/clockify-api-spec-update
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
