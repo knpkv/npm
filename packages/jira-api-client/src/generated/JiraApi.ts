@@ -1652,8 +1652,6 @@ export type GetBanner403 = ErrorCollection
 export const GetBanner403 = ErrorCollection
 export type SetBannerRequestJson = AnnouncementBannerConfigurationUpdate
 export const SetBannerRequestJson = AnnouncementBannerConfigurationUpdate
-export type SetBanner204 = Schema.Json
-export const SetBanner204 = Schema.Json
 export type SetBanner400 = ErrorCollection
 export const SetBanner400 = ErrorCollection
 export type SetBanner401 = ErrorCollection
@@ -1678,8 +1676,6 @@ export type UpdateMultipleCustomFieldValuesParams = { readonly "generateChangelo
 export const UpdateMultipleCustomFieldValuesParams = Schema.Struct({ "generateChangelog": Schema.optionalKey(Schema.Boolean), "generateAppEvents": Schema.optionalKey(Schema.Boolean) })
 export type UpdateMultipleCustomFieldValuesRequestJson = MultipleCustomFieldValuesUpdateDetails
 export const UpdateMultipleCustomFieldValuesRequestJson = MultipleCustomFieldValuesUpdateDetails
-export type UpdateMultipleCustomFieldValues204 = Schema.Json
-export const UpdateMultipleCustomFieldValues204 = Schema.Json
 export type UpdateMultipleCustomFieldValues400 = Schema.Json
 export const UpdateMultipleCustomFieldValues400 = Schema.Json
 export type UpdateMultipleCustomFieldValues403 = Schema.Json
@@ -1714,8 +1710,6 @@ export type UpdateCustomFieldValueParams = { readonly "generateChangelog"?: bool
 export const UpdateCustomFieldValueParams = Schema.Struct({ "generateChangelog": Schema.optionalKey(Schema.Boolean), "generateAppEvents": Schema.optionalKey(Schema.Boolean) })
 export type UpdateCustomFieldValueRequestJson = CustomFieldValueUpdateDetails
 export const UpdateCustomFieldValueRequestJson = CustomFieldValueUpdateDetails
-export type UpdateCustomFieldValue204 = Schema.Json
-export const UpdateCustomFieldValue204 = Schema.Json
 export type UpdateCustomFieldValue400 = Schema.Json
 export const UpdateCustomFieldValue400 = Schema.Json
 export type UpdateCustomFieldValue403 = Schema.Json
@@ -2060,8 +2054,6 @@ export type UpdateFieldsAssociatedWithSchemesRequestJson = { readonly [x: string
 export const UpdateFieldsAssociatedWithSchemesRequestJson = Schema.Record(Schema.String, Schema.Array(UpdateFieldAssociationsRequestItem))
 export type UpdateFieldsAssociatedWithSchemes200 = FieldSchemeToFieldsResponse
 export const UpdateFieldsAssociatedWithSchemes200 = FieldSchemeToFieldsResponse
-export type UpdateFieldsAssociatedWithSchemes204 = Schema.Json
-export const UpdateFieldsAssociatedWithSchemes204 = Schema.Json
 export type UpdateFieldsAssociatedWithSchemes207 = FieldSchemeToFieldsResponse
 export const UpdateFieldsAssociatedWithSchemes207 = FieldSchemeToFieldsResponse
 export type UpdateFieldsAssociatedWithSchemes400 = FieldSchemeToFieldsResponse
@@ -2074,8 +2066,6 @@ export type RemoveFieldsAssociatedWithSchemesRequestJson = { readonly [x: string
 export const RemoveFieldsAssociatedWithSchemesRequestJson = Schema.Record(Schema.String, RemoveFieldAssociationsRequestItem)
 export type RemoveFieldsAssociatedWithSchemes200 = MinimalFieldSchemeToFieldsResponse
 export const RemoveFieldsAssociatedWithSchemes200 = MinimalFieldSchemeToFieldsResponse
-export type RemoveFieldsAssociatedWithSchemes204 = Schema.Json
-export const RemoveFieldsAssociatedWithSchemes204 = Schema.Json
 export type RemoveFieldsAssociatedWithSchemes207 = MinimalFieldSchemeToFieldsResponse
 export const RemoveFieldsAssociatedWithSchemes207 = MinimalFieldSchemeToFieldsResponse
 export type RemoveFieldsAssociatedWithSchemes400 = MinimalFieldSchemeToFieldsResponse
@@ -2088,8 +2078,6 @@ export type UpdateFieldAssociationSchemeItemParametersRequestJson = { readonly [
 export const UpdateFieldAssociationSchemeItemParametersRequestJson = Schema.Record(Schema.String, Schema.Array(UpdateFieldSchemeParametersRequest))
 export type UpdateFieldAssociationSchemeItemParameters200 = UpdateFieldSchemeParametersResponse
 export const UpdateFieldAssociationSchemeItemParameters200 = UpdateFieldSchemeParametersResponse
-export type UpdateFieldAssociationSchemeItemParameters204 = Schema.Json
-export const UpdateFieldAssociationSchemeItemParameters204 = Schema.Json
 export type UpdateFieldAssociationSchemeItemParameters207 = UpdateFieldSchemeParametersResponse
 export const UpdateFieldAssociationSchemeItemParameters207 = UpdateFieldSchemeParametersResponse
 export type UpdateFieldAssociationSchemeItemParameters400 = UpdateFieldSchemeParametersResponse
@@ -2100,8 +2088,6 @@ export type UpdateFieldAssociationSchemeItemParameters403 = Schema.Json
 export const UpdateFieldAssociationSchemeItemParameters403 = Schema.Json
 export type RemoveFieldAssociationSchemeItemParametersRequestJson = { readonly [x: string]: ReadonlyArray<ParameterRemovalDetails> }
 export const RemoveFieldAssociationSchemeItemParametersRequestJson = Schema.Record(Schema.String, Schema.Array(ParameterRemovalDetails))
-export type RemoveFieldAssociationSchemeItemParameters204 = Schema.Json
-export const RemoveFieldAssociationSchemeItemParameters204 = Schema.Json
 export type RemoveFieldAssociationSchemeItemParameters207 = RemoveFieldParametersResult
 export const RemoveFieldAssociationSchemeItemParameters207 = RemoveFieldParametersResult
 export type RemoveFieldAssociationSchemeItemParameters400 = ErrorCollections
@@ -2126,8 +2112,6 @@ export type AssociateProjectsToFieldAssociationSchemesRequestJson = { readonly [
 export const AssociateProjectsToFieldAssociationSchemesRequestJson = Schema.Record(Schema.String, FieldSchemeToProjectsRequest)
 export type AssociateProjectsToFieldAssociationSchemes200 = FieldSchemeToProjectsResponse
 export const AssociateProjectsToFieldAssociationSchemes200 = FieldSchemeToProjectsResponse
-export type AssociateProjectsToFieldAssociationSchemes204 = Schema.Json
-export const AssociateProjectsToFieldAssociationSchemes204 = Schema.Json
 export type AssociateProjectsToFieldAssociationSchemes207 = FieldSchemeToProjectsResponse
 export const AssociateProjectsToFieldAssociationSchemes207 = FieldSchemeToProjectsResponse
 export type AssociateProjectsToFieldAssociationSchemes400 = FieldSchemeToProjectsResponse
@@ -2216,16 +2200,12 @@ export type GetConfiguration401 = Schema.Json
 export const GetConfiguration401 = Schema.Json
 export type GetSelectedTimeTrackingImplementation200 = TimeTrackingProvider
 export const GetSelectedTimeTrackingImplementation200 = TimeTrackingProvider
-export type GetSelectedTimeTrackingImplementation204 = Schema.Json
-export const GetSelectedTimeTrackingImplementation204 = Schema.Json
 export type GetSelectedTimeTrackingImplementation401 = Schema.Json
 export const GetSelectedTimeTrackingImplementation401 = Schema.Json
 export type GetSelectedTimeTrackingImplementation403 = Schema.Json
 export const GetSelectedTimeTrackingImplementation403 = Schema.Json
 export type SelectTimeTrackingImplementationRequestJson = TimeTrackingProvider
 export const SelectTimeTrackingImplementationRequestJson = TimeTrackingProvider
-export type SelectTimeTrackingImplementation204 = Schema.Json
-export const SelectTimeTrackingImplementation204 = Schema.Json
 export type SelectTimeTrackingImplementation400 = Schema.Json
 export const SelectTimeTrackingImplementation400 = Schema.Json
 export type SelectTimeTrackingImplementation401 = Schema.Json
@@ -2320,16 +2300,12 @@ export type AddGadget404 = ErrorCollection
 export const AddGadget404 = ErrorCollection
 export type UpdateGadgetRequestJson = DashboardGadgetUpdateRequest
 export const UpdateGadgetRequestJson = DashboardGadgetUpdateRequest
-export type UpdateGadget204 = Schema.Json
-export const UpdateGadget204 = Schema.Json
 export type UpdateGadget400 = ErrorCollection
 export const UpdateGadget400 = ErrorCollection
 export type UpdateGadget401 = Schema.Json
 export const UpdateGadget401 = Schema.Json
 export type UpdateGadget404 = ErrorCollection
 export const UpdateGadget404 = ErrorCollection
-export type RemoveGadget204 = Schema.Json
-export const RemoveGadget204 = Schema.Json
 export type RemoveGadget401 = Schema.Json
 export const RemoveGadget401 = Schema.Json
 export type RemoveGadget404 = ErrorCollection
@@ -2360,8 +2336,6 @@ export type SetDashboardItemProperty403 = ErrorCollection
 export const SetDashboardItemProperty403 = ErrorCollection
 export type SetDashboardItemProperty404 = ErrorCollection
 export const SetDashboardItemProperty404 = ErrorCollection
-export type DeleteDashboardItemProperty204 = Schema.Json
-export const DeleteDashboardItemProperty204 = Schema.Json
 export type DeleteDashboardItemProperty400 = ErrorCollection
 export const DeleteDashboardItemProperty400 = ErrorCollection
 export type DeleteDashboardItemProperty401 = ErrorCollection
@@ -2476,8 +2450,6 @@ export type CreateCustomField400 = Schema.Json
 export const CreateCustomField400 = Schema.Json
 export type CreateAssociationsRequestJson = FieldAssociationsRequest
 export const CreateAssociationsRequestJson = FieldAssociationsRequest
-export type CreateAssociations204 = Schema.Json
-export const CreateAssociations204 = Schema.Json
 export type CreateAssociations400 = Schema.Json
 export const CreateAssociations400 = Schema.Json
 export type CreateAssociations401 = Schema.Json
@@ -2486,8 +2458,6 @@ export type CreateAssociations404 = Schema.Json
 export const CreateAssociations404 = Schema.Json
 export type RemoveAssociationsRequestJson = FieldAssociationsRequest
 export const RemoveAssociationsRequestJson = FieldAssociationsRequest
-export type RemoveAssociations204 = Schema.Json
-export const RemoveAssociations204 = Schema.Json
 export type RemoveAssociations400 = Schema.Json
 export const RemoveAssociations400 = Schema.Json
 export type RemoveAssociations401 = Schema.Json
@@ -2516,8 +2486,6 @@ export type GetTrashedFieldsPaginated403 = ErrorCollection
 export const GetTrashedFieldsPaginated403 = ErrorCollection
 export type UpdateCustomFieldRequestJson = UpdateCustomFieldDetails
 export const UpdateCustomFieldRequestJson = UpdateCustomFieldDetails
-export type UpdateCustomField204 = Schema.Json
-export const UpdateCustomField204 = Schema.Json
 export type UpdateCustomField401 = Schema.Json
 export const UpdateCustomField401 = Schema.Json
 export type GetFieldProjectAssociationsParams = { readonly "startAt"?: number, readonly "maxResults"?: number }
@@ -2554,8 +2522,6 @@ export type GetDefaultValues401 = Schema.Json
 export const GetDefaultValues401 = Schema.Json
 export type SetDefaultValuesRequestJson = CustomFieldContextDefaultValueUpdate
 export const SetDefaultValuesRequestJson = CustomFieldContextDefaultValueUpdate
-export type SetDefaultValues204 = Schema.Json
-export const SetDefaultValues204 = Schema.Json
 export type SetDefaultValues401 = Schema.Json
 export const SetDefaultValues401 = Schema.Json
 export type GetContextDefaultValuesParams = { readonly "contextId"?: ReadonlyArray<number>, readonly "issueTypeId"?: ReadonlyArray<string>, readonly "startAt"?: number, readonly "maxResults"?: number }
@@ -2586,24 +2552,16 @@ export type GetProjectContextMapping401 = Schema.Json
 export const GetProjectContextMapping401 = Schema.Json
 export type UpdateCustomFieldContextRequestJson = CustomFieldContextUpdateDetails
 export const UpdateCustomFieldContextRequestJson = CustomFieldContextUpdateDetails
-export type UpdateCustomFieldContext204 = Schema.Json
-export const UpdateCustomFieldContext204 = Schema.Json
 export type UpdateCustomFieldContext401 = Schema.Json
 export const UpdateCustomFieldContext401 = Schema.Json
-export type DeleteCustomFieldContext204 = Schema.Json
-export const DeleteCustomFieldContext204 = Schema.Json
 export type DeleteCustomFieldContext401 = Schema.Json
 export const DeleteCustomFieldContext401 = Schema.Json
 export type AddIssueTypesToContextRequestJson = IssueTypeIds
 export const AddIssueTypesToContextRequestJson = IssueTypeIds
-export type AddIssueTypesToContext204 = Schema.Json
-export const AddIssueTypesToContext204 = Schema.Json
 export type AddIssueTypesToContext401 = Schema.Json
 export const AddIssueTypesToContext401 = Schema.Json
 export type RemoveIssueTypesFromContextRequestJson = IssueTypeIds
 export const RemoveIssueTypesFromContextRequestJson = IssueTypeIds
-export type RemoveIssueTypesFromContext204 = Schema.Json
-export const RemoveIssueTypesFromContext204 = Schema.Json
 export type RemoveIssueTypesFromContext401 = Schema.Json
 export const RemoveIssueTypesFromContext401 = Schema.Json
 export type GetOptionsForContextParams = { readonly "optionId"?: number, readonly "onlyOptions"?: boolean, readonly "startAt"?: number, readonly "maxResults"?: number }
@@ -2626,8 +2584,6 @@ export type CreateCustomFieldOption401 = Schema.Json
 export const CreateCustomFieldOption401 = Schema.Json
 export type ReorderCustomFieldOptionsRequestJson = OrderOfCustomFieldOptions
 export const ReorderCustomFieldOptionsRequestJson = OrderOfCustomFieldOptions
-export type ReorderCustomFieldOptions204 = Schema.Json
-export const ReorderCustomFieldOptions204 = Schema.Json
 export type ReorderCustomFieldOptions401 = Schema.Json
 export const ReorderCustomFieldOptions401 = Schema.Json
 export type DeleteCustomFieldOption401 = Schema.Json
@@ -2642,14 +2598,10 @@ export type ReplaceCustomFieldOption404 = Schema.Json
 export const ReplaceCustomFieldOption404 = Schema.Json
 export type AssignProjectsToCustomFieldContextRequestJson = ProjectIds
 export const AssignProjectsToCustomFieldContextRequestJson = ProjectIds
-export type AssignProjectsToCustomFieldContext204 = Schema.Json
-export const AssignProjectsToCustomFieldContext204 = Schema.Json
 export type AssignProjectsToCustomFieldContext401 = Schema.Json
 export const AssignProjectsToCustomFieldContext401 = Schema.Json
 export type RemoveCustomFieldContextFromProjectsRequestJson = ProjectIds
 export const RemoveCustomFieldContextFromProjectsRequestJson = ProjectIds
-export type RemoveCustomFieldContextFromProjects204 = Schema.Json
-export const RemoveCustomFieldContextFromProjects204 = Schema.Json
 export type RemoveCustomFieldContextFromProjects401 = Schema.Json
 export const RemoveCustomFieldContextFromProjects401 = Schema.Json
 export type GetContextsForFieldDeprecatedParams = { readonly "startAt"?: number, readonly "maxResults"?: number }
@@ -2720,8 +2672,6 @@ export type UpdateIssueFieldOption403 = Schema.Json
 export const UpdateIssueFieldOption403 = Schema.Json
 export type UpdateIssueFieldOption404 = Schema.Json
 export const UpdateIssueFieldOption404 = Schema.Json
-export type DeleteIssueFieldOption204 = Schema.Json
-export const DeleteIssueFieldOption204 = Schema.Json
 export type DeleteIssueFieldOption403 = Schema.Json
 export const DeleteIssueFieldOption403 = Schema.Json
 export type DeleteIssueFieldOption404 = Schema.Json
@@ -2788,8 +2738,6 @@ export type CreateFieldConfiguration403 = Schema.Json
 export const CreateFieldConfiguration403 = Schema.Json
 export type UpdateFieldConfigurationRequestJson = FieldConfigurationDetails
 export const UpdateFieldConfigurationRequestJson = FieldConfigurationDetails
-export type UpdateFieldConfiguration204 = Schema.Json
-export const UpdateFieldConfiguration204 = Schema.Json
 export type UpdateFieldConfiguration400 = Schema.Json
 export const UpdateFieldConfiguration400 = Schema.Json
 export type UpdateFieldConfiguration401 = Schema.Json
@@ -2798,8 +2746,6 @@ export type UpdateFieldConfiguration403 = Schema.Json
 export const UpdateFieldConfiguration403 = Schema.Json
 export type UpdateFieldConfiguration404 = Schema.Json
 export const UpdateFieldConfiguration404 = Schema.Json
-export type DeleteFieldConfiguration204 = Schema.Json
-export const DeleteFieldConfiguration204 = Schema.Json
 export type DeleteFieldConfiguration400 = Schema.Json
 export const DeleteFieldConfiguration400 = Schema.Json
 export type DeleteFieldConfiguration401 = Schema.Json
@@ -2820,8 +2766,6 @@ export type GetFieldConfigurationItems404 = Schema.Json
 export const GetFieldConfigurationItems404 = Schema.Json
 export type UpdateFieldConfigurationItemsRequestJson = FieldConfigurationItemsDetails
 export const UpdateFieldConfigurationItemsRequestJson = FieldConfigurationItemsDetails
-export type UpdateFieldConfigurationItems204 = Schema.Json
-export const UpdateFieldConfigurationItems204 = Schema.Json
 export type UpdateFieldConfigurationItems400 = Schema.Json
 export const UpdateFieldConfigurationItems400 = Schema.Json
 export type UpdateFieldConfigurationItems401 = Schema.Json
@@ -2870,18 +2814,12 @@ export type GetFieldConfigurationSchemeProjectMapping403 = Schema.Json
 export const GetFieldConfigurationSchemeProjectMapping403 = Schema.Json
 export type AssignFieldConfigurationSchemeToProjectRequestJson = FieldConfigurationSchemeProjectAssociation
 export const AssignFieldConfigurationSchemeToProjectRequestJson = FieldConfigurationSchemeProjectAssociation
-export type AssignFieldConfigurationSchemeToProject204 = Schema.Json
-export const AssignFieldConfigurationSchemeToProject204 = Schema.Json
 export type AssignFieldConfigurationSchemeToProject401 = Schema.Json
 export const AssignFieldConfigurationSchemeToProject401 = Schema.Json
 export type UpdateFieldConfigurationSchemeRequestJson = UpdateFieldConfigurationSchemeDetails
 export const UpdateFieldConfigurationSchemeRequestJson = UpdateFieldConfigurationSchemeDetails
-export type UpdateFieldConfigurationScheme204 = Schema.Json
-export const UpdateFieldConfigurationScheme204 = Schema.Json
 export type UpdateFieldConfigurationScheme401 = Schema.Json
 export const UpdateFieldConfigurationScheme401 = Schema.Json
-export type DeleteFieldConfigurationScheme204 = Schema.Json
-export const DeleteFieldConfigurationScheme204 = Schema.Json
 export type DeleteFieldConfigurationScheme400 = Schema.Json
 export const DeleteFieldConfigurationScheme400 = Schema.Json
 export type DeleteFieldConfigurationScheme401 = Schema.Json
@@ -2892,8 +2830,6 @@ export type DeleteFieldConfigurationScheme404 = Schema.Json
 export const DeleteFieldConfigurationScheme404 = Schema.Json
 export type SetFieldConfigurationSchemeMappingRequestJson = AssociateFieldConfigurationsWithIssueTypesRequest
 export const SetFieldConfigurationSchemeMappingRequestJson = AssociateFieldConfigurationsWithIssueTypesRequest
-export type SetFieldConfigurationSchemeMapping204 = Schema.Json
-export const SetFieldConfigurationSchemeMapping204 = Schema.Json
 export type SetFieldConfigurationSchemeMapping400 = Schema.Json
 export const SetFieldConfigurationSchemeMapping400 = Schema.Json
 export type SetFieldConfigurationSchemeMapping401 = Schema.Json
@@ -2904,8 +2840,6 @@ export type SetFieldConfigurationSchemeMapping404 = Schema.Json
 export const SetFieldConfigurationSchemeMapping404 = Schema.Json
 export type RemoveIssueTypesFromGlobalFieldConfigurationSchemeRequestJson = IssueTypeIdsToRemove
 export const RemoveIssueTypesFromGlobalFieldConfigurationSchemeRequestJson = IssueTypeIdsToRemove
-export type RemoveIssueTypesFromGlobalFieldConfigurationScheme204 = Schema.Json
-export const RemoveIssueTypesFromGlobalFieldConfigurationScheme204 = Schema.Json
 export type RemoveIssueTypesFromGlobalFieldConfigurationScheme400 = ErrorCollection
 export const RemoveIssueTypesFromGlobalFieldConfigurationScheme400 = ErrorCollection
 export type RemoveIssueTypesFromGlobalFieldConfigurationScheme401 = ErrorCollection
@@ -3014,8 +2948,6 @@ export type DeleteFavouriteForFilter400 = Schema.Json
 export const DeleteFavouriteForFilter400 = Schema.Json
 export type ChangeFilterOwnerRequestJson = ChangeFilterOwner
 export const ChangeFilterOwnerRequestJson = ChangeFilterOwner
-export type ChangeFilterOwner204 = Schema.Json
-export const ChangeFilterOwner204 = Schema.Json
 export type ChangeFilterOwner400 = Schema.Json
 export const ChangeFilterOwner400 = Schema.Json
 export type ChangeFilterOwner403 = Schema.Json
@@ -3282,8 +3214,6 @@ export type EditIssueRequestJson = IssueUpdateDetails
 export const EditIssueRequestJson = IssueUpdateDetails
 export type EditIssue200 = Schema.Json
 export const EditIssue200 = Schema.Json
-export type EditIssue204 = Schema.Json
-export const EditIssue204 = Schema.Json
 export type EditIssue400 = Schema.Json
 export const EditIssue400 = Schema.Json
 export type EditIssue401 = Schema.Json
@@ -3308,8 +3238,6 @@ export type DeleteIssue404 = Schema.Json
 export const DeleteIssue404 = Schema.Json
 export type AssignIssueRequestJson = User
 export const AssignIssueRequestJson = User
-export type AssignIssue204 = Schema.Json
-export const AssignIssue204 = Schema.Json
 export type AssignIssue400 = Schema.Json
 export const AssignIssue400 = Schema.Json
 export type AssignIssue403 = Schema.Json
@@ -3404,8 +3332,6 @@ export type GetEditIssueMeta404 = Schema.Json
 export const GetEditIssueMeta404 = Schema.Json
 export type NotifyRequestJson = Notification
 export const NotifyRequestJson = Notification
-export type Notify204 = Schema.Json
-export const Notify204 = Schema.Json
 export type Notify400 = Schema.Json
 export const Notify400 = Schema.Json
 export type Notify403 = Schema.Json
@@ -3488,8 +3414,6 @@ export type GetRemoteIssueLinkById404 = Schema.Json
 export const GetRemoteIssueLinkById404 = Schema.Json
 export type UpdateRemoteIssueLinkRequestJson = RemoteIssueLinkRequest
 export const UpdateRemoteIssueLinkRequestJson = RemoteIssueLinkRequest
-export type UpdateRemoteIssueLink204 = Schema.Json
-export const UpdateRemoteIssueLink204 = Schema.Json
 export type UpdateRemoteIssueLink401 = Schema.Json
 export const UpdateRemoteIssueLink401 = Schema.Json
 export type UpdateRemoteIssueLink403 = Schema.Json
@@ -3514,8 +3438,6 @@ export type GetTransitions404 = Schema.Json
 export const GetTransitions404 = Schema.Json
 export type DoTransitionRequestJson = IssueUpdateDetails
 export const DoTransitionRequestJson = IssueUpdateDetails
-export type DoTransition204 = Schema.Json
-export const DoTransition204 = Schema.Json
 export type DoTransition400 = Schema.Json
 export const DoTransition400 = Schema.Json
 export type DoTransition401 = Schema.Json
@@ -3534,8 +3456,6 @@ export type GetVotes401 = Schema.Json
 export const GetVotes401 = Schema.Json
 export type GetVotes404 = Schema.Json
 export const GetVotes404 = Schema.Json
-export type AddVote204 = Schema.Json
-export const AddVote204 = Schema.Json
 export type AddVote400 = Schema.Json
 export const AddVote400 = Schema.Json
 export type AddVote401 = Schema.Json
@@ -3554,8 +3474,6 @@ export type GetIssueWatchers404 = Schema.Json
 export const GetIssueWatchers404 = Schema.Json
 export type AddWatcherRequestJson = string
 export const AddWatcherRequestJson = Schema.String
-export type AddWatcher204 = Schema.Json
-export const AddWatcher204 = Schema.Json
 export type AddWatcher400 = Schema.Json
 export const AddWatcher400 = Schema.Json
 export type AddWatcher401 = Schema.Json
@@ -3780,8 +3698,6 @@ export type GetSecurityLevels403 = ErrorCollection
 export const GetSecurityLevels403 = ErrorCollection
 export type SetDefaultLevelsRequestJson = SetDefaultLevelsRequest
 export const SetDefaultLevelsRequestJson = SetDefaultLevelsRequest
-export type SetDefaultLevels204 = Schema.Json
-export const SetDefaultLevels204 = Schema.Json
 export type SetDefaultLevels400 = ErrorCollection
 export const SetDefaultLevels400 = ErrorCollection
 export type SetDefaultLevels401 = ErrorCollection
@@ -3836,8 +3752,6 @@ export type GetIssueSecurityScheme403 = Schema.Json
 export const GetIssueSecurityScheme403 = Schema.Json
 export type UpdateIssueSecuritySchemeRequestJson = UpdateIssueSecuritySchemeRequestBean
 export const UpdateIssueSecuritySchemeRequestJson = UpdateIssueSecuritySchemeRequestBean
-export type UpdateIssueSecurityScheme204 = Schema.Json
-export const UpdateIssueSecurityScheme204 = Schema.Json
 export type UpdateIssueSecurityScheme400 = ErrorCollection
 export const UpdateIssueSecurityScheme400 = ErrorCollection
 export type UpdateIssueSecurityScheme401 = ErrorCollection
@@ -3858,8 +3772,6 @@ export type GetIssueSecurityLevelMembers403 = Schema.Json
 export const GetIssueSecurityLevelMembers403 = Schema.Json
 export type GetIssueSecurityLevelMembers404 = Schema.Json
 export const GetIssueSecurityLevelMembers404 = Schema.Json
-export type DeleteSecurityScheme204 = Schema.Json
-export const DeleteSecurityScheme204 = Schema.Json
 export type DeleteSecurityScheme400 = ErrorCollection
 export const DeleteSecurityScheme400 = ErrorCollection
 export type DeleteSecurityScheme401 = ErrorCollection
@@ -3870,8 +3782,6 @@ export type DeleteSecurityScheme404 = ErrorCollection
 export const DeleteSecurityScheme404 = ErrorCollection
 export type AddSecurityLevelRequestJson = AddSecuritySchemeLevelsRequestBean
 export const AddSecurityLevelRequestJson = AddSecuritySchemeLevelsRequestBean
-export type AddSecurityLevel204 = Schema.Json
-export const AddSecurityLevel204 = Schema.Json
 export type AddSecurityLevel400 = ErrorCollection
 export const AddSecurityLevel400 = ErrorCollection
 export type AddSecurityLevel401 = ErrorCollection
@@ -3882,8 +3792,6 @@ export type AddSecurityLevel404 = ErrorCollection
 export const AddSecurityLevel404 = ErrorCollection
 export type UpdateSecurityLevelRequestJson = UpdateIssueSecurityLevelDetails
 export const UpdateSecurityLevelRequestJson = UpdateIssueSecurityLevelDetails
-export type UpdateSecurityLevel204 = Schema.Json
-export const UpdateSecurityLevel204 = Schema.Json
 export type UpdateSecurityLevel400 = ErrorCollection
 export const UpdateSecurityLevel400 = ErrorCollection
 export type UpdateSecurityLevel401 = ErrorCollection
@@ -3908,8 +3816,6 @@ export type RemoveLevel409 = ErrorCollection
 export const RemoveLevel409 = ErrorCollection
 export type AddSecurityLevelMembersRequestJson = SecuritySchemeMembersRequest
 export const AddSecurityLevelMembersRequestJson = SecuritySchemeMembersRequest
-export type AddSecurityLevelMembers204 = Schema.Json
-export const AddSecurityLevelMembers204 = Schema.Json
 export type AddSecurityLevelMembers400 = ErrorCollection
 export const AddSecurityLevelMembers400 = ErrorCollection
 export type AddSecurityLevelMembers401 = ErrorCollection
@@ -3918,8 +3824,6 @@ export type AddSecurityLevelMembers403 = ErrorCollection
 export const AddSecurityLevelMembers403 = ErrorCollection
 export type AddSecurityLevelMembers404 = ErrorCollection
 export const AddSecurityLevelMembers404 = ErrorCollection
-export type RemoveMemberFromSecurityLevel204 = Schema.Json
-export const RemoveMemberFromSecurityLevel204 = Schema.Json
 export type RemoveMemberFromSecurityLevel400 = ErrorCollection
 export const RemoveMemberFromSecurityLevel400 = ErrorCollection
 export type RemoveMemberFromSecurityLevel401 = ErrorCollection
@@ -4074,34 +3978,22 @@ export type GetIssueTypeSchemeForProjects403 = Schema.Json
 export const GetIssueTypeSchemeForProjects403 = Schema.Json
 export type AssignIssueTypeSchemeToProjectRequestJson = IssueTypeSchemeProjectAssociation
 export const AssignIssueTypeSchemeToProjectRequestJson = IssueTypeSchemeProjectAssociation
-export type AssignIssueTypeSchemeToProject204 = Schema.Json
-export const AssignIssueTypeSchemeToProject204 = Schema.Json
 export type AssignIssueTypeSchemeToProject401 = Schema.Json
 export const AssignIssueTypeSchemeToProject401 = Schema.Json
 export type UpdateIssueTypeSchemeRequestJson = IssueTypeSchemeUpdateDetails
 export const UpdateIssueTypeSchemeRequestJson = IssueTypeSchemeUpdateDetails
-export type UpdateIssueTypeScheme204 = Schema.Json
-export const UpdateIssueTypeScheme204 = Schema.Json
 export type UpdateIssueTypeScheme401 = Schema.Json
 export const UpdateIssueTypeScheme401 = Schema.Json
-export type DeleteIssueTypeScheme204 = Schema.Json
-export const DeleteIssueTypeScheme204 = Schema.Json
 export type DeleteIssueTypeScheme401 = Schema.Json
 export const DeleteIssueTypeScheme401 = Schema.Json
 export type AddIssueTypesToIssueTypeSchemeRequestJson = IssueTypeIds
 export const AddIssueTypesToIssueTypeSchemeRequestJson = IssueTypeIds
-export type AddIssueTypesToIssueTypeScheme204 = Schema.Json
-export const AddIssueTypesToIssueTypeScheme204 = Schema.Json
 export type AddIssueTypesToIssueTypeScheme401 = Schema.Json
 export const AddIssueTypesToIssueTypeScheme401 = Schema.Json
 export type ReorderIssueTypesInIssueTypeSchemeRequestJson = OrderOfIssueTypes
 export const ReorderIssueTypesInIssueTypeSchemeRequestJson = OrderOfIssueTypes
-export type ReorderIssueTypesInIssueTypeScheme204 = Schema.Json
-export const ReorderIssueTypesInIssueTypeScheme204 = Schema.Json
 export type ReorderIssueTypesInIssueTypeScheme401 = Schema.Json
 export const ReorderIssueTypesInIssueTypeScheme401 = Schema.Json
-export type RemoveIssueTypeFromIssueTypeScheme204 = Schema.Json
-export const RemoveIssueTypeFromIssueTypeScheme204 = Schema.Json
 export type RemoveIssueTypeFromIssueTypeScheme401 = Schema.Json
 export const RemoveIssueTypeFromIssueTypeScheme401 = Schema.Json
 export type GetIssueTypeScreenSchemesParams = { readonly "startAt"?: number, readonly "maxResults"?: number, readonly "id"?: ReadonlyArray<number>, readonly "queryString"?: string, readonly "orderBy"?: "name" | "-name" | "+name" | "id" | "-id" | "+id", readonly "expand"?: string }
@@ -4142,40 +4034,28 @@ export type GetIssueTypeScreenSchemeProjectAssociations403 = Schema.Json
 export const GetIssueTypeScreenSchemeProjectAssociations403 = Schema.Json
 export type AssignIssueTypeScreenSchemeToProjectRequestJson = IssueTypeScreenSchemeProjectAssociation
 export const AssignIssueTypeScreenSchemeToProjectRequestJson = IssueTypeScreenSchemeProjectAssociation
-export type AssignIssueTypeScreenSchemeToProject204 = Schema.Json
-export const AssignIssueTypeScreenSchemeToProject204 = Schema.Json
 export type AssignIssueTypeScreenSchemeToProject401 = Schema.Json
 export const AssignIssueTypeScreenSchemeToProject401 = Schema.Json
 export type UpdateIssueTypeScreenSchemeRequestJson = IssueTypeScreenSchemeUpdateDetails
 export const UpdateIssueTypeScreenSchemeRequestJson = IssueTypeScreenSchemeUpdateDetails
-export type UpdateIssueTypeScreenScheme204 = Schema.Json
-export const UpdateIssueTypeScreenScheme204 = Schema.Json
 export type UpdateIssueTypeScreenScheme401 = Schema.Json
 export const UpdateIssueTypeScreenScheme401 = Schema.Json
-export type DeleteIssueTypeScreenScheme204 = Schema.Json
-export const DeleteIssueTypeScreenScheme204 = Schema.Json
 export type DeleteIssueTypeScreenScheme401 = Schema.Json
 export const DeleteIssueTypeScreenScheme401 = Schema.Json
 export type DeleteIssueTypeScreenScheme403 = Schema.Json
 export const DeleteIssueTypeScreenScheme403 = Schema.Json
 export type AppendMappingsForIssueTypeScreenSchemeRequestJson = IssueTypeScreenSchemeMappingDetails
 export const AppendMappingsForIssueTypeScreenSchemeRequestJson = IssueTypeScreenSchemeMappingDetails
-export type AppendMappingsForIssueTypeScreenScheme204 = Schema.Json
-export const AppendMappingsForIssueTypeScreenScheme204 = Schema.Json
 export type AppendMappingsForIssueTypeScreenScheme401 = Schema.Json
 export const AppendMappingsForIssueTypeScreenScheme401 = Schema.Json
 export type AppendMappingsForIssueTypeScreenScheme403 = Schema.Json
 export const AppendMappingsForIssueTypeScreenScheme403 = Schema.Json
 export type UpdateDefaultScreenSchemeRequestJson = UpdateDefaultScreenScheme
 export const UpdateDefaultScreenSchemeRequestJson = UpdateDefaultScreenScheme
-export type UpdateDefaultScreenScheme204 = Schema.Json
-export const UpdateDefaultScreenScheme204 = Schema.Json
 export type UpdateDefaultScreenScheme401 = Schema.Json
 export const UpdateDefaultScreenScheme401 = Schema.Json
 export type RemoveMappingsFromIssueTypeScreenSchemeRequestJson = IssueTypeIds
 export const RemoveMappingsFromIssueTypeScreenSchemeRequestJson = IssueTypeIds
-export type RemoveMappingsFromIssueTypeScreenScheme204 = Schema.Json
-export const RemoveMappingsFromIssueTypeScreenScheme204 = Schema.Json
 export type RemoveMappingsFromIssueTypeScreenScheme401 = Schema.Json
 export const RemoveMappingsFromIssueTypeScreenScheme401 = Schema.Json
 export type GetProjectsForIssueTypeScreenSchemeParams = { readonly "startAt"?: number, readonly "maxResults"?: number, readonly "query"?: string }
@@ -4226,8 +4106,6 @@ export type UpdatePrecomputationsRequestJson = JqlFunctionPrecomputationUpdateRe
 export const UpdatePrecomputationsRequestJson = JqlFunctionPrecomputationUpdateRequestBean
 export type UpdatePrecomputations200 = JqlFunctionPrecomputationUpdateResponse
 export const UpdatePrecomputations200 = JqlFunctionPrecomputationUpdateResponse
-export type UpdatePrecomputations204 = Schema.Json
-export const UpdatePrecomputations204 = Schema.Json
 export type UpdatePrecomputations400 = JqlFunctionPrecomputationUpdateErrorResponse
 export const UpdatePrecomputations400 = JqlFunctionPrecomputationUpdateErrorResponse
 export type UpdatePrecomputations403 = JqlFunctionPrecomputationUpdateErrorResponse
@@ -4320,8 +4198,6 @@ export type SetPreferenceParams = { readonly "key": string }
 export const SetPreferenceParams = Schema.Struct({ "key": Schema.String })
 export type SetPreferenceRequestJson = string
 export const SetPreferenceRequestJson = Schema.String
-export type SetPreference204 = Schema.Json
-export const SetPreference204 = Schema.Json
 export type SetPreference401 = Schema.Json
 export const SetPreference401 = Schema.Json
 export type SetPreference404 = Schema.Json
@@ -4338,8 +4214,6 @@ export type GetLocale401 = Schema.Json
 export const GetLocale401 = Schema.Json
 export type SetLocaleRequestJson = Locale
 export const SetLocaleRequestJson = Locale
-export type SetLocale204 = Schema.Json
-export const SetLocale204 = Schema.Json
 export type SetLocale400 = Schema.Json
 export const SetLocale400 = Schema.Json
 export type SetLocale401 = Schema.Json
@@ -4386,8 +4260,6 @@ export type GetNotificationScheme404 = Schema.Json
 export const GetNotificationScheme404 = Schema.Json
 export type UpdateNotificationSchemeRequestJson = UpdateNotificationSchemeDetails
 export const UpdateNotificationSchemeRequestJson = UpdateNotificationSchemeDetails
-export type UpdateNotificationScheme204 = Schema.Json
-export const UpdateNotificationScheme204 = Schema.Json
 export type UpdateNotificationScheme400 = ErrorCollection
 export const UpdateNotificationScheme400 = ErrorCollection
 export type UpdateNotificationScheme401 = ErrorCollection
@@ -4398,8 +4270,6 @@ export type UpdateNotificationScheme404 = ErrorCollection
 export const UpdateNotificationScheme404 = ErrorCollection
 export type AddNotificationsRequestJson = AddNotificationsDetails
 export const AddNotificationsRequestJson = AddNotificationsDetails
-export type AddNotifications204 = Schema.Json
-export const AddNotifications204 = Schema.Json
 export type AddNotifications400 = ErrorCollection
 export const AddNotifications400 = ErrorCollection
 export type AddNotifications401 = ErrorCollection
@@ -4408,8 +4278,6 @@ export type AddNotifications403 = ErrorCollection
 export const AddNotifications403 = ErrorCollection
 export type AddNotifications404 = ErrorCollection
 export const AddNotifications404 = ErrorCollection
-export type DeleteNotificationScheme204 = Schema.Json
-export const DeleteNotificationScheme204 = Schema.Json
 export type DeleteNotificationScheme400 = ErrorCollection
 export const DeleteNotificationScheme400 = ErrorCollection
 export type DeleteNotificationScheme401 = ErrorCollection
@@ -4418,8 +4286,6 @@ export type DeleteNotificationScheme403 = ErrorCollection
 export const DeleteNotificationScheme403 = ErrorCollection
 export type DeleteNotificationScheme404 = ErrorCollection
 export const DeleteNotificationScheme404 = ErrorCollection
-export type RemoveNotificationFromNotificationScheme204 = Schema.Json
-export const RemoveNotificationFromNotificationScheme204 = Schema.Json
 export type RemoveNotificationFromNotificationScheme400 = ErrorCollection
 export const RemoveNotificationFromNotificationScheme400 = ErrorCollection
 export type RemoveNotificationFromNotificationScheme401 = ErrorCollection
@@ -4560,8 +4426,6 @@ export type GetPlan404 = ErrorCollection
 export const GetPlan404 = ErrorCollection
 export type UpdatePlanParams = { readonly "useGroupId"?: boolean }
 export const UpdatePlanParams = Schema.Struct({ "useGroupId": Schema.optionalKey(Schema.Boolean) })
-export type UpdatePlan204 = Schema.Json
-export const UpdatePlan204 = Schema.Json
 export type UpdatePlan400 = ErrorCollection
 export const UpdatePlan400 = ErrorCollection
 export type UpdatePlan401 = ErrorCollection
@@ -4572,8 +4436,6 @@ export type UpdatePlan404 = ErrorCollection
 export const UpdatePlan404 = ErrorCollection
 export type UpdatePlan409 = ErrorCollection
 export const UpdatePlan409 = ErrorCollection
-export type ArchivePlan204 = Schema.Json
-export const ArchivePlan204 = Schema.Json
 export type ArchivePlan401 = ErrorCollection
 export const ArchivePlan401 = ErrorCollection
 export type ArchivePlan403 = ErrorCollection
@@ -4608,8 +4470,6 @@ export type GetTeams404 = ErrorCollection
 export const GetTeams404 = ErrorCollection
 export type AddAtlassianTeamRequestJson = AddAtlassianTeamRequest
 export const AddAtlassianTeamRequestJson = AddAtlassianTeamRequest
-export type AddAtlassianTeam204 = Schema.Json
-export const AddAtlassianTeam204 = Schema.Json
 export type AddAtlassianTeam400 = ErrorCollection
 export const AddAtlassianTeam400 = ErrorCollection
 export type AddAtlassianTeam401 = ErrorCollection
@@ -4630,8 +4490,6 @@ export type GetAtlassianTeam404 = ErrorCollection
 export const GetAtlassianTeam404 = ErrorCollection
 export type GetAtlassianTeam409 = ErrorCollection
 export const GetAtlassianTeam409 = ErrorCollection
-export type UpdateAtlassianTeam204 = Schema.Json
-export const UpdateAtlassianTeam204 = Schema.Json
 export type UpdateAtlassianTeam400 = ErrorCollection
 export const UpdateAtlassianTeam400 = ErrorCollection
 export type UpdateAtlassianTeam401 = ErrorCollection
@@ -4642,8 +4500,6 @@ export type UpdateAtlassianTeam404 = ErrorCollection
 export const UpdateAtlassianTeam404 = ErrorCollection
 export type UpdateAtlassianTeam409 = ErrorCollection
 export const UpdateAtlassianTeam409 = ErrorCollection
-export type RemoveAtlassianTeam204 = Schema.Json
-export const RemoveAtlassianTeam204 = Schema.Json
 export type RemoveAtlassianTeam401 = ErrorCollection
 export const RemoveAtlassianTeam401 = ErrorCollection
 export type RemoveAtlassianTeam403 = ErrorCollection
@@ -4676,8 +4532,6 @@ export type GetPlanOnlyTeam404 = ErrorCollection
 export const GetPlanOnlyTeam404 = ErrorCollection
 export type GetPlanOnlyTeam409 = ErrorCollection
 export const GetPlanOnlyTeam409 = ErrorCollection
-export type UpdatePlanOnlyTeam204 = Schema.Json
-export const UpdatePlanOnlyTeam204 = Schema.Json
 export type UpdatePlanOnlyTeam400 = ErrorCollection
 export const UpdatePlanOnlyTeam400 = ErrorCollection
 export type UpdatePlanOnlyTeam401 = ErrorCollection
@@ -4688,8 +4542,6 @@ export type UpdatePlanOnlyTeam404 = ErrorCollection
 export const UpdatePlanOnlyTeam404 = ErrorCollection
 export type UpdatePlanOnlyTeam409 = ErrorCollection
 export const UpdatePlanOnlyTeam409 = ErrorCollection
-export type DeletePlanOnlyTeam204 = Schema.Json
-export const DeletePlanOnlyTeam204 = Schema.Json
 export type DeletePlanOnlyTeam401 = ErrorCollection
 export const DeletePlanOnlyTeam401 = ErrorCollection
 export type DeletePlanOnlyTeam403 = ErrorCollection
@@ -4698,8 +4550,6 @@ export type DeletePlanOnlyTeam404 = ErrorCollection
 export const DeletePlanOnlyTeam404 = ErrorCollection
 export type DeletePlanOnlyTeam409 = ErrorCollection
 export const DeletePlanOnlyTeam409 = ErrorCollection
-export type TrashPlan204 = Schema.Json
-export const TrashPlan204 = Schema.Json
 export type TrashPlan401 = ErrorCollection
 export const TrashPlan401 = ErrorCollection
 export type TrashPlan403 = ErrorCollection
@@ -4724,8 +4574,6 @@ export type CreatePriority403 = ErrorCollection
 export const CreatePriority403 = ErrorCollection
 export type SetDefaultPriorityRequestJson = SetDefaultPriorityRequest
 export const SetDefaultPriorityRequestJson = SetDefaultPriorityRequest
-export type SetDefaultPriority204 = Schema.Json
-export const SetDefaultPriority204 = Schema.Json
 export type SetDefaultPriority400 = ErrorCollection
 export const SetDefaultPriority400 = ErrorCollection
 export type SetDefaultPriority401 = ErrorCollection
@@ -4736,8 +4584,6 @@ export type SetDefaultPriority404 = ErrorCollection
 export const SetDefaultPriority404 = ErrorCollection
 export type MovePrioritiesRequestJson = ReorderIssuePriorities
 export const MovePrioritiesRequestJson = ReorderIssuePriorities
-export type MovePriorities204 = Schema.Json
-export const MovePriorities204 = Schema.Json
 export type MovePriorities400 = ErrorCollection
 export const MovePriorities400 = ErrorCollection
 export type MovePriorities401 = ErrorCollection
@@ -4760,8 +4606,6 @@ export type GetPriority404 = Schema.Json
 export const GetPriority404 = Schema.Json
 export type UpdatePriorityRequestJson = UpdatePriorityDetails
 export const UpdatePriorityRequestJson = UpdatePriorityDetails
-export type UpdatePriority204 = Schema.Json
-export const UpdatePriority204 = Schema.Json
 export type UpdatePriority400 = ErrorCollection
 export const UpdatePriority400 = ErrorCollection
 export type UpdatePriority401 = ErrorCollection
@@ -4832,8 +4676,6 @@ export type UpdatePriorityScheme403 = Schema.Json
 export const UpdatePriorityScheme403 = Schema.Json
 export type UpdatePriorityScheme409 = Schema.Json
 export const UpdatePriorityScheme409 = Schema.Json
-export type DeletePriorityScheme204 = Schema.Json
-export const DeletePriorityScheme204 = Schema.Json
 export type DeletePriorityScheme400 = Schema.Json
 export const DeletePriorityScheme400 = Schema.Json
 export type DeletePriorityScheme401 = Schema.Json
@@ -4956,8 +4798,6 @@ export type DeleteProject401 = Schema.Json
 export const DeleteProject401 = Schema.Json
 export type DeleteProject404 = Schema.Json
 export const DeleteProject404 = Schema.Json
-export type ArchiveProject204 = Schema.Json
-export const ArchiveProject204 = Schema.Json
 export type ArchiveProject400 = Schema.Json
 export const ArchiveProject400 = Schema.Json
 export type ArchiveProject401 = Schema.Json
@@ -4968,8 +4808,6 @@ export type ArchiveProject404 = Schema.Json
 export const ArchiveProject404 = Schema.Json
 export type UpdateProjectAvatarRequestJson = Avatar
 export const UpdateProjectAvatarRequestJson = Avatar
-export type UpdateProjectAvatar204 = Schema.Json
-export const UpdateProjectAvatar204 = Schema.Json
 export type UpdateProjectAvatar401 = Schema.Json
 export const UpdateProjectAvatar401 = Schema.Json
 export type UpdateProjectAvatar403 = Schema.Json
@@ -5014,16 +4852,12 @@ export type GetDefaultProjectClassification404 = Schema.Json
 export const GetDefaultProjectClassification404 = Schema.Json
 export type UpdateDefaultProjectClassificationRequestJson = UpdateDefaultProjectClassificationBean
 export const UpdateDefaultProjectClassificationRequestJson = UpdateDefaultProjectClassificationBean
-export type UpdateDefaultProjectClassification204 = Schema.Json
-export const UpdateDefaultProjectClassification204 = Schema.Json
 export type UpdateDefaultProjectClassification400 = Schema.Json
 export const UpdateDefaultProjectClassification400 = Schema.Json
 export type UpdateDefaultProjectClassification401 = Schema.Json
 export const UpdateDefaultProjectClassification401 = Schema.Json
 export type UpdateDefaultProjectClassification404 = Schema.Json
 export const UpdateDefaultProjectClassification404 = Schema.Json
-export type RemoveDefaultProjectClassification204 = Schema.Json
-export const RemoveDefaultProjectClassification204 = Schema.Json
 export type RemoveDefaultProjectClassification400 = Schema.Json
 export const RemoveDefaultProjectClassification400 = Schema.Json
 export type RemoveDefaultProjectClassification401 = Schema.Json
@@ -5204,8 +5038,6 @@ export type GetProjectEmail404 = Schema.Json
 export const GetProjectEmail404 = Schema.Json
 export type UpdateProjectEmailRequestJson = ProjectEmailAddress
 export const UpdateProjectEmailRequestJson = ProjectEmailAddress
-export type UpdateProjectEmail204 = Schema.Json
-export const UpdateProjectEmail204 = Schema.Json
 export type UpdateProjectEmail400 = Schema.Json
 export const UpdateProjectEmail400 = Schema.Json
 export type UpdateProjectEmail401 = Schema.Json
@@ -5374,8 +5206,6 @@ export type CreateResolution403 = ErrorCollection
 export const CreateResolution403 = ErrorCollection
 export type SetDefaultResolutionRequestJson = SetDefaultResolutionRequest
 export const SetDefaultResolutionRequestJson = SetDefaultResolutionRequest
-export type SetDefaultResolution204 = Schema.Json
-export const SetDefaultResolution204 = Schema.Json
 export type SetDefaultResolution400 = ErrorCollection
 export const SetDefaultResolution400 = ErrorCollection
 export type SetDefaultResolution401 = ErrorCollection
@@ -5386,8 +5216,6 @@ export type SetDefaultResolution404 = ErrorCollection
 export const SetDefaultResolution404 = ErrorCollection
 export type MoveResolutionsRequestJson = ReorderIssueResolutionsRequest
 export const MoveResolutionsRequestJson = ReorderIssueResolutionsRequest
-export type MoveResolutions204 = Schema.Json
-export const MoveResolutions204 = Schema.Json
 export type MoveResolutions400 = ErrorCollection
 export const MoveResolutions400 = ErrorCollection
 export type MoveResolutions401 = ErrorCollection
@@ -5410,8 +5238,6 @@ export type GetResolution404 = Schema.Json
 export const GetResolution404 = Schema.Json
 export type UpdateResolutionRequestJson = UpdateResolutionDetails
 export const UpdateResolutionRequestJson = UpdateResolutionDetails
-export type UpdateResolution204 = Schema.Json
-export const UpdateResolution204 = Schema.Json
 export type UpdateResolution400 = ErrorCollection
 export const UpdateResolution400 = ErrorCollection
 export type UpdateResolution401 = ErrorCollection
@@ -5654,8 +5480,6 @@ export type RemoveScreenTabField404 = Schema.Json
 export const RemoveScreenTabField404 = Schema.Json
 export type MoveScreenTabFieldRequestJson = MoveFieldBean
 export const MoveScreenTabFieldRequestJson = MoveFieldBean
-export type MoveScreenTabField204 = Schema.Json
-export const MoveScreenTabField204 = Schema.Json
 export type MoveScreenTabField400 = Schema.Json
 export const MoveScreenTabField400 = Schema.Json
 export type MoveScreenTabField401 = Schema.Json
@@ -5664,8 +5488,6 @@ export type MoveScreenTabField403 = Schema.Json
 export const MoveScreenTabField403 = Schema.Json
 export type MoveScreenTabField404 = Schema.Json
 export const MoveScreenTabField404 = Schema.Json
-export type MoveScreenTab204 = Schema.Json
-export const MoveScreenTab204 = Schema.Json
 export type MoveScreenTab400 = Schema.Json
 export const MoveScreenTab400 = Schema.Json
 export type MoveScreenTab401 = Schema.Json
@@ -5690,8 +5512,6 @@ export type CreateScreenScheme401 = Schema.Json
 export const CreateScreenScheme401 = Schema.Json
 export type UpdateScreenSchemeRequestJson = UpdateScreenSchemeDetails
 export const UpdateScreenSchemeRequestJson = UpdateScreenSchemeDetails
-export type UpdateScreenScheme204 = Schema.Json
-export const UpdateScreenScheme204 = Schema.Json
 export type UpdateScreenScheme401 = Schema.Json
 export const UpdateScreenScheme401 = Schema.Json
 export type DeleteScreenScheme401 = Schema.Json
@@ -5792,8 +5612,6 @@ export type GetStatusesById401 = Schema.Json
 export const GetStatusesById401 = Schema.Json
 export type UpdateStatusesRequestJson = StatusUpdateRequest
 export const UpdateStatusesRequestJson = StatusUpdateRequest
-export type UpdateStatuses204 = Schema.Json
-export const UpdateStatuses204 = Schema.Json
 export type UpdateStatuses401 = Schema.Json
 export const UpdateStatuses401 = Schema.Json
 export type UpdateStatuses409 = Schema.Json
@@ -5808,8 +5626,6 @@ export type CreateStatuses409 = Schema.Json
 export const CreateStatuses409 = Schema.Json
 export type DeleteStatusesByIdParams = { readonly "id": ReadonlyArray<string> }
 export const DeleteStatusesByIdParams = Schema.Struct({ "id": Schema.Array(Schema.String) })
-export type DeleteStatusesById204 = Schema.Json
-export const DeleteStatusesById204 = Schema.Json
 export type DeleteStatusesById401 = Schema.Json
 export const DeleteStatusesById401 = Schema.Json
 export type GetStatusesByNameParams = { readonly "name": ReadonlyArray<string>, readonly "projectId"?: string }
@@ -5894,8 +5710,6 @@ export type CreateUiModification404 = DetailedErrorCollection
 export const CreateUiModification404 = DetailedErrorCollection
 export type UpdateUiModificationRequestJson = UpdateUiModificationDetails
 export const UpdateUiModificationRequestJson = UpdateUiModificationDetails
-export type UpdateUiModification204 = Schema.Json
-export const UpdateUiModification204 = Schema.Json
 export type UpdateUiModification400 = Schema.Json
 export const UpdateUiModification400 = Schema.Json
 export type UpdateUiModification401 = Schema.Json
@@ -5904,8 +5718,6 @@ export type UpdateUiModification403 = Schema.Json
 export const UpdateUiModification403 = Schema.Json
 export type UpdateUiModification404 = DetailedErrorCollection
 export const UpdateUiModification404 = DetailedErrorCollection
-export type DeleteUiModification204 = Schema.Json
-export const DeleteUiModification204 = Schema.Json
 export type DeleteUiModification401 = Schema.Json
 export const DeleteUiModification401 = Schema.Json
 export type DeleteUiModification403 = Schema.Json
@@ -6282,8 +6094,6 @@ export type DeleteVersion401 = Schema.Json
 export const DeleteVersion401 = Schema.Json
 export type DeleteVersion404 = Schema.Json
 export const DeleteVersion404 = Schema.Json
-export type MergeVersions204 = Schema.Json
-export const MergeVersions204 = Schema.Json
 export type MergeVersions400 = Schema.Json
 export const MergeVersions400 = Schema.Json
 export type MergeVersions401 = Schema.Json
@@ -6340,8 +6150,6 @@ export type CreateRelatedWork404 = Schema.Json
 export const CreateRelatedWork404 = Schema.Json
 export type DeleteAndReplaceVersionRequestJson = DeleteAndReplaceVersionBean
 export const DeleteAndReplaceVersionRequestJson = DeleteAndReplaceVersionBean
-export type DeleteAndReplaceVersion204 = Schema.Json
-export const DeleteAndReplaceVersion204 = Schema.Json
 export type DeleteAndReplaceVersion400 = Schema.Json
 export const DeleteAndReplaceVersion400 = Schema.Json
 export type DeleteAndReplaceVersion401 = Schema.Json
@@ -6580,8 +6388,6 @@ export type GetWorkflowSchemeProjectAssociations401 = Schema.Json
 export const GetWorkflowSchemeProjectAssociations401 = Schema.Json
 export type AssignSchemeToProjectRequestJson = WorkflowSchemeProjectAssociation
 export const AssignSchemeToProjectRequestJson = WorkflowSchemeProjectAssociation
-export type AssignSchemeToProject204 = Schema.Json
-export const AssignSchemeToProject204 = Schema.Json
 export type AssignSchemeToProject401 = Schema.Json
 export const AssignSchemeToProject401 = Schema.Json
 export type SwitchWorkflowSchemeForProjectRequestJson = WorkflowSchemeProjectSwitchBean
@@ -6642,8 +6448,6 @@ export type UpdateWorkflowScheme403 = Schema.Json
 export const UpdateWorkflowScheme403 = Schema.Json
 export type UpdateWorkflowScheme404 = Schema.Json
 export const UpdateWorkflowScheme404 = Schema.Json
-export type DeleteWorkflowScheme204 = Schema.Json
-export const DeleteWorkflowScheme204 = Schema.Json
 export type DeleteWorkflowScheme400 = Schema.Json
 export const DeleteWorkflowScheme400 = Schema.Json
 export type DeleteWorkflowScheme401 = Schema.Json
@@ -7139,10 +6943,10 @@ export const make = (
     "setBanner": (options) => HttpClientRequest.put(`/rest/api/3/announcementBanner`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetBanner204),
       "400": decodeError("SetBanner400", SetBanner400),
       "401": decodeError("SetBanner401", SetBanner401),
       "403": decodeError("SetBanner403", SetBanner403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7162,10 +6966,10 @@ export const make = (
     HttpClientRequest.setUrlParams({ "generateChangelog": options.params?.["generateChangelog"] as any, "generateAppEvents": options.params?.["generateAppEvents"] as any }),
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateMultipleCustomFieldValues204),
       "400": decodeError("UpdateMultipleCustomFieldValues400", UpdateMultipleCustomFieldValues400),
       "403": decodeError("UpdateMultipleCustomFieldValues403", UpdateMultipleCustomFieldValues403),
       "404": decodeError("UpdateMultipleCustomFieldValues404", UpdateMultipleCustomFieldValues404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7195,10 +6999,10 @@ export const make = (
     HttpClientRequest.setUrlParams({ "generateChangelog": options.params?.["generateChangelog"] as any, "generateAppEvents": options.params?.["generateAppEvents"] as any }),
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateCustomFieldValue204),
       "400": decodeError("UpdateCustomFieldValue400", UpdateCustomFieldValue400),
       "403": decodeError("UpdateCustomFieldValue403", UpdateCustomFieldValue403),
       "404": decodeError("UpdateCustomFieldValue404", UpdateCustomFieldValue404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7571,11 +7375,11 @@ export const make = (
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "200": decodeSuccess(UpdateFieldsAssociatedWithSchemes200),
-      "204": decodeSuccess(UpdateFieldsAssociatedWithSchemes204),
       "207": decodeSuccess(UpdateFieldsAssociatedWithSchemes207),
       "400": decodeError("UpdateFieldsAssociatedWithSchemes400", UpdateFieldsAssociatedWithSchemes400),
       "401": decodeError("UpdateFieldsAssociatedWithSchemes401", UpdateFieldsAssociatedWithSchemes401),
       "403": decodeError("UpdateFieldsAssociatedWithSchemes403", UpdateFieldsAssociatedWithSchemes403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7583,11 +7387,11 @@ export const make = (
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "200": decodeSuccess(RemoveFieldsAssociatedWithSchemes200),
-      "204": decodeSuccess(RemoveFieldsAssociatedWithSchemes204),
       "207": decodeSuccess(RemoveFieldsAssociatedWithSchemes207),
       "400": decodeError("RemoveFieldsAssociatedWithSchemes400", RemoveFieldsAssociatedWithSchemes400),
       "401": decodeError("RemoveFieldsAssociatedWithSchemes401", RemoveFieldsAssociatedWithSchemes401),
       "403": decodeError("RemoveFieldsAssociatedWithSchemes403", RemoveFieldsAssociatedWithSchemes403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7595,23 +7399,23 @@ export const make = (
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "200": decodeSuccess(UpdateFieldAssociationSchemeItemParameters200),
-      "204": decodeSuccess(UpdateFieldAssociationSchemeItemParameters204),
       "207": decodeSuccess(UpdateFieldAssociationSchemeItemParameters207),
       "400": decodeError("UpdateFieldAssociationSchemeItemParameters400", UpdateFieldAssociationSchemeItemParameters400),
       "401": decodeError("UpdateFieldAssociationSchemeItemParameters401", UpdateFieldAssociationSchemeItemParameters401),
       "403": decodeError("UpdateFieldAssociationSchemeItemParameters403", UpdateFieldAssociationSchemeItemParameters403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeFieldAssociationSchemeItemParameters": (options) => HttpClientRequest.delete(`/rest/api/3/config/fieldschemes/fields/parameters`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "204": decodeSuccess(RemoveFieldAssociationSchemeItemParameters204),
-      "207": decodeSuccess(RemoveFieldAssociationSchemeItemParameters207),
+      "2xx": decodeSuccess(RemoveFieldAssociationSchemeItemParameters207),
       "400": decodeError("RemoveFieldAssociationSchemeItemParameters400", RemoveFieldAssociationSchemeItemParameters400),
       "401": decodeError("RemoveFieldAssociationSchemeItemParameters401", RemoveFieldAssociationSchemeItemParameters401),
       "403": decodeError("RemoveFieldAssociationSchemeItemParameters403", RemoveFieldAssociationSchemeItemParameters403),
       "200": () => Effect.void,
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7630,11 +7434,11 @@ export const make = (
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
       "200": decodeSuccess(AssociateProjectsToFieldAssociationSchemes200),
-      "204": decodeSuccess(AssociateProjectsToFieldAssociationSchemes204),
       "207": decodeSuccess(AssociateProjectsToFieldAssociationSchemes207),
       "400": decodeError("AssociateProjectsToFieldAssociationSchemes400", AssociateProjectsToFieldAssociationSchemes400),
       "401": decodeError("AssociateProjectsToFieldAssociationSchemes401", AssociateProjectsToFieldAssociationSchemes401),
       "403": decodeError("AssociateProjectsToFieldAssociationSchemes403", AssociateProjectsToFieldAssociationSchemes403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7719,20 +7523,20 @@ export const make = (
   ),
     "getSelectedTimeTrackingImplementation": (options) => HttpClientRequest.get(`/rest/api/3/configuration/timetracking`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "200": decodeSuccess(GetSelectedTimeTrackingImplementation200),
-      "204": decodeSuccess(GetSelectedTimeTrackingImplementation204),
+      "2xx": decodeSuccess(GetSelectedTimeTrackingImplementation200),
       "401": decodeError("GetSelectedTimeTrackingImplementation401", GetSelectedTimeTrackingImplementation401),
       "403": decodeError("GetSelectedTimeTrackingImplementation403", GetSelectedTimeTrackingImplementation403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "selectTimeTrackingImplementation": (options) => HttpClientRequest.put(`/rest/api/3/configuration/timetracking`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SelectTimeTrackingImplementation204),
       "400": decodeError("SelectTimeTrackingImplementation400", SelectTimeTrackingImplementation400),
       "401": decodeError("SelectTimeTrackingImplementation401", SelectTimeTrackingImplementation401),
       "403": decodeError("SelectTimeTrackingImplementation403", SelectTimeTrackingImplementation403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7837,18 +7641,18 @@ export const make = (
     "updateGadget": (dashboardId, gadgetId, options) => HttpClientRequest.put(`/rest/api/3/dashboard/${dashboardId}/gadget/${gadgetId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateGadget204),
       "400": decodeError("UpdateGadget400", UpdateGadget400),
       "401": decodeError("UpdateGadget401", UpdateGadget401),
       "404": decodeError("UpdateGadget404", UpdateGadget404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeGadget": (dashboardId, gadgetId, options) => HttpClientRequest.delete(`/rest/api/3/dashboard/${dashboardId}/gadget/${gadgetId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveGadget204),
       "401": decodeError("RemoveGadget401", RemoveGadget401),
       "404": decodeError("RemoveGadget404", RemoveGadget404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -7882,11 +7686,11 @@ export const make = (
   ),
     "deleteDashboardItemProperty": (dashboardId, itemId, propertyKey, options) => HttpClientRequest.delete(`/rest/api/3/dashboard/${dashboardId}/items/${itemId}/properties/${propertyKey}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteDashboardItemProperty204),
       "400": decodeError("DeleteDashboardItemProperty400", DeleteDashboardItemProperty400),
       "401": decodeError("DeleteDashboardItemProperty401", DeleteDashboardItemProperty401),
       "403": decodeError("DeleteDashboardItemProperty403", DeleteDashboardItemProperty403),
       "404": decodeError("DeleteDashboardItemProperty404", DeleteDashboardItemProperty404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8006,20 +7810,20 @@ export const make = (
     "createAssociations": (options) => HttpClientRequest.put(`/rest/api/3/field/association`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(CreateAssociations204),
       "400": decodeError("CreateAssociations400", CreateAssociations400),
       "401": decodeError("CreateAssociations401", CreateAssociations401),
       "404": decodeError("CreateAssociations404", CreateAssociations404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeAssociations": (options) => HttpClientRequest.delete(`/rest/api/3/field/association`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveAssociations204),
       "400": decodeError("RemoveAssociations400", RemoveAssociations400),
       "401": decodeError("RemoveAssociations401", RemoveAssociations401),
       "404": decodeError("RemoveAssociations404", RemoveAssociations404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8046,8 +7850,8 @@ export const make = (
     "updateCustomField": (fieldId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateCustomField204),
       "401": decodeError("UpdateCustomField401", UpdateCustomField401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8090,8 +7894,8 @@ export const make = (
     "setDefaultValues": (fieldId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}/context/defaultValue`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetDefaultValues204),
       "401": decodeError("SetDefaultValues401", SetDefaultValues401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8131,31 +7935,31 @@ export const make = (
     "updateCustomFieldContext": (fieldId, contextId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}/context/${contextId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateCustomFieldContext204),
       "401": decodeError("UpdateCustomFieldContext401", UpdateCustomFieldContext401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteCustomFieldContext": (fieldId, contextId, options) => HttpClientRequest.delete(`/rest/api/3/field/${fieldId}/context/${contextId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteCustomFieldContext204),
       "401": decodeError("DeleteCustomFieldContext401", DeleteCustomFieldContext401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "addIssueTypesToContext": (fieldId, contextId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}/context/${contextId}/issuetype`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddIssueTypesToContext204),
       "401": decodeError("AddIssueTypesToContext401", AddIssueTypesToContext401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeIssueTypesFromContext": (fieldId, contextId, options) => HttpClientRequest.post(`/rest/api/3/field/${fieldId}/context/${contextId}/issuetype/remove`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveIssueTypesFromContext204),
       "401": decodeError("RemoveIssueTypesFromContext401", RemoveIssueTypesFromContext401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8186,8 +7990,8 @@ export const make = (
     "reorderCustomFieldOptions": (fieldId, contextId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}/context/${contextId}/option/move`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(ReorderCustomFieldOptions204),
       "401": decodeError("ReorderCustomFieldOptions401", ReorderCustomFieldOptions401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8210,16 +8014,16 @@ export const make = (
     "assignProjectsToCustomFieldContext": (fieldId, contextId, options) => HttpClientRequest.put(`/rest/api/3/field/${fieldId}/context/${contextId}/project`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignProjectsToCustomFieldContext204),
       "401": decodeError("AssignProjectsToCustomFieldContext401", AssignProjectsToCustomFieldContext401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeCustomFieldContextFromProjects": (fieldId, contextId, options) => HttpClientRequest.post(`/rest/api/3/field/${fieldId}/context/${contextId}/project/remove`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveCustomFieldContextFromProjects204),
       "401": decodeError("RemoveCustomFieldContextFromProjects401", RemoveCustomFieldContextFromProjects401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8299,10 +8103,10 @@ export const make = (
   ),
     "deleteIssueFieldOption": (fieldKey, optionId, options) => HttpClientRequest.delete(`/rest/api/3/field/${fieldKey}/option/${optionId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteIssueFieldOption204),
       "403": decodeError("DeleteIssueFieldOption403", DeleteIssueFieldOption403),
       "404": decodeError("DeleteIssueFieldOption404", DeleteIssueFieldOption404),
       "409": decodeError("DeleteIssueFieldOption409", DeleteIssueFieldOption409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8368,21 +8172,21 @@ export const make = (
     "updateFieldConfiguration": (id, options) => HttpClientRequest.put(`/rest/api/3/fieldconfiguration/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateFieldConfiguration204),
       "400": decodeError("UpdateFieldConfiguration400", UpdateFieldConfiguration400),
       "401": decodeError("UpdateFieldConfiguration401", UpdateFieldConfiguration401),
       "403": decodeError("UpdateFieldConfiguration403", UpdateFieldConfiguration403),
       "404": decodeError("UpdateFieldConfiguration404", UpdateFieldConfiguration404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteFieldConfiguration": (id, options) => HttpClientRequest.delete(`/rest/api/3/fieldconfiguration/${id}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteFieldConfiguration204),
       "400": decodeError("DeleteFieldConfiguration400", DeleteFieldConfiguration400),
       "401": decodeError("DeleteFieldConfiguration401", DeleteFieldConfiguration401),
       "403": decodeError("DeleteFieldConfiguration403", DeleteFieldConfiguration403),
       "404": decodeError("DeleteFieldConfiguration404", DeleteFieldConfiguration404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8399,11 +8203,11 @@ export const make = (
     "updateFieldConfigurationItems": (id, options) => HttpClientRequest.put(`/rest/api/3/fieldconfiguration/${id}/fields`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateFieldConfigurationItems204),
       "400": decodeError("UpdateFieldConfigurationItems400", UpdateFieldConfigurationItems400),
       "401": decodeError("UpdateFieldConfigurationItems401", UpdateFieldConfigurationItems401),
       "403": decodeError("UpdateFieldConfigurationItems403", UpdateFieldConfigurationItems403),
       "404": decodeError("UpdateFieldConfigurationItems404", UpdateFieldConfigurationItems404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8449,48 +8253,48 @@ export const make = (
     "assignFieldConfigurationSchemeToProject": (options) => HttpClientRequest.put(`/rest/api/3/fieldconfigurationscheme/project`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignFieldConfigurationSchemeToProject204),
       "401": decodeError("AssignFieldConfigurationSchemeToProject401", AssignFieldConfigurationSchemeToProject401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateFieldConfigurationScheme": (id, options) => HttpClientRequest.put(`/rest/api/3/fieldconfigurationscheme/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateFieldConfigurationScheme204),
       "401": decodeError("UpdateFieldConfigurationScheme401", UpdateFieldConfigurationScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteFieldConfigurationScheme": (id, options) => HttpClientRequest.delete(`/rest/api/3/fieldconfigurationscheme/${id}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteFieldConfigurationScheme204),
       "400": decodeError("DeleteFieldConfigurationScheme400", DeleteFieldConfigurationScheme400),
       "401": decodeError("DeleteFieldConfigurationScheme401", DeleteFieldConfigurationScheme401),
       "403": decodeError("DeleteFieldConfigurationScheme403", DeleteFieldConfigurationScheme403),
       "404": decodeError("DeleteFieldConfigurationScheme404", DeleteFieldConfigurationScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "setFieldConfigurationSchemeMapping": (id, options) => HttpClientRequest.put(`/rest/api/3/fieldconfigurationscheme/${id}/mapping`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetFieldConfigurationSchemeMapping204),
       "400": decodeError("SetFieldConfigurationSchemeMapping400", SetFieldConfigurationSchemeMapping400),
       "401": decodeError("SetFieldConfigurationSchemeMapping401", SetFieldConfigurationSchemeMapping401),
       "403": decodeError("SetFieldConfigurationSchemeMapping403", SetFieldConfigurationSchemeMapping403),
       "404": decodeError("SetFieldConfigurationSchemeMapping404", SetFieldConfigurationSchemeMapping404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeIssueTypesFromGlobalFieldConfigurationScheme": (id, options) => HttpClientRequest.post(`/rest/api/3/fieldconfigurationscheme/${id}/mapping/delete`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveIssueTypesFromGlobalFieldConfigurationScheme204),
       "400": decodeError("RemoveIssueTypesFromGlobalFieldConfigurationScheme400", RemoveIssueTypesFromGlobalFieldConfigurationScheme400),
       "401": decodeError("RemoveIssueTypesFromGlobalFieldConfigurationScheme401", RemoveIssueTypesFromGlobalFieldConfigurationScheme401),
       "403": decodeError("RemoveIssueTypesFromGlobalFieldConfigurationScheme403", RemoveIssueTypesFromGlobalFieldConfigurationScheme403),
       "404": decodeError("RemoveIssueTypesFromGlobalFieldConfigurationScheme404", RemoveIssueTypesFromGlobalFieldConfigurationScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8617,10 +8421,10 @@ export const make = (
     "changeFilterOwner": (id, options) => HttpClientRequest.put(`/rest/api/3/filter/${id}/owner`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(ChangeFilterOwner204),
       "400": decodeError("ChangeFilterOwner400", ChangeFilterOwner400),
       "403": decodeError("ChangeFilterOwner403", ChangeFilterOwner403),
       "404": decodeError("ChangeFilterOwner404", ChangeFilterOwner404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8922,14 +8726,14 @@ export const make = (
     HttpClientRequest.setUrlParams({ "notifyUsers": options.params?.["notifyUsers"] as any, "overrideScreenSecurity": options.params?.["overrideScreenSecurity"] as any, "overrideEditableFlag": options.params?.["overrideEditableFlag"] as any, "returnIssue": options.params?.["returnIssue"] as any, "expand": options.params?.["expand"] as any }),
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "200": decodeSuccess(EditIssue200),
-      "204": decodeSuccess(EditIssue204),
+      "2xx": decodeSuccess(EditIssue200),
       "400": decodeError("EditIssue400", EditIssue400),
       "401": decodeError("EditIssue401", EditIssue401),
       "403": decodeError("EditIssue403", EditIssue403),
       "404": decodeError("EditIssue404", EditIssue404),
       "409": decodeError("EditIssue409", EditIssue409),
       "422": decodeError("EditIssue422", EditIssue422),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -8947,10 +8751,10 @@ export const make = (
     "assignIssue": (issueIdOrKey, options) => HttpClientRequest.put(`/rest/api/3/issue/${issueIdOrKey}/assignee`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignIssue204),
       "400": decodeError("AssignIssue400", AssignIssue400),
       "403": decodeError("AssignIssue403", AssignIssue403),
       "404": decodeError("AssignIssue404", AssignIssue404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9046,10 +8850,10 @@ export const make = (
     "notify": (issueIdOrKey, options) => HttpClientRequest.post(`/rest/api/3/issue/${issueIdOrKey}/notify`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(Notify204),
       "400": decodeError("Notify400", Notify400),
       "403": decodeError("Notify403", Notify403),
       "404": decodeError("Notify404", Notify404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9135,10 +8939,10 @@ export const make = (
     "updateRemoteIssueLink": (issueIdOrKey, linkId, options) => HttpClientRequest.put(`/rest/api/3/issue/${issueIdOrKey}/remotelink/${linkId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateRemoteIssueLink204),
       "401": decodeError("UpdateRemoteIssueLink401", UpdateRemoteIssueLink401),
       "403": decodeError("UpdateRemoteIssueLink403", UpdateRemoteIssueLink403),
       "404": decodeError("UpdateRemoteIssueLink404", UpdateRemoteIssueLink404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9164,13 +8968,13 @@ export const make = (
     "doTransition": (issueIdOrKey, options) => HttpClientRequest.post(`/rest/api/3/issue/${issueIdOrKey}/transitions`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DoTransition204),
       "400": decodeError("DoTransition400", DoTransition400),
       "401": decodeError("DoTransition401", DoTransition401),
       "404": decodeError("DoTransition404", DoTransition404),
       "409": decodeError("DoTransition409", DoTransition409),
       "413": decodeError("DoTransition413", DoTransition413),
       "422": decodeError("DoTransition422", DoTransition422),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9184,10 +8988,10 @@ export const make = (
   ),
     "addVote": (issueIdOrKey, options) => HttpClientRequest.post(`/rest/api/3/issue/${issueIdOrKey}/votes`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddVote204),
       "400": decodeError("AddVote400", AddVote400),
       "401": decodeError("AddVote401", AddVote401),
       "404": decodeError("AddVote404", AddVote404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9210,11 +9014,11 @@ export const make = (
     "addWatcher": (issueIdOrKey, options) => HttpClientRequest.post(`/rest/api/3/issue/${issueIdOrKey}/watchers`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddWatcher204),
       "400": decodeError("AddWatcher400", AddWatcher400),
       "401": decodeError("AddWatcher401", AddWatcher401),
       "403": decodeError("AddWatcher403", AddWatcher403),
       "404": decodeError("AddWatcher404", AddWatcher404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9458,11 +9262,11 @@ export const make = (
     "setDefaultLevels": (options) => HttpClientRequest.put(`/rest/api/3/issuesecurityschemes/level/default`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetDefaultLevels204),
       "400": decodeError("SetDefaultLevels400", SetDefaultLevels400),
       "401": decodeError("SetDefaultLevels401", SetDefaultLevels401),
       "403": decodeError("SetDefaultLevels403", SetDefaultLevels403),
       "404": decodeError("SetDefaultLevels404", SetDefaultLevels404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9516,11 +9320,11 @@ export const make = (
     "updateIssueSecurityScheme": (id, options) => HttpClientRequest.put(`/rest/api/3/issuesecurityschemes/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateIssueSecurityScheme204),
       "400": decodeError("UpdateIssueSecurityScheme400", UpdateIssueSecurityScheme400),
       "401": decodeError("UpdateIssueSecurityScheme401", UpdateIssueSecurityScheme401),
       "403": decodeError("UpdateIssueSecurityScheme403", UpdateIssueSecurityScheme403),
       "404": decodeError("UpdateIssueSecurityScheme404", UpdateIssueSecurityScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9537,33 +9341,33 @@ export const make = (
   ),
     "deleteSecurityScheme": (schemeId, options) => HttpClientRequest.delete(`/rest/api/3/issuesecurityschemes/${schemeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteSecurityScheme204),
       "400": decodeError("DeleteSecurityScheme400", DeleteSecurityScheme400),
       "401": decodeError("DeleteSecurityScheme401", DeleteSecurityScheme401),
       "403": decodeError("DeleteSecurityScheme403", DeleteSecurityScheme403),
       "404": decodeError("DeleteSecurityScheme404", DeleteSecurityScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "addSecurityLevel": (schemeId, options) => HttpClientRequest.put(`/rest/api/3/issuesecurityschemes/${schemeId}/level`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddSecurityLevel204),
       "400": decodeError("AddSecurityLevel400", AddSecurityLevel400),
       "401": decodeError("AddSecurityLevel401", AddSecurityLevel401),
       "403": decodeError("AddSecurityLevel403", AddSecurityLevel403),
       "404": decodeError("AddSecurityLevel404", AddSecurityLevel404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateSecurityLevel": (schemeId, levelId, options) => HttpClientRequest.put(`/rest/api/3/issuesecurityschemes/${schemeId}/level/${levelId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateSecurityLevel204),
       "400": decodeError("UpdateSecurityLevel400", UpdateSecurityLevel400),
       "401": decodeError("UpdateSecurityLevel401", UpdateSecurityLevel401),
       "403": decodeError("UpdateSecurityLevel403", UpdateSecurityLevel403),
       "404": decodeError("UpdateSecurityLevel404", UpdateSecurityLevel404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9582,21 +9386,21 @@ export const make = (
     "addSecurityLevelMembers": (schemeId, levelId, options) => HttpClientRequest.put(`/rest/api/3/issuesecurityschemes/${schemeId}/level/${levelId}/member`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddSecurityLevelMembers204),
       "400": decodeError("AddSecurityLevelMembers400", AddSecurityLevelMembers400),
       "401": decodeError("AddSecurityLevelMembers401", AddSecurityLevelMembers401),
       "403": decodeError("AddSecurityLevelMembers403", AddSecurityLevelMembers403),
       "404": decodeError("AddSecurityLevelMembers404", AddSecurityLevelMembers404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeMemberFromSecurityLevel": (schemeId, levelId, memberId, options) => HttpClientRequest.delete(`/rest/api/3/issuesecurityschemes/${schemeId}/level/${levelId}/member/${memberId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveMemberFromSecurityLevel204),
       "400": decodeError("RemoveMemberFromSecurityLevel400", RemoveMemberFromSecurityLevel400),
       "401": decodeError("RemoveMemberFromSecurityLevel401", RemoveMemberFromSecurityLevel401),
       "403": decodeError("RemoveMemberFromSecurityLevel403", RemoveMemberFromSecurityLevel403),
       "404": decodeError("RemoveMemberFromSecurityLevel404", RemoveMemberFromSecurityLevel404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9757,46 +9561,46 @@ export const make = (
     "assignIssueTypeSchemeToProject": (options) => HttpClientRequest.put(`/rest/api/3/issuetypescheme/project`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignIssueTypeSchemeToProject204),
       "401": decodeError("AssignIssueTypeSchemeToProject401", AssignIssueTypeSchemeToProject401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateIssueTypeScheme": (issueTypeSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescheme/${issueTypeSchemeId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateIssueTypeScheme204),
       "401": decodeError("UpdateIssueTypeScheme401", UpdateIssueTypeScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteIssueTypeScheme": (issueTypeSchemeId, options) => HttpClientRequest.delete(`/rest/api/3/issuetypescheme/${issueTypeSchemeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteIssueTypeScheme204),
       "401": decodeError("DeleteIssueTypeScheme401", DeleteIssueTypeScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "addIssueTypesToIssueTypeScheme": (issueTypeSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescheme/${issueTypeSchemeId}/issuetype`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddIssueTypesToIssueTypeScheme204),
       "401": decodeError("AddIssueTypesToIssueTypeScheme401", AddIssueTypesToIssueTypeScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "reorderIssueTypesInIssueTypeScheme": (issueTypeSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescheme/${issueTypeSchemeId}/issuetype/move`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(ReorderIssueTypesInIssueTypeScheme204),
       "401": decodeError("ReorderIssueTypesInIssueTypeScheme401", ReorderIssueTypesInIssueTypeScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeIssueTypeFromIssueTypeScheme": (issueTypeSchemeId, issueTypeId, options) => HttpClientRequest.delete(`/rest/api/3/issuetypescheme/${issueTypeSchemeId}/issuetype/${issueTypeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveIssueTypeFromIssueTypeScheme204),
       "401": decodeError("RemoveIssueTypeFromIssueTypeScheme401", RemoveIssueTypeFromIssueTypeScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9841,49 +9645,49 @@ export const make = (
     "assignIssueTypeScreenSchemeToProject": (options) => HttpClientRequest.put(`/rest/api/3/issuetypescreenscheme/project`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignIssueTypeScreenSchemeToProject204),
       "401": decodeError("AssignIssueTypeScreenSchemeToProject401", AssignIssueTypeScreenSchemeToProject401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateIssueTypeScreenScheme": (issueTypeScreenSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescreenscheme/${issueTypeScreenSchemeId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateIssueTypeScreenScheme204),
       "401": decodeError("UpdateIssueTypeScreenScheme401", UpdateIssueTypeScreenScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteIssueTypeScreenScheme": (issueTypeScreenSchemeId, options) => HttpClientRequest.delete(`/rest/api/3/issuetypescreenscheme/${issueTypeScreenSchemeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteIssueTypeScreenScheme204),
       "401": decodeError("DeleteIssueTypeScreenScheme401", DeleteIssueTypeScreenScheme401),
       "403": decodeError("DeleteIssueTypeScreenScheme403", DeleteIssueTypeScreenScheme403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "appendMappingsForIssueTypeScreenScheme": (issueTypeScreenSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescreenscheme/${issueTypeScreenSchemeId}/mapping`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AppendMappingsForIssueTypeScreenScheme204),
       "401": decodeError("AppendMappingsForIssueTypeScreenScheme401", AppendMappingsForIssueTypeScreenScheme401),
       "403": decodeError("AppendMappingsForIssueTypeScreenScheme403", AppendMappingsForIssueTypeScreenScheme403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateDefaultScreenScheme": (issueTypeScreenSchemeId, options) => HttpClientRequest.put(`/rest/api/3/issuetypescreenscheme/${issueTypeScreenSchemeId}/mapping/default`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateDefaultScreenScheme204),
       "401": decodeError("UpdateDefaultScreenScheme401", UpdateDefaultScreenScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeMappingsFromIssueTypeScreenScheme": (issueTypeScreenSchemeId, options) => HttpClientRequest.post(`/rest/api/3/issuetypescreenscheme/${issueTypeScreenSchemeId}/mapping/remove`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveMappingsFromIssueTypeScreenScheme204),
       "401": decodeError("RemoveMappingsFromIssueTypeScreenScheme401", RemoveMappingsFromIssueTypeScreenScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -9937,11 +9741,11 @@ export const make = (
     HttpClientRequest.setUrlParams({ "skipNotFoundPrecomputations": options.params?.["skipNotFoundPrecomputations"] as any }),
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "200": decodeSuccess(UpdatePrecomputations200),
-      "204": decodeSuccess(UpdatePrecomputations204),
+      "2xx": decodeSuccess(UpdatePrecomputations200),
       "400": decodeError("UpdatePrecomputations400", UpdatePrecomputations400),
       "403": decodeError("UpdatePrecomputations403", UpdatePrecomputations403),
       "404": decodeError("UpdatePrecomputations404", UpdatePrecomputations404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10040,9 +9844,9 @@ export const make = (
     HttpClientRequest.setUrlParams({ "key": options.params["key"] as any }),
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetPreference204),
       "401": decodeError("SetPreference401", SetPreference401),
       "404": decodeError("SetPreference404", SetPreference404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10065,9 +9869,9 @@ export const make = (
     "setLocale": (options) => HttpClientRequest.put(`/rest/api/3/mypreferences/locale`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetLocale204),
       "400": decodeError("SetLocale400", SetLocale400),
       "401": decodeError("SetLocale401", SetLocale401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10119,42 +9923,42 @@ export const make = (
     "updateNotificationScheme": (id, options) => HttpClientRequest.put(`/rest/api/3/notificationscheme/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateNotificationScheme204),
       "400": decodeError("UpdateNotificationScheme400", UpdateNotificationScheme400),
       "401": decodeError("UpdateNotificationScheme401", UpdateNotificationScheme401),
       "403": decodeError("UpdateNotificationScheme403", UpdateNotificationScheme403),
       "404": decodeError("UpdateNotificationScheme404", UpdateNotificationScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "addNotifications": (id, options) => HttpClientRequest.put(`/rest/api/3/notificationscheme/${id}/notification`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddNotifications204),
       "400": decodeError("AddNotifications400", AddNotifications400),
       "401": decodeError("AddNotifications401", AddNotifications401),
       "403": decodeError("AddNotifications403", AddNotifications403),
       "404": decodeError("AddNotifications404", AddNotifications404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteNotificationScheme": (notificationSchemeId, options) => HttpClientRequest.delete(`/rest/api/3/notificationscheme/${notificationSchemeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteNotificationScheme204),
       "400": decodeError("DeleteNotificationScheme400", DeleteNotificationScheme400),
       "401": decodeError("DeleteNotificationScheme401", DeleteNotificationScheme401),
       "403": decodeError("DeleteNotificationScheme403", DeleteNotificationScheme403),
       "404": decodeError("DeleteNotificationScheme404", DeleteNotificationScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeNotificationFromNotificationScheme": (notificationSchemeId, notificationId, options) => HttpClientRequest.delete(`/rest/api/3/notificationscheme/${notificationSchemeId}/notification/${notificationId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveNotificationFromNotificationScheme204),
       "400": decodeError("RemoveNotificationFromNotificationScheme400", RemoveNotificationFromNotificationScheme400),
       "401": decodeError("RemoveNotificationFromNotificationScheme401", RemoveNotificationFromNotificationScheme401),
       "403": decodeError("RemoveNotificationFromNotificationScheme403", RemoveNotificationFromNotificationScheme403),
       "404": decodeError("RemoveNotificationFromNotificationScheme404", RemoveNotificationFromNotificationScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10303,22 +10107,22 @@ export const make = (
     "updatePlan": (planId, options) => HttpClientRequest.put(`/rest/api/3/plans/plan/${planId}`).pipe(
     HttpClientRequest.setUrlParams({ "useGroupId": options?.params?.["useGroupId"] as any }),
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdatePlan204),
       "400": decodeError("UpdatePlan400", UpdatePlan400),
       "401": decodeError("UpdatePlan401", UpdatePlan401),
       "403": decodeError("UpdatePlan403", UpdatePlan403),
       "404": decodeError("UpdatePlan404", UpdatePlan404),
       "409": decodeError("UpdatePlan409", UpdatePlan409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "archivePlan": (planId, options) => HttpClientRequest.put(`/rest/api/3/plans/plan/${planId}/archive`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(ArchivePlan204),
       "401": decodeError("ArchivePlan401", ArchivePlan401),
       "403": decodeError("ArchivePlan403", ArchivePlan403),
       "404": decodeError("ArchivePlan404", ArchivePlan404),
       "409": decodeError("ArchivePlan409", ArchivePlan409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10347,12 +10151,12 @@ export const make = (
     "addAtlassianTeam": (planId, options) => HttpClientRequest.post(`/rest/api/3/plans/plan/${planId}/team/atlassian`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AddAtlassianTeam204),
       "400": decodeError("AddAtlassianTeam400", AddAtlassianTeam400),
       "401": decodeError("AddAtlassianTeam401", AddAtlassianTeam401),
       "403": decodeError("AddAtlassianTeam403", AddAtlassianTeam403),
       "404": decodeError("AddAtlassianTeam404", AddAtlassianTeam404),
       "409": decodeError("AddAtlassianTeam409", AddAtlassianTeam409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10368,22 +10172,22 @@ export const make = (
   ),
     "updateAtlassianTeam": (planId, atlassianTeamId, options) => HttpClientRequest.put(`/rest/api/3/plans/plan/${planId}/team/atlassian/${atlassianTeamId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateAtlassianTeam204),
       "400": decodeError("UpdateAtlassianTeam400", UpdateAtlassianTeam400),
       "401": decodeError("UpdateAtlassianTeam401", UpdateAtlassianTeam401),
       "403": decodeError("UpdateAtlassianTeam403", UpdateAtlassianTeam403),
       "404": decodeError("UpdateAtlassianTeam404", UpdateAtlassianTeam404),
       "409": decodeError("UpdateAtlassianTeam409", UpdateAtlassianTeam409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeAtlassianTeam": (planId, atlassianTeamId, options) => HttpClientRequest.delete(`/rest/api/3/plans/plan/${planId}/team/atlassian/${atlassianTeamId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveAtlassianTeam204),
       "401": decodeError("RemoveAtlassianTeam401", RemoveAtlassianTeam401),
       "403": decodeError("RemoveAtlassianTeam403", RemoveAtlassianTeam403),
       "404": decodeError("RemoveAtlassianTeam404", RemoveAtlassianTeam404),
       "409": decodeError("RemoveAtlassianTeam409", RemoveAtlassianTeam409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10411,32 +10215,32 @@ export const make = (
   ),
     "updatePlanOnlyTeam": (planId, planOnlyTeamId, options) => HttpClientRequest.put(`/rest/api/3/plans/plan/${planId}/team/planonly/${planOnlyTeamId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdatePlanOnlyTeam204),
       "400": decodeError("UpdatePlanOnlyTeam400", UpdatePlanOnlyTeam400),
       "401": decodeError("UpdatePlanOnlyTeam401", UpdatePlanOnlyTeam401),
       "403": decodeError("UpdatePlanOnlyTeam403", UpdatePlanOnlyTeam403),
       "404": decodeError("UpdatePlanOnlyTeam404", UpdatePlanOnlyTeam404),
       "409": decodeError("UpdatePlanOnlyTeam409", UpdatePlanOnlyTeam409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deletePlanOnlyTeam": (planId, planOnlyTeamId, options) => HttpClientRequest.delete(`/rest/api/3/plans/plan/${planId}/team/planonly/${planOnlyTeamId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeletePlanOnlyTeam204),
       "401": decodeError("DeletePlanOnlyTeam401", DeletePlanOnlyTeam401),
       "403": decodeError("DeletePlanOnlyTeam403", DeletePlanOnlyTeam403),
       "404": decodeError("DeletePlanOnlyTeam404", DeletePlanOnlyTeam404),
       "409": decodeError("DeletePlanOnlyTeam409", DeletePlanOnlyTeam409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "trashPlan": (planId, options) => HttpClientRequest.put(`/rest/api/3/plans/plan/${planId}/trash`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(TrashPlan204),
       "401": decodeError("TrashPlan401", TrashPlan401),
       "403": decodeError("TrashPlan403", TrashPlan403),
       "404": decodeError("TrashPlan404", TrashPlan404),
       "409": decodeError("TrashPlan409", TrashPlan409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10460,22 +10264,22 @@ export const make = (
     "setDefaultPriority": (options) => HttpClientRequest.put(`/rest/api/3/priority/default`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetDefaultPriority204),
       "400": decodeError("SetDefaultPriority400", SetDefaultPriority400),
       "401": decodeError("SetDefaultPriority401", SetDefaultPriority401),
       "403": decodeError("SetDefaultPriority403", SetDefaultPriority403),
       "404": decodeError("SetDefaultPriority404", SetDefaultPriority404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "movePriorities": (options) => HttpClientRequest.put(`/rest/api/3/priority/move`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(MovePriorities204),
       "400": decodeError("MovePriorities400", MovePriorities400),
       "401": decodeError("MovePriorities401", MovePriorities401),
       "403": decodeError("MovePriorities403", MovePriorities403),
       "404": decodeError("MovePriorities404", MovePriorities404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10498,11 +10302,11 @@ export const make = (
     "updatePriority": (id, options) => HttpClientRequest.put(`/rest/api/3/priority/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdatePriority204),
       "400": decodeError("UpdatePriority400", UpdatePriority400),
       "401": decodeError("UpdatePriority401", UpdatePriority401),
       "403": decodeError("UpdatePriority403", UpdatePriority403),
       "404": decodeError("UpdatePriority404", UpdatePriority404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10569,10 +10373,10 @@ export const make = (
   ),
     "deletePriorityScheme": (schemeId, options) => HttpClientRequest.delete(`/rest/api/3/priorityscheme/${schemeId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeletePriorityScheme204),
       "400": decodeError("DeletePriorityScheme400", DeletePriorityScheme400),
       "401": decodeError("DeletePriorityScheme401", DeletePriorityScheme401),
       "403": decodeError("DeletePriorityScheme403", DeletePriorityScheme403),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10727,21 +10531,21 @@ export const make = (
   ),
     "archiveProject": (projectIdOrKey, options) => HttpClientRequest.post(`/rest/api/3/project/${projectIdOrKey}/archive`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(ArchiveProject204),
       "400": decodeError("ArchiveProject400", ArchiveProject400),
       "401": decodeError("ArchiveProject401", ArchiveProject401),
       "403": decodeError("ArchiveProject403", ArchiveProject403),
       "404": decodeError("ArchiveProject404", ArchiveProject404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "updateProjectAvatar": (projectIdOrKey, options) => HttpClientRequest.put(`/rest/api/3/project/${projectIdOrKey}/avatar`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateProjectAvatar204),
       "401": decodeError("UpdateProjectAvatar401", UpdateProjectAvatar401),
       "403": decodeError("UpdateProjectAvatar403", UpdateProjectAvatar403),
       "404": decodeError("UpdateProjectAvatar404", UpdateProjectAvatar404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10792,19 +10596,19 @@ export const make = (
     "updateDefaultProjectClassification": (projectIdOrKey, options) => HttpClientRequest.put(`/rest/api/3/project/${projectIdOrKey}/classification-level/default`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateDefaultProjectClassification204),
       "400": decodeError("UpdateDefaultProjectClassification400", UpdateDefaultProjectClassification400),
       "401": decodeError("UpdateDefaultProjectClassification401", UpdateDefaultProjectClassification401),
       "404": decodeError("UpdateDefaultProjectClassification404", UpdateDefaultProjectClassification404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "removeDefaultProjectClassification": (projectIdOrKey, options) => HttpClientRequest.delete(`/rest/api/3/project/${projectIdOrKey}/classification-level/default`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(RemoveDefaultProjectClassification204),
       "400": decodeError("RemoveDefaultProjectClassification400", RemoveDefaultProjectClassification400),
       "401": decodeError("RemoveDefaultProjectClassification401", RemoveDefaultProjectClassification401),
       "404": decodeError("RemoveDefaultProjectClassification404", RemoveDefaultProjectClassification404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -10999,11 +10803,11 @@ export const make = (
     "updateProjectEmail": (projectId, options) => HttpClientRequest.put(`/rest/api/3/project/${projectId}/email`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateProjectEmail204),
       "400": decodeError("UpdateProjectEmail400", UpdateProjectEmail400),
       "401": decodeError("UpdateProjectEmail401", UpdateProjectEmail401),
       "403": decodeError("UpdateProjectEmail403", UpdateProjectEmail403),
       "404": decodeError("UpdateProjectEmail404", UpdateProjectEmail404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11185,22 +10989,22 @@ export const make = (
     "setDefaultResolution": (options) => HttpClientRequest.put(`/rest/api/3/resolution/default`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(SetDefaultResolution204),
       "400": decodeError("SetDefaultResolution400", SetDefaultResolution400),
       "401": decodeError("SetDefaultResolution401", SetDefaultResolution401),
       "403": decodeError("SetDefaultResolution403", SetDefaultResolution403),
       "404": decodeError("SetDefaultResolution404", SetDefaultResolution404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "moveResolutions": (options) => HttpClientRequest.put(`/rest/api/3/resolution/move`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(MoveResolutions204),
       "400": decodeError("MoveResolutions400", MoveResolutions400),
       "401": decodeError("MoveResolutions401", MoveResolutions401),
       "403": decodeError("MoveResolutions403", MoveResolutions403),
       "404": decodeError("MoveResolutions404", MoveResolutions404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11223,11 +11027,11 @@ export const make = (
     "updateResolution": (id, options) => HttpClientRequest.put(`/rest/api/3/resolution/${id}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateResolution204),
       "400": decodeError("UpdateResolution400", UpdateResolution400),
       "401": decodeError("UpdateResolution401", UpdateResolution401),
       "403": decodeError("UpdateResolution403", UpdateResolution403),
       "404": decodeError("UpdateResolution404", UpdateResolution404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11474,21 +11278,21 @@ export const make = (
     "moveScreenTabField": (screenId, tabId, id, options) => HttpClientRequest.post(`/rest/api/3/screens/${screenId}/tabs/${tabId}/fields/${id}/move`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(MoveScreenTabField204),
       "400": decodeError("MoveScreenTabField400", MoveScreenTabField400),
       "401": decodeError("MoveScreenTabField401", MoveScreenTabField401),
       "403": decodeError("MoveScreenTabField403", MoveScreenTabField403),
       "404": decodeError("MoveScreenTabField404", MoveScreenTabField404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "moveScreenTab": (screenId, tabId, pos, options) => HttpClientRequest.post(`/rest/api/3/screens/${screenId}/tabs/${tabId}/move/${pos}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(MoveScreenTab204),
       "400": decodeError("MoveScreenTab400", MoveScreenTab400),
       "401": decodeError("MoveScreenTab401", MoveScreenTab401),
       "403": decodeError("MoveScreenTab403", MoveScreenTab403),
       "404": decodeError("MoveScreenTab404", MoveScreenTab404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11512,8 +11316,8 @@ export const make = (
     "updateScreenScheme": (screenSchemeId, options) => HttpClientRequest.put(`/rest/api/3/screenscheme/${screenSchemeId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateScreenScheme204),
       "401": decodeError("UpdateScreenScheme401", UpdateScreenScheme401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11645,9 +11449,9 @@ export const make = (
     "updateStatuses": (options) => HttpClientRequest.put(`/rest/api/3/statuses`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateStatuses204),
       "401": decodeError("UpdateStatuses401", UpdateStatuses401),
       "409": decodeError("UpdateStatuses409", UpdateStatuses409),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11663,8 +11467,8 @@ export const make = (
     "deleteStatusesById": (options) => HttpClientRequest.delete(`/rest/api/3/statuses`).pipe(
     HttpClientRequest.setUrlParams({ "id": options.params["id"] as any }),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteStatusesById204),
       "401": decodeError("DeleteStatusesById401", DeleteStatusesById401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -11756,20 +11560,20 @@ export const make = (
     "updateUiModification": (uiModificationId, options) => HttpClientRequest.put(`/rest/api/3/uiModifications/${uiModificationId}`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(UpdateUiModification204),
       "400": decodeError("UpdateUiModification400", UpdateUiModification400),
       "401": decodeError("UpdateUiModification401", UpdateUiModification401),
       "403": decodeError("UpdateUiModification403", UpdateUiModification403),
       "404": decodeError("UpdateUiModification404", UpdateUiModification404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
     "deleteUiModification": (uiModificationId, options) => HttpClientRequest.delete(`/rest/api/3/uiModifications/${uiModificationId}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteUiModification204),
       "401": decodeError("DeleteUiModification401", DeleteUiModification401),
       "403": decodeError("DeleteUiModification403", DeleteUiModification403),
       "404": decodeError("DeleteUiModification404", DeleteUiModification404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -12140,10 +11944,10 @@ export const make = (
   ),
     "mergeVersions": (id, moveIssuesTo, options) => HttpClientRequest.put(`/rest/api/3/version/${id}/mergeto/${moveIssuesTo}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(MergeVersions204),
       "400": decodeError("MergeVersions400", MergeVersions400),
       "401": decodeError("MergeVersions401", MergeVersions401),
       "404": decodeError("MergeVersions404", MergeVersions404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -12199,10 +12003,10 @@ export const make = (
     "deleteAndReplaceVersion": (id, options) => HttpClientRequest.post(`/rest/api/3/version/${id}/removeAndSwap`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteAndReplaceVersion204),
       "400": decodeError("DeleteAndReplaceVersion400", DeleteAndReplaceVersion400),
       "401": decodeError("DeleteAndReplaceVersion401", DeleteAndReplaceVersion401),
       "404": decodeError("DeleteAndReplaceVersion404", DeleteAndReplaceVersion404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -12472,8 +12276,8 @@ export const make = (
     "assignSchemeToProject": (options) => HttpClientRequest.put(`/rest/api/3/workflowscheme/project`).pipe(
     HttpClientRequest.bodyJsonUnsafe(options.payload),
     withResponse(options.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(AssignSchemeToProject204),
       "401": decodeError("AssignSchemeToProject401", AssignSchemeToProject401),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -12538,11 +12342,11 @@ export const make = (
   ),
     "deleteWorkflowScheme": (id, options) => HttpClientRequest.delete(`/rest/api/3/workflowscheme/${id}`).pipe(
     withResponse(options?.config)(HttpClientResponse.matchStatus({
-      "2xx": decodeSuccess(DeleteWorkflowScheme204),
       "400": decodeError("DeleteWorkflowScheme400", DeleteWorkflowScheme400),
       "401": decodeError("DeleteWorkflowScheme401", DeleteWorkflowScheme401),
       "403": decodeError("DeleteWorkflowScheme403", DeleteWorkflowScheme403),
       "404": decodeError("DeleteWorkflowScheme404", DeleteWorkflowScheme404),
+      "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
   ),
@@ -12999,7 +12803,7 @@ readonly "getBanner": <Config extends OperationConfig>(options: { readonly confi
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setBanner": <Config extends OperationConfig>(options: { readonly payload: typeof SetBannerRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetBanner204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetBanner400", typeof SetBanner400.Type> | JiraApiError<"SetBanner401", typeof SetBanner401.Type> | JiraApiError<"SetBanner403", typeof SetBanner403.Type>>
+readonly "setBanner": <Config extends OperationConfig>(options: { readonly payload: typeof SetBannerRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetBanner400", typeof SetBanner400.Type> | JiraApiError<"SetBanner401", typeof SetBanner401.Type> | JiraApiError<"SetBanner403", typeof SetBanner403.Type>>
   /**
 * Returns a [paginated](#pagination) list of configurations for list of custom fields of a [type](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/) created by a [Forge app](https://developer.atlassian.com/platform/forge/).
 *
@@ -13024,7 +12828,7 @@ readonly "getCustomFieldsConfigurations": <Config extends OperationConfig>(optio
 *
 * The new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.
 */
-readonly "updateMultipleCustomFieldValues": <Config extends OperationConfig>(options: { readonly params?: typeof UpdateMultipleCustomFieldValuesParams.Encoded | undefined; readonly payload: typeof UpdateMultipleCustomFieldValuesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateMultipleCustomFieldValues204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateMultipleCustomFieldValues400", typeof UpdateMultipleCustomFieldValues400.Type> | JiraApiError<"UpdateMultipleCustomFieldValues403", typeof UpdateMultipleCustomFieldValues403.Type> | JiraApiError<"UpdateMultipleCustomFieldValues404", typeof UpdateMultipleCustomFieldValues404.Type>>
+readonly "updateMultipleCustomFieldValues": <Config extends OperationConfig>(options: { readonly params?: typeof UpdateMultipleCustomFieldValuesParams.Encoded | undefined; readonly payload: typeof UpdateMultipleCustomFieldValuesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateMultipleCustomFieldValues400", typeof UpdateMultipleCustomFieldValues400.Type> | JiraApiError<"UpdateMultipleCustomFieldValues403", typeof UpdateMultipleCustomFieldValues403.Type> | JiraApiError<"UpdateMultipleCustomFieldValues404", typeof UpdateMultipleCustomFieldValues404.Type>>
   /**
 * Returns a [paginated](#pagination) list of configurations for a custom field of a [type](https://developer.atlassian.com/platform/forge/manifest-reference/modules/jira-custom-field-type/) created by a [Forge app](https://developer.atlassian.com/platform/forge/).
 *
@@ -13055,7 +12859,7 @@ readonly "updateCustomFieldConfiguration": <Config extends OperationConfig>(fiel
 *
 * The new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.
 */
-readonly "updateCustomFieldValue": <Config extends OperationConfig>(fieldIdOrKey: string, options: { readonly params?: typeof UpdateCustomFieldValueParams.Encoded | undefined; readonly payload: typeof UpdateCustomFieldValueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateCustomFieldValue204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomFieldValue400", typeof UpdateCustomFieldValue400.Type> | JiraApiError<"UpdateCustomFieldValue403", typeof UpdateCustomFieldValue403.Type> | JiraApiError<"UpdateCustomFieldValue404", typeof UpdateCustomFieldValue404.Type>>
+readonly "updateCustomFieldValue": <Config extends OperationConfig>(fieldIdOrKey: string, options: { readonly params?: typeof UpdateCustomFieldValueParams.Encoded | undefined; readonly payload: typeof UpdateCustomFieldValueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomFieldValue400", typeof UpdateCustomFieldValue400.Type> | JiraApiError<"UpdateCustomFieldValue403", typeof UpdateCustomFieldValue403.Type> | JiraApiError<"UpdateCustomFieldValue404", typeof UpdateCustomFieldValue404.Type>>
   /**
 * Returns all application properties or an application property.
 *
@@ -13539,25 +13343,25 @@ readonly "createFieldAssociationScheme": <Config extends OperationConfig>(option
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateFieldsAssociatedWithSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateFieldsAssociatedWithSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldsAssociatedWithSchemes200.Type | typeof UpdateFieldsAssociatedWithSchemes204.Type | typeof UpdateFieldsAssociatedWithSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldsAssociatedWithSchemes400", typeof UpdateFieldsAssociatedWithSchemes400.Type> | JiraApiError<"UpdateFieldsAssociatedWithSchemes401", typeof UpdateFieldsAssociatedWithSchemes401.Type> | JiraApiError<"UpdateFieldsAssociatedWithSchemes403", typeof UpdateFieldsAssociatedWithSchemes403.Type>>
+readonly "updateFieldsAssociatedWithSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateFieldsAssociatedWithSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldsAssociatedWithSchemes200.Type | typeof UpdateFieldsAssociatedWithSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldsAssociatedWithSchemes400", typeof UpdateFieldsAssociatedWithSchemes400.Type> | JiraApiError<"UpdateFieldsAssociatedWithSchemes401", typeof UpdateFieldsAssociatedWithSchemes401.Type> | JiraApiError<"UpdateFieldsAssociatedWithSchemes403", typeof UpdateFieldsAssociatedWithSchemes403.Type>>
   /**
 * Remove fields associated with field association schemes.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeFieldsAssociatedWithSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveFieldsAssociatedWithSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveFieldsAssociatedWithSchemes200.Type | typeof RemoveFieldsAssociatedWithSchemes204.Type | typeof RemoveFieldsAssociatedWithSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveFieldsAssociatedWithSchemes400", typeof RemoveFieldsAssociatedWithSchemes400.Type> | JiraApiError<"RemoveFieldsAssociatedWithSchemes401", typeof RemoveFieldsAssociatedWithSchemes401.Type> | JiraApiError<"RemoveFieldsAssociatedWithSchemes403", typeof RemoveFieldsAssociatedWithSchemes403.Type>>
+readonly "removeFieldsAssociatedWithSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveFieldsAssociatedWithSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveFieldsAssociatedWithSchemes200.Type | typeof RemoveFieldsAssociatedWithSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveFieldsAssociatedWithSchemes400", typeof RemoveFieldsAssociatedWithSchemes400.Type> | JiraApiError<"RemoveFieldsAssociatedWithSchemes401", typeof RemoveFieldsAssociatedWithSchemes401.Type> | JiraApiError<"RemoveFieldsAssociatedWithSchemes403", typeof RemoveFieldsAssociatedWithSchemes403.Type>>
   /**
 * Update field association item parameters in field association schemes.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateFieldAssociationSchemeItemParameters": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateFieldAssociationSchemeItemParametersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldAssociationSchemeItemParameters200.Type | typeof UpdateFieldAssociationSchemeItemParameters204.Type | typeof UpdateFieldAssociationSchemeItemParameters207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldAssociationSchemeItemParameters400", typeof UpdateFieldAssociationSchemeItemParameters400.Type> | JiraApiError<"UpdateFieldAssociationSchemeItemParameters401", typeof UpdateFieldAssociationSchemeItemParameters401.Type> | JiraApiError<"UpdateFieldAssociationSchemeItemParameters403", typeof UpdateFieldAssociationSchemeItemParameters403.Type>>
+readonly "updateFieldAssociationSchemeItemParameters": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateFieldAssociationSchemeItemParametersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldAssociationSchemeItemParameters200.Type | typeof UpdateFieldAssociationSchemeItemParameters207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldAssociationSchemeItemParameters400", typeof UpdateFieldAssociationSchemeItemParameters400.Type> | JiraApiError<"UpdateFieldAssociationSchemeItemParameters401", typeof UpdateFieldAssociationSchemeItemParameters401.Type> | JiraApiError<"UpdateFieldAssociationSchemeItemParameters403", typeof UpdateFieldAssociationSchemeItemParameters403.Type>>
   /**
 * Remove field association parameters overrides for work types.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeFieldAssociationSchemeItemParameters": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveFieldAssociationSchemeItemParametersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveFieldAssociationSchemeItemParameters204.Type | typeof RemoveFieldAssociationSchemeItemParameters207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveFieldAssociationSchemeItemParameters400", typeof RemoveFieldAssociationSchemeItemParameters400.Type> | JiraApiError<"RemoveFieldAssociationSchemeItemParameters401", typeof RemoveFieldAssociationSchemeItemParameters401.Type> | JiraApiError<"RemoveFieldAssociationSchemeItemParameters403", typeof RemoveFieldAssociationSchemeItemParameters403.Type>>
+readonly "removeFieldAssociationSchemeItemParameters": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveFieldAssociationSchemeItemParametersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveFieldAssociationSchemeItemParameters207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveFieldAssociationSchemeItemParameters400", typeof RemoveFieldAssociationSchemeItemParameters400.Type> | JiraApiError<"RemoveFieldAssociationSchemeItemParameters401", typeof RemoveFieldAssociationSchemeItemParameters401.Type> | JiraApiError<"RemoveFieldAssociationSchemeItemParameters403", typeof RemoveFieldAssociationSchemeItemParameters403.Type>>
   /**
 * Get projects with field association schemes. This will be a temporary API but useful when transitioning from the legacy field configuration APIs to the new ones.
 *
@@ -13569,7 +13373,7 @@ readonly "getProjectsWithFieldSchemes": <Config extends OperationConfig>(options
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "associateProjectsToFieldAssociationSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof AssociateProjectsToFieldAssociationSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssociateProjectsToFieldAssociationSchemes200.Type | typeof AssociateProjectsToFieldAssociationSchemes204.Type | typeof AssociateProjectsToFieldAssociationSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssociateProjectsToFieldAssociationSchemes400", typeof AssociateProjectsToFieldAssociationSchemes400.Type> | JiraApiError<"AssociateProjectsToFieldAssociationSchemes401", typeof AssociateProjectsToFieldAssociationSchemes401.Type> | JiraApiError<"AssociateProjectsToFieldAssociationSchemes403", typeof AssociateProjectsToFieldAssociationSchemes403.Type>>
+readonly "associateProjectsToFieldAssociationSchemes": <Config extends OperationConfig>(options: { readonly payload: typeof AssociateProjectsToFieldAssociationSchemesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssociateProjectsToFieldAssociationSchemes200.Type | typeof AssociateProjectsToFieldAssociationSchemes207.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssociateProjectsToFieldAssociationSchemes400", typeof AssociateProjectsToFieldAssociationSchemes400.Type> | JiraApiError<"AssociateProjectsToFieldAssociationSchemes401", typeof AssociateProjectsToFieldAssociationSchemes401.Type> | JiraApiError<"AssociateProjectsToFieldAssociationSchemes403", typeof AssociateProjectsToFieldAssociationSchemes403.Type>>
   /**
 * Endpoint for fetching a field association scheme by its ID
 *
@@ -13623,13 +13427,13 @@ readonly "getConfiguration": <Config extends OperationConfig>(options: { readonl
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "getSelectedTimeTrackingImplementation": <Config extends OperationConfig>(options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof GetSelectedTimeTrackingImplementation200.Type | typeof GetSelectedTimeTrackingImplementation204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetSelectedTimeTrackingImplementation401", typeof GetSelectedTimeTrackingImplementation401.Type> | JiraApiError<"GetSelectedTimeTrackingImplementation403", typeof GetSelectedTimeTrackingImplementation403.Type>>
+readonly "getSelectedTimeTrackingImplementation": <Config extends OperationConfig>(options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof GetSelectedTimeTrackingImplementation200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetSelectedTimeTrackingImplementation401", typeof GetSelectedTimeTrackingImplementation401.Type> | JiraApiError<"GetSelectedTimeTrackingImplementation403", typeof GetSelectedTimeTrackingImplementation403.Type>>
   /**
 * Selects a time tracking provider.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "selectTimeTrackingImplementation": <Config extends OperationConfig>(options: { readonly payload: typeof SelectTimeTrackingImplementationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SelectTimeTrackingImplementation204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SelectTimeTrackingImplementation400", typeof SelectTimeTrackingImplementation400.Type> | JiraApiError<"SelectTimeTrackingImplementation401", typeof SelectTimeTrackingImplementation401.Type> | JiraApiError<"SelectTimeTrackingImplementation403", typeof SelectTimeTrackingImplementation403.Type>>
+readonly "selectTimeTrackingImplementation": <Config extends OperationConfig>(options: { readonly payload: typeof SelectTimeTrackingImplementationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SelectTimeTrackingImplementation400", typeof SelectTimeTrackingImplementation400.Type> | JiraApiError<"SelectTimeTrackingImplementation401", typeof SelectTimeTrackingImplementation401.Type> | JiraApiError<"SelectTimeTrackingImplementation403", typeof SelectTimeTrackingImplementation403.Type>>
   /**
 * Returns all time tracking providers. By default, Jira only has one time tracking provider: *JIRA provided time tracking*. However, you can install other time tracking providers via apps from the Atlassian Marketplace. For more information on time tracking providers, see the documentation for the [ Time Tracking Provider](https://developer.atlassian.com/cloud/jira/platform/modules/time-tracking-provider/) module.
 *
@@ -13729,7 +13533,7 @@ readonly "addGadget": <Config extends OperationConfig>(dashboardId: string, opti
 *
 * **[Permissions](#permissions) required:** None.
 */
-readonly "updateGadget": <Config extends OperationConfig>(dashboardId: string, gadgetId: string, options: { readonly payload: typeof UpdateGadgetRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateGadget204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateGadget400", typeof UpdateGadget400.Type> | JiraApiError<"UpdateGadget401", typeof UpdateGadget401.Type> | JiraApiError<"UpdateGadget404", typeof UpdateGadget404.Type>>
+readonly "updateGadget": <Config extends OperationConfig>(dashboardId: string, gadgetId: string, options: { readonly payload: typeof UpdateGadgetRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateGadget400", typeof UpdateGadget400.Type> | JiraApiError<"UpdateGadget401", typeof UpdateGadget401.Type> | JiraApiError<"UpdateGadget404", typeof UpdateGadget404.Type>>
   /**
 * Removes a dashboard gadget from a dashboard.
 *
@@ -13737,7 +13541,7 @@ readonly "updateGadget": <Config extends OperationConfig>(dashboardId: string, g
 *
 * **[Permissions](#permissions) required:** None.
 */
-readonly "removeGadget": <Config extends OperationConfig>(dashboardId: string, gadgetId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveGadget204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveGadget401", typeof RemoveGadget401.Type> | JiraApiError<"RemoveGadget404", typeof RemoveGadget404.Type>>
+readonly "removeGadget": <Config extends OperationConfig>(dashboardId: string, gadgetId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveGadget401", typeof RemoveGadget401.Type> | JiraApiError<"RemoveGadget404", typeof RemoveGadget404.Type>>
   /**
 * Returns the keys of all properties for a dashboard item.
 *
@@ -13783,7 +13587,7 @@ readonly "setDashboardItemProperty": <Config extends OperationConfig>(dashboardI
 *
 * **[Permissions](#permissions) required:** The user must have edit permission of the dashboard.
 */
-readonly "deleteDashboardItemProperty": <Config extends OperationConfig>(dashboardId: string, itemId: string, propertyKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteDashboardItemProperty204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteDashboardItemProperty400", typeof DeleteDashboardItemProperty400.Type> | JiraApiError<"DeleteDashboardItemProperty401", typeof DeleteDashboardItemProperty401.Type> | JiraApiError<"DeleteDashboardItemProperty403", typeof DeleteDashboardItemProperty403.Type> | JiraApiError<"DeleteDashboardItemProperty404", typeof DeleteDashboardItemProperty404.Type>>
+readonly "deleteDashboardItemProperty": <Config extends OperationConfig>(dashboardId: string, itemId: string, propertyKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteDashboardItemProperty400", typeof DeleteDashboardItemProperty400.Type> | JiraApiError<"DeleteDashboardItemProperty401", typeof DeleteDashboardItemProperty401.Type> | JiraApiError<"DeleteDashboardItemProperty403", typeof DeleteDashboardItemProperty403.Type> | JiraApiError<"DeleteDashboardItemProperty404", typeof DeleteDashboardItemProperty404.Type>>
   /**
 * Returns a dashboard.
 *
@@ -13941,7 +13745,7 @@ readonly "createCustomField": <Config extends OperationConfig>(options: { readon
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "createAssociations": <Config extends OperationConfig>(options: { readonly payload: typeof CreateAssociationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreateAssociations204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreateAssociations400", typeof CreateAssociations400.Type> | JiraApiError<"CreateAssociations401", typeof CreateAssociations401.Type> | JiraApiError<"CreateAssociations404", typeof CreateAssociations404.Type>>
+readonly "createAssociations": <Config extends OperationConfig>(options: { readonly payload: typeof CreateAssociationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreateAssociations400", typeof CreateAssociations400.Type> | JiraApiError<"CreateAssociations401", typeof CreateAssociations401.Type> | JiraApiError<"CreateAssociations404", typeof CreateAssociations404.Type>>
   /**
 * Unassociates a set of fields with a project and issue type context.
 *
@@ -13953,7 +13757,7 @@ readonly "createAssociations": <Config extends OperationConfig>(options: { reado
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeAssociations": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveAssociationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveAssociations204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveAssociations400", typeof RemoveAssociations400.Type> | JiraApiError<"RemoveAssociations401", typeof RemoveAssociations401.Type> | JiraApiError<"RemoveAssociations404", typeof RemoveAssociations404.Type>>
+readonly "removeAssociations": <Config extends OperationConfig>(options: { readonly payload: typeof RemoveAssociationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveAssociations400", typeof RemoveAssociations400.Type> | JiraApiError<"RemoveAssociations401", typeof RemoveAssociations401.Type> | JiraApiError<"RemoveAssociations404", typeof RemoveAssociations404.Type>>
   /**
 * Returns a [paginated](#pagination) list of fields for Classic Jira projects. The list can include:
 *
@@ -13980,7 +13784,7 @@ readonly "getTrashedFieldsPaginated": <Config extends OperationConfig>(options: 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateCustomField": <Config extends OperationConfig>(fieldId: string, options: { readonly payload: typeof UpdateCustomFieldRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateCustomField204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomField401", typeof UpdateCustomField401.Type>>
+readonly "updateCustomField": <Config extends OperationConfig>(fieldId: string, options: { readonly payload: typeof UpdateCustomFieldRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomField401", typeof UpdateCustomField401.Type>>
   /**
 * Returns a [paginated](#pagination) list of project associations for the given custom field. Each association contains the ID of a project the field is associated with.
 *
@@ -14086,7 +13890,7 @@ readonly "getDefaultValues": <Config extends OperationConfig>(fieldId: string, o
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setDefaultValues": <Config extends OperationConfig>(fieldId: string, options: { readonly payload: typeof SetDefaultValuesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetDefaultValues204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultValues401", typeof SetDefaultValues401.Type>>
+readonly "setDefaultValues": <Config extends OperationConfig>(fieldId: string, options: { readonly payload: typeof SetDefaultValuesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultValues401", typeof SetDefaultValues401.Type>>
   /**
 * Returns a paginated list of default values grouped by custom field context.
 *
@@ -14128,7 +13932,7 @@ readonly "getProjectContextMapping": <Config extends OperationConfig>(fieldId: s
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof UpdateCustomFieldContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateCustomFieldContext204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomFieldContext401", typeof UpdateCustomFieldContext401.Type>>
+readonly "updateCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof UpdateCustomFieldContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateCustomFieldContext401", typeof UpdateCustomFieldContext401.Type>>
   /**
 * Deletes a [ custom field context](https://confluence.atlassian.com/adminjiracloud/what-are-custom-field-contexts-991923859.html).
 *
@@ -14136,7 +13940,7 @@ readonly "updateCustomFieldContext": <Config extends OperationConfig>(fieldId: s
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteCustomFieldContext204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteCustomFieldContext401", typeof DeleteCustomFieldContext401.Type>>
+readonly "deleteCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteCustomFieldContext401", typeof DeleteCustomFieldContext401.Type>>
   /**
 * Adds issue types to a custom field context, appending the issue types to the issue types list.
 *
@@ -14148,7 +13952,7 @@ readonly "deleteCustomFieldContext": <Config extends OperationConfig>(fieldId: s
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addIssueTypesToContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof AddIssueTypesToContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddIssueTypesToContext204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddIssueTypesToContext401", typeof AddIssueTypesToContext401.Type>>
+readonly "addIssueTypesToContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof AddIssueTypesToContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddIssueTypesToContext401", typeof AddIssueTypesToContext401.Type>>
   /**
 * Removes issue types from a custom field context.
 *
@@ -14156,7 +13960,7 @@ readonly "addIssueTypesToContext": <Config extends OperationConfig>(fieldId: str
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeIssueTypesFromContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof RemoveIssueTypesFromContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveIssueTypesFromContext204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypesFromContext401", typeof RemoveIssueTypesFromContext401.Type>>
+readonly "removeIssueTypesFromContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof RemoveIssueTypesFromContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypesFromContext401", typeof RemoveIssueTypesFromContext401.Type>>
   /**
 * Returns a [paginated](#pagination) list of all custom field option for a context. Options are returned first then cascading options, in the order they display in Jira.
 *
@@ -14192,7 +13996,7 @@ readonly "createCustomFieldOption": <Config extends OperationConfig>(fieldId: st
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "reorderCustomFieldOptions": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof ReorderCustomFieldOptionsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof ReorderCustomFieldOptions204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ReorderCustomFieldOptions401", typeof ReorderCustomFieldOptions401.Type>>
+readonly "reorderCustomFieldOptions": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof ReorderCustomFieldOptionsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ReorderCustomFieldOptions401", typeof ReorderCustomFieldOptions401.Type>>
   /**
 * Deletes a custom field option.
 *
@@ -14220,7 +14024,7 @@ readonly "replaceCustomFieldOption": <Config extends OperationConfig>(fieldId: s
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "assignProjectsToCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof AssignProjectsToCustomFieldContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignProjectsToCustomFieldContext204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignProjectsToCustomFieldContext401", typeof AssignProjectsToCustomFieldContext401.Type>>
+readonly "assignProjectsToCustomFieldContext": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof AssignProjectsToCustomFieldContextRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignProjectsToCustomFieldContext401", typeof AssignProjectsToCustomFieldContext401.Type>>
   /**
 * Removes a custom field context from projects.
 *
@@ -14230,7 +14034,7 @@ readonly "assignProjectsToCustomFieldContext": <Config extends OperationConfig>(
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeCustomFieldContextFromProjects": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof RemoveCustomFieldContextFromProjectsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveCustomFieldContextFromProjects204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveCustomFieldContextFromProjects401", typeof RemoveCustomFieldContextFromProjects401.Type>>
+readonly "removeCustomFieldContextFromProjects": <Config extends OperationConfig>(fieldId: string, contextId: string, options: { readonly payload: typeof RemoveCustomFieldContextFromProjectsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveCustomFieldContextFromProjects401", typeof RemoveCustomFieldContextFromProjects401.Type>>
   /**
 * Returns a [paginated](#pagination) list of the contexts a field is used in. Deprecated, use [ Get custom field contexts](#api-rest-api-3-field-fieldId-context-get).
 *
@@ -14300,7 +14104,7 @@ readonly "updateIssueFieldOption": <Config extends OperationConfig>(fieldKey: st
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg). Jira permissions are not required for the app providing the field.
 */
-readonly "deleteIssueFieldOption": <Config extends OperationConfig>(fieldKey: string, optionId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteIssueFieldOption204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueFieldOption403", typeof DeleteIssueFieldOption403.Type> | JiraApiError<"DeleteIssueFieldOption404", typeof DeleteIssueFieldOption404.Type> | JiraApiError<"DeleteIssueFieldOption409", typeof DeleteIssueFieldOption409.Type>>
+readonly "deleteIssueFieldOption": <Config extends OperationConfig>(fieldKey: string, optionId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueFieldOption403", typeof DeleteIssueFieldOption403.Type> | JiraApiError<"DeleteIssueFieldOption404", typeof DeleteIssueFieldOption404.Type> | JiraApiError<"DeleteIssueFieldOption409", typeof DeleteIssueFieldOption409.Type>>
   /**
 * Deselects an issue-field select-list option from all issues where it is selected. A different option can be selected to replace the deselected option. The update can also be limited to a smaller set of issues by using a JQL query.
 *
@@ -14366,7 +14170,7 @@ readonly "createFieldConfiguration": <Config extends OperationConfig>(options: {
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateFieldConfiguration": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldConfiguration204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfiguration400", typeof UpdateFieldConfiguration400.Type> | JiraApiError<"UpdateFieldConfiguration401", typeof UpdateFieldConfiguration401.Type> | JiraApiError<"UpdateFieldConfiguration403", typeof UpdateFieldConfiguration403.Type> | JiraApiError<"UpdateFieldConfiguration404", typeof UpdateFieldConfiguration404.Type>>
+readonly "updateFieldConfiguration": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfiguration400", typeof UpdateFieldConfiguration400.Type> | JiraApiError<"UpdateFieldConfiguration401", typeof UpdateFieldConfiguration401.Type> | JiraApiError<"UpdateFieldConfiguration403", typeof UpdateFieldConfiguration403.Type> | JiraApiError<"UpdateFieldConfiguration404", typeof UpdateFieldConfiguration404.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14376,7 +14180,7 @@ readonly "updateFieldConfiguration": <Config extends OperationConfig>(id: string
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteFieldConfiguration": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteFieldConfiguration204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteFieldConfiguration400", typeof DeleteFieldConfiguration400.Type> | JiraApiError<"DeleteFieldConfiguration401", typeof DeleteFieldConfiguration401.Type> | JiraApiError<"DeleteFieldConfiguration403", typeof DeleteFieldConfiguration403.Type> | JiraApiError<"DeleteFieldConfiguration404", typeof DeleteFieldConfiguration404.Type>>
+readonly "deleteFieldConfiguration": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteFieldConfiguration400", typeof DeleteFieldConfiguration400.Type> | JiraApiError<"DeleteFieldConfiguration401", typeof DeleteFieldConfiguration401.Type> | JiraApiError<"DeleteFieldConfiguration403", typeof DeleteFieldConfiguration403.Type> | JiraApiError<"DeleteFieldConfiguration404", typeof DeleteFieldConfiguration404.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14400,7 +14204,7 @@ readonly "getFieldConfigurationItems": <Config extends OperationConfig>(id: stri
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateFieldConfigurationItems": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationItemsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldConfigurationItems204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfigurationItems400", typeof UpdateFieldConfigurationItems400.Type> | JiraApiError<"UpdateFieldConfigurationItems401", typeof UpdateFieldConfigurationItems401.Type> | JiraApiError<"UpdateFieldConfigurationItems403", typeof UpdateFieldConfigurationItems403.Type> | JiraApiError<"UpdateFieldConfigurationItems404", typeof UpdateFieldConfigurationItems404.Type>>
+readonly "updateFieldConfigurationItems": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationItemsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfigurationItems400", typeof UpdateFieldConfigurationItems400.Type> | JiraApiError<"UpdateFieldConfigurationItems401", typeof UpdateFieldConfigurationItems401.Type> | JiraApiError<"UpdateFieldConfigurationItems403", typeof UpdateFieldConfigurationItems403.Type> | JiraApiError<"UpdateFieldConfigurationItems404", typeof UpdateFieldConfigurationItems404.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14452,7 +14256,7 @@ readonly "getFieldConfigurationSchemeProjectMapping": <Config extends OperationC
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "assignFieldConfigurationSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignFieldConfigurationSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignFieldConfigurationSchemeToProject204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignFieldConfigurationSchemeToProject401", typeof AssignFieldConfigurationSchemeToProject401.Type>>
+readonly "assignFieldConfigurationSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignFieldConfigurationSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignFieldConfigurationSchemeToProject401", typeof AssignFieldConfigurationSchemeToProject401.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14462,7 +14266,7 @@ readonly "assignFieldConfigurationSchemeToProject": <Config extends OperationCon
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateFieldConfigurationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfigurationScheme401", typeof UpdateFieldConfigurationScheme401.Type>>
+readonly "updateFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateFieldConfigurationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateFieldConfigurationScheme401", typeof UpdateFieldConfigurationScheme401.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14472,7 +14276,7 @@ readonly "updateFieldConfigurationScheme": <Config extends OperationConfig>(id: 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteFieldConfigurationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteFieldConfigurationScheme400", typeof DeleteFieldConfigurationScheme400.Type> | JiraApiError<"DeleteFieldConfigurationScheme401", typeof DeleteFieldConfigurationScheme401.Type> | JiraApiError<"DeleteFieldConfigurationScheme403", typeof DeleteFieldConfigurationScheme403.Type> | JiraApiError<"DeleteFieldConfigurationScheme404", typeof DeleteFieldConfigurationScheme404.Type>>
+readonly "deleteFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteFieldConfigurationScheme400", typeof DeleteFieldConfigurationScheme400.Type> | JiraApiError<"DeleteFieldConfigurationScheme401", typeof DeleteFieldConfigurationScheme401.Type> | JiraApiError<"DeleteFieldConfigurationScheme403", typeof DeleteFieldConfigurationScheme403.Type> | JiraApiError<"DeleteFieldConfigurationScheme404", typeof DeleteFieldConfigurationScheme404.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14482,7 +14286,7 @@ readonly "deleteFieldConfigurationScheme": <Config extends OperationConfig>(id: 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setFieldConfigurationSchemeMapping": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof SetFieldConfigurationSchemeMappingRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetFieldConfigurationSchemeMapping204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetFieldConfigurationSchemeMapping400", typeof SetFieldConfigurationSchemeMapping400.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping401", typeof SetFieldConfigurationSchemeMapping401.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping403", typeof SetFieldConfigurationSchemeMapping403.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping404", typeof SetFieldConfigurationSchemeMapping404.Type>>
+readonly "setFieldConfigurationSchemeMapping": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof SetFieldConfigurationSchemeMappingRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetFieldConfigurationSchemeMapping400", typeof SetFieldConfigurationSchemeMapping400.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping401", typeof SetFieldConfigurationSchemeMapping401.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping403", typeof SetFieldConfigurationSchemeMapping403.Type> | JiraApiError<"SetFieldConfigurationSchemeMapping404", typeof SetFieldConfigurationSchemeMapping404.Type>>
   /**
 * Deprecated, use [ Field schemes](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-field-schemes/#api-group-field-schemes) which supports field association schemes.
 *
@@ -14492,7 +14296,7 @@ readonly "setFieldConfigurationSchemeMapping": <Config extends OperationConfig>(
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeIssueTypesFromGlobalFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof RemoveIssueTypesFromGlobalFieldConfigurationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme400", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme400.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme401", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme401.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme403", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme403.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme404", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme404.Type>>
+readonly "removeIssueTypesFromGlobalFieldConfigurationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof RemoveIssueTypesFromGlobalFieldConfigurationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme400", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme400.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme401", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme401.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme403", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme403.Type> | JiraApiError<"RemoveIssueTypesFromGlobalFieldConfigurationScheme404", typeof RemoveIssueTypesFromGlobalFieldConfigurationScheme404.Type>>
   /**
 * Creates a filter. The filter is shared according to the [default share scope](#api-rest-api-3-filter-post). The filter is not selected as a favorite.
 *
@@ -14649,7 +14453,7 @@ readonly "deleteFavouriteForFilter": <Config extends OperationConfig>(id: string
 *
 * **[Permissions](#permissions) required:** Permission to access Jira. However, the user must own the filter or have the *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "changeFilterOwner": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof ChangeFilterOwnerRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof ChangeFilterOwner204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ChangeFilterOwner400", typeof ChangeFilterOwner400.Type> | JiraApiError<"ChangeFilterOwner403", typeof ChangeFilterOwner403.Type> | JiraApiError<"ChangeFilterOwner404", typeof ChangeFilterOwner404.Type>>
+readonly "changeFilterOwner": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof ChangeFilterOwnerRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ChangeFilterOwner400", typeof ChangeFilterOwner400.Type> | JiraApiError<"ChangeFilterOwner403", typeof ChangeFilterOwner403.Type> | JiraApiError<"ChangeFilterOwner404", typeof ChangeFilterOwner404.Type>>
   /**
 * Returns the share permissions for a filter. A filter can be shared with groups, projects, all logged-in users, or the public. Sharing with all logged-in users or the public is known as a global share permission.
 *
@@ -15072,7 +14876,7 @@ readonly "getIssue": <Config extends OperationConfig>(issueIdOrKey: string, opti
 *  *  *Browse projects* and *Edit issues* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "editIssue": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly params?: typeof EditIssueParams.Encoded | undefined; readonly payload: typeof EditIssueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof EditIssue200.Type | typeof EditIssue204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"EditIssue400", typeof EditIssue400.Type> | JiraApiError<"EditIssue401", typeof EditIssue401.Type> | JiraApiError<"EditIssue403", typeof EditIssue403.Type> | JiraApiError<"EditIssue404", typeof EditIssue404.Type> | JiraApiError<"EditIssue409", typeof EditIssue409.Type> | JiraApiError<"EditIssue422", typeof EditIssue422.Type>>
+readonly "editIssue": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly params?: typeof EditIssueParams.Encoded | undefined; readonly payload: typeof EditIssueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof EditIssue200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"EditIssue400", typeof EditIssue400.Type> | JiraApiError<"EditIssue401", typeof EditIssue401.Type> | JiraApiError<"EditIssue403", typeof EditIssue403.Type> | JiraApiError<"EditIssue404", typeof EditIssue404.Type> | JiraApiError<"EditIssue409", typeof EditIssue409.Type> | JiraApiError<"EditIssue422", typeof EditIssue422.Type>>
   /**
 * Deletes an issue.
 *
@@ -15101,7 +14905,7 @@ readonly "deleteIssue": <Config extends OperationConfig>(issueIdOrKey: string, o
 *  *  *Browse Projects* and *Assign Issues* [ project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "assignIssue": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof AssignIssueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignIssue204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssue400", typeof AssignIssue400.Type> | JiraApiError<"AssignIssue403", typeof AssignIssue403.Type> | JiraApiError<"AssignIssue404", typeof AssignIssue404.Type>>
+readonly "assignIssue": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof AssignIssueRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssue400", typeof AssignIssue400.Type> | JiraApiError<"AssignIssue403", typeof AssignIssue403.Type> | JiraApiError<"AssignIssue404", typeof AssignIssue404.Type>>
   /**
 * Adds one or more attachments to an issue. Attachments are posted as multipart/form-data ([RFC 1867](https://www.ietf.org/rfc/rfc1867.txt)).
 *
@@ -15377,7 +15181,7 @@ readonly "getEditIssueMeta": <Config extends OperationConfig>(issueIdOrKey: stri
 *  *  *Browse Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "notify": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof NotifyRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof Notify204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"Notify400", typeof Notify400.Type> | JiraApiError<"Notify403", typeof Notify403.Type> | JiraApiError<"Notify404", typeof Notify404.Type>>
+readonly "notify": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof NotifyRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"Notify400", typeof Notify400.Type> | JiraApiError<"Notify403", typeof Notify403.Type> | JiraApiError<"Notify404", typeof Notify404.Type>>
   /**
 * Returns the URLs and keys of an issue's properties.
 *
@@ -15492,7 +15296,7 @@ readonly "getRemoteIssueLinkById": <Config extends OperationConfig>(issueIdOrKey
 *  *  *Browse projects* and *Link issues* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "updateRemoteIssueLink": <Config extends OperationConfig>(issueIdOrKey: string, linkId: string, options: { readonly payload: typeof UpdateRemoteIssueLinkRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateRemoteIssueLink204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateRemoteIssueLink401", typeof UpdateRemoteIssueLink401.Type> | JiraApiError<"UpdateRemoteIssueLink403", typeof UpdateRemoteIssueLink403.Type> | JiraApiError<"UpdateRemoteIssueLink404", typeof UpdateRemoteIssueLink404.Type>>
+readonly "updateRemoteIssueLink": <Config extends OperationConfig>(issueIdOrKey: string, linkId: string, options: { readonly payload: typeof UpdateRemoteIssueLinkRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateRemoteIssueLink401", typeof UpdateRemoteIssueLink401.Type> | JiraApiError<"UpdateRemoteIssueLink403", typeof UpdateRemoteIssueLink403.Type> | JiraApiError<"UpdateRemoteIssueLink404", typeof UpdateRemoteIssueLink404.Type>>
   /**
 * Deletes a remote issue link from an issue.
 *
@@ -15533,7 +15337,7 @@ readonly "getTransitions": <Config extends OperationConfig>(issueIdOrKey: string
 *  *  *Browse projects* and *Transition issues* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "doTransition": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof DoTransitionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof DoTransition204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DoTransition400", typeof DoTransition400.Type> | JiraApiError<"DoTransition401", typeof DoTransition401.Type> | JiraApiError<"DoTransition404", typeof DoTransition404.Type> | JiraApiError<"DoTransition409", typeof DoTransition409.Type> | JiraApiError<"DoTransition413", typeof DoTransition413.Type> | JiraApiError<"DoTransition422", typeof DoTransition422.Type>>
+readonly "doTransition": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof DoTransitionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DoTransition400", typeof DoTransition400.Type> | JiraApiError<"DoTransition401", typeof DoTransition401.Type> | JiraApiError<"DoTransition404", typeof DoTransition404.Type> | JiraApiError<"DoTransition409", typeof DoTransition409.Type> | JiraApiError<"DoTransition413", typeof DoTransition413.Type> | JiraApiError<"DoTransition422", typeof DoTransition422.Type>>
   /**
 * Returns details about the votes on an issue.
 *
@@ -15559,7 +15363,7 @@ readonly "getVotes": <Config extends OperationConfig>(issueIdOrKey: string, opti
 *  *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 */
-readonly "addVote": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof AddVote204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddVote400", typeof AddVote400.Type> | JiraApiError<"AddVote401", typeof AddVote401.Type> | JiraApiError<"AddVote404", typeof AddVote404.Type>>
+readonly "addVote": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddVote400", typeof AddVote400.Type> | JiraApiError<"AddVote401", typeof AddVote401.Type> | JiraApiError<"AddVote404", typeof AddVote404.Type>>
   /**
 * Deletes a user's vote from an issue. This is the equivalent of the user clicking *Unvote* on an issue in Jira.
 *
@@ -15596,7 +15400,7 @@ readonly "getIssueWatchers": <Config extends OperationConfig>(issueIdOrKey: stri
 *  *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.
 *  *  To add users other than themselves to the watchlist, *Manage watcher list* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.
 */
-readonly "addWatcher": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof AddWatcherRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddWatcher204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddWatcher400", typeof AddWatcher400.Type> | JiraApiError<"AddWatcher401", typeof AddWatcher401.Type> | JiraApiError<"AddWatcher403", typeof AddWatcher403.Type> | JiraApiError<"AddWatcher404", typeof AddWatcher404.Type>>
+readonly "addWatcher": <Config extends OperationConfig>(issueIdOrKey: string, options: { readonly payload: typeof AddWatcherRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddWatcher400", typeof AddWatcher400.Type> | JiraApiError<"AddWatcher401", typeof AddWatcher401.Type> | JiraApiError<"AddWatcher403", typeof AddWatcher403.Type> | JiraApiError<"AddWatcher404", typeof AddWatcher404.Type>>
   /**
 * Deletes a user as a watcher of an issue.
 *
@@ -15893,7 +15697,7 @@ readonly "getSecurityLevels": <Config extends OperationConfig>(options: { readon
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setDefaultLevels": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultLevelsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetDefaultLevels204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultLevels400", typeof SetDefaultLevels400.Type> | JiraApiError<"SetDefaultLevels401", typeof SetDefaultLevels401.Type> | JiraApiError<"SetDefaultLevels403", typeof SetDefaultLevels403.Type> | JiraApiError<"SetDefaultLevels404", typeof SetDefaultLevels404.Type>>
+readonly "setDefaultLevels": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultLevelsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultLevels400", typeof SetDefaultLevels400.Type> | JiraApiError<"SetDefaultLevels401", typeof SetDefaultLevels401.Type> | JiraApiError<"SetDefaultLevels403", typeof SetDefaultLevels403.Type> | JiraApiError<"SetDefaultLevels404", typeof SetDefaultLevels404.Type>>
   /**
 * Returns a [paginated](#pagination) list of issue security level members.
 *
@@ -15939,7 +15743,7 @@ readonly "getIssueSecurityScheme": <Config extends OperationConfig>(id: string, 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateIssueSecurityScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateIssueSecuritySchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateIssueSecurityScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueSecurityScheme400", typeof UpdateIssueSecurityScheme400.Type> | JiraApiError<"UpdateIssueSecurityScheme401", typeof UpdateIssueSecurityScheme401.Type> | JiraApiError<"UpdateIssueSecurityScheme403", typeof UpdateIssueSecurityScheme403.Type> | JiraApiError<"UpdateIssueSecurityScheme404", typeof UpdateIssueSecurityScheme404.Type>>
+readonly "updateIssueSecurityScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateIssueSecuritySchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueSecurityScheme400", typeof UpdateIssueSecurityScheme400.Type> | JiraApiError<"UpdateIssueSecurityScheme401", typeof UpdateIssueSecurityScheme401.Type> | JiraApiError<"UpdateIssueSecurityScheme403", typeof UpdateIssueSecurityScheme403.Type> | JiraApiError<"UpdateIssueSecurityScheme404", typeof UpdateIssueSecurityScheme404.Type>>
   /**
 * Returns issue security level members.
 *
@@ -15953,19 +15757,19 @@ readonly "getIssueSecurityLevelMembers": <Config extends OperationConfig>(issueS
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteSecurityScheme": <Config extends OperationConfig>(schemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteSecurityScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteSecurityScheme400", typeof DeleteSecurityScheme400.Type> | JiraApiError<"DeleteSecurityScheme401", typeof DeleteSecurityScheme401.Type> | JiraApiError<"DeleteSecurityScheme403", typeof DeleteSecurityScheme403.Type> | JiraApiError<"DeleteSecurityScheme404", typeof DeleteSecurityScheme404.Type>>
+readonly "deleteSecurityScheme": <Config extends OperationConfig>(schemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteSecurityScheme400", typeof DeleteSecurityScheme400.Type> | JiraApiError<"DeleteSecurityScheme401", typeof DeleteSecurityScheme401.Type> | JiraApiError<"DeleteSecurityScheme403", typeof DeleteSecurityScheme403.Type> | JiraApiError<"DeleteSecurityScheme404", typeof DeleteSecurityScheme404.Type>>
   /**
 * Adds levels and levels' members to the issue security scheme. You can add up to 100 levels per request.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addSecurityLevel": <Config extends OperationConfig>(schemeId: string, options: { readonly payload: typeof AddSecurityLevelRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddSecurityLevel204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddSecurityLevel400", typeof AddSecurityLevel400.Type> | JiraApiError<"AddSecurityLevel401", typeof AddSecurityLevel401.Type> | JiraApiError<"AddSecurityLevel403", typeof AddSecurityLevel403.Type> | JiraApiError<"AddSecurityLevel404", typeof AddSecurityLevel404.Type>>
+readonly "addSecurityLevel": <Config extends OperationConfig>(schemeId: string, options: { readonly payload: typeof AddSecurityLevelRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddSecurityLevel400", typeof AddSecurityLevel400.Type> | JiraApiError<"AddSecurityLevel401", typeof AddSecurityLevel401.Type> | JiraApiError<"AddSecurityLevel403", typeof AddSecurityLevel403.Type> | JiraApiError<"AddSecurityLevel404", typeof AddSecurityLevel404.Type>>
   /**
 * Updates the issue security level.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateSecurityLevel": <Config extends OperationConfig>(schemeId: string, levelId: string, options: { readonly payload: typeof UpdateSecurityLevelRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateSecurityLevel204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateSecurityLevel400", typeof UpdateSecurityLevel400.Type> | JiraApiError<"UpdateSecurityLevel401", typeof UpdateSecurityLevel401.Type> | JiraApiError<"UpdateSecurityLevel403", typeof UpdateSecurityLevel403.Type> | JiraApiError<"UpdateSecurityLevel404", typeof UpdateSecurityLevel404.Type>>
+readonly "updateSecurityLevel": <Config extends OperationConfig>(schemeId: string, levelId: string, options: { readonly payload: typeof UpdateSecurityLevelRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateSecurityLevel400", typeof UpdateSecurityLevel400.Type> | JiraApiError<"UpdateSecurityLevel401", typeof UpdateSecurityLevel401.Type> | JiraApiError<"UpdateSecurityLevel403", typeof UpdateSecurityLevel403.Type> | JiraApiError<"UpdateSecurityLevel404", typeof UpdateSecurityLevel404.Type>>
   /**
 * Deletes an issue security level.
 *
@@ -15979,13 +15783,13 @@ readonly "removeLevel": <Config extends OperationConfig>(schemeId: string, level
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addSecurityLevelMembers": <Config extends OperationConfig>(schemeId: string, levelId: string, options: { readonly payload: typeof AddSecurityLevelMembersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddSecurityLevelMembers204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddSecurityLevelMembers400", typeof AddSecurityLevelMembers400.Type> | JiraApiError<"AddSecurityLevelMembers401", typeof AddSecurityLevelMembers401.Type> | JiraApiError<"AddSecurityLevelMembers403", typeof AddSecurityLevelMembers403.Type> | JiraApiError<"AddSecurityLevelMembers404", typeof AddSecurityLevelMembers404.Type>>
+readonly "addSecurityLevelMembers": <Config extends OperationConfig>(schemeId: string, levelId: string, options: { readonly payload: typeof AddSecurityLevelMembersRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddSecurityLevelMembers400", typeof AddSecurityLevelMembers400.Type> | JiraApiError<"AddSecurityLevelMembers401", typeof AddSecurityLevelMembers401.Type> | JiraApiError<"AddSecurityLevelMembers403", typeof AddSecurityLevelMembers403.Type> | JiraApiError<"AddSecurityLevelMembers404", typeof AddSecurityLevelMembers404.Type>>
   /**
 * Removes an issue security level member from an issue security scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeMemberFromSecurityLevel": <Config extends OperationConfig>(schemeId: string, levelId: string, memberId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveMemberFromSecurityLevel204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveMemberFromSecurityLevel400", typeof RemoveMemberFromSecurityLevel400.Type> | JiraApiError<"RemoveMemberFromSecurityLevel401", typeof RemoveMemberFromSecurityLevel401.Type> | JiraApiError<"RemoveMemberFromSecurityLevel403", typeof RemoveMemberFromSecurityLevel403.Type> | JiraApiError<"RemoveMemberFromSecurityLevel404", typeof RemoveMemberFromSecurityLevel404.Type>>
+readonly "removeMemberFromSecurityLevel": <Config extends OperationConfig>(schemeId: string, levelId: string, memberId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveMemberFromSecurityLevel400", typeof RemoveMemberFromSecurityLevel400.Type> | JiraApiError<"RemoveMemberFromSecurityLevel401", typeof RemoveMemberFromSecurityLevel401.Type> | JiraApiError<"RemoveMemberFromSecurityLevel403", typeof RemoveMemberFromSecurityLevel403.Type> | JiraApiError<"RemoveMemberFromSecurityLevel404", typeof RemoveMemberFromSecurityLevel404.Type>>
   /**
 * Returns all issue types.
 *
@@ -16136,13 +15940,13 @@ readonly "getIssueTypeSchemeForProjects": <Config extends OperationConfig>(optio
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "assignIssueTypeSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignIssueTypeSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignIssueTypeSchemeToProject204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssueTypeSchemeToProject401", typeof AssignIssueTypeSchemeToProject401.Type>>
+readonly "assignIssueTypeSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignIssueTypeSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssueTypeSchemeToProject401", typeof AssignIssueTypeSchemeToProject401.Type>>
   /**
 * Updates an issue type scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof UpdateIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateIssueTypeScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueTypeScheme401", typeof UpdateIssueTypeScheme401.Type>>
+readonly "updateIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof UpdateIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueTypeScheme401", typeof UpdateIssueTypeScheme401.Type>>
   /**
 * Deletes an issue type scheme.
 *
@@ -16152,7 +15956,7 @@ readonly "updateIssueTypeScheme": <Config extends OperationConfig>(issueTypeSche
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteIssueTypeScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueTypeScheme401", typeof DeleteIssueTypeScheme401.Type>>
+readonly "deleteIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueTypeScheme401", typeof DeleteIssueTypeScheme401.Type>>
   /**
 * Adds issue types to an issue type scheme.
 *
@@ -16162,7 +15966,7 @@ readonly "deleteIssueTypeScheme": <Config extends OperationConfig>(issueTypeSche
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addIssueTypesToIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof AddIssueTypesToIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddIssueTypesToIssueTypeScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddIssueTypesToIssueTypeScheme401", typeof AddIssueTypesToIssueTypeScheme401.Type>>
+readonly "addIssueTypesToIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof AddIssueTypesToIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddIssueTypesToIssueTypeScheme401", typeof AddIssueTypesToIssueTypeScheme401.Type>>
   /**
 * Changes the order of issue types in an issue type scheme.
 *
@@ -16174,7 +15978,7 @@ readonly "addIssueTypesToIssueTypeScheme": <Config extends OperationConfig>(issu
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "reorderIssueTypesInIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof ReorderIssueTypesInIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof ReorderIssueTypesInIssueTypeScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ReorderIssueTypesInIssueTypeScheme401", typeof ReorderIssueTypesInIssueTypeScheme401.Type>>
+readonly "reorderIssueTypesInIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, options: { readonly payload: typeof ReorderIssueTypesInIssueTypeSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ReorderIssueTypesInIssueTypeScheme401", typeof ReorderIssueTypesInIssueTypeScheme401.Type>>
   /**
 * Removes an issue type from an issue type scheme.
 *
@@ -16186,7 +15990,7 @@ readonly "reorderIssueTypesInIssueTypeScheme": <Config extends OperationConfig>(
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeIssueTypeFromIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, issueTypeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveIssueTypeFromIssueTypeScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypeFromIssueTypeScheme401", typeof RemoveIssueTypeFromIssueTypeScheme401.Type>>
+readonly "removeIssueTypeFromIssueTypeScheme": <Config extends OperationConfig>(issueTypeSchemeId: string, issueTypeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveIssueTypeFromIssueTypeScheme401", typeof RemoveIssueTypeFromIssueTypeScheme401.Type>>
   /**
 * Returns a [paginated](#pagination) list of issue type screen schemes.
 *
@@ -16224,37 +16028,37 @@ readonly "getIssueTypeScreenSchemeProjectAssociations": <Config extends Operatio
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "assignIssueTypeScreenSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignIssueTypeScreenSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignIssueTypeScreenSchemeToProject204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssueTypeScreenSchemeToProject401", typeof AssignIssueTypeScreenSchemeToProject401.Type>>
+readonly "assignIssueTypeScreenSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignIssueTypeScreenSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignIssueTypeScreenSchemeToProject401", typeof AssignIssueTypeScreenSchemeToProject401.Type>>
   /**
 * Updates an issue type screen scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof UpdateIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateIssueTypeScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueTypeScreenScheme401", typeof UpdateIssueTypeScreenScheme401.Type>>
+readonly "updateIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof UpdateIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateIssueTypeScreenScheme401", typeof UpdateIssueTypeScreenScheme401.Type>>
   /**
 * Deletes an issue type screen scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteIssueTypeScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueTypeScreenScheme401", typeof DeleteIssueTypeScreenScheme401.Type> | JiraApiError<"DeleteIssueTypeScreenScheme403", typeof DeleteIssueTypeScreenScheme403.Type>>
+readonly "deleteIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteIssueTypeScreenScheme401", typeof DeleteIssueTypeScreenScheme401.Type> | JiraApiError<"DeleteIssueTypeScreenScheme403", typeof DeleteIssueTypeScreenScheme403.Type>>
   /**
 * Appends issue type to screen scheme mappings to an issue type screen scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "appendMappingsForIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof AppendMappingsForIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AppendMappingsForIssueTypeScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AppendMappingsForIssueTypeScreenScheme401", typeof AppendMappingsForIssueTypeScreenScheme401.Type> | JiraApiError<"AppendMappingsForIssueTypeScreenScheme403", typeof AppendMappingsForIssueTypeScreenScheme403.Type>>
+readonly "appendMappingsForIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof AppendMappingsForIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AppendMappingsForIssueTypeScreenScheme401", typeof AppendMappingsForIssueTypeScreenScheme401.Type> | JiraApiError<"AppendMappingsForIssueTypeScreenScheme403", typeof AppendMappingsForIssueTypeScreenScheme403.Type>>
   /**
 * Updates the default screen scheme of an issue type screen scheme. The default screen scheme is used for all unmapped issue types.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateDefaultScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof UpdateDefaultScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateDefaultScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateDefaultScreenScheme401", typeof UpdateDefaultScreenScheme401.Type>>
+readonly "updateDefaultScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof UpdateDefaultScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateDefaultScreenScheme401", typeof UpdateDefaultScreenScheme401.Type>>
   /**
 * Removes issue type to screen scheme mappings from an issue type screen scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeMappingsFromIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof RemoveMappingsFromIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof RemoveMappingsFromIssueTypeScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveMappingsFromIssueTypeScreenScheme401", typeof RemoveMappingsFromIssueTypeScreenScheme401.Type>>
+readonly "removeMappingsFromIssueTypeScreenScheme": <Config extends OperationConfig>(issueTypeScreenSchemeId: string, options: { readonly payload: typeof RemoveMappingsFromIssueTypeScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveMappingsFromIssueTypeScreenScheme401", typeof RemoveMappingsFromIssueTypeScreenScheme401.Type>>
   /**
 * Returns a [paginated](#pagination) list of projects associated with an issue type screen scheme.
 *
@@ -16313,7 +16117,7 @@ readonly "getPrecomputations": <Config extends OperationConfig>(options: { reado
 *
 * The new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.
 */
-readonly "updatePrecomputations": <Config extends OperationConfig>(options: { readonly params?: typeof UpdatePrecomputationsParams.Encoded | undefined; readonly payload: typeof UpdatePrecomputationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdatePrecomputations200.Type | typeof UpdatePrecomputations204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePrecomputations400", typeof UpdatePrecomputations400.Type> | JiraApiError<"UpdatePrecomputations403", typeof UpdatePrecomputations403.Type> | JiraApiError<"UpdatePrecomputations404", typeof UpdatePrecomputations404.Type>>
+readonly "updatePrecomputations": <Config extends OperationConfig>(options: { readonly params?: typeof UpdatePrecomputationsParams.Encoded | undefined; readonly payload: typeof UpdatePrecomputationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdatePrecomputations200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePrecomputations400", typeof UpdatePrecomputations400.Type> | JiraApiError<"UpdatePrecomputations403", typeof UpdatePrecomputations403.Type> | JiraApiError<"UpdatePrecomputations404", typeof UpdatePrecomputations404.Type>>
   /**
 * Returns function precomputations by IDs, along with information about when they were created, updated, and last used. Each precomputation has a `value` \- the JQL fragment to replace the custom function clause with.
 *
@@ -16443,7 +16247,7 @@ readonly "getPreference": <Config extends OperationConfig>(options: { readonly p
 *
 * **[Permissions](#permissions) required:** Permission to access Jira.
 */
-readonly "setPreference": <Config extends OperationConfig>(options: { readonly params: typeof SetPreferenceParams.Encoded; readonly payload: typeof SetPreferenceRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetPreference204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetPreference401", typeof SetPreference401.Type> | JiraApiError<"SetPreference404", typeof SetPreference404.Type>>
+readonly "setPreference": <Config extends OperationConfig>(options: { readonly params: typeof SetPreferenceParams.Encoded; readonly payload: typeof SetPreferenceRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetPreference401", typeof SetPreference401.Type> | JiraApiError<"SetPreference404", typeof SetPreference404.Type>>
   /**
 * Deletes a preference of the user, which restores the default value of system defined settings.
 *
@@ -16474,7 +16278,7 @@ readonly "getLocale": <Config extends OperationConfig>(options: { readonly confi
 *
 * **[Permissions](#permissions) required:** Permission to access Jira.
 */
-readonly "setLocale": <Config extends OperationConfig>(options: { readonly payload: typeof SetLocaleRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetLocale204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetLocale400", typeof SetLocale400.Type> | JiraApiError<"SetLocale401", typeof SetLocale401.Type>>
+readonly "setLocale": <Config extends OperationConfig>(options: { readonly payload: typeof SetLocaleRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetLocale400", typeof SetLocale400.Type> | JiraApiError<"SetLocale401", typeof SetLocale401.Type>>
   /**
 * Returns details for the current user.
 *
@@ -16512,7 +16316,7 @@ readonly "getNotificationScheme": <Config extends OperationConfig>(id: string, o
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateNotificationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateNotificationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateNotificationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateNotificationScheme400", typeof UpdateNotificationScheme400.Type> | JiraApiError<"UpdateNotificationScheme401", typeof UpdateNotificationScheme401.Type> | JiraApiError<"UpdateNotificationScheme403", typeof UpdateNotificationScheme403.Type> | JiraApiError<"UpdateNotificationScheme404", typeof UpdateNotificationScheme404.Type>>
+readonly "updateNotificationScheme": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateNotificationSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateNotificationScheme400", typeof UpdateNotificationScheme400.Type> | JiraApiError<"UpdateNotificationScheme401", typeof UpdateNotificationScheme401.Type> | JiraApiError<"UpdateNotificationScheme403", typeof UpdateNotificationScheme403.Type> | JiraApiError<"UpdateNotificationScheme404", typeof UpdateNotificationScheme404.Type>>
   /**
 * Adds notifications to a notification scheme. You can add up to 1000 notifications per request.
 *
@@ -16520,19 +16324,19 @@ readonly "updateNotificationScheme": <Config extends OperationConfig>(id: string
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addNotifications": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof AddNotificationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddNotifications204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddNotifications400", typeof AddNotifications400.Type> | JiraApiError<"AddNotifications401", typeof AddNotifications401.Type> | JiraApiError<"AddNotifications403", typeof AddNotifications403.Type> | JiraApiError<"AddNotifications404", typeof AddNotifications404.Type>>
+readonly "addNotifications": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof AddNotificationsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddNotifications400", typeof AddNotifications400.Type> | JiraApiError<"AddNotifications401", typeof AddNotifications401.Type> | JiraApiError<"AddNotifications403", typeof AddNotifications403.Type> | JiraApiError<"AddNotifications404", typeof AddNotifications404.Type>>
   /**
 * Deletes a notification scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteNotificationScheme": <Config extends OperationConfig>(notificationSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteNotificationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteNotificationScheme400", typeof DeleteNotificationScheme400.Type> | JiraApiError<"DeleteNotificationScheme401", typeof DeleteNotificationScheme401.Type> | JiraApiError<"DeleteNotificationScheme403", typeof DeleteNotificationScheme403.Type> | JiraApiError<"DeleteNotificationScheme404", typeof DeleteNotificationScheme404.Type>>
+readonly "deleteNotificationScheme": <Config extends OperationConfig>(notificationSchemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteNotificationScheme400", typeof DeleteNotificationScheme400.Type> | JiraApiError<"DeleteNotificationScheme401", typeof DeleteNotificationScheme401.Type> | JiraApiError<"DeleteNotificationScheme403", typeof DeleteNotificationScheme403.Type> | JiraApiError<"DeleteNotificationScheme404", typeof DeleteNotificationScheme404.Type>>
   /**
 * Removes a notification from a notification scheme.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeNotificationFromNotificationScheme": <Config extends OperationConfig>(notificationSchemeId: string, notificationId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveNotificationFromNotificationScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveNotificationFromNotificationScheme400", typeof RemoveNotificationFromNotificationScheme400.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme401", typeof RemoveNotificationFromNotificationScheme401.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme403", typeof RemoveNotificationFromNotificationScheme403.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme404", typeof RemoveNotificationFromNotificationScheme404.Type>>
+readonly "removeNotificationFromNotificationScheme": <Config extends OperationConfig>(notificationSchemeId: string, notificationId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveNotificationFromNotificationScheme400", typeof RemoveNotificationFromNotificationScheme400.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme401", typeof RemoveNotificationFromNotificationScheme401.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme403", typeof RemoveNotificationFromNotificationScheme403.Type> | JiraApiError<"RemoveNotificationFromNotificationScheme404", typeof RemoveNotificationFromNotificationScheme404.Type>>
   /**
 * Returns all permissions, including:
 *
@@ -16797,13 +16601,13 @@ readonly "getPlan": <Config extends OperationConfig>(planId: string, options: { 
 *
 * *Note that "add" operations do not respect array indexes in target locations. Call the "Get plan" endpoint to find out the order of array elements.*
 */
-readonly "updatePlan": <Config extends OperationConfig>(planId: string, options: { readonly params?: typeof UpdatePlanParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof UpdatePlan204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePlan400", typeof UpdatePlan400.Type> | JiraApiError<"UpdatePlan401", typeof UpdatePlan401.Type> | JiraApiError<"UpdatePlan403", typeof UpdatePlan403.Type> | JiraApiError<"UpdatePlan404", typeof UpdatePlan404.Type> | JiraApiError<"UpdatePlan409", typeof UpdatePlan409.Type>>
+readonly "updatePlan": <Config extends OperationConfig>(planId: string, options: { readonly params?: typeof UpdatePlanParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePlan400", typeof UpdatePlan400.Type> | JiraApiError<"UpdatePlan401", typeof UpdatePlan401.Type> | JiraApiError<"UpdatePlan403", typeof UpdatePlan403.Type> | JiraApiError<"UpdatePlan404", typeof UpdatePlan404.Type> | JiraApiError<"UpdatePlan409", typeof UpdatePlan409.Type>>
   /**
 * Archives a plan.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "archivePlan": <Config extends OperationConfig>(planId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof ArchivePlan204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ArchivePlan401", typeof ArchivePlan401.Type> | JiraApiError<"ArchivePlan403", typeof ArchivePlan403.Type> | JiraApiError<"ArchivePlan404", typeof ArchivePlan404.Type> | JiraApiError<"ArchivePlan409", typeof ArchivePlan409.Type>>
+readonly "archivePlan": <Config extends OperationConfig>(planId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ArchivePlan401", typeof ArchivePlan401.Type> | JiraApiError<"ArchivePlan403", typeof ArchivePlan403.Type> | JiraApiError<"ArchivePlan404", typeof ArchivePlan404.Type> | JiraApiError<"ArchivePlan409", typeof ArchivePlan409.Type>>
   /**
 * Duplicates a plan.
 *
@@ -16821,7 +16625,7 @@ readonly "getTeams": <Config extends OperationConfig>(planId: string, options: {
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "addAtlassianTeam": <Config extends OperationConfig>(planId: string, options: { readonly payload: typeof AddAtlassianTeamRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AddAtlassianTeam204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddAtlassianTeam400", typeof AddAtlassianTeam400.Type> | JiraApiError<"AddAtlassianTeam401", typeof AddAtlassianTeam401.Type> | JiraApiError<"AddAtlassianTeam403", typeof AddAtlassianTeam403.Type> | JiraApiError<"AddAtlassianTeam404", typeof AddAtlassianTeam404.Type> | JiraApiError<"AddAtlassianTeam409", typeof AddAtlassianTeam409.Type>>
+readonly "addAtlassianTeam": <Config extends OperationConfig>(planId: string, options: { readonly payload: typeof AddAtlassianTeamRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AddAtlassianTeam400", typeof AddAtlassianTeam400.Type> | JiraApiError<"AddAtlassianTeam401", typeof AddAtlassianTeam401.Type> | JiraApiError<"AddAtlassianTeam403", typeof AddAtlassianTeam403.Type> | JiraApiError<"AddAtlassianTeam404", typeof AddAtlassianTeam404.Type> | JiraApiError<"AddAtlassianTeam409", typeof AddAtlassianTeam409.Type>>
   /**
 * Returns planning settings for an Atlassian team in a plan.
 *
@@ -16840,13 +16644,13 @@ readonly "getAtlassianTeam": <Config extends OperationConfig>(planId: string, at
 *
 * *Note that "add" operations do not respect array indexes in target locations. Call the "Get Atlassian team in plan" endpoint to find out the order of array elements.*
 */
-readonly "updateAtlassianTeam": <Config extends OperationConfig>(planId: string, atlassianTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof UpdateAtlassianTeam204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateAtlassianTeam400", typeof UpdateAtlassianTeam400.Type> | JiraApiError<"UpdateAtlassianTeam401", typeof UpdateAtlassianTeam401.Type> | JiraApiError<"UpdateAtlassianTeam403", typeof UpdateAtlassianTeam403.Type> | JiraApiError<"UpdateAtlassianTeam404", typeof UpdateAtlassianTeam404.Type> | JiraApiError<"UpdateAtlassianTeam409", typeof UpdateAtlassianTeam409.Type>>
+readonly "updateAtlassianTeam": <Config extends OperationConfig>(planId: string, atlassianTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateAtlassianTeam400", typeof UpdateAtlassianTeam400.Type> | JiraApiError<"UpdateAtlassianTeam401", typeof UpdateAtlassianTeam401.Type> | JiraApiError<"UpdateAtlassianTeam403", typeof UpdateAtlassianTeam403.Type> | JiraApiError<"UpdateAtlassianTeam404", typeof UpdateAtlassianTeam404.Type> | JiraApiError<"UpdateAtlassianTeam409", typeof UpdateAtlassianTeam409.Type>>
   /**
 * Removes an Atlassian team from a plan and deletes their planning settings.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeAtlassianTeam": <Config extends OperationConfig>(planId: string, atlassianTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveAtlassianTeam204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveAtlassianTeam401", typeof RemoveAtlassianTeam401.Type> | JiraApiError<"RemoveAtlassianTeam403", typeof RemoveAtlassianTeam403.Type> | JiraApiError<"RemoveAtlassianTeam404", typeof RemoveAtlassianTeam404.Type> | JiraApiError<"RemoveAtlassianTeam409", typeof RemoveAtlassianTeam409.Type>>
+readonly "removeAtlassianTeam": <Config extends OperationConfig>(planId: string, atlassianTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveAtlassianTeam401", typeof RemoveAtlassianTeam401.Type> | JiraApiError<"RemoveAtlassianTeam403", typeof RemoveAtlassianTeam403.Type> | JiraApiError<"RemoveAtlassianTeam404", typeof RemoveAtlassianTeam404.Type> | JiraApiError<"RemoveAtlassianTeam409", typeof RemoveAtlassianTeam409.Type>>
   /**
 * Creates a plan-only team and configures their planning settings.
 *
@@ -16873,19 +16677,19 @@ readonly "getPlanOnlyTeam": <Config extends OperationConfig>(planId: string, pla
 *
 * *Note that "add" operations do not respect array indexes in target locations. Call the "Get plan-only team" endpoint to find out the order of array elements.*
 */
-readonly "updatePlanOnlyTeam": <Config extends OperationConfig>(planId: string, planOnlyTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof UpdatePlanOnlyTeam204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePlanOnlyTeam400", typeof UpdatePlanOnlyTeam400.Type> | JiraApiError<"UpdatePlanOnlyTeam401", typeof UpdatePlanOnlyTeam401.Type> | JiraApiError<"UpdatePlanOnlyTeam403", typeof UpdatePlanOnlyTeam403.Type> | JiraApiError<"UpdatePlanOnlyTeam404", typeof UpdatePlanOnlyTeam404.Type> | JiraApiError<"UpdatePlanOnlyTeam409", typeof UpdatePlanOnlyTeam409.Type>>
+readonly "updatePlanOnlyTeam": <Config extends OperationConfig>(planId: string, planOnlyTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePlanOnlyTeam400", typeof UpdatePlanOnlyTeam400.Type> | JiraApiError<"UpdatePlanOnlyTeam401", typeof UpdatePlanOnlyTeam401.Type> | JiraApiError<"UpdatePlanOnlyTeam403", typeof UpdatePlanOnlyTeam403.Type> | JiraApiError<"UpdatePlanOnlyTeam404", typeof UpdatePlanOnlyTeam404.Type> | JiraApiError<"UpdatePlanOnlyTeam409", typeof UpdatePlanOnlyTeam409.Type>>
   /**
 * Deletes a plan-only team and their planning settings.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deletePlanOnlyTeam": <Config extends OperationConfig>(planId: string, planOnlyTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeletePlanOnlyTeam204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePlanOnlyTeam401", typeof DeletePlanOnlyTeam401.Type> | JiraApiError<"DeletePlanOnlyTeam403", typeof DeletePlanOnlyTeam403.Type> | JiraApiError<"DeletePlanOnlyTeam404", typeof DeletePlanOnlyTeam404.Type> | JiraApiError<"DeletePlanOnlyTeam409", typeof DeletePlanOnlyTeam409.Type>>
+readonly "deletePlanOnlyTeam": <Config extends OperationConfig>(planId: string, planOnlyTeamId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePlanOnlyTeam401", typeof DeletePlanOnlyTeam401.Type> | JiraApiError<"DeletePlanOnlyTeam403", typeof DeletePlanOnlyTeam403.Type> | JiraApiError<"DeletePlanOnlyTeam404", typeof DeletePlanOnlyTeam404.Type> | JiraApiError<"DeletePlanOnlyTeam409", typeof DeletePlanOnlyTeam409.Type>>
   /**
 * Moves a plan to trash.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "trashPlan": <Config extends OperationConfig>(planId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof TrashPlan204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"TrashPlan401", typeof TrashPlan401.Type> | JiraApiError<"TrashPlan403", typeof TrashPlan403.Type> | JiraApiError<"TrashPlan404", typeof TrashPlan404.Type> | JiraApiError<"TrashPlan409", typeof TrashPlan409.Type>>
+readonly "trashPlan": <Config extends OperationConfig>(planId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"TrashPlan401", typeof TrashPlan401.Type> | JiraApiError<"TrashPlan403", typeof TrashPlan403.Type> | JiraApiError<"TrashPlan404", typeof TrashPlan404.Type> | JiraApiError<"TrashPlan409", typeof TrashPlan409.Type>>
   /**
 * Returns the list of all issue priorities.
 *
@@ -16905,13 +16709,13 @@ readonly "createPriority": <Config extends OperationConfig>(options: { readonly 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setDefaultPriority": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultPriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetDefaultPriority204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultPriority400", typeof SetDefaultPriority400.Type> | JiraApiError<"SetDefaultPriority401", typeof SetDefaultPriority401.Type> | JiraApiError<"SetDefaultPriority403", typeof SetDefaultPriority403.Type> | JiraApiError<"SetDefaultPriority404", typeof SetDefaultPriority404.Type>>
+readonly "setDefaultPriority": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultPriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultPriority400", typeof SetDefaultPriority400.Type> | JiraApiError<"SetDefaultPriority401", typeof SetDefaultPriority401.Type> | JiraApiError<"SetDefaultPriority403", typeof SetDefaultPriority403.Type> | JiraApiError<"SetDefaultPriority404", typeof SetDefaultPriority404.Type>>
   /**
 * Changes the order of issue priorities.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "movePriorities": <Config extends OperationConfig>(options: { readonly payload: typeof MovePrioritiesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof MovePriorities204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MovePriorities400", typeof MovePriorities400.Type> | JiraApiError<"MovePriorities401", typeof MovePriorities401.Type> | JiraApiError<"MovePriorities403", typeof MovePriorities403.Type> | JiraApiError<"MovePriorities404", typeof MovePriorities404.Type>>
+readonly "movePriorities": <Config extends OperationConfig>(options: { readonly payload: typeof MovePrioritiesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MovePriorities400", typeof MovePriorities400.Type> | JiraApiError<"MovePriorities401", typeof MovePriorities401.Type> | JiraApiError<"MovePriorities403", typeof MovePriorities403.Type> | JiraApiError<"MovePriorities404", typeof MovePriorities404.Type>>
   /**
 * Returns a [paginated](#pagination) list of priorities. The list can contain all priorities or a subset determined by any combination of these criteria:
 *
@@ -16941,7 +16745,7 @@ readonly "getPriority": <Config extends OperationConfig>(id: string, options: { 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updatePriority": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdatePriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdatePriority204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePriority400", typeof UpdatePriority400.Type> | JiraApiError<"UpdatePriority401", typeof UpdatePriority401.Type> | JiraApiError<"UpdatePriority403", typeof UpdatePriority403.Type> | JiraApiError<"UpdatePriority404", typeof UpdatePriority404.Type>>
+readonly "updatePriority": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdatePriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdatePriority400", typeof UpdatePriority400.Type> | JiraApiError<"UpdatePriority401", typeof UpdatePriority401.Type> | JiraApiError<"UpdatePriority403", typeof UpdatePriority403.Type> | JiraApiError<"UpdatePriority404", typeof UpdatePriority404.Type>>
   /**
 * Deletes an issue priority.
 *
@@ -16987,7 +16791,7 @@ readonly "updatePriorityScheme": <Config extends OperationConfig>(schemeId: stri
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deletePriorityScheme": <Config extends OperationConfig>(schemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeletePriorityScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePriorityScheme400", typeof DeletePriorityScheme400.Type> | JiraApiError<"DeletePriorityScheme401", typeof DeletePriorityScheme401.Type> | JiraApiError<"DeletePriorityScheme403", typeof DeletePriorityScheme403.Type>>
+readonly "deletePriorityScheme": <Config extends OperationConfig>(schemeId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeletePriorityScheme400", typeof DeletePriorityScheme400.Type> | JiraApiError<"DeletePriorityScheme401", typeof DeletePriorityScheme401.Type> | JiraApiError<"DeletePriorityScheme403", typeof DeletePriorityScheme403.Type>>
   /**
 * Returns a [paginated](#pagination) list of priorities by scheme.
 *
@@ -17158,7 +16962,7 @@ readonly "deleteProject": <Config extends OperationConfig>(projectIdOrKey: strin
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "archiveProject": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof ArchiveProject204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ArchiveProject400", typeof ArchiveProject400.Type> | JiraApiError<"ArchiveProject401", typeof ArchiveProject401.Type> | JiraApiError<"ArchiveProject403", typeof ArchiveProject403.Type> | JiraApiError<"ArchiveProject404", typeof ArchiveProject404.Type>>
+readonly "archiveProject": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ArchiveProject400", typeof ArchiveProject400.Type> | JiraApiError<"ArchiveProject401", typeof ArchiveProject401.Type> | JiraApiError<"ArchiveProject403", typeof ArchiveProject403.Type> | JiraApiError<"ArchiveProject404", typeof ArchiveProject404.Type>>
   /**
 * Sets the avatar displayed for a project.
 *
@@ -17166,7 +16970,7 @@ readonly "archiveProject": <Config extends OperationConfig>(projectIdOrKey: stri
 *
 * **[Permissions](#permissions) required:** *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg).
 */
-readonly "updateProjectAvatar": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly payload: typeof UpdateProjectAvatarRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateProjectAvatar204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateProjectAvatar401", typeof UpdateProjectAvatar401.Type> | JiraApiError<"UpdateProjectAvatar403", typeof UpdateProjectAvatar403.Type> | JiraApiError<"UpdateProjectAvatar404", typeof UpdateProjectAvatar404.Type>>
+readonly "updateProjectAvatar": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly payload: typeof UpdateProjectAvatarRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateProjectAvatar401", typeof UpdateProjectAvatar401.Type> | JiraApiError<"UpdateProjectAvatar403", typeof UpdateProjectAvatar403.Type> | JiraApiError<"UpdateProjectAvatar404", typeof UpdateProjectAvatar404.Type>>
   /**
 * Deletes a custom avatar from a project. Note that system avatars cannot be deleted.
 *
@@ -17241,7 +17045,7 @@ readonly "getDefaultProjectClassification": <Config extends OperationConfig>(pro
 *  *  *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.
 *  *  *Administer jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateDefaultProjectClassification": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly payload: typeof UpdateDefaultProjectClassificationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateDefaultProjectClassification204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateDefaultProjectClassification400", typeof UpdateDefaultProjectClassification400.Type> | JiraApiError<"UpdateDefaultProjectClassification401", typeof UpdateDefaultProjectClassification401.Type> | JiraApiError<"UpdateDefaultProjectClassification404", typeof UpdateDefaultProjectClassification404.Type>>
+readonly "updateDefaultProjectClassification": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly payload: typeof UpdateDefaultProjectClassificationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateDefaultProjectClassification400", typeof UpdateDefaultProjectClassification400.Type> | JiraApiError<"UpdateDefaultProjectClassification401", typeof UpdateDefaultProjectClassification401.Type> | JiraApiError<"UpdateDefaultProjectClassification404", typeof UpdateDefaultProjectClassification404.Type>>
   /**
 * Remove the default data classification level for a project.
 *
@@ -17250,7 +17054,7 @@ readonly "updateDefaultProjectClassification": <Config extends OperationConfig>(
 *  *  *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.
 *  *  *Administer jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "removeDefaultProjectClassification": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof RemoveDefaultProjectClassification204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveDefaultProjectClassification400", typeof RemoveDefaultProjectClassification400.Type> | JiraApiError<"RemoveDefaultProjectClassification401", typeof RemoveDefaultProjectClassification401.Type> | JiraApiError<"RemoveDefaultProjectClassification404", typeof RemoveDefaultProjectClassification404.Type>>
+readonly "removeDefaultProjectClassification": <Config extends OperationConfig>(projectIdOrKey: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"RemoveDefaultProjectClassification400", typeof RemoveDefaultProjectClassification400.Type> | JiraApiError<"RemoveDefaultProjectClassification401", typeof RemoveDefaultProjectClassification401.Type> | JiraApiError<"RemoveDefaultProjectClassification404", typeof RemoveDefaultProjectClassification404.Type>>
   /**
 * Returns a [paginated](#pagination) list of all components in a project. See the [Get project components](#api-rest-api-3-project-projectIdOrKey-components-get) resource if you want to get a full list of versions without pagination.
 *
@@ -17426,7 +17230,7 @@ readonly "getProjectEmail": <Config extends OperationConfig>(projectId: string, 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg) or *Administer Projects* [project permission.](https://confluence.atlassian.com/x/yodKLg)
 */
-readonly "updateProjectEmail": <Config extends OperationConfig>(projectId: string, options: { readonly payload: typeof UpdateProjectEmailRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateProjectEmail204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateProjectEmail400", typeof UpdateProjectEmail400.Type> | JiraApiError<"UpdateProjectEmail401", typeof UpdateProjectEmail401.Type> | JiraApiError<"UpdateProjectEmail403", typeof UpdateProjectEmail403.Type> | JiraApiError<"UpdateProjectEmail404", typeof UpdateProjectEmail404.Type>>
+readonly "updateProjectEmail": <Config extends OperationConfig>(projectId: string, options: { readonly payload: typeof UpdateProjectEmailRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateProjectEmail400", typeof UpdateProjectEmail400.Type> | JiraApiError<"UpdateProjectEmail401", typeof UpdateProjectEmail401.Type> | JiraApiError<"UpdateProjectEmail403", typeof UpdateProjectEmail403.Type> | JiraApiError<"UpdateProjectEmail404", typeof UpdateProjectEmail404.Type>>
   /**
 * Get the issue type hierarchy for a next-gen project.
 *
@@ -17560,13 +17364,13 @@ readonly "createResolution": <Config extends OperationConfig>(options: { readonl
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "setDefaultResolution": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultResolutionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof SetDefaultResolution204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultResolution400", typeof SetDefaultResolution400.Type> | JiraApiError<"SetDefaultResolution401", typeof SetDefaultResolution401.Type> | JiraApiError<"SetDefaultResolution403", typeof SetDefaultResolution403.Type> | JiraApiError<"SetDefaultResolution404", typeof SetDefaultResolution404.Type>>
+readonly "setDefaultResolution": <Config extends OperationConfig>(options: { readonly payload: typeof SetDefaultResolutionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"SetDefaultResolution400", typeof SetDefaultResolution400.Type> | JiraApiError<"SetDefaultResolution401", typeof SetDefaultResolution401.Type> | JiraApiError<"SetDefaultResolution403", typeof SetDefaultResolution403.Type> | JiraApiError<"SetDefaultResolution404", typeof SetDefaultResolution404.Type>>
   /**
 * Changes the order of issue resolutions.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "moveResolutions": <Config extends OperationConfig>(options: { readonly payload: typeof MoveResolutionsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof MoveResolutions204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveResolutions400", typeof MoveResolutions400.Type> | JiraApiError<"MoveResolutions401", typeof MoveResolutions401.Type> | JiraApiError<"MoveResolutions403", typeof MoveResolutions403.Type> | JiraApiError<"MoveResolutions404", typeof MoveResolutions404.Type>>
+readonly "moveResolutions": <Config extends OperationConfig>(options: { readonly payload: typeof MoveResolutionsRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveResolutions400", typeof MoveResolutions400.Type> | JiraApiError<"MoveResolutions401", typeof MoveResolutions401.Type> | JiraApiError<"MoveResolutions403", typeof MoveResolutions403.Type> | JiraApiError<"MoveResolutions404", typeof MoveResolutions404.Type>>
   /**
 * Returns a [paginated](#pagination) list of resolutions. The list can contain all resolutions or a subset determined by any combination of these criteria:
 *
@@ -17587,7 +17391,7 @@ readonly "getResolution": <Config extends OperationConfig>(id: string, options: 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateResolution": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateResolutionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateResolution204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateResolution400", typeof UpdateResolution400.Type> | JiraApiError<"UpdateResolution401", typeof UpdateResolution401.Type> | JiraApiError<"UpdateResolution403", typeof UpdateResolution403.Type> | JiraApiError<"UpdateResolution404", typeof UpdateResolution404.Type>>
+readonly "updateResolution": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof UpdateResolutionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateResolution400", typeof UpdateResolution400.Type> | JiraApiError<"UpdateResolution401", typeof UpdateResolution401.Type> | JiraApiError<"UpdateResolution403", typeof UpdateResolution403.Type> | JiraApiError<"UpdateResolution404", typeof UpdateResolution404.Type>>
   /**
 * Deletes an issue resolution.
 *
@@ -17772,13 +17576,13 @@ readonly "removeScreenTabField": <Config extends OperationConfig>(screenId: stri
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "moveScreenTabField": <Config extends OperationConfig>(screenId: string, tabId: string, id: string, options: { readonly payload: typeof MoveScreenTabFieldRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof MoveScreenTabField204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveScreenTabField400", typeof MoveScreenTabField400.Type> | JiraApiError<"MoveScreenTabField401", typeof MoveScreenTabField401.Type> | JiraApiError<"MoveScreenTabField403", typeof MoveScreenTabField403.Type> | JiraApiError<"MoveScreenTabField404", typeof MoveScreenTabField404.Type>>
+readonly "moveScreenTabField": <Config extends OperationConfig>(screenId: string, tabId: string, id: string, options: { readonly payload: typeof MoveScreenTabFieldRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveScreenTabField400", typeof MoveScreenTabField400.Type> | JiraApiError<"MoveScreenTabField401", typeof MoveScreenTabField401.Type> | JiraApiError<"MoveScreenTabField403", typeof MoveScreenTabField403.Type> | JiraApiError<"MoveScreenTabField404", typeof MoveScreenTabField404.Type>>
   /**
 * Moves a screen tab.
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "moveScreenTab": <Config extends OperationConfig>(screenId: string, tabId: string, pos: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof MoveScreenTab204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveScreenTab400", typeof MoveScreenTab400.Type> | JiraApiError<"MoveScreenTab401", typeof MoveScreenTab401.Type> | JiraApiError<"MoveScreenTab403", typeof MoveScreenTab403.Type> | JiraApiError<"MoveScreenTab404", typeof MoveScreenTab404.Type>>
+readonly "moveScreenTab": <Config extends OperationConfig>(screenId: string, tabId: string, pos: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MoveScreenTab400", typeof MoveScreenTab400.Type> | JiraApiError<"MoveScreenTab401", typeof MoveScreenTab401.Type> | JiraApiError<"MoveScreenTab403", typeof MoveScreenTab403.Type> | JiraApiError<"MoveScreenTab404", typeof MoveScreenTab404.Type>>
   /**
 * Returns a [paginated](#pagination) list of screen schemes.
 *
@@ -17798,7 +17602,7 @@ readonly "createScreenScheme": <Config extends OperationConfig>(options: { reado
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "updateScreenScheme": <Config extends OperationConfig>(screenSchemeId: string, options: { readonly payload: typeof UpdateScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateScreenScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateScreenScheme401", typeof UpdateScreenScheme401.Type>>
+readonly "updateScreenScheme": <Config extends OperationConfig>(screenSchemeId: string, options: { readonly payload: typeof UpdateScreenSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateScreenScheme401", typeof UpdateScreenScheme401.Type>>
   /**
 * Deletes a screen scheme. A screen scheme cannot be deleted if it is used in an issue type screen scheme.
 *
@@ -17953,7 +17757,7 @@ readonly "getStatusesById": <Config extends OperationConfig>(options: { readonly
 *  *  *Administer projects* [project permission.](https://confluence.atlassian.com/x/yodKLg)
 *  *  *Administer Jira* [project permission.](https://confluence.atlassian.com/x/yodKLg)
 */
-readonly "updateStatuses": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateStatusesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateStatuses204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateStatuses401", typeof UpdateStatuses401.Type> | JiraApiError<"UpdateStatuses409", typeof UpdateStatuses409.Type>>
+readonly "updateStatuses": <Config extends OperationConfig>(options: { readonly payload: typeof UpdateStatusesRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateStatuses401", typeof UpdateStatuses401.Type> | JiraApiError<"UpdateStatuses409", typeof UpdateStatuses409.Type>>
   /**
 * Creates statuses for a global or project scope.
 *
@@ -17971,7 +17775,7 @@ readonly "createStatuses": <Config extends OperationConfig>(options: { readonly 
 *  *  *Administer projects* [project permission.](https://confluence.atlassian.com/x/yodKLg)
 *  *  *Administer Jira* [project permission.](https://confluence.atlassian.com/x/yodKLg)
 */
-readonly "deleteStatusesById": <Config extends OperationConfig>(options: { readonly params: typeof DeleteStatusesByIdParams.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof DeleteStatusesById204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteStatusesById401", typeof DeleteStatusesById401.Type>>
+readonly "deleteStatusesById": <Config extends OperationConfig>(options: { readonly params: typeof DeleteStatusesByIdParams.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteStatusesById401", typeof DeleteStatusesById401.Type>>
   /**
 * Returns a list of the statuses specified by one or more status names.
 *
@@ -18082,7 +17886,7 @@ readonly "createUiModification": <Config extends OperationConfig>(options: { rea
 *
 * The new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.
 */
-readonly "updateUiModification": <Config extends OperationConfig>(uiModificationId: string, options: { readonly payload: typeof UpdateUiModificationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof UpdateUiModification204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateUiModification400", typeof UpdateUiModification400.Type> | JiraApiError<"UpdateUiModification401", typeof UpdateUiModification401.Type> | JiraApiError<"UpdateUiModification403", typeof UpdateUiModification403.Type> | JiraApiError<"UpdateUiModification404", typeof UpdateUiModification404.Type>>
+readonly "updateUiModification": <Config extends OperationConfig>(uiModificationId: string, options: { readonly payload: typeof UpdateUiModificationRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"UpdateUiModification400", typeof UpdateUiModification400.Type> | JiraApiError<"UpdateUiModification401", typeof UpdateUiModification401.Type> | JiraApiError<"UpdateUiModification403", typeof UpdateUiModification403.Type> | JiraApiError<"UpdateUiModification404", typeof UpdateUiModification404.Type>>
   /**
 * Deletes a UI modification. All the contexts that belong to the UI modification are deleted too. UI modification can only be deleted by Forge apps.
 *
@@ -18090,7 +17894,7 @@ readonly "updateUiModification": <Config extends OperationConfig>(uiModification
 *
 * The new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.
 */
-readonly "deleteUiModification": <Config extends OperationConfig>(uiModificationId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteUiModification204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteUiModification401", typeof DeleteUiModification401.Type> | JiraApiError<"DeleteUiModification403", typeof DeleteUiModification403.Type> | JiraApiError<"DeleteUiModification404", typeof DeleteUiModification404.Type>>
+readonly "deleteUiModification": <Config extends OperationConfig>(uiModificationId: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteUiModification401", typeof DeleteUiModification401.Type> | JiraApiError<"DeleteUiModification403", typeof DeleteUiModification403.Type> | JiraApiError<"DeleteUiModification404", typeof DeleteUiModification404.Type>>
   /**
 * Returns the system and custom avatars for a project, issue type or priority.
 *
@@ -18502,7 +18306,7 @@ readonly "deleteVersion": <Config extends OperationConfig>(id: string, options: 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg) or *Administer Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that contains the version.
 */
-readonly "mergeVersions": <Config extends OperationConfig>(id: string, moveIssuesTo: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof MergeVersions204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MergeVersions400", typeof MergeVersions400.Type> | JiraApiError<"MergeVersions401", typeof MergeVersions401.Type> | JiraApiError<"MergeVersions404", typeof MergeVersions404.Type>>
+readonly "mergeVersions": <Config extends OperationConfig>(id: string, moveIssuesTo: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"MergeVersions400", typeof MergeVersions400.Type> | JiraApiError<"MergeVersions401", typeof MergeVersions401.Type> | JiraApiError<"MergeVersions404", typeof MergeVersions404.Type>>
   /**
 * Modifies the version's sequence within the project, which affects the display order of the versions in Jira.
 *
@@ -18556,7 +18360,7 @@ readonly "createRelatedWork": <Config extends OperationConfig>(id: string, optio
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg) or *Administer Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that contains the version.
 */
-readonly "deleteAndReplaceVersion": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof DeleteAndReplaceVersionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof DeleteAndReplaceVersion204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteAndReplaceVersion400", typeof DeleteAndReplaceVersion400.Type> | JiraApiError<"DeleteAndReplaceVersion401", typeof DeleteAndReplaceVersion401.Type> | JiraApiError<"DeleteAndReplaceVersion404", typeof DeleteAndReplaceVersion404.Type>>
+readonly "deleteAndReplaceVersion": <Config extends OperationConfig>(id: string, options: { readonly payload: typeof DeleteAndReplaceVersionRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteAndReplaceVersion400", typeof DeleteAndReplaceVersion400.Type> | JiraApiError<"DeleteAndReplaceVersion401", typeof DeleteAndReplaceVersion401.Type> | JiraApiError<"DeleteAndReplaceVersion404", typeof DeleteAndReplaceVersion404.Type>>
   /**
 * Returns counts of the issues and unresolved issues for the project version.
 *
@@ -19366,7 +19170,7 @@ readonly "getWorkflowSchemeProjectAssociations": <Config extends OperationConfig
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "assignSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof AssignSchemeToProject204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignSchemeToProject401", typeof AssignSchemeToProject401.Type>>
+readonly "assignSchemeToProject": <Config extends OperationConfig>(options: { readonly payload: typeof AssignSchemeToProjectRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"AssignSchemeToProject401", typeof AssignSchemeToProject401.Type>>
   /**
 * Switches a workflow scheme for a project.
 *
@@ -19421,7 +19225,7 @@ readonly "updateWorkflowScheme": <Config extends OperationConfig>(id: string, op
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "deleteWorkflowScheme": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof DeleteWorkflowScheme204.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteWorkflowScheme400", typeof DeleteWorkflowScheme400.Type> | JiraApiError<"DeleteWorkflowScheme401", typeof DeleteWorkflowScheme401.Type> | JiraApiError<"DeleteWorkflowScheme403", typeof DeleteWorkflowScheme403.Type> | JiraApiError<"DeleteWorkflowScheme404", typeof DeleteWorkflowScheme404.Type>>
+readonly "deleteWorkflowScheme": <Config extends OperationConfig>(id: string, options: { readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"DeleteWorkflowScheme400", typeof DeleteWorkflowScheme400.Type> | JiraApiError<"DeleteWorkflowScheme401", typeof DeleteWorkflowScheme401.Type> | JiraApiError<"DeleteWorkflowScheme403", typeof DeleteWorkflowScheme403.Type> | JiraApiError<"DeleteWorkflowScheme404", typeof DeleteWorkflowScheme404.Type>>
   /**
 * Create a draft workflow scheme from an active workflow scheme, by copying the active workflow scheme. Note that an active workflow scheme can only have one draft workflow scheme.
 *

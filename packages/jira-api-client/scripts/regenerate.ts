@@ -113,12 +113,16 @@ const bodylessErrorContent: Schema.Json = {
 }
 
 /**
- * Atlassian omits bodies from many documented 4xx/5xx responses. Without a
- * content schema the generator treats those statuses as successful voids.
+ * A 204 response can never contain a message body, but Jira attaches empty JSON
+ * schemas to many of them. Remove that misleading content so the generator
+ * emits `void` handlers instead of JSON decoders.
+ *
+ * Atlassian also omits bodies from many documented 4xx/5xx responses. Without
+ * a content schema the generator treats those statuses as successful voids.
  * Give them a permissive JSON body so they remain failures with status-bearing
  * generated JiraApiError values.
  */
-const normalizeBodylessErrors = (document: Schema.Json): Schema.Json => {
+const normalizeResponses = (document: Schema.Json): Schema.Json => {
   if (!Predicate.isObject(document)) return document
   const root = document
   const rootPaths = root.paths
@@ -135,6 +139,14 @@ const normalizeBodylessErrors = (document: Schema.Json): Schema.Json => {
           const responses = Object.fromEntries(
             Object.entries(operation.responses).map(([status, response]) => {
               const code = Number(status)
+              if (code === 204 && Predicate.isObject(response)) {
+                return [
+                  status,
+                  Object.fromEntries(
+                    Object.entries(response).filter(([key]) => key !== "content")
+                  )
+                ]
+              }
               if (!Number.isInteger(code) || code < 400 || !Predicate.isObject(response) || "content" in response) {
                 return [status, response]
               }
@@ -166,7 +178,7 @@ const generate = Effect.fn("Jira.regenerate.generate")(function*(scriptPaths: Sc
   ).pipe(
     Effect.mapError((cause) => new RegenerateError({ message: "Could not apply Jira JSON patch", cause }))
   )
-  const normalized = normalizeBodylessErrors(patched)
+  const normalized = normalizeResponses(patched)
   const document = yield* Schema.decodeUnknownEffect(OpenApiDocument)(normalized).pipe(
     Effect.mapError((cause) => new RegenerateError({ message: "Normalized Jira document is not OpenAPI", cause }))
   )

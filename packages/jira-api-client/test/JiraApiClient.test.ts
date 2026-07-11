@@ -126,6 +126,30 @@ describe("JiraApiClient", () => {
       expect(result._tag).toBe("Failure")
     }).pipe(Effect.provide(clientLayer(basicConfig, { status: 200, body: {} }, []))))
 
+  it.effect("returns void for Jira 204 responses that advertise an empty JSON schema", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const result = yield* client.setBanner({
+        payload: { isEnabled: true, message: "Maintenance" }
+      })
+
+      expect(result).toBeUndefined()
+      expect(requests).toHaveLength(1)
+    }).pipe(Effect.provide(clientLayer(basicConfig, { status: 204 }, requests)))
+  })
+
+  it.effect("keeps naturally bodyless delete operations void", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const result = yield* client.deleteIssue("PROJ-1", undefined)
+
+      expect(result).toBeUndefined()
+      expect(requests).toHaveLength(1)
+    }).pipe(Effect.provide(clientLayer(basicConfig, { status: 204 }, requests)))
+  })
+
   it.effect("uploads multipart data with the Atlassian CSRF bypass header", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

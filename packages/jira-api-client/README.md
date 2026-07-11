@@ -70,9 +70,11 @@ The command performs this deterministic pipeline:
 2. Canonically encode the unmodified response as `.specs/jira-v3.json`.
 3. Apply `.specs/jira-v3.patch.json` as RFC 6902 JSON Patch in memory.
 4. Normalize contradictory defaults and mixed open-object schemas in memory.
-5. Add permissive JSON schemas to documented bodyless error responses so they
+5. Remove misleading JSON content from `204 No Content` responses so they
+   generate as `void` instead of attempting to decode an empty body.
+6. Add permissive JSON schemas to documented bodyless error responses so they
    cannot be mistaken for successful `void` responses.
-6. Generate `src/generated/JiraApi.ts` with `@effect/openapi-generator`.
+7. Generate `src/generated/JiraApi.ts` with `@effect/openapi-generator`.
 
 Never edit the generated TypeScript or committed upstream specification by
 hand. Put intentional upstream corrections in the JSON Patch, or change the
