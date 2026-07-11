@@ -113,6 +113,26 @@ describe("ConfluenceApiClient", () => {
       Effect.provide(clientLayer(basicConfig, { status: 404, body: { message: "Not found" } }, []))
     ))
 
+  it.effect("decodes null attachment media descriptions returned by Atlassian", () =>
+    Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const response = yield* client.v2.getPageAttachments("123", undefined)
+
+      expect(response.results?.[0]?.mediaTypeDescription).toBeNull()
+    }).pipe(
+      Effect.provide(clientLayer(
+        basicConfig,
+        {
+          status: 200,
+          body: {
+            results: [{ id: "attachment-1", mediaType: "application/octet-stream", mediaTypeDescription: null }],
+            _links: {}
+          }
+        },
+        []
+      ))
+    ))
+
   it.effect("sends multipart uploads with Atlassian's required header", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

@@ -75,6 +75,8 @@ The raw documents remain byte-for-byte representations of Atlassian's JSON data 
   unions. The generator resolves these OpenAPI `nullable` fields to
   `Schema.Never` before its `onEnter` hook runs, so the hook alone cannot repair
   them; the focused patch is required and covered by response-decoding tests.
+- V2 attachment media descriptions accept `null`, matching observed Atlassian
+  responses even though the upstream document declares only `string`.
 
 Review patch changes particularly carefully: they are compatibility contracts, not copies of upstream data.
 
