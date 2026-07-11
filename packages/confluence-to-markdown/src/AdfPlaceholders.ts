@@ -39,6 +39,7 @@
  */
 
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 export interface AdfNode {
@@ -49,10 +50,8 @@ export interface AdfNode {
   readonly marks?: ReadonlyArray<AdfNode>
 }
 
-const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
-  typeof value === "object" && value !== null
-
-const isAdfNode = (value: unknown): value is AdfNode => isRecord(value) && typeof value.type === "string"
+const isAdfNode = (value: unknown): value is AdfNode =>
+  Predicate.isReadonlyObject(value) && typeof value.type === "string"
 
 const STATUS_RE = /<span class="adf-status"\s+data-color="([^"]+)">([^<]*)<\/span>/g
 const INLINE_NODE_RE = /<!--\s*adf:(date|emoji)(?:\s+node=([\s\S]*?))?\s*-->/g
@@ -652,7 +651,7 @@ const inlineRoundTrips = (node: AdfNode): boolean => {
     case "inlineCard": {
       const attrs = node.attrs ?? {}
       const data = attrs["data"]
-      const url = attrs["url"] ?? (isRecord(data) ? data["url"] : undefined)
+      const url = attrs["url"] ?? (Predicate.isReadonlyObject(data) ? data["url"] : undefined)
       return typeof url === "string" && url.length > 0 && !breaksCommentPlaceholder(node)
     }
     case "date":

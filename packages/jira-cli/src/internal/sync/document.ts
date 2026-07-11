@@ -4,6 +4,7 @@
  * @internal
  */
 import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
+import * as Predicate from "effect/Predicate"
 import matter from "gray-matter"
 import * as yaml from "js-yaml"
 import { SyncValidationError } from "../../JiraCliError.js"
@@ -16,20 +17,17 @@ import type {
   UserFieldValue
 } from "./types.js"
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
 const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
   Array.isArray(value) && value.every((item) => typeof item === "string")
 
 const isFrontMatterCustomFields = (
   value: unknown
-): value is IssueDocumentFrontMatter["customFields"] => isRecord(value)
+): value is IssueDocumentFrontMatter["customFields"] => Predicate.isReadonlyObject(value)
 
 const yamlEngine = {
   parse: (str: string): object => {
     const value = yaml.load(str)
-    return isRecord(value) ? value : {}
+    return Predicate.isReadonlyObject(value) ? value : {}
   },
   stringify: (data: object): string => yaml.dump(data)
 }
@@ -107,7 +105,7 @@ const parseFrontMatter = (path: string, data: Record<string, unknown>): IssueDoc
   const userValue = (key: string): UserFieldValue | null => {
     const value = data[key]
     if (value === null || value === undefined) return null
-    const record = isRecord(value) ? value : fail(path, `Invalid user field "${key}"`)
+    const record = Predicate.isReadonlyObject(value) ? value : fail(path, `Invalid user field "${key}"`)
     const accountId = record["accountId"]
     const displayName = record["displayName"]
     if (typeof accountId === "string" && typeof displayName === "string") {
@@ -244,7 +242,7 @@ const parseAttachmentMetadata = (
 ): Partial<Pick<AttachmentReference, "id" | "mediaType" | "size">> => {
   try {
     const parsed = JSON.parse(raw)
-    if (!isRecord(parsed)) return {}
+    if (!Predicate.isReadonlyObject(parsed)) return {}
     return {
       id: typeof parsed["jiraAttachmentId"] === "string"
         ? parsed["jiraAttachmentId"]

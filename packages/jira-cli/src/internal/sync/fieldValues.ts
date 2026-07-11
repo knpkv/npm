@@ -3,6 +3,7 @@
  *
  * @internal
  */
+import * as Predicate from "effect/Predicate"
 import type { CascadingFieldValue, OptionFieldValue, SyncFieldValue, UserFieldValue } from "./types.js"
 
 export type CompleteListItem = string | number | boolean | UserFieldValue | OptionFieldValue
@@ -44,18 +45,18 @@ export const completeListValue = (
 export const makeCompleteListValue = completeListValue
 
 export const isUserFieldValue = (value: unknown): value is UserFieldValue => {
-  if (!isRecord(value)) return false
+  if (!Predicate.isReadonlyObject(value)) return false
   return typeof value["accountId"] === "string" && typeof value["displayName"] === "string"
 }
 
 export const isOptionFieldValue = (value: unknown): value is OptionFieldValue => {
-  if (!isRecord(value) || typeof value["value"] !== "string") return false
+  if (!Predicate.isReadonlyObject(value) || typeof value["value"] !== "string") return false
   const id = value["id"]
   return id === undefined || typeof id === "string"
 }
 
 export const isCascadingFieldValue = (value: unknown): value is CascadingFieldValue => {
-  if (!isRecord(value) || !isOptionFieldValue(value["parent"])) return false
+  if (!Predicate.isReadonlyObject(value) || !isOptionFieldValue(value["parent"])) return false
   const child = value["child"]
   return child === undefined || isOptionFieldValue(child)
 }
@@ -140,6 +141,3 @@ const isCompleteListItem = (value: unknown): value is CompleteListItem => {
       return false
   }
 }
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)

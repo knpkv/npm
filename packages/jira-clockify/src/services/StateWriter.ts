@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface TimerStateFile {
@@ -50,12 +51,9 @@ export class StateWriter extends Context.Service<StateWriter, StateWriterShape>(
 const STATE_DIR = ".jcf"
 const STATE_FILE = "state.json"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const parseStateFile = (content: string): TimerStateFile => {
   const parsed: unknown = JSON.parse(content)
-  if (!isRecord(parsed)) return emptyState
+  if (!Predicate.isObject(parsed)) return emptyState
   return {
     active: typeof parsed.active === "boolean" ? parsed.active : emptyState.active,
     ticketKey: typeof parsed.ticketKey === "string" || parsed.ticketKey === null
