@@ -19,7 +19,7 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient } from "@knpkv/jira-api-client"
+import { make as makeJiraApi } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -28,8 +28,10 @@ import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { StateWriter, type TimerStateFile } from "./StateWriter.js"
@@ -177,8 +179,8 @@ export const layer = Layer.effect(
   TimerService,
   Effect.gen(function*() {
     const clockify = yield* ClockifyApiClient
-    const jira = yield* JiraApiClient
     const jiraAuth = yield* JiraAuth
+    const httpClient = yield* HttpClient.HttpClient
     const clockifyAuth = yield* ClockifyAuth
     const config = yield* ConfigService
     const stateWriter = yield* StateWriter
@@ -262,6 +264,20 @@ export const layer = Layer.effect(
           yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
           return { _tag: "NotLoggedIn" }
         }
+        const auth = yield* Effect.option(
+          Effect.all({
+            accessToken: jiraAuth.getAccessToken(),
+            cloudId: jiraAuth.getCloudId()
+          })
+        )
+        if (Option.isNone(auth)) {
+          yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
+          return { _tag: "NotLoggedIn" }
+        }
+        const jira = makeJiraApi(httpClient, {
+          baseUrl: "",
+          auth: { type: "oauth2", ...auth.value }
+        })
         return yield* jira.addWorklog(ticketKey, {
           payload: {
             started,
