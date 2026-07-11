@@ -19,10 +19,11 @@
  * @module
  */
 import { normalizeAttachmentMediaType } from "@knpkv/atlassian-common/attachments"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import { JiraApiError } from "./JiraCliError.js"
 
 /**
@@ -113,13 +114,11 @@ interface SearchJqlResponse {
   readonly nextPageToken?: string
 }
 
-const isRecord = (value: unknown): value is Readonly<Record<PropertyKey, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const recordOrEmpty = (value: unknown): Readonly<Record<PropertyKey, unknown>> => isRecord(value) ? value : {}
+const recordOrEmpty = (value: unknown): Readonly<Record<PropertyKey, unknown>> =>
+  Predicate.isReadonlyObject(value) ? value : {}
 
 const recordArray = (value: unknown): ReadonlyArray<Readonly<Record<PropertyKey, unknown>>> =>
-  Array.isArray(value) ? value.filter(isRecord) : []
+  Array.isArray(value) ? value.filter(Predicate.isReadonlyObject) : []
 
 const parseSearchJqlResponse = (value: unknown): SearchJqlResponse => {
   const record = recordOrEmpty(value)
@@ -193,7 +192,7 @@ const FIELDS = [
 const extractDisplayName = (field: unknown): string | null => {
   if (field === null || field === undefined) return null
   if (typeof field === "string") return field
-  if (isRecord(field)) {
+  if (Predicate.isReadonlyObject(field)) {
     if (typeof field.displayName === "string") return field.displayName
     if (typeof field.name === "string") return field.name
   }
@@ -208,7 +207,7 @@ const extractNameArray = (field: unknown): ReadonlyArray<string> => {
   return field
     .map((item) => {
       if (typeof item === "string") return item
-      if (isRecord(item)) {
+      if (Predicate.isReadonlyObject(item)) {
         if (typeof item.name === "string") return item.name
       }
       return null
@@ -313,12 +312,12 @@ const make = Effect.gen(function*() {
   const siteUrl = yield* SiteUrl
 
   const getByKey = (key: string): Effect.Effect<Issue, JiraApiError> =>
-    toEffect(client.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
+    client.getIssue(key, {
       params: {
-        path: { issueIdOrKey: key },
-        query: { fields: FIELDS, expand: "renderedFields" }
+        fields: FIELDS,
+        expand: "renderedFields"
       }
-    })).pipe(
+    }).pipe(
       Effect.map((result) => mapIssueUnknown(result, siteUrl)),
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to get issue ${key}`, cause }))
     )
@@ -328,17 +327,15 @@ const make = Effect.gen(function*() {
     maxResults: number,
     nextPageToken?: string
   ): Effect.Effect<SearchJqlResponse, JiraApiError> =>
-    toEffect(client.v3.client.GET("/rest/api/3/search/jql", {
+    client.searchIssuesUsingJql({
       params: {
-        query: {
-          jql,
-          maxResults,
-          ...(nextPageToken ? { nextPageToken } : {}),
-          fields: FIELDS,
-          expand: "renderedFields"
-        }
+        jql,
+        maxResults,
+        ...(nextPageToken ? { nextPageToken } : {}),
+        fields: FIELDS,
+        expand: "renderedFields"
       }
-    })).pipe(
+    }).pipe(
       Effect.map(parseSearchJqlResponse),
       Effect.mapError((cause) => new JiraApiError({ message: "Failed to search issues", cause }))
     )

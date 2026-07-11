@@ -48,6 +48,7 @@
     { "name": "Smart Link", "description": "" },
     { "name": "Space", "description": "" },
     { "name": "Space Permissions", "description": "" },
+    { "name": "Space Permission Transition", "description": "" },
     { "name": "Space Properties", "description": "" },
     { "name": "Space Roles", "description": "" },
     { "name": "Task", "description": "" },
@@ -5368,7 +5369,7 @@
             "name": "depth",
             "in": "query",
             "description": "Maximum depth of descendants to return. If more results are required, use the endpoint corresponding to the content type of the deepest descendant to fetch more descendants.",
-            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 5, "type": "integer" }
+            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 10, "type": "integer" }
           },
           {
             "name": "cursor",
@@ -6058,7 +6059,7 @@
             "name": "depth",
             "in": "query",
             "description": "Maximum depth of descendants to return. If more results are required, use the endpoint corresponding to the content type of the deepest descendant to fetch more descendants.",
-            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 5, "type": "integer" }
+            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 10, "type": "integer" }
           },
           {
             "name": "cursor",
@@ -6735,7 +6736,7 @@
             "name": "depth",
             "in": "query",
             "description": "Maximum depth of descendants to return. If more results are required, use the endpoint corresponding to the content type of the deepest descendant to fetch more descendants.",
-            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 5, "type": "integer" }
+            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 10, "type": "integer" }
           },
           {
             "name": "cursor",
@@ -7418,7 +7419,7 @@
             "name": "depth",
             "in": "query",
             "description": "Maximum depth of descendants to return. If more results are required, use the endpoint corresponding to the content type of the deepest descendant to fetch more descendants.",
-            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 5, "type": "integer" }
+            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 10, "type": "integer" }
           },
           {
             "name": "cursor",
@@ -7828,10 +7829,10 @@
         "x-atlassian-connect-scope": "READ"
       },
       "post": {
-        "tags": ["Space", "EAP"],
+        "tags": ["Space"],
         "operationId": "createSpace",
         "summary": "Create space",
-        "description": "Creates a Space as specified in the payload.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to create spaces.",
+        "description": "Creates a Space as specified in the payload.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to create spaces.",
         "requestBody": { "$ref": "#/components/requestBodies/SpaceCreateRequest" },
         "responses": {
           "201": {
@@ -7873,8 +7874,7 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:space:confluence"] }
         ],
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-connect-scope": "WRITE",
-        "x-experimental": true
+        "x-atlassian-connect-scope": "WRITE"
       }
     },
     "/spaces/{id}": {
@@ -8811,10 +8811,10 @@
     },
     "/space-permissions": {
       "get": {
-        "tags": ["Space Permissions", "EAP"],
+        "tags": ["Space Permissions"],
         "operationId": "getAvailableSpacePermissions",
         "summary": "Get available space permissions",
-        "description": "Retrieves the available space permissions.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site.",
+        "description": "Retrieves the available space permissions.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site.",
         "parameters": [
           {
             "name": "cursor",
@@ -8861,16 +8861,215 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:space.permission:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
+      }
+    },
+    "/space-permissions/transition/combinations": {
+      "get": {
+        "tags": ["Space Permission Transition"],
+        "operationId": "listSpacePermissionCombinations",
+        "summary": "List unassigned space permission combinations",
+        "description": "Lists the unique unassigned space permission combinations currently present on the tenant.\nCombinations that already map to a space role are filtered out server-side. Each row carries\nthe decoded set of space permissions and the principal types that currently hold the\ncombination — these inform which `principalType` values are valid to include in the matching\nbulk role-assignments request.\n\nResults are always sorted by `principalCount` descending. Sort field and sort order are not\nconfigurable; page size is controlled by the `limit` query parameter (default 25, min 1,\nmax 250). Use the `cursor` field to page through additional results. The `generatedAt` field\nreflects the last audit run that populated the combinations table — call the\ngenerate-combinations endpoint to refresh stale data.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be a Confluence administrator.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor returned from a previous page in the `cursor` field of the response. Omit for the first page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "The maximum number of combinations to return per page. Requests outside the supported range return `400`.",
+            "schema": { "type": "integer", "format": "int32", "default": 25, "minimum": 1, "maximum": 250 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned with the page of unassigned combinations (possibly an empty `results` array if\nno combinations exist or if combinations have not yet been generated for this tenant).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListSpacePermissionCombinationsResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Returned if the `cursor` query parameter is malformed, or if `limit` is not an integer\nin the range `1`–`250`.",
+            "content": {}
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the calling user does not have permission or the resource is not found.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:configuration:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:configuration:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "ADMIN",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true
+      },
+      "post": {
+        "tags": ["Space Permission Transition"],
+        "operationId": "generateSpacePermissionCombinations",
+        "summary": "Generate space permission combinations",
+        "description": "Submits a task to refresh the space permission combinations in the database, which identifies\nall unique permission combinations across the site. This provides permission combination IDs\nthat can be used with the assign-roles and remove-access endpoints.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be a Confluence administrator.",
+        "responses": {
+          "202": {
+            "description": "Returned if the generation task is successfully submitted.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkTransitionTaskResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the calling user does not have permission or the resource is not found.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:configuration:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "ADMIN",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true
+      }
+    },
+    "/space-permissions/transition/role-assignments": {
+      "post": {
+        "tags": ["Space Permission Transition"],
+        "operationId": "bulkAssignSpacePermissionRoles",
+        "summary": "Bulk assign space permission roles",
+        "description": "Bulk assigns roles for one or more permission combination IDs obtained from the space permission\ncombinations. Supports targeting all spaces, specific spaces, or excluding specific spaces.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be a Confluence administrator.",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BulkAssignRolesRequest" } } },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Returned if the bulk assign roles task is successfully submitted.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkTransitionTaskResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request is invalid (e.g., empty assignments, missing space selection).",
+            "content": {}
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the calling user does not have permission or the resource is not found.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:configuration:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "ADMIN",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true
+      }
+    },
+    "/space-permissions/transition/access-removals": {
+      "post": {
+        "tags": ["Space Permission Transition"],
+        "operationId": "bulkRemoveSpacePermissionAccess",
+        "summary": "Bulk remove space permission access",
+        "description": "Bulk removes access for one or more permission combination IDs obtained from the space permission\ncombinations. This removes all space permissions for the specified combinations across\nthe targeted spaces.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be a Confluence administrator.",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BulkRemoveAccessRequest" } } },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Returned if the bulk remove access task is successfully submitted.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkTransitionTaskResponse" } }
+            }
+          },
+          "400": {
+            "description": "Returned if the request is invalid (e.g., empty permission combination IDs, missing space selection).",
+            "content": {}
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the calling user does not have permission or the resource is not found.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["write:configuration:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "ADMIN",
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-experimental": true
+      }
+    },
+    "/space-permissions/transition/tasks/{taskId}": {
+      "get": {
+        "tags": ["Space Permission Transition"],
+        "operationId": "getSpacePermissionTransitionTaskStatus",
+        "summary": "Get space permission transition task status",
+        "description": "Retrieves the status of an async space permission transition task. Use the taskId returned\nfrom the generate-combinations, assign-roles, or remove-access endpoints to poll for\nprogress and completion.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be a Confluence administrator.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the async task, as returned by the generate-combinations, assign-roles, or remove-access endpoints.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returned if the task is found and the status is successfully retrieved.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BulkTransitionTaskStatusResponse" } }
+            }
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing from the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the task does not exist or the calling user does not have permission to view it.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:configuration:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:configuration:confluence"] }
+        ],
+        "x-atlassian-connect-scope": "ADMIN",
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
         "x-experimental": true
       }
     },
     "/space-roles": {
       "get": {
-        "tags": ["Space Roles", "EAP"],
+        "tags": ["Space Roles"],
         "operationId": "getAvailableSpaceRoles",
         "summary": "Get available space roles",
-        "description": "Retrieves the available space roles.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site; if requesting a certain space's roles, permission to view the space.",
+        "description": "Retrieves the available space roles.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site; if requesting a certain space's roles, permission to view the space.",
         "parameters": [
           {
             "name": "space-id",
@@ -8945,14 +9144,13 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:space.permission:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       },
       "post": {
         "tags": ["Space Roles"],
         "operationId": "createSpaceRole",
         "summary": "Create a space role",
-        "description": "Create a space role.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
+        "description": "Create a space role.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8993,16 +9191,15 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
         ],
         "x-atlassian-connect-scope": "ADMIN",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       }
     },
     "/space-roles/{id}": {
       "get": {
-        "tags": ["Space Roles", "EAP"],
+        "tags": ["Space Roles"],
         "operationId": "getSpaceRolesById",
         "summary": "Get space role by ID",
-        "description": "Retrieves the space role by ID.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site.",
+        "description": "Retrieves the space role by ID.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site.",
         "parameters": [
           {
             "name": "id",
@@ -9051,14 +9248,13 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:space.permission:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       },
       "put": {
         "tags": ["Space Roles"],
         "operationId": "updateSpaceRole",
         "summary": "Update a space role",
-        "description": "Update a space role.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
+        "description": "Update a space role.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
         "parameters": [
           {
             "name": "id",
@@ -9116,14 +9312,13 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
         ],
         "x-atlassian-connect-scope": "ADMIN",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       },
       "delete": {
         "tags": ["Space Roles"],
         "operationId": "deleteSpaceRole",
         "summary": "Delete a space role",
-        "description": "Delete a space role\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
+        "description": "Delete a space role\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nUser must be an organization or site admin. Connect and Forge app users are not authorized to access this resource.",
         "parameters": [
           {
             "name": "id",
@@ -9153,8 +9348,7 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:configuration:confluence"] }
         ],
         "x-atlassian-connect-scope": "ADMIN",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       }
     },
     "/space-role-mode": {
@@ -9162,7 +9356,7 @@
         "tags": ["Space Roles"],
         "operationId": "getSpaceRoleMode",
         "summary": "Get space role mode",
-        "description": "Retrieves the space role mode.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site ('Can use' global permission).",
+        "description": "Retrieves the space role mode.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to access the Confluence site ('Can use' global permission).",
         "responses": {
           "200": {
             "description": "Returned if the requested space role mode is returned.",
@@ -9196,16 +9390,15 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:configuration:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       }
     },
     "/spaces/{id}/role-assignments": {
       "get": {
-        "tags": ["Space Roles", "EAP"],
+        "tags": ["Space Roles"],
         "operationId": "getSpaceRoleAssignments",
         "summary": "Get space role assignments",
-        "description": "Retrieves the space role assignments.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the space.",
+        "description": "Retrieves the space role assignments.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the space.",
         "parameters": [
           {
             "name": "id",
@@ -9287,14 +9480,13 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:space.permission:confluence"] }
         ],
         "x-atlassian-connect-scope": "READ",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       },
       "post": {
-        "tags": ["Space Roles", "EAP"],
+        "tags": ["Space Roles"],
         "operationId": "setSpaceRoleAssignments",
         "summary": "Set space role assignments",
-        "description": "Sets space role assignments as specified in the payload.\n\nAvailable as part of the [Role-Based Access Controls Beta](https://community.atlassian.com/forums/Confluence-articles/Beta-Simplify-space-access-in-Confluence-with-roles/ba-p/3044550). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to manage roles in the space.",
+        "description": "Sets space role assignments as specified in the payload. For each entry, if `roleId` is provided\nthe principal is assigned to that role. If `roleId` is omitted, the role assignment for that principal is removed, if it exists.\n\nAvailable on tenants with [Role-Based Access Control](https://support.atlassian.com/confluence-cloud/docs/manage-user-roles/). \n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to manage roles in the space.",
         "parameters": [
           {
             "name": "id",
@@ -9337,8 +9529,7 @@
           { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["write:space.permission:confluence"] }
         ],
         "x-atlassian-connect-scope": "SPACE_ADMIN",
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-experimental": true
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }]
       }
     },
     "/pages/{id}/footer-comments": {
@@ -11919,7 +12110,7 @@
             "name": "depth",
             "in": "query",
             "description": "Maximum depth of descendants to return. If more results are required, use the endpoint corresponding to the content type of the deepest descendant to fetch more descendants.",
-            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 5, "type": "integer" }
+            "schema": { "format": "int32", "default": 2, "minimum": 1, "maximum": 10, "type": "integer" }
           },
           {
             "name": "cursor",
@@ -12791,6 +12982,59 @@
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }]
       }
     },
+    "/attachments/{id}/thumbnail/download": {
+      "get": {
+        "tags": ["Attachment"],
+        "operationId": "getAttachmentThumbnailById",
+        "summary": "Download attachment thumbnail by id",
+        "description": "Redirects the client to a URL that serves an attachment thumbnail's binary data.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nPermission to view the attachment's container.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The ID of the attachment to be returned. If you don't know the attachment's ID, use Get attachments for page/blogpost/custom content.",
+            "schema": { "type": "string", "pattern": "(att)?[0-9]+" }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Allows you to retrieve a previously published version. Specify the previous version's number to retrieve its details.",
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "description": "Allows you to define the thumbnail height.",
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "width",
+            "in": "query",
+            "description": "Allows you to define the thumbnail width.",
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "302": { "description": "Returned if download URL is found.", "content": {} },
+          "400": { "description": "Returned if an invalid request is provided.", "content": {} },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing\nfrom the request.",
+            "content": {}
+          },
+          "404": {
+            "description": "Returned if the calling user does not have permission to view the\nrequested attachment or the attachment was not found.",
+            "content": {}
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "oAuthDefinitions": ["read:attachment:confluence"] }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "oAuthDefinitions", "state": "Current", "scopes": ["read:attachment:confluence"] }
+        ],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": false }],
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
     "/app/properties": {
       "get": {
         "tags": ["App Properties"],
@@ -13386,7 +13630,7 @@
           "application/json": {
             "schema": {
               "type": "object",
-              "required": ["createdAt", "cleanHistory"],
+              "required": ["createdAt"],
               "properties": {
                 "createdAt": {
                   "type": "string",
@@ -13395,18 +13639,26 @@
                 },
                 "cleanHistory": {
                   "type": "boolean",
+                  "nullable": true,
                   "description": "Whether to clean up previous versions containing the redaction. When true, historical versions of the content that contain the redacted text will be squashed."
+                },
+                "versionNumber": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 1,
+                  "nullable": true,
+                  "description": "Optional version number of the content to redact. When specified, the redaction will target \na specific historical version of the content rather than the current version.\n\n- If omitted or null, the redaction applies to the current (latest) version of the content.\n- When provided, must be a valid version number that exists for the content.\n\n**Note**: Version numbers start at 1 and increment with each content update.\n"
                 },
                 "body": {
                   "type": "object",
                   "properties": {
-                    "redactions": { "type": "array", "items": { "$ref": "#/components/schemas/Redaction" } }
+                    "redactions": { "type": "array", "items": { "$ref": "#/components/schemas/RedactionPointer" } }
                   }
                 },
                 "title": {
                   "type": "object",
                   "properties": {
-                    "redactions": { "type": "array", "items": { "$ref": "#/components/schemas/Redaction" } }
+                    "redactions": { "type": "array", "items": { "$ref": "#/components/schemas/RedactionPointer" } }
                   }
                 }
               }
@@ -14722,6 +14974,7 @@
             "type": "string",
             "description": "The account ID of the user who created this space originally."
           },
+          "spaceOwnerId": { "type": "string", "description": "The account ID of the user who owns this space." },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -14777,6 +15030,7 @@
             "type": "string",
             "description": "The account ID of the user who created this space originally."
           },
+          "spaceOwnerId": { "type": "string", "description": "The account ID of the user who owns this space." },
           "currentActiveAlias": { "type": "string", "description": "Currently active alias for a Confluence space." },
           "createdAt": {
             "type": "string",
@@ -14916,6 +15170,195 @@
             "type": "string",
             "description": "Id of the task to update the space permissions associated with the space role"
           }
+        }
+      },
+      "BulkTransitionTaskResponse": {
+        "type": "object",
+        "required": ["taskId", "status", "statusUrl"],
+        "properties": {
+          "taskId": { "type": "string", "description": "The ID of the async task." },
+          "status": {
+            "type": "string",
+            "description": "The current status of the task.",
+            "enum": ["IN_PROGRESS", "COMPLETED", "FAILED"]
+          },
+          "statusUrl": { "type": "string", "description": "URL to poll for task progress." }
+        }
+      },
+      "BulkTransitionTaskStatusResponse": {
+        "type": "object",
+        "required": ["taskId", "status"],
+        "properties": {
+          "taskId": { "type": "string", "description": "The ID of the task." },
+          "status": {
+            "type": "string",
+            "description": "The current status of the task.",
+            "enum": ["IN_PROGRESS", "COMPLETED", "FAILED"]
+          },
+          "errorMessage": {
+            "type": "string",
+            "description": "Human-readable error message describing why the task failed. Only present when status is FAILED.",
+            "nullable": true
+          }
+        }
+      },
+      "BulkAssignRolesRequest": {
+        "type": "object",
+        "required": ["assignments", "spaceSelection"],
+        "properties": {
+          "assignments": {
+            "type": "array",
+            "description": "List of role assignments to apply.",
+            "items": { "$ref": "#/components/schemas/BulkTransitionRoleAssignment" }
+          },
+          "spaceSelection": { "$ref": "#/components/schemas/BulkTransitionSpaceSelection" }
+        }
+      },
+      "BulkRemoveAccessRequest": {
+        "type": "object",
+        "required": ["permissionCombinationIds", "spaceSelection"],
+        "properties": {
+          "permissionCombinationIds": {
+            "type": "array",
+            "description": "List of permission combination IDs to remove access for.",
+            "items": { "type": "string" }
+          },
+          "spaceSelection": { "$ref": "#/components/schemas/BulkTransitionSpaceSelection" }
+        }
+      },
+      "BulkTransitionRoleAssignment": {
+        "type": "object",
+        "required": ["permissionCombinationId", "principalTypeAssignments"],
+        "properties": {
+          "permissionCombinationId": { "type": "string", "description": "The ID of the permission combination." },
+          "principalTypeAssignments": {
+            "type": "array",
+            "description": "List of principal type assignments.",
+            "items": { "$ref": "#/components/schemas/BulkTransitionPrincipalTypeAssignment" }
+          }
+        }
+      },
+      "BulkTransitionPrincipalTypeAssignment": {
+        "type": "object",
+        "required": ["principalType", "removeAccess"],
+        "properties": {
+          "principalType": {
+            "type": "string",
+            "description": "The type of principal.",
+            "enum": [
+              "USER",
+              "GROUP",
+              "GUEST",
+              "ANONYMOUS",
+              "ALL_LICENSED_USERS_USER_CLASS",
+              "ALL_PRODUCT_ADMINS_USER_CLASS",
+              "APP"
+            ]
+          },
+          "removeAccess": {
+            "type": "boolean",
+            "description": "Whether to remove access for this principal type instead of assigning a role."
+          },
+          "roleId": {
+            "type": "string",
+            "description": "The UUID of the space role to assign. Required when removeAccess is false.",
+            "nullable": true
+          }
+        }
+      },
+      "BulkTransitionSpaceSelection": {
+        "type": "object",
+        "required": ["spaceType"],
+        "properties": {
+          "spaceType": {
+            "type": "string",
+            "description": "The space selection type.",
+            "enum": ["ALL", "ALL_EXCEPT_PERSONAL", "ALL_EXCEPT_SPECIFIC", "PERSONAL", "SPECIFIC"]
+          },
+          "selectedSpaces": {
+            "type": "array",
+            "description": "List of specific spaces. Required when spaceType is SPECIFIC or ALL_EXCEPT_SPECIFIC.",
+            "items": { "$ref": "#/components/schemas/BulkTransitionSpaceTarget" }
+          }
+        }
+      },
+      "BulkTransitionSpaceTarget": {
+        "type": "object",
+        "required": ["id", "key"],
+        "properties": {
+          "id": { "type": "string", "description": "The space ID." },
+          "key": { "type": "string", "description": "The space key." }
+        }
+      },
+      "ListSpacePermissionCombinationsResponse": {
+        "type": "object",
+        "required": ["results"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "description": "One page of unassigned permission combinations, sorted by principalCount descending.",
+            "items": { "$ref": "#/components/schemas/BulkTransitionCombinationEntry" }
+          },
+          "generatedAt": {
+            "type": "string",
+            "description": "ISO-8601 timestamp of the last audit run that populated the combinations table.\nAbsent if the audit task has never run on this tenant.",
+            "nullable": true
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque cursor for the next page. Absent when no further results exist.",
+            "nullable": true
+          }
+        }
+      },
+      "BulkTransitionCombinationEntry": {
+        "type": "object",
+        "required": ["combinationId", "spaceCount", "principalCount", "permissions", "principalTypes"],
+        "properties": {
+          "combinationId": {
+            "type": "string",
+            "description": "The opaque id identifying this unique combination of space permissions. Pass directly to the bulk role-assignments or access-removals endpoints."
+          },
+          "spaceCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of spaces that currently have this combination."
+          },
+          "principalCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of principals (users / groups / etc.) that currently have this combination."
+          },
+          "permissions": {
+            "type": "array",
+            "description": "The decoded space permissions that make up this combination.",
+            "items": { "$ref": "#/components/schemas/BulkTransitionDecodedPermission" }
+          },
+          "principalTypes": {
+            "type": "array",
+            "description": "The principal types that currently hold this combination and can be reassigned via the\nbulk role-assignments endpoint. Use this to know which `principalType` entries are valid\nto include in the bulk-assign request for this combination.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "GROUP",
+                "GUEST",
+                "ANONYMOUS",
+                "ALL_LICENSED_USERS_USER_CLASS",
+                "ALL_PRODUCT_ADMINS_USER_CLASS",
+                "APP",
+                "TEAM"
+              ]
+            }
+          }
+        }
+      },
+      "BulkTransitionDecodedPermission": {
+        "type": "object",
+        "required": ["id", "displayName"],
+        "properties": {
+          "id": { "type": "string", "description": "The platform id of the permission (e.g. `VIEW_CONTENT`)." },
+          "displayName": { "type": "string", "description": "Human-readable name of the permission." }
         }
       },
       "SpaceRoleAssignment": {

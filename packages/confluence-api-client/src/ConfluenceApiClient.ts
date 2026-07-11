@@ -1,130 +1,127 @@
 /**
- * Confluence API client Layer wrapper.
+ * Schema-validated Confluence Cloud REST API clients.
  *
- * Uses openapi-fetch + Effect for type-safe Confluence REST API access.
+ * Generated code owns request construction and response decoding. This module
+ * applies version-specific base URLs, authentication, and the multipart upload
+ * boundary that Atlassian's OpenAPI document cannot represent as FormData.
  *
  * @module
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import { flow } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
-import { ConfluenceApiConfig } from "./ConfluenceApiConfig.js"
-import type { paths as V1Paths } from "./generated/v1/schema.js"
-import type { paths as V2Paths } from "./generated/v2/schema.js"
-import { makeOpenApiFetchClient, type OpenApiFetchClient } from "./OpenApiFetchClient.js"
+import type { SchemaError } from "effect/Schema"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import type * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import { ConfluenceApiConfig, type ConfluenceApiConfigShape } from "./ConfluenceApiConfig.js"
+import * as ConfluenceV1Api from "./generated/ConfluenceV1Api.js"
+import * as ConfluenceV2Api from "./generated/ConfluenceV2Api.js"
 
-/**
- * Combined v1 + v2 client shape.
- *
- * @example
- * ```typescript
- * import { toEffect } from "@knpkv/confluence-api-client"
- *
- * // V2: get page by ID
- * toEffect(client.v2.client.GET("/pages/{id}", {
- *   params: { path: { id: 123 } }
- * }))
- *
- * // V2: create page with body
- * toEffect(client.v2.client.POST("/pages", {
- *   body: { spaceId: "...", title: "...", body: { ... } }
- * }))
- *
- * // V1: get user
- * toEffect(client.v1.client.GET("/wiki/rest/api/user", {
- *   params: { query: { accountId: "..." } }
- * }))
- * ```
- *
- * @category Client
- */
-export interface ConfluenceApiClientShape {
-  readonly v1: OpenApiFetchClient<V1Paths>
-  readonly v2: OpenApiFetchClient<V2Paths>
+export interface UploadAttachmentInput {
+  readonly bytes: Uint8Array
+  readonly filename: string
+  readonly mediaType?: string | undefined
 }
 
-/**
- * Confluence API client service.
- *
- * @example
- * ```typescript
- * import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
- * import * as Redacted from "effect/Redacted"
- * import * as Effect from "effect/Effect"
- * import * as Layer from "effect/Layer"
- *
- * const program = Effect.gen(function* () {
- *   const client = yield* ConfluenceApiClient
- *   const page = yield* toEffect(client.v2.client.GET("/pages/{id}", {
- *     params: { path: { id: 12345 } }
- *   }))
- *   console.log(page.title)
- * })
- *
- * const configLayer = Layer.succeed(ConfluenceApiConfig, {
- *   baseUrl: "https://mysite.atlassian.net",
- *   auth: {
- *     type: "basic",
- *     email: "user@example.com",
- *     apiToken: Redacted.make("token")
- *   }
- * })
- *
- * Effect.runPromise(
- *   program.pipe(
- *     Effect.provide(ConfluenceApiClient.layer),
- *     Effect.provide(configLayer)
- *   )
- * )
- * ```
- *
- * @category Client
- */
+export interface ConfluenceApiClientShape {
+  readonly v1: ConfluenceV1Api.ConfluenceV1Api
+  readonly v2: ConfluenceV2Api.ConfluenceV2Api
+  readonly uploadAttachment: (
+    pageId: string,
+    input: UploadAttachmentInput
+  ) => Effect.Effect<
+    ConfluenceV1Api.CreateOrUpdateAttachments200,
+    HttpClientError.HttpClientError | SchemaError
+  >
+}
+
+const authorizationHeader = (config: ConfluenceApiConfigShape): string =>
+  config.auth.type === "basic"
+    ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
+    : `Bearer ${Redacted.value(config.auth.accessToken)}`
+
+const apiBaseUrl = (config: ConfluenceApiConfigShape, version: "v1" | "v2"): string => {
+  const origin = config.auth.type === "oauth2"
+    ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}`
+    : config.baseUrl
+  return version === "v1" ? origin : `${origin}/wiki/api/v2`
+}
+
+const authenticatedClient = (
+  httpClient: HttpClient.HttpClient,
+  config: ConfluenceApiConfigShape,
+  version: "v1" | "v2"
+): HttpClient.HttpClient =>
+  httpClient.pipe(
+    HttpClient.mapRequest(flow(
+      HttpClientRequest.prependUrl(apiBaseUrl(config, version)),
+      HttpClientRequest.setHeader("Authorization", authorizationHeader(config)),
+      HttpClientRequest.setHeader("Accept", "application/json")
+    ))
+  )
+
+export const makeV1 = (
+  httpClient: HttpClient.HttpClient,
+  config: ConfluenceApiConfigShape
+): ConfluenceV1Api.ConfluenceV1Api => ConfluenceV1Api.make(authenticatedClient(httpClient, config, "v1"))
+
+export const makeV2 = (
+  httpClient: HttpClient.HttpClient,
+  config: ConfluenceApiConfigShape
+): ConfluenceV2Api.ConfluenceV2Api => ConfluenceV2Api.make(authenticatedClient(httpClient, config, "v2"))
+
+export const make = (
+  httpClient: HttpClient.HttpClient,
+  config: ConfluenceApiConfigShape
+): ConfluenceApiClientShape => {
+  const v1 = makeV1(httpClient, config)
+  const v2 = makeV2(httpClient, config)
+  const uploadAttachment: ConfluenceApiClientShape["uploadAttachment"] = (pageId, input) => {
+    const buffer = new ArrayBuffer(input.bytes.byteLength)
+    new Uint8Array(buffer).set(input.bytes)
+    const form = new FormData()
+    form.append(
+      "file",
+      new Blob([buffer], input.mediaType === undefined ? undefined : { type: input.mediaType }),
+      input.filename
+    )
+    form.append("minorEdit", "true")
+
+    return v1.httpClient.execute(
+      HttpClientRequest.put(`/wiki/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`).pipe(
+        HttpClientRequest.setUrlParam("status", "current"),
+        HttpClientRequest.setHeader("X-Atlassian-Token", "nocheck"),
+        HttpClientRequest.bodyFormData(form)
+      )
+    ).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(ConfluenceV1Api.CreateOrUpdateAttachments200))
+    )
+  }
+
+  return { v1, v2, uploadAttachment }
+}
+
 export class ConfluenceApiClient extends Context.Service<ConfluenceApiClient, ConfluenceApiClientShape>()(
   "@knpkv/confluence-api-client/ConfluenceApiClient"
 ) {
-  /**
-   * Layer that provides ConfluenceApiClient.
-   *
-   * Requires: ConfluenceApiConfig
-   */
-  static readonly layer: Layer.Layer<ConfluenceApiClient, never, ConfluenceApiConfig> = Layer.effect(
+  static readonly layer: Layer.Layer<
+    ConfluenceApiClient,
+    never,
+    ConfluenceApiConfig | HttpClient.HttpClient
+  > = Layer.effect(
     ConfluenceApiClient,
     Effect.gen(function*() {
       const config = yield* ConfluenceApiConfig
-
-      // Build auth header
-      const authHeader = config.auth.type === "basic"
-        ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
-        : `Bearer ${Redacted.value(config.auth.accessToken)}`
-
-      // V1 schema paths include /wiki/rest/api prefix, so base URL is just the origin
-      const v1BaseUrl = config.auth.type === "oauth2"
-        ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}`
-        : config.baseUrl
-
-      const v2BaseUrl = config.auth.type === "oauth2"
-        ? `https://api.atlassian.com/ex/confluence/${config.auth.cloudId}/wiki/api/v2`
-        : `${config.baseUrl}/wiki/api/v2`
-
-      const headers = {
-        Authorization: authHeader,
-        Accept: "application/json"
-      }
-
-      return {
-        v1: makeOpenApiFetchClient<V1Paths>(v1BaseUrl, headers),
-        v2: makeOpenApiFetchClient<V2Paths>(v2BaseUrl, headers)
-      }
+      const httpClient = yield* HttpClient.HttpClient
+      return ConfluenceApiClient.of(make(httpClient, config))
     })
   )
 }
 
-/**
- * Layer that provides ConfluenceApiClient.
- *
- * @category Layers
- */
 export const layer = ConfluenceApiClient.layer

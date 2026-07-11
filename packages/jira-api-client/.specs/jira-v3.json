@@ -4289,6 +4289,14 @@
             "type": "string"
           },
           "stableId": { "description": "The stable ID of the field.", "type": "string" },
+          "translatedDescription": {
+            "description": "The translated (i18n) description of the field for the current locale. Returned for custom fields.",
+            "type": "string"
+          },
+          "translatedName": {
+            "description": "The translated (i18n) name of the field for the current locale. Returned for custom fields.",
+            "type": "string"
+          },
           "typeDisplayName": { "description": "The display name of the field type", "type": "string" }
         },
         "required": ["id", "name", "schema"],
@@ -13710,7 +13718,7 @@
           "translatedName": { "description": "The translated name of the project role.", "type": "string" },
           "type": {
             "description": "The type of the project role. This is \"DEFAULT\" or \"GUEST\\_ROLE\".",
-            "enum": ["DEFAULT", "GUEST_ROLE"],
+            "enum": ["DEFAULT", "GUEST_ROLE", "AI_AGENT_ROLE"],
             "readOnly": true,
             "type": "string"
           }
@@ -14283,7 +14291,7 @@
           "pcri": { "$ref": "#/components/schemas/ProjectCreateResourceIdentifier" },
           "type": {
             "description": "The type of the role. Only used by project-scoped project",
-            "enum": ["HIDDEN", "VIEWABLE", "EDITABLE", "GUEST"],
+            "enum": ["HIDDEN", "VIEWABLE", "AI_AGENT", "EDITABLE", "GUEST"],
             "example": "EDITABLE",
             "type": "string"
           }
@@ -19259,21 +19267,6 @@
         },
         "type": "object"
       },
-      "WorkflowTransitionProperty": {
-        "additionalProperties": true,
-        "description": "Details about the server Jira is running on.",
-        "properties": {
-          "id": { "description": "The ID of the transition property.", "readOnly": true, "type": "string" },
-          "key": {
-            "description": "The key of the transition property. Also known as the name of the transition property.",
-            "readOnly": true,
-            "type": "string"
-          },
-          "value": { "description": "The value of the transition property.", "type": "string" }
-        },
-        "required": ["value"],
-        "type": "object"
-      },
       "WorkflowTransitionRule": {
         "additionalProperties": false,
         "description": "A workflow transition rule.",
@@ -20084,7 +20077,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-05f20e18d9bde3de68f911b4915970482f536d4e"
+    "version": "1001.0.0-SNAPSHOT-db2a2d37fd683b7252277fde071c0ff005d6f529"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -51362,269 +51355,6 @@
               "read:project-category:jira",
               "read:project:jira"
             ],
-            "state": "Beta"
-          }
-        ],
-        "x-atlassian-connect-scope": "ADMIN"
-      }
-    },
-    "/rest/api/3/workflow/transitions/{transitionId}/properties": {
-      "delete": {
-        "deprecated": true,
-        "description": "This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); delete transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.\n\nDeletes a property from a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
-        "operationId": "deleteWorkflowTransitionProperty",
-        "parameters": [
-          {
-            "description": "The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition.",
-            "in": "path",
-            "name": "transitionId",
-            "required": true,
-            "schema": { "format": "int64", "type": "integer" }
-          },
-          {
-            "description": "The name of the transition property to delete, also known as the name of the property.",
-            "in": "query",
-            "name": "key",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The name of the workflow that the transition belongs to.",
-            "in": "query",
-            "name": "workflowName",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The workflow status. Set to `live` for inactive workflows or `draft` for draft workflows. Active workflows cannot be edited.",
-            "in": "query",
-            "name": "workflowMode",
-            "schema": { "enum": ["live", "draft"], "type": "string" }
-          }
-        ],
-        "responses": {
-          "200": { "description": "200 response" },
-          "304": {
-            "description": "Returned if no changes were made by the request. For example, trying to delete a property that cannot be found."
-          },
-          "400": { "description": "Returned if the request is invalid." },
-          "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
-          "403": { "description": "Returned if the user does not have the necessary permission." },
-          "404": { "description": "Returned if the workflow transition is not found." }
-        },
-        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
-        "summary": "Delete workflow transition property",
-        "tags": ["Workflow transition properties"],
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-oauth2-scopes": [
-          { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
-          { "scheme": "OAuth2", "scopes": ["delete:workflow.property:jira"], "state": "Beta" }
-        ],
-        "x-atlassian-connect-scope": "ADMIN"
-      },
-      "get": {
-        "deprecated": true,
-        "description": "This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); fetch transition properties from [Bulk get workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-post) instead.\n\nReturns the properties on a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
-        "operationId": "getWorkflowTransitionProperties",
-        "parameters": [
-          {
-            "description": "The ID of the transition. To get the ID, view the workflow in text mode in the Jira administration console. The ID is shown next to the transition.",
-            "in": "path",
-            "name": "transitionId",
-            "required": true,
-            "schema": { "format": "int64", "type": "integer" }
-          },
-          {
-            "description": "Some properties with keys that have the *jira.* prefix are reserved, which means they are not editable. To include these properties in the results, set this parameter to *true*.",
-            "in": "query",
-            "name": "includeReservedKeys",
-            "schema": { "default": false, "type": "boolean" }
-          },
-          {
-            "description": "The key of the property being returned, also known as the name of the property. If this parameter is not specified, all properties on the transition are returned.",
-            "in": "query",
-            "name": "key",
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The name of the workflow that the transition belongs to.",
-            "in": "query",
-            "name": "workflowName",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The workflow status. Set to *live* for active and inactive workflows, or *draft* for draft workflows.",
-            "in": "query",
-            "name": "workflowMode",
-            "schema": { "default": "live", "enum": ["live", "draft"], "type": "string" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": "[{\"id\":\"jira.i18n.title\",\"key\":\"jira.i18n.title\",\"value\":\"some.title\"},{\"id\":\"jira.permission\",\"key\":\"jira.permission\",\"value\":\"createissue\"}]",
-                "schema": { "$ref": "#/components/schemas/WorkflowTransitionProperty" }
-              }
-            },
-            "description": "200 response"
-          },
-          "400": { "description": "Returned if the request is invalid." },
-          "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
-          "403": { "description": "Returned if the user does not have admin permission" },
-          "404": { "description": "Returned if the workflow transition or property is not found." }
-        },
-        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
-        "summary": "Get workflow transition properties",
-        "tags": ["Workflow transition properties"],
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-oauth2-scopes": [
-          { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
-          { "scheme": "OAuth2", "scopes": ["read:workflow.property:jira"], "state": "Beta" }
-        ],
-        "x-atlassian-connect-scope": "ADMIN"
-      },
-      "post": {
-        "deprecated": true,
-        "description": "This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); add transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.\n\nAdds a property to a workflow transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
-        "operationId": "createWorkflowTransitionProperty",
-        "parameters": [
-          {
-            "description": "The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition.",
-            "in": "path",
-            "name": "transitionId",
-            "required": true,
-            "schema": { "format": "int64", "type": "integer" }
-          },
-          {
-            "description": "The key of the property being added, also known as the name of the property. Set this to the same value as the `key` defined in the request body.",
-            "in": "query",
-            "name": "key",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The name of the workflow that the transition belongs to.",
-            "in": "query",
-            "name": "workflowName",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The workflow status. Set to *live* for inactive workflows or *draft* for draft workflows. Active workflows cannot be edited.",
-            "in": "query",
-            "name": "workflowMode",
-            "schema": { "default": "live", "enum": ["live", "draft"], "type": "string" }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": { "value": "createissue" },
-              "schema": { "$ref": "#/components/schemas/WorkflowTransitionProperty" }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": "{\"key\":\"jira.i18n.title\",\"value\":\"some.title\",\"id\":\"jira.i18n.title\"}",
-                "schema": { "$ref": "#/components/schemas/WorkflowTransitionProperty" }
-              }
-            },
-            "description": "200 response"
-          },
-          "400": { "description": "Returned if a workflow property with the same key is present on the transition." },
-          "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
-          "403": { "description": "Returned if the user does not have the necessary permission." },
-          "404": { "description": "Returned if the workflow transition is not found." }
-        },
-        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
-        "summary": "Create workflow transition property",
-        "tags": ["Workflow transition properties"],
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-oauth2-scopes": [
-          { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
-          {
-            "scheme": "OAuth2",
-            "scopes": ["write:workflow.property:jira", "read:workflow.property:jira"],
-            "state": "Beta"
-          }
-        ],
-        "x-atlassian-connect-scope": "ADMIN"
-      },
-      "put": {
-        "deprecated": true,
-        "description": "This will be removed on [June 1, 2026](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-2570); update transition properties using [Bulk update workflows](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflows/#api-rest-api-3-workflows-update-post) instead.\n\nUpdates a workflow transition by changing the property value. Trying to update a property that does not exist results in a new property being added to the transition. Transition properties are used to change the behavior of a transition. For more information, see [Transition properties](https://confluence.atlassian.com/x/zIhKLg#Advancedworkflowconfiguration-transitionproperties) and [Workflow properties](https://confluence.atlassian.com/x/JYlKLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
-        "operationId": "updateWorkflowTransitionProperty",
-        "parameters": [
-          {
-            "description": "The ID of the transition. To get the ID, view the workflow in text mode in the Jira admin settings. The ID is shown next to the transition.",
-            "in": "path",
-            "name": "transitionId",
-            "required": true,
-            "schema": { "format": "int64", "type": "integer" }
-          },
-          {
-            "description": "The key of the property being updated, also known as the name of the property. Set this to the same value as the `key` defined in the request body.",
-            "in": "query",
-            "name": "key",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The name of the workflow that the transition belongs to.",
-            "in": "query",
-            "name": "workflowName",
-            "required": true,
-            "schema": { "type": "string" }
-          },
-          {
-            "description": "The workflow status. Set to `live` for inactive workflows or `draft` for draft workflows. Active workflows cannot be edited.",
-            "in": "query",
-            "name": "workflowMode",
-            "schema": { "enum": ["live", "draft"], "type": "string" }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": { "value": "createissue" },
-              "schema": { "$ref": "#/components/schemas/WorkflowTransitionProperty" }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "example": "{\"key\":\"jira.i18n.title\",\"value\":\"some.title\",\"id\":\"jira.i18n.title\"}",
-                "schema": { "$ref": "#/components/schemas/WorkflowTransitionProperty" }
-              }
-            },
-            "description": "200 response"
-          },
-          "304": {
-            "description": "Returned if no changes were made by the request. For example, attempting to update a property with its current value."
-          },
-          "400": { "description": "Returned if the request is invalid." },
-          "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
-          "403": { "description": "Returned if the user does not have the necessary permission." },
-          "404": { "description": "Returned if the workflow transition is not found." }
-        },
-        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
-        "summary": "Update workflow transition property",
-        "tags": ["Workflow transition properties"],
-        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-oauth2-scopes": [
-          { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
-          {
-            "scheme": "OAuth2",
-            "scopes": ["write:workflow.property:jira", "read:workflow.property:jira"],
             "state": "Beta"
           }
         ],

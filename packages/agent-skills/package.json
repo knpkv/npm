@@ -36,8 +36,8 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.93",
-    "effect": "4.0.0-beta.93"
+    "@effect/platform-node": "4.0.0-beta.97",
+    "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
     "@types/node": "latest",

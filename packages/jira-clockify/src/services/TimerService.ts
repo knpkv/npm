@@ -5,7 +5,7 @@
  *
  * - **Dual write**: Starting a timer creates a Clockify time entry AND updates the local
  *   state file (for Neovim/statusline). Stopping updates the Clockify entry AND posts
- *   a Jira worklog via raw HTTP (generated client swallows 4xx as void).
+ *   a Jira worklog through the Schema-validated Jira client.
  * - **Auto-resolution**: Project ID, billable flag, and tags are resolved from config defaults,
  *   Clockify project name matching, and Jira issue type/labels.
  * - **External detection**: {@link TimerServiceShape.detectRunning} polls Clockify for a
@@ -13,8 +13,7 @@
  *
  * **Gotchas**
  *
- * - Jira worklog uses raw HTTP because the generated client returns void for 4xx — check
- *   `response.status` manually.
+ * - Jira worklog failures remain typed; a 401 is mapped to `NotLoggedIn`.
  * - `timeSpentSeconds` is floored to 60s minimum (Jira rejects <60s worklogs).
  *
  * @module
@@ -29,10 +28,8 @@ import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Redacted from "effect/Redacted"
+import * as Predicate from "effect/Predicate"
 import * as SubscriptionRef from "effect/SubscriptionRef"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { StateWriter, type TimerStateFile } from "./StateWriter.js"
@@ -108,23 +105,13 @@ const emptyState: TimerState = {
   startedViaJcf: false
 }
 
-// Distil a Jira worklog error body (usually `{ "errorMessages": [...] }`) into a short phrase.
-// Pure helper kept at module scope so the JSON parse isn't a try/catch inside an Effect.gen.
-const summariseJiraError = (status: number, body: string): string => {
-  const trimmed = body.trim()
-  if (!trimmed) return `HTTP ${status}`
-  try {
-    const parsed: unknown = JSON.parse(trimmed)
-    const errorMessages = parsed !== null && typeof parsed === "object"
-      ? Reflect.get(parsed, "errorMessages")
-      : undefined
-    if (Array.isArray(errorMessages) && errorMessages.every((message) => typeof message === "string")) {
-      return `HTTP ${status}: ${errorMessages.join("; ")}`
-    }
-  } catch {
-    // Non-JSON body — fall through to the raw snippet.
-  }
-  return `HTTP ${status}: ${trimmed.slice(0, 200)}`
+const formatJiraFailure = (error: unknown): string => {
+  if (!Predicate.isReadonlyObject(error)) return String(error)
+  const response = Predicate.isReadonlyObject(error.response) ? error.response : undefined
+  const status = typeof response?.status === "number" ? `HTTP ${response.status}` : "Jira request failed"
+  if (!("cause" in error)) return status
+  const detail = typeof error.cause === "string" ? error.cause : JSON.stringify(error.cause)
+  return detail.length === 0 ? status : `${status}: ${detail}`
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +177,7 @@ export const layer = Layer.effect(
   TimerService,
   Effect.gen(function*() {
     const clockify = yield* ClockifyApiClient
-    yield* JiraApiClient // ensure dep is in layer
-    const httpClient = yield* HttpClient.HttpClient
+    const jira = yield* JiraApiClient
     const jiraAuth = yield* JiraAuth
     const clockifyAuth = yield* ClockifyAuth
     const config = yield* ConfigService
@@ -258,7 +244,7 @@ export const layer = Layer.effect(
         return tagIds
       })
 
-    // Post a Jira worklog via raw HTTP (generated client swallows 4xx as void).
+    // Post a Jira worklog through the generated, Schema-validated client.
     const postJiraWorklog = (
       ticketKey: string,
       startedAt: Date,
@@ -271,66 +257,34 @@ export const layer = Layer.effect(
         const started = startedAt.toISOString().replace("Z", "+0000")
         yield* Effect.logDebug(`Jira worklog: ${ticketKey} ${timeSpent}s`)
 
-        const accessToken = yield* jiraAuth.getAccessToken().pipe(
-          Effect.tapError((e) => Effect.logDebug(`Jira getAccessToken failed: ${String(e)}`)),
-          Effect.catch(() => Effect.succeed(Redacted.make("")))
-        )
-        const cloudId = yield* jiraAuth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
-
-        // Short-circuit: without a token or cloudId the request is guaranteed to
-        // 401 against a malformed URL — report not-logged-in so retrying is suppressed.
-        if (Redacted.value(accessToken) === "" || cloudId === "") {
+        const loggedIn = yield* jiraAuth.isLoggedIn().pipe(Effect.catch(() => Effect.succeed(false)))
+        if (!loggedIn) {
           yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
           return { _tag: "NotLoggedIn" }
         }
-
-        const exec = yield* httpClient.execute(
-          HttpClientRequest.post(
-            `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${encodeURIComponent(ticketKey)}/worklog`
-          ).pipe(
-            HttpClientRequest.setHeader("Authorization", `Bearer ${Redacted.value(accessToken)}`),
-            HttpClientRequest.setHeader("Content-Type", "application/json"),
-            HttpClientRequest.bodyJsonUnsafe({
-              started,
-              timeSpentSeconds: timeSpent,
-              ...(comment ?
-                {
-                  comment: {
-                    type: "doc",
-                    version: 1,
-                    content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }]
-                  }
-                } :
-                {})
-            })
-          )
-        ).pipe(
-          Effect.map((
-            response
-          ) => ({ ok: true, response } satisfies { readonly ok: true; readonly response: typeof response })),
-          Effect.catch((e) =>
-            Effect.logDebug(`Jira worklog failed: ${String(e)}`).pipe(
-              Effect.as(
-                { ok: false, message: `Network error: ${String(e)}` } satisfies {
-                  readonly ok: false
-                  readonly message: string
+        return yield* jira.addWorklog(ticketKey, {
+          payload: {
+            started,
+            timeSpentSeconds: timeSpent,
+            ...(comment ?
+              {
+                comment: {
+                  type: "doc",
+                  version: 1,
+                  content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }]
                 }
-              )
+              } :
+              {})
+          }
+        }).pipe(
+          Effect.as<JiraWorklogOutcome>({ _tag: "Posted" }),
+          Effect.catchTag("AddWorklog401", () => Effect.succeed<JiraWorklogOutcome>({ _tag: "NotLoggedIn" })),
+          Effect.catch((error) =>
+            Effect.logDebug(`Jira worklog failed: ${formatJiraFailure(error)}`).pipe(
+              Effect.as<JiraWorklogOutcome>({ _tag: "Failed", message: formatJiraFailure(error) })
             )
           )
         )
-
-        if (!exec.ok) {
-          return { _tag: "Failed", message: exec.message }
-        }
-        if (exec.response.status >= 200 && exec.response.status < 300) {
-          yield* Effect.logDebug(`Jira worklog created (${exec.response.status})`)
-          return { _tag: "Posted" }
-        }
-        const body = yield* exec.response.text.pipe(Effect.catch(() => Effect.succeed("")))
-        const message = summariseJiraError(exec.response.status, body)
-        yield* Effect.logDebug(`Jira worklog failed: ${message}`)
-        return { _tag: "Failed", message }
       })
 
     const start = (ticket: JiraTicket, options?: StartOptions) =>
@@ -469,7 +423,7 @@ export const layer = Layer.effect(
           )
         }
 
-        // Log Jira worklog (raw HTTP — generated client swallows 4xx as void)
+        // Log Jira worklog through the generated Jira client.
         const worklog: WorklogParams | null = current.ticketKey
           ? { ticketKey: current.ticketKey, startedAt: current.startedAt, durationSeconds: durationMs / 1000, comment }
           : null

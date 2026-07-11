@@ -1,0 +1,26 @@
+[
+  {
+    "op": "replace",
+    "path": "/components/schemas/PageSingle/properties/position",
+    "value": {
+      "description": "Position of the page within its parent page tree.",
+      "anyOf": [{ "type": "integer", "format": "int32" }, { "type": "null" }]
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/PageBulk/properties/position",
+    "value": {
+      "description": "Position of the page within its parent page tree.",
+      "anyOf": [{ "type": "integer", "format": "int32" }, { "type": "null" }]
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/ChildPage/properties/childPosition",
+    "value": {
+      "description": "Position of the child page within its parent page tree.",
+      "anyOf": [{ "type": "integer", "format": "int32" }, { "type": "null" }]
+    }
+  }
+]

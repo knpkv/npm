@@ -26,7 +26,7 @@
  *
  * @module
  */
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -303,9 +303,9 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const cached = fieldIdsByName.get(name)
       if (cached !== undefined) return cached
-      const result = yield* toEffect(
-        client.v3.client.GET("/rest/api/3/field")
-      ).pipe(Effect.mapError((cause) => new JiraApiError({ message: `Failed to list Jira fields`, cause })))
+      const result = yield* client.getFields(undefined).pipe(
+        Effect.mapError((cause) => new JiraApiError({ message: `Failed to list Jira fields`, cause }))
+      )
       const matches: Array<string> = []
       for (const field of rawArray(result)) {
         const id = field["id"]
@@ -318,9 +318,7 @@ const make = Effect.gen(function*() {
     })
 
   const fetchUser = (accountId: string): Effect.Effect<Person, never> =>
-    toEffect(
-      client.v3.client.GET("/rest/api/3/user", { params: { query: { accountId } } })
-    ).pipe(
+    client.getUser({ params: { accountId } }).pipe(
       Effect.map((u) => {
         const obj = asRaw(u)
         const person: Person = {
@@ -394,18 +392,14 @@ const make = Effect.gen(function*() {
       const MAX_PAGES = 100
       let nextPageToken: string | undefined = undefined
       for (let page = 0; page < MAX_PAGES; page++) {
-        const result = yield* toEffect(
-          client.v3.client.GET("/rest/api/3/search/jql", {
-            params: {
-              query: {
-                jql: buildByVersionJql(versionName, projectKey),
-                fields: requestedFields,
-                maxResults: PAGE,
-                ...(nextPageToken ? { nextPageToken } : {})
-              }
-            }
-          })
-        ).pipe(
+        const result = yield* client.searchIssuesUsingJql({
+          params: {
+            jql: buildByVersionJql(versionName, projectKey),
+            fields: requestedFields,
+            maxResults: PAGE,
+            ...(nextPageToken ? { nextPageToken } : {})
+          }
+        }).pipe(
           Effect.mapError((cause) =>
             new JiraApiError({ message: `Failed to fetch tickets for fixVersion "${versionName}"`, cause })
           )
@@ -555,14 +549,14 @@ const make = Effect.gen(function*() {
       const cap = options?.maxResults
       const customFieldNames = options?.customFieldNames ?? []
       for (let page = 0; page < MAX_PAGES; page++) {
-        const result = yield* toEffect(
-          client.v3.client.GET("/rest/api/3/project/{projectIdOrKey}/version", {
-            params: {
-              path: { projectIdOrKey: projectKey },
-              query: { startAt, maxResults: PAGE_SIZE, expand: EXPAND, orderBy: "-releaseDate" }
-            }
-          })
-        ).pipe(
+        const result = yield* client.getProjectVersionsPaginated(projectKey, {
+          params: {
+            startAt,
+            maxResults: PAGE_SIZE,
+            expand: EXPAND,
+            orderBy: "-releaseDate"
+          }
+        }).pipe(
           Effect.mapError((cause) => new JiraApiError({ message: `Failed to list versions for ${projectKey}`, cause }))
         )
 
@@ -583,41 +577,29 @@ const make = Effect.gen(function*() {
     })
 
   const getVersion = (id: string): Effect.Effect<Version, JiraApiError> =>
-    toEffect(
-      client.v3.client.GET("/rest/api/3/version/{id}", {
-        params: { path: { id }, query: { expand: EXPAND } }
-      })
-    ).pipe(
+    client.getVersion(id, { params: { expand: EXPAND } }).pipe(
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to get version ${id}`, cause })),
       Effect.flatMap((raw) => mapVersion(asRaw(raw), []))
     )
 
   const updateVersion = (id: string, input: UpdateVersionInput): Effect.Effect<Version, JiraApiError> =>
-    toEffect(
-      client.v3.client.PUT("/rest/api/3/version/{id}", {
-        params: { path: { id } },
-        body: { ...(input.description !== undefined ? { description: input.description } : {}) }
-      })
-    ).pipe(
+    client.updateVersion(id, {
+      payload: { ...(input.description !== undefined ? { description: input.description } : {}) }
+    }).pipe(
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to update version ${id}`, cause })),
       Effect.map((raw) => mapVersionScalar(asRaw(raw)))
     )
 
   const listRelatedWork = (id: string): Effect.Effect<ReadonlyArray<RelatedWork>, JiraApiError> =>
-    toEffect(
-      client.v3.client.GET("/rest/api/3/version/{id}/relatedwork", { params: { path: { id } } })
-    ).pipe(
+    client.getRelatedWork(id, undefined).pipe(
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to list related work for version ${id}`, cause })),
       Effect.map((raw) => (Array.isArray(raw) ? raw : []).map(toRelatedWork))
     )
 
   const addRelatedWork = (id: string, input: AddRelatedWorkInput): Effect.Effect<RelatedWork, JiraApiError> =>
-    toEffect(
-      client.v3.client.POST("/rest/api/3/version/{id}/relatedwork", {
-        params: { path: { id } },
-        body: { title: input.title, category: input.category, url: input.url }
-      })
-    ).pipe(
+    client.createRelatedWork(id, {
+      payload: { title: input.title, category: input.category, url: input.url }
+    }).pipe(
       Effect.mapError((cause) => new JiraApiError({ message: `Failed to add related work to version ${id}`, cause })),
       Effect.map((raw) => {
         const w = toRelatedWork(raw)

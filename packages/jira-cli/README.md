@@ -203,7 +203,7 @@ jira auth status     # Show current auth status
 import { Effect, Layer } from "effect"
 import * as Redacted from "effect/Redacted"
 import { IssueService, IssueServiceLayer } from "@knpkv/jira-cli"
-import { JiraApiClient, JiraApiConfig, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 
 const configLayer = Layer.succeed(JiraApiConfig, {
   baseUrl: "https://mysite.atlassian.net",
@@ -224,11 +224,7 @@ const program = Effect.gen(function* () {
 // Or using JiraApiClient directly (low-level)
 const direct = Effect.gen(function* () {
   const client = yield* JiraApiClient
-  const issue = yield* toEffect(
-    client.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
-      params: { path: { issueIdOrKey: "PROJ-123" } }
-    })
-  )
+  const issue = yield* client.getIssue("PROJ-123", undefined)
   console.log(issue.fields?.summary)
 }).pipe(Effect.provide(JiraApiClient.layer), Effect.provide(configLayer))
 ```

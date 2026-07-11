@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { JiraApiClient, type JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraApiClient, make } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { paths as V3Paths } from "../../jira-api-client/src/generated/v3/schema.js"
-import { makeOpenApiFetchClient } from "../../jira-api-client/src/OpenApiFetchClient.js"
+import * as Redacted from "effect/Redacted"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { stripEmails } from "../src/commands/version.js"
 import type { Version } from "../src/VersionService.js"
 import {
@@ -208,37 +209,45 @@ describe("stripEmails", () => {
 // ---------------------------------------------------------------------------
 
 const versionsFixture = [
-  { id: "1", name: "1.0.0", released: true, self: "https://x/version/1" },
+  {
+    id: "1",
+    name: "1.0.0",
+    released: true,
+    self: "https://x/version/1",
+    contributors: ["account-1", { accountId: "account-2", displayName: "Ada" }]
+  },
   { id: "2", name: "2.0.0", released: false, self: "https://x/version/2" },
   { id: "3", name: "3.0.0", released: true, self: "https://x/version/3" },
   { id: "4", name: "4.0.0", released: false, self: "https://x/version/4" }
 ]
 
 /**
- * Build a JiraApiClient mock whose `v3.client.GET` routes by path: the version
+ * Build a JiraApiClient mock whose HTTP transport routes by path: the version
  * list endpoint returns the fixture; the JQL search endpoint returns no issues
  * (so the contributor scan resolves to empty without further calls).
  */
-const makeJiraLayer = () =>
-  Layer.succeed(
+const makeJiraLayer = () => {
+  const httpClient = HttpClient.make((request) => {
+    const body = request.url.includes("/project/PROJ/version")
+      ? { values: versionsFixture, isLast: true }
+      : { issues: [], isLast: true }
+    return Effect.succeed(HttpClientResponse.fromWeb(
+      request,
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+    ))
+  })
+  const api = make(httpClient, {
+    baseUrl: "https://jira.test",
+    auth: { type: "basic", email: "test@example.com", apiToken: Redacted.make("token") }
+  })
+  return Layer.succeed(
     JiraApiClient,
-    {
-      v3: {
-        client: Object.assign(makeOpenApiFetchClient<V3Paths>("https://jira.test", {}).client, {
-          GET: (path: string) =>
-            path === "/rest/api/3/project/{projectIdOrKey}/version"
-              ? Promise.resolve({
-                data: { values: versionsFixture, isLast: true },
-                response: { ok: true, status: 200 }
-              })
-              : Promise.resolve({
-                data: { issues: [], isLast: true },
-                response: { ok: true, status: 200 }
-              })
-        })
-      }
-    } satisfies JiraApiClientShape
+    JiraApiClient.of({
+      ...api,
+      uploadAttachment: () => Effect.die("unused Jira upload mock")
+    })
   )
+}
 
 describe("listProjectVersions filtering", () => {
   it.effect("returns all versions when neither flag is set", () =>
@@ -267,5 +276,12 @@ describe("listProjectVersions filtering", () => {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 2 })
       expect(list.map((v) => v.id)).toEqual(["1", "2"])
+    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+
+  it.effect("preserves Jira Premium contributors decoded from the generated Version schema", () =>
+    Effect.gen(function*() {
+      const service = yield* VersionService
+      const list = yield* service.listProjectVersions("PROJ", { maxResults: 1 })
+      expect(list[0]?.contributors.map((person) => person.accountId)).toEqual(["account-1", "account-2"])
     }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
 })

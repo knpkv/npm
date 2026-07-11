@@ -1,0 +1,43 @@
+[
+  {
+    "op": "replace",
+    "path": "/paths/~1rest~1api~13~1search~1jql/get/operationId",
+    "value": "searchIssuesUsingJql"
+  },
+  {
+    "op": "replace",
+    "path": "/paths/~1rest~1api~13~1search~1jql/post/operationId",
+    "value": "searchIssuesUsingJqlPost"
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/SearchAndReconcileResults/properties/nextPageToken/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/Version/properties/contributors",
+    "value": {
+      "description": "Jira Premium contributors associated with the version.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "additionalProperties": {},
+            "properties": {
+              "accountId": {
+                "type": "string"
+              }
+            },
+            "required": ["accountId"],
+            "type": "object"
+          }
+        ]
+      },
+      "readOnly": true,
+      "type": "array"
+    }
+  }
+]

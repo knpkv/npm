@@ -1,10 +1,16 @@
 /**
- * Root barrel export for `@knpkv/clockify-api-client` -- openapi-fetch + Effect Clockify REST client.
+ * Root barrel export for the Schema-validated Effect Clockify client.
  *
  * @packageDocumentation
  */
 
-export { ClockifyApiClient, type ClockifyApiClientShape, layer } from "./ClockifyApiClient.js"
+export {
+  ClockifyApiClient,
+  type ClockifyApiClientShape,
+  type ClockifyClientError,
+  layer,
+  make
+} from "./ClockifyApiClient.js"
 
 export type {
   CreateTimeEntryParams,
@@ -21,15 +27,4 @@ export type {
 
 export { ClockifyApiConfig, type ClockifyApiConfigShape } from "./ClockifyApiConfig.js"
 
-export { ClockifyApiError } from "./ClockifyApiError.js"
-
-export {
-  FetchClientError,
-  makeOpenApiFetchClient,
-  type OpenApiFetchClient,
-  type SuccessData,
-  toEffect
-} from "./OpenApiFetchClient.js"
-
-// Re-export generated types
-export type * as V1 from "./generated/index.js"
+export * as ClockifyApi from "./generated/ClockifyApi.js"

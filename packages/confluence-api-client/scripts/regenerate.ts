@@ -1,41 +1,33 @@
 #!/usr/bin/env tsx
 /**
- * Regeneration script for Confluence API clients.
+ * Fetch, compare, patch, and regenerate the Confluence API clients.
  *
- * Fetches OpenAPI specs from Atlassian, compares versions, and regenerates types if needed.
+ * The committed OpenAPI documents are unmodified upstream documents. RFC 6902
+ * patches and OpenAPI-to-JSON-Schema normalization are applied only in memory.
  */
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import * as OpenApiGenerator from "@effect/openapi-generator/OpenApiGenerator"
+import * as OpenApiPatch from "@effect/openapi-generator/OpenApiPatch"
+import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as JsonSchema from "effect/JsonSchema"
+import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
-import type * as PlatformError from "effect/PlatformError"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { Command, Flag as Options } from "effect/unstable/cli"
-import { HttpClient } from "effect/unstable/http"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import pkg from "../package.json" with { type: "json" }
+import * as Command from "effect/unstable/cli/Command"
+import * as Flag from "effect/unstable/cli/Flag"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi"
+import { format as formatSource } from "prettier"
 
-const SPEC_URLS: Readonly<Record<"v1" | "v2", string>> = {
+type ApiVersion = "v1" | "v2"
+
+const SPEC_URLS: Readonly<Record<ApiVersion, string>> = {
   v1: "https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json",
   v2: "https://dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json"
-}
-
-interface SpecInfo {
-  version: string
-  title: string
-}
-
-interface ScriptPaths {
-  readonly packageDir: string
-  readonly specsDir: string
-  readonly versionV1File: string
-  readonly versionV2File: string
-  readonly generatedV1Dir: string
-  readonly generatedV2Dir: string
 }
 
 class RegenerateError extends Data.TaggedError("RegenerateError")<{
@@ -45,245 +37,294 @@ class RegenerateError extends Data.TaggedError("RegenerateError")<{
 
 const JsonString = Schema.fromJsonString(Schema.Json)
 
-const SpecInfoResponse = Schema.Struct({
-  info: Schema.Struct({
-    version: Schema.String,
-    title: Schema.String
-  })
-})
-
-const fetchText = (url: string): Effect.Effect<string, RegenerateError, HttpClient.HttpClient> =>
-  HttpClient.get(url).pipe(
-    Effect.flatMap((response) =>
-      response.status >= 200 && response.status < 300
-        ? response.text
-        : Effect.fail(new RegenerateError({ message: `Failed to fetch ${url}`, cause: { status: response.status } }))
-    ),
-    Effect.mapError((cause) => new RegenerateError({ message: `Fetch failed: ${url}`, cause }))
-  )
-
-const fetchSpecInfo = (url: string): Effect.Effect<SpecInfo, RegenerateError, HttpClient.HttpClient> =>
-  fetchText(url).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(SpecInfoResponse))),
-    Effect.map(({ info }) => ({ version: info.version, title: info.title })),
-    Effect.mapError((cause) => new RegenerateError({ message: "JSON decode failed", cause }))
-  )
-
-const formatJson = (text: string): Effect.Effect<string, RegenerateError> =>
-  Schema.decodeUnknownEffect(JsonString)(text).pipe(
-    Effect.flatMap(Schema.encodeEffect(JsonString)),
-    Effect.map((encoded) => `${encoded}\n`),
-    Effect.mapError((cause) => new RegenerateError({ message: "JSON format failed", cause }))
-  )
-
-const scriptPaths: Effect.Effect<ScriptPaths, RegenerateError, Path.Path> = Effect.gen(function*() {
-  const path = yield* Path.Path
-  const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
-    Effect.mapError((cause) => new RegenerateError({ message: "Script path resolution failed", cause }))
-  )
-  const scriptDir = path.dirname(scriptFile)
-  const packageDir = path.join(scriptDir, "..")
-  const specsDir = path.join(packageDir, ".specs")
-
-  return {
-    packageDir,
-    specsDir,
-    versionV1File: path.join(specsDir, "VERSION_V1"),
-    versionV2File: path.join(specsDir, "VERSION_V2"),
-    generatedV1Dir: path.join(packageDir, "src", "generated", "v1"),
-    generatedV2Dir: path.join(packageDir, "src", "generated", "v2")
-  }
-})
-
-const fetchAndSaveSpec = (
-  packageDir: string,
-  url: string,
-  outputPath: string
-): Effect.Effect<
-  void,
-  RegenerateError,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | HttpClient.HttpClient
-> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const spec = yield* fetchText(url)
-    const formattedSpec = yield* formatJson(spec)
-    yield* fs.writeFileString(outputPath, formattedSpec).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Save failed", cause }))
-    )
-    yield* formatFile(packageDir, outputPath)
-  })
-
-const readVersion = (file: string): Effect.Effect<string | null, RegenerateError, FileSystem.FileSystem> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const exists = yield* fs.exists(file).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Version lookup failed", cause }))
-    )
-    if (!exists) return null
-
-    return yield* fs.readFileString(file).pipe(
-      Effect.map((version) => version.trim()),
-      Effect.mapError((cause) => new RegenerateError({ message: "Version read failed", cause }))
-    )
-  })
-
-const writeVersion = (file: string, version: string): Effect.Effect<void, RegenerateError, FileSystem.FileSystem> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    yield* fs.writeFileString(file, version).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Version write failed", cause }))
-    )
-  })
-
-const ensureDir = (dir: string): Effect.Effect<void, RegenerateError, FileSystem.FileSystem> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Directory creation failed", cause }))
-    )
-  })
-
-interface GenerateTypesOptions {
-  readonly packageDir: string
-  readonly specPath: string
-  readonly outputDir: string
-}
-
-const commandExitCode = (
-  command: ChildProcess.Command
-): Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError, ChildProcessSpawner.ChildProcessSpawner> =>
-  ChildProcessSpawner.ChildProcessSpawner.pipe(
-    Effect.flatMap((spawner) => spawner.exitCode(command))
-  )
-
-const formatFile = (
-  packageDir: string,
-  file: string
-): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function*() {
-    const command = ChildProcess.make("pnpm", ["exec", "prettier", "--write", file], {
-      cwd: packageDir,
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit"
-    })
-    const exitCode = yield* commandExitCode(command).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Formatting failed", cause }))
-    )
-
-    if (exitCode !== 0) {
-      return yield* Effect.fail(new RegenerateError({ message: "Formatting failed", cause: { exitCode } }))
-    }
-  })
-
-const generateTypes = (
-  options: GenerateTypesOptions
-): Effect.Effect<void, RegenerateError, ChildProcessSpawner.ChildProcessSpawner | Path.Path> =>
-  Effect.gen(function*() {
-    const path = yield* Path.Path
-    const outputFile = path.join(options.outputDir, "schema.d.ts")
-    const command = ChildProcess.make("pnpm", ["exec", "openapi-typescript", options.specPath, "-o", outputFile], {
-      cwd: options.packageDir,
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit"
-    })
-    const exitCode = yield* commandExitCode(command).pipe(
-      Effect.mapError((cause) => new RegenerateError({ message: "Type generation failed", cause }))
-    )
-
-    if (exitCode !== 0) {
-      return yield* Effect.fail(new RegenerateError({ message: "Type generation failed", cause: { exitCode } }))
-    }
-  })
-
-const checkOnly = Options.boolean("check").pipe(
-  Options.withDescription("Check only, exit 1 if outdated"),
-  Options.withDefault(false)
+const OpenApiDocument = Schema.declare<OpenAPISpec>(
+  (value): value is OpenAPISpec =>
+    Predicate.hasProperty(value, "paths") &&
+    Predicate.isObject(value.paths) &&
+    (Predicate.hasProperty(value, "openapi") || Predicate.hasProperty(value, "swagger")),
+  { identifier: "OpenApiDocument" }
 )
 
-const regenerate = Command.make("regenerate", { checkOnly }, ({ checkOnly }) =>
-  Effect.gen(function*() {
-    const path = yield* Path.Path
-    const paths = yield* scriptPaths
+const SpecInfo = Schema.Struct({ info: Schema.Struct({ version: Schema.String }) })
 
-    yield* Console.log("Fetching Confluence API spec versions...")
+interface VersionPaths {
+  readonly specFile: string
+  readonly patchFile: string
+  readonly outputFile: string
+  readonly versionFile: string
+}
 
-    const [v1Info, v2Info] = yield* Effect.all([
-      fetchSpecInfo(SPEC_URLS.v1),
-      fetchSpecInfo(SPEC_URLS.v2)
-    ])
+interface ScriptPaths {
+  readonly packageDir: string
+  readonly versions: Readonly<Record<ApiVersion, VersionPaths>>
+}
 
-    const currentV1 = yield* readVersion(paths.versionV1File)
-    const currentV2 = yield* readVersion(paths.versionV2File)
-
-    yield* Console.log(`V1: current=${currentV1 ?? "none"}, remote=${v1Info.version}`)
-    yield* Console.log(`V2: current=${currentV2 ?? "none"}, remote=${v2Info.version}`)
-
-    const v1Changed = currentV1 !== v1Info.version
-    const v2Changed = currentV2 !== v2Info.version
-
-    if (!v1Changed && !v2Changed) {
-      yield* Console.log("All specs up to date.")
-      return
+const paths = Effect.gen(function*() {
+  const path = yield* Path.Path
+  const scriptFile = yield* path.fromFileUrl(new URL(import.meta.url)).pipe(
+    Effect.mapError((cause) => new RegenerateError({ message: "Could not resolve script path", cause }))
+  )
+  const packageDir = path.join(path.dirname(scriptFile), "..")
+  const specsDir = path.join(packageDir, ".specs")
+  const generatedDir = path.join(packageDir, "src", "generated")
+  return {
+    packageDir,
+    versions: {
+      v1: {
+        specFile: path.join(specsDir, "confluence-v1.json"),
+        patchFile: path.join(specsDir, "confluence-v1.patch.json"),
+        outputFile: path.join(generatedDir, "ConfluenceV1Api.ts"),
+        versionFile: path.join(specsDir, "VERSION_V1")
+      },
+      v2: {
+        specFile: path.join(specsDir, "confluence-v2.json"),
+        patchFile: path.join(specsDir, "confluence-v2.patch.json"),
+        outputFile: path.join(generatedDir, "ConfluenceV2Api.ts"),
+        versionFile: path.join(specsDir, "VERSION_V2")
+      }
     }
-
-    if (checkOnly) {
-      yield* Console.log("Specs are outdated!")
-      if (v1Changed) yield* Console.log(`  V1: ${currentV1} -> ${v1Info.version}`)
-      if (v2Changed) yield* Console.log(`  V2: ${currentV2} -> ${v2Info.version}`)
-      return yield* Effect.fail(new RegenerateError({ message: "Specs outdated" }))
-    }
-
-    yield* ensureDir(paths.specsDir)
-    yield* ensureDir(paths.generatedV1Dir)
-    yield* ensureDir(paths.generatedV2Dir)
-
-    if (v1Changed) {
-      yield* Console.log(`Fetching V1 spec (${v1Info.version})...`)
-      const specPath = path.join(paths.specsDir, `confluence-v1-${v1Info.version}.json`)
-      yield* fetchAndSaveSpec(paths.packageDir, SPEC_URLS.v1, specPath)
-      yield* Console.log(`Saved: ${specPath}`)
-
-      yield* Console.log("Generating V1 types...")
-      yield* generateTypes({
-        packageDir: paths.packageDir,
-        specPath,
-        outputDir: paths.generatedV1Dir
-      })
-      yield* Console.log(`Generated: src/generated/v1/schema.d.ts`)
-
-      yield* writeVersion(paths.versionV1File, v1Info.version)
-    }
-
-    if (v2Changed) {
-      yield* Console.log(`Fetching V2 spec (${v2Info.version})...`)
-      const specPath = path.join(paths.specsDir, `confluence-v2-${v2Info.version}.json`)
-      yield* fetchAndSaveSpec(paths.packageDir, SPEC_URLS.v2, specPath)
-      yield* Console.log(`Saved: ${specPath}`)
-
-      yield* Console.log("Generating V2 types...")
-      yield* generateTypes({
-        packageDir: paths.packageDir,
-        specPath,
-        outputDir: paths.generatedV2Dir
-      })
-      yield* Console.log(`Generated: src/generated/v2/schema.d.ts`)
-
-      yield* writeVersion(paths.versionV2File, v2Info.version)
-    }
-
-    yield* Console.log("Done!")
-  })).pipe(Command.withDescription("Regenerate Confluence API types from OpenAPI specs"))
-
-const cli = Command.run(regenerate, {
-  name: pkg.name,
-  version: pkg.version
+  } satisfies ScriptPaths
 })
 
-cli.pipe(
-  Effect.provide(NodeHttpClient.layerFetch),
-  Effect.provide(NodeServices.layer),
+const fetchUpstream = (version: ApiVersion) =>
+  HttpClient.get(SPEC_URLS[version]).pipe(
+    Effect.flatMap((response) =>
+      response.status >= 200 && response.status < 300
+        ? response.text.pipe(
+          Effect.mapError((cause) =>
+            new RegenerateError({
+              message: `Could not read Confluence ${version} response`,
+              cause
+            })
+          )
+        )
+        : Effect.fail(
+          new RegenerateError({
+            message: `Confluence ${version} spec request failed with status ${response.status}`
+          })
+        )
+    ),
+    Effect.flatMap(Schema.decodeUnknownEffect(JsonString)),
+    Effect.mapError((cause) =>
+      new RegenerateError({
+        message: `Could not fetch or decode Confluence ${version} spec`,
+        cause
+      })
+    )
+  )
+
+const canonicalJson = (value: Schema.Json) =>
+  Schema.encodeEffect(JsonString)(value).pipe(
+    Effect.map((json) => `${json}\n`),
+    Effect.mapError((cause) => new RegenerateError({ message: "Could not encode Confluence spec", cause }))
+  )
+
+const formattedJson = (value: Schema.Json, version: ApiVersion) =>
+  Schema.encodeEffect(JsonString)(value).pipe(
+    Effect.flatMap((source) =>
+      Effect.tryPromise({
+        try: () => formatSource(source, { parser: "json", printWidth: 120, trailingComma: "none", semi: false }),
+        catch: (cause) => new RegenerateError({ message: `Could not format Confluence ${version} spec`, cause })
+      })
+    ),
+    Effect.mapError((cause) => new RegenerateError({ message: `Could not format Confluence ${version} spec`, cause }))
+  )
+
+/** Convert OpenAPI 3.0 nullable metadata into JSON Schema understood by Effect. */
+const normalizeSchema = (schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
+  const { default: _default, examples: _examples, ...withoutMetadata } = schema
+  if (!Predicate.hasProperty(withoutMetadata, "nullable")) return withoutMetadata
+  const { nullable, ...normalized } = withoutMetadata
+  return nullable === true ? { anyOf: [normalized, { type: "null" }] } : normalized
+}
+
+const stripTrailingWhitespace = (source: string): string => source.replace(/[ \t]+$/gm, "")
+
+const isJsonObject = (value: Schema.Json): value is { readonly [key: string]: Schema.Json } => Predicate.isObject(value)
+
+const hasJsonSchema = (response: Schema.Json): boolean => {
+  if (!isJsonObject(response)) return false
+  const content = response["content"]
+  if (content === undefined || !isJsonObject(content)) return false
+  const json = content["application/json"]
+  return json !== undefined && isJsonObject(json) && json["schema"] !== undefined
+}
+
+/**
+ * Empty error responses contain no value to decode. Removing them makes the
+ * generated client reject those statuses through its unexpected-status path
+ * instead of incorrectly treating them as successful `void` responses.
+ */
+const removeUntypedErrorResponses = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(removeUntypedErrorResponses)
+  if (!isJsonObject(value)) return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => {
+      if (key !== "responses" || !isJsonObject(child)) {
+        return [key, removeUntypedErrorResponses(child)]
+      }
+      return [
+        key,
+        Object.fromEntries(
+          Object.entries(child)
+            .filter(([status, response]) =>
+              Number(status) < 400 || Number.isNaN(Number(status)) || hasJsonSchema(response)
+            )
+            .map(([status, response]) => [status, removeUntypedErrorResponses(response)])
+        )
+      ]
+    })
+  )
+}
+
+const generateVersion = Effect.fn("Confluence.regenerate.generateVersion")(function*(
+  version: ApiVersion,
+  versionPaths: VersionPaths,
+  upstream: Schema.Json
+) {
+  const fs = yield* FileSystem.FileSystem
+  const patch = yield* OpenApiPatch.parsePatchInput(versionPaths.patchFile).pipe(
+    Effect.mapError((cause) =>
+      new RegenerateError({
+        message: `Could not parse Confluence ${version} JSON patch`,
+        cause
+      })
+    )
+  )
+  const patched = yield* OpenApiPatch.applyPatches(
+    [{ source: versionPaths.patchFile, patch }],
+    upstream
+  ).pipe(
+    Effect.mapError((cause) =>
+      new RegenerateError({
+        message: `Could not apply Confluence ${version} JSON patch`,
+        cause
+      })
+    )
+  )
+  const document = yield* Schema.decodeUnknownEffect(OpenApiDocument)(removeUntypedErrorResponses(patched)).pipe(
+    Effect.mapError((cause) =>
+      new RegenerateError({
+        message: `Patched Confluence ${version} document is not OpenAPI`,
+        cause
+      })
+    )
+  )
+  const generator = yield* OpenApiGenerator.OpenApiGenerator
+  const warnings: Array<OpenApiGenerator.OpenApiGeneratorWarning> = []
+  const generated = yield* generator.generate(document, {
+    name: version === "v1" ? "ConfluenceV1Api" : "ConfluenceV2Api",
+    format: "httpclient",
+    onEnter: normalizeSchema,
+    onWarning: (warning) => warnings.push(warning)
+  })
+  yield* Effect.forEach(
+    warnings,
+    (warning) =>
+      Console.warn(
+        `[${version}] [${warning.code}] ${warning.method ?? ""} ${warning.path ?? ""}: ${warning.message}`
+      ),
+    { discard: true }
+  )
+  yield* fs.writeFileString(versionPaths.outputFile, stripTrailingWhitespace(generated)).pipe(
+    Effect.mapError((cause) =>
+      new RegenerateError({
+        message: `Could not write generated Confluence ${version} client`,
+        cause
+      })
+    )
+  )
+})
+
+const check = Flag.boolean("check").pipe(
+  Flag.withDescription("Exit non-zero when either committed upstream spec differs from Confluence")
+)
+
+const local = Flag.boolean("local").pipe(
+  Flag.withDescription("Regenerate both clients from the committed specs without contacting Confluence")
+)
+
+const readCommitted = (version: ApiVersion, versionPaths: VersionPaths) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    return yield* fs.readFileString(versionPaths.specFile).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(JsonString)),
+      Effect.mapError((cause) =>
+        new RegenerateError({
+          message: `Could not read committed Confluence ${version} spec`,
+          cause
+        })
+      )
+    )
+  })
+
+const root = Command.make("confluence-api-regenerate", { check, local }).pipe(
+  Command.withHandler(
+    Effect.fn("Confluence.regenerate")(function*({ check, local }) {
+      if (check && local) {
+        return yield* new RegenerateError({ message: "--check and --local cannot be combined" })
+      }
+
+      const fs = yield* FileSystem.FileSystem
+      const scriptPaths = yield* paths
+      const versions: ReadonlyArray<ApiVersion> = ["v1", "v2"]
+      const upstream = local
+        ? yield* Effect.all({
+          v1: readCommitted("v1", scriptPaths.versions.v1),
+          v2: readCommitted("v2", scriptPaths.versions.v2)
+        })
+        : yield* Effect.all({ v1: fetchUpstream("v1"), v2: fetchUpstream("v2") })
+
+      if (check) {
+        const changed = yield* Effect.forEach(versions, (version) =>
+          Effect.gen(function*() {
+            const versionPaths = scriptPaths.versions[version]
+            const remote = yield* canonicalJson(upstream[version])
+            const current = yield* readCommitted(version, versionPaths).pipe(
+              Effect.flatMap(canonicalJson),
+              Effect.orElseSucceed(() => "")
+            )
+            return current === remote ? undefined : version
+          })).pipe(Effect.map((results) => results.filter(Predicate.isNotUndefined)))
+
+        if (changed.length === 0) {
+          return yield* Console.log("Confluence OpenAPI specs are current.")
+        }
+        return yield* new RegenerateError({
+          message: `Confluence ${
+            changed.join(" and ")
+          } spec changed; run \`pnpm --filter @knpkv/confluence-api-client regenerate\``
+        })
+      }
+
+      yield* Effect.forEach(versions, (version) =>
+        Effect.gen(function*() {
+          const versionPaths = scriptPaths.versions[version]
+          const document = upstream[version]
+          const { info } = yield* Schema.decodeUnknownEffect(SpecInfo)(document).pipe(
+            Effect.mapError((cause) =>
+              new RegenerateError({
+                message: `Confluence ${version} spec has no version`,
+                cause
+              })
+            )
+          )
+          yield* fs.writeFileString(versionPaths.specFile, yield* formattedJson(document, version))
+          yield* fs.writeFileString(versionPaths.versionFile, `${info.version}\n`)
+          yield* generateVersion(version, versionPaths, document)
+          yield* Console.log(`Generated Confluence ${version} ${info.version} client from ${SPEC_URLS[version]}`)
+        }), { discard: true })
+    })
+  )
+)
+
+const MainLayer = Layer.mergeAll(
+  OpenApiGenerator.layerTransformerSchema,
+  NodeHttpClient.layerFetch,
+  NodeServices.layer
+)
+
+Command.run(root, { version: "1.0.0" }).pipe(
+  Effect.provide(MainLayer),
   NodeRuntime.runMain
 )

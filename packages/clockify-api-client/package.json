@@ -26,42 +26,36 @@
       "import": "./dist/ClockifyApiConfig.js",
       "types": "./dist/ClockifyApiConfig.d.ts"
     },
-    "./ClockifyApiError": {
-      "import": "./dist/ClockifyApiError.js",
-      "types": "./dist/ClockifyApiError.d.ts"
-    },
     "./generated": {
-      "import": "./dist/generated/index.js",
-      "types": "./dist/generated/index.d.ts"
+      "import": "./dist/generated/ClockifyApi.js",
+      "types": "./dist/generated/ClockifyApi.d.ts"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/generated/schema.d.ts dist/generated/schema.d.ts",
-    "check": "tsc --noEmit",
+    "build": "tsc",
+    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",
-    "regenerate": "tsx scripts/regenerate.ts"
+    "regenerate": "tsx scripts/regenerate.ts",
+    "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.93"
-  },
-  "dependencies": {
-    "openapi-fetch": "^0.17.0"
+    "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.93",
-    "@effect/vitest": "4.0.0-beta.93",
+    "@effect/openapi-generator": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/vitest": "4.0.0-beta.97",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.93",
-    "openapi-typescript": "^7.13.0",
-    "openapi-typescript-helpers": "^0.1.0",
+    "effect": "4.0.0-beta.97",
+    "prettier": "^3.9.5",
     "tsx": "^4.23.0",
     "typescript": "~6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "effect",

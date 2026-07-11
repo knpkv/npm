@@ -32,10 +32,10 @@
     "docgen": "docgen"
   },
   "dependencies": {
-    "@aws-sdk/credential-providers": "^3.1079.0",
-    "@effect/sql-libsql": "4.0.0-beta.93",
+    "@aws-sdk/credential-providers": "^3.1085.0",
+    "@effect/sql-libsql": "4.0.0-beta.97",
     "@libsql/client": "^0.17.4",
     "distilled-aws": "0.1.1",
-    "effect": "4.0.0-beta.93"
+    "effect": "4.0.0-beta.97"
   }
 }

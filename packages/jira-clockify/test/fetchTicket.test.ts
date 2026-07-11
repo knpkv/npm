@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { JiraApiClient, type JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraApiClient, make } from "@knpkv/jira-api-client"
 import { JiraAuth, type JiraAuthService } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { paths as V3Paths } from "../../jira-api-client/src/generated/v3/schema.js"
-import { makeOpenApiFetchClient } from "../../jira-api-client/src/OpenApiFetchClient.js"
+import * as Redacted from "effect/Redacted"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
 
 // ---------------------------------------------------------------------------
@@ -12,22 +13,33 @@ import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
 // ---------------------------------------------------------------------------
 
 /**
- * Build a JiraApiClient mock whose `v3.client.GET` resolves the openapi-fetch
- * `{ data, error, response }` shape that `toEffect` consumes.
+ * Build a JiraApiClient backed by a deterministic in-memory HTTP transport.
  */
 const makeJiraLayer = (
   resolve: () => { data?: unknown; error?: unknown; response: { ok: boolean; status: number } }
-) =>
-  Layer.succeed(
+) => {
+  const httpClient = HttpClient.make((request) => {
+    const result = resolve()
+    return Effect.succeed(HttpClientResponse.fromWeb(
+      request,
+      new Response(JSON.stringify(result.data ?? result.error ?? {}), {
+        status: result.response.status,
+        headers: { "content-type": "application/json" }
+      })
+    ))
+  })
+  const api = make(httpClient, {
+    baseUrl: "https://jira.test",
+    auth: { type: "basic", email: "test@example.com", apiToken: Redacted.make("token") }
+  })
+  return Layer.succeed(
     JiraApiClient,
-    {
-      v3: {
-        client: Object.assign(makeOpenApiFetchClient<V3Paths>("https://jira.test", {}).client, {
-          GET: () => Promise.resolve(resolve())
-        })
-      }
-    } satisfies JiraApiClientShape
+    JiraApiClient.of({
+      ...api,
+      uploadAttachment: () => Effect.die("unused Jira upload mock")
+    })
   )
+}
 
 const makeAuthService = (isLoggedIn: JiraAuthService["isLoggedIn"]): JiraAuthService => ({
   configure: () => Effect.die("unused JiraAuth mock method"),

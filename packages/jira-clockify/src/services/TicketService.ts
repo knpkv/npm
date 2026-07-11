@@ -13,12 +13,13 @@
  *
  * @module
  */
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { ConfigService } from "./ConfigService.js"
 
@@ -60,9 +61,6 @@ const emptyState: TicketState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const extractField = (fields: Record<string, unknown> | null | undefined, key: string): unknown => fields?.[key] ?? null
 
 const extractString = (fields: Record<string, unknown> | null | undefined, key: string): string | null => {
@@ -76,7 +74,7 @@ const extractNested = (
   nested: string
 ): string | null => {
   const val = extractField(fields, key)
-  if (isRecord(val)) {
+  if (Predicate.isObject(val)) {
     const v = val[nested]
     return typeof v === "string" ? v : null
   }
@@ -90,7 +88,7 @@ const extractNested = (
  */
 export const mapIssueToTicket = (issue: Record<string, unknown>, fallbackKey?: string): JiraTicket => {
   const rawFields = issue["fields"]
-  const fields = isRecord(rawFields) ? rawFields : null
+  const fields = Predicate.isObject(rawFields) ? rawFields : null
   const key = typeof issue["key"] === "string" ? issue["key"] : (fallbackKey ?? "?")
   const rawLabels = fields?.["labels"]
   return {
@@ -131,24 +129,19 @@ export const layer = Layer.effect(
       const cfg = yield* config.get
       const jql = cfg.defaultJql
 
-      const result = yield* toEffect(jira.v3.client.GET("/rest/api/3/search/jql", {
+      const result = yield* jira.searchIssuesUsingJql({
         params: {
-          query: {
-            jql,
-            maxResults: 50,
-            fields: ["summary", "status", "priority", "assignee", "issuetype", "labels", "updated"]
-          }
+          jql,
+          maxResults: 50,
+          fields: ["summary", "status", "priority", "assignee", "issuetype", "labels", "updated"]
         }
-      })).pipe(
-        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e })),
-        Effect.flatMap((result) =>
-          result === undefined
-            ? Effect.fail(new TicketError({ message: "Jira search returned no response body" }))
-            : Effect.succeed(result)
-        )
+      }).pipe(
+        Effect.mapError((e) => new TicketError({ message: `Jira search failed: ${String(e)}`, cause: e }))
       )
 
-      const tickets: Array<JiraTicket> = (result.issues ?? []).filter(isRecord).map((issue) => mapIssueToTicket(issue))
+      const tickets: Array<JiraTicket> = (result.issues ?? [])
+        .filter(Predicate.isObject)
+        .map((issue) => mapIssueToTicket(issue))
 
       yield* SubscriptionRef.set(ref, {
         tickets,

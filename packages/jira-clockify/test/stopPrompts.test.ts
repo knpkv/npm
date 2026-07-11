@@ -8,7 +8,7 @@
  */
 import { NodeServices, NodeTerminal } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { ClockifyApiClient, type ClockifyApiClientShape, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, type ClockifyApiClientShape } from "@knpkv/clockify-api-client"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -23,7 +23,6 @@ let savedPatches: Array<unknown> = []
 const unused = () => Effect.die("unused Clockify mock method")
 
 const mockClockify: ClockifyApiClientShape = {
-  api: makeOpenApiFetchClient("https://api.clockify.test", {}),
   getUser: unused,
   getWorkspaces: unused,
   getProjects: () => Effect.succeed([]),

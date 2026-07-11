@@ -1,0 +1,31 @@
+[
+  {
+    "op": "replace",
+    "path": "/components/schemas/Content",
+    "value": {}
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/Space/properties/permissions/items",
+    "value": {}
+  },
+  {
+    "op": "replace",
+    "path": "/paths/~1wiki~1rest~1api~1content~1{id}~1child~1attachment/put/requestBody/content/multipart~1form-data/schema",
+    "value": {}
+  },
+  {
+    "op": "add",
+    "path": "/paths/~1wiki~1rest~1api~1content~1{id}~1child~1attachment/put/parameters/-",
+    "value": {
+      "name": "X-Atlassian-Token",
+      "in": "header",
+      "description": "Required by Atlassian for multipart requests.",
+      "required": true,
+      "schema": {
+        "type": "string",
+        "enum": ["nocheck"]
+      }
+    }
+  }
+]

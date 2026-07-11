@@ -3,11 +3,11 @@
  *
  * @module
  */
-import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
-import type { V1 } from "@knpkv/clockify-api-client"
+import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Data, Effect, Option, Predicate, Schema } from "effect"
+import { Console, Data, Effect, Option, Predicate, Redacted, Schema } from "effect"
 import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
@@ -167,19 +167,19 @@ export const clockifySetup = Command.make(
 
       yield* Console.log("Validating...")
 
-      // Create a temporary openapi-fetch client with the entered key
-      const { client } = makeOpenApiFetchClient<V1.paths>("https://api.clockify.me/api", {
-        "X-Api-Key": apiKey,
-        "Content-Type": "application/json"
+      const httpClient = yield* HttpClient.HttpClient
+      const client = makeClockifyApi(httpClient, {
+        apiKey: Redacted.make(apiKey),
+        baseUrl: "https://api.clockify.me/api"
       })
 
-      const user = yield* toEffect(client.GET("/v1/user")).pipe(
+      const user = yield* client.getLoggedUser(undefined).pipe(
         Effect.flatMap(decodeClockifyUser),
         Effect.catch(() => Effect.fail(new InvalidClockifyApiKeyError()))
       )
       yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
 
-      const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
+      const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
         Effect.flatMap(decodeClockifyWorkspaces),
         Effect.catch(() => Effect.succeed(emptyWorkspaces()))
       )

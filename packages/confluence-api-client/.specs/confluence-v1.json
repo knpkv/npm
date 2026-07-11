@@ -1258,7 +1258,7 @@
           {
             "name": "allowCache",
             "in": "query",
-            "description": "If this field is false, the cache will erase its current value and begin a conversion.\nIf this field is true, the cache will not erase its current value, and will set the status of the\nresult in cache to RERUNNING. Once the data is updated, the status will change to COMPLETED. \nLarge macros that take long to convert, and who want to show intermediate, but potentially stale data, immediately should set this field to true.\nCache values are stored per macro per user per content and expansions.",
+            "description": "Controls whether conversion results are cached and reused for identical requests.\n\n- `false`: Each request creates a new conversion task, even if an identical request was made previously.\n- `true`: Enables caching behavior for identical requests from the same user.\n  - If no cached result exists, a new conversion task is created\n  - If a cached result exists, the existing task is marked as RERUNNING and will complete with status COMPLETED\n  - Returns the same task ID for identical requests, allowing you to retrieve the cached result\n\nFor large macros that are slow to convert and for which it is acceptable to show cached data, set this field to `true`.",
             "schema": { "type": "boolean", "default": false }
           },
           {
@@ -2655,7 +2655,7 @@
           {
             "name": "allowCache",
             "in": "query",
-            "description": "If this field is false, the cache will erase its current value and begin a new conversion.\nIf this field is true, the cache will not erase its current value, and will set the status of the\nasync conversion to RERUNNING. Once the data is updated, the status will change to COMPLETED. \nLarge macros that take long to convert, and whose data need not immediately up to date (same as previous conversion's result within last 5 minutes)\nshould set this fields to true. Cache values are stored per user per content body and expansions.",
+            "description": "Controls whether conversion results are cached and reused for identical requests.\n\n- `false`: Each request creates a new conversion task, even if an identical request was made previously.\n- `true`: Enables caching behavior for identical requests from the same user.\n  - If no cached result exists, a new conversion task is created\n  - If a cached result exists, the existing task is marked as RERUNNING and will complete with status COMPLETED\n  - Returns the same task ID for identical requests, allowing you to retrieve the cached result",
             "schema": { "type": "boolean", "default": false }
           },
           {
@@ -2695,7 +2695,7 @@
       "get": {
         "tags": ["Content body"],
         "summary": "Get asynchronously converted content body from the id or the current status of the task.",
-        "description": "Returns the asynchronous content body for the corresponding id if the task is complete \nor returns the status of the task.\n\nAfter the task is completed, the result can be obtained for 5 minutes, or until an identical conversion request is made again,\nwith allowCache query param set to false.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nIf request specifies 'contentIdContext', 'View' permission for the space, and permission to view the content.",
+        "description": "Returns the content body for the corresponding `asyncId` of a completed conversion task. If\nthe task is not completed, the task status is returned instead.\n\nOnce a conversion task is completed, the result can be obtained for up to 5 minutes, or\nuntil an identical conversion request is made again with the `allowCache` parameter set to\nfalse.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\nIf request specifies 'contentIdContext', 'View' permission for the space, and permission to view the content.",
         "operationId": "asyncConvertContentBodyResponse",
         "parameters": [
           {
@@ -4547,7 +4547,7 @@
       "get": {
         "tags": ["Space settings"],
         "summary": "Get space settings",
-        "description": "Returns the settings of a space. Currently only the\n`routeOverrideEnabled` setting can be returned.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'View' permission for the space.",
+        "description": "Returns the settings of a space.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'View' permission for the space.",
         "operationId": "getSpaceSettings",
         "parameters": [
           {
@@ -4583,7 +4583,7 @@
       "put": {
         "tags": ["Space settings"],
         "summary": "Update space settings",
-        "description": "Updates the settings for a space. Currently only the\n`routeOverrideEnabled` setting can be updated.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
+        "description": "Updates the settings for a space.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
         "operationId": "updateSpaceSettings",
         "parameters": [
           {
@@ -5519,7 +5519,7 @@
       "get": {
         "tags": ["Content watches"],
         "summary": "Get content watch status",
-        "description": "Returns whether a user is watching a piece of content. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Returns whether a user is watching a piece of content. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "getContentWatchStatus",
         "parameters": [
           {
@@ -5539,7 +5539,7 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserWatch" } } }
           },
           "403": {
-            "description": "Returned if;\n\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No content exists for the specified `contentId`.",
+            "description": "Returned if;\n\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No content exists for the specified `contentId`.",
             "content": {}
           },
           "404": { "description": "Returned if no `contentId` is specified.", "content": {} }
@@ -5555,7 +5555,7 @@
       "post": {
         "tags": ["Content watches"],
         "summary": "Add content watcher",
-        "description": "Adds a user as a watcher to a piece of content. Choose the user by doing\none of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\nNote, you must add the `X-Atlassian-Token: no-check` header when making a\nrequest, as this operation has XSRF protection.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Adds a user as a watcher to a piece of content. Choose the user by doing\none of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\nNote, you must add the `X-Atlassian-Token: no-check` header when making a\nrequest, as this operation has XSRF protection.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "addContentWatcher",
         "parameters": [
           {
@@ -5575,7 +5575,7 @@
             "content": {}
           },
           "403": {
-            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No content exists for the specified `contentId`.",
+            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No content exists for the specified `contentId`.",
             "content": {}
           },
           "404": { "description": "Returned if no `contentId` is specified.", "content": {} }
@@ -5591,7 +5591,7 @@
       "delete": {
         "tags": ["Content watches"],
         "summary": "Remove content watcher",
-        "description": "Removes a user as a watcher from a piece of content. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Removes a user as a watcher from a piece of content. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "removeContentWatcher",
         "parameters": [
           {
@@ -5618,7 +5618,7 @@
             "content": {}
           },
           "403": {
-            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No content exists for the specified `contentId`.",
+            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\ncontent.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No content exists for the specified `contentId`.",
             "content": {}
           },
           "404": { "description": "Returned if no `contentId` is specified.", "content": {} }
@@ -5753,7 +5753,7 @@
       "get": {
         "tags": ["Content watches"],
         "summary": "Get space watch status",
-        "description": "Returns whether a user is watching a space. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Returns whether a user is watching a space. Choose the user by\ndoing one of the following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "isWatchingSpace",
         "parameters": [
           {
@@ -5773,7 +5773,7 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserWatch" } } }
           },
           "403": {
-            "description": "Returned if;\n\n- The calling user does not have permission to view the\nspace.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No space exists for the specified `spaceKey`.",
+            "description": "Returned if;\n\n- The calling user does not have permission to view the\nspace.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No space exists for the specified `spaceKey`.",
             "content": {}
           },
           "404": { "description": "Returned if no `spaceKey` is specified.", "content": {} }
@@ -5789,7 +5789,7 @@
       "post": {
         "tags": ["Content watches"],
         "summary": "Add space watcher",
-        "description": "Adds a user as a watcher to a space. Choose the user by doing one of the\nfollowing:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\nNote, you must add the `X-Atlassian-Token: no-check` header when making a\nrequest, as this operation has XSRF protection.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Adds a user as a watcher to a space. Choose the user by doing one of the\nfollowing:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\nNote, you must add the `X-Atlassian-Token: no-check` header when making a\nrequest, as this operation has XSRF protection.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "addSpaceWatcher",
         "parameters": [
           {
@@ -5816,7 +5816,7 @@
             "content": {}
           },
           "403": {
-            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\nspace.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No space exists for the specified `spaceKey`.",
+            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the\nspace.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No space exists for the specified `spaceKey`.",
             "content": {}
           },
           "404": { "description": "Returned if no `spaceKey` is specified.", "content": {} }
@@ -5832,7 +5832,7 @@
       "delete": {
         "tags": ["Content watches"],
         "summary": "Remove space watch",
-        "description": "Removes a user as a watcher from a space. Choose the user by doing one of\nthe following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
+        "description": "Removes a user as a watcher from a space. Choose the user by doing one of\nthe following:\n\n- Specify a user via a query parameter: Use the `accountId` to identify the user.\n- Do not specify a user: The currently logged-in user will be used.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Confluence Administrator' global permission or 'Space Administrator' permission for the relevant space if specifying a user, otherwise\npermission to access the Confluence site ('Can use' global permission).",
         "operationId": "removeSpaceWatch",
         "parameters": [
           {
@@ -5852,7 +5852,7 @@
             "content": {}
           },
           "403": {
-            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the space.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator.\n- No space exists for the specified `spaceKey`.",
+            "description": "Returned if;\n\n- The `X-Atlassian-Token: no-check` header is not specified.\n- The calling user does not have permission to view the space.\n- A user is specified via a query parameter and the calling user is\nnot a Confluence administrator or space administrator.\n- No space exists for the specified `spaceKey`.",
             "content": {}
           },
           "404": { "description": "Returned if no `spaceKey` is specified.", "content": {} }
@@ -5939,7 +5939,7 @@
         "x-atlassian-connect-scope": "ACCESS_EMAIL_ADDRESSES"
       }
     },
-    "/atlassian-connect/1/app/module/dynamic": {
+    "/wiki/rest/atlassian-connect/1/app/module/dynamic": {
       "get": {
         "tags": ["Dynamic modules"],
         "summary": "Get modules",
@@ -5961,7 +5961,7 @@
         "deprecated": false,
         "x-experimental": true,
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-connect-scope": "INACCESSIBLE"
+        "x-atlassian-connect-scope": "NONE"
       },
       "post": {
         "tags": ["Dynamic modules"],
@@ -5995,7 +5995,7 @@
         "x-experimental": true,
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
         "x-codegen-request-body-name": "body",
-        "x-atlassian-connect-scope": "INACCESSIBLE"
+        "x-atlassian-connect-scope": "NONE"
       },
       "delete": {
         "tags": ["Dynamic modules"],
@@ -6026,7 +6026,7 @@
         "deprecated": false,
         "x-experimental": true,
         "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
-        "x-atlassian-connect-scope": "INACCESSIBLE"
+        "x-atlassian-connect-scope": "NONE"
       }
     },
     "/wiki/rest/api/analytics/content/{contentId}/views": {
@@ -7877,7 +7877,7 @@
           "to": { "type": "string", "description": "The name of the target format for the content body conversion." },
           "allowCache": {
             "type": "boolean",
-            "description": "If `false`, the cache will erase its current value and begin a new conversion. If `true`, the cache will not erase its current value, and will set the status of the async conversion to “RERUNNING”. Once the data is updated, the status will change to “COMPLETED”. Large macros that take a long time to convert and that need not be immediately up to date (e.g. a macro in which the new conversion result is the same as a previous conversion result that was completed within the last 5 minutes) should set this field to `true`. Cache values are stored per user per content body and expansions.",
+            "description": "Controls whether conversion results are cached and reused for identical requests.\n\n- `false`: Each request creates a new conversion task, even if an identical request was made previously.\n- `true`: Enables caching behavior for identical requests from the same user.\n  - If no cached result exists, a new conversion task is created\n  - If a cached result exists, the existing task is marked as RERUNNING and will complete with status COMPLETED\n  - Returns the same task ID for identical requests, allowing you to retrieve the cached result",
             "default": false
           },
           "spaceKeyContext": {
@@ -8087,6 +8087,18 @@
           "type": { "type": "string", "default": "group", "enum": ["group"] },
           "name": { "type": "string" },
           "id": { "type": "string" },
+          "usageType": {
+            "type": "string",
+            "default": "USERBASE_GROUP",
+            "enum": ["USERBASE_GROUP", "TEAM_COLLABORATION"],
+            "description": "This property represents how this collection of users is used:\n  - `USERBASE_GROUP`: This value indicates that the collection of users is used as a group.\n  - `TEAM_COLLABORATION`: This value indicates that the collection of users is used as a team."
+          },
+          "managedBy": {
+            "type": "string",
+            "default": "ADMINS",
+            "enum": ["ADMINS", "EXTERNAL", "TEAM_MEMBERS", "OPEN"],
+            "description": "This property represents how this collection of users is managed:\n  - `ADMINS`: This value indicates that the collection of users is managed by org, site or product admins.\n  - `EXTERNAL`: This value indicates that the collection of users is managed externally (through SCIM, HRIS, etc.).\n  - `TEAM_MEMBERS`: This value indicates that the collection of users is managed by its members.\n  - `OPEN`: This value indicates that the collection of users is not actively managed by any users."
+          },
           "_links": { "$ref": "#/components/schemas/GenericLinks" }
         }
       },
@@ -9001,6 +9013,12 @@
               "default": { "type": "string" }
             }
           },
+          "contentMode": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["standard", "compact"],
+            "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography."
+          },
           "spaceKey": { "type": "string" },
           "_links": { "$ref": "#/components/schemas/GenericLinks" }
         }
@@ -9011,6 +9029,12 @@
           "routeOverrideEnabled": {
             "type": "boolean",
             "description": "Defines whether an override for the space home should be used. This is\nused in conjunction with a space theme provided by an app. For\nexample, if this property is set to true, a theme can display a page\nother than the space homepage when users visit the root URL for a\nspace. This property allows apps to provide content-only theming\nwithout overriding the space home."
+          },
+          "contentMode": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["standard", "compact"],
+            "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography."
           }
         }
       },

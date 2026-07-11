@@ -98,7 +98,7 @@ const JiraConfigLive = Layer.unwrap(
   })
 )
 
-// Build Jira API client layer with config (no HttpClient needed — uses openapi-fetch)
+// Build the generated Jira client with auth config and the shared Effect HttpClient.
 const JiraClientLive = JiraApiClient.layer.pipe(
   Layer.provide(JiraConfigLive)
 )

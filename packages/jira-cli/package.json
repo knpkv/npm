@@ -60,10 +60,10 @@
     "check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.93"
+    "effect": "4.0.0-beta.97"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-beta.93",
+    "@effect/platform-node": "4.0.0-beta.97",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/atlassian-common": "workspace:*",
     "@knpkv/jira-api-client": "workspace:*",
@@ -71,12 +71,12 @@
     "js-yaml": "5.2.1"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.93",
+    "@effect/vitest": "4.0.0-beta.97",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.93",
+    "effect": "4.0.0-beta.97",
     "typescript": "~6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "effect",

@@ -244,7 +244,7 @@ const makeSandboxService = Effect.gen(function*() {
             // Wait for code-server to be ready (poll health)
             yield* log("Waiting for code-server health check")
             yield* docker.exec(cid, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-              Effect.retry(Schedule.recurs(30).pipe(Schedule.both(Schedule.spaced(Duration.seconds(1))))),
+              Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
               Effect.tap(() => log("code-server ready")),
               Effect.tapError((e) => log(`Health check failed: ${String(e)}`)),
               Effect.catchIf(() => true, () => Effect.void)
@@ -348,9 +348,7 @@ const makeSandboxService = Effect.gen(function*() {
         yield* progress(id, "Waiting for code-server health check")
 
         yield* docker.exec(row.containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-          Effect.retry(
-            Schedule.recurs(30).pipe(Schedule.both(Schedule.spaced(Duration.seconds(1))))
-          ),
+          Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
           Effect.tap(() => progress(id, "code-server ready")),
           Effect.catchIf(() => true, () => Effect.void)
         )

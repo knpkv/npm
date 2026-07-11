@@ -1,15 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape, TimeEntry, V1 } from "@knpkv/clockify-api-client"
-import { ClockifyApiClient, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
-import { FetchClientError, JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import type { ClockifyApiClientShape, TimeEntry } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient } from "@knpkv/clockify-api-client"
+import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService } from "../src/services/ConfigService.js"
 import { StateWriter } from "../src/services/StateWriter.js"
@@ -48,11 +49,8 @@ const resetCaptures = () => {
   stoppedTimers = []
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
 const paramsRecord = (value: unknown): Record<string, unknown> => {
-  if (!isRecord(value)) {
+  if (!Predicate.isObject(value)) {
     throw new Error("Expected captured params to be a record")
   }
   return value
@@ -72,7 +70,6 @@ const makeTimeEntry = (id: string, description: string, startedAt: Date, project
 })
 
 const mockClockify: ClockifyApiClientShape = {
-  api: makeOpenApiFetchClient<V1.paths>("https://api.clockify.me/api", {}),
   getUser: () =>
     Effect.succeed({
       id: USER_ID,
@@ -655,7 +652,15 @@ describe("TimerService", () => {
       }).pipe(Effect.provide(
         makeTestLayer({
           ...mockClockify,
-          createTimeEntry: () => Effect.fail(new FetchClientError({ error: "boom", status: 500, message: "boom" }))
+          createTimeEntry: () =>
+            Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request: HttpClientRequest.get("https://clockify.test/time-entry"),
+                  description: "boom"
+                })
+              })
+            )
         }, MockHttpClientLayer)
       )))
 
