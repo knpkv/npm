@@ -1,0 +1,321 @@
+/* PROTOTYPE — calm GitHub/Linear density; hierarchy carries the boldness. */
+.cc-b .cc-canvas:before,
+.cc-b .cc-trace-kpis,
+.cc-b .cc-trace-insight {
+  display: none;
+}
+.cc-b .cc-trace-heading {
+  top: 66px;
+}
+.cc-b .cc-trace-heading > div:first-child > p {
+  color: #777;
+}
+.cc-b .cc-trace-heading h1 {
+  font-size: 21px;
+  letter-spacing: -0.04em;
+}
+.cc-b .cc-trace-heading h1 span {
+  color: #aaa;
+}
+.cc-b .cc-ship-verdict {
+  width: 132px;
+  min-height: 42px;
+  padding: 6px 8px;
+  grid-template-columns: 25px 1fr;
+  border-width: 1px;
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: #291d1c;
+}
+.cc-b .cc-ship-verdict strong {
+  font-size: 13px;
+}
+.cc-b .cc-ship-verdict > span {
+  font-size: 6px;
+}
+.cc-b .cc-ship-verdict small {
+  font-size: 6px;
+}
+.cc-b .cc-trace-canvas {
+  top: 128px;
+  height: 480px;
+  border-top-width: 1px;
+  border-radius: 7px;
+  background: #181818;
+  background-image: none;
+}
+.cc-b .cc-trace-lanes span {
+  padding: 9px 11px;
+  border-color: #303030;
+}
+.cc-b .cc-trace-lanes span b {
+  color: #666;
+  font-size: 10px;
+  opacity: 1;
+}
+.cc-b .cc-trace-lines path {
+  stroke: #4d7da8;
+  filter: none;
+}
+.cc-b .cc-trace-lines path.failed {
+  stroke: #a95852;
+  filter: none;
+}
+.cc-b .cc-trace-node,
+.cc-b .cc-ticket-group {
+  border-radius: 6px;
+  box-shadow: none;
+}
+.cc-b .cc-trace-node {
+  border-left-width: 2px;
+}
+.cc-b .cc-trace-node.selected,
+.cc-b .cc-trace-node.release.selected {
+  border-color: #4d8cca;
+  box-shadow: 0 0 0 1px #4d8cca;
+}
+.cc-b .cc-relation-label {
+  border: 0;
+  border-radius: 4px;
+  color: #83a9ce;
+  background: #1b2732;
+  font-family: inherit;
+  font-size: 6px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cc-b .cc-object-detail {
+  border-top-width: 1px;
+  border-radius: 7px;
+}
+.cc-b .cc-inspector-tabs > div {
+  display: flex;
+  gap: 3px;
+}
+.cc-b .cc-inspector-tabs > div > button {
+  width: auto;
+  height: 29px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 5px;
+  color: #777;
+  background: transparent;
+  font-size: 8px;
+}
+.cc-b .cc-inspector-tabs > div > button.active {
+  color: #d9e9f8;
+  background: #273441;
+}
+.cc-agent-inspector {
+  min-height: calc(100% - 50px);
+  display: flex;
+  flex-direction: column;
+}
+.cc-agent-state {
+  padding: 14px 13px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid #333;
+}
+.cc-agent-state > div {
+  display: grid;
+  gap: 3px;
+}
+.cc-agent-state b {
+  font-size: 9px;
+}
+.cc-agent-state small {
+  color: #777;
+  font-size: 7px;
+}
+.cc-agent-state small i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #5bc78c;
+}
+.cc-agent-verdict {
+  padding: 16px 13px;
+  border-bottom: 1px solid #333;
+}
+.cc-agent-verdict > small {
+  color: #777;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+.cc-agent-verdict h2 {
+  margin: 4px 0;
+  color: #f1847b;
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+.cc-agent-verdict p {
+  margin: 0;
+  color: #929292;
+  font-size: 8px;
+  line-height: 1.5;
+}
+.cc-agent-findings {
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+}
+.cc-agent-findings > button {
+  min-height: 48px;
+  padding: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  color: #888;
+  background: transparent;
+  text-align: left;
+}
+.cc-agent-findings > button:hover {
+  background: #282828;
+}
+.cc-agent-findings > button > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+}
+.cc-agent-findings .bad {
+  color: #e67b72;
+  background: #3b2422;
+}
+.cc-agent-findings .warn {
+  color: #d5a65c;
+  background: #382d1d;
+}
+.cc-agent-findings button > div {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+.cc-agent-findings b {
+  color: #ddd;
+  font-size: 8px;
+}
+.cc-agent-findings small {
+  color: #777;
+  font-size: 7px;
+}
+.cc-agent-evidence {
+  margin: 4px 13px 12px;
+  padding: 9px;
+  display: flex;
+  gap: 8px;
+  color: #78bf99;
+  border: 1px solid #30493b;
+  border-radius: 6px;
+  background: #1e2a23;
+}
+.cc-agent-evidence > div {
+  display: grid;
+  gap: 2px;
+}
+.cc-agent-evidence b {
+  font-size: 8px;
+}
+.cc-agent-evidence small {
+  color: #718279;
+  font-size: 7px;
+}
+.cc-agent-inspector > footer {
+  margin-top: auto;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border-top: 1px solid #333;
+}
+.cc-agent-inspector > footer button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #bbb;
+  background: #282828;
+  font-size: 7px;
+}
+.cc-agent-inspector > footer .cc-primary {
+  color: white;
+  border-color: #2874b8;
+  background: #1264a8;
+}
+
+/* Structural reset: one Linear-style sidebar, release workspace, agent bench. */
+.cc-b {
+  grid-template: 60px 1fr / 240px minmax(0, 1fr);
+}
+.cc-b .cc-b-header {
+  grid-column: 1 / -1;
+}
+.cc-b .cc-b-header .cc-brand {
+  width: 222px;
+}
+.cc-b .cc-b-rail {
+  display: none;
+}
+.cc-b .cc-b-library {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 14px 12px;
+}
+.cc-b .cc-canvas {
+  grid-column: 2;
+  grid-row: 2;
+}
+.cc-library-nav {
+  margin: 12px 0 14px;
+  padding-bottom: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border-bottom: 1px solid #303030;
+}
+.cc-b .cc-b-library .cc-library-nav button {
+  height: 31px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 5px;
+  color: #888;
+  background: transparent;
+  font-size: 8px;
+}
+.cc-b .cc-b-library .cc-library-nav button:hover {
+  color: #ddd;
+  background: #282828;
+}
+.cc-b .cc-b-library .cc-library-nav button.active {
+  color: #dbeaff;
+  background: #273441;
+}
+.cc-b .cc-trace-heading {
+  right: 310px;
+}
+.cc-b .cc-trace-canvas {
+  right: 300px;
+}
+.cc-b .cc-object-detail {
+  top: 74px;
+  right: 14px;
+  width: 276px;
+}
+.cc-b .cc-section-view {
+  inset: 0;
+}

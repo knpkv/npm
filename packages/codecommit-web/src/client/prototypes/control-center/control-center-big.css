@@ -1,0 +1,532 @@
+/* PROTOTYPE — deadly simple, intentionally oversized. */
+.cc-b {
+  grid-template: 72px 1fr / minmax(0, 1fr);
+}
+.cc-b .cc-b-library,
+.cc-b .cc-b-rail {
+  display: none;
+}
+.cc-b .cc-b-header {
+  grid-column: 1;
+  height: 72px;
+  padding: 0 28px;
+}
+.cc-b .cc-b-header .cc-brand {
+  width: auto;
+  margin-right: 36px;
+  font-size: 17px;
+}
+.cc-b .cc-b-breadcrumb {
+  font-size: 13px;
+}
+.cc-b .cc-b-breadcrumb span,
+.cc-b .cc-b-breadcrumb b,
+.cc-b .cc-b-breadcrumb small,
+.cc-b .cc-b-actions > span:first-child {
+  display: none;
+}
+.cc-b .cc-b-actions button {
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  font-size: 13px;
+}
+.cc-b .cc-b-actions button.cc-avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 12px;
+}
+.cc-b .cc-canvas {
+  grid-column: 1;
+  grid-row: 2;
+}
+.cc-release-brief {
+  inset: 54px 390px 60px 64px;
+}
+.cc-brief-eyebrow {
+  margin-bottom: 12px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+.cc-release-brief h1 {
+  font-size: clamp(48px, 5.6vw, 84px);
+  font-weight: 680;
+  line-height: 0.95;
+  letter-spacing: -0.075em;
+}
+.cc-release-brief h1 b {
+  color: #8e8e93;
+  font-weight: 430;
+}
+.cc-release-brief header p {
+  margin-top: 16px;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+.cc-brief-status {
+  height: 56px;
+  padding: 0 22px;
+  gap: 10px;
+  border-radius: 28px;
+  font-size: 17px;
+}
+.cc-brief-status i {
+  width: 10px;
+  height: 10px;
+}
+.cc-delivery-strip {
+  min-height: 126px;
+  margin: 44px 0 46px;
+  padding: 12px;
+  grid-template-columns: 1fr 34px 1fr 34px 1fr;
+  border: 0;
+  border-radius: 26px;
+  box-shadow: 0 10px 40px #0000000d;
+}
+.cc-delivery-strip > svg {
+  width: 24px;
+  height: 24px;
+}
+.cc-delivery-strip > button {
+  min-height: 96px;
+  padding: 14px 18px;
+  gap: 16px;
+  border-radius: 20px;
+}
+.cc-delivery-strip > button:hover {
+  transform: translateY(-2px);
+}
+.cc-delivery-strip button > span {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+}
+.cc-delivery-strip small {
+  font-size: 11px;
+  letter-spacing: 0.11em;
+}
+.cc-delivery-strip b {
+  font-size: 24px;
+  letter-spacing: -0.035em;
+}
+.cc-delivery-strip button > svg:last-child {
+  width: 22px;
+  height: 22px;
+  color: #34a853;
+}
+.cc-brief-section-head {
+  min-height: 68px;
+}
+.cc-brief-section-head h2 {
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+.cc-brief-section-head > div span {
+  font-size: 15px;
+}
+.cc-brief-section-head nav {
+  padding: 5px;
+  border-radius: 16px;
+}
+.cc-brief-section-head nav button {
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.cc-workstream-row {
+  min-height: 86px;
+  grid-template-columns: minmax(300px, 1.3fr) minmax(250px, 0.8fr) 46px;
+  gap: 18px;
+}
+.cc-workstream-title {
+  gap: 16px;
+}
+.cc-workstream-title > i {
+  width: 38px;
+  height: 38px;
+}
+.cc-workstream-title > span {
+  grid-template-columns: 82px 1fr;
+}
+.cc-workstream-title small {
+  font-size: 13px;
+}
+.cc-workstream-title b {
+  font-size: 19px;
+  letter-spacing: -0.025em;
+}
+.cc-inline-relation {
+  gap: 9px;
+}
+.cc-inline-relation button {
+  height: 40px;
+  padding: 0 13px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.cc-inline-relation > svg {
+  width: 17px;
+  height: 17px;
+}
+.cc-workstream-owner {
+  width: 42px;
+  height: 42px;
+  font-size: 10px;
+}
+.cc-release-brief > footer {
+  min-height: 72px;
+}
+.cc-release-brief > footer span,
+.cc-release-brief > footer button {
+  font-size: 13px;
+}
+.cc-b .cc-object-detail {
+  top: 92px;
+  right: 24px;
+  bottom: 28px;
+  width: 340px;
+  border-radius: 26px;
+}
+.cc-b .cc-inspector-tabs {
+  min-height: 64px;
+  padding: 10px 14px;
+}
+.cc-b .cc-inspector-tabs > div > button {
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.cc-agent-state {
+  padding: 22px 20px;
+}
+.cc-agent-state .cc-agent-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+.cc-agent-state b {
+  font-size: 17px;
+}
+.cc-agent-state small {
+  font-size: 12px;
+}
+.cc-agent-verdict {
+  padding: 26px 20px;
+}
+.cc-agent-verdict > small {
+  font-size: 11px;
+}
+.cc-agent-verdict h2 {
+  margin: 8px 0;
+  font-size: 42px;
+}
+.cc-agent-verdict p {
+  font-size: 15px;
+  line-height: 1.45;
+}
+.cc-agent-findings {
+  padding: 12px;
+}
+.cc-agent-findings > button {
+  min-height: 72px;
+  padding: 12px;
+}
+.cc-agent-findings > button > span {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+.cc-agent-findings b {
+  font-size: 15px;
+}
+.cc-agent-findings small {
+  font-size: 12px;
+}
+.cc-agent-evidence {
+  margin: 8px 16px 16px;
+  padding: 14px;
+}
+.cc-agent-evidence b {
+  font-size: 13px;
+}
+.cc-agent-evidence small {
+  font-size: 11px;
+}
+.cc-agent-inspector > footer {
+  padding: 14px;
+  grid-template-columns: 1fr;
+}
+.cc-agent-inspector > footer button {
+  height: 52px;
+  border-radius: 16px;
+  font-size: 13px;
+}
+@media (max-width: 1200px) {
+  .cc-release-brief {
+    left: 34px;
+    right: 350px;
+  }
+  .cc-workstream-row {
+    grid-template-columns: minmax(260px, 1fr) 220px 42px;
+  }
+  .cc-inline-relation button:last-child,
+  .cc-inline-relation > svg {
+    display: none;
+  }
+}
+
+/* Specialist synthesis: one verdict, two blockers, details on demand. */
+.cc-b {
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Display",
+    "Inter",
+    sans-serif;
+}
+.cc-b .cc-b-actions > button:not(.cc-avatar) {
+  display: none;
+}
+.cc-release-brief {
+  inset: 38px 64px 42px;
+}
+.cc-release-brief h1 {
+  max-width: 900px;
+  font-size: clamp(64px, 8vw, 116px);
+  font-weight: 700;
+  line-height: 0.88;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+}
+.cc-release-brief header p {
+  color: #68686d;
+}
+.cc-brief-status {
+  min-width: 270px;
+  justify-content: center;
+  color: white;
+  background: #0071e3;
+}
+.cc-brief-status i {
+  display: none;
+}
+.cc-delivery-strip {
+  min-height: 104px;
+  margin: 28px 0 30px;
+}
+.cc-delivery-strip > button {
+  min-height: 80px;
+}
+.cc-delivery-strip button > span {
+  width: 54px;
+  height: 54px;
+}
+.cc-delivery-strip small {
+  color: #68686d;
+  font-size: 12px;
+}
+.cc-delivery-strip b {
+  font-size: 28px;
+}
+.cc-delivery-strip > svg {
+  display: none;
+}
+.cc-delivery-strip {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.cc-delivery-strip > button:nth-of-type(2) {
+  background: #fff1f0;
+}
+.cc-delivery-strip > button:nth-of-type(3) {
+  background: #f7f7f8;
+}
+.cc-brief-section-head {
+  min-height: 58px;
+}
+.cc-blocking-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.cc-blocking-list article {
+  min-height: 112px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid #e5e5e7;
+  border-radius: 20px;
+  background: white;
+}
+.cc-blocking-list article > span {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+}
+.cc-blocking-list .red {
+  color: #d92d20;
+  background: #ffebe9;
+}
+.cc-blocking-list .amber {
+  color: #946200;
+  background: #fff4d8;
+}
+.cc-blocking-list article small {
+  color: #68686d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.cc-blocking-list article h3 {
+  margin: 5px 0 2px;
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+.cc-blocking-list article p {
+  margin: 0;
+  color: #68686d;
+  font-size: 13px;
+}
+.cc-blocking-list article > button {
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid #dedee2;
+  border-radius: 14px;
+  color: #1d1d1f;
+  background: white;
+  font-size: 13px;
+}
+.cc-blocking-list article > button.primary {
+  color: white;
+  border-color: #0071e3;
+  background: #0071e3;
+}
+.cc-also-noticed,
+.cc-changes-toggle {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-bottom: 1px solid #dedee2;
+  color: #68686d;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+}
+.cc-also-noticed span {
+  flex: 1;
+}
+.cc-also-noticed b {
+  color: #1d1d1f;
+}
+.cc-changes-toggle {
+  min-height: 60px;
+  justify-content: space-between;
+  color: #1d1d1f;
+  font-size: 18px;
+  font-weight: 600;
+}
+.cc-changes-toggle b {
+  margin-left: 6px;
+  color: #86868b;
+}
+.cc-changes-toggle[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.cc-workstream.compact .cc-workstream-row {
+  min-height: 66px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.cc-workstream.compact .cc-workstream-owner {
+  display: none;
+}
+.cc-workstream.compact .cc-workstream-title b {
+  font-size: 17px;
+}
+.cc-b .cc-object-detail {
+  z-index: 80;
+  top: 88px;
+  width: 360px;
+  box-shadow: 0 20px 80px #0002;
+}
+.cc-b :focus-visible {
+  outline: 3px solid #0071e3;
+  outline-offset: 3px;
+}
+@media (max-width: 1000px) {
+  .cc-release-brief {
+    right: 34px;
+  }
+  .cc-release-brief > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .cc-brief-status {
+    width: 100%;
+    height: 64px;
+  }
+  .cc-blocking-list {
+    grid-template-columns: 1fr;
+  }
+  .cc-b .cc-object-detail {
+    inset: 80px 12px 12px auto;
+    width: min(420px, calc(100vw - 24px));
+  }
+  .cc-b .cc-canvas {
+    min-width: 0;
+  }
+}
+@media (max-width: 700px) {
+  .cc-b .cc-b-header {
+    padding: 0 16px;
+  }
+  .cc-b .cc-b-header .cc-brand {
+    margin-right: 0;
+  }
+  .cc-b .cc-b-breadcrumb,
+  .cc-b .cc-b-actions {
+    display: none;
+  }
+  .cc-release-brief {
+    position: relative;
+    inset: auto;
+    padding: 32px 20px 80px;
+    overflow: visible;
+  }
+  .cc-release-brief h1 {
+    font-size: clamp(64px, 20vw, 92px);
+  }
+  .cc-delivery-strip {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 30px 0;
+  }
+  .cc-delivery-strip > button {
+    min-height: 96px;
+  }
+  .cc-blocking-list article {
+    grid-template-columns: 46px 1fr;
+  }
+  .cc-blocking-list article > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .cc-workstream.compact .cc-workstream-row {
+    grid-template-columns: 1fr;
+    padding: 12px 0;
+  }
+  .cc-inline-relation {
+    padding-left: 54px;
+  }
+}
