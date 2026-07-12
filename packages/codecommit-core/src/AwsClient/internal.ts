@@ -82,12 +82,12 @@ type AwsRuntimeEnv =
   | HttpClient.HttpClient
 
 const makeThrottleSchedule = (config: AwsClientConfigShape) =>
-  Schedule.both(
+  Schedule.max([
     Schedule.exponential(config.retryBaseDelay, 2).pipe(Schedule.jittered),
     Schedule.recurs(config.maxRetries)
-  ).pipe(
-    Schedule.modifyDelay((_output, delay) =>
-      Effect.succeed(Duration.min(delay, Duration.fromInputUnsafe(config.maxRetryDelay)))
+  ]).pipe(
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.min(duration, Duration.fromInputUnsafe(config.maxRetryDelay)))
     )
   )
 

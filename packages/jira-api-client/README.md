@@ -1,94 +1,117 @@
 # @knpkv/jira-api-client
 
-Effect-based Jira Cloud REST API v3 client. Type-safe paths and responses generated from the official OpenAPI schema via `openapi-typescript` + `openapi-fetch`.
-
-## Installation
-
-```bash
-pnpm add @knpkv/jira-api-client
-```
-
-Peer dependencies: `effect`
+Schema-validated Effect client for Jira Cloud REST API v3. Request parameters,
+response codecs, operation errors, and the low-level client are generated from
+Atlassian's official OpenAPI document with `@effect/openapi-generator`.
 
 ## Usage
 
-```typescript
-import { Effect, Layer } from "effect"
-import * as Redacted from "effect/Redacted"
-import { JiraApiClient, JiraApiConfig, toEffect } from "@knpkv/jira-api-client"
+```ts
+import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import { NodeHttpClient } from "@effect/platform-node"
+import { Effect, Layer, Redacted } from "effect"
 
 const program = Effect.gen(function* () {
-  const client = yield* JiraApiClient
-
-  // Get issue by key
-  const issue = yield* toEffect(
-    client.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
-      params: { path: { issueIdOrKey: "PROJ-123" } }
-    })
-  )
-  console.log(issue.fields?.summary)
-
-  // Search with JQL
-  const results = yield* toEffect(
-    client.v3.client.POST("/rest/api/3/search/jql", {
-      body: { jql: "project = PROJ AND status != Done", maxResults: 50 }
-    })
-  )
+  const jira = yield* JiraApiClient
+  return yield* jira.getIssue("PROJ-123", {
+    params: { fields: ["summary", "status"] }
+  })
 })
 
-// Basic auth
-const configLayer = Layer.succeed(JiraApiConfig, {
-  baseUrl: "https://mysite.atlassian.net",
+const ConfigLive = Layer.succeed(JiraApiConfig, {
+  baseUrl: "https://example.atlassian.net",
   auth: {
     type: "basic",
-    email: "user@example.com",
-    apiToken: Redacted.make("your-api-token")
+    email: "developer@example.com",
+    apiToken: Redacted.make("api-token")
   }
 })
 
-// Or OAuth2
-const oauthConfigLayer = Layer.succeed(JiraApiConfig, {
-  baseUrl: "",
-  auth: {
-    type: "oauth2",
-    accessToken: Redacted.make("oauth-access-token"),
-    cloudId: "your-cloud-id"
-  }
-})
-
-Effect.runPromise(program.pipe(Effect.provide(JiraApiClient.layer), Effect.provide(configLayer)))
+Effect.runPromise(
+  program.pipe(
+    Effect.provide(JiraApiClient.layer),
+    Effect.provide(ConfigLive),
+    Effect.provide(NodeHttpClient.layerUndici)
+  )
+)
 ```
 
-## API Pattern
+OAuth2 configuration uses an access token and cloud ID. Requests are routed
+through `https://api.atlassian.com/ex/jira/{cloudId}` automatically.
 
-All API calls go through `toEffect()` which wraps the openapi-fetch promise in an Effect:
+The complete generated module is exported as `JiraApi`, and `make` constructs
+the generated client from an existing Effect `HttpClient`. Application code
+normally uses `JiraApiClient`, which also provides `uploadAttachment` for Jira's
+multipart endpoint. The upstream schema describes that endpoint as Java server
+objects rather than a native `FormData`, so multipart construction deliberately
+lives in this single handwritten boundary.
 
-```typescript
-toEffect(client.v3.client.GET("/rest/api/3/..."))
-// → Effect<ResponseData, FetchClientError>
+All successful JSON bodies are decoded with generated Effect Schemas. Documented
+4xx and 5xx statuses fail with generated tagged errors such as `GetIssue404`;
+transport and malformed-body failures remain in the typed error channel.
+
+## Regenerating the client
+
+Requirements:
+
+- dependencies installed with `pnpm install`;
+- network access to Atlassian for a live regeneration;
+- a clean enough worktree to review generated changes independently.
+
+Run a live regeneration from the repository root:
+
+```sh
+pnpm --filter @knpkv/jira-api-client regenerate
 ```
 
-Paths are fully type-safe — autocomplete and compile-time errors for invalid paths, params, and bodies.
+The command performs this deterministic pipeline:
 
-## Errors
+1. Fetch `https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json`.
+2. Canonically encode the unmodified response as `.specs/jira-v3.json`.
+3. Apply `.specs/jira-v3.patch.json` as RFC 6902 JSON Patch in memory.
+4. Normalize contradictory defaults and mixed open-object schemas in memory.
+5. Remove misleading JSON content from `204 No Content` responses so they
+   generate as `void` instead of attempting to decode an empty body.
+6. Add permissive JSON schemas to documented bodyless error responses so they
+   cannot be mistaken for successful `void` responses.
+7. Generate `src/generated/JiraApi.ts` with `@effect/openapi-generator`.
 
-`FetchClientError` is a tagged error with `error`, `status`, and `message` fields:
+Never edit the generated TypeScript or committed upstream specification by
+hand. Put intentional upstream corrections in the JSON Patch, or change the
+documented normalization in `scripts/regenerate.ts`.
 
-```typescript
-import { FetchClientError } from "@knpkv/jira-api-client"
+For an offline, reproducible regeneration from the committed specification:
 
-program.pipe(Effect.catchTag("FetchClientError", (e) => Console.log(`HTTP ${e.status}: ${e.message}`)))
+```sh
+pnpm --filter @knpkv/jira-api-client regenerate --local
 ```
 
-## Subpath Exports
+Review and validate a regeneration with:
 
-| Export                                 | Contents                        |
-| -------------------------------------- | ------------------------------- |
-| `@knpkv/jira-api-client`               | Client, config, toEffect, types |
-| `@knpkv/jira-api-client/v3`            | Generated V3 OpenAPI types      |
-| `@knpkv/jira-api-client/JiraApiClient` | Client service only             |
-| `@knpkv/jira-api-client/JiraApiConfig` | Config service only             |
+```sh
+git diff -- packages/jira-api-client/.specs
+git diff -- packages/jira-api-client/src/generated/JiraApi.ts
+pnpm --filter @knpkv/jira-api-client check
+pnpm --filter @knpkv/jira-api-client build
+pnpm --filter @knpkv/jira-api-client test
+pnpm --filter @knpkv/jira-cli test
+pnpm --filter @knpkv/jira-clockify test
+```
 
-## License
+## Checking specification freshness
 
-MIT
+```sh
+pnpm --filter @knpkv/jira-api-client regenerate:check
+```
+
+This fetches the complete current document and compares its canonical JSON
+structure with the committed raw specification. It does not rely only on
+Atlassian's version string.
+
+`.github/workflows/jira-api-update.yml` runs the check daily. When the upstream
+document changes, CI regenerates the client, builds and tests this package and
+its Jira consumers, adds a changeset, and opens or updates a pull request on
+`chore/jira-api-spec-update`.
+
+Generated source is excluded from handwritten-source lint rules, but remains
+fully typechecked, built, and exercised through transport and decoding tests.

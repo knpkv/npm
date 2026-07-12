@@ -3,57 +3,32 @@
  *
  * @module
  */
-import { makeOpenApiFetchClient, toEffect } from "@knpkv/clockify-api-client"
-import type { V1 } from "@knpkv/clockify-api-client"
+import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Predicate } from "effect"
+import { Console, Effect, Predicate, Redacted, Schema } from "effect"
 import * as Path from "effect/Path"
 import { Prompt } from "effect/unstable/cli"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 declare const Bun: unknown
 
-interface ClockifySetupUser {
-  readonly id: string
-  readonly name: string
-  readonly email: string
-}
+const ClockifySetupUser = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+  email: Schema.NonEmptyString
+})
 
-interface ClockifySetupWorkspace {
-  readonly id: string
-  readonly name: string
-}
+const ClockifySetupWorkspace = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString
+})
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+type ClockifySetupWorkspace = typeof ClockifySetupWorkspace.Type
 
-const stringField = (record: Record<string, unknown>, key: string): string | null => {
-  const value = record[key]
-  return typeof value === "string" && value.length > 0 ? value : null
-}
-
-const clockifyUserFrom = (value: unknown): ClockifySetupUser | null => {
-  if (!isRecord(value)) return null
-  const id = stringField(value, "id")
-  const name = stringField(value, "name")
-  const email = stringField(value, "email")
-  if (id === null || name === null || email === null) return null
-  return { id, name, email }
-}
-
-const clockifyWorkspaceFrom = (value: unknown): ClockifySetupWorkspace | null => {
-  if (!isRecord(value)) return null
-  const id = stringField(value, "id")
-  const name = stringField(value, "name")
-  if (id === null || name === null) return null
-  return { id, name }
-}
-
-const clockifyWorkspaceListFrom = (value: unknown): ReadonlyArray<ClockifySetupWorkspace> =>
-  Array.isArray(value)
-    ? value.map(clockifyWorkspaceFrom).filter((workspace): workspace is ClockifySetupWorkspace => workspace !== null)
-    : []
+const decodeClockifySetupUser = Schema.decodeUnknownEffect(ClockifySetupUser)
+const decodeClockifySetupWorkspaces = Schema.decodeUnknownEffect(Schema.Array(ClockifySetupWorkspace))
 
 // ---------------------------------------------------------------------------
 // First-run setup
@@ -110,14 +85,14 @@ export const checkAuthOrSetup = Effect.gen(function*() {
       return false
     }
 
-    // Create a temporary openapi-fetch client with the entered key
-    const { client } = makeOpenApiFetchClient<V1.paths>("https://api.clockify.me/api", {
-      "X-Api-Key": apiKey,
-      "Content-Type": "application/json"
+    const httpClient = yield* HttpClient.HttpClient
+    const client = makeClockifyApi(httpClient, {
+      apiKey: Redacted.make(apiKey),
+      baseUrl: "https://api.clockify.me/api"
     })
 
-    const user = yield* toEffect(client.GET("/v1/user")).pipe(
-      Effect.map(clockifyUserFrom),
+    const user = yield* client.getLoggedUser(undefined).pipe(
+      Effect.flatMap(decodeClockifySetupUser),
       Effect.catch(() => Effect.succeed(null))
     )
     if (!user) {
@@ -126,8 +101,8 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     }
     yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
 
-    const workspaces = yield* toEffect(client.GET("/v1/workspaces")).pipe(
-      Effect.map(clockifyWorkspaceListFrom),
+    const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
+      Effect.flatMap(decodeClockifySetupWorkspaces),
       Effect.catch(() => Effect.succeed<ReadonlyArray<ClockifySetupWorkspace>>([]))
     )
     let workspaceId = ""

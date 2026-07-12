@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface JcfConfig {
@@ -47,11 +48,8 @@ export class ConfigService extends Context.Service<ConfigService, ConfigServiceS
 const CONFIG_DIR = ".jcf"
 const CONFIG_FILE = "config.json"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const stringRecord = (value: unknown): Record<string, string> | undefined => {
-  if (!isRecord(value)) return undefined
+  if (!Predicate.isObject(value)) return undefined
   const result: Record<string, string> = {}
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry !== "string") return undefined
@@ -62,7 +60,7 @@ const stringRecord = (value: unknown): Record<string, string> | undefined => {
 
 const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const parsed: unknown = JSON.parse(content)
-  if (!isRecord(parsed)) return {}
+  if (!Predicate.isObject(parsed)) return {}
   const projectMap = stringRecord(parsed.projectMap)
   return {
     ...(typeof parsed.defaultJql === "string" ? { defaultJql: parsed.defaultJql } : {}),

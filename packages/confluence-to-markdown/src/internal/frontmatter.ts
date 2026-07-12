@@ -5,14 +5,12 @@
  * @internal
  */
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as yaml from "js-yaml"
 import { FrontMatterError } from "../ConfluenceError.js"
 import type { NewPageFrontMatter, PageFrontMatter } from "../Schemas.js"
 import { NewPageFrontMatterSchema, PageFrontMatterSchema } from "../Schemas.js"
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
 
 /**
  * Parsed markdown file with front-matter.
@@ -44,7 +42,7 @@ const parseRawMarkdown = (content: string): { readonly data: Record<string, unkn
     ? content.slice(afterClosingStart + 1)
     : content.slice(afterClosingStart)
   const loaded = yaml.load(header)
-  const data = isRecord(loaded) ? loaded : {}
+  const data = Predicate.isObject(loaded) ? loaded : {}
   return { data, content: afterClosing }
 }
 

@@ -1,213 +1,161 @@
-import { describe, expect, it, vi } from "@effect/vitest"
+import { describe, expect, it } from "@effect/vitest"
+import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
-import { ConfluenceApiClient, ConfluenceApiConfig, FetchClientError, toEffect } from "../src/index.js"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import { ConfluenceApiClient, ConfluenceApiConfig } from "../src/index.js"
 
-const isRequest = (input: RequestInfo | URL): input is Request =>
-  Predicate.hasProperty(input, "url") &&
-  Predicate.hasProperty(input, "headers") &&
-  Predicate.hasProperty(input.headers, "entries") &&
-  typeof input.headers.entries === "function"
-
-const headersRecord = (headers: HeadersInit | undefined): Record<string, string> => {
-  if (headers === undefined) return {}
-  if (
-    Predicate.hasProperty(headers, "entries") &&
-    typeof headers.entries === "function"
-  ) {
-    return Object.fromEntries(headers.entries())
-  }
-  if (Array.isArray(headers)) return Object.fromEntries(headers)
-  return Object.fromEntries(Object.entries(headers))
-}
-
-const authorizationHeader = (headers: HeadersInit | undefined): string | undefined => {
-  const record = headersRecord(headers)
-  return record.Authorization ?? record.authorization
-}
-
-/**
- * Mock global fetch to capture requests and return canned responses.
- */
-const withMockFetch = <A, E>(
-  responses: Array<{ status: number; body: unknown }>,
-  fn: (capturedRequests: Array<{ url: string; init: RequestInit }>) => Effect.Effect<A, E>
-): Effect.Effect<A, E> => {
-  const capturedRequests: Array<{ url: string; init: RequestInit }> = []
-  let requestIndex = 0
-  const originalFetch = fetch
-
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : isRequest(input) ? input.url : input.toString()
-    const headers = isRequest(input)
-      ? Object.fromEntries(input.headers.entries())
-      : headersRecord(init?.headers)
-    capturedRequests.push({ url, init: { ...init, headers } })
-    const response = responses[requestIndex] ?? { status: 200, body: {} }
-    requestIndex++
-    return new Response(JSON.stringify(response.body), {
-      status: response.status,
-      headers: { "content-type": "application/json" }
-    })
-  })
-
-  return Effect.ensuring(
-    fn(capturedRequests),
-    Effect.sync(() => {
-      vi.stubGlobal("fetch", originalFetch)
-    })
+const clientLayer = (
+  config: Context.Service.Shape<typeof ConfluenceApiConfig>,
+  response: { readonly status: number; readonly body: unknown },
+  requests: Array<HttpClientRequest.HttpClientRequest>
+) =>
+  ConfluenceApiClient.layer.pipe(
+    Layer.provide(Layer.succeed(ConfluenceApiConfig, config)),
+    Layer.provide(Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request)
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(JSON.stringify(response.body), {
+              status: response.status,
+              headers: { "content-type": "application/json" }
+            })
+          )
+        })
+      )
+    ))
   )
-}
+
+const basicConfig = {
+  baseUrl: "https://example.atlassian.net",
+  auth: {
+    type: "basic",
+    email: "user@example.com",
+    apiToken: Redacted.make("token")
+  }
+} satisfies Context.Service.Shape<typeof ConfluenceApiConfig>
 
 describe("ConfluenceApiClient", () => {
-  describe("layer construction", () => {
-    // Verifies basic auth applies Base64-encoded email:token as Authorization header and routes to baseUrl
-    it.effect("creates client with basic auth", () =>
-      withMockFetch(
-        [{ status: 200, body: { id: "123", title: "Test Page" } }],
-        (capturedRequests) =>
-          Effect.gen(function*() {
-            const configLayer = Layer.succeed(ConfluenceApiConfig, {
-              baseUrl: "https://test.atlassian.net",
-              auth: {
-                type: "basic",
-                email: "user@example.com",
-                apiToken: Redacted.make("test-token")
-              }
-            })
+  it.effect("authenticates and decodes V2 requests with basic auth", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const page = yield* client.v2.getPageById("123", undefined)
 
-            const client = yield* ConfluenceApiClient.pipe(
-              Effect.provide(ConfluenceApiClient.layer),
-              Effect.provide(configLayer)
-            )
-
-            const page = yield* toEffect(client.v2.client.GET("/pages/{id}", { params: { path: { id: 123 } } }))
-
-            expect(page.id).toBe("123")
-            expect(page.title).toBe("Test Page")
-            expect(capturedRequests).toHaveLength(1)
-
-            const request = capturedRequests[0]!
-            expect(request.url).toContain("/pages/123")
-            const authHeader = authorizationHeader(request.init.headers)
-            expect(authHeader).toMatch(/^Basic /)
-          })
+      expect(page).toMatchObject({ id: "123", title: "Test Page", position: null })
+      expect(requests[0]?.url).toBe("https://example.atlassian.net/wiki/api/v2/pages/123")
+      expect(requests[0]?.headers.authorization).toMatch(/^Basic /)
+    }).pipe(
+      Effect.provide(clientLayer(
+        basicConfig,
+        { status: 200, body: { id: "123", title: "Test Page", position: null } },
+        requests
       ))
-
-    // Verifies OAuth2 applies Bearer token and routes through Atlassian cloud proxy (api.atlassian.com/ex/confluence/cloudId)
-    it.effect("creates client with OAuth2 auth", () =>
-      withMockFetch(
-        [{ status: 200, body: { id: "456", title: "OAuth Page" } }],
-        (capturedRequests) =>
-          Effect.gen(function*() {
-            const configLayer = Layer.succeed(ConfluenceApiConfig, {
-              baseUrl: "https://test.atlassian.net",
-              auth: {
-                type: "oauth2",
-                accessToken: Redacted.make("oauth-token"),
-                cloudId: "cloud-123"
-              }
-            })
-
-            const client = yield* ConfluenceApiClient.pipe(
-              Effect.provide(ConfluenceApiClient.layer),
-              Effect.provide(configLayer)
-            )
-
-            const page = yield* toEffect(client.v2.client.GET("/pages/{id}", { params: { path: { id: 456 } } }))
-
-            expect(page.id).toBe("456")
-            expect(capturedRequests).toHaveLength(1)
-
-            const request = capturedRequests[0]!
-            expect(request.url).toContain("api.atlassian.com/ex/confluence/cloud-123")
-            const authHeader = authorizationHeader(request.init.headers)
-            expect(authHeader).toBe("Bearer oauth-token")
-          })
-      ))
+    )
   })
 
-  describe("V2 client", () => {
-    // Smoke test: V2 client constructs correct URL path for page retrieval
-    it.effect("getPageById makes correct request", () =>
-      withMockFetch(
-        [{ status: 200, body: { id: "123", title: "Test" } }],
-        (capturedRequests) =>
-          Effect.gen(function*() {
-            const configLayer = Layer.succeed(ConfluenceApiConfig, {
-              baseUrl: "https://test.atlassian.net",
-              auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-            })
+  it.effect("routes V1 OAuth requests through Atlassian's cloud gateway", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const user = yield* client.v1.getUser({ params: { accountId: "account-1" } })
 
-            const client = yield* ConfluenceApiClient.pipe(
-              Effect.provide(ConfluenceApiClient.layer),
-              Effect.provide(configLayer)
-            )
-
-            const page = yield* toEffect(client.v2.client.GET("/pages/{id}", { params: { path: { id: 123 } } }))
-
-            expect(page.id).toBe("123")
-            expect(capturedRequests[0]!.url).toContain("/pages/123")
-          })
+      expect(user.accountId).toBe("account-1")
+      expect(requests[0]?.url).toBe(
+        "https://api.atlassian.com/ex/confluence/cloud-1/wiki/rest/api/user"
+      )
+      expect(requests[0]?.urlParams).toContainEqual(["accountId", "account-1"])
+      expect(requests[0]?.headers.authorization).toBe("Bearer oauth-token")
+    }).pipe(
+      Effect.provide(clientLayer(
+        {
+          baseUrl: "https://ignored.atlassian.net",
+          auth: {
+            type: "oauth2",
+            accessToken: Redacted.make("oauth-token"),
+            cloudId: "cloud-1"
+          }
+        },
+        { status: 200, body: { type: "known", accountId: "account-1", displayName: "Ada" } },
+        requests
       ))
-
-    // API errors (404, 500) must propagate as FetchClientError
-    it.effect("handles API errors", () =>
-      withMockFetch(
-        [{ status: 404, body: { message: "Page not found" } }],
-        () =>
-          Effect.gen(function*() {
-            const configLayer = Layer.succeed(ConfluenceApiConfig, {
-              baseUrl: "https://test.atlassian.net",
-              auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-            })
-
-            const client = yield* ConfluenceApiClient.pipe(
-              Effect.provide(ConfluenceApiClient.layer),
-              Effect.provide(configLayer)
-            )
-
-            const result = yield* toEffect(client.v2.client.GET("/pages/{id}", { params: { path: { id: 999 } } }))
-              .pipe(Effect.result)
-
-            expect(result._tag).toBe("Failure")
-            if (result._tag === "Failure") {
-              expect(result.failure).toBeInstanceOf(FetchClientError)
-              if (Predicate.hasProperty(result.failure, "status")) {
-                expect(result.failure.status).toBe(404)
-              }
-            }
-          })
-      ))
+    )
   })
 
-  describe("V1 client", () => {
-    // V1 API uses different base path (/wiki/rest/api) -- verifies it's wired correctly
-    it.effect("getUser makes correct request", () =>
-      withMockFetch(
-        [{ status: 200, body: { type: "known", accountId: "abc", displayName: "Test User" } }],
-        (capturedRequests) =>
-          Effect.gen(function*() {
-            const configLayer = Layer.succeed(ConfluenceApiConfig, {
-              baseUrl: "https://test.atlassian.net",
-              auth: { type: "basic", email: "u@e.com", apiToken: Redacted.make("t") }
-            })
+  it.effect("fails when a successful response violates the generated schema", () =>
+    Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const result = yield* Effect.result(client.v2.getPageById("123", undefined))
+      expect(result._tag).toBe("Failure")
+    }).pipe(
+      Effect.provide(clientLayer(basicConfig, { status: 200, body: { id: "123", position: "invalid" } }, []))
+    ))
 
-            const client = yield* ConfluenceApiClient.pipe(
-              Effect.provide(ConfluenceApiClient.layer),
-              Effect.provide(configLayer)
-            )
+  it.effect("preserves status information for non-success responses", () =>
+    Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const result = yield* Effect.result(client.v2.getPageById("404", undefined))
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(HttpClientError.isHttpClientError(result.failure)).toBe(true)
+        if (HttpClientError.isHttpClientError(result.failure)) {
+          expect(result.failure.response?.status).toBe(404)
+        }
+      }
+    }).pipe(
+      Effect.provide(clientLayer(basicConfig, { status: 404, body: { message: "Not found" } }, []))
+    ))
 
-            const user = yield* toEffect(client.v1.client.GET("/wiki/rest/api/user", {
-              params: { query: { accountId: "abc" } }
-            }))
+  it.effect("decodes null attachment media descriptions returned by Atlassian", () =>
+    Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const response = yield* client.v2.getPageAttachments("123", undefined)
 
-            expect(user.accountId).toBe("abc")
-            expect(user.displayName).toBe("Test User")
-            expect(capturedRequests[0]!.url).toContain("/wiki/rest/api/user")
-          })
+      expect(response.results?.[0]?.mediaTypeDescription).toBeNull()
+    }).pipe(
+      Effect.provide(clientLayer(
+        basicConfig,
+        {
+          status: 200,
+          body: {
+            results: [{ id: "attachment-1", mediaType: "application/octet-stream", mediaTypeDescription: null }],
+            _links: {}
+          }
+        },
+        []
       ))
+    ))
+
+  it.effect("sends multipart uploads with Atlassian's required header", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluenceApiClient
+      const response = yield* client.uploadAttachment("123", {
+        bytes: new Uint8Array([1, 2, 3]),
+        filename: "diagram.png",
+        mediaType: "image/png"
+      })
+
+      expect(response.size).toBe(1)
+      expect(requests[0]?.url).toBe(
+        "https://example.atlassian.net/wiki/rest/api/content/123/child/attachment"
+      )
+      expect(requests[0]?.urlParams).toContainEqual(["status", "current"])
+      expect(requests[0]?.headers["x-atlassian-token"]).toBe("nocheck")
+      expect(requests[0]?.body._tag).toBe("FormData")
+    }).pipe(
+      Effect.provide(clientLayer(
+        basicConfig,
+        { status: 200, body: { results: [{}], size: 1, _links: {} } },
+        requests
+      ))
+    )
   })
 })

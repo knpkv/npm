@@ -10,6 +10,7 @@
  * - JIRA_BASE_URL defaults to https://knpkv.atlassian.net
  * - JIRA_ISSUE_KEY defaults to KAN-1
  */
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
@@ -101,6 +102,7 @@ const makeIntegrationLayer = (config: IntegrationConfig) => {
     Layer.provideMerge(Layer.succeed(SiteUrl, config.baseUrl)),
     Layer.provideMerge(JiraApiClient.layer),
     Layer.provideMerge(configLayer),
+    Layer.provideMerge(NodeHttpClient.layerUndici),
     Layer.provideMerge(NodeServices.layer)
   )
 }

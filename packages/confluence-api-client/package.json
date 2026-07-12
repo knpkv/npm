@@ -30,45 +30,42 @@
       "import": "./dist/ConfluenceApiConfig.js",
       "types": "./dist/ConfluenceApiConfig.d.ts"
     },
-    "./v1": {
-      "import": "./dist/generated/v1/index.js",
-      "types": "./dist/generated/v1/index.d.ts"
+    "./generated/v1": {
+      "import": "./dist/generated/ConfluenceV1Api.js",
+      "types": "./dist/generated/ConfluenceV1Api.d.ts"
     },
-    "./v2": {
-      "import": "./dist/generated/v2/index.js",
-      "types": "./dist/generated/v2/index.d.ts"
+    "./generated/v2": {
+      "import": "./dist/generated/ConfluenceV2Api.js",
+      "types": "./dist/generated/ConfluenceV2Api.d.ts"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp src/generated/v1/schema.d.ts dist/generated/v1/schema.d.ts && cp src/generated/v2/schema.d.ts dist/generated/v2/schema.d.ts",
+    "build": "tsc",
     "clean": "rimraf dist dist-test .tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json",
     "regenerate": "tsx scripts/regenerate.ts",
     "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.93"
-  },
-  "dependencies": {
-    "openapi-fetch": "^0.17.0"
+    "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.93",
-    "@effect/vitest": "4.0.0-beta.93",
+    "@effect/openapi-generator": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/vitest": "4.0.0-beta.97",
     "@types/node": "latest",
-    "effect": "4.0.0-beta.93",
-    "openapi-typescript": "^7.13.0",
-    "openapi-typescript-helpers": "^0.1.0",
+    "effect": "4.0.0-beta.97",
+    "prettier": "^3.9.5",
     "tsx": "^4.23.0",
     "typescript": "~6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "effect",

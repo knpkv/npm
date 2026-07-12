@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { ClockifyApiClientShape, TimeEntry, V1 } from "@knpkv/clockify-api-client"
-import { ClockifyApiClient, makeOpenApiFetchClient } from "@knpkv/clockify-api-client"
-import { FetchClientError, JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import type { ClockifyApiClientShape, TimeEntry } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService } from "../src/services/ConfigService.js"
 import { StateWriter } from "../src/services/StateWriter.js"
@@ -48,11 +48,8 @@ const resetCaptures = () => {
   stoppedTimers = []
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
 const paramsRecord = (value: unknown): Record<string, unknown> => {
-  if (!isRecord(value)) {
+  if (!Predicate.isObject(value)) {
     throw new Error("Expected captured params to be a record")
   }
   return value
@@ -72,7 +69,6 @@ const makeTimeEntry = (id: string, description: string, startedAt: Date, project
 })
 
 const mockClockify: ClockifyApiClientShape = {
-  api: makeOpenApiFetchClient<V1.paths>("https://api.clockify.me/api", {}),
   getUser: () =>
     Effect.succeed({
       id: USER_ID,
@@ -112,20 +108,6 @@ const mockClockify: ClockifyApiClientShape = {
 }
 
 const MockClockifyLayer = Layer.succeed(ClockifyApiClient, mockClockify)
-
-// JiraApiClient — unused by start/stop logic directly, but required by layer construction
-const MockJiraApiClientLayer = JiraApiClient.layer.pipe(
-  Layer.provide(
-    Layer.succeed(JiraApiConfig, {
-      baseUrl: "https://test.atlassian.net",
-      auth: {
-        type: "basic",
-        email: "test@example.com",
-        apiToken: Redacted.make("jira-api-token")
-      }
-    })
-  )
-)
 
 const MockClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
   getConfig: Effect.succeed({
@@ -268,7 +250,6 @@ const makeFlakyHttpClientLayer = (failures: number) => {
 
 const TestLayer = timerLayer.pipe(
   Layer.provide(MockClockifyLayer),
-  Layer.provide(MockJiraApiClientLayer),
   Layer.provide(MockClockifyAuthLayer),
   Layer.provide(MockConfigLayer),
   Layer.provide(MockStateWriterLayer),
@@ -284,7 +265,6 @@ const makeTestLayer = (
 ) =>
   timerLayer.pipe(
     Layer.provide(Layer.succeed(ClockifyApiClient, clockify)),
-    Layer.provide(MockJiraApiClientLayer),
     Layer.provide(MockClockifyAuthLayer),
     Layer.provide(MockConfigLayer),
     Layer.provide(MockStateWriterLayer),
@@ -655,7 +635,15 @@ describe("TimerService", () => {
       }).pipe(Effect.provide(
         makeTestLayer({
           ...mockClockify,
-          createTimeEntry: () => Effect.fail(new FetchClientError({ error: "boom", status: 500, message: "boom" }))
+          createTimeEntry: () =>
+            Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request: HttpClientRequest.get("https://clockify.test/time-entry"),
+                  description: "boom"
+                })
+              })
+            )
         }, MockHttpClientLayer)
       )))
 
@@ -720,6 +708,51 @@ describe("TimerService", () => {
   })
 
   describe("worklog retry", () => {
+    it.effect("refreshes Jira authorization for every worklog request", () => {
+      let accessTokenCalls = 0
+      const authorizationHeaders: Array<string | undefined> = []
+      const jiraAuthLayer = Layer.succeed(JiraAuth, {
+        configure: () => Effect.void,
+        isConfigured: () => Effect.succeed(true),
+        login: () => Effect.void,
+        logout: () => Effect.void,
+        getAccessToken: () => Effect.succeed(Redacted.make(`jira-token-${++accessTokenCalls}`)),
+        getCloudId: () => Effect.succeed("cloud-1"),
+        getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
+        getCurrentUser: () => Effect.succeed(null),
+        ...mockJiraAuthProfileMethods,
+        isLoggedIn: () => Effect.succeed(true)
+      })
+      const httpLayer = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          authorizationHeaders.push(request.headers["authorization"])
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ id: "wl-1" }), {
+                status: 201,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          )
+        })
+      )
+
+      return Effect.gen(function*() {
+        const svc = yield* TimerService
+        const params = {
+          ticketKey: "PROJ-123",
+          startedAt: new Date("2025-01-01T09:00:00.000Z"),
+          durationSeconds: 600
+        }
+        expect((yield* svc.logWorklog(params))._tag).toBe("Posted")
+        expect((yield* svc.logWorklog(params))._tag).toBe("Posted")
+        expect(accessTokenCalls).toBe(2)
+        expect(authorizationHeaders).toEqual(["Bearer jira-token-1", "Bearer jira-token-2"])
+      }).pipe(Effect.provide(makeTestLayer(mockClockify, httpLayer, jiraAuthLayer)))
+    })
+
     // A successful stop leaves nothing to retry — outcome Posted, no retry params.
     it.effect("stop reports Posted with no retry params when Jira succeeds", () =>
       Effect.gen(function*() {

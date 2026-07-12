@@ -1,19 +1,16 @@
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import {
   CommentId,
   type CommentThread,
   PRComment,
   type PRCommentLocation,
-  PRCommentLocationJson
+  type PRCommentLocationJson
 } from "../../Domain.js"
 
 export type CommentLocationJson = typeof PRCommentLocationJson.Type
 export type CommentThreadJson = CommentLocationJson["comments"][number]
 
 const decodeCommentId = Schema.decodeUnknownSync(CommentId)
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const optionalString = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
 
@@ -32,10 +29,10 @@ const parseJson = (json: string): unknown => {
 }
 
 const jsonThreadFromUnknown = (value: unknown): CommentThreadJson | null => {
-  if (!isRecord(value)) return null
+  if (!Predicate.isObject(value)) return null
   const root = value["root"]
   const replies = value["replies"]
-  if (!isRecord(root) || !Array.isArray(replies)) return null
+  if (!Predicate.isObject(root) || !Array.isArray(replies)) return null
 
   const id = requiredString(root["id"])
   const content = requiredString(root["content"])
@@ -67,7 +64,7 @@ const jsonThreadFromUnknown = (value: unknown): CommentThreadJson | null => {
 }
 
 const jsonLocationFromUnknown = (value: unknown): CommentLocationJson | null => {
-  if (!isRecord(value) || !Array.isArray(value["comments"])) return null
+  if (!Predicate.isObject(value) || !Array.isArray(value["comments"])) return null
   const comments: Array<CommentThreadJson> = []
   for (const comment of value["comments"]) {
     const decoded = jsonThreadFromUnknown(comment)

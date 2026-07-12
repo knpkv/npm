@@ -6,6 +6,7 @@
  *
  * @module
  */
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 export type AdfMetadataKind = "attrs" | "marks" | "node"
@@ -23,12 +24,9 @@ export const AdfMetadataSidecarSchema = Schema.Struct({
 export type AdfMetadataEntry = typeof AdfMetadataEntrySchema.Type
 export type AdfMetadataSidecar = typeof AdfMetadataSidecarSchema.Type
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
-  if (isRecord(v)) {
+  if (Predicate.isObject(v)) {
     const entries = Object.entries(v)
       .filter(([, value]) => value !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

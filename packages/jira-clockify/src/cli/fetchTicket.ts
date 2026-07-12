@@ -17,8 +17,7 @@
  *
  * @module
  */
-import type { FetchClientError } from "@knpkv/jira-api-client"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Effect } from "effect"
 import { type JiraTicket, mapIssueToTicket } from "../services/TicketService.js"
@@ -50,12 +49,11 @@ export const fetchTicketByKey = (
     if (loginCheck) return loginCheck
 
     const jira = yield* JiraApiClient
-    return yield* toEffect(jira.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}", {
+    return yield* jira.getIssue(key, {
       params: {
-        path: { issueIdOrKey: key },
-        query: { fields: ["summary", "status", "priority", "assignee", "issuetype", "labels", "updated"] }
+        fields: ["summary", "status", "priority", "assignee", "issuetype", "labels", "updated"]
       }
-    })).pipe(
+    }).pipe(
       Effect.map((issue): FetchTicketResult => {
         const record = issue !== null && typeof issue === "object" && !Array.isArray(issue)
           ? Object.fromEntries(Object.entries(issue))
@@ -65,11 +63,10 @@ export const fetchTicketByKey = (
           ticket: mapIssueToTicket(record, key)
         }
       }),
-      Effect.catch((e: FetchClientError) =>
+      Effect.catchTag("GetIssue404", () => Effect.succeed<FetchTicketResult>({ _tag: "NotFound" })),
+      Effect.catch((e) =>
         Effect.succeed<FetchTicketResult>(
-          e.status === 404
-            ? { _tag: "NotFound" }
-            : { _tag: "FetchError", message: e.message }
+          { _tag: "FetchError", message: String(e) }
         )
       )
     )

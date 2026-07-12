@@ -22,12 +22,13 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { type JiraWorklogOutcome, TimerService } from "./TimerService.js"
@@ -189,18 +190,15 @@ interface RawWorklog {
   readonly timeSpentSeconds?: number | undefined
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const issueKey = (issue: unknown): string | null => {
-  if (!isRecord(issue)) return null
+  if (!Predicate.isObject(issue)) return null
   const key = issue.key
   return typeof key === "string" ? key : null
 }
 
 const toRawWorklog = (value: unknown): RawWorklog | null => {
-  if (!isRecord(value)) return null
-  const author = isRecord(value.author) ? value.author : undefined
+  if (!Predicate.isObject(value)) return null
+  const author = Predicate.isObject(value.author) ? value.author : undefined
   const accountId = author?.accountId
   return {
     ...(typeof accountId === "string" ? { author: { accountId } } : {}),
@@ -210,7 +208,7 @@ const toRawWorklog = (value: unknown): RawWorklog | null => {
 }
 
 const toRawWorklogs = (response: unknown): ReadonlyArray<RawWorklog> => {
-  if (!isRecord(response) || !Array.isArray(response.worklogs)) return []
+  if (!Predicate.isObject(response) || !Array.isArray(response.worklogs)) return []
   return response.worklogs.flatMap((worklog) => {
     const parsed = toRawWorklog(worklog)
     return parsed ? [parsed] : []
@@ -263,21 +261,14 @@ export const layer = Layer.effect(
         const fromDay = localDay(period.from)
         const toDay = localDay(period.to)
         // Find issues the user logged work on in the window.
-        const search = yield* toEffect(jira.v3.client.GET("/rest/api/3/search/jql", {
+        const search = yield* jira.searchIssuesUsingJql({
           params: {
-            query: {
-              jql: `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`,
-              maxResults: 100,
-              fields: ["key"]
-            }
+            jql: `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`,
+            maxResults: 100,
+            fields: ["key"]
           }
-        })).pipe(
-          Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e })),
-          Effect.flatMap((search) =>
-            search === undefined
-              ? Effect.fail(new ReconcileError({ message: "Jira search returned no response body" }))
-              : Effect.succeed(search)
-          )
+        }).pipe(
+          Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e }))
         )
 
         const issueKeys = (search.issues ?? []).flatMap((issue) => {
@@ -290,12 +281,12 @@ export const layer = Layer.effect(
         const tally: Array<{ ticketKey: string; day: string; seconds: number }> = []
 
         for (const issueKey of issueKeys) {
-          const worklogs = yield* toEffect(jira.v3.client.GET("/rest/api/3/issue/{issueIdOrKey}/worklog", {
+          const worklogs = yield* jira.getIssueWorklog(issueKey, {
             params: {
-              path: { issueIdOrKey: issueKey },
-              query: { startedAfter: fromMs, startedBefore: toMs }
+              startedAfter: fromMs,
+              startedBefore: toMs
             }
-          })).pipe(
+          }).pipe(
             Effect.map(toRawWorklogs),
             Effect.catch(() => Effect.succeed<ReadonlyArray<RawWorklog>>([]))
           )

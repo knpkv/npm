@@ -57,7 +57,8 @@ export const ClockifyApiConfigLive = Layer.effect(
 ).pipe(Layer.provide(ClockifyAuthLive))
 
 export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
-  Layer.provide(ClockifyApiConfigLive)
+  Layer.provide(ClockifyApiConfigLive),
+  Layer.provide(PlatformLayer)
 )
 
 export const JiraApiConfigLive = Layer.effect(

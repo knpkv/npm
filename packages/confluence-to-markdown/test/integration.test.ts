@@ -15,6 +15,7 @@ import * as Path from "effect/Path"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { parseMarkdown } from "../src/internal/frontmatter.js"
 
 let CLI_PATH = ""
 let BASE_URL = ""
@@ -755,7 +756,13 @@ describe("CLI Integration - Page Creation Flow", () => {
         expect(yield* pathExists(reclonedFile!)).toBe(true)
 
         const contentAfterReclone = yield* readText(reclonedFile!)
-        expect(contentAfterReclone).toBe(contentBeforeReclone)
+        const beforeReclone = yield* parseMarkdown(file, contentBeforeReclone)
+        const afterReclone = yield* parseMarkdown(reclonedFile!, contentAfterReclone)
+        expect(afterReclone.content).toBe(beforeReclone.content)
+        expect(afterReclone.frontMatter).toEqual({
+          ...beforeReclone.frontMatter!,
+          position: expect.any(Number)
+        })
         expect(contentAfterReclone).toContain(createMarker)
         expect(contentAfterReclone).toContain(modifyMarker)
         yield* expectSidecarMetadata(reclonedFile!, pageId!, contentAfterReclone)

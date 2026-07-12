@@ -7,6 +7,7 @@
  * @module
  */
 import { isPreviewableAttachment } from "@knpkv/atlassian-common/attachments"
+import * as Predicate from "effect/Predicate"
 import { sanitizeConfluenceMediaAlt } from "./internal/mediaAlt.js"
 
 /**
@@ -100,11 +101,9 @@ const attrNum = (n: AdfNode, key: string): number | undefined => {
   return typeof v === "number" ? v : undefined
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v)
-
 const attrRecord = (n: AdfNode, key: string): Record<string, unknown> | undefined => {
   const v = n.attrs?.[key]
-  return isRecord(v) ? v : undefined
+  return Predicate.isObject(v) ? v : undefined
 }
 
 const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
@@ -115,7 +114,7 @@ const CONFLUENCE_CORE_MACRO_TYPE = "com.atlassian.confluence.macro.core"
 // push → pull a byte-level fixed point (and contentHash stable).
 const stableStringify = (v: unknown): string => {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
-  if (isRecord(v)) {
+  if (Predicate.isObject(v)) {
     const entries = Object.entries(v)
       .filter(([, value]) => value !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
@@ -126,7 +125,7 @@ const stableStringify = (v: unknown): string => {
 }
 
 const toAdfNode = (value: unknown): AdfNode => {
-  if (!isRecord(value)) return { type: "unknown" }
+  if (!Predicate.isObject(value)) return { type: "unknown" }
   const type = Reflect.get(value, "type")
   const attrs = Reflect.get(value, "attrs")
   const content = Reflect.get(value, "content")
@@ -134,7 +133,7 @@ const toAdfNode = (value: unknown): AdfNode => {
   const marks = Reflect.get(value, "marks")
   return {
     type: typeof type === "string" ? type : "unknown",
-    ...(isRecord(attrs) ? { attrs } : {}),
+    ...(Predicate.isObject(attrs) ? { attrs } : {}),
     ...(Array.isArray(content) ? { content: content.map(toAdfNode) } : {}),
     ...(typeof text === "string" ? { text } : {}),
     ...(Array.isArray(marks) ? { marks: marks.map(toAdfNode) } : {})
@@ -242,7 +241,7 @@ const isOnlyKeys = (v: Record<string, unknown> | undefined, keys: ReadonlyArray<
 const tocLevel = (macroParams: Record<string, unknown> | undefined, key: "minLevel" | "maxLevel"): string | null => {
   const param = macroParams?.[key]
   if (param === undefined) return null
-  if (!isRecord(param)) return null
+  if (!Predicate.isObject(param)) return null
   const record = param
   if (!isOnlyKeys(record, ["value"])) return null
   const value = record["value"]
@@ -260,7 +259,7 @@ const tocMarkdown = (n: AdfNode): string | null => {
   if (!isOnlyKeys(parameters, ["macroParams"])) return null
 
   const macroParams = parameters["macroParams"]
-  if (!isRecord(macroParams)) return null
+  if (!Predicate.isObject(macroParams)) return null
   const macroParamRecord = macroParams
   if (!isOnlyKeys(macroParamRecord, ["minLevel", "maxLevel"])) return null
 

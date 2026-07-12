@@ -4,7 +4,7 @@
  * @module
  */
 import { normalizeAttachmentMediaType } from "@knpkv/atlassian-common/attachments"
-import { JiraApiClient, toEffect } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -86,17 +86,11 @@ const make = Effect.gen(function*() {
         )
       )
       const filename = input.filename ?? path.basename(input.filePath)
-      const buffer = new ArrayBuffer(bytes.byteLength)
-      new Uint8Array(buffer).set(bytes)
-      const form = new FormData()
-      form.append("file", new Blob([buffer], input.mediaType ? { type: input.mediaType } : undefined), filename)
-
-      const result = yield* toEffect(client.v3.client.POST("/rest/api/3/issue/{issueIdOrKey}/attachments", {
-        params: { path: { issueIdOrKey } },
-        headers: { "X-Atlassian-Token": "no-check" },
-        body: [{ name: filename, originalFilename: filename, size: bytes.byteLength }],
-        bodySerializer: () => form
-      })).pipe(
+      const result = yield* client.uploadAttachment(issueIdOrKey, {
+        bytes,
+        filename,
+        ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType })
+      }).pipe(
         Effect.mapError((cause) =>
           new JiraApiError({ message: `Failed to upload attachment to ${issueIdOrKey}`, cause })
         )

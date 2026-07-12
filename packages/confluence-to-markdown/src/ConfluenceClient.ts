@@ -5,7 +5,8 @@
  *
  * @module
  */
-import { ConfluenceApiClient, ConfluenceApiConfig, FetchClientError, toEffect } from "@knpkv/confluence-api-client"
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -15,6 +16,8 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
+import type * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type { PageId } from "./Brand.js"
 import { ApiError, RateLimitError } from "./ConfluenceError.js"
 import {
@@ -186,10 +189,7 @@ const MAX_PAGINATION_ITERATIONS = 100
 const VERSIONS_PAGE_SIZE = 50
 const ATLAS_DOC_FORMAT: "atlas_doc_format" = "atlas_doc_format"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const recordOrNull = (value: unknown): Record<string, unknown> | null => isRecord(value) ? value : null
+const recordOrNull = (value: unknown): Record<PropertyKey, unknown> | null => Predicate.isObject(value) ? value : null
 
 const stringOrUndefined = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
 
@@ -245,31 +245,20 @@ const writeRequestRetry: {
 /**
  * Map API client errors to domain errors.
  */
-const fetchClientErrorFromUnknown = (error: unknown): FetchClientError =>
-  (() => {
-    const record = recordOrNull(error)
-    if (record?._tag === "FetchClientError") {
-      return new FetchClientError({
-        error: record["error"],
-        status: numberOrUndefined(record["status"]) ?? 0,
-        message: stringOrUndefined(record["message"]) ?? String(record["error"] ?? error)
-      })
-    }
-    return new FetchClientError({
-      error,
-      status: 0,
-      message: String(error)
-    })
-  })()
-
 const mapApiError = (error: unknown, endpoint: string, pageId?: string): ApiError | RateLimitError => {
-  const fetchError = fetchClientErrorFromUnknown(error)
-  if (fetchError.status === 429) {
+  const record = recordOrNull(error)
+  const response = HttpClientError.isHttpClientError(error)
+    ? error.response
+    : recordOrNull(record?.["response"])
+  const status = response === undefined || response === null
+    ? Schema.isSchemaError(error) ? 200 : 0
+    : numberOrUndefined(response["status"]) ?? 0
+  if (status === 429) {
     return new RateLimitError()
   }
   return new ApiError({
-    status: fetchError.status,
-    message: fetchError.message,
+    status,
+    message: Predicate.isError(error) ? error.message : String(record?.["cause"] ?? error),
     endpoint,
     ...(pageId !== undefined && { pageId })
   })
@@ -305,16 +294,24 @@ const mapDecodeError = (cause: unknown, endpoint: string, pageId?: string): ApiE
     ...(pageId !== undefined && { pageId })
   })
 
-const normalizeNullPagePosition = (value: unknown): unknown =>
-  isRecord(value) && value.position === null
-    ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== "position"))
-    : value
+const normalizePagePosition = (value: unknown): unknown => {
+  if (!Predicate.isObject(value)) return value
+  const position = typeof value.position === "number"
+    ? value.position
+    : typeof value.childPosition === "number"
+    ? value.childPosition
+    : undefined
+  return {
+    ...Object.fromEntries(Object.entries(value).filter(([key]) => key !== "position" && key !== "childPosition")),
+    ...(position === undefined ? {} : { position })
+  }
+}
 
 const normalizeNullPagePositions = (value: unknown): unknown => {
-  if (!isRecord(value) || !Array.isArray(value.results)) return normalizeNullPagePosition(value)
+  if (!Predicate.isObject(value) || !Array.isArray(value.results)) return normalizePagePosition(value)
   return {
     ...value,
-    results: value.results.map(normalizeNullPagePosition)
+    results: value.results.map(normalizePagePosition)
   }
 }
 
@@ -324,7 +321,7 @@ const decodePageResponse = (
   pageId?: string
 ): Effect.Effect<PageResponse, ApiError> =>
   Effect.try({
-    try: () => Schema.decodeUnknownSync(PageResponseSchema)(normalizeNullPagePosition(value)),
+    try: () => Schema.decodeUnknownSync(PageResponseSchema)(normalizePagePosition(value)),
     catch: (cause) => mapDecodeError(cause, endpoint, pageId)
   })
 
@@ -494,7 +491,7 @@ const decodeAttachment = (
  */
 const make = (
   config: ConfluenceClientConfig
-): Effect.Effect<Context.Service.Shape<typeof ConfluenceClient>> =>
+): Effect.Effect<Context.Service.Shape<typeof ConfluenceClient>, never, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     // Create underlying API client
     const apiConfigLayer = Layer.succeed(ConfluenceApiConfig, {
@@ -509,9 +506,9 @@ const make = (
       Effect.provide(apiConfigLayer)
     )
     const getPage = (id: PageId): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      toEffect(apiClient.v2.client.GET("/pages/{id}", {
-        params: { path: { id: Number(id) }, query: { "body-format": ATLAS_DOC_FORMAT } }
-      })).pipe(
+      apiClient.v2.getPageById(id, {
+        params: { "body-format": ATLAS_DOC_FORMAT }
+      }).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
         Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}`, id)),
@@ -519,9 +516,7 @@ const make = (
       )
 
     const getChildren = (id: PageId): Effect.Effect<PageChildrenResponse, ApiError | RateLimitError> =>
-      toEffect(apiClient.v2.client.GET("/pages/{id}/children", {
-        params: { path: { id: Number(id) } }
-      })).pipe(
+      apiClient.v2.getChildPages(id, undefined).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
         Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
@@ -546,9 +541,9 @@ const make = (
             )
           }
 
-          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/children", {
-            params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}) } }
-          })).pipe(
+          const response = yield* apiClient.v2.getChildPages(id, {
+            params: { ...(cursor ? { cursor } : {}) }
+          }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/children`, id)),
             Effect.retry(readRequestRetry),
             Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/children`, id)),
@@ -570,15 +565,15 @@ const make = (
       })
 
     const createPage = (req: CreatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      toEffect(apiClient.v2.client.POST("/pages", {
-        body: {
+      apiClient.v2.createPage({
+        payload: {
           spaceId: req.spaceId,
           title: req.title,
           ...(req.parentId ? { parentId: req.parentId } : {}),
           body: { representation: req.body.representation, value: req.body.value },
           status: "current"
         }
-      })).pipe(
+      }).pipe(
         Effect.mapError((e) => mapApiError(e, "/pages")),
         Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, "/pages")),
@@ -586,16 +581,15 @@ const make = (
       )
 
     const updatePage = (req: UpdatePageRequest): Effect.Effect<PageResponse, ApiError | RateLimitError> =>
-      toEffect(apiClient.v2.client.PUT("/pages/{id}", {
-        params: { path: { id: Number(req.id) } },
-        body: {
+      apiClient.v2.updatePage(req.id, {
+        payload: {
           id: req.id,
           title: req.title,
           status: req.status ?? "current",
           body: { representation: req.body.representation, value: req.body.value },
           version: { number: req.version.number, ...(req.version.message ? { message: req.version.message } : {}) }
         }
-      })).pipe(
+      }).pipe(
         Effect.mapError((e) => mapApiError(e, `/pages/${req.id}`, req.id)),
         Effect.retry(writeRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${req.id}`, req.id)),
@@ -603,9 +597,7 @@ const make = (
       )
 
     const deletePage = (id: PageId): Effect.Effect<void, ApiError | RateLimitError> =>
-      toEffect(apiClient.v2.client.DELETE("/pages/{id}", {
-        params: { path: { id: Number(id) } }
-      })).pipe(
+      apiClient.v2.deletePage(id, undefined).pipe(
         Effect.map(() => void 0),
         Effect.mapError((e) => mapApiError(e, `/pages/${id}`, id)),
         Effect.retry(writeRequestRetry),
@@ -633,16 +625,13 @@ const make = (
             )
           }
 
-          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/versions", {
+          const response = yield* apiClient.v2.getPageVersions(id, {
             params: {
-              path: { id: Number(id) },
-              query: {
-                ...(options?.includeBody ? { "body-format": ATLAS_DOC_FORMAT } : {}),
-                ...(cursor ? { cursor } : {}),
-                limit: VERSIONS_PAGE_SIZE
-              }
+              ...(options?.includeBody ? { "body-format": ATLAS_DOC_FORMAT } : {}),
+              ...(cursor ? { cursor } : {}),
+              limit: VERSIONS_PAGE_SIZE
             }
-          })).pipe(
+          }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/versions`, id)),
             Effect.retry(readRequestRetry),
             Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/versions`, id)),
@@ -685,9 +674,9 @@ const make = (
             )
           }
 
-          const response = yield* toEffect(apiClient.v2.client.GET("/pages/{id}/attachments", {
-            params: { path: { id: Number(id) }, query: { ...(cursor ? { cursor } : {}), limit: 50 } }
-          })).pipe(
+          const response = yield* apiClient.v2.getPageAttachments(id, {
+            params: { ...(cursor ? { cursor } : {}), limit: 50 }
+          }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${id}/attachments`, id)),
             Effect.retry(readRequestRetry),
             Effect.mapError((e) => normalizeConfluenceError(e, `/pages/${id}/attachments`, id))
@@ -729,19 +718,13 @@ const make = (
             })
           )
         )
-        const buffer = new ArrayBuffer(bytes.byteLength)
-        new Uint8Array(buffer).set(bytes)
         const filename = input.filename ?? path.basename(input.filePath)
-        const form = new FormData()
-        form.append("file", new Blob([buffer], input.mediaType ? { type: input.mediaType } : undefined), filename)
-        form.append("minorEdit", "true")
 
-        const response = yield* toEffect(apiClient.v1.client.PUT("/wiki/rest/api/content/{id}/child/attachment", {
-          params: { path: { id: pageId }, query: { status: "current" } },
-          headers: { "X-Atlassian-Token": "nocheck" },
-          body: { file: filename, minorEdit: "true" },
-          bodySerializer: () => form
-        })).pipe(
+        const response = yield* apiClient.uploadAttachment(pageId, {
+          bytes,
+          filename,
+          ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType })
+        }).pipe(
           Effect.mapError((e) => mapApiError(e, `/wiki/rest/api/content/${pageId}/child/attachment`, pageId)),
           Effect.retry(writeRequestRetry),
           Effect.mapError((e) =>
@@ -778,9 +761,7 @@ const make = (
       })
 
     const getUser = (accountId: string): Effect.Effect<AtlassianUser, ApiError | RateLimitError> =>
-      toEffect(apiClient.v1.client.GET("/wiki/rest/api/user", {
-        params: { query: { accountId } }
-      })).pipe(
+      apiClient.v1.getUser({ params: { accountId } }).pipe(
         Effect.mapError((e) => mapApiError(e, `/user?accountId=${accountId}`)),
         Effect.retry(readRequestRetry),
         Effect.mapError((e) => normalizeConfluenceError(e, `/user?accountId=${accountId}`)),
@@ -806,15 +787,12 @@ const make = (
     const setEditorVersion = (pageId: PageId, version: "v1" | "v2"): Effect.Effect<void, ApiError | RateLimitError> =>
       Effect.gen(function*() {
         // Try to get existing property by key, treat 404 as "not exists"
-        const existing = yield* toEffect(apiClient.v2.client.GET("/pages/{page-id}/properties", {
-          params: { path: { "page-id": Number(pageId) }, query: { key: "editor" } }
-        })).pipe(
+        const existing = yield* apiClient.v2.getPageContentProperties(pageId, {
+          params: { key: "editor" }
+        }).pipe(
           Effect.map(firstEditorProperty),
           Effect.catchIf(
-            (e: unknown) => {
-              const record = recordOrNull(e)
-              return record?._tag === "FetchClientError" && record["status"] === 404
-            },
+            (e: unknown) => HttpClientError.isHttpClientError(e) && e.response?.status === 404,
             () => Effect.succeed(undefined)
           ),
           Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties?key=editor`, pageId))
@@ -823,20 +801,16 @@ const make = (
         if (existing?.id) {
           // Update existing property
           const nextVersion = (existing.version?.number ?? 0) + 1
-          yield* toEffect(apiClient.v2.client.PUT("/pages/{page-id}/properties/{property-id}", {
-            params: {
-              path: { "page-id": Number(pageId), "property-id": Number(existing.id) }
-            },
-            body: { key: "editor", value: version, version: { number: nextVersion } }
-          })).pipe(
+          yield* apiClient.v2.updatePagePropertyById(pageId, existing.id, {
+            payload: { key: "editor", value: version, version: { number: nextVersion } }
+          }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         } else {
           // Create new property
-          yield* toEffect(apiClient.v2.client.POST("/pages/{page-id}/properties", {
-            params: { path: { "page-id": Number(pageId) } },
-            body: { key: "editor", value: version }
-          })).pipe(
+          yield* apiClient.v2.createPageProperty(pageId, {
+            payload: { key: "editor", value: version }
+          }).pipe(
             Effect.mapError((e) => mapApiError(e, `/pages/${pageId}/properties/editor`, pageId))
           )
         }
@@ -891,8 +865,14 @@ const make = (
  *
  * @category Layers
  */
+export const layerWithHttpClient = (
+  config: ConfluenceClientConfig
+): Layer.Layer<ConfluenceClient, never, HttpClient.HttpClient> => Layer.effect(ConfluenceClient, make(config))
+
 export const layer = (config: ConfluenceClientConfig): Layer.Layer<ConfluenceClient> =>
-  Layer.effect(ConfluenceClient, make(config))
+  layerWithHttpClient(config).pipe(
+    Layer.provide(NodeHttpClient.layerFetch)
+  )
 
 const extractUploadedAttachment = (response: unknown): unknown | null => {
   const record = recordOrNull(response)

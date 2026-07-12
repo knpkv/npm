@@ -20,22 +20,23 @@ The package collection contains product CLIs, generated API clients, shared Atla
 
 The API clients expose Effect services around generated OpenAPI clients. They keep generated schemas available through subpath exports and provide `Context.Service` layers for application code.
 
-| Package                        | Public exports                                                                          | Auth model                                                           |
-| ------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `@knpkv/jira-api-client`       | `JiraApiClient`, `JiraApiConfig`, `FetchClientError`, generated `v3` types.             | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
-| `@knpkv/confluence-api-client` | `ConfluenceApiClient`, `ConfluenceApiConfig`, generated `v1` and `v2` types.            | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
-| `@knpkv/clockify-api-client`   | `ClockifyApiClient`, `ClockifyApiConfig`, `ClockifyApiError`, generated Clockify types. | `X-Api-Key` header.                                                  |
+| Package                        | Public exports                                                                       | Auth model                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `@knpkv/jira-api-client`       | `JiraApiClient`, `JiraApiConfig`, and the generated `JiraApi` namespace.             | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
+| `@knpkv/confluence-api-client` | `ConfluenceApiClient`, `ConfluenceApiConfig`, and generated v1/v2 namespaces.        | Basic auth or OAuth2 through Atlassian cloud gateway with `cloudId`. |
+| `@knpkv/clockify-api-client`   | `ClockifyApiClient`, `ClockifyApiConfig`, and the generated `ClockifyApi` namespace. | `X-Api-Key` header.                                                  |
 
 Minimal service shape:
 
 ```typescript
 import { Effect, Layer } from "effect"
 import * as Redacted from "effect/Redacted"
-import { JiraApiClient, JiraApiConfig, toEffect } from "@knpkv/jira-api-client"
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 
 const program = Effect.gen(function* () {
   const jira = yield* JiraApiClient
-  return yield* toEffect(jira.v3.client.GET("/rest/api/3/myself"))
+  return yield* jira.getCurrentUser(undefined)
 })
 
 const ConfigLive = Layer.succeed(JiraApiConfig, {
@@ -47,7 +48,13 @@ const ConfigLive = Layer.succeed(JiraApiConfig, {
   }
 })
 
-Effect.runPromise(program.pipe(Effect.provide(JiraApiClient.layer), Effect.provide(ConfigLive)))
+Effect.runPromise(
+  program.pipe(
+    Effect.provide(JiraApiClient.layer),
+    Effect.provide(ConfigLive),
+    Effect.provide(NodeHttpClient.layerFetch)
+  )
+)
 ```
 
 ## Shared Libraries

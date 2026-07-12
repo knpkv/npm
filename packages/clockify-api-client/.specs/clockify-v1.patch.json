@@ -1,48 +1,162 @@
-{
-  "$comment": "Patches for clockify-v1.json — the official spec has incomplete DTOs. Applied by scripts/regenerate.ts before generating types.",
-  "schemas": {
-    "UserDto": {
-      "addProperties": {
-        "activeWorkspace": { "type": "string" },
-        "defaultWorkspace": { "type": "string" },
-        "profilePicture": { "type": "string" },
-        "status": { "type": "string" }
-      },
-      "required": ["id", "name", "email", "activeWorkspace", "defaultWorkspace", "status"]
-    },
-    "TimeEntryDto": {
-      "renameProperties": {
-        "get_id": "id"
-      },
-      "addProperties": {
-        "workspaceId": { "type": "string" },
-        "type": { "type": "string" },
-        "isLocked": { "type": "boolean" },
-        "tagIds": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["id", "description", "billable", "userId", "workspaceId", "timeInterval"]
-    },
-    "TimeIntervalDto": {
-      "required": ["start"],
-      "patchProperties": {
-        "end": { "type": "string", "format": "date-time", "nullable": true },
-        "duration": { "type": "string", "nullable": true }
-      }
-    },
-    "TagDto": {
-      "required": ["id", "name", "workspaceId", "archived"]
-    },
-    "ProjectDtoV1": {
-      "addProperties": {
-        "name": { "type": "string" },
-        "note": { "type": "string" },
-        "workspaceId": { "type": "string" },
-        "public": { "type": "boolean" }
-      },
-      "required": ["id", "name", "archived", "billable", "color", "workspaceId"]
-    },
-    "CreateTimeEntryRequest": {
-      "required": ["description", "start"]
+[
+  {
+    "op": "replace",
+    "path": "/components/schemas/AccountStatus",
+    "value": {
+      "type": "string",
+      "description": "Represents account status enum.",
+      "enum": ["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"]
     }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDto/properties/activeWorkspace",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDto/properties/defaultWorkspace",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDto/properties/profilePicture",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDto/properties/status",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDto/required",
+    "value": ["id", "name", "email", "activeWorkspace", "defaultWorkspace", "status"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/properties/id",
+    "value": {
+      "type": "string",
+      "description": "Represents time entry identifier across the system."
+    }
+  },
+  {
+    "op": "remove",
+    "path": "/components/schemas/TimeEntryDto/properties/get_id"
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/properties/workspaceId",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/properties/type",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/properties/isLocked",
+    "value": { "type": "boolean" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/properties/tagIds",
+    "value": { "type": "array", "items": { "type": "string" } }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDto/required",
+    "value": ["id", "description", "billable", "userId", "workspaceId", "timeInterval"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeIntervalDto/required",
+    "value": ["start"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeIntervalDto/properties/end",
+    "value": { "type": "string", "format": "date-time", "nullable": true }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeIntervalDto/properties/duration",
+    "value": { "type": "string", "nullable": true }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeIntervalDtoV1/properties/end",
+    "value": {
+      "type": "string",
+      "description": "Represents an end date in yyyy-MM-ddThh:mm:ssZ format.",
+      "nullable": true
+    }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeIntervalDtoV1/properties/duration/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TagDto/required",
+    "value": ["id", "name", "workspaceId", "archived"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TagDtoV1/required",
+    "value": ["id", "name", "workspaceId", "archived"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/UserDtoV1/required",
+    "value": ["id", "name", "email"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/WorkspaceDtoV1/required",
+    "value": ["id", "name"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoImplV1/required",
+    "value": ["id", "description", "billable", "userId", "workspaceId", "timeInterval"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/required",
+    "value": ["id", "description", "billable", "userId", "workspaceId", "timeInterval"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/ProjectDtoV1/properties/name",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/ProjectDtoV1/properties/note",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/ProjectDtoV1/properties/workspaceId",
+    "value": { "type": "string" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/ProjectDtoV1/properties/public",
+    "value": { "type": "boolean" }
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/ProjectDtoV1/required",
+    "value": ["id", "name", "archived", "billable", "color", "workspaceId"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/CreateTimeEntryRequest/required",
+    "value": ["description", "start"]
   }
-}
+]
