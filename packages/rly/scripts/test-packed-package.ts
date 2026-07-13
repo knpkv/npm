@@ -21,6 +21,7 @@ import {
   renderNormalEntryConsumer,
   renderNormalEntryViteConfig
 } from "./packed/normal-entry.js"
+import { PACKED_REGISTRY_ARTIFACTS, validatePackedRegistry } from "./packed/registry.js"
 
 class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
   readonly reason: string
@@ -58,12 +59,23 @@ const program = Effect.scoped(Effect.gen(function*() {
       "package/dist/generated-tokens.css",
       ...(hasComponentStyles ? ["package/dist/components.css"] : []),
       "package/dist/fonts/geist-latin-wght-normal.woff2",
-      "package/dist/fonts/geist-mono-latin-wght-normal.woff2"
+      "package/dist/fonts/geist-mono-latin-wght-normal.woff2",
+      ...PACKED_REGISTRY_ARTIFACTS
     ]
   ) {
     if (!listing.split("\n").includes(artifact)) {
       return yield* Effect.fail(new PackedPackageError({ reason: `Packed asset is missing: ${artifact}` }))
     }
+  }
+  const packedRegistryEntries = listing.split("\n").filter((entry) => entry.startsWith("package/registry/"))
+  const expectedPackedRegistryEntries = new Set<string>(PACKED_REGISTRY_ARTIFACTS)
+  const unexpectedRegistryEntries = packedRegistryEntries.filter(
+    (entry) => !expectedPackedRegistryEntries.has(entry)
+  )
+  if (unexpectedRegistryEntries.length > 0) {
+    return yield* Effect.fail(
+      new PackedPackageError({ reason: `Unexpected packed registry artifact: ${unexpectedRegistryEntries.join(", ")}` })
+    )
   }
   const diffArtifacts = findPackedDiffArtifacts(listing.split("\n"))
   if (diffArtifacts === undefined) {
@@ -79,6 +91,15 @@ const program = Effect.scoped(Effect.gen(function*() {
   })
   if (diffArtifactFailure !== undefined) {
     return yield* Effect.fail(new PackedPackageError({ reason: diffArtifactFailure }))
+  }
+  const packedRegistryFailure = validatePackedRegistry({
+    components: yield* run("tar", ["-xOf", archive, "package/registry/components.json"], temporary),
+    schema: yield* run("tar", ["-xOf", archive, "package/registry/schema.json"], temporary),
+    search: yield* run("tar", ["-xOf", archive, "package/registry/search.json"], temporary),
+    usage: yield* run("tar", ["-xOf", archive, "package/registry/USAGE.md"], temporary)
+  })
+  if (packedRegistryFailure !== undefined) {
+    return yield* Effect.fail(new PackedPackageError({ reason: packedRegistryFailure }))
   }
   const leaked = listing.split("\n").filter((entry) =>
     /^package\/(?:src|test|scripts|generated|component-manifest\.ts)(?:\/|$)/.test(entry)
@@ -515,6 +536,23 @@ void [${references}]
   )
 
   yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
+  yield* run(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `const options = { with: { type: "json" } };
+const components = (await import("@knpkv/rly/registry/components.json", options)).default;
+const schema = (await import("@knpkv/rly/registry/schema.json", options)).default;
+const search = (await import("@knpkv/rly/registry/search.json", options)).default;
+const usage = import.meta.resolve("@knpkv/rly/registry/USAGE.md");
+if (!Array.isArray(components.components) || components.components.length === 0) throw new Error("Empty packed registry");
+if (schema.$id !== "https://knpkv.dev/schemas/rly/components.schema.json") throw new Error("Wrong packed schema");
+if (search.records.length !== components.components.length) throw new Error("Incomplete packed search index");
+if (!usage.endsWith("/registry/USAGE.md")) throw new Error(usage);`
+    ],
+    consumer
+  )
   yield* run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], consumer)
   yield* run("node", ["dist/index.js"], consumer)
   yield* fs.writeFileString(

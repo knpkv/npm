@@ -14,12 +14,14 @@ class DistValidationError extends Data.TaggedError("DistValidationError")<{
   readonly reason: string
 }> {}
 
-const PackageJson = Schema.fromJsonString(Schema.Struct({
-  files: Schema.Array(Schema.String),
-  main: Schema.String,
-  sideEffects: Schema.Array(Schema.String),
-  types: Schema.String
-}))
+const PackageJson = Schema.fromJsonString(
+  Schema.Struct({
+    files: Schema.Array(Schema.String),
+    main: Schema.String,
+    sideEffects: Schema.Array(Schema.String),
+    types: Schema.String
+  })
+)
 
 const listFiles: (
   fs: FileSystem.FileSystem,
@@ -50,12 +52,7 @@ const program = Effect.gen(function*() {
 
   for (const entry of componentManifest.entries) {
     const stem = entryOutputStem(entry)
-    const artifacts = [
-      `dist/${stem}.js`,
-      `dist/${stem}.js.map`,
-      `dist/dts/${stem}.d.ts`,
-      `dist/dts/${stem}.d.ts.map`
-    ]
+    const artifacts = [`dist/${stem}.js`, `dist/${stem}.js.map`, `dist/dts/${stem}.d.ts`, `dist/dts/${stem}.d.ts.map`]
     for (const artifact of artifacts) {
       const target = path.join(packageRoot, artifact)
       if (!(yield* fs.exists(target))) {
@@ -161,8 +158,8 @@ const program = Effect.gen(function*() {
     if (packageJson.main !== root.import) failures.push("main does not match root import")
     if (packageJson.types !== root.types) failures.push("types does not match root types")
   }
-  if (JSON.stringify(packageJson.files) !== JSON.stringify(["dist", "README.md"])) {
-    failures.push("package files must contain only dist and README.md")
+  if (JSON.stringify(packageJson.files) !== JSON.stringify(["dist", "registry", "README.md"])) {
+    failures.push("package files must contain only dist, registry, and README.md")
   }
   if (JSON.stringify(packageJson.sideEffects) !== JSON.stringify(["*.css", "**/*.css"])) {
     failures.push("only CSS may be declared side-effectful")

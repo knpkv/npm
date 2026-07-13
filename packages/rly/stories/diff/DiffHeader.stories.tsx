@@ -54,6 +54,10 @@ export const ControlledPreferences: Story = {
     await expect(canvas.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "true")
     await userEvent.click(canvas.getByRole("button", { name: "Agent" }))
     await expect(canvas.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(canvas.getByRole("button", { name: "Human" }))
+    await expect(canvas.getByRole("button", { name: "Human" })).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(canvas.getByRole("button", { name: "Unresolved" }))
+    await expect(canvas.getByRole("button", { name: "Unresolved" })).toHaveAttribute("aria-pressed", "true")
     canvasElement.dataset.diffHeaderControlsPlayComplete = "true"
   },
   render: () => (

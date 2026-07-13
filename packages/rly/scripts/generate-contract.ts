@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import { componentManifest } from "../component-manifest.js"
 import { findSourceDrift, renderContract, renderPackageJson } from "./contract.js"
+import { findRegistrySourceFailures } from "./registry/source-validation.js"
 
 class GenerateContractError extends Data.TaggedError("GenerateContractError")<{
   readonly reason: string
@@ -59,6 +60,15 @@ const program = Effect.gen(function*() {
   }
   for (const file of sourceDrift.unexpected) failures.push(`undeclared component source ${file}`)
 
+  const registryFiles = new Map<string, string>()
+  registryFiles.set("component-manifest.ts", yield* fs.readFileString(path.join(packageRoot, "component-manifest.ts")))
+  for (const directory of ["src", "stories", "test", "scripts", "manifest"]) {
+    for (const file of yield* listFiles(fs, path, packageRoot, path.join(packageRoot, directory))) {
+      registryFiles.set(file, yield* fs.readFileString(path.join(packageRoot, file)))
+    }
+  }
+  for (const failure of findRegistrySourceFailures(componentManifest, registryFiles)) failures.push(failure)
+
   for (const [relative, content] of expected) {
     const target = path.join(packageRoot, relative)
     if (mode === "write") {
@@ -80,12 +90,24 @@ const program = Effect.gen(function*() {
   const generatedDirectory = path.join(packageRoot, "generated")
   if (yield* fs.exists(generatedDirectory)) {
     const expectedGenerated = new Set(
-      [...expected.keys()].filter((relative) => relative.startsWith("generated/")).map((relative) =>
-        path.basename(relative)
-      )
+      [...expected.keys()]
+        .filter((relative) => relative.startsWith("generated/"))
+        .map((relative) => path.basename(relative))
     )
     for (const entry of yield* fs.readDirectory(generatedDirectory)) {
       if (!expectedGenerated.has(entry)) failures.push(`unexpected generated/${entry}`)
+    }
+  }
+
+  const registryDirectory = path.join(packageRoot, "registry")
+  if (yield* fs.exists(registryDirectory)) {
+    const expectedRegistry = new Set(
+      [...expected.keys()]
+        .filter((relative) => relative.startsWith("registry/"))
+        .map((relative) => path.basename(relative))
+    )
+    for (const entry of yield* fs.readDirectory(registryDirectory)) {
+      if (!expectedRegistry.has(entry)) failures.push(`unexpected registry/${entry}`)
     }
   }
 

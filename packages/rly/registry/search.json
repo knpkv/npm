@@ -1,0 +1,1266 @@
+{
+  "generatedNotice": "Generated from @knpkv/rly/component-manifest.ts. Do not edit.",
+  "package": "@knpkv/rly",
+  "schemaVersion": 1,
+  "records": [
+    {
+      "capabilities": [
+        "agent",
+        "open"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "AgentContextButton",
+      "states": [
+        "complete",
+        "default"
+      ],
+      "terms": [
+        "agent",
+        "agentcontextbutton",
+        "complete",
+        "open",
+        "pattern"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "overlay"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "AgentDrawer",
+      "states": [
+        "default",
+        "open"
+      ],
+      "terms": [
+        "agent",
+        "agentdrawer",
+        "open",
+        "overlay",
+        "pattern"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "progress"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "AgentJob",
+      "states": [
+        "cancelled",
+        "default",
+        "failed",
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "terms": [
+        "agent",
+        "agentjob",
+        "cancelled",
+        "failed",
+        "pattern",
+        "progress",
+        "queued",
+        "running",
+        "succeeded"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "propose"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "AgentProposal",
+      "states": [
+        "default",
+        "proposed",
+        "superseded"
+      ],
+      "terms": [
+        "agent",
+        "agentproposal",
+        "pattern",
+        "propose",
+        "proposed",
+        "superseded"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "conversation"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "AgentThread",
+      "states": [
+        "active",
+        "default",
+        "error"
+      ],
+      "terms": [
+        "active",
+        "agent",
+        "agentthread",
+        "conversation",
+        "error",
+        "pattern"
+      ]
+    },
+    {
+      "capabilities": [
+        "identify"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Avatar",
+      "states": [
+        "circle",
+        "default",
+        "fallback",
+        "hero",
+        "large",
+        "rounded-square",
+        "small"
+      ],
+      "terms": [
+        "avatar",
+        "circle",
+        "default",
+        "fallback",
+        "hero",
+        "identify",
+        "large",
+        "primitive",
+        "rounded-square",
+        "shape",
+        "size",
+        "small"
+      ]
+    },
+    {
+      "capabilities": [
+        "act"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Button",
+      "states": [
+        "compact",
+        "default",
+        "disabled",
+        "loading",
+        "primary",
+        "principal",
+        "quiet",
+        "secondary"
+      ],
+      "terms": [
+        "act",
+        "button",
+        "compact",
+        "default",
+        "disabled",
+        "loading",
+        "primary",
+        "primitive",
+        "principal",
+        "quiet",
+        "secondary",
+        "size",
+        "variant"
+      ]
+    },
+    {
+      "capabilities": [
+        "group",
+        "people"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "CollaboratorGroup",
+      "states": [
+        "compact",
+        "default",
+        "empty"
+      ],
+      "terms": [
+        "collaboratorgroup",
+        "compact",
+        "default",
+        "empty",
+        "group",
+        "pattern",
+        "people",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "confirm",
+        "overlay"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Dialog",
+      "states": [
+        "default",
+        "nested",
+        "open"
+      ],
+      "terms": [
+        "confirm",
+        "default",
+        "dialog",
+        "nested",
+        "open",
+        "overlay",
+        "primitive",
+        "size",
+        "wide"
+      ]
+    },
+    {
+      "capabilities": [
+        "compare",
+        "review"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffCodeView",
+      "states": [
+        "default",
+        "stacked",
+        "strict"
+      ],
+      "terms": [
+        "buffered",
+        "compare",
+        "diff",
+        "diffcodeview",
+        "mode",
+        "review",
+        "split",
+        "stacked",
+        "strict",
+        "virtualization"
+      ]
+    },
+    {
+      "capabilities": [
+        "filter",
+        "navigate"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffFileTree",
+      "states": [
+        "added",
+        "binary",
+        "default",
+        "deleted",
+        "modified",
+        "renamed",
+        "unavailable"
+      ],
+      "terms": [
+        "added",
+        "binary",
+        "deleted",
+        "diff",
+        "difffiletree",
+        "filter",
+        "modified",
+        "navigate",
+        "renamed",
+        "unavailable"
+      ]
+    },
+    {
+      "capabilities": [
+        "annotate",
+        "review"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffFinding",
+      "states": [
+        "agent",
+        "current",
+        "default",
+        "human",
+        "resolved",
+        "stale"
+      ],
+      "terms": [
+        "agent",
+        "anchor",
+        "annotate",
+        "current",
+        "diff",
+        "difffinding",
+        "human",
+        "resolved",
+        "review",
+        "source",
+        "stale"
+      ]
+    },
+    {
+      "capabilities": [
+        "configure",
+        "filter"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffHeader",
+      "states": [
+        "agent",
+        "all",
+        "default",
+        "split",
+        "stacked",
+        "wrapped"
+      ],
+      "terms": [
+        "agent",
+        "all",
+        "configure",
+        "diff",
+        "diffheader",
+        "filter",
+        "findingFilter",
+        "human",
+        "layout",
+        "split",
+        "stacked",
+        "unresolved",
+        "wrapped"
+      ]
+    },
+    {
+      "capabilities": [
+        "compare",
+        "navigate",
+        "review"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffWorkbench",
+      "states": [
+        "all-files",
+        "default",
+        "selected-file"
+      ],
+      "terms": [
+        "all-files",
+        "compare",
+        "diff",
+        "diffworkbench",
+        "navigate",
+        "review",
+        "scope",
+        "selected-file"
+      ]
+    },
+    {
+      "capabilities": [
+        "render",
+        "virtualize"
+      ],
+      "category": "diff",
+      "importPath": "@knpkv/rly/diff",
+      "name": "DiffWorkerProvider",
+      "states": [
+        "default",
+        "fallback",
+        "worker"
+      ],
+      "terms": [
+        "diff",
+        "diffworkerprovider",
+        "fallback",
+        "render",
+        "virtualize",
+        "worker"
+      ]
+    },
+    {
+      "capabilities": [
+        "separate"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Divider",
+      "states": [
+        "default",
+        "horizontal",
+        "strong",
+        "subtle",
+        "vertical"
+      ],
+      "terms": [
+        "divider",
+        "horizontal",
+        "orientation",
+        "primitive",
+        "separate",
+        "strength",
+        "strong",
+        "subtle",
+        "vertical"
+      ]
+    },
+    {
+      "capabilities": [
+        "compose",
+        "entity"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "EntityShell",
+      "states": [
+        "default",
+        "error",
+        "stale"
+      ],
+      "terms": [
+        "compose",
+        "entity",
+        "entityshell",
+        "error",
+        "pattern",
+        "stale"
+      ]
+    },
+    {
+      "capabilities": [
+        "sort",
+        "table"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "EntityTable",
+      "states": [
+        "default",
+        "empty",
+        "error",
+        "loading",
+        "ready"
+      ],
+      "terms": [
+        "empty",
+        "entitytable",
+        "error",
+        "loading",
+        "pattern",
+        "ready",
+        "sort",
+        "table"
+      ]
+    },
+    {
+      "capabilities": [
+        "evidence"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "EvidenceStamp",
+      "states": [
+        "current",
+        "default",
+        "missing",
+        "stale"
+      ],
+      "terms": [
+        "current",
+        "evidence",
+        "evidencestamp",
+        "missing",
+        "pattern",
+        "stale"
+      ]
+    },
+    {
+      "capabilities": [
+        "input"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Field",
+      "states": [
+        "compact",
+        "default"
+      ],
+      "terms": [
+        "compact",
+        "default",
+        "field",
+        "input",
+        "primitive",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "freshness",
+        "status"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "FreshnessStamp",
+      "states": [
+        "cached",
+        "compact",
+        "current",
+        "default",
+        "missing",
+        "stale",
+        "unavailable"
+      ],
+      "terms": [
+        "cached",
+        "compact",
+        "current",
+        "default",
+        "freshness",
+        "freshnessstamp",
+        "missing",
+        "pattern",
+        "size",
+        "stale",
+        "state",
+        "status",
+        "unavailable"
+      ]
+    },
+    {
+      "capabilities": [
+        "style",
+        "theme"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/foundations",
+      "name": "GlobalStyles",
+      "states": [
+        "default",
+        "scope"
+      ],
+      "terms": [
+        "foundation",
+        "globalstyles",
+        "scope",
+        "style",
+        "theme"
+      ]
+    },
+    {
+      "capabilities": [
+        "confirm",
+        "govern"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "GovernedActionReview",
+      "states": [
+        "complete",
+        "default",
+        "failed",
+        "review"
+      ],
+      "terms": [
+        "complete",
+        "confirm",
+        "failed",
+        "govern",
+        "governedactionreview",
+        "pattern",
+        "review"
+      ]
+    },
+    {
+      "capabilities": [
+        "symbol"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/foundations",
+      "name": "Icon",
+      "states": [
+        "decorative",
+        "default",
+        "large",
+        "small"
+      ],
+      "terms": [
+        "decorative",
+        "default",
+        "foundation",
+        "icon",
+        "large",
+        "size",
+        "small",
+        "symbol"
+      ]
+    },
+    {
+      "capabilities": [
+        "act"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "IconButton",
+      "states": [
+        "compact",
+        "default",
+        "disabled",
+        "loading",
+        "primary",
+        "principal",
+        "quiet",
+        "secondary"
+      ],
+      "terms": [
+        "act",
+        "compact",
+        "default",
+        "disabled",
+        "iconbutton",
+        "loading",
+        "primary",
+        "primitive",
+        "principal",
+        "quiet",
+        "secondary",
+        "size",
+        "variant"
+      ]
+    },
+    {
+      "capabilities": [
+        "navigate"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/foundations",
+      "name": "LinkProvider",
+      "states": [
+        "default",
+        "framework-bridge"
+      ],
+      "terms": [
+        "foundation",
+        "framework-bridge",
+        "linkprovider",
+        "navigate"
+      ]
+    },
+    {
+      "capabilities": [
+        "people"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "PeopleStrip",
+      "states": [
+        "compact",
+        "default",
+        "overflow"
+      ],
+      "terms": [
+        "compact",
+        "default",
+        "overflow",
+        "pattern",
+        "people",
+        "peoplestrip",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "identify",
+        "people"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "Person",
+      "states": [
+        "compact",
+        "default",
+        "fallback"
+      ],
+      "terms": [
+        "compact",
+        "default",
+        "fallback",
+        "identify",
+        "pattern",
+        "people",
+        "person",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "overlay"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/foundations",
+      "name": "PortalProvider",
+      "states": [
+        "custom-target",
+        "default"
+      ],
+      "terms": [
+        "custom-target",
+        "foundation",
+        "overlay",
+        "portalprovider"
+      ]
+    },
+    {
+      "capabilities": [
+        "relationship",
+        "trace"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelationshipChain",
+      "states": [
+        "complete",
+        "default",
+        "inferred",
+        "missing"
+      ],
+      "terms": [
+        "complete",
+        "inferred",
+        "missing",
+        "pattern",
+        "relationship",
+        "relationshipchain",
+        "trace"
+      ]
+    },
+    {
+      "capabilities": [
+        "relationship",
+        "table"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelationshipTable",
+      "states": [
+        "complete",
+        "default",
+        "inferred",
+        "missing"
+      ],
+      "terms": [
+        "complete",
+        "inferred",
+        "missing",
+        "pattern",
+        "relationship",
+        "relationshiptable",
+        "table"
+      ]
+    },
+    {
+      "capabilities": [
+        "inspect",
+        "release"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "ReleasePreview",
+      "states": [
+        "default",
+        "ready"
+      ],
+      "terms": [
+        "inspect",
+        "pattern",
+        "ready",
+        "release",
+        "releasepreview"
+      ]
+    },
+    {
+      "capabilities": [
+        "identify",
+        "release"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "ReleaseRelay",
+      "states": [
+        "compact",
+        "default",
+        "forced-colors",
+        "hero"
+      ],
+      "terms": [
+        "compact",
+        "forced-colors",
+        "hero",
+        "identify",
+        "pattern",
+        "release",
+        "releaserelay",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "navigate",
+        "release"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "ReleaseRow",
+      "states": [
+        "blocked",
+        "building",
+        "default",
+        "deploying",
+        "held",
+        "ready",
+        "shipped"
+      ],
+      "terms": [
+        "blocked",
+        "building",
+        "deploying",
+        "held",
+        "navigate",
+        "pattern",
+        "ready",
+        "release",
+        "releaserow",
+        "shipped"
+      ]
+    },
+    {
+      "capabilities": [
+        "select"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Select",
+      "states": [
+        "compact",
+        "default",
+        "disabled"
+      ],
+      "terms": [
+        "compact",
+        "default",
+        "disabled",
+        "primitive",
+        "select",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "style",
+        "theme"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/tokens",
+      "name": "SemanticTokens",
+      "states": [
+        "default",
+        "overview"
+      ],
+      "terms": [
+        "foundation",
+        "overview",
+        "semantictokens",
+        "style",
+        "theme"
+      ]
+    },
+    {
+      "capabilities": [
+        "identify",
+        "service"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "ServiceMark",
+      "states": [
+        "clockify",
+        "codecommit",
+        "codepipeline",
+        "compact",
+        "confluence",
+        "default",
+        "jira"
+      ],
+      "terms": [
+        "clockify",
+        "codecommit",
+        "codepipeline",
+        "compact",
+        "confluence",
+        "default",
+        "identify",
+        "jira",
+        "pattern",
+        "service",
+        "servicemark",
+        "size"
+      ]
+    },
+    {
+      "capabilities": [
+        "inspect",
+        "overlay"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Sheet",
+      "states": [
+        "default",
+        "end",
+        "open",
+        "start"
+      ],
+      "terms": [
+        "end",
+        "inspect",
+        "open",
+        "overlay",
+        "primitive",
+        "sheet",
+        "side",
+        "start"
+      ]
+    },
+    {
+      "capabilities": [
+        "loading"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Skeleton",
+      "states": [
+        "block",
+        "circle",
+        "default",
+        "text"
+      ],
+      "terms": [
+        "block",
+        "circle",
+        "loading",
+        "primitive",
+        "skeleton",
+        "text",
+        "variant"
+      ]
+    },
+    {
+      "capabilities": [
+        "delivery",
+        "progress"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "StageRail",
+      "states": [
+        "blocked",
+        "compact",
+        "complete",
+        "current",
+        "default"
+      ],
+      "terms": [
+        "blocked",
+        "compact",
+        "complete",
+        "current",
+        "default",
+        "delivery",
+        "pattern",
+        "progress",
+        "size",
+        "stagerail"
+      ]
+    },
+    {
+      "capabilities": [
+        "status"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "StateLabel",
+      "states": [
+        "caution",
+        "compact",
+        "critical",
+        "default",
+        "neutral",
+        "positive",
+        "progress"
+      ],
+      "terms": [
+        "caution",
+        "compact",
+        "critical",
+        "default",
+        "neutral",
+        "positive",
+        "primitive",
+        "progress",
+        "size",
+        "statelabel",
+        "status",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
+        "recover",
+        "status"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "StatePanel",
+      "states": [
+        "caution",
+        "critical",
+        "default",
+        "neutral",
+        "positive",
+        "progress"
+      ],
+      "terms": [
+        "caution",
+        "critical",
+        "neutral",
+        "positive",
+        "primitive",
+        "progress",
+        "recover",
+        "statepanel",
+        "status",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
+        "group"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Surface",
+      "states": [
+        "card",
+        "compact",
+        "default",
+        "grouped",
+        "none",
+        "primary",
+        "secondary",
+        "spacious",
+        "tertiary"
+      ],
+      "terms": [
+        "card",
+        "compact",
+        "default",
+        "group",
+        "grouped",
+        "none",
+        "padding",
+        "primary",
+        "primitive",
+        "secondary",
+        "shape",
+        "spacious",
+        "surface",
+        "tertiary",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
+        "navigate",
+        "select"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Tabs",
+      "states": [
+        "default",
+        "disabled",
+        "large",
+        "selected"
+      ],
+      "terms": [
+        "default",
+        "disabled",
+        "large",
+        "navigate",
+        "primitive",
+        "select",
+        "selected",
+        "size",
+        "tabs"
+      ]
+    },
+    {
+      "capabilities": [
+        "typography"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Text",
+      "states": [
+        "body",
+        "body-large",
+        "card-title",
+        "code",
+        "default",
+        "inherit",
+        "label",
+        "meta",
+        "page-title",
+        "primary",
+        "secondary",
+        "section-title",
+        "tertiary",
+        "verdict"
+      ],
+      "terms": [
+        "body",
+        "body-large",
+        "card-title",
+        "code",
+        "inherit",
+        "label",
+        "meta",
+        "page-title",
+        "primary",
+        "primitive",
+        "secondary",
+        "section-title",
+        "tertiary",
+        "text",
+        "tone",
+        "typography",
+        "variant",
+        "verdict"
+      ]
+    },
+    {
+      "capabilities": [
+        "theme"
+      ],
+      "category": "foundation",
+      "importPath": "@knpkv/rly/foundations",
+      "name": "ThemeProvider",
+      "states": [
+        "dark",
+        "default",
+        "light",
+        "system"
+      ],
+      "terms": [
+        "dark",
+        "foundation",
+        "light",
+        "system",
+        "theme",
+        "themeprovider"
+      ]
+    },
+    {
+      "capabilities": [
+        "audit",
+        "timeline"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "TimelineRow",
+      "states": [
+        "agent",
+        "default",
+        "human",
+        "service",
+        "system"
+      ],
+      "terms": [
+        "agent",
+        "audit",
+        "human",
+        "pattern",
+        "service",
+        "system",
+        "timeline",
+        "timelinerow"
+      ]
+    },
+    {
+      "capabilities": [
+        "release",
+        "status"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "Verdict",
+      "states": [
+        "caution",
+        "critical",
+        "default",
+        "neutral",
+        "positive",
+        "progress"
+      ],
+      "terms": [
+        "caution",
+        "critical",
+        "neutral",
+        "pattern",
+        "positive",
+        "progress",
+        "release",
+        "status",
+        "tone",
+        "verdict"
+      ]
+    },
+    {
+      "capabilities": [
+        "relationship",
+        "release"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "WorksetCard",
+      "states": [
+        "complete",
+        "default",
+        "error"
+      ],
+      "terms": [
+        "complete",
+        "error",
+        "pattern",
+        "relationship",
+        "release",
+        "worksetcard"
+      ]
+    }
+  ]
+}

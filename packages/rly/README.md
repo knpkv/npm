@@ -6,9 +6,11 @@ The package is intentionally application-independent: it contains no vendor clie
 
 ## Status
 
-The package contract is established at `0.0.0` while its first `0.1.0`
-component surface is built. Tokens, framework-neutral foundations, and the
-first controlled interaction primitives are available behind explicit exports.
+The first `0.1.0` surface is complete behind the package's `0.0.0`
+development version. Tokens, foundations, primitives, delivery patterns,
+contextual-agent patterns, and the isolated diff workbench are available
+through explicit, generated exports. The package remains presentation-only;
+application and provider integrations live outside rly.
 
 ## Tokens and global styles
 
@@ -353,6 +355,28 @@ it never replaces the diff with partial raw text. Applications still own
 pagination, content fetching, immutable revision identity, URL state, and all
 review or approval commands.
 
+## Agent registry and scaffolding
+
+Rly publishes four static registry artifacts for component discovery and
+planning: `components.json`, its strict `schema.json`, a compact `search.json`,
+and `USAGE.md`. Import them through the explicit
+`@knpkv/rly/registry/*` package exports. They contain metadata only—never
+component implementations, callbacks, actions, or a JSON-to-React runtime.
+
+Validate the generated registry and scaffold a complete maintainer-owned
+component slice with:
+
+```bash
+pnpm --filter @knpkv/rly validate:registry
+pnpm --filter @knpkv/rly scaffold -- primitive SignalCard "Present one explicit delivery signal state"
+```
+
+The scaffolder validates every target before writing, then creates the source,
+focused CSS, all-state Storybook story, DOM/accessibility test, manifest entry,
+registry metadata, generated exports, and public index together. Applications
+continue to compile typed React presenters and keep all service and agent
+execution outside rly.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to
@@ -366,6 +390,10 @@ pnpm --filter @knpkv/rly storybook:build
 
 `storybook:build` also validates that the static catalog contains both the
 interactive story and its generated documentation route.
+
+The workspace docs build publishes the same static catalog at
+`/rly/catalog/`, beside the indexed install, export, token, theme, registry,
+and usage documentation.
 
 Browser checks are deliberately serialized to one Chromium worker. Install the
 managed browser once, then run the complete catalog gate:

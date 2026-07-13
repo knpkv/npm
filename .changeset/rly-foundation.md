@@ -65,3 +65,10 @@ bird's-eye workbench. Pin and wrap `@pierre/diffs` `CodeView` with split and
 stacked layouts, wrapping, context, selection, annotations, item versioning,
 scrolling, virtualization, bounded workers, and an announced synchronous
 fallback that never silently omits source changes.
+
+Publish a fail-closed, schema-validated agent registry with deterministic
+component, variant, state, accessibility, search, and source metadata. Add
+maintainer scaffolding and package-boundary validation, ship every registry
+artifact through explicit exports, and document the complete design system in
+the indexed workspace docs site with its static Storybook catalog composed at
+a stable nested route.

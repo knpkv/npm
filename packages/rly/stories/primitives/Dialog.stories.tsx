@@ -54,7 +54,7 @@ const NestedOverlayStack = (): ReactElement => {
     <PortalProvider>
       <main data-nested-overlay-background="" style={pageStyle}>
         <Dialog.Root defaultOpen>
-          <Dialog.Content title="Outer release decision">
+          <Dialog.Content size="wide" title="Outer release decision">
             <div style={stackStyle}>
               <Text>The outer decision remains suspended while deeper context is open.</Text>
               <Dialog.Close>Close outer dialog</Dialog.Close>

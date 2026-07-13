@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type ReactElement, useRef, useState } from "react"
-import { expect, userEvent } from "storybook/test"
+import { expect, userEvent, waitFor } from "storybook/test"
 import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
+import { DiffWorkerProvider, useDiffWorkerState } from "../../src/diff/worker-pool.js"
 import type { RlyDiffCodeItem, RlyDiffCodeViewHandle } from "../../src/diff/types.js"
 import { Button } from "../../src/primitives/Button.js"
 import { Text } from "../../src/primitives/Text.js"
@@ -102,6 +103,19 @@ const DiffHarness = (): ReactElement => {
   )
 }
 
+const WorkerState = ({ label }: { readonly label: string }): ReactElement => {
+  const state = useDiffWorkerState()
+  return (
+    <p>
+      {label}: {state.status}
+    </p>
+  )
+}
+
+const unavailableWorker = (): Worker => {
+  throw new Error("Worker unavailable in this controlled catalog state")
+}
+
 const meta = {
   component: DiffCodeView,
   tags: ["autodocs"],
@@ -144,6 +158,25 @@ export const StackedWrapped: Story = {
       <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "320px" }}>
         <DiffCodeView {...args} />
       </div>
+    </main>
+  )
+}
+
+export const WorkerStates: Story = {
+  args: { initialItems: [releaseItem] },
+  play: async ({ canvas, canvasElement }) => {
+    await waitFor(() => expect(canvas.getByText("Accelerated: worker")).toBeVisible())
+    await waitFor(() => expect(canvas.getByText("Synchronous: fallback")).toBeVisible())
+    canvasElement.dataset.diffWorkerStatesPlayComplete = "true"
+  },
+  render: () => (
+    <main style={pageStyle}>
+      <DiffWorkerProvider>
+        <WorkerState label="Accelerated" />
+      </DiffWorkerProvider>
+      <DiffWorkerProvider workerFactory={unavailableWorker}>
+        <WorkerState label="Synchronous" />
+      </DiffWorkerProvider>
     </main>
   )
 }

@@ -1,5 +1,29 @@
 [
   {
+    "id": "registry-components",
+    "output": "registry/components.json",
+    "source": "registry/components.json",
+    "subpath": "./registry/components.json"
+  },
+  {
+    "id": "registry-schema",
+    "output": "registry/schema.json",
+    "source": "registry/schema.json",
+    "subpath": "./registry/schema.json"
+  },
+  {
+    "id": "registry-search",
+    "output": "registry/search.json",
+    "source": "registry/search.json",
+    "subpath": "./registry/search.json"
+  },
+  {
+    "id": "registry-usage",
+    "output": "registry/USAGE.md",
+    "source": "registry/USAGE.md",
+    "subpath": "./registry/USAGE.md"
+  },
+  {
     "id": "styles",
     "output": "dist/styles.css",
     "source": "src/styles/styles.css",

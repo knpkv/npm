@@ -37,6 +37,10 @@
       "types": "./dist/dts/tokens/index.d.ts",
       "import": "./dist/tokens/index.js"
     },
+    "./registry/components.json": "./registry/components.json",
+    "./registry/schema.json": "./registry/schema.json",
+    "./registry/search.json": "./registry/search.json",
+    "./registry/USAGE.md": "./registry/USAGE.md",
     "./styles.css": "./dist/styles.css"
   },
   "publishConfig": {
@@ -44,6 +48,7 @@
   },
   "files": [
     "dist",
+    "registry",
     "README.md"
   ],
   "sideEffects": [
@@ -51,14 +56,15 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "pnpm codegen:check && rimraf dist && vite build && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
-    "check": "pnpm codegen:check && pnpm lint:colors && tsc -b tsconfig.json",
+    "build": "pnpm codegen:check && pnpm validate:registry && rimraf dist && vite build && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
+    "check": "pnpm codegen:check && pnpm validate:registry && pnpm lint:colors && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
     "codegen": "tsx scripts/generate-contract.ts write",
     "codegen:check": "tsx scripts/generate-contract.ts check",
-    "lint": "eslint \"{src,test,scripts,generated,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
+    "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
     "lint:colors": "tsx scripts/tokens/lint-colors.ts",
     "prepack": "pnpm build",
+    "scaffold": "tsx scripts/scaffold-component.ts",
     "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --no-version-updates",
     "storybook:build": "storybook build --output-dir storybook-static --disable-telemetry && pnpm validate:storybook",
     "storybook:serve": "vite preview --outDir storybook-static --host 127.0.0.1 --port 6006 --strictPort",
@@ -68,6 +74,7 @@
     "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook",
     "test:visual": "pnpm storybook:build && playwright test --config playwright.config.ts",
     "validate:dist": "tsx scripts/validate-dist.ts",
+    "validate:registry": "tsx scripts/validate-registry.ts",
     "validate:storybook": "tsx scripts/validate-storybook.ts",
     "visual:classify": "tsx scripts/visual/classify-git-changes.ts"
   },
@@ -88,6 +95,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
+    "ajv": "8.20.0",
     "effect": "4.0.0-beta.97",
     "happy-dom": "20.8.9",
     "playwright": "1.61.1",

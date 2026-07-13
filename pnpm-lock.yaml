@@ -670,6 +670,9 @@ importers:
       '@vitest/browser-playwright':
         specifier: 4.1.10
         version: 4.1.10(playwright@1.61.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.0)(yaml@2.8.3))(vitest@4.1.10)
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
       effect:
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97

@@ -6,20 +6,23 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import { componentManifest } from "../component-manifest.js"
 
 class StorybookValidationError extends Data.TaggedError("StorybookValidationError")<{
   readonly reason: string
 }> {}
 
-const StorybookIndex = Schema.fromJsonString(Schema.Struct({
-  entries: Schema.Record(
-    Schema.String,
-    Schema.Struct({
-      id: Schema.String,
-      type: Schema.Literals(["story", "docs"])
-    })
-  )
-}))
+const StorybookIndex = Schema.fromJsonString(
+  Schema.Struct({
+    entries: Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        id: Schema.String,
+        type: Schema.Literals(["story", "docs"])
+      })
+    )
+  })
+)
 
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -49,6 +52,12 @@ const program = Effect.gen(function*() {
     const entry = index.entries[id]
     if (entry === undefined || entry.id !== id || entry.type !== type) {
       failures.push(`missing ${type} entry ${id}`)
+    }
+  }
+  for (const component of componentManifest.components.filter(({ registry }) => registry)) {
+    const entry = index.entries[component.visual.storyId]
+    if (entry === undefined || entry.id !== component.visual.storyId || entry.type !== "story") {
+      failures.push(`missing registry story entry ${component.visual.storyId}`)
     }
   }
   if (failures.length > 0) {

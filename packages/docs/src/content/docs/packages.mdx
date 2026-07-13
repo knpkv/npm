@@ -59,11 +59,12 @@ Effect.runPromise(
 
 ## Shared Libraries
 
-| Package                   | Purpose                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token/profile storage, profile-manager CLI, AST nodes, and Markdown serialization. |
-| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services.               |
-| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                                             |
+| Package                   | Purpose                                                                                                                               | Docs         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `@knpkv/rly`              | Release-oriented React presentation system for human and agent collaboration.                                                         | [rly](/rly/) |
+| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token/profile storage, profile-manager CLI, AST nodes, and Markdown serialization. | —            |
+| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services.               | —            |
+| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                                             | —            |
 
 ## Local State By Package
 
@@ -80,6 +81,7 @@ Effect.runPromise(
 | Surface                           | Audience               | Role                                                 |
 | --------------------------------- | ---------------------- | ---------------------------------------------------- |
 | `packages/docs`                   | Users and agents       | Canonical CLI-first documentation site.              |
+| [rly catalog](/rly/catalog/)      | Designers and builders | Interactive components, states, and accessibility.   |
 | Package READMEs                   | npm users              | Package-level quick start and API overview.          |
 | `docs/command-surface.md`         | Maintainers            | Design history for the resource-first command model. |
 | `packages/**/effect-explainer.md` | Maintainers and agents | Architecture notes for Effect-heavy modules.         |

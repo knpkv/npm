@@ -3,4 +3,5 @@
 pnpm-lock.yaml
 packages/rly/src/styles/generated-tokens.css
 packages/rly/generated/
+packages/rly/registry/
 repos/

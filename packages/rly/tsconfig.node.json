@@ -12,6 +12,7 @@
     ".storybook/**/*",
     "component-manifest.ts",
     "generated",
+    "manifest",
     "playwright.config.ts",
     "scripts",
     "src",

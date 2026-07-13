@@ -23,5 +23,9 @@
     "types": "./dist/dts/tokens/index.d.ts",
     "import": "./dist/tokens/index.js"
   },
+  "./registry/components.json": "./registry/components.json",
+  "./registry/schema.json": "./registry/schema.json",
+  "./registry/search.json": "./registry/search.json",
+  "./registry/USAGE.md": "./registry/USAGE.md",
   "./styles.css": "./dist/styles.css"
 }

@@ -243,7 +243,7 @@
           "packages/rly/test/diff/worker-pool.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench"
+      "storyId": "diff-diffcodeview--worker-states"
     },
     {
       "name": "Divider",
