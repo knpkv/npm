@@ -74,6 +74,7 @@ const keepScrollableCodeKeyboardAccessible = (node: HTMLElement, phase: "mount" 
   }
 }
 
+/** Render and incrementally update complete text changes through rly's isolated renderer adapter. */
 export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>(function DiffCodeView(
   {
     annotations = [],
@@ -103,7 +104,9 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
   annotationsRef.current = annotations
   const [sourceItems] = useState(() => new Map(initialItems.map((item) => [item.id, item])))
   const [versions] = useState(() => new Map(initialItems.map((item) => [item.id, item.version ?? 0])))
-  const [seedItems] = useState(() => initialItems.map((item) => toRendererItem(item, annotations, item.version ?? 0)))
+  const rendererItems = [...sourceItems.values()].map((item) =>
+    toRendererItem(item, annotations, versions.get(item.id) ?? item.version ?? 0)
+  )
 
   useEffect(() => {
     for (const item of sourceItems.values()) {
@@ -160,7 +163,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
         ref={rendererRef}
         className={cssClass(styles, "viewer")}
         disableWorkerPool={workerState.status !== "worker"}
-        initialItems={seedItems}
+        initialItems={rendererItems}
         {...(onSelectedLinesChange === undefined ? {} : { onSelectedLinesChange })}
         options={{
           collapsedContextThreshold: contextLines,

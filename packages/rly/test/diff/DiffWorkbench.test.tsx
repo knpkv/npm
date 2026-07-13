@@ -33,6 +33,7 @@ describe("DiffWorkbench", () => {
       "Virtualized code viewer"
     )
     expect(workbench?.querySelector("aside[aria-label='Semantic findings'] ol")?.children).toHaveLength(2)
+    expect(workbench?.querySelector("ol[aria-label='Semantic findings list']")?.getAttribute("tabindex")).toBe("0")
     expect(workbench?.textContent).toContain("Human review finding")
     expect(workbench?.textContent).toContain("Agent review finding")
   })

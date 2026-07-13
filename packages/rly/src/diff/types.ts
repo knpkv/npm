@@ -1,11 +1,13 @@
 import type { ReactNode } from "react"
 
+/** One complete text revision supplied to the diff renderer. */
 export interface RlyDiffTextFile {
   readonly cacheKey?: string
   readonly contents: string
   readonly name: string
 }
 
+/** One stable before/after item managed by a DiffCodeView instance. */
 export interface RlyDiffCodeItem {
   readonly after: RlyDiffTextFile
   readonly before: RlyDiffTextFile
@@ -14,6 +16,7 @@ export interface RlyDiffCodeItem {
   readonly version?: number
 }
 
+/** One semantic annotation anchored to a rendered diff line. */
 export interface RlyDiffCodeAnnotation {
   readonly id: string
   readonly itemId: string
@@ -22,6 +25,7 @@ export interface RlyDiffCodeAnnotation {
   readonly side: "additions" | "deletions"
 }
 
+/** The caller-controlled selected line range for one diff item. */
 export interface RlyDiffCodeSelection {
   readonly id: string
   readonly range: {
@@ -32,6 +36,7 @@ export interface RlyDiffCodeSelection {
   }
 }
 
+/** An imperative item or line destination within the complete renderer. */
 export type RlyDiffCodeScrollTarget =
   | {
     readonly align?: "center" | "end" | "nearest" | "start"
@@ -50,12 +55,14 @@ export type RlyDiffCodeScrollTarget =
     readonly type: "line"
   }
 
+/** Stable imperative operations exposed by DiffCodeView. */
 export interface RlyDiffCodeViewHandle {
   addItems(items: ReadonlyArray<RlyDiffCodeItem>): void
   scrollTo(target: RlyDiffCodeScrollTarget): void
   updateItem(item: RlyDiffCodeItem): boolean
 }
 
+/** Controlled presentation options for the pinned diff renderer adapter. */
 export interface RlyDiffCodeViewProps {
   readonly annotations?: ReadonlyArray<RlyDiffCodeAnnotation>
   readonly className?: string

@@ -1,5 +1,6 @@
 import { registerCustomCSSVariableTheme } from "@pierre/diffs"
 
+/** Stable custom theme identifiers registered for the isolated diff renderer. */
 export const RLY_DIFF_THEMES: { readonly dark: "rly-dark"; readonly light: "rly-light" } = {
   dark: "rly-dark",
   light: "rly-light"

@@ -104,6 +104,8 @@ describe("diff worker boundary", () => {
     if (emitStats === undefined) throw new Error("Worker stat subscription was not installed")
     await act(async () => emitStats?.({ workersFailed: true }))
     expect(host.querySelector("[data-worker-state='fallback']")).not.toBeNull()
+    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
+    expect(terminatePool).toHaveBeenCalledOnce()
     await act(async () => root.unmount())
     expect(unsubscribeFromStats).toHaveBeenCalledOnce()
     expect(terminatePool).toHaveBeenCalledOnce()

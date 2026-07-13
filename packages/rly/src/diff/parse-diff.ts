@@ -15,6 +15,7 @@ export const validateDiffCodeItem = (item: RlyDiffCodeItem): void => {
   }
 }
 
+/** Parse one validated rly before/after item into the pinned renderer's metadata shape. */
 export const parseDiffFilePair = (item: RlyDiffCodeItem): FileDiffMetadata => {
   validateDiffCodeItem(item)
   return parseDiffFromFile(

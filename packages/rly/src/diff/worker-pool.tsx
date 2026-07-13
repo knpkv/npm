@@ -17,12 +17,18 @@ interface RlyDiffWorkerState {
   readonly status: RlyDiffWorkerStatus
 }
 
+interface WorkerSubscription {
+  unsubscribe?: () => void
+}
+
+/** Props for the bounded, fail-open diff syntax-highlighting worker provider. */
 export interface DiffWorkerProviderProps {
   readonly children: ReactNode
   readonly poolSize?: number
   readonly workerFactory?: () => Worker
 }
 
+/** Options for creating package-relative module workers without exposing vendor types. */
 export interface CreateDiffWorkerFactoryOptions {
   readonly name?: string
   readonly workerUrl?: string | URL
@@ -30,6 +36,7 @@ export interface CreateDiffWorkerFactoryOptions {
 
 const DiffWorkerStateContext = createContext<RlyDiffWorkerState>({ status: "main-thread" })
 
+/** Validate and normalize the supported one-to-four worker pool size. */
 export const normalizeDiffWorkerPoolSize = (poolSize = 2): number => {
   if (!Number.isInteger(poolSize) || poolSize < 1 || poolSize > 4) {
     throw new RangeError("Diff worker pool size must be an integer from 1 through 4")
@@ -37,6 +44,7 @@ export const normalizeDiffWorkerPoolSize = (poolSize = 2): number => {
   return poolSize
 }
 
+/** Create a browser-only module-worker factory for the packaged diff worker. */
 export const createDiffWorkerFactory = ({
   name = "rly-diff-highlighter",
   workerUrl = defaultWorkerUrl
@@ -70,6 +78,7 @@ const initializeWorkerState = (workerFactory: () => Worker, poolSize: number): R
   }
 }
 
+/** Provide bounded worker acceleration with immediate synchronous failover and cleanup. */
 export const DiffWorkerProvider = ({
   children,
   poolSize: requestedPoolSize,
@@ -81,15 +90,28 @@ export const DiffWorkerProvider = ({
     let active = true
     const nextState = initializeWorkerState(workerFactory, normalizeDiffWorkerPoolSize(requestedPoolSize))
     const manager = nextState.manager
-    const unsubscribe = manager?.subscribeToStatChanges((stats) => {
-      if (active && stats.workersFailed) setState({ manager, status: "fallback" })
-    })
+    let cleaned = false
+    const subscription: WorkerSubscription = {}
+    const cleanWorkerManager = (): void => {
+      if (cleaned) return
+      cleaned = true
+      subscription.unsubscribe?.()
+      manager?.terminate()
+    }
+    if (manager !== undefined) {
+      subscription.unsubscribe = manager.subscribeToStatChanges((stats) => {
+        if (active && stats.workersFailed) {
+          cleanWorkerManager()
+          setState({ status: "fallback" })
+        }
+      })
+      if (cleaned) subscription.unsubscribe()
+    }
     setState(nextState)
 
     return () => {
       active = false
-      unsubscribe?.()
-      manager?.terminate()
+      cleanWorkerManager()
     }
   }, [requestedPoolSize, workerFactory])
 

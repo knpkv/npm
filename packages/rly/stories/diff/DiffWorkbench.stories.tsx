@@ -295,3 +295,57 @@ export const CompactForcedColors: Story = {
     </main>
   )
 }
+
+const staleFindings = Array.from({ length: 12 }, (_, index): RlyDiffFinding => ({
+  anchor: {
+    contextHash: `ctx-stale-${index}`,
+    currentRevision: "8fa21c7",
+    fileId: "audit",
+    line: index + 1,
+    path: "src/audit/payment-evidence.ts",
+    reason: "A newer revision replaced this immutable review anchor.",
+    revision: "55c102a",
+    side: "before",
+    state: "stale"
+  },
+  authorName: index % 2 === 0 ? "Relay reviewer" : "Mina Chen",
+  body: `Preserved review evidence ${index + 1} remains readable after the source revision changed.`,
+  id: `stale-${index}`,
+  severity: index % 3 === 0 ? "warning" : "note",
+  source: index % 2 === 0 ? "agent" : "human",
+  status: "open",
+  title: `Historical finding ${index + 1}`
+}))
+
+export const StaticFindingsOverflow: Story = {
+  args: {
+    findings: [],
+    header: null,
+    inventory: null,
+    label: "Static findings keyboard review",
+    scope: { label: "All 6 changed files", mode: "all-files" },
+    viewer: null
+  },
+  play: async ({ canvas }) => {
+    const list = canvas.getByRole("list", { name: "Historical findings list" })
+    list.focus()
+    await expect(list).toHaveFocus()
+    await userEvent.keyboard("{PageDown}")
+  },
+  render: () => (
+    <main style={pageStyle}>
+      <DiffWorkbench
+        findings={staleFindings.map((finding) => ({
+          content: <DiffFinding finding={finding} onAnchorActivate={() => undefined} />,
+          id: finding.id
+        }))}
+        findingsLabel="Historical findings"
+        header={<header>PR-184 · preserved review evidence</header>}
+        inventory={<nav>Six changed files</nav>}
+        label="Static findings keyboard review"
+        scope={{ label: "All 6 changed files", mode: "all-files" }}
+        viewer={<div>Complete source changes</div>}
+      />
+    </main>
+  )
+}

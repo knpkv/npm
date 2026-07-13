@@ -120,7 +120,7 @@ export const DiffWorkbench = ({
           {findings.length === 0 ? (
             <div className={style("empty")}>{emptyFindings}</div>
           ) : (
-            <ol className={style("findingList")}>
+            <ol aria-label={`${visibleFindingsLabel} list`} className={style("findingList")} tabIndex={0}>
               {findings.map((finding) => (
                 <li className={style("findingItem")} key={finding.id}>
                   {finding.content}
