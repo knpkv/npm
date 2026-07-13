@@ -5,5 +5,8 @@
   "compilerOptions": {
     "stripInternal": true
   },
-  "references": [{ "path": "./packages/rly/tsconfig.build.json" }]
+  "references": [
+    { "path": "./packages/rly/tsconfig.build.json" },
+    { "path": "./packages/control-center/tsconfig.build.json" }
+  ]
 }

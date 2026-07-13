@@ -18,7 +18,7 @@
     "check:tsgo": "pnpm --recursive --filter \"./packages/**/*\" --filter \"!@knpkv/agent-skills\" exec tsgo -b tsconfig.json",
     "lint": "pnpm lint:config && pnpm lint:eslint && pnpm lint:ast && pnpm lint:rly-colors",
     "lint:config": "node scripts/check-eslint-config.mjs",
-    "lint:eslint": "eslint --no-error-on-unmatched-pattern \"**/{src,test,examples,dtslint}/**/*.{ts,tsx,mjs}\" \"**/scripts/**/*.{ts,tsx}\"",
+    "lint:eslint": "eslint --no-error-on-unmatched-pattern \"**/{src,test,e2e,examples,dtslint}/**/*.{ts,tsx,mjs}\" \"**/scripts/**/*.{ts,tsx}\" \"packages/control-center/{vite,vitest,playwright}.config.ts\"",
     "lint:rly-colors": "pnpm --filter @knpkv/rly lint:colors",
     "lint:ast": "ast-grep scan --globs '!**/generated/**'",
     "lint:fix": "pnpm lint:eslint --fix && pnpm lint:ast --update-all",
