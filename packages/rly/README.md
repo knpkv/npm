@@ -152,6 +152,39 @@ disclosure instead of an anonymous avatar stack. `CollaboratorGroup` exposes
 author, owner, reviewer, operator, and approver lanes without inferring roles
 from position.
 
+## Release identity and verdicts
+
+`ReleaseRelay` presents the release identity projection already derived and
+persisted by the application. It accepts an opaque algorithm label, codename,
+and exactly three distinct indices into rly's semantic-versioned 16-symbol SVG
+catalog. It never receives a canonical release ID and performs no hashing,
+modulo selection, codename generation, or migration.
+
+```tsx
+import { ReleaseRelay, Verdict } from "@knpkv/rly/patterns"
+
+export const ReleaseDecision = () => (
+  <>
+    <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" size="hero" symbolIndices={[6, 3, 7]} />
+    <Verdict
+      reason="Every required check and approval matches the current release head."
+      tone="positive"
+      verdict="Ready to ship."
+    />
+  </>
+)
+```
+
+The symbol order is persisted identity: indices `0..15` map to orbit, split,
+brace, wave, gate, fork, bridge, beacon, loop, pulse, anchor, ladder, knot,
+spark, stack, and compass. Reordering or replacing that map is a breaking
+identity change rather than a cosmetic icon update.
+
+`Verdict` stays deliberately large and neutral. The caller supplies its exact
+wording, reason, and semantic tone; tone affects only the redundant icon,
+4px rail, and restrained reason context. Rly does not infer readiness from any
+of those values.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

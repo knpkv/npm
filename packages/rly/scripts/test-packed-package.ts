@@ -144,7 +144,9 @@ import {
   FreshnessStamp,
   PeopleStrip,
   Person,
-  ServiceMark
+  ReleaseRelay,
+  ServiceMark,
+  Verdict
 } from "@knpkv/rly/patterns"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -190,6 +192,8 @@ const markup = renderToStaticMarkup(
       onCategoryExpandedChange={() => undefined}
       owners={[{ id: "blake", name: "Blake Kim", role: "Release owner" }]}
     />
+    <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" symbolIndices={[6, 3, 7]} />
+    <Verdict reason="Every required check matches the current head." tone="positive" verdict="Ready to ship." />
     <Tabs
       aria-label="Packed sections"
       items={[{ content: createElement("span", null, "Packed panel"), label: "Summary", value: "summary" }]}
@@ -205,6 +209,10 @@ if (
   || !markup.includes("Avery Diaz")
   || !markup.includes("Casey Singh")
   || !markup.includes("Packed collaborators")
+  || !markup.includes("Release relay, Copper Orbit, symbols bridge, wave, beacon.")
+  || !markup.includes("Identity algorithm: relay/v1")
+  || !markup.includes("Ready to ship.")
+  || !markup.includes("Every required check matches the current head.")
 ) {
   throw new Error("Pattern SSR contract failed")
 }

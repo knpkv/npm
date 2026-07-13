@@ -687,6 +687,31 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "ReleaseRelay" },
+      { kind: "value", name: "RLY_RELEASE_RELAY_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_RELEASE_RELAY_SYMBOLS" },
+      { kind: "value", name: "RLY_RELEASE_RELAY_VARIANTS" },
+      { kind: "type", name: "ReleaseRelayProps" },
+      { kind: "type", name: "RlyReleaseRelaySize" },
+      { kind: "type", name: "RlyReleaseRelaySymbolIndex" },
+      { kind: "type", name: "RlyReleaseRelaySymbolIndices" },
+      { kind: "type", name: "RlyReleaseRelaySymbolName" }
+    ],
+    name: "ReleaseRelay",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/ReleaseRelay.tsx",
+    status: "stable",
+    styles: ["src/patterns/ReleaseRelay.module.css"],
+    variants: [{ defaultValue: "compact", name: "size", values: ["compact", "hero"] }],
+    visual: {
+      story: "stories/patterns/ReleaseRelay.stories.tsx",
+      storyId: "patterns-releaserelay--catalog",
+      tests: ["test/patterns/ReleaseRelay.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "RLY_SERVICE_MARK_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_SERVICE_MARK_VARIANTS" },
       { kind: "value", name: "ServiceMark" },
@@ -711,6 +736,26 @@ export const componentManifest = {
       story: "stories/patterns/ServiceMark.stories.tsx",
       storyId: "patterns-servicemark--gallery",
       tests: ["test/patterns/ServiceMark.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "RLY_VERDICT_VARIANTS" },
+      { kind: "value", name: "Verdict" },
+      { kind: "type", name: "RlyVerdictTone" },
+      { kind: "type", name: "VerdictProps" }
+    ],
+    name: "Verdict",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/Verdict.tsx",
+    status: "stable",
+    styles: ["src/patterns/Verdict.module.css"],
+    variants: [{ name: "tone", values: ["caution", "critical", "neutral", "positive", "progress"] }],
+    visual: {
+      story: "stories/patterns/Verdict.stories.tsx",
+      storyId: "patterns-verdict--states",
+      tests: ["test/patterns/Verdict.test.tsx"]
     }
   }]
 } satisfies ComponentManifest

@@ -204,6 +204,20 @@
       "storyId": "foundations-portalprovider--custom-target"
     },
     {
+      "name": "ReleaseRelay",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleaseRelay.tsx",
+        "story": "packages/rly/stories/patterns/ReleaseRelay.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleaseRelay.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleaseRelay.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releaserelay--catalog"
+    },
+    {
       "name": "Select",
       "paths": {
         "source": "packages/rly/src/primitives/Select.tsx",
@@ -352,6 +366,20 @@
         ]
       },
       "storyId": "foundations-themeprovider--controlled"
+    },
+    {
+      "name": "Verdict",
+      "paths": {
+        "source": "packages/rly/src/patterns/Verdict.tsx",
+        "story": "packages/rly/stories/patterns/Verdict.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Verdict.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Verdict.test.tsx"
+        ]
+      },
+      "storyId": "patterns-verdict--states"
     }
   ]
 }

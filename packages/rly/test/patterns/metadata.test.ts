@@ -3,7 +3,9 @@ import { RLY_COLLABORATOR_GROUP_VARIANTS } from "../../src/patterns/Collaborator
 import { RLY_FRESHNESS_STAMP_VARIANTS } from "../../src/patterns/FreshnessStamp.js"
 import { RLY_PEOPLE_STRIP_VARIANTS } from "../../src/patterns/PeopleStrip.js"
 import { RLY_PERSON_VARIANTS } from "../../src/patterns/Person.js"
+import { RLY_RELEASE_RELAY_VARIANTS } from "../../src/patterns/ReleaseRelay.js"
 import { RLY_SERVICE_MARK_VARIANTS } from "../../src/patterns/ServiceMark.js"
+import { RLY_VERDICT_VARIANTS } from "../../src/patterns/Verdict.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
   RLY_MOTION_TOKEN_NAMES,
@@ -33,7 +35,9 @@ const catalogs: ReadonlyArray<VariantCatalog> = [
   RLY_FRESHNESS_STAMP_VARIANTS,
   RLY_PEOPLE_STRIP_VARIANTS,
   RLY_PERSON_VARIANTS,
-  RLY_SERVICE_MARK_VARIANTS
+  RLY_RELEASE_RELAY_VARIANTS,
+  RLY_SERVICE_MARK_VARIANTS,
+  RLY_VERDICT_VARIANTS
 ]
 
 describe("pattern metadata", () => {

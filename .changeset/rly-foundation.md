@@ -34,3 +34,9 @@ Add presentation-only provenance and collaborator patterns for all five
 services, explicit freshness and evidence references, named human roles, safe
 avatar fallbacks, controlled `+N people` expansion, compact layouts, and
 forced-color-safe identity.
+
+Add the deterministic Release Relay presentation contract with 16 stable,
+code-owned SVG symbols, exact compact and hero geometry, runtime tuple
+validation, and golden persisted vectors. Add a giant neutral Verdict with a
+caller-supplied reason and semantic rail, without deriving release identity or
+readiness in the design system.
