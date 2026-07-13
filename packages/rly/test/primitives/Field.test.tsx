@@ -2,7 +2,13 @@
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { Field, RLY_FIELD_DEFAULT_VARIANTS, RLY_FIELD_VARIANTS } from "../../src/primitives/Field.js"
+import {
+  Field,
+  type FieldControlProps,
+  RLY_FIELD_DEFAULT_VARIANTS,
+  RLY_FIELD_VARIANTS
+} from "../../src/primitives/Field.js"
+import { Select } from "../../src/primitives/Select.js"
 import { render } from "./render.js"
 
 describe("Field", () => {
@@ -57,6 +63,17 @@ describe("Field", () => {
     expect(RLY_FIELD_DEFAULT_VARIANTS).toEqual({ size: "default" })
   })
 
+  it("accepts an rly-owned control that preserves final DOM semantics", () => {
+    const markup = renderToStaticMarkup(
+      <Field controlId="environment" label="Environment">
+        {(controlProps) => <Select {...controlProps} options={[{ label: "Staging", value: "staging" }]} />}
+      </Field>
+    )
+    expect(markup).toContain('id="environment"')
+    expect(markup).toContain('aria-labelledby="environment-label"')
+    expect(markup).toContain('role="combobox"')
+  })
+
   it("rejects empty accessible copy", () => {
     expect(() => renderToStaticMarkup(<Field label=" ">{(props) => <input {...props} />}</Field>)).toThrow(
       "Field label"
@@ -74,6 +91,12 @@ describe("Field", () => {
     expect(() => renderToStaticMarkup(<Field label="Name">{() => <input />}</Field>)).toThrow(
       "Field control must apply"
     )
-    expect(() => renderToStaticMarkup(<Field label="Name">{() => <></>}</Field>)).toThrow("must render one control")
+    const DroppingControl = (_props: FieldControlProps) => <input data-dropped-owned-semantics="true" />
+    expect(() =>
+      renderToStaticMarkup(<Field label="Name">{(controlProps) => <DroppingControl {...controlProps} />}</Field>)
+    ).toThrow("concrete or rly-owned control")
+    expect(() => renderToStaticMarkup(<Field label="Name">{() => <></>}</Field>)).toThrow(
+      "concrete or rly-owned control"
+    )
   })
 })

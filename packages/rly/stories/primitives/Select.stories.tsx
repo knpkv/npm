@@ -11,6 +11,12 @@ const options = [
   { label: "Staging", value: "staging" },
   { disabled: true, label: "Production unavailable", value: "production" }
 ] satisfies ReadonlyArray<RlySelectOption>
+const longOption = [
+  {
+    label: "Integration verification environment with an intentionally unbroken identifier 4f9bb31a92cb47cba",
+    value: "long"
+  }
+] satisfies ReadonlyArray<RlySelectOption>
 
 const ControlledSelect = (): ReactElement => {
   const [value, setValue] = useState<string | undefined>(undefined)
@@ -24,6 +30,7 @@ const ControlledSelect = (): ReactElement => {
           <Select aria-label="Environment" onValueChange={setValue} options={options} value={value} />
           <Select aria-label="Compact environment" defaultValue="development" options={options} size="compact" />
           <Select aria-label="Disabled environment" disabled options={options} />
+          <Select aria-label="Long environment" defaultValue="long" options={longOption} />
         </div>
       </main>
     </PortalProvider>
@@ -51,6 +58,7 @@ export const States: Story = {
     await userEvent.click(canvas.getByRole("option", { name: "Staging" }))
     await expect(trigger).toHaveTextContent("Staging")
     await expect(canvas.getByRole("combobox", { name: "Disabled environment" })).toBeDisabled()
+    await expect(canvas.getByRole("combobox", { name: "Long environment" })).toBeVisible()
   },
   render: () => <ControlledSelect />
 }

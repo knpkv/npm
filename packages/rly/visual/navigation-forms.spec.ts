@@ -48,6 +48,9 @@ test("contains the select popup and restores trigger focus", async ({ page }) =>
   await page.goto(story("primitives-select--states"))
 
   const trigger = page.getByRole("combobox", { exact: true, name: "Environment" })
+  const longTrigger = page.getByRole("combobox", { name: "Long environment" })
+  const longValue = longTrigger.locator("span").first()
+  expect(await longValue.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
   await trigger.click()
   const listbox = page.getByRole("listbox")
   await expect(listbox).toBeVisible()

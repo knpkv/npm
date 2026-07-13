@@ -3,6 +3,7 @@ import type { AriaAttributes, ComponentPropsWithRef, ReactElement } from "react"
 import { Icon } from "../foundations/Icon.js"
 import { PortalBoundary } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, defineVariants, requireText } from "../internal/component.js"
+import { registerFieldControl } from "../internal/field-control.js"
 import styles from "./Select.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
@@ -91,7 +92,7 @@ const validateOptions = (options: ReadonlyArray<RlySelectOption>, disabled: bool
 }
 
 /** Render an owned, portal-safe single-value selector without exposing Radix component shapes. */
-export const Select = (componentProps: SelectProps): ReactElement => {
+const SelectImplementation = (componentProps: SelectProps): ReactElement => {
   const valueControlled = "value" in componentProps
   const {
     "aria-describedby": ariaDescribedBy,
@@ -205,3 +206,5 @@ export const Select = (componentProps: SelectProps): ReactElement => {
     </RadixSelect.Root>
   )
 }
+
+export const Select = registerFieldControl(SelectImplementation)

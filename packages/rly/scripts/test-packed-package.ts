@@ -150,7 +150,12 @@ const markup = renderToStaticMarkup(
       <Field controlId="packed-name" label="Release name">
         {(controlProps) => createElement("input", controlProps)}
       </Field>
-      <Select aria-label="Environment" options={[{ label: "Staging", value: "staging" }]} />
+      <Field controlId="packed-environment" label="Environment">
+        {(controlProps) => createElement(Select, {
+          ...controlProps,
+          options: [{ label: "Staging", value: "staging" }]
+        })}
+      </Field>
     </PortalProvider>
     <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
     <Tabs

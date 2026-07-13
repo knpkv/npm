@@ -24,6 +24,13 @@
     color: var(--rly-color-text-2);
   }
 
+  .trigger > span:first-child {
+    min-inline-size: var(--rly-space-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .trigger[data-state="open"] {
     border-color: var(--rly-color-focus);
   }
