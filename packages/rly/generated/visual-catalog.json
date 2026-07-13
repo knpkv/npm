@@ -128,6 +128,124 @@
       "storyId": "primitives-dialog--interaction"
     },
     {
+      "name": "DiffCodeTypes",
+      "paths": {
+        "source": "packages/rly/src/diff/types.ts",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench"
+    },
+    {
+      "name": "DiffCodeView",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffCodeView.tsx",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffCodeView.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench"
+    },
+    {
+      "name": "DiffFileTree",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffFileTree.tsx",
+        "story": "packages/rly/stories/diff/DiffFileTree.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffFileTree.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffFileTree.test.tsx"
+        ]
+      },
+      "storyId": "diff-difffiletree--file-states"
+    },
+    {
+      "name": "DiffFinding",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffFinding.tsx",
+        "story": "packages/rly/stories/diff/DiffFinding.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffFinding.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffFinding.test.tsx"
+        ]
+      },
+      "storyId": "diff-difffinding--human-and-agent"
+    },
+    {
+      "name": "DiffHeader",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffHeader.tsx",
+        "story": "packages/rly/stories/diff/DiffHeader.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffHeader.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffHeader.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffheader--controlled-preferences"
+    },
+    {
+      "name": "DiffParsing",
+      "paths": {
+        "source": "packages/rly/src/diff/parse-diff.ts",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/parse-diff.test.ts"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench"
+    },
+    {
+      "name": "DiffThemes",
+      "paths": {
+        "source": "packages/rly/src/diff/themes.ts",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench"
+    },
+    {
+      "name": "DiffWorkbench",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffWorkbench.tsx",
+        "story": "packages/rly/stories/diff/DiffWorkbench.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffWorkbench.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffWorkbench.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffworkbench--bird-eye-review"
+    },
+    {
+      "name": "DiffWorkerProvider",
+      "paths": {
+        "source": "packages/rly/src/diff/worker-pool.tsx",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/worker-pool.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench"
+    },
+    {
       "name": "Divider",
       "paths": {
         "source": "packages/rly/src/primitives/Divider.tsx",

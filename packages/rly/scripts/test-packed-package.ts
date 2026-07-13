@@ -9,6 +9,18 @@ import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { componentManifest } from "../component-manifest.js"
 import { componentStyleSources } from "./contract.js"
+import { findPackedDiffArtifacts, validatePackedDiffArtifactSources } from "./packed/diff-assets.js"
+import {
+  renderDiffConsumerAssertions,
+  renderDiffConsumerFixture,
+  renderDiffConsumerImports,
+  renderDiffConsumerMarkup
+} from "./packed/diff-consumer.js"
+import {
+  findLeakedDiffImplementation,
+  renderNormalEntryConsumer,
+  renderNormalEntryViteConfig
+} from "./packed/normal-entry.js"
 
 class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
   readonly reason: string
@@ -52,6 +64,21 @@ const program = Effect.scoped(Effect.gen(function*() {
     if (!listing.split("\n").includes(artifact)) {
       return yield* Effect.fail(new PackedPackageError({ reason: `Packed asset is missing: ${artifact}` }))
     }
+  }
+  const diffArtifacts = findPackedDiffArtifacts(listing.split("\n"))
+  if (diffArtifacts === undefined) {
+    return yield* Effect.fail(new PackedPackageError({ reason: "Packed diff worker or its WASM runtime is missing" }))
+  }
+  const packedDiffEntry = yield* run("tar", ["-xOf", archive, "package/dist/diff/index.js"], temporary)
+  const packedWorkerSource = yield* run("tar", ["-xOf", archive, diffArtifacts.worker], temporary)
+  const diffArtifactFailure = validatePackedDiffArtifactSources({
+    diffEntry: packedDiffEntry,
+    wasmFileName: path.basename(diffArtifacts.wasm),
+    workerFileName: path.basename(diffArtifacts.worker),
+    workerSource: packedWorkerSource
+  })
+  if (diffArtifactFailure !== undefined) {
+    return yield* Effect.fail(new PackedPackageError({ reason: diffArtifactFailure }))
   }
   const leaked = listing.split("\n").filter((entry) =>
     /^package\/(?:src|test|scripts|generated|component-manifest\.ts)(?:\/|$)/.test(entry)
@@ -166,6 +193,7 @@ import {
   Verdict,
   WorksetCard
 } from "@knpkv/rly/patterns"
+${renderDiffConsumerImports()}
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
@@ -228,6 +256,7 @@ const packedAgentProposal: RlyAgentProposal = {
   impact: "Replace the Jira issue description only",
   target: "Jira RPS-6307"
 }
+${renderDiffConsumerFixture()}
 const markup = renderToStaticMarkup(
   <ThemeProvider theme="dark">
     <Icon decorative name="check" />
@@ -252,6 +281,7 @@ const markup = renderToStaticMarkup(
       </Sheet.Root>
     </PortalProvider>
     <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
+    ${renderDiffConsumerMarkup()}
     <ServiceMark service="jira" />
     <FreshnessStamp dateTime="2026-07-13T14:00:00Z" state="current" time="Observed now" />
     <EvidenceStamp freshness="current" reference="evidence/jira/OPS-428/revision/17" service="jira" />
@@ -441,6 +471,7 @@ const markup = renderToStaticMarkup(
 )
 if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
 if (!markup.includes("Packed primitive") || !markup.includes("<button")) throw new Error("Primitive SSR contract failed")
+${renderDiffConsumerAssertions()}
 if (
   !markup.includes("Jira")
   || !markup.includes("Observed now")
@@ -556,6 +587,29 @@ export default {
     }
   }
   yield* run("node", [path.join(fieldBundleDirectory, fieldBundleFile)], consumer)
+  yield* fs.writeFileString(path.join(sourceDirectory, "normal-entries.js"), renderNormalEntryConsumer())
+  yield* fs.writeFileString(path.join(consumer, "vite.normal.config.mjs"), renderNormalEntryViteConfig())
+  yield* run("pnpm", ["exec", "vite", "build", "--config", "vite.normal.config.mjs"], consumer)
+  const normalBundleDirectory = path.join(consumer, "dist-normal")
+  const normalBundleFiles = (yield* fs.readDirectory(normalBundleDirectory))
+    .filter((file) => file.endsWith(".js") || file.endsWith(".mjs"))
+  const normalBundleEntry = normalBundleFiles.find((file) => file.startsWith("normal-entries"))
+  if (normalBundleEntry === undefined) {
+    return yield* Effect.fail(new PackedPackageError({ reason: "Normal-entry bundle has no executable entry" }))
+  }
+  const normalBundleSources = yield* Effect.forEach(
+    normalBundleFiles,
+    (file) => fs.readFileString(path.join(normalBundleDirectory, file))
+  )
+  const leakedDiffImplementation = findLeakedDiffImplementation(normalBundleSources.join("\n"))
+  if (leakedDiffImplementation !== undefined) {
+    return yield* Effect.fail(
+      new PackedPackageError({
+        reason: `Normal package entries retained diff implementation: ${leakedDiffImplementation}`
+      })
+    )
+  }
+  yield* run("node", [path.join(normalBundleDirectory, normalBundleEntry)], consumer)
   for (const entry of componentManifest.entries) {
     const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
     yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)

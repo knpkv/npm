@@ -1,0 +1,188 @@
+@layer rly.components {
+  .root {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    container-type: inline-size;
+    display: grid;
+    min-inline-size: var(--rly-space-0);
+    overflow: hidden;
+  }
+
+  .header {
+    align-items: end;
+    display: flex;
+    gap: var(--rly-space-16);
+    justify-content: space-between;
+    padding: var(--rly-space-20);
+  }
+
+  .header > span {
+    display: grid;
+    gap: var(--rly-space-2);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .header h2 {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .eyebrow,
+  .notice,
+  .empty,
+  .error,
+  .change,
+  .content,
+  .previousPath {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  .eyebrow,
+  .change {
+    text-transform: uppercase;
+  }
+
+  .count {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / 0.8 var(--rly-type-page-title-font);
+    letter-spacing: var(--rly-type-page-title-tracking);
+    white-space: nowrap;
+  }
+
+  .notice,
+  .empty,
+  .error {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-12) var(--rly-space-20);
+  }
+
+  .error {
+    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+    display: grid;
+    gap: var(--rly-space-2);
+  }
+
+  .error strong {
+    color: var(--rly-color-text-1);
+  }
+
+  .list {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    list-style: none;
+    margin: var(--rly-space-0);
+    max-block-size: 34rem;
+    overflow: auto;
+    padding: var(--rly-space-0);
+  }
+
+  .list li {
+    contain: content;
+    contain-intrinsic-block-size: 58px;
+  }
+
+  .file {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    gap: var(--rly-space-12);
+    grid-template-columns: 3ch minmax(var(--rly-space-0), 1fr) auto;
+    inline-size: 100%;
+    min-block-size: 58px;
+    padding: var(--rly-space-10) var(--rly-space-16);
+    text-align: start;
+  }
+
+  .file:hover {
+    background: var(--rly-color-surface-2);
+  }
+
+  .file[aria-current="true"] {
+    background: var(--rly-color-surface-3);
+    box-shadow: inset var(--rly-space-4) 0 var(--rly-color-focus);
+  }
+
+  .file:focus-visible {
+    outline: 3px solid var(--rly-color-focus);
+    outline-offset: -3px;
+  }
+
+  .index {
+    color: var(--rly-color-text-3);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    text-align: end;
+  }
+
+  .pathBlock {
+    display: grid;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .path,
+  .previousPath {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .path {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+      var(--rly-type-code-font);
+  }
+
+  .previousPath {
+    text-decoration: line-through;
+  }
+
+  .badges {
+    align-items: end;
+    display: grid;
+    justify-items: end;
+  }
+
+  .content {
+    max-inline-size: 24ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @container (max-width: 24rem) {
+    .header {
+      align-items: start;
+    }
+
+    .count {
+      font-size: var(--rly-type-section-title-size);
+    }
+
+    .file {
+      align-items: start;
+      grid-template-columns: 3ch minmax(var(--rly-space-0), 1fr);
+    }
+
+    .badges {
+      align-items: start;
+      grid-column: 2;
+      justify-items: start;
+    }
+
+    .content {
+      max-inline-size: 100%;
+      white-space: normal;
+    }
+  }
+}

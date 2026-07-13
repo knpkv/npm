@@ -58,3 +58,10 @@ provider job progress and truthful terminal states, explicit non-authorizing
 agent proposals, and confirmation-gated named human authorization. Cover
 focus stability, cancellation, 320px dark and forced-color layouts, and
 presentation-only callbacks with no provider or vendor execution.
+
+Add an isolated complete diff entry with explicit file-content states, a
+500-file-safe inventory, controlled header and semantic findings, and a compact
+bird's-eye workbench. Pin and wrap `@pierre/diffs` `CodeView` with split and
+stacked layouts, wrapping, context, selection, annotations, item versioning,
+scrolling, virtualization, bounded workers, and an announced synchronous
+fallback that never silently omits source changes.

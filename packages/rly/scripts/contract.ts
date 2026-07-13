@@ -177,7 +177,10 @@ const renderBarrel = (
   })
   const componentExports = components
     .filter(({ publicEntry }) => publicEntry === entry.id)
-    .sort((left, right) => left.name.localeCompare(right.name))
+    .sort((left, right) =>
+      relativeModulePath(entry, left).localeCompare(relativeModulePath(entry, right))
+      || left.name.localeCompare(right.name)
+    )
     .flatMap((component) => {
       const from = relativeModulePath(entry, component)
       const exports = [...component.exports].sort((left, right) => left.name.localeCompare(right.name))

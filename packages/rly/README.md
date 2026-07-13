@@ -315,6 +315,44 @@ Callbacks request application-owned state changes only. Rly never contacts an
 agent provider, invokes a vendor capability, derives permission, or treats an
 agent proposal as a human decision.
 
+## Complete pull-request diffs
+
+The experimental `@knpkv/rly/diff` entry keeps the heavy renderer and its
+worker graph out of ordinary primitives and patterns. `DiffWorkbench` composes
+a controlled header, complete lightweight file inventory, renderer slot, and
+semantic finding list. Exceptional files stay visible as loading, binary,
+generated, oversized, unavailable, or error rows; renames preserve both paths.
+
+`DiffCodeView` is the single pinned `@pierre/diffs` adapter. It accepts complete
+before/after text, split or stacked layout, wrapping, context, selection,
+annotations, and virtualization controls. Its imperative handle adds or
+versions items and scrolls to files or lines without resetting the viewer.
+
+```tsx
+import { DiffCodeView, DiffWorkerProvider } from "@knpkv/rly/diff"
+
+export const PullRequestDiff = () => (
+  <DiffWorkerProvider poolSize={2}>
+    <DiffCodeView
+      initialItems={[
+        {
+          id: "release-gate",
+          before: { name: "src/gate.ts", contents: "export const ready = false\n" },
+          after: { name: "src/gate.ts", contents: "export const ready = true\n" }
+        }
+      ]}
+      mode="split"
+    />
+  </DiffWorkerProvider>
+)
+```
+
+The provider owns a bounded module-worker pool. If creation or execution fails,
+the same complete `CodeView` remounts synchronously and announces the fallback;
+it never replaces the diff with partial raw text. Applications still own
+pagination, content fetching, immutable revision identity, URL state, and all
+review or approval commands.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

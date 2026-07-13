@@ -116,4 +116,21 @@ describe("public entries", () => {
       "RLY_TYPE_TOKEN_NAMES"
     ])
   })
+
+  it("keeps the experimental renderer isolated behind the diff entry", async () => {
+    const Diff = await import("../../src/diff/index.js")
+
+    expect(Object.keys(Diff)).toEqual([
+      "DiffCodeView",
+      "DiffFileTree",
+      "DiffFinding",
+      "DiffHeader",
+      "DiffWorkbench",
+      "parseDiffFilePair",
+      "RLY_DIFF_THEMES",
+      "createDiffWorkerFactory",
+      "DiffWorkerProvider",
+      "normalizeDiffWorkerPoolSize"
+    ])
+  })
 })

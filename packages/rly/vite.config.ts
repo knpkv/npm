@@ -53,7 +53,9 @@ const entrySourceMaps = (): Plugin => ({
 })
 
 export default defineConfig({
+  base: "./",
   plugins: [componentStyles(), react(), entrySourceMaps()],
+  worker: { format: "es" },
   css: {
     modules: {
       generateScopedName: "rly_[name]__[local]"

@@ -44,6 +44,11 @@ describe("component manifest contract", () => {
     }
 
     expect(componentStyleSources(manifest)).toEqual([
+      "src/diff/DiffCodeView.module.css",
+      "src/diff/DiffFileTree.module.css",
+      "src/diff/DiffFinding.module.css",
+      "src/diff/DiffHeader.module.css",
+      "src/diff/DiffWorkbench.module.css",
       "src/foundations/Alpha.module.css",
       "src/foundations/Zebra.module.css",
       "src/patterns/AgentContextButton.module.css",
@@ -88,6 +93,11 @@ describe("component manifest contract", () => {
 
   it("projects every component stylesheet from the checked-in manifest", () => {
     expect(componentStyleSources(componentManifest)).toEqual([
+      "src/diff/DiffCodeView.module.css",
+      "src/diff/DiffFileTree.module.css",
+      "src/diff/DiffFinding.module.css",
+      "src/diff/DiffHeader.module.css",
+      "src/diff/DiffWorkbench.module.css",
       "src/patterns/AgentContextButton.module.css",
       "src/patterns/AgentDrawer.module.css",
       "src/patterns/AgentJob.module.css",

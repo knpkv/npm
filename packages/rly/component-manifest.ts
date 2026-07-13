@@ -126,6 +126,186 @@ export const componentManifest = {
       tests: ["test/tokens/token-contract.test.ts"]
     }
   }, {
+    category: "diff",
+    exports: [{ kind: "value", name: "DiffCodeView" }],
+    name: "DiffCodeView",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/DiffCodeView.tsx",
+    status: "experimental",
+    styles: ["src/diff/DiffCodeView.module.css"],
+    variants: [
+      { defaultValue: "split", name: "mode", values: ["split", "stacked"] },
+      { defaultValue: "buffered", name: "virtualization", values: ["buffered", "strict"] }
+    ],
+    visual: {
+      story: "stories/diff/DiffCodeView.stories.tsx",
+      storyId: "diff-diffcodeview--workbench",
+      tests: ["test/diff/DiffCodeView.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "type", name: "RlyDiffCodeAnnotation" },
+      { kind: "type", name: "RlyDiffCodeItem" },
+      { kind: "type", name: "RlyDiffCodeScrollTarget" },
+      { kind: "type", name: "RlyDiffCodeSelection" },
+      { kind: "type", name: "RlyDiffCodeViewHandle" },
+      { kind: "type", name: "RlyDiffCodeViewProps" },
+      { kind: "type", name: "RlyDiffTextFile" }
+    ],
+    name: "DiffCodeTypes",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/types.ts",
+    status: "experimental",
+    styles: [],
+    variants: [],
+    visual: {
+      story: "stories/diff/DiffCodeView.stories.tsx",
+      storyId: "diff-diffcodeview--workbench",
+      tests: ["test/diff/DiffCodeView.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "value", name: "DiffFileTree" },
+      { kind: "type", name: "DiffFileTreeProps" },
+      { kind: "type", name: "RlyDiffFile" },
+      { kind: "type", name: "RlyDiffFileChange" },
+      { kind: "type", name: "RlyDiffFileContent" },
+      { kind: "type", name: "RlyDiffInventory" }
+    ],
+    name: "DiffFileTree",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/DiffFileTree.tsx",
+    status: "stable",
+    styles: ["src/diff/DiffFileTree.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/diff/DiffFileTree.stories.tsx",
+      storyId: "diff-difffiletree--file-states",
+      tests: ["test/diff/DiffFileTree.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "value", name: "DiffFinding" },
+      { kind: "type", name: "DiffFindingProps" },
+      { kind: "type", name: "RlyDiffFinding" },
+      { kind: "type", name: "RlyDiffFindingAnchor" }
+    ],
+    name: "DiffFinding",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/DiffFinding.tsx",
+    status: "stable",
+    styles: ["src/diff/DiffFinding.module.css"],
+    variants: [
+      { name: "source", values: ["human", "agent"] },
+      { name: "anchor", values: ["current", "stale"] }
+    ],
+    visual: {
+      story: "stories/diff/DiffFinding.stories.tsx",
+      storyId: "diff-difffinding--human-and-agent",
+      tests: ["test/diff/DiffFinding.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "value", name: "DiffHeader" },
+      { kind: "type", name: "DiffHeaderProps" },
+      { kind: "type", name: "RlyDiffFindingFilter" },
+      { kind: "type", name: "RlyDiffLayout" }
+    ],
+    name: "DiffHeader",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/DiffHeader.tsx",
+    status: "stable",
+    styles: ["src/diff/DiffHeader.module.css"],
+    variants: [
+      { name: "layout", values: ["split", "stacked"] },
+      { name: "findingFilter", values: ["all", "human", "agent", "unresolved"] }
+    ],
+    visual: {
+      story: "stories/diff/DiffHeader.stories.tsx",
+      storyId: "diff-diffheader--controlled-preferences",
+      tests: ["test/diff/DiffHeader.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [{ kind: "value", name: "parseDiffFilePair" }],
+    name: "DiffParsing",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/parse-diff.ts",
+    status: "experimental",
+    styles: [],
+    variants: [],
+    visual: {
+      story: "stories/diff/DiffCodeView.stories.tsx",
+      storyId: "diff-diffcodeview--workbench",
+      tests: ["test/diff/parse-diff.test.ts"]
+    }
+  }, {
+    category: "diff",
+    exports: [{ kind: "value", name: "RLY_DIFF_THEMES" }],
+    name: "DiffThemes",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/themes.ts",
+    status: "experimental",
+    styles: [],
+    variants: [],
+    visual: {
+      story: "stories/diff/DiffCodeView.stories.tsx",
+      storyId: "diff-diffcodeview--workbench",
+      tests: ["test/diff/DiffCodeView.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "value", name: "DiffWorkbench" },
+      { kind: "type", name: "DiffWorkbenchProps" },
+      { kind: "type", name: "RlyDiffWorkbenchFinding" },
+      { kind: "type", name: "RlyDiffWorkbenchScope" }
+    ],
+    name: "DiffWorkbench",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/DiffWorkbench.tsx",
+    status: "stable",
+    styles: ["src/diff/DiffWorkbench.module.css"],
+    variants: [{ name: "scope", values: ["all-files", "selected-file"] }],
+    visual: {
+      story: "stories/diff/DiffWorkbench.stories.tsx",
+      storyId: "diff-diffworkbench--bird-eye-review",
+      tests: ["test/diff/DiffWorkbench.test.tsx"]
+    }
+  }, {
+    category: "diff",
+    exports: [
+      { kind: "value", name: "createDiffWorkerFactory" },
+      { kind: "value", name: "DiffWorkerProvider" },
+      { kind: "value", name: "normalizeDiffWorkerPoolSize" },
+      { kind: "type", name: "CreateDiffWorkerFactoryOptions" },
+      { kind: "type", name: "DiffWorkerProviderProps" }
+    ],
+    name: "DiffWorkerProvider",
+    publicEntry: "diff",
+    registry: true,
+    source: "src/diff/worker-pool.tsx",
+    status: "experimental",
+    styles: [],
+    variants: [],
+    visual: {
+      story: "stories/diff/DiffCodeView.stories.tsx",
+      storyId: "diff-diffcodeview--workbench",
+      tests: ["test/diff/worker-pool.test.tsx"]
+    }
+  }, {
     category: "foundation",
     exports: [
       { kind: "value", name: "GlobalStyles" },
