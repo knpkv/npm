@@ -178,7 +178,20 @@ void [${references}]
   yield* run("node", ["dist/index.js"], consumer)
   yield* fs.writeFileString(
     path.join(sourceDirectory, "field-only.js"),
-    `import { Field } from "@knpkv/rly/primitives"\nglobalThis.__packedField = Field\n`
+    `import { Field } from "@knpkv/rly/primitives"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+const markup = renderToStaticMarkup(
+  createElement(
+    Field,
+    { controlId: "tree-shaken-field", description: "Packed description", label: "Packed label" },
+    (controlProps) => createElement("input", controlProps)
+  )
+)
+if (!markup.includes('id="tree-shaken-field"') || !markup.includes('aria-describedby="tree-shaken-field-description"')) {
+  throw new Error("Field-only bundled SSR contract failed")
+}
+`
   )
   yield* fs.writeFileString(
     path.join(consumer, "vite.field.config.mjs"),
@@ -192,7 +205,7 @@ export default {
     },
     minify: false,
     outDir: new URL("dist-field", import.meta.url).pathname,
-    rollupOptions: { external: ["react", "react/jsx-runtime"] }
+    rollupOptions: { external: ["react", "react/jsx-runtime", "react-dom/server"] }
   },
   logLevel: "silent",
   root
@@ -216,7 +229,14 @@ export default {
     return yield* Effect.fail(new PackedPackageError({ reason: "Field-only bundle emitted no JavaScript" }))
   }
   const fieldOnlyBundle = yield* fs.readFileString(path.join(fieldBundleDirectory, fieldBundleFile))
-  for (const leakedImplementation of ["Select options must contain", "radix-ui", "lucide"]) {
+  for (
+    const leakedImplementation of [
+      "Select options must contain",
+      "radix-ui",
+      "lucide",
+      "registeredFieldControls.add"
+    ]
+  ) {
     if (fieldOnlyBundle.includes(leakedImplementation)) {
       return yield* Effect.fail(
         new PackedPackageError({
@@ -225,6 +245,7 @@ export default {
       )
     }
   }
+  yield* run("node", [path.join(fieldBundleDirectory, fieldBundleFile)], consumer)
   for (const entry of componentManifest.entries) {
     const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
     yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)
