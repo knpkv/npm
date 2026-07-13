@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { RLY_AVATAR_VARIANTS } from "../../src/primitives/Avatar.js"
 import { RLY_BUTTON_VARIANTS } from "../../src/primitives/Button.js"
+import { RLY_DIALOG_VARIANTS } from "../../src/primitives/Dialog.js"
 import { RLY_DIVIDER_VARIANTS } from "../../src/primitives/Divider.js"
 import { RLY_FIELD_VARIANTS } from "../../src/primitives/Field.js"
 import { RLY_ICON_BUTTON_VARIANTS } from "../../src/primitives/IconButton.js"
 import { RLY_SELECT_VARIANTS } from "../../src/primitives/Select.js"
+import { RLY_SHEET_VARIANTS } from "../../src/primitives/Sheet.js"
 import { RLY_SKELETON_VARIANTS } from "../../src/primitives/Skeleton.js"
 import { RLY_STATE_LABEL_VARIANTS } from "../../src/primitives/StateLabel.js"
 import { RLY_STATE_PANEL_VARIANTS } from "../../src/primitives/StatePanel.js"
@@ -43,10 +45,12 @@ const catalogs: ReadonlyArray<
 > = [
   RLY_AVATAR_VARIANTS,
   RLY_BUTTON_VARIANTS,
+  RLY_DIALOG_VARIANTS,
   RLY_DIVIDER_VARIANTS,
   RLY_FIELD_VARIANTS,
   RLY_ICON_BUTTON_VARIANTS,
   RLY_SELECT_VARIANTS,
+  RLY_SHEET_VARIANTS,
   RLY_SKELETON_VARIANTS,
   RLY_STATE_LABEL_VARIANTS,
   RLY_STATE_PANEL_VARIANTS,

@@ -137,7 +137,7 @@ import {
   ThemeProvider,
   type RlyLinkComponent
 } from "@knpkv/rly/foundations"
-import { Button, Field, Select, Surface, Tabs, Text } from "@knpkv/rly/primitives"
+import { Button, Dialog, Field, Select, Sheet, Surface, Tabs, Text } from "@knpkv/rly/primitives"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
@@ -156,6 +156,14 @@ const markup = renderToStaticMarkup(
           options: [{ label: "Staging", value: "staging" }]
         })}
       </Field>
+      <Dialog.Root>
+        <Dialog.Trigger>Open packed dialog</Dialog.Trigger>
+        <Dialog.Content title="Packed dialog"><Dialog.Close>Close packed dialog</Dialog.Close></Dialog.Content>
+      </Dialog.Root>
+      <Sheet.Root>
+        <Sheet.Trigger>Open packed sheet</Sheet.Trigger>
+        <Sheet.Content title="Packed sheet"><Sheet.Body>Packed sheet body</Sheet.Body></Sheet.Content>
+      </Sheet.Root>
     </PortalProvider>
     <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
     <Tabs
@@ -166,7 +174,13 @@ const markup = renderToStaticMarkup(
 )
 if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
 if (!markup.includes("Packed primitive") || !markup.includes("<button")) throw new Error("Primitive SSR contract failed")
-if (!markup.includes("packed-name") || !markup.includes('role="combobox"') || !markup.includes('role="tablist"')) {
+if (
+  !markup.includes("packed-name")
+  || !markup.includes('role="combobox"')
+  || !markup.includes('role="tablist"')
+  || !markup.includes("Open packed dialog")
+  || !markup.includes("Open packed sheet")
+) {
   throw new Error("Controlled primitive SSR contract failed")
 }
 void [${references}]

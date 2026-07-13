@@ -278,6 +278,30 @@ export const componentManifest = {
   }, {
     category: "primitive",
     exports: [
+      { kind: "value", name: "Dialog" },
+      { kind: "value", name: "RLY_DIALOG_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_DIALOG_VARIANTS" },
+      { kind: "type", name: "DialogCloseProps" },
+      { kind: "type", name: "DialogContentProps" },
+      { kind: "type", name: "DialogRootProps" },
+      { kind: "type", name: "DialogTriggerProps" },
+      { kind: "type", name: "RlyDialogSize" }
+    ],
+    name: "Dialog",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Dialog.tsx",
+    status: "stable",
+    styles: ["src/primitives/Dialog.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["default", "wide"] }],
+    visual: {
+      story: "stories/primitives/Dialog.stories.tsx",
+      storyId: "primitives-dialog--interaction",
+      tests: ["test/primitives/Dialog.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
       { kind: "value", name: "Divider" },
       { kind: "value", name: "RLY_DIVIDER_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_DIVIDER_VARIANTS" },
@@ -368,6 +392,32 @@ export const componentManifest = {
       story: "stories/primitives/Select.stories.tsx",
       storyId: "primitives-select--states",
       tests: ["test/primitives/Select.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "RLY_SHEET_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_SHEET_VARIANTS" },
+      { kind: "value", name: "Sheet" },
+      { kind: "type", name: "RlySheetSide" },
+      { kind: "type", name: "SheetBodyProps" },
+      { kind: "type", name: "SheetCloseProps" },
+      { kind: "type", name: "SheetContentProps" },
+      { kind: "type", name: "SheetFooterProps" },
+      { kind: "type", name: "SheetRootProps" },
+      { kind: "type", name: "SheetTriggerProps" }
+    ],
+    name: "Sheet",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Sheet.tsx",
+    status: "stable",
+    styles: ["src/primitives/Sheet.module.css"],
+    variants: [{ defaultValue: "end", name: "side", values: ["end", "start"] }],
+    visual: {
+      story: "stories/primitives/Sheet.stories.tsx",
+      storyId: "primitives-sheet--interaction",
+      tests: ["test/primitives/Sheet.test.tsx"]
     }
   }, {
     category: "primitive",

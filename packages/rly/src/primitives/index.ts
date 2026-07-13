@@ -5,6 +5,14 @@ export { Avatar, RLY_AVATAR_DEFAULT_VARIANTS, RLY_AVATAR_VARIANTS } from "./Avat
 export type { AvatarProps, RlyAvatarShape, RlyAvatarSize } from "./Avatar.js"
 export { Button, RLY_BUTTON_DEFAULT_VARIANTS, RLY_BUTTON_VARIANTS } from "./Button.js"
 export type { ButtonProps, RlyButtonSize, RlyButtonVariant } from "./Button.js"
+export { Dialog, RLY_DIALOG_DEFAULT_VARIANTS, RLY_DIALOG_VARIANTS } from "./Dialog.js"
+export type {
+  DialogCloseProps,
+  DialogContentProps,
+  DialogRootProps,
+  DialogTriggerProps,
+  RlyDialogSize
+} from "./Dialog.js"
 export { Divider, RLY_DIVIDER_DEFAULT_VARIANTS, RLY_DIVIDER_VARIANTS } from "./Divider.js"
 export type { DividerProps, RlyDividerOrientation, RlyDividerStrength } from "./Divider.js"
 export { Field, RLY_FIELD_DEFAULT_VARIANTS, RLY_FIELD_VARIANTS } from "./Field.js"
@@ -13,6 +21,16 @@ export { IconButton, RLY_ICON_BUTTON_DEFAULT_VARIANTS, RLY_ICON_BUTTON_VARIANTS 
 export type { IconButtonProps, RlyIconButtonSize, RlyIconButtonVariant } from "./IconButton.js"
 export { RLY_SELECT_DEFAULT_VARIANTS, RLY_SELECT_VARIANTS, Select } from "./Select.js"
 export type { RlySelectOption, RlySelectSize, SelectProps } from "./Select.js"
+export { RLY_SHEET_DEFAULT_VARIANTS, RLY_SHEET_VARIANTS, Sheet } from "./Sheet.js"
+export type {
+  RlySheetSide,
+  SheetBodyProps,
+  SheetCloseProps,
+  SheetContentProps,
+  SheetFooterProps,
+  SheetRootProps,
+  SheetTriggerProps
+} from "./Sheet.js"
 export { RLY_SKELETON_DEFAULT_VARIANTS, RLY_SKELETON_VARIANTS, Skeleton } from "./Skeleton.js"
 export type { RlySkeletonVariant, SkeletonProps } from "./Skeleton.js"
 export { RLY_STATE_LABEL_DEFAULT_VARIANTS, RLY_STATE_LABEL_VARIANTS, StateLabel } from "./StateLabel.js"

@@ -30,6 +30,20 @@
       "storyId": "primitives-button--states"
     },
     {
+      "name": "Dialog",
+      "paths": {
+        "source": "packages/rly/src/primitives/Dialog.tsx",
+        "story": "packages/rly/stories/primitives/Dialog.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Dialog.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Dialog.test.tsx"
+        ]
+      },
+      "storyId": "primitives-dialog--interaction"
+    },
+    {
       "name": "Divider",
       "paths": {
         "source": "packages/rly/src/primitives/Divider.tsx",
@@ -144,6 +158,20 @@
         ]
       },
       "storyId": "foundations-tokens--overview"
+    },
+    {
+      "name": "Sheet",
+      "paths": {
+        "source": "packages/rly/src/primitives/Sheet.tsx",
+        "story": "packages/rly/stories/primitives/Sheet.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Sheet.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Sheet.test.tsx"
+        ]
+      },
+      "storyId": "primitives-sheet--interaction"
     },
     {
       "name": "Skeleton",

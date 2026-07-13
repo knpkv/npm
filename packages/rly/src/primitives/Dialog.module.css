@@ -1,0 +1,140 @@
+@layer rly.components {
+  .layer {
+    inset: var(--rly-space-0);
+    pointer-events: none;
+    position: fixed;
+    z-index: 100;
+  }
+
+  .overlay {
+    background: var(--rly-color-canvas);
+    inset: var(--rly-space-0);
+    opacity: 0.78;
+    pointer-events: auto;
+    position: fixed;
+  }
+
+  .content {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-overlay);
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    display: grid;
+    gap: var(--rly-space-24);
+    inset-block-start: 50%;
+    inset-inline-start: 50%;
+    max-block-size: calc(100dvh - var(--rly-space-32));
+    max-inline-size: calc(100vw - var(--rly-space-32));
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-32);
+    pointer-events: auto;
+    position: fixed;
+    transform: translate(-50%, -50%);
+  }
+
+  .defaultSize {
+    inline-size: 32rem;
+  }
+  .wide {
+    inline-size: 48rem;
+  }
+
+  .header {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .title {
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .description {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+      var(--rly-type-body-large-font);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+
+  .body {
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .overlay[data-state="open"] {
+    animation: dialog-fade-in var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
+  }
+  .overlay[data-state="closed"] {
+    animation: dialog-fade-out var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+  .content[data-state="open"] {
+    animation: dialog-enter var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
+  }
+  .content[data-state="closed"] {
+    animation: dialog-exit var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+
+  @keyframes dialog-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes dialog-fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes dialog-enter {
+    from {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + var(--rly-space-8)));
+    }
+  }
+  @keyframes dialog-exit {
+    to {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% + var(--rly-space-8)));
+    }
+  }
+
+  @media (max-width: 25rem) {
+    .content {
+      block-size: 100dvh;
+      border: var(--rly-space-0);
+      border-radius: var(--rly-space-0);
+      inset: var(--rly-space-0);
+      inline-size: 100%;
+      max-block-size: none;
+      max-inline-size: none;
+      padding: var(--rly-space-20);
+      transform: none;
+    }
+
+    .content[data-state="open"] {
+      animation-name: dialog-compact-in;
+    }
+    .content[data-state="closed"] {
+      animation-name: dialog-compact-out;
+    }
+  }
+
+  @keyframes dialog-compact-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes dialog-compact-out {
+    to {
+      opacity: 0;
+    }
+  }
+}

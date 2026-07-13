@@ -25,3 +25,7 @@ responsive Storybook contracts.
 Add controlled-first `Tabs`, `Field`, and `Select` primitives with owned public
 types, Radix-internal keyboard behavior, explicit labeling and error semantics,
 safe portal composition, and compact responsive states.
+
+Add owned compound `Dialog` and `Sheet` overlays with visible accessible names,
+native inert isolation, focus containment and restoration, scroll locking,
+nested cleanup, compact full-screen layouts, and token-driven motion.

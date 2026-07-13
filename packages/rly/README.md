@@ -72,8 +72,9 @@ publishes an owned name and size vocabulary rather than vendor types.
 
 The primitive layer stays deliberately small: typography, surfaces, dividers,
 buttons, state presentation, avatars, deterministic loading geometry, tabs,
-and form controls. Each component exposes an owned variant vocabulary and
-ordinary React DOM props without leaking Radix or icon-library types.
+form controls, and modal overlays. Each component exposes an owned variant
+vocabulary and ordinary React DOM props without leaking Radix or icon-library
+types.
 
 ```tsx
 import { Avatar, Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
@@ -102,6 +103,13 @@ change callback. `Field` supplies the exact id and ARIA props to a
 consumer-owned input, textarea, or `Select` through its render callback, so it
 can connect visible labels, descriptions, required state, and announced errors
 without cloning a framework-specific control.
+
+`Dialog` and `Sheet` expose owned compound APIs (`Root`, `Trigger`, `Content`,
+and `Close`; `Sheet` also provides `Body` and `Footer`). Both require an
+available `PortalProvider` target, isolate the background with native inert
+state, contain and restore focus, lock document scrolling, and become
+full-screen at compact widths. Titles are always visible and required, while
+motion is governed by the central theme tokens.
 
 ## Component catalog
 
