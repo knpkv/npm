@@ -5,9 +5,10 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { componentManifest } from "../component-manifest.js"
-import { entryOutputStem, renderPackageExports } from "./contract.js"
+import { componentStyleSources, entryOutputStem, renderPackageExports } from "./contract.js"
 
 class DistValidationError extends Data.TaggedError("DistValidationError")<{
   readonly reason: string
@@ -20,11 +21,32 @@ const PackageJson = Schema.fromJsonString(Schema.Struct({
   types: Schema.String
 }))
 
+const listFiles: (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  directory: string
+) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError> = Effect.fn("rly.listDistFiles")(
+  function*(fs, path, directory) {
+    const files: Array<string> = []
+    for (const entry of yield* fs.readDirectory(directory)) {
+      const absolute = path.join(directory, entry)
+      const info = yield* fs.stat(absolute)
+      if (info.type === "Directory") {
+        for (const file of yield* listFiles(fs, path, absolute)) files.push(file)
+      } else if (info.type === "File") {
+        files.push(absolute)
+      }
+    }
+    return files
+  }
+)
+
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const packageRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
   const failures: Array<string> = []
+  const hasComponentStyles = componentStyleSources(componentManifest).length > 0
 
   for (const entry of componentManifest.entries) {
     const stem = entryOutputStem(entry)
@@ -61,11 +83,22 @@ const program = Effect.gen(function*() {
       failures.push(`implementation type leaked through ${declaration}`)
     }
   }
+  const distDirectory = path.join(packageRoot, "dist")
+  if (yield* fs.exists(distDirectory)) {
+    for (const file of yield* listFiles(fs, path, distDirectory)) {
+      if (!file.endsWith(".js")) continue
+      const source = yield* fs.readFileString(file)
+      if (/['"][^'"]+\.css(?:\?[^'"]*)?['"]/.test(source)) {
+        failures.push(`runtime CSS import leaked through ${path.relative(packageRoot, file)}`)
+      }
+    }
+  }
   for (
     const artifact of [
       "dist/base.css",
       "dist/fonts.css",
       "dist/generated-tokens.css",
+      ...(hasComponentStyles ? ["dist/components.css"] : []),
       "dist/fonts/geist-latin-wght-normal.woff2",
       "dist/fonts/geist-mono-latin-wght-normal.woff2",
       "dist/fonts/OFL-Geist.txt",
@@ -75,6 +108,24 @@ const program = Effect.gen(function*() {
     const target = path.join(packageRoot, artifact)
     if (!(yield* fs.exists(target))) failures.push(`missing ${artifact}`)
     else if ((yield* fs.stat(target)).type !== "File") failures.push(`not a file ${artifact}`)
+  }
+  const componentStylesPath = path.join(packageRoot, "dist/components.css")
+  const publishedStylesPath = path.join(packageRoot, "dist/styles.css")
+  const componentImport = "@import \"./components.css\";"
+  if (yield* fs.exists(publishedStylesPath)) {
+    const publishedStyles = yield* fs.readFileString(publishedStylesPath)
+    const importCount = publishedStyles.split(componentImport).length - 1
+    if (hasComponentStyles && importCount !== 1) {
+      failures.push("published styles must import component CSS exactly once")
+    } else if (!hasComponentStyles && importCount !== 0) {
+      failures.push("published styles import component CSS without manifest styles")
+    }
+  }
+  if (hasComponentStyles && (yield* fs.exists(componentStylesPath))) {
+    const componentStyles = yield* fs.readFileString(componentStylesPath)
+    if (componentStyles.trim().length === 0) failures.push("published component CSS is empty")
+  } else if (!hasComponentStyles && (yield* fs.exists(componentStylesPath))) {
+    failures.push("component CSS exists without manifest styles")
   }
   const publishedFontsPath = path.join(packageRoot, "dist/fonts.css")
   if (yield* fs.exists(publishedFontsPath)) {

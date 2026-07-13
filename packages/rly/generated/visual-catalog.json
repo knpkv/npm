@@ -2,6 +2,48 @@
   "schemaVersion": 1,
   "components": [
     {
+      "name": "Avatar",
+      "paths": {
+        "source": "packages/rly/src/primitives/Avatar.tsx",
+        "story": "packages/rly/stories/primitives/Avatar.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Avatar.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Avatar.test.tsx"
+        ]
+      },
+      "storyId": "primitives-avatar--gallery"
+    },
+    {
+      "name": "Button",
+      "paths": {
+        "source": "packages/rly/src/primitives/Button.tsx",
+        "story": "packages/rly/stories/primitives/Button.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Button.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Button.test.tsx"
+        ]
+      },
+      "storyId": "primitives-button--states"
+    },
+    {
+      "name": "Divider",
+      "paths": {
+        "source": "packages/rly/src/primitives/Divider.tsx",
+        "story": "packages/rly/stories/primitives/Divider.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Divider.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Divider.test.tsx"
+        ]
+      },
+      "storyId": "primitives-divider--gallery"
+    },
+    {
       "name": "GlobalStyles",
       "paths": {
         "source": "packages/rly/src/foundations/GlobalStyles.tsx",
@@ -24,6 +66,20 @@
         ]
       },
       "storyId": "foundations-icon--catalog"
+    },
+    {
+      "name": "IconButton",
+      "paths": {
+        "source": "packages/rly/src/primitives/IconButton.tsx",
+        "story": "packages/rly/stories/primitives/IconButton.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/IconButton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/IconButton.test.tsx"
+        ]
+      },
+      "storyId": "primitives-iconbutton--states"
     },
     {
       "name": "LinkProvider",
@@ -60,6 +116,76 @@
         ]
       },
       "storyId": "foundations-tokens--overview"
+    },
+    {
+      "name": "Skeleton",
+      "paths": {
+        "source": "packages/rly/src/primitives/Skeleton.tsx",
+        "story": "packages/rly/stories/primitives/Skeleton.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Skeleton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Skeleton.test.tsx"
+        ]
+      },
+      "storyId": "primitives-skeleton--gallery"
+    },
+    {
+      "name": "StateLabel",
+      "paths": {
+        "source": "packages/rly/src/primitives/StateLabel.tsx",
+        "story": "packages/rly/stories/primitives/StateLabel.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/StateLabel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/StateLabel.test.tsx"
+        ]
+      },
+      "storyId": "primitives-statelabel--gallery"
+    },
+    {
+      "name": "StatePanel",
+      "paths": {
+        "source": "packages/rly/src/primitives/StatePanel.tsx",
+        "story": "packages/rly/stories/primitives/StatePanel.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/StatePanel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/StatePanel.test.tsx"
+        ]
+      },
+      "storyId": "primitives-statepanel--gallery"
+    },
+    {
+      "name": "Surface",
+      "paths": {
+        "source": "packages/rly/src/primitives/Surface.tsx",
+        "story": "packages/rly/stories/primitives/Surface.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Surface.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Surface.test.tsx"
+        ]
+      },
+      "storyId": "primitives-surface--gallery"
+    },
+    {
+      "name": "Text",
+      "paths": {
+        "source": "packages/rly/src/primitives/Text.tsx",
+        "story": "packages/rly/stories/primitives/Text.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Text.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Text.test.tsx"
+        ]
+      },
+      "storyId": "primitives-text--gallery"
     },
     {
       "name": "ThemeProvider",

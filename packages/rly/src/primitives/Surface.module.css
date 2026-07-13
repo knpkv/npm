@@ -1,0 +1,37 @@
+@layer rly.components {
+  .root {
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .tonePrimary {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+  }
+  .toneSecondary {
+    background: var(--rly-color-surface-2);
+  }
+  .toneTertiary {
+    background: var(--rly-color-surface-3);
+  }
+  .shapeCard {
+    border-radius: var(--rly-radius-control);
+  }
+  .shapeGrouped {
+    border-radius: var(--rly-radius-group);
+  }
+  .paddingNone {
+    padding: var(--rly-space-0);
+  }
+  .paddingCompact {
+    padding: var(--rly-space-16);
+  }
+  .paddingDefault {
+    padding: var(--rly-space-24);
+  }
+  .paddingSpacious {
+    padding: var(--rly-space-32);
+  }
+}

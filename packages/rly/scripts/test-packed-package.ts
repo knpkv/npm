@@ -8,6 +8,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { componentManifest } from "../component-manifest.js"
+import { componentStyleSources } from "./contract.js"
 
 class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
   readonly reason: string
@@ -21,6 +22,7 @@ const program = Effect.scoped(Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const packageRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
   const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "rly-packed-consumer-" })
+  const hasComponentStyles = componentStyleSources(componentManifest).length > 0
 
   const run = (command: string, args: ReadonlyArray<string>, cwd: string) =>
     spawner.string(ChildProcess.make(command, args, { cwd })).pipe(
@@ -42,6 +44,7 @@ const program = Effect.scoped(Effect.gen(function*() {
       "package/dist/base.css",
       "package/dist/fonts.css",
       "package/dist/generated-tokens.css",
+      ...(hasComponentStyles ? ["package/dist/components.css"] : []),
       "package/dist/fonts/geist-latin-wght-normal.woff2",
       "package/dist/fonts/geist-mono-latin-wght-normal.woff2"
     ]
@@ -56,6 +59,21 @@ const program = Effect.scoped(Effect.gen(function*() {
   )
   if (leaked.length > 0) {
     return yield* Effect.fail(new PackedPackageError({ reason: `Packed source leaked: ${leaked.join(", ")}` }))
+  }
+  const packedStyles = yield* run("tar", ["-xOf", archive, "package/dist/styles.css"], temporary)
+  const componentImport = "@import \"./components.css\";"
+  const componentImportCount = packedStyles.split(componentImport).length - 1
+  if (hasComponentStyles && componentImportCount !== 1) {
+    return yield* Effect.fail(new PackedPackageError({ reason: "Packed styles do not include component CSS once" }))
+  }
+  if (!hasComponentStyles && componentImportCount !== 0) {
+    return yield* Effect.fail(new PackedPackageError({ reason: "Packed styles include undeclared component CSS" }))
+  }
+  if (hasComponentStyles) {
+    const packedComponentStyles = yield* run("tar", ["-xOf", archive, "package/dist/components.css"], temporary)
+    if (packedComponentStyles.trim().length === 0) {
+      return yield* Effect.fail(new PackedPackageError({ reason: "Packed component CSS is empty" }))
+    }
   }
 
   const consumer = path.join(temporary, "consumer")
@@ -119,6 +137,7 @@ import {
   ThemeProvider,
   type RlyLinkComponent
 } from "@knpkv/rly/foundations"
+import { Button, Surface, Text } from "@knpkv/rly/primitives"
 import { renderToStaticMarkup } from "react-dom/server"
 
 const RouterLink: RlyLinkComponent = (props) => <a {...props} data-router-destination={props.href} />
@@ -127,9 +146,11 @@ const markup = renderToStaticMarkup(
     <Icon decorative name="check" />
     <LinkProvider component={RouterLink}><span>Link bridge</span></LinkProvider>
     <PortalProvider container={null}><span>Portal policy</span></PortalProvider>
+    <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
   </ThemeProvider>
 )
 if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
+if (!markup.includes("Packed primitive") || !markup.includes("<button")) throw new Error("Primitive SSR contract failed")
 void [${references}]
 `
   )

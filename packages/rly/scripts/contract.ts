@@ -97,6 +97,12 @@ const sortedEntries = (manifest: ComponentManifest): ReadonlyArray<ModuleEntry> 
 const sortedAssets = (manifest: ComponentManifest): ReadonlyArray<AssetEntry> =>
   [...manifest.assets].sort((left, right) => left.subpath.localeCompare(right.subpath))
 
+/** Project the manifest-owned component styles in deterministic build order. */
+export const componentStyleSources = (manifest: ComponentManifest): ReadonlyArray<`src/${string}.css`> => {
+  validateManifest(manifest)
+  return manifest.components.flatMap(({ styles }) => styles).sort((left, right) => left.localeCompare(right))
+}
+
 const relativeModulePath = (entry: ModuleEntry, component: ComponentRecord): string => {
   const from = entry.source.split("/").slice(0, -1)
   const to = component.source.replace(/\.tsx?$/, ".js").split("/")

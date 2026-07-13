@@ -1,0 +1,20 @@
+@layer rly.components {
+  .root {
+    flex: none;
+  }
+  .horizontal {
+    block-size: 1px;
+    inline-size: 100%;
+  }
+  .vertical {
+    align-self: stretch;
+    inline-size: 1px;
+    min-block-size: var(--rly-space-20);
+  }
+  .subtle {
+    background: var(--rly-color-border-1);
+  }
+  .strong {
+    background: var(--rly-color-border-2);
+  }
+}

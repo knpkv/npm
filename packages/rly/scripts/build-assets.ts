@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { componentManifest } from "../component-manifest.js"
+import { componentStyleSources } from "./contract.js"
 
 class BuildAssetError extends Data.TaggedError("BuildAssetError")<{
   readonly reason: string
@@ -42,13 +43,20 @@ const program = Effect.gen(function*() {
   const sourceDirectory = path.dirname(path.join(packageRoot, styles.source))
   const outputDirectory = path.dirname(path.join(packageRoot, styles.output))
   const fontOutput = path.join(outputDirectory, "fonts")
+  const hasComponentStyles = componentStyleSources(componentManifest).length > 0
   yield* fs.makeDirectory(outputDirectory, { recursive: true })
   yield* fs.makeDirectory(fontOutput, { recursive: true })
+
+  if (hasComponentStyles && !(yield* fs.exists(path.join(outputDirectory, "components.css")))) {
+    return yield* Effect.fail(new BuildAssetError({ reason: "Vite did not emit manifest-owned component CSS" }))
+  }
 
   for (const file of ["styles.css", "generated-tokens.css", "base.css", "fonts.css"]) {
     const source = yield* fs.readFileString(path.join(sourceDirectory, file))
     const published = file === "fonts.css"
       ? source.replaceAll(/@fontsource-variable\/(?:geist|geist-mono)\/files\//g, "./fonts/")
+      : file === "styles.css" && hasComponentStyles
+      ? `${source.trimEnd()}\n@import "./components.css";\n`
       : source
     yield* fs.writeFileString(path.join(outputDirectory, file), published)
   }

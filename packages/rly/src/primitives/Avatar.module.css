@@ -1,0 +1,52 @@
+@layer rly.components {
+  .root {
+    align-items: center;
+    background: var(--rly-color-surface-2);
+    box-sizing: border-box;
+    color: var(--rly-color-text-2);
+    display: inline-flex;
+    flex: none;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .small {
+    block-size: var(--rly-space-24);
+    inline-size: var(--rly-space-24);
+  }
+  .defaultSize {
+    block-size: var(--rly-space-32);
+    inline-size: var(--rly-space-32);
+  }
+  .large {
+    block-size: var(--rly-space-40);
+    inline-size: var(--rly-space-40);
+  }
+  .hero {
+    block-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    inline-size: calc(var(--rly-space-48) + var(--rly-space-8));
+  }
+  .circle {
+    border-radius: var(--rly-radius-round);
+  }
+  .roundedSquare {
+    border-radius: var(--rly-radius-field);
+  }
+  .image {
+    block-size: 100%;
+    inline-size: 100%;
+    object-fit: cover;
+  }
+
+  .fallback {
+    align-items: center;
+    block-size: 100%;
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    inline-size: 100%;
+    justify-content: center;
+    overflow: hidden;
+    text-transform: uppercase;
+  }
+}

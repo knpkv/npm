@@ -1,0 +1,88 @@
+@layer rly.components {
+  .root {
+    margin: var(--rly-space-0);
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .verdict,
+  .pageTitle,
+  .sectionTitle,
+  .cardTitle {
+    text-wrap: balance;
+  }
+
+  .bodyLarge,
+  .body {
+    text-wrap: pretty;
+  }
+
+  .verdict {
+    font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
+      var(--rly-type-verdict-font);
+    letter-spacing: var(--rly-type-verdict-tracking);
+  }
+
+  .pageTitle {
+    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
+      var(--rly-type-page-title-font);
+    letter-spacing: var(--rly-type-page-title-tracking);
+  }
+
+  .sectionTitle {
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
+  }
+
+  .cardTitle {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+  }
+
+  .bodyLarge {
+    font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+      var(--rly-type-body-large-font);
+    letter-spacing: var(--rly-type-body-large-tracking);
+  }
+
+  .body {
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    letter-spacing: var(--rly-type-body-tracking);
+  }
+
+  .label {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+  }
+
+  .meta {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: var(--rly-type-meta-tracking);
+  }
+
+  .code {
+    font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+      var(--rly-type-code-font);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--rly-type-code-tracking);
+    white-space: pre-wrap;
+  }
+
+  .tonePrimary {
+    color: var(--rly-color-text-1);
+  }
+  .toneSecondary {
+    color: var(--rly-color-text-2);
+  }
+  .toneTertiary {
+    color: var(--rly-color-text-3);
+  }
+  .toneInherit {
+    color: inherit;
+  }
+}

@@ -1,0 +1,92 @@
+@layer rly.components {
+  .root {
+    background: var(--rly-color-surface-2);
+    border: 1px solid currentcolor;
+    border-radius: var(--rly-radius-control);
+    box-sizing: border-box;
+    color: var(--rly-color-text-2);
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: var(--rly-space-4) auto minmax(var(--rly-space-0), 1fr);
+    max-inline-size: 100%;
+    padding: var(--rly-space-24);
+  }
+
+  .neutral {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-2);
+  }
+  .positive {
+    background: var(--rly-color-success-tint);
+    color: var(--rly-color-success-ink);
+  }
+  .critical {
+    background: var(--rly-color-blocked-tint);
+    color: var(--rly-color-blocked-ink);
+  }
+  .caution {
+    background: var(--rly-color-held-tint);
+    color: var(--rly-color-held-ink);
+  }
+  .progress {
+    background: var(--rly-color-deploying-tint);
+    color: var(--rly-color-deploying-ink);
+  }
+  .rail {
+    align-self: stretch;
+    background: currentcolor;
+    border-radius: var(--rly-radius-round);
+  }
+  .icon {
+    display: inline-flex;
+    padding-block-start: var(--rly-space-2);
+  }
+  .content {
+    color: var(--rly-color-text-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .title {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .positive .title {
+    color: var(--rly-color-success-ink);
+  }
+  .critical .title {
+    color: var(--rly-color-blocked-ink);
+  }
+  .caution .title {
+    color: var(--rly-color-held-ink);
+  }
+  .progress .title {
+    color: var(--rly-color-deploying-ink);
+  }
+
+  .description {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    overflow-wrap: anywhere;
+  }
+  .description > :first-child {
+    margin-block-start: var(--rly-space-0);
+  }
+  .description > :last-child {
+    margin-block-end: var(--rly-space-0);
+  }
+  .action {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    padding-block-start: var(--rly-space-8);
+  }
+}

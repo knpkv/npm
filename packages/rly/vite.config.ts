@@ -1,7 +1,9 @@
 import react from "@vitejs/plugin-react"
 import { basename } from "node:path"
 import { defineConfig, type Plugin } from "vite"
+import { componentManifest } from "./component-manifest.js"
 import { moduleEntrySources } from "./generated/vite-entries.js"
+import { componentStyleSources } from "./scripts/contract.js"
 
 const entries = Object.fromEntries(
   Object.entries(moduleEntrySources).map(([id, source]) => [
@@ -9,6 +11,22 @@ const entries = Object.fromEntries(
     new URL(`./${source}`, import.meta.url).pathname
   ])
 )
+
+const componentStyles = (): Plugin => {
+  const rootEntry = new URL(`./${moduleEntrySources.root}`, import.meta.url).pathname
+  const imports = componentStyleSources(componentManifest)
+    .map((source) => `import ${JSON.stringify(`./${source.slice("src/".length)}`)}`)
+    .join("\n")
+
+  return {
+    name: "rly-component-styles",
+    enforce: "pre",
+    transform(source, id) {
+      if (id !== rootEntry || imports.length === 0) return
+      return { code: `${source}\n${imports}\n`, map: null }
+    }
+  }
+}
 
 const entrySourceMaps = (): Plugin => ({
   name: "rly-entry-source-maps",
@@ -35,10 +53,17 @@ const entrySourceMaps = (): Plugin => ({
 })
 
 export default defineConfig({
-  plugins: [react(), entrySourceMaps()],
+  plugins: [componentStyles(), react(), entrySourceMaps()],
+  css: {
+    modules: {
+      generateScopedName: "rly_[name]__[local]"
+    }
+  },
   build: {
+    cssCodeSplit: false,
     emptyOutDir: true,
     lib: {
+      cssFileName: "components",
       entry: entries,
       formats: ["es"]
     },

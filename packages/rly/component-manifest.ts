@@ -225,5 +225,239 @@ export const componentManifest = {
       storyId: "foundations-themeprovider--controlled",
       tests: ["test/foundations/ThemeProvider.test.tsx"]
     }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Avatar" },
+      { kind: "value", name: "RLY_AVATAR_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_AVATAR_VARIANTS" },
+      { kind: "type", name: "AvatarProps" },
+      { kind: "type", name: "RlyAvatarShape" },
+      { kind: "type", name: "RlyAvatarSize" }
+    ],
+    name: "Avatar",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Avatar.tsx",
+    status: "stable",
+    styles: ["src/primitives/Avatar.module.css"],
+    variants: [
+      { defaultValue: "default", name: "size", values: ["small", "default", "large", "hero"] },
+      { defaultValue: "circle", name: "shape", values: ["circle", "rounded-square"] }
+    ],
+    visual: {
+      story: "stories/primitives/Avatar.stories.tsx",
+      storyId: "primitives-avatar--gallery",
+      tests: ["test/primitives/Avatar.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Button" },
+      { kind: "value", name: "RLY_BUTTON_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_BUTTON_VARIANTS" },
+      { kind: "type", name: "ButtonProps" },
+      { kind: "type", name: "RlyButtonSize" },
+      { kind: "type", name: "RlyButtonVariant" }
+    ],
+    name: "Button",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Button.tsx",
+    status: "stable",
+    styles: ["src/primitives/Button.module.css"],
+    variants: [
+      { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
+      { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+    ],
+    visual: {
+      story: "stories/primitives/Button.stories.tsx",
+      storyId: "primitives-button--states",
+      tests: ["test/primitives/Button.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Divider" },
+      { kind: "value", name: "RLY_DIVIDER_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_DIVIDER_VARIANTS" },
+      { kind: "type", name: "DividerProps" },
+      { kind: "type", name: "RlyDividerOrientation" },
+      { kind: "type", name: "RlyDividerStrength" }
+    ],
+    name: "Divider",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Divider.tsx",
+    status: "stable",
+    styles: ["src/primitives/Divider.module.css"],
+    variants: [
+      { defaultValue: "horizontal", name: "orientation", values: ["horizontal", "vertical"] },
+      { defaultValue: "subtle", name: "strength", values: ["subtle", "strong"] }
+    ],
+    visual: {
+      story: "stories/primitives/Divider.stories.tsx",
+      storyId: "primitives-divider--gallery",
+      tests: ["test/primitives/Divider.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "IconButton" },
+      { kind: "value", name: "RLY_ICON_BUTTON_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_ICON_BUTTON_VARIANTS" },
+      { kind: "type", name: "IconButtonProps" },
+      { kind: "type", name: "RlyIconButtonSize" },
+      { kind: "type", name: "RlyIconButtonVariant" }
+    ],
+    name: "IconButton",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/IconButton.tsx",
+    status: "stable",
+    styles: ["src/primitives/IconButton.module.css"],
+    variants: [
+      { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
+      { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+    ],
+    visual: {
+      story: "stories/primitives/IconButton.stories.tsx",
+      storyId: "primitives-iconbutton--states",
+      tests: ["test/primitives/IconButton.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Skeleton" },
+      { kind: "value", name: "RLY_SKELETON_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_SKELETON_VARIANTS" },
+      { kind: "type", name: "RlySkeletonVariant" },
+      { kind: "type", name: "SkeletonProps" }
+    ],
+    name: "Skeleton",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Skeleton.tsx",
+    status: "stable",
+    styles: ["src/primitives/Skeleton.module.css"],
+    variants: [{ defaultValue: "text", name: "variant", values: ["text", "block", "circle"] }],
+    visual: {
+      story: "stories/primitives/Skeleton.stories.tsx",
+      storyId: "primitives-skeleton--gallery",
+      tests: ["test/primitives/Skeleton.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "StateLabel" },
+      { kind: "value", name: "RLY_STATE_LABEL_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_STATE_LABEL_VARIANTS" },
+      { kind: "type", name: "RlyStateLabelSize" },
+      { kind: "type", name: "RlyStateTone" },
+      { kind: "type", name: "StateLabelProps" }
+    ],
+    name: "StateLabel",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/StateLabel.tsx",
+    status: "stable",
+    styles: ["src/primitives/StateLabel.module.css"],
+    variants: [
+      {
+        defaultValue: "neutral",
+        name: "tone",
+        values: ["neutral", "positive", "critical", "caution", "progress"]
+      },
+      { defaultValue: "default", name: "size", values: ["compact", "default"] }
+    ],
+    visual: {
+      story: "stories/primitives/StateLabel.stories.tsx",
+      storyId: "primitives-statelabel--gallery",
+      tests: ["test/primitives/StateLabel.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "StatePanel" },
+      { kind: "value", name: "RLY_STATE_PANEL_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_STATE_PANEL_VARIANTS" },
+      { kind: "type", name: "RlyStatePanelAnnouncement" },
+      { kind: "type", name: "RlyStatePanelTone" },
+      { kind: "type", name: "StatePanelProps" }
+    ],
+    name: "StatePanel",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/StatePanel.tsx",
+    status: "stable",
+    styles: ["src/primitives/StatePanel.module.css"],
+    variants: [{
+      defaultValue: "neutral",
+      name: "tone",
+      values: ["neutral", "positive", "critical", "caution", "progress"]
+    }],
+    visual: {
+      story: "stories/primitives/StatePanel.stories.tsx",
+      storyId: "primitives-statepanel--gallery",
+      tests: ["test/primitives/StatePanel.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Surface" },
+      { kind: "value", name: "RLY_SURFACE_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_SURFACE_VARIANTS" },
+      { kind: "type", name: "RlySurfaceElement" },
+      { kind: "type", name: "RlySurfacePadding" },
+      { kind: "type", name: "RlySurfaceShape" },
+      { kind: "type", name: "RlySurfaceTone" },
+      { kind: "type", name: "SurfaceProps" }
+    ],
+    name: "Surface",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Surface.tsx",
+    status: "stable",
+    styles: ["src/primitives/Surface.module.css"],
+    variants: [
+      { defaultValue: "primary", name: "tone", values: ["primary", "secondary", "tertiary"] },
+      { defaultValue: "card", name: "shape", values: ["card", "grouped"] },
+      { defaultValue: "default", name: "padding", values: ["none", "compact", "default", "spacious"] }
+    ],
+    visual: {
+      story: "stories/primitives/Surface.stories.tsx",
+      storyId: "primitives-surface--gallery",
+      tests: ["test/primitives/Surface.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "Text" },
+      { kind: "value", name: "RLY_TEXT_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_TEXT_VARIANTS" },
+      { kind: "type", name: "RlyTextElement" },
+      { kind: "type", name: "RlyTextTone" },
+      { kind: "type", name: "RlyTextVariant" },
+      { kind: "type", name: "TextProps" }
+    ],
+    name: "Text",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Text.tsx",
+    status: "stable",
+    styles: ["src/primitives/Text.module.css"],
+    variants: [
+      {
+        defaultValue: "body",
+        name: "variant",
+        values: ["verdict", "page-title", "section-title", "card-title", "body-large", "body", "label", "meta", "code"]
+      },
+      { defaultValue: "primary", name: "tone", values: ["primary", "secondary", "tertiary", "inherit"] }
+    ],
+    visual: {
+      story: "stories/primitives/Text.stories.tsx",
+      storyId: "primitives-text--gallery",
+      tests: ["test/primitives/Text.test.tsx"]
+    }
   }]
 } satisfies ComponentManifest

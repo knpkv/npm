@@ -1,0 +1,24 @@
+@layer rly.components {
+  .root {
+    background: var(--rly-color-surface-3);
+    border: 1px solid var(--rly-color-border-1);
+    box-sizing: border-box;
+    max-inline-size: 100%;
+  }
+
+  .text {
+    block-size: var(--rly-type-body-line-height);
+    border-radius: var(--rly-radius-tag);
+    inline-size: 100%;
+  }
+  .block {
+    border-radius: var(--rly-radius-control);
+    inline-size: 100%;
+    min-block-size: var(--rly-space-64);
+  }
+  .circle {
+    aspect-ratio: 1;
+    border-radius: var(--rly-radius-round);
+    inline-size: var(--rly-space-48);
+  }
+}

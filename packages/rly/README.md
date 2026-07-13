@@ -68,6 +68,34 @@ router. `PortalProvider` owns an in-tree target unless a custom target is
 supplied; explicit `null` never falls back to the global document body. `Icon`
 publishes an owned name and size vocabulary rather than vendor types.
 
+## Primitives
+
+The primitive layer stays deliberately small: typography, surfaces, dividers,
+buttons, state presentation, avatars, and deterministic loading geometry. Each
+component exposes an owned variant vocabulary and ordinary React DOM props
+without leaking Radix or icon-library types.
+
+```tsx
+import { Avatar, Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+
+export const Decision = () => (
+  <Surface padding="spacious" shape="grouped">
+    <Text as="h2" variant="section-title">
+      Ready for review
+    </Text>
+    <StateLabel label="Waiting for confirmation" tone="progress" />
+    <Avatar fallback="AK" label="Alex Kim" />
+    <Button leadingIcon="check" size="principal" variant="primary">
+      Approve changes
+    </Button>
+  </Surface>
+)
+```
+
+Import `@knpkv/rly/styles.css` once to load every primitive style through the
+stable component layer. Components never inject styles at runtime, and the
+published JavaScript remains safe to import during SSR.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

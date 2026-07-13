@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { type ComponentManifest, componentManifest, type ModuleEntry } from "../../component-manifest.js"
 import {
+  type ComponentManifest,
+  componentManifest,
+  type ComponentRecord,
+  type ModuleEntry
+} from "../../component-manifest.js"
+import {
+  componentStyleSources,
   findSourceDrift,
   renderContract,
   renderPackageJson,
@@ -14,10 +20,69 @@ const manifestWithEntries = (entries: ReadonlyArray<ModuleEntry>): ComponentMani
 })
 
 describe("component manifest contract", () => {
-  it("renders deterministically when entries are reordered", () => {
-    const reordered = manifestWithEntries([...componentManifest.entries].reverse())
+  it("renders deterministically when entries and components are reordered", () => {
+    const reordered: ComponentManifest = {
+      ...manifestWithEntries([...componentManifest.entries].reverse()),
+      components: [...componentManifest.components].reverse()
+    }
 
     expect([...renderContract(reordered)]).toEqual([...renderContract(componentManifest)])
+  })
+
+  it("projects manifest-owned component styles in deterministic build order", () => {
+    const manifest: ComponentManifest = {
+      ...componentManifest,
+      components: componentManifest.components.map((component): ComponentRecord => {
+        if (component.name === "GlobalStyles") {
+          return { ...component, styles: ["src/foundations/Zebra.module.css"] }
+        }
+        if (component.name === "Icon") {
+          return { ...component, styles: ["src/foundations/Alpha.module.css"] }
+        }
+        return component
+      })
+    }
+
+    expect(componentStyleSources(manifest)).toEqual([
+      "src/foundations/Alpha.module.css",
+      "src/foundations/Zebra.module.css",
+      "src/primitives/Avatar.module.css",
+      "src/primitives/Button.module.css",
+      "src/primitives/Divider.module.css",
+      "src/primitives/IconButton.module.css",
+      "src/primitives/Skeleton.module.css",
+      "src/primitives/StateLabel.module.css",
+      "src/primitives/StatePanel.module.css",
+      "src/primitives/Surface.module.css",
+      "src/primitives/Text.module.css"
+    ])
+  })
+
+  it("projects every R07 primitive stylesheet from the checked-in manifest", () => {
+    expect(componentStyleSources(componentManifest)).toEqual([
+      "src/primitives/Avatar.module.css",
+      "src/primitives/Button.module.css",
+      "src/primitives/Divider.module.css",
+      "src/primitives/IconButton.module.css",
+      "src/primitives/Skeleton.module.css",
+      "src/primitives/StateLabel.module.css",
+      "src/primitives/StatePanel.module.css",
+      "src/primitives/Surface.module.css",
+      "src/primitives/Text.module.css"
+    ])
+  })
+
+  it("rejects component styles owned by more than one manifest record", () => {
+    const manifest: ComponentManifest = {
+      ...componentManifest,
+      components: componentManifest.components.map((component): ComponentRecord =>
+        component.name === "GlobalStyles" || component.name === "Icon"
+          ? { ...component, styles: ["src/foundations/Shared.module.css"] }
+          : component
+      )
+    }
+
+    expect(() => componentStyleSources(manifest)).toThrow("Duplicate component style")
   })
 
   it("rejects duplicate entry identities", () => {
