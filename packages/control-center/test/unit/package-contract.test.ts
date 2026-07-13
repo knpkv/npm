@@ -31,17 +31,15 @@ describe("package contract", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
   })
 
-  it.effect("keeps the checked-in first-release manifest at 0.0.0", () =>
+  it.effect("keeps the checked-in manifest compatible with release versioning", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
       const source = yield* fs.readFileString(path.join(packageRoot, "package.json"))
-      const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Struct({ version: Schema.String })))(
-        source
-      )
+      const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(source)
       if (Result.isFailure(decoded)) return yield* Effect.die("package.json version could not be decoded")
-      expect(decoded.success.version).toBe("0.0.0")
+      expect(inspectPackageContract(decoded.success)).toEqual([])
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it("accepts the changeset-produced 0.1.0 version", () => {
