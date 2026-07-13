@@ -84,3 +84,20 @@ jobs:
           node-version: 24.10.0
       - run: pnpm build
       - run: pnpm test
+
+  browser:
+    name: Browser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 24.10.0
+      - name: Install bounded Chromium runtime
+        run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
+      - name: Test the rly catalog
+        run: pnpm --filter @knpkv/rly test:browser

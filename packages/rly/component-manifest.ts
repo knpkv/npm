@@ -28,6 +28,11 @@ export interface ComponentRecord {
     readonly name: string
     readonly values: readonly [string, ...ReadonlyArray<string>]
   }>
+  readonly visual: {
+    readonly story: `stories/${string}.stories.tsx`
+    readonly storyId: string
+    readonly tests: ReadonlyArray<`test/${string}.test.ts` | `test/${string}.test.tsx`>
+  }
 }
 
 /** Single source of truth for generated rly entries and component metadata. */

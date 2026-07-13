@@ -66,6 +66,11 @@ export const validateManifest = (manifest: ComponentManifest): void => {
   for (const component of manifest.components) {
     validatePath(component.source, "component source")
     for (const style of component.styles) validatePath(style, "component style")
+    validatePath(component.visual.story, "component story")
+    for (const test of component.visual.tests) validatePath(test, "component test")
+    if (component.visual.storyId.length === 0) {
+      throw new ContractError({ reason: `Missing story id for ${component.name}` })
+    }
     if (!entries.has(component.publicEntry)) {
       throw new ContractError({ reason: `Unknown component entry: ${component.publicEntry}` })
     }
@@ -111,6 +116,24 @@ export const renderPackageJson = (
   manifest: ComponentManifest,
   packageJson: Readonly<Record<string, unknown>>
 ): string => `${JSON.stringify({ ...packageJson, exports: renderPackageExports(manifest) }, null, 2)}\n`
+
+/** Render the visual classifier's exact component path catalog. */
+export const renderVisualCatalog = (manifest: ComponentManifest): string => {
+  validateManifest(manifest)
+  const components = [...manifest.components]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((component) => ({
+      name: component.name,
+      paths: {
+        source: `packages/rly/${component.source}`,
+        story: `packages/rly/${component.visual.story}`,
+        styles: [...component.styles].sort().map((style) => `packages/rly/${style}`),
+        tests: [...component.visual.tests].sort().map((test) => `packages/rly/${test}`)
+      },
+      storyId: component.visual.storyId
+    }))
+  return `${JSON.stringify({ schemaVersion: 1, components }, null, 2)}\n`
+}
 
 const renderBarrel = (
   entry: ModuleEntry,
@@ -176,6 +199,7 @@ export const renderContract = (manifest: ComponentManifest): ReadonlyMap<string,
   )
   const files = new Map<string, string>([
     ["generated/package-exports.json", `${JSON.stringify(renderPackageExports(manifest), null, 2)}\n`],
+    ["generated/visual-catalog.json", renderVisualCatalog(manifest)],
     [
       "generated/vite-entries.ts",
       `${GENERATED_HEADER}\nexport const moduleEntrySources = ${JSON.stringify(viteEntries, null, 2)} as const\n`

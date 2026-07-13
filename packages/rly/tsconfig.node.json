@@ -8,6 +8,20 @@
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.node.tsbuildinfo",
     "types": ["node", "vite/client", "vitest/globals"]
   },
-  "include": ["component-manifest.ts", "generated", "scripts", "src", "test", "vite.config.ts", "vitest.config.ts"],
+  "include": [
+    ".storybook/**/*",
+    "component-manifest.ts",
+    "generated",
+    "playwright.config.ts",
+    "scripts",
+    "src",
+    "stories",
+    "test",
+    "visual",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "vitest.shims.d.ts",
+    "vitest.storybook.config.ts"
+  ],
   "exclude": ["dist", "node_modules"]
 }

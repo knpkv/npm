@@ -54,6 +54,15 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - **Timeout**: 10 minutes
 - **Node Version**: 24.10.0
 
+#### Browser
+
+- Installs the Playwright-managed Chromium runtime and its system dependencies
+- Runs the `rly` Storybook interaction, accessibility, static-catalog, and visual-state checks
+- Serializes browser work to one worker through the package configuration
+- **Command**: `pnpm --filter @knpkv/rly test:browser`
+- **Timeout**: 15 minutes
+- **Node Version**: 24.10.0
+
 ---
 
 ### Snapshot (`snapshot.yml`)

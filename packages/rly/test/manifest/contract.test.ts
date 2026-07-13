@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { type ComponentManifest, componentManifest, type ModuleEntry } from "../../component-manifest.js"
-import { findSourceDrift, renderContract, renderPackageJson, validateManifest } from "../../scripts/contract.js"
+import {
+  findSourceDrift,
+  renderContract,
+  renderPackageJson,
+  renderVisualCatalog,
+  validateManifest
+} from "../../scripts/contract.js"
 
 const manifestWithEntries = (entries: ReadonlyArray<ModuleEntry>): ComponentManifest => ({
   ...componentManifest,
@@ -43,7 +49,12 @@ describe("component manifest contract", () => {
         source: "src/primitives/button.tsx",
         status: "stable",
         styles: [],
-        variants: [{ defaultValue: "quiet", name: "tone", values: ["strong"] }]
+        variants: [{ defaultValue: "quiet", name: "tone", values: ["strong"] }],
+        visual: {
+          story: "stories/primitives/Button.stories.tsx",
+          storyId: "primitives-button",
+          tests: ["test/primitives/Button.test.tsx"]
+        }
       }]
     }
 
@@ -65,7 +76,12 @@ describe("component manifest contract", () => {
         source: "src/primitives/button.tsx",
         status: "stable",
         styles: ["src/primitives/button.css"],
-        variants: []
+        variants: [],
+        visual: {
+          story: "stories/primitives/Button.stories.tsx",
+          storyId: "primitives-button",
+          tests: ["test/primitives/Button.test.tsx"]
+        }
       }]
     }
 
@@ -106,6 +122,42 @@ describe("component manifest contract", () => {
           types: "./dist/dts/index.d.ts"
         }
       }
+    })
+  })
+
+  it("projects exact repository paths for the fail-safe visual classifier", () => {
+    const manifest: ComponentManifest = {
+      ...componentManifest,
+      components: [{
+        category: "primitive",
+        exports: [{ kind: "value", name: "Button" }],
+        name: "Button",
+        publicEntry: "primitives",
+        registry: true,
+        source: "src/primitives/Button.tsx",
+        status: "stable",
+        styles: ["src/primitives/Button.module.css"],
+        variants: [],
+        visual: {
+          story: "stories/primitives/Button.stories.tsx",
+          storyId: "primitives-button",
+          tests: ["test/primitives/Button.test.tsx"]
+        }
+      }]
+    }
+
+    expect(JSON.parse(renderVisualCatalog(manifest))).toEqual({
+      components: [{
+        name: "Button",
+        paths: {
+          source: "packages/rly/src/primitives/Button.tsx",
+          story: "packages/rly/stories/primitives/Button.stories.tsx",
+          styles: ["packages/rly/src/primitives/Button.module.css"],
+          tests: ["packages/rly/test/primitives/Button.test.tsx"]
+        },
+        storyId: "primitives-button"
+      }],
+      schemaVersion: 1
     })
   })
 })
