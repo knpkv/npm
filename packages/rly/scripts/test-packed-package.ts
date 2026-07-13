@@ -1,0 +1,125 @@
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Console from "effect/Console"
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { componentManifest } from "../component-manifest.js"
+
+class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
+  readonly reason: string
+}> {}
+
+const PackageJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String, version: Schema.String }))
+
+const program = Effect.scoped(Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const packageRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
+  const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "rly-packed-consumer-" })
+
+  const run = (command: string, args: ReadonlyArray<string>, cwd: string) =>
+    spawner.string(ChildProcess.make(command, args, { cwd })).pipe(
+      Effect.mapError(() => new PackedPackageError({ reason: `${command} ${args.join(" ")} failed` }))
+    )
+
+  const packageSource = yield* fs.readFileString(path.join(packageRoot, "package.json"))
+  const packageJson = yield* Schema.decodeUnknownEffect(PackageJson)(packageSource).pipe(
+    Effect.mapError(() => new PackedPackageError({ reason: "Could not decode rly package identity" }))
+  )
+  yield* run("pnpm", ["pack", "--pack-destination", temporary], packageRoot)
+
+  const archiveName = `${packageJson.name.replace("@", "").replace("/", "-")}-${packageJson.version}.tgz`
+  const archive = path.join(temporary, archiveName)
+  const listing = yield* run("tar", ["-tf", archive], temporary)
+  const leaked = listing.split("\n").filter((entry) =>
+    /^package\/(?:src|test|scripts|generated|component-manifest\.ts)(?:\/|$)/.test(entry)
+  )
+  if (leaked.length > 0) {
+    return yield* Effect.fail(new PackedPackageError({ reason: `Packed source leaked: ${leaked.join(", ")}` }))
+  }
+
+  const consumer = path.join(temporary, "consumer")
+  const sourceDirectory = path.join(consumer, "src")
+  yield* fs.makeDirectory(sourceDirectory, { recursive: true })
+  yield* fs.writeFileString(
+    path.join(consumer, "package.json"),
+    `${
+      JSON.stringify(
+        {
+          private: true,
+          type: "module",
+          dependencies: {
+            "@knpkv/rly": `file:${archive}`,
+            react: "19.2.7",
+            "react-dom": "19.2.7"
+          },
+          devDependencies: { typescript: "6.0.3" }
+        },
+        null,
+        2
+      )
+    }\n`
+  )
+  yield* fs.writeFileString(
+    path.join(consumer, "tsconfig.json"),
+    `${
+      JSON.stringify(
+        {
+          compilerOptions: {
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            noEmit: true,
+            skipLibCheck: false,
+            strict: true,
+            target: "ES2022"
+          },
+          include: ["src"]
+        },
+        null,
+        2
+      )
+    }\n`
+  )
+
+  const imports = componentManifest.entries.map((entry, index) =>
+    `import * as Entry${index} from ${
+      JSON.stringify(entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`)
+    }`
+  )
+  const references = componentManifest.entries.map((_, index) => `Entry${index}`).join(", ")
+  yield* fs.writeFileString(path.join(sourceDirectory, "index.ts"), `${imports.join("\n")}\nvoid [${references}]\n`)
+
+  yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
+  yield* run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], consumer)
+  for (const entry of componentManifest.entries) {
+    const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
+    yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)
+  }
+  for (
+    const specifier of [
+      "@knpkv/rly/src/index.js",
+      "@knpkv/rly/dist/index.js",
+      "@knpkv/rly/components/button"
+    ]
+  ) {
+    const deepImportCheck =
+      `try { await import(${JSON.stringify(specifier)}); throw new Error('deep import succeeded') } `
+      + "catch (error) { if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error }"
+    yield* run("node", ["--input-type=module", "-e", deepImportCheck], consumer)
+  }
+
+  yield* Console.log(`packed consumer verified ${componentManifest.entries.length} public entries`)
+}))
+
+NodeRuntime.runMain(
+  program.pipe(
+    Effect.tapError((error) => Console.error(error)),
+    Effect.provide(NodeServices.layer)
+  ),
+  { disableErrorReporting: true }
+)

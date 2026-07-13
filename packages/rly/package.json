@@ -16,6 +16,26 @@
     ".": {
       "types": "./dist/dts/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./diff": {
+      "types": "./dist/dts/diff/index.d.ts",
+      "import": "./dist/diff/index.js"
+    },
+    "./foundations": {
+      "types": "./dist/dts/foundations/index.d.ts",
+      "import": "./dist/foundations/index.js"
+    },
+    "./patterns": {
+      "types": "./dist/dts/patterns/index.d.ts",
+      "import": "./dist/patterns/index.js"
+    },
+    "./primitives": {
+      "types": "./dist/dts/primitives/index.d.ts",
+      "import": "./dist/primitives/index.js"
+    },
+    "./tokens": {
+      "types": "./dist/dts/tokens/index.d.ts",
+      "import": "./dist/tokens/index.js"
     }
   },
   "publishConfig": {
@@ -30,25 +50,32 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "rimraf dist && vite build && tsc -b tsconfig.build.json --force",
-    "check": "tsc -b tsconfig.json",
+    "build": "pnpm codegen:check && rimraf dist && vite build && tsc -b tsconfig.build.json --force && pnpm validate:dist",
+    "check": "pnpm codegen:check && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
+    "codegen": "tsx scripts/generate-contract.ts write",
+    "codegen:check": "tsx scripts/generate-contract.ts check",
+    "lint": "eslint \"{src,test,scripts,generated}/**/*.{ts,tsx}\" component-manifest.ts",
     "prepack": "pnpm build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:pack": "tsx scripts/test-packed-package.ts",
+    "validate:dist": "tsx scripts/validate-dist.ts"
   },
   "peerDependencies": {
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.97",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "effect": "4.0.0-beta.97",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "rimraf": "^6.1.3",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.3",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
