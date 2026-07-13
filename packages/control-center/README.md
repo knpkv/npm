@@ -21,7 +21,9 @@ Development binds to `127.0.0.1:5173` by default. Secure LAN startup and pairing
 
 - `@knpkv/control-center` — browser-safe API and domain contracts
 - `@knpkv/control-center/api` — shared typed API contracts
-- `@knpkv/control-center/domain` — vendor-neutral domain contracts
+- `@knpkv/control-center/domain` — Schema-backed vendor-neutral domain contracts, including canonical IDs, people and agent roles, source freshness, and deterministic release identity
 - `@knpkv/control-center/server` — server composition
 
 The browser application is intentionally private. It consumes `@knpkv/rly`, while the root, API, domain, and server boundaries are mechanically prevented from importing the design system. Server composition is available only from the explicit `/server` entry. Production code is also forbidden from importing the approved prototype at runtime.
+
+Release Relay projections are domain data, not presentation state. Each release persists its `relay/v1` codename and three-symbol projection; readers validate that projection against the canonical release ID so a future relay algorithm can be introduced without silently changing existing release identity.

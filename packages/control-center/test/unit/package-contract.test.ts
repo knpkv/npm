@@ -10,6 +10,7 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   dependencies: {
     "@knpkv/rly": "workspace:^",
+    effect: "4.0.0-beta.97",
     react: "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -61,7 +62,7 @@ describe("package contract", () => {
       })
     ).toEqual(
       expect.arrayContaining([
-        "T01 runtime dependencies must remain the reviewed minimal set",
+        "runtime dependencies must remain the reviewed set",
         "package exports must contain only ., ./api, ./domain, ./server"
       ])
     )
