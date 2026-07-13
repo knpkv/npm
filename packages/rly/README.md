@@ -111,6 +111,47 @@ state, contain and restore focus, lock document scrolling, and become
 full-screen at compact widths. Titles are always visible and required, while
 motion is governed by the central theme tokens.
 
+## Provenance and collaborators
+
+The first product patterns keep source, freshness, and human responsibility as
+separate contracts. `ServiceMark` names CodeCommit, CodePipeline, Jira,
+Confluence, or Clockify with code-owned marks and provenance-only accents.
+`FreshnessStamp` presents application-supplied `current`, `cached`, `stale`,
+`missing`, or `unavailable` state without calculating time or thresholds.
+`EvidenceStamp` composes both concepts while keeping the evidence reference
+visible and wrap-safe.
+
+```tsx
+import { CollaboratorGroup, EvidenceStamp } from "@knpkv/rly/patterns"
+
+export const ReviewEvidence = () => (
+  <>
+    <EvidenceStamp
+      freshness="current"
+      freshnessDateTime="2026-07-13T14:00:00Z"
+      freshnessTime="Observed 2 minutes ago"
+      reference="evidence/codecommit/PR-482/revision/17"
+      service="codecommit"
+    />
+    <CollaboratorGroup
+      approvers={[{ id: "casey", name: "Casey Singh", role: "Merge approver" }]}
+      expandedCategories={[]}
+      heading="Pull request collaborators"
+      onCategoryExpandedChange={() => undefined}
+      reviewers={[{ id: "avery", name: "Avery Diaz", role: "Code reviewer" }]}
+    />
+  </>
+)
+```
+
+`Person` always renders a visible name and explicit role beside a decorative
+avatar. An optional `avatarSrc` must already be validated and proxied by the
+application; deterministic initials remain available when it is missing or
+fails. `PeopleStrip` uses controlled expansion and the exact `+N people`
+disclosure instead of an anonymous avatar stack. `CollaboratorGroup` exposes
+author, owner, reviewer, operator, and approver lanes without inferring roles
+from position.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

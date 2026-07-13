@@ -576,5 +576,141 @@ export const componentManifest = {
       storyId: "primitives-text--gallery",
       tests: ["test/primitives/Text.test.tsx"]
     }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "CollaboratorGroup" },
+      { kind: "value", name: "RLY_COLLABORATOR_GROUP_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_COLLABORATOR_GROUP_VARIANTS" },
+      { kind: "type", name: "CollaboratorGroupProps" },
+      { kind: "type", name: "RlyCollaboratorCategory" },
+      { kind: "type", name: "RlyCollaboratorGroupSize" }
+    ],
+    name: "CollaboratorGroup",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/CollaboratorGroup.tsx",
+    status: "stable",
+    styles: ["src/patterns/CollaboratorGroup.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/patterns/CollaboratorGroup.stories.tsx",
+      storyId: "patterns-collaboratorgroup--entity-roles",
+      tests: ["test/patterns/CollaboratorGroup.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "EvidenceStamp" },
+      { kind: "type", name: "EvidenceStampProps" }
+    ],
+    name: "EvidenceStamp",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/EvidenceStamp.tsx",
+    status: "stable",
+    styles: ["src/patterns/EvidenceStamp.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/EvidenceStamp.stories.tsx",
+      storyId: "patterns-evidencestamp--compact-forced-colors",
+      tests: ["test/patterns/EvidenceStamp.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "FreshnessStamp" },
+      { kind: "value", name: "RLY_FRESHNESS_STAMP_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_FRESHNESS_STAMP_VARIANTS" },
+      { kind: "type", name: "FreshnessStampProps" },
+      { kind: "type", name: "RlyFreshnessStampSize" },
+      { kind: "type", name: "RlyFreshnessState" }
+    ],
+    name: "FreshnessStamp",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/FreshnessStamp.tsx",
+    status: "stable",
+    styles: ["src/patterns/FreshnessStamp.module.css"],
+    variants: [
+      { name: "state", values: ["current", "cached", "stale", "missing", "unavailable"] },
+      { defaultValue: "default", name: "size", values: ["compact", "default"] }
+    ],
+    visual: {
+      story: "stories/patterns/FreshnessStamp.stories.tsx",
+      storyId: "patterns-freshnessstamp--matrix",
+      tests: ["test/patterns/FreshnessStamp.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "PeopleStrip" },
+      { kind: "value", name: "RLY_PEOPLE_STRIP_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_PEOPLE_STRIP_VARIANTS" },
+      { kind: "type", name: "PeopleStripProps" },
+      { kind: "type", name: "RlyPeopleStripSize" }
+    ],
+    name: "PeopleStrip",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/PeopleStrip.tsx",
+    status: "stable",
+    styles: ["src/patterns/PeopleStrip.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/patterns/PeopleStrip.stories.tsx",
+      storyId: "patterns-peoplestrip--overflow",
+      tests: ["test/patterns/PeopleStrip.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "Person" },
+      { kind: "value", name: "RLY_PERSON_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_PERSON_VARIANTS" },
+      { kind: "type", name: "PersonProps" },
+      { kind: "type", name: "RlyPerson" },
+      { kind: "type", name: "RlyPersonSize" }
+    ],
+    name: "Person",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/Person.tsx",
+    status: "stable",
+    styles: ["src/patterns/Person.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/patterns/Person.stories.tsx",
+      storyId: "patterns-person--states",
+      tests: ["test/patterns/Person.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "RLY_SERVICE_MARK_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_SERVICE_MARK_VARIANTS" },
+      { kind: "value", name: "ServiceMark" },
+      { kind: "type", name: "RlyService" },
+      { kind: "type", name: "RlyServiceMarkSize" },
+      { kind: "type", name: "ServiceMarkProps" }
+    ],
+    name: "ServiceMark",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/ServiceMark.tsx",
+    status: "stable",
+    styles: ["src/patterns/ServiceMark.module.css"],
+    variants: [
+      {
+        name: "service",
+        values: ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
+      },
+      { defaultValue: "default", name: "size", values: ["compact", "default"] }
+    ],
+    visual: {
+      story: "stories/patterns/ServiceMark.stories.tsx",
+      storyId: "patterns-servicemark--gallery",
+      tests: ["test/patterns/ServiceMark.test.tsx"]
+    }
   }]
 } satisfies ComponentManifest

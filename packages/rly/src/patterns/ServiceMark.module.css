@@ -1,0 +1,62 @@
+@layer rly.components {
+  .root {
+    align-items: center;
+    display: inline-grid;
+    gap: var(--rly-space-8);
+    grid-template-columns: 3px auto minmax(0, auto);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .rail {
+    align-self: stretch;
+    background: currentcolor;
+    border-radius: var(--rly-radius-round);
+    inline-size: 3px;
+    min-block-size: var(--rly-space-24);
+  }
+
+  .glyph {
+    display: block;
+  }
+
+  .name {
+    color: var(--rly-color-text-1);
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .compact {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .compact .glyph {
+    block-size: var(--rly-space-24);
+    inline-size: var(--rly-space-24);
+  }
+
+  .defaultSize {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+  .defaultSize .glyph {
+    block-size: var(--rly-space-32);
+    inline-size: var(--rly-space-32);
+  }
+
+  .codecommit {
+    color: var(--rly-color-service-codecommit);
+  }
+  .codepipeline {
+    color: var(--rly-color-service-codepipeline);
+  }
+  .jira {
+    color: var(--rly-color-service-jira);
+  }
+  .confluence {
+    color: var(--rly-color-service-confluence);
+  }
+  .clockify {
+    color: var(--rly-color-service-clockify);
+  }
+}

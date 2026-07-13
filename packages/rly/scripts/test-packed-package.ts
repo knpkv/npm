@@ -138,6 +138,14 @@ import {
   type RlyLinkComponent
 } from "@knpkv/rly/foundations"
 import { Button, Dialog, Field, Select, Sheet, Surface, Tabs, Text } from "@knpkv/rly/primitives"
+import {
+  CollaboratorGroup,
+  EvidenceStamp,
+  FreshnessStamp,
+  PeopleStrip,
+  Person,
+  ServiceMark
+} from "@knpkv/rly/patterns"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
@@ -166,6 +174,22 @@ const markup = renderToStaticMarkup(
       </Sheet.Root>
     </PortalProvider>
     <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
+    <ServiceMark service="jira" />
+    <FreshnessStamp dateTime="2026-07-13T14:00:00Z" state="current" time="Observed now" />
+    <EvidenceStamp freshness="current" reference="evidence/jira/OPS-428/revision/17" service="jira" />
+    <Person person={{ id: "avery", name: "Avery Diaz", role: "Release owner" }} />
+    <PeopleStrip
+      aria-label="Packed reviewers"
+      expanded={false}
+      onExpandedChange={() => undefined}
+      people={[{ id: "casey", name: "Casey Singh", role: "Code reviewer" }]}
+    />
+    <CollaboratorGroup
+      expandedCategories={[]}
+      heading="Packed collaborators"
+      onCategoryExpandedChange={() => undefined}
+      owners={[{ id: "blake", name: "Blake Kim", role: "Release owner" }]}
+    />
     <Tabs
       aria-label="Packed sections"
       items={[{ content: createElement("span", null, "Packed panel"), label: "Summary", value: "summary" }]}
@@ -174,6 +198,16 @@ const markup = renderToStaticMarkup(
 )
 if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
 if (!markup.includes("Packed primitive") || !markup.includes("<button")) throw new Error("Primitive SSR contract failed")
+if (
+  !markup.includes("Jira")
+  || !markup.includes("Observed now")
+  || !markup.includes("evidence/jira/OPS-428/revision/17")
+  || !markup.includes("Avery Diaz")
+  || !markup.includes("Casey Singh")
+  || !markup.includes("Packed collaborators")
+) {
+  throw new Error("Pattern SSR contract failed")
+}
 if (
   !markup.includes("packed-name")
   || !markup.includes('role="combobox"')

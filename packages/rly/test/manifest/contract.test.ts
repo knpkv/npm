@@ -46,6 +46,12 @@ describe("component manifest contract", () => {
     expect(componentStyleSources(manifest)).toEqual([
       "src/foundations/Alpha.module.css",
       "src/foundations/Zebra.module.css",
+      "src/patterns/CollaboratorGroup.module.css",
+      "src/patterns/EvidenceStamp.module.css",
+      "src/patterns/FreshnessStamp.module.css",
+      "src/patterns/PeopleStrip.module.css",
+      "src/patterns/Person.module.css",
+      "src/patterns/ServiceMark.module.css",
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
       "src/primitives/Dialog.module.css",
@@ -63,8 +69,14 @@ describe("component manifest contract", () => {
     ])
   })
 
-  it("projects every primitive stylesheet from the checked-in manifest", () => {
+  it("projects every component stylesheet from the checked-in manifest", () => {
     expect(componentStyleSources(componentManifest)).toEqual([
+      "src/patterns/CollaboratorGroup.module.css",
+      "src/patterns/EvidenceStamp.module.css",
+      "src/patterns/FreshnessStamp.module.css",
+      "src/patterns/PeopleStrip.module.css",
+      "src/patterns/Person.module.css",
+      "src/patterns/ServiceMark.module.css",
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
       "src/primitives/Dialog.module.css",

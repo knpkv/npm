@@ -29,3 +29,8 @@ safe portal composition, and compact responsive states.
 Add owned compound `Dialog` and `Sheet` overlays with visible accessible names,
 native inert isolation, focus containment and restoration, scroll locking,
 nested cleanup, compact full-screen layouts, and token-driven motion.
+
+Add presentation-only provenance and collaborator patterns for all five
+services, explicit freshness and evidence references, named human roles, safe
+avatar fallbacks, controlled `+N people` expansion, compact layouts, and
+forced-color-safe identity.

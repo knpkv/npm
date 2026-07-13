@@ -30,6 +30,20 @@
       "storyId": "primitives-button--states"
     },
     {
+      "name": "CollaboratorGroup",
+      "paths": {
+        "source": "packages/rly/src/patterns/CollaboratorGroup.tsx",
+        "story": "packages/rly/stories/patterns/CollaboratorGroup.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/CollaboratorGroup.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/CollaboratorGroup.test.tsx"
+        ]
+      },
+      "storyId": "patterns-collaboratorgroup--entity-roles"
+    },
+    {
       "name": "Dialog",
       "paths": {
         "source": "packages/rly/src/primitives/Dialog.tsx",
@@ -58,6 +72,20 @@
       "storyId": "primitives-divider--gallery"
     },
     {
+      "name": "EvidenceStamp",
+      "paths": {
+        "source": "packages/rly/src/patterns/EvidenceStamp.tsx",
+        "story": "packages/rly/stories/patterns/EvidenceStamp.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EvidenceStamp.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EvidenceStamp.test.tsx"
+        ]
+      },
+      "storyId": "patterns-evidencestamp--compact-forced-colors"
+    },
+    {
       "name": "Field",
       "paths": {
         "source": "packages/rly/src/primitives/Field.tsx",
@@ -70,6 +98,20 @@
         ]
       },
       "storyId": "primitives-field--states"
+    },
+    {
+      "name": "FreshnessStamp",
+      "paths": {
+        "source": "packages/rly/src/patterns/FreshnessStamp.tsx",
+        "story": "packages/rly/stories/patterns/FreshnessStamp.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/FreshnessStamp.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/FreshnessStamp.test.tsx"
+        ]
+      },
+      "storyId": "patterns-freshnessstamp--matrix"
     },
     {
       "name": "GlobalStyles",
@@ -122,6 +164,34 @@
       "storyId": "foundations-linkprovider--framework-bridge"
     },
     {
+      "name": "PeopleStrip",
+      "paths": {
+        "source": "packages/rly/src/patterns/PeopleStrip.tsx",
+        "story": "packages/rly/stories/patterns/PeopleStrip.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/PeopleStrip.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/PeopleStrip.test.tsx"
+        ]
+      },
+      "storyId": "patterns-peoplestrip--overflow"
+    },
+    {
+      "name": "Person",
+      "paths": {
+        "source": "packages/rly/src/patterns/Person.tsx",
+        "story": "packages/rly/stories/patterns/Person.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Person.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Person.test.tsx"
+        ]
+      },
+      "storyId": "patterns-person--states"
+    },
+    {
       "name": "PortalProvider",
       "paths": {
         "source": "packages/rly/src/foundations/PortalProvider.tsx",
@@ -158,6 +228,20 @@
         ]
       },
       "storyId": "foundations-tokens--overview"
+    },
+    {
+      "name": "ServiceMark",
+      "paths": {
+        "source": "packages/rly/src/patterns/ServiceMark.tsx",
+        "story": "packages/rly/stories/patterns/ServiceMark.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ServiceMark.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ServiceMark.test.tsx"
+        ]
+      },
+      "storyId": "patterns-servicemark--gallery"
     },
     {
       "name": "Sheet",

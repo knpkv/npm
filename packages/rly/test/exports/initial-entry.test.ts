@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 describe("public entries", () => {
-  it("exports foundations, primitives, and browser-safe semantic token names from the root", async () => {
+  it("exports foundations, patterns, primitives, and browser-safe semantic token names from the root", async () => {
     const Rly = await import("../../src/index.js")
 
     expect(Object.keys(Rly)).toEqual([
@@ -14,6 +14,22 @@ describe("public entries", () => {
       "PortalProvider",
       "RLY_THEME_NAMES",
       "ThemeProvider",
+      "CollaboratorGroup",
+      "RLY_COLLABORATOR_GROUP_DEFAULT_VARIANTS",
+      "RLY_COLLABORATOR_GROUP_VARIANTS",
+      "EvidenceStamp",
+      "FreshnessStamp",
+      "RLY_FRESHNESS_STAMP_DEFAULT_VARIANTS",
+      "RLY_FRESHNESS_STAMP_VARIANTS",
+      "PeopleStrip",
+      "RLY_PEOPLE_STRIP_DEFAULT_VARIANTS",
+      "RLY_PEOPLE_STRIP_VARIANTS",
+      "Person",
+      "RLY_PERSON_DEFAULT_VARIANTS",
+      "RLY_PERSON_VARIANTS",
+      "RLY_SERVICE_MARK_DEFAULT_VARIANTS",
+      "RLY_SERVICE_MARK_VARIANTS",
+      "ServiceMark",
       "Avatar",
       "RLY_AVATAR_DEFAULT_VARIANTS",
       "RLY_AVATAR_VARIANTS",
