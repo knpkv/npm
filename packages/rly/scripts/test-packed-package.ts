@@ -91,7 +91,7 @@ const program = Effect.scoped(Effect.gen(function*() {
             react: "19.2.7",
             "react-dom": "19.2.7"
           },
-          devDependencies: { typescript: "6.0.3" }
+          devDependencies: { typescript: "6.0.3", vite: "8.1.4" }
         },
         null,
         2
@@ -176,6 +176,55 @@ void [${references}]
   yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
   yield* run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], consumer)
   yield* run("node", ["dist/index.js"], consumer)
+  yield* fs.writeFileString(
+    path.join(sourceDirectory, "field-only.js"),
+    `import { Field } from "@knpkv/rly/primitives"\nglobalThis.__packedField = Field\n`
+  )
+  yield* fs.writeFileString(
+    path.join(consumer, "vite.field.config.mjs"),
+    `const root = new URL(".", import.meta.url).pathname
+export default {
+  build: {
+    lib: {
+      entry: new URL("src/field-only.js", import.meta.url).pathname,
+      fileName: "field-only",
+      formats: ["es"]
+    },
+    minify: false,
+    outDir: new URL("dist-field", import.meta.url).pathname,
+    rollupOptions: { external: ["react", "react/jsx-runtime"] }
+  },
+  logLevel: "silent",
+  root
+}
+`
+  )
+  const fieldBundleOutput = yield* run(
+    "pnpm",
+    ["exec", "vite", "build", "--config", "vite.field.config.mjs"],
+    consumer
+  )
+  const fieldBundleDirectory = path.join(consumer, "dist-field")
+  if (!(yield* fs.exists(fieldBundleDirectory))) {
+    return yield* Effect.fail(
+      new PackedPackageError({ reason: `Field-only bundle directory is missing: ${fieldBundleOutput}` })
+    )
+  }
+  const fieldBundleFile = (yield* fs.readDirectory(fieldBundleDirectory))
+    .find((file) => file.endsWith(".js") || file.endsWith(".mjs"))
+  if (fieldBundleFile === undefined) {
+    return yield* Effect.fail(new PackedPackageError({ reason: "Field-only bundle emitted no JavaScript" }))
+  }
+  const fieldOnlyBundle = yield* fs.readFileString(path.join(fieldBundleDirectory, fieldBundleFile))
+  for (const leakedImplementation of ["Select options must contain", "radix-ui", "lucide"]) {
+    if (fieldOnlyBundle.includes(leakedImplementation)) {
+      return yield* Effect.fail(
+        new PackedPackageError({
+          reason: `Field-only bundle retained unrelated implementation: ${leakedImplementation}`
+        })
+      )
+    }
+  }
   for (const entry of componentManifest.entries) {
     const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
     yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)

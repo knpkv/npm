@@ -207,4 +207,4 @@ const SelectImplementation = (componentProps: SelectProps): ReactElement => {
   )
 }
 
-export const Select = registerFieldControl(SelectImplementation)
+export const Select = /* @__PURE__ */ registerFieldControl(SelectImplementation)
