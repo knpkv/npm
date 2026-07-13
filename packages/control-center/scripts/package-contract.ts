@@ -1,6 +1,8 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+const semverPattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
 const ExportTargetSchema = Schema.Struct({
   import: Schema.String,
   types: Schema.String
@@ -13,7 +15,7 @@ const PackageManifestSchema = Schema.Struct({
   main: Schema.String,
   name: Schema.String,
   types: Schema.String,
-  version: Schema.String
+  version: Schema.String.check(Schema.isPattern(semverPattern))
 })
 
 const expectedExports: Readonly<Record<string, { readonly import: string; readonly types: string }>> = {
@@ -22,8 +24,6 @@ const expectedExports: Readonly<Record<string, { readonly import: string; readon
   "./domain": { import: "./dist/server/domain/index.js", types: "./dist/server/domain/index.d.ts" },
   "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" }
 }
-
-const semverPattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 
 const sameKeys = (record: Readonly<Record<string, unknown>>, expected: ReadonlyArray<string>): boolean => {
   const actual = Object.keys(record).sort()
@@ -38,7 +38,6 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   const manifest = decoded.success
   const violations: Array<string> = []
   if (manifest.name !== "@knpkv/control-center") violations.push("package name must be @knpkv/control-center")
-  if (!semverPattern.test(manifest.version)) violations.push("package version must be valid semantic versioning")
   if (manifest.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
   if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")

@@ -490,6 +490,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+      '@effect/vitest':
+        specifier: 4.0.0-beta.97
+        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
       '@playwright/test':
         specifier: 1.61.1
         version: 1.61.1

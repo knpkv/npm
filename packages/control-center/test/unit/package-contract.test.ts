@@ -1,10 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
 import { inspectPackageContract } from "../../scripts/package-contract.js"
 
 const validManifest = {
@@ -31,25 +31,27 @@ describe("package contract", () => {
     expect(inspectPackageContract(validManifest)).toEqual([])
   })
 
-  it("keeps the checked-in first-release manifest at 0.0.0", async () => {
-    const version = await Effect.runPromise(
-      Effect.gen(function*() {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
-        const source = yield* fs.readFileString(path.join(packageRoot, "package.json"))
-        const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Struct({ version: Schema.String })))(
-          source
-        )
-        if (Result.isFailure(decoded)) return yield* Effect.die("package.json version could not be decoded")
-        return decoded.success.version
-      }).pipe(Effect.provide(NodeServices.layer))
-    )
-    expect(version).toBe("0.0.0")
-  })
+  it.effect("keeps the checked-in first-release manifest at 0.0.0", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))
+      const source = yield* fs.readFileString(path.join(packageRoot, "package.json"))
+      const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Struct({ version: Schema.String })))(
+        source
+      )
+      if (Result.isFailure(decoded)) return yield* Effect.die("package.json version could not be decoded")
+      expect(decoded.success.version).toBe("0.0.0")
+    }).pipe(Effect.provide(NodeServices.layer)))
 
   it("accepts the changeset-produced 0.1.0 version", () => {
     expect(inspectPackageContract({ ...validManifest, version: "0.1.0" })).toEqual([])
+  })
+
+  it("rejects a version that is not semantic versioning", () => {
+    expect(inspectPackageContract({ ...validManifest, version: "next" })).toEqual([
+      "package manifest does not match its required structure"
+    ])
   })
 
   it("rejects copied dependencies and accidental browser/server exports", () => {
