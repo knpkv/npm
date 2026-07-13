@@ -1,4 +1,4 @@
-import { DateTime, Schema } from "effect"
+import { DateTime, Schema, SchemaTransformation } from "effect"
 
 import { PluginConnectionId } from "./identifiers.js"
 import { UtcTimestamp } from "./utcTimestamp.js"
@@ -44,15 +44,31 @@ export const NormalizationSchemaVersion = Schema.Number.check(
 /** Decoded normalization-schema version. */
 export type NormalizationSchemaVersion = typeof NormalizationSchemaVersion.Type
 
+const hasNoControlCharacters = (value: string): boolean =>
+  Array.from(value).every((character) => {
+    const codePoint = character.codePointAt(0)
+    return (
+      codePoint !== undefined &&
+      !((codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f))
+    )
+  })
+
+const SafeSourceUrlString = Schema.String.check(
+  Schema.makeFilter(hasNoControlCharacters, { expected: "a source URL without control characters" })
+)
+
 /** Safe navigable URL for an exact provider object, without embedded credentials. */
-export const SourceUrl = Schema.URLFromString.check(
-  Schema.makeFilter(
-    ({ protocol }) => protocol === "https:" || protocol === "http:",
-    { expected: "an HTTP or HTTPS source URL" }
-  ),
-  Schema.makeFilter(
-    ({ password, username }) => password.length === 0 && username.length === 0,
-    { expected: "a source URL without embedded credentials" }
+export const SourceUrl = SafeSourceUrlString.pipe(
+  Schema.decodeTo(Schema.URL, SchemaTransformation.urlFromString),
+  Schema.check(
+    Schema.makeFilter(
+      ({ protocol }) => protocol === "https:" || protocol === "http:",
+      { expected: "an HTTP or HTTPS source URL" }
+    ),
+    Schema.makeFilter(
+      ({ password, username }) => password.length === 0 && username.length === 0,
+      { expected: "a source URL without embedded credentials" }
+    )
   )
 )
 

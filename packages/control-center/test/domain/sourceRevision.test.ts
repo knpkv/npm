@@ -126,7 +126,14 @@ describe("SourceRevision", () => {
     "javascript:alert(1)",
     "data:text/html,unsafe",
     "file:///etc/passwd",
-    "https://user:secret@example.com/object"
+    "https://user:secret@example.com/object",
+    "https://example.com/a\nb",
+    "https://example.com/a\rb",
+    "https://example.com/a\tb",
+    "https://example.com/a\u0000b",
+    "https://example.com/a\u001fb",
+    "https://example.com/a\u007fb",
+    "https://example.com/a\u0085b"
   ])("rejects unsafe source URL %s", (sourceUrl) => {
     assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(SourceUrl)(sourceUrl)))
     assert.isTrue(
