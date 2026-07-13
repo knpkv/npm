@@ -144,14 +144,41 @@ import {
   FreshnessStamp,
   PeopleStrip,
   Person,
+  RelationshipChain,
+  RelationshipTable,
   ReleaseRelay,
   ServiceMark,
+  StageRail,
+  type RlyRelationship,
   Verdict
 } from "@knpkv/rly/patterns"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 const RouterLink: RlyLinkComponent = (props) => <a {...props} data-router-destination={props.href} />
+const packedRelationships = [{
+  id: "packed-jira-pr",
+  kind: "Implemented by",
+  direction: "forward",
+  lifecycle: "verified",
+  source: {
+    state: "present",
+    id: "packed-jira",
+    title: "RPS-6307",
+    reference: "Release candidate",
+    service: "jira",
+    href: "/jira/RPS-6307"
+  },
+  target: {
+    state: "present",
+    id: "packed-pr",
+    title: "PR #291",
+    reference: "7f4c9b1",
+    service: "codecommit",
+    href: "/codecommit/pulls/291"
+  },
+  evidence: "Packed relationship evidence"
+}] satisfies ReadonlyArray<RlyRelationship>
 const markup = renderToStaticMarkup(
   <ThemeProvider theme="dark">
     <Icon decorative name="check" />
@@ -192,6 +219,12 @@ const markup = renderToStaticMarkup(
       onCategoryExpandedChange={() => undefined}
       owners={[{ id: "blake", name: "Blake Kim", role: "Release owner" }]}
     />
+    <StageRail
+      heading="Packed pipeline stages"
+      stages={[{ id: "build", name: "Build", state: "Passed", tone: "positive" }]}
+    />
+    <RelationshipChain heading="Packed relationship chain" relationships={packedRelationships} />
+    <RelationshipTable heading="Packed relationship table" relationships={packedRelationships} />
     <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" symbolIndices={[6, 3, 7]} />
     <Verdict reason="Every required check matches the current head." tone="positive" verdict="Ready to ship." />
     <Tabs
@@ -209,6 +242,10 @@ if (
   || !markup.includes("Avery Diaz")
   || !markup.includes("Casey Singh")
   || !markup.includes("Packed collaborators")
+  || !markup.includes("Packed pipeline stages")
+  || !markup.includes("Packed relationship chain")
+  || !markup.includes("Packed relationship table")
+  || !markup.includes("Packed relationship evidence")
   || !markup.includes("Release relay, Copper Orbit, symbols bridge, wave, beacon.")
   || !markup.includes("Identity algorithm: relay/v1")
   || !markup.includes("Ready to ship.")

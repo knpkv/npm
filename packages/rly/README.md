@@ -185,6 +185,62 @@ wording, reason, and semantic tone; tone affects only the redundant icon,
 4px rail, and restrained reason context. Rly does not infer readiness from any
 of those values.
 
+## Delivery stages and relationships
+
+`StageRail` presents an application-supplied ordered stage list. Every stage
+keeps its visible name and state, with an optional reason and named owner. Empty
+and single-stage executions remain explicit, and the rail reflows vertically at
+compact widths instead of hiding stages in a horizontal scroller.
+
+`RelationshipChain` and `RelationshipTable` consume the same readonly
+relationship records. The chain is the glanceable visual sentence; the table is
+the equivalent native semantic ledger. Both preserve source, target, kind,
+direction, lifecycle, evidence, and people in the same record order.
+
+```tsx
+import { RelationshipChain, RelationshipTable, StageRail, type RlyRelationship } from "@knpkv/rly/patterns"
+
+const relationships = [
+  {
+    id: "jira-rps-6307-pr-291",
+    kind: "Implemented by",
+    direction: "forward",
+    lifecycle: "verified",
+    source: {
+      state: "present",
+      id: "jira-rps-6307",
+      title: "RPS-6307",
+      reference: "Release candidate",
+      service: "jira",
+      href: "/jira/RPS-6307"
+    },
+    target: {
+      state: "present",
+      id: "pr-291",
+      title: "PR #291",
+      reference: "7f4c9b1",
+      service: "codecommit",
+      href: "/codecommit/pulls/291"
+    },
+    evidence: "Head and issue link verified"
+  }
+] satisfies ReadonlyArray<RlyRelationship>
+
+export const DeliveryEvidence = () => (
+  <>
+    <StageRail heading="Pipeline stages" stages={[{ id: "build", name: "Build", state: "Passed", tone: "positive" }]} />
+    <RelationshipChain heading="Delivery relationships" relationships={relationships} />
+    <RelationshipTable heading="Delivery relationship ledger" relationships={relationships} />
+  </>
+)
+```
+
+A missing endpoint is a real discriminated record with a visible label and
+reason; it is never represented by an unexplained gap. Rly maps the seven
+persisted lifecycle values—missing, inferred, proposed, verified, governed,
+rejected, and superseded—to redundant icon-and-word presentation only. It does
+not infer links, confidence, readiness, or authorization.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

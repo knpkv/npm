@@ -5,6 +5,7 @@ import { RLY_PEOPLE_STRIP_VARIANTS } from "../../src/patterns/PeopleStrip.js"
 import { RLY_PERSON_VARIANTS } from "../../src/patterns/Person.js"
 import { RLY_RELEASE_RELAY_VARIANTS } from "../../src/patterns/ReleaseRelay.js"
 import { RLY_SERVICE_MARK_VARIANTS } from "../../src/patterns/ServiceMark.js"
+import { RLY_STAGE_RAIL_VARIANTS } from "../../src/patterns/StageRail.js"
 import { RLY_VERDICT_VARIANTS } from "../../src/patterns/Verdict.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
@@ -37,6 +38,7 @@ const catalogs: ReadonlyArray<VariantCatalog> = [
   RLY_PERSON_VARIANTS,
   RLY_RELEASE_RELAY_VARIANTS,
   RLY_SERVICE_MARK_VARIANTS,
+  RLY_STAGE_RAIL_VARIANTS,
   RLY_VERDICT_VARIANTS
 ]
 

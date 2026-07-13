@@ -40,3 +40,8 @@ code-owned SVG symbols, exact compact and hero geometry, runtime tuple
 validation, and golden persisted vectors. Add a giant neutral Verdict with a
 caller-supplied reason and semantic rail, without deriving release identity or
 readiness in the design system.
+
+Add semantic delivery-stage and relationship patterns with complete
+zero-to-many cardinality, explicit missing endpoints, caller-supplied lifecycle
+and direction, equivalent chain and native-table views, deterministic keyboard
+order, and compact forced-color-safe reflow.

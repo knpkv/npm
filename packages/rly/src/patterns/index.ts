@@ -16,6 +16,22 @@ export type { PeopleStripProps, RlyPeopleStripSize } from "./PeopleStrip.js"
 export { Person, RLY_PERSON_DEFAULT_VARIANTS, RLY_PERSON_VARIANTS } from "./Person.js"
 export type { PersonProps, RlyPerson, RlyPersonSize } from "./Person.js"
 export {
+  RelationshipChain,
+  RLY_RELATIONSHIP_DIRECTION_PRESENTATION,
+  RLY_RELATIONSHIP_LIFECYCLE_PRESENTATION
+} from "./RelationshipChain.js"
+export type {
+  RelationshipChainProps,
+  RlyMissingRelationshipEndpoint,
+  RlyPresentRelationshipEndpoint,
+  RlyRelationship,
+  RlyRelationshipDirection,
+  RlyRelationshipEndpoint,
+  RlyRelationshipLifecycle
+} from "./RelationshipChain.js"
+export { RelationshipTable } from "./RelationshipTable.js"
+export type { RelationshipTableProps } from "./RelationshipTable.js"
+export {
   ReleaseRelay,
   RLY_RELEASE_RELAY_DEFAULT_VARIANTS,
   RLY_RELEASE_RELAY_SYMBOLS,
@@ -30,5 +46,7 @@ export type {
 } from "./ReleaseRelay.js"
 export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMark } from "./ServiceMark.js"
 export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
+export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
+export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
 export { RLY_VERDICT_VARIANTS, Verdict } from "./Verdict.js"
 export type { RlyVerdictTone, VerdictProps } from "./Verdict.js"

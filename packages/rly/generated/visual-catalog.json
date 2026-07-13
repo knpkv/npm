@@ -204,6 +204,34 @@
       "storyId": "foundations-portalprovider--custom-target"
     },
     {
+      "name": "RelationshipChain",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelationshipChain.tsx",
+        "story": "packages/rly/stories/patterns/RelationshipChain.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelationshipChain.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelationshipChain.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relationshipchain--cardinalities"
+    },
+    {
+      "name": "RelationshipTable",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelationshipTable.tsx",
+        "story": "packages/rly/stories/patterns/RelationshipTable.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelationshipTable.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelationshipTable.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relationshiptable--equivalence"
+    },
+    {
       "name": "ReleaseRelay",
       "paths": {
         "source": "packages/rly/src/patterns/ReleaseRelay.tsx",
@@ -284,6 +312,20 @@
         ]
       },
       "storyId": "primitives-skeleton--gallery"
+    },
+    {
+      "name": "StageRail",
+      "paths": {
+        "source": "packages/rly/src/patterns/StageRail.tsx",
+        "story": "packages/rly/stories/patterns/StageRail.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/StageRail.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/StageRail.test.tsx"
+        ]
+      },
+      "storyId": "patterns-stagerail--states"
     },
     {
       "name": "StateLabel",

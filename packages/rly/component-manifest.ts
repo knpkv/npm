@@ -712,6 +712,50 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "RLY_RELATIONSHIP_DIRECTION_PRESENTATION" },
+      { kind: "value", name: "RLY_RELATIONSHIP_LIFECYCLE_PRESENTATION" },
+      { kind: "value", name: "RelationshipChain" },
+      { kind: "type", name: "RelationshipChainProps" },
+      { kind: "type", name: "RlyMissingRelationshipEndpoint" },
+      { kind: "type", name: "RlyPresentRelationshipEndpoint" },
+      { kind: "type", name: "RlyRelationship" },
+      { kind: "type", name: "RlyRelationshipDirection" },
+      { kind: "type", name: "RlyRelationshipEndpoint" },
+      { kind: "type", name: "RlyRelationshipLifecycle" }
+    ],
+    name: "RelationshipChain",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/RelationshipChain.tsx",
+    status: "stable",
+    styles: ["src/patterns/RelationshipChain.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/RelationshipChain.stories.tsx",
+      storyId: "patterns-relationshipchain--cardinalities",
+      tests: ["test/patterns/RelationshipChain.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "RelationshipTable" },
+      { kind: "type", name: "RelationshipTableProps" }
+    ],
+    name: "RelationshipTable",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/RelationshipTable.tsx",
+    status: "stable",
+    styles: ["src/patterns/RelationshipTable.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/RelationshipTable.stories.tsx",
+      storyId: "patterns-relationshiptable--equivalence",
+      tests: ["test/patterns/RelationshipTable.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "RLY_SERVICE_MARK_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_SERVICE_MARK_VARIANTS" },
       { kind: "value", name: "ServiceMark" },
@@ -736,6 +780,28 @@ export const componentManifest = {
       story: "stories/patterns/ServiceMark.stories.tsx",
       storyId: "patterns-servicemark--gallery",
       tests: ["test/patterns/ServiceMark.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "RLY_STAGE_RAIL_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_STAGE_RAIL_VARIANTS" },
+      { kind: "value", name: "StageRail" },
+      { kind: "type", name: "RlyStage" },
+      { kind: "type", name: "RlyStageRailSize" },
+      { kind: "type", name: "StageRailProps" }
+    ],
+    name: "StageRail",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/StageRail.tsx",
+    status: "stable",
+    styles: ["src/patterns/StageRail.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/patterns/StageRail.stories.tsx",
+      storyId: "patterns-stagerail--states",
+      tests: ["test/patterns/StageRail.test.tsx"]
     }
   }, {
     category: "pattern",
