@@ -43,7 +43,7 @@ export default defineConfig({
       formats: ["es"]
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime"]
+      external: ["lucide-react", "radix-ui", "react", "react-dom", "react/jsx-runtime"]
     },
     sourcemap: true
   }

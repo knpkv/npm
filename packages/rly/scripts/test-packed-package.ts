@@ -86,6 +86,7 @@ const program = Effect.scoped(Effect.gen(function*() {
       JSON.stringify(
         {
           compilerOptions: {
+            jsx: "react-jsx",
             module: "NodeNext",
             moduleResolution: "NodeNext",
             noEmit: true,
@@ -107,7 +108,30 @@ const program = Effect.scoped(Effect.gen(function*() {
     }`
   )
   const references = componentManifest.entries.map((_, index) => `Entry${index}`).join(", ")
-  yield* fs.writeFileString(path.join(sourceDirectory, "index.ts"), `${imports.join("\n")}\nvoid [${references}]\n`)
+  yield* fs.writeFileString(
+    path.join(sourceDirectory, "index.tsx"),
+    `${imports.join("\n")}
+import {
+  Icon,
+  LinkProvider,
+  PortalProvider,
+  ThemeProvider,
+  type RlyLinkComponent
+} from "@knpkv/rly/foundations"
+import { renderToStaticMarkup } from "react-dom/server"
+
+const RouterLink: RlyLinkComponent = (props) => <a {...props} data-router-destination={props.href} />
+const markup = renderToStaticMarkup(
+  <ThemeProvider theme="dark">
+    <Icon decorative name="check" />
+    <LinkProvider component={RouterLink}><span>Link bridge</span></LinkProvider>
+    <PortalProvider container={null}><span>Portal policy</span></PortalProvider>
+  </ThemeProvider>
+)
+if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
+void [${references}]
+`
+  )
 
   yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
   yield* run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], consumer)

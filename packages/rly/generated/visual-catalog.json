@@ -2,6 +2,54 @@
   "schemaVersion": 1,
   "components": [
     {
+      "name": "GlobalStyles",
+      "paths": {
+        "source": "packages/rly/src/foundations/GlobalStyles.tsx",
+        "story": "packages/rly/stories/foundations/GlobalStyles.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/GlobalStyles.test.tsx"
+        ]
+      },
+      "storyId": "foundations-globalstyles--scope"
+    },
+    {
+      "name": "Icon",
+      "paths": {
+        "source": "packages/rly/src/foundations/Icon.tsx",
+        "story": "packages/rly/stories/foundations/Icon.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/Icon.test.tsx"
+        ]
+      },
+      "storyId": "foundations-icon--catalog"
+    },
+    {
+      "name": "LinkProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/LinkProvider.tsx",
+        "story": "packages/rly/stories/foundations/LinkProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/LinkProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-linkprovider--framework-bridge"
+    },
+    {
+      "name": "PortalProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/PortalProvider.tsx",
+        "story": "packages/rly/stories/foundations/PortalProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/PortalProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-portalprovider--custom-target"
+    },
+    {
       "name": "SemanticTokens",
       "paths": {
         "source": "packages/rly/src/tokens/semantic-tokens.ts",
@@ -12,6 +60,18 @@
         ]
       },
       "storyId": "foundations-tokens--overview"
+    },
+    {
+      "name": "ThemeProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/ThemeProvider.tsx",
+        "story": "packages/rly/stories/foundations/ThemeProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/ThemeProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-themeprovider--controlled"
     }
   ]
 }

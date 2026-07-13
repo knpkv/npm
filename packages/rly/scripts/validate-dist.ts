@@ -49,6 +49,18 @@ const program = Effect.gen(function*() {
     if (!(yield* fs.exists(target))) failures.push(`missing ${asset.output}`)
     else if ((yield* fs.stat(target)).type !== "File") failures.push(`not a file ${asset.output}`)
   }
+  for (const component of componentManifest.components) {
+    const declaration = component.source.replace(/^src\//, "dist/dts/").replace(/\.tsx?$/, ".d.ts")
+    const target = path.join(packageRoot, declaration)
+    if (!(yield* fs.exists(target))) {
+      failures.push(`missing ${declaration}`)
+      continue
+    }
+    const source = yield* fs.readFileString(target)
+    if (/from ["'](?:lucide-react|radix-ui)["']/.test(source)) {
+      failures.push(`implementation type leaked through ${declaration}`)
+    }
+  }
   for (
     const artifact of [
       "dist/base.css",

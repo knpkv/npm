@@ -102,6 +102,8 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.2.9",
-    "@fontsource-variable/geist-mono": "5.2.8"
+    "@fontsource-variable/geist-mono": "5.2.8",
+    "lucide-react": "1.24.0",
+    "radix-ui": "1.6.2"
   }
 }

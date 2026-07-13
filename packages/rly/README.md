@@ -6,7 +6,9 @@ The package is intentionally application-independent: it contains no vendor clie
 
 ## Status
 
-The package contract is established at `0.0.0` while its first `0.1.0` component surface is built. Public components and themes will be added behind explicit exports.
+The package contract is established at `0.0.0` while its first `0.1.0`
+component surface is built. Tokens and framework-neutral foundations are
+available behind explicit exports.
 
 ## Tokens and global styles
 
@@ -38,6 +40,33 @@ pnpm --filter @knpkv/rly lint:colors
 
 The color-policy lint rejects raw component colors, primitive palette
 variables, and component-local theme/media overrides.
+
+## Foundations
+
+Import the stylesheet once, then establish an explicit controlled theme scope:
+
+```tsx
+import { Icon, LinkProvider, PortalProvider, ThemeProvider, type RlyLinkProps } from "@knpkv/rly"
+
+const AppLink = ({ href, ...props }: RlyLinkProps) => <a {...props} href={href} />
+
+export const App = () => (
+  <ThemeProvider theme="system">
+    <LinkProvider component={AppLink}>
+      <PortalProvider>
+        <Icon decorative name="check" />
+        Ready
+      </PortalProvider>
+    </LinkProvider>
+  </ThemeProvider>
+)
+```
+
+`ThemeProvider` is controlled and performs no storage or preference reads.
+`LinkProvider` accepts an application-owned anchor bridge without importing a
+router. `PortalProvider` owns an in-tree target unless a custom target is
+supplied; explicit `null` never falls back to the global document body. `Icon`
+publishes an owned name and size vocabulary rather than vendor types.
 
 ## Component catalog
 

@@ -11,3 +11,7 @@ classification.
 Add generated semantic color, typography, spacing, shape, and motion tokens;
 light, dark, forced-color, and reduced-motion themes; self-hosted Geist font
 assets; contrast validation; and a fail-closed component color policy.
+
+Add SSR-safe `GlobalStyles`, controlled `ThemeProvider`, owned accessible
+`Icon`, framework-neutral `LinkProvider`, and custom-target `PortalProvider`
+foundations without exposing router, Radix, or icon-library types.
