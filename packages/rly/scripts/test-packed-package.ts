@@ -234,7 +234,7 @@ export default {
       "Select options must contain",
       "radix-ui",
       "lucide",
-      "registeredFieldControls.add"
+      ".add("
     ]
   ) {
     if (fieldOnlyBundle.includes(leakedImplementation)) {
