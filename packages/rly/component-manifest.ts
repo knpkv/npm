@@ -303,6 +303,28 @@ export const componentManifest = {
   }, {
     category: "primitive",
     exports: [
+      { kind: "value", name: "Field" },
+      { kind: "value", name: "RLY_FIELD_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_FIELD_VARIANTS" },
+      { kind: "type", name: "FieldControlProps" },
+      { kind: "type", name: "FieldProps" },
+      { kind: "type", name: "RlyFieldSize" }
+    ],
+    name: "Field",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Field.tsx",
+    status: "stable",
+    styles: ["src/primitives/Field.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/primitives/Field.stories.tsx",
+      storyId: "primitives-field--states",
+      tests: ["test/primitives/Field.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
       { kind: "value", name: "IconButton" },
       { kind: "value", name: "RLY_ICON_BUTTON_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_ICON_BUTTON_VARIANTS" },
@@ -324,6 +346,28 @@ export const componentManifest = {
       story: "stories/primitives/IconButton.stories.tsx",
       storyId: "primitives-iconbutton--states",
       tests: ["test/primitives/IconButton.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "RLY_SELECT_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_SELECT_VARIANTS" },
+      { kind: "value", name: "Select" },
+      { kind: "type", name: "RlySelectOption" },
+      { kind: "type", name: "RlySelectSize" },
+      { kind: "type", name: "SelectProps" }
+    ],
+    name: "Select",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Select.tsx",
+    status: "stable",
+    styles: ["src/primitives/Select.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+    visual: {
+      story: "stories/primitives/Select.stories.tsx",
+      storyId: "primitives-select--states",
+      tests: ["test/primitives/Select.test.tsx"]
     }
   }, {
     category: "primitive",
@@ -428,6 +472,29 @@ export const componentManifest = {
       story: "stories/primitives/Surface.stories.tsx",
       storyId: "primitives-surface--gallery",
       tests: ["test/primitives/Surface.test.tsx"]
+    }
+  }, {
+    category: "primitive",
+    exports: [
+      { kind: "value", name: "RLY_TABS_DEFAULT_VARIANTS" },
+      { kind: "value", name: "RLY_TABS_VARIANTS" },
+      { kind: "value", name: "Tabs" },
+      { kind: "type", name: "RlyTabItem" },
+      { kind: "type", name: "RlyTabsDirection" },
+      { kind: "type", name: "RlyTabsSize" },
+      { kind: "type", name: "TabsProps" }
+    ],
+    name: "Tabs",
+    publicEntry: "primitives",
+    registry: true,
+    source: "src/primitives/Tabs.tsx",
+    status: "stable",
+    styles: ["src/primitives/Tabs.module.css"],
+    variants: [{ defaultValue: "default", name: "size", values: ["default", "large"] }],
+    visual: {
+      story: "stories/primitives/Tabs.stories.tsx",
+      storyId: "primitives-tabs--interaction",
+      tests: ["test/primitives/Tabs.test.tsx"]
     }
   }, {
     category: "primitive",

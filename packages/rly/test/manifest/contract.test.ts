@@ -49,25 +49,31 @@ describe("component manifest contract", () => {
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
       "src/primitives/Divider.module.css",
+      "src/primitives/Field.module.css",
       "src/primitives/IconButton.module.css",
+      "src/primitives/Select.module.css",
       "src/primitives/Skeleton.module.css",
       "src/primitives/StateLabel.module.css",
       "src/primitives/StatePanel.module.css",
       "src/primitives/Surface.module.css",
+      "src/primitives/Tabs.module.css",
       "src/primitives/Text.module.css"
     ])
   })
 
-  it("projects every R07 primitive stylesheet from the checked-in manifest", () => {
+  it("projects every primitive stylesheet from the checked-in manifest", () => {
     expect(componentStyleSources(componentManifest)).toEqual([
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
       "src/primitives/Divider.module.css",
+      "src/primitives/Field.module.css",
       "src/primitives/IconButton.module.css",
+      "src/primitives/Select.module.css",
       "src/primitives/Skeleton.module.css",
       "src/primitives/StateLabel.module.css",
       "src/primitives/StatePanel.module.css",
       "src/primitives/Surface.module.css",
+      "src/primitives/Tabs.module.css",
       "src/primitives/Text.module.css"
     ])
   })

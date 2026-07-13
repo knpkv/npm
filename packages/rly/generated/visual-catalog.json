@@ -44,6 +44,20 @@
       "storyId": "primitives-divider--gallery"
     },
     {
+      "name": "Field",
+      "paths": {
+        "source": "packages/rly/src/primitives/Field.tsx",
+        "story": "packages/rly/stories/primitives/Field.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Field.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Field.test.tsx"
+        ]
+      },
+      "storyId": "primitives-field--states"
+    },
+    {
       "name": "GlobalStyles",
       "paths": {
         "source": "packages/rly/src/foundations/GlobalStyles.tsx",
@@ -104,6 +118,20 @@
         ]
       },
       "storyId": "foundations-portalprovider--custom-target"
+    },
+    {
+      "name": "Select",
+      "paths": {
+        "source": "packages/rly/src/primitives/Select.tsx",
+        "story": "packages/rly/stories/primitives/Select.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Select.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Select.test.tsx"
+        ]
+      },
+      "storyId": "primitives-select--states"
     },
     {
       "name": "SemanticTokens",
@@ -172,6 +200,20 @@
         ]
       },
       "storyId": "primitives-surface--gallery"
+    },
+    {
+      "name": "Tabs",
+      "paths": {
+        "source": "packages/rly/src/primitives/Tabs.tsx",
+        "story": "packages/rly/stories/primitives/Tabs.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Tabs.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Tabs.test.tsx"
+        ]
+      },
+      "storyId": "primitives-tabs--interaction"
     },
     {
       "name": "Text",

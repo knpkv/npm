@@ -137,7 +137,8 @@ import {
   ThemeProvider,
   type RlyLinkComponent
 } from "@knpkv/rly/foundations"
-import { Button, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Field, Select, Surface, Tabs, Text } from "@knpkv/rly/primitives"
+import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 const RouterLink: RlyLinkComponent = (props) => <a {...props} data-router-destination={props.href} />
@@ -145,12 +146,24 @@ const markup = renderToStaticMarkup(
   <ThemeProvider theme="dark">
     <Icon decorative name="check" />
     <LinkProvider component={RouterLink}><span>Link bridge</span></LinkProvider>
-    <PortalProvider container={null}><span>Portal policy</span></PortalProvider>
+    <PortalProvider container={null}>
+      <Field controlId="packed-name" label="Release name">
+        {(controlProps) => createElement("input", controlProps)}
+      </Field>
+      <Select aria-label="Environment" options={[{ label: "Staging", value: "staging" }]} />
+    </PortalProvider>
     <Surface><Text>Packed primitive</Text><Button>Continue</Button></Surface>
+    <Tabs
+      aria-label="Packed sections"
+      items={[{ content: createElement("span", null, "Packed panel"), label: "Summary", value: "summary" }]}
+    />
   </ThemeProvider>
 )
 if (!markup.includes('data-theme="dark"')) throw new Error("Foundation SSR contract failed")
 if (!markup.includes("Packed primitive") || !markup.includes("<button")) throw new Error("Primitive SSR contract failed")
+if (!markup.includes("packed-name") || !markup.includes('role="combobox"') || !markup.includes('role="tablist"')) {
+  throw new Error("Controlled primitive SSR contract failed")
+}
 void [${references}]
 `
   )

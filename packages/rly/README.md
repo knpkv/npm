@@ -7,8 +7,8 @@ The package is intentionally application-independent: it contains no vendor clie
 ## Status
 
 The package contract is established at `0.0.0` while its first `0.1.0`
-component surface is built. Tokens and framework-neutral foundations are
-available behind explicit exports.
+component surface is built. Tokens, framework-neutral foundations, and the
+first controlled interaction primitives are available behind explicit exports.
 
 ## Tokens and global styles
 
@@ -71,9 +71,9 @@ publishes an owned name and size vocabulary rather than vendor types.
 ## Primitives
 
 The primitive layer stays deliberately small: typography, surfaces, dividers,
-buttons, state presentation, avatars, and deterministic loading geometry. Each
-component exposes an owned variant vocabulary and ordinary React DOM props
-without leaking Radix or icon-library types.
+buttons, state presentation, avatars, deterministic loading geometry, tabs,
+and form controls. Each component exposes an owned variant vocabulary and
+ordinary React DOM props without leaking Radix or icon-library types.
 
 ```tsx
 import { Avatar, Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
@@ -95,6 +95,13 @@ export const Decision = () => (
 Import `@knpkv/rly/styles.css` once to load every primitive style through the
 stable component layer. Components never inject styles at runtime, and the
 published JavaScript remains safe to import during SSR.
+
+Interactive state is controlled first. `Tabs` and `Select` accept an optional
+default only for reusable local ownership; controlled values require their
+change callback. `Field` supplies the exact id and ARIA props to a
+consumer-owned input, textarea, or `Select` through its render callback, so it
+can connect visible labels, descriptions, required state, and announced errors
+without cloning a framework-specific control.
 
 ## Component catalog
 

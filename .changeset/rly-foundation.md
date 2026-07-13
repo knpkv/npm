@@ -21,3 +21,7 @@ Add the first nine owned primitives: `Text`, `Surface`, `Divider`, `Button`,
 semantic CSS as one deterministic component layer with no runtime injection,
 and cover variant, accessibility, interaction, SSR, packed-consumer, and
 responsive Storybook contracts.
+
+Add controlled-first `Tabs`, `Field`, and `Select` primitives with owned public
+types, Radix-internal keyboard behavior, explicit labeling and error semantics,
+safe portal composition, and compact responsive states.
