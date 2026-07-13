@@ -1,6 +1,6 @@
 import * as TypeScript from "typescript"
 import { describe, expect, it } from "vitest"
-import { componentManifest } from "../../component-manifest.js"
+import { type ComponentManifest, componentManifest } from "../../component-manifest.js"
 import { findRegistrySourceFailures } from "../../scripts/registry/source-validation.js"
 
 const packageRoot = new URL("../../", import.meta.url).pathname
@@ -21,6 +21,15 @@ const registryFiles = (): ReadonlyMap<string, string> => {
   }
   return files
 }
+
+const withDiffCodeCoverageStory = (storyId: string): ComponentManifest => ({
+  ...componentManifest,
+  components: componentManifest.components.map((component) =>
+    component.name === "DiffCodeView"
+      ? { ...component, visual: { ...component.visual, coverageStoryIds: [storyId] } }
+      : component
+  )
+})
 
 describe("registry source validation", () => {
   it("accepts complete source, style, story, test, docs, a11y, and variant coverage", () => {
@@ -66,6 +75,30 @@ describe("registry source validation", () => {
         "story diff-diffcodeview--workbench does not cover virtualization=strict"
       ])
     )
+  })
+
+  it("does not credit story names or unrelated object-key bindings as rendered coverage", () => {
+    const storyPath = "stories/diff/DiffCodeView.stories.tsx"
+    for (
+      const decoy of [
+        `export const StackedStrict: Story = { args: {}, play: async () => undefined }`,
+        `const args = { mode: "stacked", virtualization: "strict" }\nexport const CoverageDecoy: Story = { args: {}, play: async () => undefined }`
+      ]
+    ) {
+      const files = new Map(registryFiles())
+      const story = files.get(storyPath)
+      if (story === undefined) throw new Error("DiffCodeView story fixture is missing")
+      files.set(storyPath, `${story}\n${decoy}\n`)
+      const storyId = decoy.includes("StackedStrict")
+        ? "diff-diffcodeview--stacked-strict"
+        : "diff-diffcodeview--coverage-decoy"
+      expect(findRegistrySourceFailures(withDiffCodeCoverageStory(storyId), files)).toEqual(
+        expect.arrayContaining([
+          "story diff-diffcodeview--workbench does not cover mode=stacked",
+          "story diff-diffcodeview--workbench does not cover virtualization=strict"
+        ])
+      )
+    }
   })
 
   it("rejects undeclared browser dependencies, host APIs, manifest dependencies, and relative escapes", () => {

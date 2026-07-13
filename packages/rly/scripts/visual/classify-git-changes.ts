@@ -24,7 +24,8 @@ const VisualCatalogJson = Schema.fromJsonString(Schema.Struct({
       styles: Schema.Array(Schema.String),
       tests: Schema.Array(Schema.String)
     }),
-    storyId: Schema.String
+    storyId: Schema.String,
+    storyIds: Schema.Array(Schema.String)
   })),
   schemaVersion: Schema.Literal(1)
 }))

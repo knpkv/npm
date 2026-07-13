@@ -97,7 +97,12 @@ export const Overflow: Story = {
 
     const narrow = canvasElement.querySelector<HTMLElement>("[data-people-narrow]")
     if (narrow === null) throw new Error("PeopleStrip narrow story boundary did not mount")
+    await expect(canvasElement.querySelector("[data-registry-state='overflow']")).not.toBeNull()
     await expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
   },
-  render: () => <ControlledPeopleStrip />
+  render: () => (
+    <div data-registry-state="overflow">
+      <ControlledPeopleStrip />
+    </div>
+  )
 }

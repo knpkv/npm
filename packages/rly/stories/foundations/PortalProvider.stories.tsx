@@ -46,12 +46,18 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const CustomTarget: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvasElement.querySelector("[data-registry-state='custom-target']")).not.toBeNull()
     const trigger = canvas.getByRole("button", { name: "Open custom portal" })
     await userEvent.click(trigger)
     const target = canvas.getByTestId("portal-target")
     await expect(within(target).getByRole("dialog", { name: "Portal policy" })).toBeVisible()
     await userEvent.keyboard("{Escape}")
     await expect(trigger).toHaveFocus()
-  }
+  },
+  render: () => (
+    <div data-registry-state="custom-target">
+      <PortalDemo />
+    </div>
+  )
 }

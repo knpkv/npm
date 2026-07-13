@@ -104,9 +104,15 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Overview: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvasElement.querySelector("[data-registry-state='overview']")).not.toBeNull()
     await expect(canvas.getByRole("heading", { name: "Meaning before color." })).toBeVisible()
     await expect(canvas.getAllByText("provenance")).toHaveLength(5)
     await expect(canvas.getByText("success", { selector: "strong" })).toBeVisible()
-  }
+  },
+  render: () => (
+    <div data-registry-state="overview">
+      <Tokens />
+    </div>
+  )
 }

@@ -136,6 +136,42 @@ const storyInitializer = (
   return undefined
 }
 
+const isValueReference = (node: TypeScript.Identifier): boolean => {
+  const parent = node.parent
+  if (parent === undefined) return false
+  if (
+    (TypeScript.isVariableDeclaration(parent)
+      || TypeScript.isParameter(parent)
+      || TypeScript.isBindingElement(parent)
+      || TypeScript.isFunctionDeclaration(parent)
+      || TypeScript.isClassDeclaration(parent)
+      || TypeScript.isInterfaceDeclaration(parent)
+      || TypeScript.isTypeAliasDeclaration(parent))
+    && parent.name === node
+  ) {
+    return false
+  }
+  if (
+    (TypeScript.isPropertyAssignment(parent)
+      || TypeScript.isPropertyDeclaration(parent)
+      || TypeScript.isMethodDeclaration(parent)
+      || TypeScript.isPropertyAccessExpression(parent)
+      || TypeScript.isJsxAttribute(parent))
+    && parent.name === node
+  ) {
+    return false
+  }
+  if (
+    TypeScript.isImportClause(parent)
+    || TypeScript.isImportSpecifier(parent)
+    || TypeScript.isNamespaceImport(parent)
+    || TypeScript.isExportSpecifier(parent)
+  ) {
+    return false
+  }
+  return true
+}
+
 const completeStoryTerms = (
   entry: string,
   storyName: string,
@@ -165,7 +201,6 @@ const completeStoryTerms = (
       if (segment.length > 0) terms.add(segment)
     }
   }
-  add(storyName)
   const visit = (file: string, node: TypeScript.Node): void => {
     const key = `${file}:${node.kind}:${node.pos}:${node.end}`
     if (visited.has(key)) return
@@ -173,7 +208,7 @@ const completeStoryTerms = (
     if (TypeScript.isIdentifier(node) || TypeScript.isStringLiteralLike(node) || TypeScript.isJsxText(node)) {
       add(node.text)
     }
-    if (TypeScript.isIdentifier(node)) {
+    if (TypeScript.isIdentifier(node) && isValueReference(node)) {
       const storySource = sourceFor(file)
       const local = storySource?.bindings.get(node.text)
       if (local !== undefined) visit(file, local)

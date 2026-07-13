@@ -15,7 +15,8 @@ const button: VisualComponentTarget = {
     styles: ["packages/rly/src/primitives/Button.module.css"],
     tests: ["packages/rly/test/primitives/Button.test.tsx"]
   },
-  storyId: "primitives-button"
+  storyId: "primitives-button",
+  storyIds: ["primitives-button"]
 }
 
 const dialog: VisualComponentTarget = {
@@ -26,7 +27,8 @@ const dialog: VisualComponentTarget = {
     styles: ["packages/rly/src/primitives/Dialog.module.css"],
     tests: ["packages/rly/test/primitives/Dialog.test.tsx"]
   },
-  storyId: "primitives-dialog"
+  storyId: "primitives-dialog",
+  storyIds: ["primitives-dialog", "primitives-dialog--nested-isolation"]
 }
 
 const catalog = (components: ReadonlyArray<VisualComponentTarget>): VisualCatalog => ({
@@ -89,7 +91,22 @@ describe("visual changed-file classifier", () => {
 
     expect(first).toEqual(second)
     expect(first).toMatchObject({
-      components: [{ name: "Button" }, { name: "Dialog" }],
+      components: [{ name: "Button" }, { name: "Dialog" }, { name: "Dialog" }],
+      scope: "component-scoped"
+    })
+  })
+
+  it("schedules every declared coverage story for a changed component", () => {
+    expect(classify([{ path: dialog.paths.source, status: "modified" }])).toEqual({
+      components: [
+        { name: "Dialog", states: ["closed", "open", "focus"], storyId: "primitives-dialog" },
+        {
+          name: "Dialog",
+          states: ["closed", "open", "focus"],
+          storyId: "primitives-dialog--nested-isolation"
+        }
+      ],
+      reasons: ["component-file-change"],
       scope: "component-scoped"
     })
   })
@@ -179,7 +196,8 @@ describe("visual changed-file classifier", () => {
       ...button,
       name: "Action",
       paths: { ...button.paths, source: "packages/rly/src/primitives/Action.tsx" },
-      storyId: "primitives-action"
+      storyId: "primitives-action",
+      storyIds: ["primitives-action"]
     }
 
     expect(classify([{
@@ -233,5 +251,21 @@ describe("visual changed-file classifier", () => {
       changes: [{ path: button.paths.source, status: "modified" }],
       currentCatalog: catalog([button, ambiguousDialog])
     })).toEqual({ reasons: ["invalid-visual-catalog"], scope: "full" })
+  })
+
+  it("rejects missing, reordered, duplicate, and empty coverage story ids", () => {
+    for (
+      const storyIds of [
+        [],
+        ["primitives-button--states", "primitives-button"],
+        ["primitives-button", "primitives-button"],
+        ["primitives-button", ""]
+      ]
+    ) {
+      expect(classifyVisualChanges({
+        changes: [{ path: button.paths.source, status: "modified" }],
+        currentCatalog: catalog([{ ...button, storyIds }])
+      })).toEqual({ reasons: ["invalid-visual-catalog"], scope: "full" })
+    }
   })
 })

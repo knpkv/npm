@@ -26,6 +26,7 @@ export interface VisualComponentTarget {
     readonly tests: ReadonlyArray<string>
   }
   readonly storyId: string
+  readonly storyIds: ReadonlyArray<string>
 }
 
 /** Versioned component lookup projected from the checked-in component manifest. */
@@ -122,7 +123,18 @@ const indexCatalog = (catalog: VisualCatalog): CatalogIndex => {
   let valid = catalog.schemaVersion === 1
 
   for (const component of catalog.components) {
-    if (component.name.length === 0 || component.storyId.length === 0 || byName.has(component.name)) valid = false
+    const uniqueStoryIds = new Set(component.storyIds)
+    if (
+      component.name.length === 0
+      || component.storyId.length === 0
+      || component.storyIds.length === 0
+      || component.storyIds[0] !== component.storyId
+      || component.storyIds.some((storyId) => storyId.length === 0)
+      || uniqueStoryIds.size !== component.storyIds.length
+      || byName.has(component.name)
+    ) {
+      valid = false
+    }
     byName.set(component.name, component)
     for (const [path, role] of componentPaths(component)) {
       if (isUnsafePath(path) || byPath.has(path)) valid = false
@@ -261,9 +273,11 @@ export const classifyVisualChanges = (input: ClassifyVisualChangesInput): Visual
 
   if (components.size > 0) {
     return {
-      components: [...components.values()].sort((left, right) => left.name.localeCompare(right.name)).map(
-        (component) => ({ name: component.name, states: CAPTURE_STATES, storyId: component.storyId })
-      ),
+      components: [...components.values()]
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .flatMap((component) =>
+          component.storyIds.map((storyId) => ({ name: component.name, states: CAPTURE_STATES, storyId }))
+        ),
       reasons: ["component-file-change"],
       scope: "component-scoped"
     }

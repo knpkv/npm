@@ -22,12 +22,18 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const FrameworkBridge: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     const link = canvas.getByRole("link", { name: "Open payments release" })
 
+    await expect(canvasElement.querySelector("[data-registry-state='framework-bridge']")).not.toBeNull()
     await expect(link).toHaveAttribute("data-router-destination", "/w/engineering/releases/payments")
     await expect(link).toHaveAttribute("href", "/w/engineering/releases/payments")
     await expect(link).toHaveAttribute("rel", "bookmark")
     await expect(link).toHaveAttribute("target", "release-detail")
-  }
+  },
+  render: () => (
+    <div data-registry-state="framework-bridge">
+      <LinkBridgeExample />
+    </div>
+  )
 }
