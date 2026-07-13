@@ -169,19 +169,29 @@ export const EntityTable = ({
       ) : (
         <>
           {cachedNotice}
+          <div aria-label={`${visibleHeading} sorting`} className={style("sortControls")} role="group">
+            <span className={style("sortLabel")}>Sort</span>
+            {columns.map((column) =>
+              column.sortable ? (
+                <button
+                  aria-label={`Sort by ${column.label}, currently ${column.sortDirection}`}
+                  className={style("sortButton")}
+                  key={column.id}
+                  onClick={() => onSortChange(column.id)}
+                  type="button"
+                >
+                  <span>{column.label}</span>
+                  <SortGlyph direction={column.sortDirection} />
+                </button>
+              ) : null
+            )}
+          </div>
           <table aria-labelledby={headingId} className={style("table")}>
             <thead className={style("head")}>
               <tr>
                 {columns.map((column) => (
                   <th aria-sort={column.sortable ? column.sortDirection : undefined} key={column.id} scope="col">
-                    {column.sortable ? (
-                      <button className={style("sortButton")} onClick={() => onSortChange(column.id)} type="button">
-                        <span>{column.label}</span>
-                        <SortGlyph direction={column.sortDirection} />
-                      </button>
-                    ) : (
-                      column.label
-                    )}
+                    {column.label}
                   </th>
                 ))}
               </tr>

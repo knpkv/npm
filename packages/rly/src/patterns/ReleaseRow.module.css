@@ -104,6 +104,8 @@
     align-items: stretch;
     display: grid;
     gap: var(--rly-space-12);
+    grid-column: 4;
+    grid-row: 1;
     justify-items: end;
   }
 
@@ -118,6 +120,8 @@
 
     .actions {
       align-items: end;
+      grid-column: 2;
+      grid-row: 2;
     }
   }
 
@@ -133,6 +137,8 @@
     }
 
     .actions {
+      grid-column: auto;
+      grid-row: auto;
       justify-items: stretch;
     }
 

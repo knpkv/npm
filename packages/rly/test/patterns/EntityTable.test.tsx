@@ -48,10 +48,12 @@ describe("EntityTable", () => {
 
     const section = host.querySelector("section")
     const table = host.querySelector("table")
-    const sort = host.querySelector<HTMLButtonElement>("th button")
+    const sort = host.querySelector<HTMLButtonElement>("[role='group'] button")
     expect(section?.getAttribute("aria-labelledby")).toBe(host.querySelector("h2")?.id)
     expect(table?.getAttribute("aria-labelledby")).toBe(host.querySelector("h2")?.id)
     expect(host.querySelector("th")?.getAttribute("aria-sort")).toBe("ascending")
+    expect(host.querySelector("th button")).toBeNull()
+    expect(sort?.getAttribute("aria-label")).toBe("Sort by Item, currently ascending")
     expect(sort?.getAttribute("type")).toBe("button")
     await act(async () => sort?.click())
     expect(onSortChange).toHaveBeenCalledWith("item")

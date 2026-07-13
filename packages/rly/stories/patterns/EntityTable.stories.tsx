@@ -156,7 +156,7 @@ export const States: Story = {
     await expect(ready.querySelectorAll("[data-rly-entity-row-id]")).toHaveLength(20)
     const itemHeader = within(ready).getByRole("columnheader", { name: "Item" })
     await expect(itemHeader).toHaveAttribute("aria-sort", "ascending")
-    await userEvent.click(within(ready).getByRole("button", { name: "Item" }))
+    await userEvent.click(within(ready).getByRole("button", { name: "Sort by Item, currently ascending" }))
     await expect(itemHeader).toHaveAttribute("aria-sort", "descending")
     await expect(canvas.getAllByText("Loading entities", { exact: true })).toHaveLength(2)
     for (const state of ["stale", "partial", "error", "unavailable"]) {
@@ -176,6 +176,10 @@ export const CompactForcedColors: Story = {
     await expect(compact.scrollWidth).toBeLessThanOrEqual(compact.clientWidth)
     await expect(compact.querySelectorAll("[data-rly-entity-row-id]")).toHaveLength(6)
     await expect(canvas.getAllByRole("columnheader")).toHaveLength(4)
+    const sort = canvas.getByRole("button", { name: "Sort by Item, currently ascending" })
+    await expect(sort).toBeVisible()
+    sort.focus()
+    await expect(sort).toHaveFocus()
     for (const provider of ["CodeCommit", "CodePipeline", "Jira", "Confluence", "Clockify"]) {
       await expect(canvas.getAllByRole("img", { name: provider }).length).toBeGreaterThan(0)
     }

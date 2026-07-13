@@ -26,6 +26,11 @@ test("keeps six release outcomes distinct and scan-friendly", async ({ page }, t
     "held"
   ])
   await expect(page.getByRole("button", { name: "Preview release" })).toHaveCount(6)
+  const firstRow = rows.first()
+  const firstRowBox = await firstRow.boundingBox()
+  const firstActionBox = await firstRow.getByRole("button", { name: "Preview release" }).boundingBox()
+  if (firstRowBox === null || firstActionBox === null) throw new Error("Release row geometry was unavailable")
+  expect(firstActionBox.y - firstRowBox.y).toBeLessThan(120)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("release-states.png") })
 
   await page.setViewportSize({ height: 1_600, width: 320 })
@@ -84,6 +89,10 @@ test("preserves entity rows across every degraded state and compact reflow", asy
   await page.setViewportSize({ height: 1_600, width: 320 })
   await page.goto(story("patterns-entitytable--compact-forced-colors", "active"))
   await expect(page.locator("[data-rly-entity-row-id]")).toHaveCount(6)
+  const sort = page.getByRole("button", { name: "Sort by Item, currently ascending" })
+  await expect(sort).toBeVisible()
+  await sort.focus()
+  await expect(sort).toBeFocused()
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("entity-table-320.png") })
 })

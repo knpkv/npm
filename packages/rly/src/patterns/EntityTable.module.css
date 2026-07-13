@@ -45,6 +45,19 @@
     text-align: start;
   }
 
+  .sortControls {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+
+  .sortLabel {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+
   .sortButton {
     align-items: center;
     background: transparent;
@@ -85,6 +98,18 @@
   }
 
   @container (max-width: 40rem) {
+    .sortControls {
+      align-items: stretch;
+      display: grid;
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+
+    .sortButton {
+      border: 1px solid var(--rly-color-border-2);
+      justify-content: space-between;
+      padding-inline: var(--rly-space-12);
+    }
+
     .table,
     .body {
       display: block;
