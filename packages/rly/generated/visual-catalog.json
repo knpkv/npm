@@ -72,6 +72,34 @@
       "storyId": "primitives-divider--gallery"
     },
     {
+      "name": "EntityShell",
+      "paths": {
+        "source": "packages/rly/src/patterns/EntityShell.tsx",
+        "story": "packages/rly/stories/patterns/EntityShell.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EntityShell.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EntityShell.test.tsx"
+        ]
+      },
+      "storyId": "patterns-entityshell--services"
+    },
+    {
+      "name": "EntityTable",
+      "paths": {
+        "source": "packages/rly/src/patterns/EntityTable.tsx",
+        "story": "packages/rly/stories/patterns/EntityTable.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EntityTable.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EntityTable.test.tsx"
+        ]
+      },
+      "storyId": "patterns-entitytable--states"
+    },
+    {
       "name": "EvidenceStamp",
       "paths": {
         "source": "packages/rly/src/patterns/EvidenceStamp.tsx",
@@ -232,6 +260,20 @@
       "storyId": "patterns-relationshiptable--equivalence"
     },
     {
+      "name": "ReleasePreview",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleasePreview.tsx",
+        "story": "packages/rly/stories/patterns/ReleasePreview.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleasePreview.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleasePreview.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releasepreview--interaction"
+    },
+    {
       "name": "ReleaseRelay",
       "paths": {
         "source": "packages/rly/src/patterns/ReleaseRelay.tsx",
@@ -244,6 +286,20 @@
         ]
       },
       "storyId": "patterns-releaserelay--catalog"
+    },
+    {
+      "name": "ReleaseRow",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleaseRow.tsx",
+        "story": "packages/rly/stories/patterns/ReleaseRow.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleaseRow.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleaseRow.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releaserow--six-states"
     },
     {
       "name": "Select",
@@ -410,6 +466,20 @@
       "storyId": "foundations-themeprovider--controlled"
     },
     {
+      "name": "TimelineRow",
+      "paths": {
+        "source": "packages/rly/src/patterns/TimelineRow.tsx",
+        "story": "packages/rly/stories/patterns/TimelineRow.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/TimelineRow.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/TimelineRow.test.tsx"
+        ]
+      },
+      "storyId": "patterns-timelinerow--actor-kinds"
+    },
+    {
       "name": "Verdict",
       "paths": {
         "source": "packages/rly/src/patterns/Verdict.tsx",
@@ -422,6 +492,20 @@
         ]
       },
       "storyId": "patterns-verdict--states"
+    },
+    {
+      "name": "WorksetCard",
+      "paths": {
+        "source": "packages/rly/src/patterns/WorksetCard.tsx",
+        "story": "packages/rly/stories/patterns/WorksetCard.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/WorksetCard.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/WorksetCard.test.tsx"
+        ]
+      },
+      "storyId": "patterns-worksetcard--release-dimensions"
     }
   ]
 }

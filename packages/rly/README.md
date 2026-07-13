@@ -241,6 +241,43 @@ persisted lifecycle values—missing, inferred, proposed, verified, governed,
 rejected, and superseded—to redundant icon-and-word presentation only. It does
 not infer links, confidence, readiness, or authorization.
 
+## Release dossiers and entity views
+
+`ReleaseRow` is the bird's-eye release dossier: one unique relay, one large
+caller-supplied verdict, named owner and approver, visible facts, and controlled
+preview and agent actions. `ReleasePreview` opens that projection in a
+controlled dialog before the application routes to a full view. Its ordered
+slots keep the primary action, stages, workset, evidence, and contextual agent
+entry explicit.
+
+`WorksetCard` keeps Jira work, CodeCommit pull-request groups, relationship
+gaps, and CodePipeline executions together without flattening them into a Jira
+board. It accepts arbitrary cardinality, including the six-ticket release
+view, and preserves many-to-many Jira keys and missing links as data.
+
+`EntityShell` supplies the consistent full-view frame for Jira, CodeCommit,
+CodePipeline, Confluence, and Clockify pages while leaving every page body and
+action application-owned. `EntityTable` provides controlled sorting and
+complete ready, loading, empty, not-found, stale, partial, error, and
+unavailable presentations. `TimelineRow` distinguishes human, agent, plugin,
+and system actors in a semantic activity list.
+
+```tsx
+import { ReleaseRow } from "@knpkv/rly/patterns"
+
+export const ReleaseOverview = () => (
+  <ReleaseRow
+    onPreview={() => openPreview()}
+    release={releasePresentation}
+    agentEntry={<button onClick={() => openReleaseAgent()}>Ask release agent</button>}
+  />
+)
+```
+
+Rly does not fetch service data, derive release readiness, execute actions, or
+route between entities. Applications normalize those concerns before passing
+presentation projections and controlled callbacks into these patterns.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

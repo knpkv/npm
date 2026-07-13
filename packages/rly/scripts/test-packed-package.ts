@@ -140,17 +140,24 @@ import {
 import { Button, Dialog, Field, Select, Sheet, Surface, Tabs, Text } from "@knpkv/rly/primitives"
 import {
   CollaboratorGroup,
+  EntityShell,
+  EntityTable,
   EvidenceStamp,
   FreshnessStamp,
   PeopleStrip,
   Person,
   RelationshipChain,
   RelationshipTable,
+  ReleasePreview,
   ReleaseRelay,
+  ReleaseRow,
   ServiceMark,
   StageRail,
+  TimelineRow,
+  type RlyReleasePresentation,
   type RlyRelationship,
-  Verdict
+  Verdict,
+  WorksetCard
 } from "@knpkv/rly/patterns"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -179,6 +186,26 @@ const packedRelationships = [{
   },
   evidence: "Packed relationship evidence"
 }] satisfies ReadonlyArray<RlyRelationship>
+const packedRelease: RlyReleasePresentation = {
+  algorithm: "relay/v1",
+  approver: { id: "packed-approver", name: "Dev Shah", role: "Production approver" },
+  codename: "Copper Orbit",
+  facts: [
+    { id: "commit", label: "Commit", value: "7f4c9b1" },
+    { id: "target", label: "Target", value: "production" }
+  ],
+  freshness: "current",
+  freshnessDateTime: "2026-07-13T14:00:00Z",
+  freshnessTime: "Observed now",
+  id: "packed-release",
+  owner: { id: "packed-owner", name: "Avery Diaz", role: "Release owner" },
+  reason: "Every required check matches the current head.",
+  state: "ready",
+  symbolIndices: [6, 3, 7],
+  tone: "positive",
+  verdict: "Ready to ship.",
+  version: "v2.4.0"
+}
 const markup = renderToStaticMarkup(
   <ThemeProvider theme="dark">
     <Icon decorative name="check" />
@@ -226,6 +253,95 @@ const markup = renderToStaticMarkup(
     <RelationshipChain heading="Packed relationship chain" relationships={packedRelationships} />
     <RelationshipTable heading="Packed relationship table" relationships={packedRelationships} />
     <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" symbolIndices={[6, 3, 7]} />
+    <ReleaseRow onPreview={() => undefined} release={packedRelease} />
+    <ReleasePreview
+      agentEntry={<span>Packed release agent</span>}
+      evidence={<span>Packed release evidence</span>}
+      onOpenChange={() => undefined}
+      onOpenFullView={() => undefined}
+      open={false}
+      primaryAction={<Button>Deploy packed release</Button>}
+      release={packedRelease}
+      stages={<StageRail heading="Packed preview stages" stages={[]} />}
+      workset={<span>Packed preview workset</span>}
+    />
+    <WorksetCard
+      gaps={[{
+        id: "packed-gap",
+        label: "Missing PR relationship",
+        reason: "No implementation evidence is linked.",
+        service: "codecommit"
+      }]}
+      heading="Packed release workset"
+      jiraItems={[{
+        id: "packed-jira-work",
+        key: "RPS-6307",
+        state: "Candidate",
+        title: "Packed Jira release candidate",
+        tone: "progress"
+      }]}
+      pipelines={[{
+        id: "packed-pipeline",
+        reference: "Execution #42",
+        stages: [{ id: "verify", name: "Verify", state: "Passed", tone: "positive" }],
+        state: "Passed",
+        title: "Packed production pipeline",
+        tone: "positive"
+      }]}
+      pullRequestGroups={[{
+        id: "packed-pr-group",
+        linkedJiraKeys: ["RPS-6307"],
+        reference: "PR #291",
+        state: "Approved",
+        title: "Packed implementation",
+        tone: "positive"
+      }]}
+    />
+    <EntityTable
+      columns={[
+        { id: "entity", label: "Entity" },
+        { id: "state", label: "State", sortable: true, sortDirection: "ascending" }
+      ]}
+      data={{
+        state: "ready",
+        rows: [{
+          id: "packed-entity",
+          cells: [
+            { columnId: "entity", content: "Packed Jira issue" },
+            { columnId: "state", content: "Ready" }
+          ]
+        }]
+      }}
+      heading="Packed entities"
+      onSortChange={() => undefined}
+    />
+    <EntityShell
+      actions={<Button>Review entity</Button>}
+      agentEntry={<Button>Ask entity agent</Button>}
+      collaborators={<span>Packed entity collaborators</span>}
+      content={<span>Packed entity content</span>}
+      freshness="current"
+      reason="The packed entity projection is complete."
+      relationships={<RelationshipChain heading="Packed entity relationships" relationships={packedRelationships} />}
+      service="jira"
+      title="Packed Jira issue"
+      tone="positive"
+      verdict="Ready"
+    />
+    <ol>
+      <TimelineRow
+        continued={false}
+        event={{
+          actorKind: "agent",
+          dateTime: "2026-07-13T14:00:00Z",
+          detail: "The release evidence was checked in a sandbox.",
+          id: "packed-event",
+          service: "codecommit",
+          time: "14:00",
+          title: "Packed agent review"
+        }}
+      />
+    </ol>
     <Verdict reason="Every required check matches the current head." tone="positive" verdict="Ready to ship." />
     <Tabs
       aria-label="Packed sections"
@@ -246,6 +362,11 @@ if (
   || !markup.includes("Packed relationship chain")
   || !markup.includes("Packed relationship table")
   || !markup.includes("Packed relationship evidence")
+  || !markup.includes("Packed release workset")
+  || !markup.includes("Packed Jira release candidate")
+  || !markup.includes("Packed entities")
+  || !markup.includes("Packed entity content")
+  || !markup.includes("Packed agent review")
   || !markup.includes("Release relay, Copper Orbit, symbols bridge, wave, beacon.")
   || !markup.includes("Identity algorithm: relay/v1")
   || !markup.includes("Ready to ship.")

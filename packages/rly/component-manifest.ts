@@ -601,6 +601,47 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "EntityShell" },
+      { kind: "type", name: "EntityShellProps" }
+    ],
+    name: "EntityShell",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/EntityShell.tsx",
+    status: "stable",
+    styles: ["src/patterns/EntityShell.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/EntityShell.stories.tsx",
+      storyId: "patterns-entityshell--services",
+      tests: ["test/patterns/EntityShell.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "EntityTable" },
+      { kind: "type", name: "EntityTableProps" },
+      { kind: "type", name: "RlyEntityTableCell" },
+      { kind: "type", name: "RlyEntityTableColumn" },
+      { kind: "type", name: "RlyEntityTableData" },
+      { kind: "type", name: "RlyEntityTableRow" },
+      { kind: "type", name: "RlyEntityTableSortDirection" }
+    ],
+    name: "EntityTable",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/EntityTable.tsx",
+    status: "stable",
+    styles: ["src/patterns/EntityTable.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/EntityTable.stories.tsx",
+      storyId: "patterns-entitytable--states",
+      tests: ["test/patterns/EntityTable.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "EvidenceStamp" },
       { kind: "type", name: "EvidenceStampProps" }
     ],
@@ -687,6 +728,24 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "ReleasePreview" },
+      { kind: "type", name: "ReleasePreviewProps" }
+    ],
+    name: "ReleasePreview",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/ReleasePreview.tsx",
+    status: "stable",
+    styles: ["src/patterns/ReleasePreview.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/ReleasePreview.stories.tsx",
+      storyId: "patterns-releasepreview--interaction",
+      tests: ["test/patterns/ReleasePreview.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "ReleaseRelay" },
       { kind: "value", name: "RLY_RELEASE_RELAY_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_RELEASE_RELAY_SYMBOLS" },
@@ -708,6 +767,27 @@ export const componentManifest = {
       story: "stories/patterns/ReleaseRelay.stories.tsx",
       storyId: "patterns-releaserelay--catalog",
       tests: ["test/patterns/ReleaseRelay.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "ReleaseRow" },
+      { kind: "type", name: "ReleaseRowProps" },
+      { kind: "type", name: "RlyReleaseFact" },
+      { kind: "type", name: "RlyReleasePresentation" },
+      { kind: "type", name: "RlyReleaseState" }
+    ],
+    name: "ReleaseRow",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/ReleaseRow.tsx",
+    status: "stable",
+    styles: ["src/patterns/ReleaseRow.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/ReleaseRow.stories.tsx",
+      storyId: "patterns-releaserow--six-states",
+      tests: ["test/patterns/ReleaseRow.test.tsx"]
     }
   }, {
     category: "pattern",
@@ -806,6 +886,26 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "TimelineRow" },
+      { kind: "type", name: "RlyTimelineActorKind" },
+      { kind: "type", name: "RlyTimelineEvent" },
+      { kind: "type", name: "TimelineRowProps" }
+    ],
+    name: "TimelineRow",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/TimelineRow.tsx",
+    status: "stable",
+    styles: ["src/patterns/TimelineRow.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/TimelineRow.stories.tsx",
+      storyId: "patterns-timelinerow--actor-kinds",
+      tests: ["test/patterns/TimelineRow.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "RLY_VERDICT_VARIANTS" },
       { kind: "value", name: "Verdict" },
       { kind: "type", name: "RlyVerdictTone" },
@@ -822,6 +922,28 @@ export const componentManifest = {
       story: "stories/patterns/Verdict.stories.tsx",
       storyId: "patterns-verdict--states",
       tests: ["test/patterns/Verdict.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "WorksetCard" },
+      { kind: "type", name: "RlyWorksetGap" },
+      { kind: "type", name: "RlyWorksetJiraItem" },
+      { kind: "type", name: "RlyWorksetPipeline" },
+      { kind: "type", name: "RlyWorksetPullRequestGroup" },
+      { kind: "type", name: "WorksetCardProps" }
+    ],
+    name: "WorksetCard",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/WorksetCard.tsx",
+    status: "stable",
+    styles: ["src/patterns/WorksetCard.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/WorksetCard.stories.tsx",
+      storyId: "patterns-worksetcard--release-dimensions",
+      tests: ["test/patterns/WorksetCard.test.tsx"]
     }
   }]
 } satisfies ComponentManifest

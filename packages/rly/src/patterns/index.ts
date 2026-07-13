@@ -7,6 +7,17 @@ export {
   RLY_COLLABORATOR_GROUP_VARIANTS
 } from "./CollaboratorGroup.js"
 export type { CollaboratorGroupProps, RlyCollaboratorCategory, RlyCollaboratorGroupSize } from "./CollaboratorGroup.js"
+export { EntityShell } from "./EntityShell.js"
+export type { EntityShellProps } from "./EntityShell.js"
+export { EntityTable } from "./EntityTable.js"
+export type {
+  EntityTableProps,
+  RlyEntityTableCell,
+  RlyEntityTableColumn,
+  RlyEntityTableData,
+  RlyEntityTableRow,
+  RlyEntityTableSortDirection
+} from "./EntityTable.js"
 export { EvidenceStamp } from "./EvidenceStamp.js"
 export type { EvidenceStampProps } from "./EvidenceStamp.js"
 export { FreshnessStamp, RLY_FRESHNESS_STAMP_DEFAULT_VARIANTS, RLY_FRESHNESS_STAMP_VARIANTS } from "./FreshnessStamp.js"
@@ -31,6 +42,8 @@ export type {
 } from "./RelationshipChain.js"
 export { RelationshipTable } from "./RelationshipTable.js"
 export type { RelationshipTableProps } from "./RelationshipTable.js"
+export { ReleasePreview } from "./ReleasePreview.js"
+export type { ReleasePreviewProps } from "./ReleasePreview.js"
 export {
   ReleaseRelay,
   RLY_RELEASE_RELAY_DEFAULT_VARIANTS,
@@ -44,9 +57,21 @@ export type {
   RlyReleaseRelaySymbolIndices,
   RlyReleaseRelaySymbolName
 } from "./ReleaseRelay.js"
+export { ReleaseRow } from "./ReleaseRow.js"
+export type { ReleaseRowProps, RlyReleaseFact, RlyReleasePresentation, RlyReleaseState } from "./ReleaseRow.js"
 export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMark } from "./ServiceMark.js"
 export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
 export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
 export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
+export { TimelineRow } from "./TimelineRow.js"
+export type { RlyTimelineActorKind, RlyTimelineEvent, TimelineRowProps } from "./TimelineRow.js"
 export { RLY_VERDICT_VARIANTS, Verdict } from "./Verdict.js"
 export type { RlyVerdictTone, VerdictProps } from "./Verdict.js"
+export { WorksetCard } from "./WorksetCard.js"
+export type {
+  RlyWorksetGap,
+  RlyWorksetJiraItem,
+  RlyWorksetPipeline,
+  RlyWorksetPullRequestGroup,
+  WorksetCardProps
+} from "./WorksetCard.js"

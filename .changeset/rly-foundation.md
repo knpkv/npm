@@ -45,3 +45,9 @@ Add semantic delivery-stage and relationship patterns with complete
 zero-to-many cardinality, explicit missing endpoints, caller-supplied lifecycle
 and direction, equivalent chain and native-table views, deterministic keyboard
 order, and compact forced-color-safe reflow.
+
+Add release dossier, preview, workset, entity-shell, entity-table, and activity
+patterns. Cover six release outcomes, six-ticket and arbitrary-cardinality Jira
+worksets, explicit PR and pipeline dimensions, service-specific full-view
+shells, controlled sorting, complete degraded data states, human and agent
+actors, compact reflow, and focus-safe preview-to-full-view actions.
