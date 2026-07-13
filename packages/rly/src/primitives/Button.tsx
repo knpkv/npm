@@ -1,4 +1,4 @@
-import type { ComponentPropsWithRef, ReactElement, ReactNode } from "react"
+import type { ComponentPropsWithRef, ReactElement } from "react"
 import { Icon, type RlyIconName } from "../foundations/Icon.js"
 import { classNames, cssClass, defineVariants } from "../internal/component.js"
 import styles from "./Button.module.css"
@@ -36,7 +36,8 @@ export const RLY_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary"
 export type RlyButtonVariant = keyof typeof RLY_BUTTON_VARIANTS.variant
 export type RlyButtonSize = keyof typeof RLY_BUTTON_VARIANTS.size
 export type ButtonProps = Omit<ComponentPropsWithRef<"button">, "children"> & {
-  readonly children: ReactNode
+  /** Plain visible text. Use IconButton for an icon-only action. */
+  readonly children: number | string
   readonly leadingIcon?: RlyIconName
   readonly loading?: boolean
   readonly size?: RlyButtonSize
@@ -59,7 +60,10 @@ export const Button = ({
   variant = "secondary",
   ...props
 }: ButtonProps): ReactElement => {
-  if (children === null || children === undefined || (typeof children === "string" && children.trim().length === 0)) {
+  if (
+    (typeof children !== "number" && typeof children !== "string") ||
+    (typeof children === "string" && children.trim().length === 0)
+  ) {
     throw new Error("Button children must contain visible content")
   }
   return (

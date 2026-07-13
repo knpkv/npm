@@ -70,7 +70,25 @@ describe("Button", () => {
     act(() => root.unmount())
   })
 
-  it("rejects blank text content", () => {
+  it("rejects content that cannot provide its visible label", () => {
     expect(() => renderToStaticMarkup(<Button> </Button>)).toThrow("visible content")
+    expect(() =>
+      renderToStaticMarkup(
+        // @ts-expect-error Button intentionally accepts plain visible text only.
+        <Button>{false}</Button>
+      )
+    ).toThrow("visible content")
+    expect(() =>
+      renderToStaticMarkup(
+        // @ts-expect-error Button intentionally rejects empty element trees.
+        <Button>{<></>}</Button>
+      )
+    ).toThrow("visible content")
+    expect(() =>
+      renderToStaticMarkup(
+        // @ts-expect-error Button intentionally rejects empty arrays.
+        <Button>{[]}</Button>
+      )
+    ).toThrow("visible content")
   })
 })
