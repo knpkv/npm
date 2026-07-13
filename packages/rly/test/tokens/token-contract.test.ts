@@ -50,6 +50,15 @@ describe("semantic token contract", () => {
     ).toBe(true)
   })
 
+  it("keeps the approved motion rhythm and easing curve exact", () => {
+    expect(motionTokenSource.map(({ duration, easing, name }) => ({ duration, easing, name }))).toEqual([
+      { duration: "90ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "fast" },
+      { duration: "160ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "standard" },
+      { duration: "240ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "deliberate" },
+      { duration: "360ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "slow" }
+    ])
+  })
+
   it("emits one central light-dark, forced-color, and reduced-motion layer", () => {
     const css = renderTokenCss()
     expect(css.match(/light-dark\(/g)).toHaveLength(colorTokenSource.length * 2)

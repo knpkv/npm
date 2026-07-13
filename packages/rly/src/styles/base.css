@@ -31,6 +31,6 @@
 
   :where([data-rly-root], [data-rly-catalog]) :focus-visible {
     outline: 3px solid var(--rly-color-focus);
-    outline-offset: 3px;
+    outline-offset: 2px;
   }
 }

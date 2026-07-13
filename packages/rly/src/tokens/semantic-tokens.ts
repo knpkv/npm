@@ -74,9 +74,9 @@ export const RLY_TYPE_TOKEN_NAMES = tokenNames([
 export type RlyTypeToken = (typeof RLY_TYPE_TOKEN_NAMES)[number]
 
 export const RLY_MOTION_TOKEN_NAMES = tokenNames([
-  "instant",
   "fast",
   "standard",
-  "deliberate"
+  "deliberate",
+  "slow"
 ])
 export type RlyMotionToken = (typeof RLY_MOTION_TOKEN_NAMES)[number]

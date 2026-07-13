@@ -91,22 +91,28 @@ const scriptViolations = (path: string, source: string): ReadonlyArray<ColorPoli
     const rule = ruleForValue(value)
     if (rule !== undefined) report(node, rule)
   }
+  const inspectExpression = (expression: ts.Expression, name: string | undefined): void => {
+    if (name === undefined || !COLOR_CONTEXT.test(name)) return
+    const inspectNode = (node: ts.Node): void => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        inspectText(node, name, node.text)
+      }
+      ts.forEachChild(node, inspectNode)
+    }
+    inspectNode(expression)
+  }
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isPropertyAssignment(node) &&
-      (ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer))
-    ) {
-      inspectText(node.initializer, propertyName(node.name), node.initializer.text)
+    if (ts.isPropertyAssignment(node)) {
+      inspectExpression(node.initializer, propertyName(node.name))
     } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       const initializer = node.initializer
-      if (
-        initializer !== undefined
-        && (ts.isStringLiteral(initializer) || ts.isNoSubstitutionTemplateLiteral(initializer))
-      ) {
-        inspectText(initializer, node.name.text, initializer.text)
+      if (initializer !== undefined) inspectExpression(initializer, node.name.text)
+    } else if (ts.isJsxAttribute(node) && node.initializer !== undefined) {
+      const name = node.name.getText(file)
+      if (ts.isStringLiteral(node.initializer)) inspectExpression(node.initializer, name)
+      else if (ts.isJsxExpression(node.initializer) && node.initializer.expression !== undefined) {
+        inspectExpression(node.initializer.expression, name)
       }
-    } else if (ts.isJsxAttribute(node) && node.initializer !== undefined && ts.isStringLiteral(node.initializer)) {
-      inspectText(node.initializer, node.name.getText(file), node.initializer.text)
     } else if (ts.isTaggedTemplateExpression(node) && node.tag.getText(file) === "css") {
       for (const violation of cssViolations(path, node.template.getText(file))) violations.push(violation)
     }

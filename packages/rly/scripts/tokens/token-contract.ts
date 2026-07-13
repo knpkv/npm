@@ -83,10 +83,18 @@ export const renderTokenCss = (): string => {
 ${root}
   }
 
+  :root:is([data-theme="light"], [data-rly-theme="light"]),
   :where([data-theme="light"], [data-rly-theme="light"]) { color-scheme: light; }
+  :root:is([data-theme="dark"], [data-rly-theme="dark"]),
   :where([data-theme="dark"], [data-rly-theme="dark"]) { color-scheme: dark; }
+  :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
+  :root:is(
+    [data-theme="light"], [data-rly-theme="light"],
+    [data-theme="dark"], [data-rly-theme="dark"],
+    [data-theme="system"], [data-rly-theme="system"]
+  ),
   :where(
     [data-theme="light"], [data-rly-theme="light"],
     [data-theme="dark"], [data-rly-theme="dark"],
@@ -106,6 +114,7 @@ ${renderForcedColors()}
     }
   }
 
+  :root:is([data-forced-colors="active"], [data-rly-forced-colors="active"]),
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) {
 ${renderForcedColors()}
   }
@@ -116,6 +125,7 @@ ${renderReducedMotion()}
     }
   }
 
+  :root:is([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]),
   :where([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]) {
 ${renderReducedMotion()}
   }

@@ -41,3 +41,49 @@ test("centralizes forced colors, reduced motion, and self-hosted fonts", async (
   await expect(page.getByText("success", { exact: true })).toBeVisible()
   await expect(page.getByText("provenance", { exact: true })).toHaveCount(5)
 })
+
+test("honors theme and preference attributes on the root element", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light", forcedColors: "none", reducedMotion: "no-preference" })
+  await page.goto(storyUrl("theme:system;forcedColors:auto;reducedMotion:system;locale:en;density:comfortable"))
+  await page.locator("[data-rly-catalog]").evaluate((element) => {
+    for (
+      const attribute of [
+        "data-theme",
+        "data-rly-theme",
+        "data-forced-colors",
+        "data-rly-forced-colors",
+        "data-reduced-motion",
+        "data-rly-reduced-motion"
+      ]
+    ) element.removeAttribute(attribute)
+    document.documentElement.dataset.theme = "dark"
+  })
+
+  expect(await page.locator("html").evaluate((element) => getComputedStyle(element).colorScheme)).toBe("dark")
+  expect(await canvasColor(page)).toBe("rgb(16, 17, 20)")
+
+  const preferences = await page.locator("html").evaluate((element) => {
+    element.dataset.forcedColors = "active"
+    element.dataset.reducedMotion = "reduce"
+    const styles = getComputedStyle(element)
+    return {
+      forcedText: styles.getPropertyValue("--rly-color-text-1").trim(),
+      motion: styles.getPropertyValue("--rly-motion-standard-duration").trim()
+    }
+  })
+  expect(preferences).toEqual({ forcedText: "CanvasText", motion: "0s" })
+
+  const focusProbe = page.getByRole("button", { name: "Focus probe" })
+  await page.locator("[data-rly-catalog]").evaluate((element) => {
+    const button = document.createElement("button")
+    button.textContent = "Focus probe"
+    element.append(button)
+  })
+  await focusProbe.focus()
+  expect(
+    await focusProbe.evaluate((element) => {
+      const styles = getComputedStyle(element)
+      return { offset: styles.outlineOffset, width: styles.outlineWidth }
+    })
+  ).toEqual({ offset: "2px", width: "3px" })
+})

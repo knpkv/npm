@@ -43,6 +43,17 @@ describe("component color policy", () => {
     )).toEqual(["raw-color", "raw-color", "raw-color"])
   })
 
+  it("rejects raw colors nested inside conditional style expressions", () => {
+    expect(rules(
+      "src/primitives/Button.tsx",
+      `
+      export const Button = ({ dark }: { readonly dark: boolean }) => (
+        <button style={{ color: dark ? "#fff" : "#000" }}>Ship</button>
+      )
+    `
+    )).toEqual(["raw-color", "raw-color"])
+  })
+
   it("does not flag prose, imports, or non-color URL attributes", () => {
     expect(rules(
       "src/primitives/Note.tsx",

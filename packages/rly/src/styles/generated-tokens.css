@@ -96,20 +96,28 @@
     --rly-type-code-line-height: 1.25rem;
     --rly-type-code-weight: 450;
     --rly-type-code-tracking: 0;
-    --rly-motion-instant-duration: 0ms;
-    --rly-motion-instant-easing: linear;
-    --rly-motion-fast-duration: 120ms;
-    --rly-motion-fast-easing: cubic-bezier(.2, 0, 0, 1);
-    --rly-motion-standard-duration: 180ms;
-    --rly-motion-standard-easing: cubic-bezier(.2, 0, 0, 1);
-    --rly-motion-deliberate-duration: 260ms;
-    --rly-motion-deliberate-easing: cubic-bezier(.2, 0, 0, 1);
+    --rly-motion-fast-duration: 90ms;
+    --rly-motion-fast-easing: cubic-bezier(.2, .8, .2, 1);
+    --rly-motion-standard-duration: 160ms;
+    --rly-motion-standard-easing: cubic-bezier(.2, .8, .2, 1);
+    --rly-motion-deliberate-duration: 240ms;
+    --rly-motion-deliberate-easing: cubic-bezier(.2, .8, .2, 1);
+    --rly-motion-slow-duration: 360ms;
+    --rly-motion-slow-easing: cubic-bezier(.2, .8, .2, 1);
   }
 
+  :root:is([data-theme="light"], [data-rly-theme="light"]),
   :where([data-theme="light"], [data-rly-theme="light"]) { color-scheme: light; }
+  :root:is([data-theme="dark"], [data-rly-theme="dark"]),
   :where([data-theme="dark"], [data-rly-theme="dark"]) { color-scheme: dark; }
+  :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
+  :root:is(
+    [data-theme="light"], [data-rly-theme="light"],
+    [data-theme="dark"], [data-rly-theme="dark"],
+    [data-theme="system"], [data-rly-theme="system"]
+  ),
   :where(
     [data-theme="light"], [data-rly-theme="light"],
     [data-theme="dark"], [data-rly-theme="dark"],
@@ -179,6 +187,7 @@
     }
   }
 
+  :root:is([data-forced-colors="active"], [data-rly-forced-colors="active"]),
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) {
     --rly-color-canvas: Canvas;
     --rly-color-surface-1: Canvas;
@@ -210,17 +219,18 @@
 
   @media (prefers-reduced-motion: reduce) {
     :root {
-    --rly-motion-instant-duration: 0ms;
     --rly-motion-fast-duration: 0ms;
     --rly-motion-standard-duration: 0ms;
     --rly-motion-deliberate-duration: 0ms;
+    --rly-motion-slow-duration: 0ms;
     }
   }
 
+  :root:is([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]),
   :where([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]) {
-    --rly-motion-instant-duration: 0ms;
     --rly-motion-fast-duration: 0ms;
     --rly-motion-standard-duration: 0ms;
     --rly-motion-deliberate-duration: 0ms;
+    --rly-motion-slow-duration: 0ms;
   }
 }
