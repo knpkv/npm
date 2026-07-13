@@ -6,4 +6,7 @@
  *
  * @packageDocumentation
  */
+export * from "./auth/index.js"
 export * from "./persistence/index.js"
+export * from "./secrets/index.js"
+export * from "./security/index.js"

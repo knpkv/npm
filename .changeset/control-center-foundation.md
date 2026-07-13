@@ -7,3 +7,5 @@ Scaffold the Control Center application with explicit browser, API, domain, and 
 Add Schema-backed canonical identities, UTC timestamps, explicit source provenance and freshness, human and agent actors, scoped collaborator roles, foundational release records, and the deterministic persisted `relay/v1` release-identity projection.
 
 Add ordered libSQL migrations, workspace-scoped optimistic repositories, malformed-record quarantine, and an owner-only content-addressed blob boundary for durable application state.
+
+Add hash-only local pairing and session authentication, owner-controlled device and session revocation, audited terminal-only owner recovery, strict loopback/LAN request policy with explicit TLS secret references, and an owner-only scoped secret store for provider credentials.

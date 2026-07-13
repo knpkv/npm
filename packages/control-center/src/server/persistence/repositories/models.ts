@@ -160,6 +160,8 @@ export const QuarantineRecordKind = Schema.Literals([
   "release-head",
   "release-revision",
   "role-assignment",
+  "session",
+  "pairing-code",
   "workspace"
 ])
 
@@ -176,6 +178,8 @@ export const QuarantineReasonCode = Schema.Literals([
   "release-head-schema-invalid",
   "release-revision-envelope-invalid",
   "role-assignment-schema-invalid",
+  "session-schema-invalid",
+  "pairing-code-schema-invalid",
   "schema-decode-failed",
   "snapshot-beyond-head",
   "snapshot-digest-mismatch",
@@ -202,6 +206,8 @@ export const QuarantineDiagnosticSummary = Schema.Literals([
   "Stored release snapshot failed schema validation.",
   "Stored release snapshot identity does not match its repository key.",
   "Stored role assignment failed schema validation.",
+  "Stored session failed schema validation.",
+  "Stored pairing code failed schema validation.",
   "Stored workspace failed schema validation."
 ])
 

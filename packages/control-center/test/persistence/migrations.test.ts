@@ -16,14 +16,17 @@ const expectedTables = [
   "control_center_migrations",
   "entities",
   "entity_revisions",
+  "pairing_codes",
   "person_identities",
   "persons",
   "plugin_connections",
   "quarantined_records",
+  "recovery_audit_events",
   "release_revisions",
   "release_targets",
   "releases",
   "role_assignments",
+  "sessions",
   "workspaces"
 ]
 
