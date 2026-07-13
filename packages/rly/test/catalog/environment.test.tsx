@@ -34,6 +34,9 @@ describe("catalog environment", () => {
     )
 
     const environment = document.querySelector("[data-rly-catalog]")
+    expect(environment?.getAttribute("data-forced-colors")).toBe("active")
+    expect(environment?.getAttribute("data-reduced-motion")).toBe("reduce")
+    expect(environment?.getAttribute("data-theme")).toBe("dark")
     expect(environment?.getAttribute("data-rly-density")).toBe("compact")
     expect(environment?.getAttribute("data-rly-forced-colors")).toBe("active")
     expect(environment?.getAttribute("data-rly-reduced-motion")).toBe("reduce")

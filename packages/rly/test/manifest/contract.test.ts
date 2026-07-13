@@ -29,6 +29,15 @@ describe("component manifest contract", () => {
     )
   })
 
+  it("rejects identities shared by module and asset entries", () => {
+    expect(() =>
+      validateManifest({
+        ...componentManifest,
+        assets: componentManifest.assets.map((asset) => ({ ...asset, id: "tokens" }))
+      })
+    ).toThrow("Duplicate entry id")
+  })
+
   it("rejects aggregate cycles", () => {
     const entries = componentManifest.entries.map((entry) =>
       entry.id === "root" ? { ...entry, aggregates: ["root"] } satisfies ModuleEntry : entry
@@ -91,7 +100,11 @@ describe("component manifest contract", () => {
   })
 
   it("detects missing records and undeclared component sources", () => {
-    const files = componentManifest.entries.map(({ source }) => source)
+    const files = [
+      ...componentManifest.entries.map(({ source }) => source),
+      ...componentManifest.assets.map(({ source }) => source),
+      ...componentManifest.components.flatMap(({ source, styles }) => [source, ...styles])
+    ]
 
     expect(
       findSourceDrift(componentManifest, [
@@ -120,7 +133,8 @@ describe("component manifest contract", () => {
         ".": {
           import: "./dist/index.js",
           types: "./dist/dts/index.d.ts"
-        }
+        },
+        "./styles.css": "./dist/styles.css"
       }
     })
   })

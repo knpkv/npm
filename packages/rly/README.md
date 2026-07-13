@@ -8,6 +8,37 @@ The package is intentionally application-independent: it contains no vendor clie
 
 The package contract is established at `0.0.0` while its first `0.1.0` component surface is built. Public components and themes will be added behind explicit exports.
 
+## Tokens and global styles
+
+Import browser-safe semantic token names from `@knpkv/rly/tokens`. Raw palette
+values remain private and are emitted only into the generated CSS contract.
+
+Import the global layers once at the application boundary:
+
+```css
+@import "@knpkv/rly/styles.css";
+```
+
+The stylesheet contains self-hosted Geist and Geist Mono variable fonts,
+semantic `light-dark()` color pairs, typography, spacing, shape, motion, a
+scoped reset, and base styles. Set `data-theme="light|dark|system"` on the rly
+root; system is the default. Forced colors and reduced motion are handled
+centrally.
+
+Service accents identify provenance only. Readiness always uses a state word,
+ink/tint pair, and geometry rather than a provider color.
+
+Token sources, CSS, registry metadata, package exports, and visual catalog data
+are generated together:
+
+```bash
+pnpm --filter @knpkv/rly codegen:check
+pnpm --filter @knpkv/rly lint:colors
+```
+
+The color-policy lint rejects raw component colors, primitive palette
+variables, and component-local theme/media overrides.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

@@ -36,8 +36,23 @@ const program = Effect.scoped(Effect.gen(function*() {
   const archiveName = `${packageJson.name.replace("@", "").replace("/", "-")}-${packageJson.version}.tgz`
   const archive = path.join(temporary, archiveName)
   const listing = yield* run("tar", ["-tf", archive], temporary)
+  for (
+    const artifact of [
+      "package/dist/styles.css",
+      "package/dist/base.css",
+      "package/dist/fonts.css",
+      "package/dist/generated-tokens.css",
+      "package/dist/fonts/geist-latin-wght-normal.woff2",
+      "package/dist/fonts/geist-mono-latin-wght-normal.woff2"
+    ]
+  ) {
+    if (!listing.split("\n").includes(artifact)) {
+      return yield* Effect.fail(new PackedPackageError({ reason: `Packed asset is missing: ${artifact}` }))
+    }
+  }
   const leaked = listing.split("\n").filter((entry) =>
     /^package\/(?:src|test|scripts|generated|component-manifest\.ts)(?:\/|$)/.test(entry)
+    || /^package\/dist\/dts\/tokens\/(?:colors|model|motion|shape|space|typography)\.d\.ts(?:\.map)?$/.test(entry)
   )
   if (leaked.length > 0) {
     return yield* Effect.fail(new PackedPackageError({ reason: `Packed source leaked: ${leaked.join(", ")}` }))
@@ -100,6 +115,15 @@ const program = Effect.scoped(Effect.gen(function*() {
     const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
     yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)
   }
+  yield* run(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `const resolved = import.meta.resolve("@knpkv/rly/styles.css"); if (!resolved.endsWith("/dist/styles.css")) throw new Error(resolved)`
+    ],
+    consumer
+  )
   for (
     const specifier of [
       "@knpkv/rly/src/index.js",

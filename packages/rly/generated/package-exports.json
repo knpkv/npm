@@ -22,5 +22,6 @@
   "./tokens": {
     "types": "./dist/dts/tokens/index.d.ts",
     "import": "./dist/tokens/index.js"
-  }
+  },
+  "./styles.css": "./dist/styles.css"
 }

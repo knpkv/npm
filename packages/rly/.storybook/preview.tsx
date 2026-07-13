@@ -1,5 +1,6 @@
 import type { Decorator, Preview } from "@storybook/react-vite"
 import { MINIMAL_VIEWPORTS } from "storybook/viewport"
+import "../src/styles/styles.css"
 import { CatalogEnvironment, resolveCatalogEnvironment } from "./catalog-environment.js"
 
 const withCatalogEnvironment: Decorator = (Story, context) => {

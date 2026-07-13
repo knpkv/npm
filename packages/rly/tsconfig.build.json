@@ -9,5 +9,15 @@
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo"
   },
   "include": ["src"],
-  "exclude": ["dist", "node_modules", "test"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "test",
+    "src/tokens/colors.ts",
+    "src/tokens/model.ts",
+    "src/tokens/motion.ts",
+    "src/tokens/shape.ts",
+    "src/tokens/space.ts",
+    "src/tokens/typography.ts"
+  ]
 }

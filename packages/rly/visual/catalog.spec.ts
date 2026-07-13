@@ -8,6 +8,9 @@ test("renders the bounded catalog environment and captures one local frame", asy
 
   await expect(page.getByRole("heading", { name: "Component catalog" })).toBeVisible()
   const environment = page.locator("[data-rly-catalog]")
+  await expect(environment).toHaveAttribute("data-theme", "dark")
+  await expect(environment).toHaveAttribute("data-forced-colors", "active")
+  await expect(environment).toHaveAttribute("data-reduced-motion", "reduce")
   await expect(environment).toHaveAttribute("data-rly-theme", "dark")
   await expect(environment).toHaveAttribute("data-rly-forced-colors", "active")
   await expect(environment).toHaveAttribute("data-rly-reduced-motion", "reduce")

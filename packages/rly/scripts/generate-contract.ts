@@ -54,7 +54,9 @@ const program = Effect.gen(function*() {
 
   const sourceFiles = yield* listFiles(fs, path, packageRoot, path.join(packageRoot, "src"))
   const sourceDrift = findSourceDrift(componentManifest, sourceFiles)
-  for (const file of sourceDrift.missing) failures.push(`missing ${file}`)
+  for (const file of sourceDrift.missing) {
+    if (mode === "check" || !expected.has(file)) failures.push(`missing ${file}`)
+  }
   for (const file of sourceDrift.unexpected) failures.push(`undeclared component source ${file}`)
 
   for (const [relative, content] of expected) {

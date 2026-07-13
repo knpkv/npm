@@ -44,6 +44,48 @@ const program = Effect.gen(function*() {
       if (info.type !== "File") failures.push(`not a file ${artifact}`)
     }
   }
+  for (const asset of componentManifest.assets) {
+    const target = path.join(packageRoot, asset.output)
+    if (!(yield* fs.exists(target))) failures.push(`missing ${asset.output}`)
+    else if ((yield* fs.stat(target)).type !== "File") failures.push(`not a file ${asset.output}`)
+  }
+  for (
+    const artifact of [
+      "dist/base.css",
+      "dist/fonts.css",
+      "dist/generated-tokens.css",
+      "dist/fonts/geist-latin-wght-normal.woff2",
+      "dist/fonts/geist-mono-latin-wght-normal.woff2",
+      "dist/fonts/OFL-Geist.txt",
+      "dist/fonts/OFL-Geist-Mono.txt"
+    ]
+  ) {
+    const target = path.join(packageRoot, artifact)
+    if (!(yield* fs.exists(target))) failures.push(`missing ${artifact}`)
+    else if ((yield* fs.stat(target)).type !== "File") failures.push(`not a file ${artifact}`)
+  }
+  const publishedFontsPath = path.join(packageRoot, "dist/fonts.css")
+  if (yield* fs.exists(publishedFontsPath)) {
+    const publishedFonts = yield* fs.readFileString(publishedFontsPath)
+    if (publishedFonts.includes("@fontsource-variable")) failures.push("published font CSS has a bare dependency URL")
+    for (const font of ["geist-latin-wght-normal.woff2", "geist-mono-latin-wght-normal.woff2"]) {
+      if (!publishedFonts.includes(`./fonts/${font}`)) failures.push(`published font CSS does not reference ${font}`)
+    }
+  }
+  for (
+    const privateArtifact of [
+      "dist/dts/tokens/colors.d.ts",
+      "dist/dts/tokens/model.d.ts",
+      "dist/dts/tokens/motion.d.ts",
+      "dist/dts/tokens/shape.d.ts",
+      "dist/dts/tokens/space.d.ts",
+      "dist/dts/tokens/typography.d.ts"
+    ]
+  ) {
+    if (yield* fs.exists(path.join(packageRoot, privateArtifact))) {
+      failures.push(`private token source leaked as ${privateArtifact}`)
+    }
+  }
 
   const packageSource = yield* fs.readFileString(path.join(packageRoot, "package.json"))
   const packageJson = yield* Schema.decodeUnknownEffect(PackageJson)(packageSource).pipe(
@@ -51,7 +93,7 @@ const program = Effect.gen(function*() {
   )
   const exports = renderPackageExports(componentManifest)
   const root = exports["."]
-  if (root === undefined) failures.push("root export is missing")
+  if (root === undefined || typeof root === "string") failures.push("root module export is missing")
   else {
     if (packageJson.main !== root.import) failures.push("main does not match root import")
     if (packageJson.types !== root.types) failures.push("types does not match root types")
@@ -66,7 +108,9 @@ const program = Effect.gen(function*() {
   if (failures.length > 0) {
     return yield* Effect.fail(new DistValidationError({ reason: failures.join(", ") }))
   }
-  yield* Console.log(`validated ${componentManifest.entries.length} rly package entries`)
+  yield* Console.log(
+    `validated ${componentManifest.entries.length} modules and ${componentManifest.assets.length} assets`
+  )
 })
 
 NodeRuntime.runMain(

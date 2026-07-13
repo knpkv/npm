@@ -29,11 +29,14 @@ export const CatalogEnvironment = ({
   readonly values: CatalogEnvironmentValues
 }) => (
   <div
+    data-forced-colors={values.forcedColors}
+    data-reduced-motion={values.reducedMotion}
     data-rly-catalog=""
     data-rly-density={values.density}
     data-rly-forced-colors={values.forcedColors}
     data-rly-reduced-motion={values.reducedMotion}
     data-rly-theme={values.theme}
+    data-theme={values.theme}
     lang={values.locale}
     style={{ minHeight: "100vh" }}
   >

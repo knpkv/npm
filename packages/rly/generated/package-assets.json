@@ -1,0 +1,8 @@
+[
+  {
+    "id": "styles",
+    "output": "dist/styles.css",
+    "source": "src/styles/styles.css",
+    "subpath": "./styles.css"
+  }
+]

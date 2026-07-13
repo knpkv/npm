@@ -41,7 +41,9 @@ const program = Effect.gen(function*() {
   )
   const expected = new Map([
     ["catalog-overview--default", "story"],
-    ["catalog-overview--documentation", "docs"]
+    ["catalog-overview--documentation", "docs"],
+    ["foundations-tokens--overview", "story"],
+    ["foundations-tokens--documentation", "docs"]
   ])
   for (const [id, type] of expected) {
     const entry = index.entries[id]

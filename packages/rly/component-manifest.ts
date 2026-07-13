@@ -10,6 +10,14 @@ export interface ModuleEntry {
   readonly subpath: "." | `./${string}`
 }
 
+/** A non-JavaScript artifact exported from the published package. */
+export interface AssetEntry {
+  readonly id: string
+  readonly output: `dist/${string}`
+  readonly source: `src/${string}`
+  readonly subpath: `./${string}`
+}
+
 /** Metadata for one named component export. */
 export interface ComponentRecord {
   readonly category: "foundation" | "primitive" | "pattern" | "diff"
@@ -37,6 +45,7 @@ export interface ComponentRecord {
 
 /** Single source of truth for generated rly entries and component metadata. */
 export interface ComponentManifest {
+  readonly assets: ReadonlyArray<AssetEntry>
   readonly components: ReadonlyArray<ComponentRecord>
   readonly entries: ReadonlyArray<ModuleEntry>
   readonly schemaVersion: 1
@@ -45,6 +54,7 @@ export interface ComponentManifest {
 /** Checked-in rly package contract. Components are added with their implementation commits. */
 export const componentManifest = {
   schemaVersion: 1,
+  assets: [{ id: "styles", output: "dist/styles.css", source: "src/styles/styles.css", subpath: "./styles.css" }],
   entries: [
     {
       aggregates: ["tokens", "foundations", "primitives", "patterns"],
@@ -89,5 +99,31 @@ export const componentManifest = {
       subpath: "./diff"
     }
   ],
-  components: []
+  components: [{
+    category: "foundation",
+    exports: [
+      { kind: "value", name: "RLY_COLOR_TOKEN_NAMES" },
+      { kind: "value", name: "RLY_MOTION_TOKEN_NAMES" },
+      { kind: "value", name: "RLY_RADIUS_TOKEN_NAMES" },
+      { kind: "value", name: "RLY_SPACE_TOKEN_NAMES" },
+      { kind: "value", name: "RLY_TYPE_TOKEN_NAMES" },
+      { kind: "type", name: "RlyColorToken" },
+      { kind: "type", name: "RlyMotionToken" },
+      { kind: "type", name: "RlyRadiusToken" },
+      { kind: "type", name: "RlySpaceToken" },
+      { kind: "type", name: "RlyTypeToken" }
+    ],
+    name: "SemanticTokens",
+    publicEntry: "tokens",
+    registry: true,
+    source: "src/tokens/semantic-tokens.ts",
+    status: "stable",
+    styles: [],
+    variants: [],
+    visual: {
+      story: "stories/foundations/Tokens.stories.tsx",
+      storyId: "foundations-tokens--overview",
+      tests: ["test/tokens/token-contract.test.ts"]
+    }
+  }]
 } satisfies ComponentManifest

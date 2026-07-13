@@ -36,7 +36,8 @@
     "./tokens": {
       "types": "./dist/dts/tokens/index.d.ts",
       "import": "./dist/tokens/index.js"
-    }
+    },
+    "./styles.css": "./dist/styles.css"
   },
   "publishConfig": {
     "access": "public"
@@ -50,12 +51,13 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "pnpm codegen:check && rimraf dist && vite build && tsc -b tsconfig.build.json --force && pnpm validate:dist",
-    "check": "pnpm codegen:check && tsc -b tsconfig.json",
+    "build": "pnpm codegen:check && rimraf dist && vite build && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
+    "check": "pnpm codegen:check && pnpm lint:colors && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
     "codegen": "tsx scripts/generate-contract.ts write",
     "codegen:check": "tsx scripts/generate-contract.ts check",
-    "lint": "eslint \"{src,test,scripts,generated,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts",
+    "lint": "eslint \"{src,test,scripts,generated,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
+    "lint:colors": "tsx scripts/tokens/lint-colors.ts",
     "prepack": "pnpm build",
     "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --no-version-updates",
     "storybook:build": "storybook build --output-dir storybook-static --disable-telemetry && pnpm validate:storybook",
@@ -97,5 +99,9 @@
     "typescript": "^6.0.3",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.2.9",
+    "@fontsource-variable/geist-mono": "5.2.8"
   }
 }

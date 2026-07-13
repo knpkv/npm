@@ -11,7 +11,10 @@ describe("package contract", () => {
     expect(isRecord(manifest)).toBe(true)
     if (!isRecord(manifest)) return
 
-    expect(manifest.dependencies).toBeUndefined()
+    expect(manifest.dependencies).toEqual({
+      "@fontsource-variable/geist": "5.2.9",
+      "@fontsource-variable/geist-mono": "5.2.8"
+    })
     expect(manifest.name).toBe("@knpkv/rly")
     expect(manifest.version).toBe("0.0.0")
   })
