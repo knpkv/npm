@@ -44,6 +44,21 @@ export const NormalizationSchemaVersion = Schema.Number.check(
 /** Decoded normalization-schema version. */
 export type NormalizationSchemaVersion = typeof NormalizationSchemaVersion.Type
 
+/** Safe navigable URL for an exact provider object, without embedded credentials. */
+export const SourceUrl = Schema.URLFromString.check(
+  Schema.makeFilter(
+    ({ protocol }) => protocol === "https:" || protocol === "http:",
+    { expected: "an HTTP or HTTPS source URL" }
+  ),
+  Schema.makeFilter(
+    ({ password, username }) => password.length === 0 && username.length === 0,
+    { expected: "a source URL without embedded credentials" }
+  )
+)
+
+/** Decoded safe source URL. */
+export type SourceUrl = typeof SourceUrl.Type
+
 /**
  * Immutable provenance needed to reconcile a normalized record with the exact
  * provider object and revision from which it was derived.
@@ -53,7 +68,7 @@ export const SourceRevision = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
   vendorImmutableId: VendorImmutableId,
   revision: Revision,
-  sourceUrl: Schema.Union([Schema.URLFromString, Schema.Null]),
+  sourceUrl: Schema.Union([SourceUrl, Schema.Null]),
   firstObservedAt: UtcTimestamp,
   lastObservedAt: UtcTimestamp,
   synchronizedAt: UtcTimestamp,

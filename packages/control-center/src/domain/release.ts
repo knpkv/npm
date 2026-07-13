@@ -56,6 +56,9 @@ const ReleaseRecord = Schema.Struct({
   workspaceId: WorkspaceId
 })
 
+const encodeSourceRevision = Schema.encodeSync(SourceRevision)
+const sourceRevisionEquivalence = Schema.toEquivalence(Schema.toEncoded(SourceRevision))
+
 /**
  * Foundational release aggregate. Readiness, evidence, stages, and delivery
  * relationships extend this record in their owning slices.
@@ -92,6 +95,18 @@ export const Release = ReleaseRecord.check(
       return new Set(sourceKeys).size === sourceKeys.length
     },
     { expected: "one current source revision per provider object" }
+  ),
+  Schema.makeFilter(
+    ({ freshness, sourceRevisions }) => {
+      if (freshness._tag !== "current" && freshness._tag !== "stale") return true
+      const freshnessRevision = encodeSourceRevision(freshness.provenance.sourceRevision)
+      return (
+        sourceRevisions.filter((sourceRevision) =>
+          sourceRevisionEquivalence(encodeSourceRevision(sourceRevision), freshnessRevision)
+        ).length === 1
+      )
+    },
+    { expected: "current or stale freshness provenance to match one release source revision" }
   ),
   Schema.makeFilter(
     ({ id, relay }) => {

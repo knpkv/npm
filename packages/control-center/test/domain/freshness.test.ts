@@ -73,6 +73,48 @@ describe("Freshness", () => {
       expect(encoded).toEqual(encodedFreshness)
     }))
 
+  it("treats the exact stale threshold as current and the next millisecond as stale", () => {
+    const currentAtBoundary = {
+      _tag: "current",
+      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" },
+      provenance: { _tag: "provider", sourceRevision },
+      sourceObservedAt: sourceRevision.lastObservedAt,
+      staleAfterSeconds: 900,
+      synchronizedAt: "2026-07-13T08:31:00.000Z"
+    }
+    const staleJustOverBoundary = {
+      _tag: "stale",
+      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.001Z" },
+      provenance: {
+        _tag: "cache",
+        cachedAt: "2026-07-13T08:31:00.000Z",
+        sourceRevision
+      },
+      sourceObservedAt: sourceRevision.lastObservedAt,
+      staleAfterSeconds: 900,
+      synchronizedAt: "2026-07-13T08:31:30.000Z"
+    }
+
+    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(currentAtBoundary))).toBe(true)
+    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(staleJustOverBoundary))).toBe(true)
+    expect(
+      Result.isFailure(
+        Schema.decodeUnknownResult(Freshness)({
+          ...currentAtBoundary,
+          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.001Z" }
+        })
+      )
+    ).toBe(true)
+    expect(
+      Result.isFailure(
+        Schema.decodeUnknownResult(Freshness)({
+          ...staleJustOverBoundary,
+          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" }
+        })
+      )
+    ).toBe(true)
+  })
+
   it("distinguishes a successful missing result from an unavailable source", () => {
     const missing = Schema.decodeUnknownResult(Freshness)({
       _tag: "missing",

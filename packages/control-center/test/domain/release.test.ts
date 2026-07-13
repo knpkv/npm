@@ -134,4 +134,17 @@ describe("Release", () => {
       })
     ).toThrow(/one current source revision/)
   })
+
+  it("rejects current freshness without its exact top-level source revision", () => {
+    expect(() => Schema.decodeUnknownSync(Release)({ ...validRelease, sourceRevisions: [] })).toThrow(
+      /freshness provenance to match/
+    )
+
+    expect(() =>
+      Schema.decodeUnknownSync(Release)({
+        ...validRelease,
+        sourceRevisions: [{ ...sourceRevision, revision: "different-revision" }]
+      })
+    ).toThrow(/freshness provenance to match/)
+  })
 })

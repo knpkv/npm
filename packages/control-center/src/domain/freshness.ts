@@ -88,6 +88,9 @@ const NoCacheProvenance = Schema.TaggedStruct("none", {
   pluginConnectionId: PluginConnectionId
 })
 
+const sourceAgeSecondsAt = (sourceObservedAt: UtcTimestamp, evaluatedAt: UtcTimestamp): number =>
+  (DateTime.toEpochMillis(evaluatedAt) - DateTime.toEpochMillis(sourceObservedAt)) / 1_000
+
 const CurrentFreshness = Schema.TaggedStruct("current", {
   pluginHealth: UsablePluginHealth,
   provenance: Schema.Union([ProviderProvenance, CachedProvenance]),
@@ -96,12 +99,15 @@ const CurrentFreshness = Schema.TaggedStruct("current", {
   synchronizedAt: UtcTimestamp
 }).check(
   Schema.makeFilter(
-    ({ provenance, sourceObservedAt, synchronizedAt }) =>
+    ({ pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
       DateTime.Equivalence(sourceObservedAt, provenance.sourceRevision.lastObservedAt) &&
       DateTime.Order(provenance.sourceRevision.synchronizedAt, synchronizedAt) <= 0 &&
-      (provenance._tag === "provider" || DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0),
+      (provenance._tag === "provider" || DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0) &&
+      DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
+      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) >= 0 &&
+      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) <= staleAfterSeconds,
     {
-      expected: "source observation to match its revision and not follow synchronization"
+      expected: "current source data to match its revision and remain within its stale threshold"
     }
   )
 )
@@ -114,12 +120,14 @@ const StaleFreshness = Schema.TaggedStruct("stale", {
   synchronizedAt: UtcTimestamp
 }).check(
   Schema.makeFilter(
-    ({ provenance, sourceObservedAt, synchronizedAt }) =>
+    ({ pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
       DateTime.Equivalence(sourceObservedAt, provenance.sourceRevision.lastObservedAt) &&
       DateTime.Order(sourceObservedAt, synchronizedAt) <= 0 &&
-      DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0,
+      DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0 &&
+      DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
+      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) > staleAfterSeconds,
     {
-      expected: "stale cache observation, cache, and synchronization times to be chronological"
+      expected: "stale cache data to be chronological and beyond its stale threshold"
     }
   )
 )

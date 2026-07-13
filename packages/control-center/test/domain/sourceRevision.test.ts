@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Result, Schema } from "effect"
 
-import { ProviderId, Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
+import { ProviderId, Revision, SourceRevision, SourceUrl, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 
 const sourceRevisionInput = {
   providerId: "jira",
@@ -121,6 +121,30 @@ describe("SourceRevision", () => {
 
     assert.isTrue(Result.isFailure(decoded))
   })
+
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,unsafe",
+    "file:///etc/passwd",
+    "https://user:secret@example.com/object"
+  ])("rejects unsafe source URL %s", (sourceUrl) => {
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(SourceUrl)(sourceUrl)))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(SourceRevision)({
+          ...sourceRevisionInput,
+          sourceUrl
+        })
+      )
+    )
+  })
+
+  it.each(["https://example.com/object", "http://localhost:8080/object"])(
+    "accepts navigable source URL %s",
+    (sourceUrl) => {
+      assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(SourceUrl)(sourceUrl)))
+    }
+  )
 
   it.effect.prop(
     "round-trips every generated valid source revision",
