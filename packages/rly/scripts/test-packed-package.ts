@@ -89,7 +89,8 @@ const program = Effect.scoped(Effect.gen(function*() {
             jsx: "react-jsx",
             module: "NodeNext",
             moduleResolution: "NodeNext",
-            noEmit: true,
+            outDir: "dist",
+            rootDir: "src",
             skipLibCheck: false,
             strict: true,
             target: "ES2022"
@@ -135,6 +136,7 @@ void [${references}]
 
   yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
   yield* run("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], consumer)
+  yield* run("node", ["dist/index.js"], consumer)
   for (const entry of componentManifest.entries) {
     const specifier = entry.subpath === "." ? "@knpkv/rly" : `@knpkv/rly/${entry.subpath.slice(2)}`
     yield* run("node", ["--input-type=module", "-e", `await import(${JSON.stringify(specifier)})`], consumer)

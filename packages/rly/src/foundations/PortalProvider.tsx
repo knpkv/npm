@@ -8,20 +8,36 @@ export interface PortalProviderProps {
   readonly container?: RlyPortalContainer | null
 }
 
-const PortalContainerContext = createContext<RlyPortalContainer | null>(null)
+export type RlyPortalTarget =
+  { readonly available: false } | { readonly available: true; readonly container: RlyPortalContainer }
 
-/** Internal target bridge for rly overlays. Null always means no target is currently available. */
-export const usePortalContainer = (): RlyPortalContainer | null => useContext(PortalContainerContext)
+interface PortalBoundaryProps {
+  readonly children: (container: RlyPortalContainer) => ReactElement
+}
+
+const unavailableTarget: RlyPortalTarget = { available: false }
+const PortalTargetContext = createContext<RlyPortalTarget>(unavailableTarget)
+
+/** Internal target state for rly overlays. Consumers must prove availability before obtaining a container. */
+export const usePortalTarget = (): RlyPortalTarget => useContext(PortalTargetContext)
+
+/** Prevents portal implementations from mounting while their controlled target is unavailable. */
+export const PortalBoundary = ({ children }: PortalBoundaryProps): ReactElement | null => {
+  const target = usePortalTarget()
+  return target.available ? children(target.container) : null
+}
 
 /** Supplies a custom portal target or owns an in-tree target without assuming a global body. */
 export const PortalProvider = ({ children, container }: PortalProviderProps): ReactElement => {
   const [ownedContainer, setOwnedContainer] = useState<HTMLDivElement | null>(null)
   const resolvedContainer = container === undefined ? ownedContainer : container
+  const target: RlyPortalTarget =
+    resolvedContainer === null ? unavailableTarget : { available: true, container: resolvedContainer }
 
   return (
-    <PortalContainerContext.Provider value={resolvedContainer}>
+    <PortalTargetContext.Provider value={target}>
       {children}
       {container === undefined ? <div data-rly-portal-root="" ref={setOwnedContainer} /> : null}
-    </PortalContainerContext.Provider>
+    </PortalTargetContext.Provider>
   )
 }

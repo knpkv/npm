@@ -4,7 +4,15 @@ import { act, createRef } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it } from "vitest"
-import { GlobalStyles } from "../../src/foundations/GlobalStyles.js"
+import { GlobalStyles, type GlobalStylesProps } from "../../src/foundations/GlobalStyles.js"
+
+// @ts-expect-error asChild cannot safely type a wrapper ref against an arbitrary child element
+const invalidPolymorphicRef: GlobalStylesProps = {
+  asChild: true,
+  children: <main />,
+  ref: createRef<HTMLDivElement>()
+}
+void invalidPolymorphicRef
 
 afterEach(() => {
   document.body.replaceChildren()

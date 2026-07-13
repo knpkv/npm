@@ -10,9 +10,10 @@ export interface GlobalStylesRootProps extends RootProps {
   readonly children?: ReactNode
 }
 
-export interface GlobalStylesChildProps extends RootProps {
+export interface GlobalStylesChildProps extends Omit<RootProps, "ref"> {
   readonly asChild: true
   readonly children: ReactElement<RootProps>
+  readonly ref?: never
 }
 
 /** Props for the structural boundary targeted by rly's reset and base layers. */

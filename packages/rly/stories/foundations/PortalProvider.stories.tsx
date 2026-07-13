@@ -2,21 +2,24 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { Dialog } from "radix-ui"
 import { type ReactElement, useState } from "react"
 import { expect, userEvent, within } from "storybook/test"
-import { PortalProvider, usePortalContainer } from "../../src/foundations/PortalProvider.js"
+import { PortalBoundary, PortalProvider } from "../../src/foundations/PortalProvider.js"
 
 const DialogProbe = (): ReactElement => {
-  const container = usePortalContainer()
   return (
     <Dialog.Root>
       <Dialog.Trigger>Open custom portal</Dialog.Trigger>
-      <Dialog.Portal container={container}>
-        <Dialog.Overlay />
-        <Dialog.Content>
-          <Dialog.Title>Portal policy</Dialog.Title>
-          <Dialog.Description>Overlays stay in the target selected by the application.</Dialog.Description>
-          <Dialog.Close>Close portal</Dialog.Close>
-        </Dialog.Content>
-      </Dialog.Portal>
+      <PortalBoundary>
+        {(container) => (
+          <Dialog.Portal container={container}>
+            <Dialog.Overlay />
+            <Dialog.Content>
+              <Dialog.Title>Portal policy</Dialog.Title>
+              <Dialog.Description>Overlays stay in the target selected by the application.</Dialog.Description>
+              <Dialog.Close>Close portal</Dialog.Close>
+            </Dialog.Content>
+          </Dialog.Portal>
+        )}
+      </PortalBoundary>
     </Dialog.Root>
   )
 }
