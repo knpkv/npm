@@ -21,5 +21,20 @@ export const Controlled: Story = {
   },
   play: async ({ canvas }) => {
     await expect(canvas.getByText("Theme is application state, never hidden provider state.")).toBeVisible()
-  }
+    await expect(canvas.getByText("Light theme")).toBeVisible()
+    await expect(canvas.getByText("Dark theme")).toBeVisible()
+  },
+  render: () => (
+    <div>
+      <ThemeProvider theme="system">
+        <p>Theme is application state, never hidden provider state.</p>
+      </ThemeProvider>
+      <ThemeProvider theme="light">
+        <p>Light theme</p>
+      </ThemeProvider>
+      <ThemeProvider theme="dark">
+        <p>Dark theme</p>
+      </ThemeProvider>
+    </div>
+  )
 }

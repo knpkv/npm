@@ -13,7 +13,10 @@
           "packages/rly/test/patterns/AgentContextButton.test.tsx"
         ]
       },
-      "storyId": "patterns-agentcontextbutton--contexts"
+      "storyId": "patterns-agentcontextbutton--contexts",
+      "storyIds": [
+        "patterns-agentcontextbutton--contexts"
+      ]
     },
     {
       "name": "AgentDrawer",
@@ -27,7 +30,10 @@
           "packages/rly/test/patterns/AgentDrawer.test.tsx"
         ]
       },
-      "storyId": "patterns-agentdrawer--interaction"
+      "storyId": "patterns-agentdrawer--interaction",
+      "storyIds": [
+        "patterns-agentdrawer--interaction"
+      ]
     },
     {
       "name": "AgentJob",
@@ -41,7 +47,10 @@
           "packages/rly/test/patterns/AgentJob.test.tsx"
         ]
       },
-      "storyId": "patterns-agentjob--states"
+      "storyId": "patterns-agentjob--states",
+      "storyIds": [
+        "patterns-agentjob--states"
+      ]
     },
     {
       "name": "AgentProposal",
@@ -55,7 +64,10 @@
           "packages/rly/test/patterns/AgentProposal.test.tsx"
         ]
       },
-      "storyId": "patterns-agentproposal--states"
+      "storyId": "patterns-agentproposal--states",
+      "storyIds": [
+        "patterns-agentproposal--states"
+      ]
     },
     {
       "name": "AgentThread",
@@ -69,7 +81,10 @@
           "packages/rly/test/patterns/AgentThread.test.tsx"
         ]
       },
-      "storyId": "patterns-agentthread--release-thread"
+      "storyId": "patterns-agentthread--release-thread",
+      "storyIds": [
+        "patterns-agentthread--release-thread"
+      ]
     },
     {
       "name": "Avatar",
@@ -83,7 +98,10 @@
           "packages/rly/test/primitives/Avatar.test.tsx"
         ]
       },
-      "storyId": "primitives-avatar--gallery"
+      "storyId": "primitives-avatar--gallery",
+      "storyIds": [
+        "primitives-avatar--gallery"
+      ]
     },
     {
       "name": "Button",
@@ -97,7 +115,10 @@
           "packages/rly/test/primitives/Button.test.tsx"
         ]
       },
-      "storyId": "primitives-button--states"
+      "storyId": "primitives-button--states",
+      "storyIds": [
+        "primitives-button--states"
+      ]
     },
     {
       "name": "CollaboratorGroup",
@@ -111,7 +132,10 @@
           "packages/rly/test/patterns/CollaboratorGroup.test.tsx"
         ]
       },
-      "storyId": "patterns-collaboratorgroup--entity-roles"
+      "storyId": "patterns-collaboratorgroup--entity-roles",
+      "storyIds": [
+        "patterns-collaboratorgroup--entity-roles"
+      ]
     },
     {
       "name": "Dialog",
@@ -125,7 +149,11 @@
           "packages/rly/test/primitives/Dialog.test.tsx"
         ]
       },
-      "storyId": "primitives-dialog--interaction"
+      "storyId": "primitives-dialog--interaction",
+      "storyIds": [
+        "primitives-dialog--interaction",
+        "primitives-dialog--nested-isolation"
+      ]
     },
     {
       "name": "DiffCodeTypes",
@@ -137,7 +165,10 @@
           "packages/rly/test/diff/DiffCodeView.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench"
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
     },
     {
       "name": "DiffCodeView",
@@ -151,7 +182,11 @@
           "packages/rly/test/diff/DiffCodeView.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench"
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench",
+        "diff-diffcodeview--stacked-wrapped"
+      ]
     },
     {
       "name": "DiffFileTree",
@@ -165,7 +200,10 @@
           "packages/rly/test/diff/DiffFileTree.test.tsx"
         ]
       },
-      "storyId": "diff-difffiletree--file-states"
+      "storyId": "diff-difffiletree--file-states",
+      "storyIds": [
+        "diff-difffiletree--file-states"
+      ]
     },
     {
       "name": "DiffFinding",
@@ -179,7 +217,11 @@
           "packages/rly/test/diff/DiffFinding.test.tsx"
         ]
       },
-      "storyId": "diff-difffinding--human-and-agent"
+      "storyId": "diff-difffinding--human-and-agent",
+      "storyIds": [
+        "diff-difffinding--human-and-agent",
+        "diff-difffinding--stale-anchor"
+      ]
     },
     {
       "name": "DiffHeader",
@@ -193,7 +235,10 @@
           "packages/rly/test/diff/DiffHeader.test.tsx"
         ]
       },
-      "storyId": "diff-diffheader--controlled-preferences"
+      "storyId": "diff-diffheader--controlled-preferences",
+      "storyIds": [
+        "diff-diffheader--controlled-preferences"
+      ]
     },
     {
       "name": "DiffParsing",
@@ -205,7 +250,10 @@
           "packages/rly/test/diff/parse-diff.test.ts"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench"
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
     },
     {
       "name": "DiffThemes",
@@ -217,7 +265,10 @@
           "packages/rly/test/diff/DiffCodeView.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench"
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
     },
     {
       "name": "DiffWorkbench",
@@ -231,7 +282,10 @@
           "packages/rly/test/diff/DiffWorkbench.test.tsx"
         ]
       },
-      "storyId": "diff-diffworkbench--bird-eye-review"
+      "storyId": "diff-diffworkbench--bird-eye-review",
+      "storyIds": [
+        "diff-diffworkbench--bird-eye-review"
+      ]
     },
     {
       "name": "DiffWorkerProvider",
@@ -243,7 +297,10 @@
           "packages/rly/test/diff/worker-pool.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--worker-states"
+      "storyId": "diff-diffcodeview--worker-states",
+      "storyIds": [
+        "diff-diffcodeview--worker-states"
+      ]
     },
     {
       "name": "Divider",
@@ -257,7 +314,10 @@
           "packages/rly/test/primitives/Divider.test.tsx"
         ]
       },
-      "storyId": "primitives-divider--gallery"
+      "storyId": "primitives-divider--gallery",
+      "storyIds": [
+        "primitives-divider--gallery"
+      ]
     },
     {
       "name": "EntityShell",
@@ -271,7 +331,10 @@
           "packages/rly/test/patterns/EntityShell.test.tsx"
         ]
       },
-      "storyId": "patterns-entityshell--services"
+      "storyId": "patterns-entityshell--services",
+      "storyIds": [
+        "patterns-entityshell--services"
+      ]
     },
     {
       "name": "EntityTable",
@@ -285,7 +348,10 @@
           "packages/rly/test/patterns/EntityTable.test.tsx"
         ]
       },
-      "storyId": "patterns-entitytable--states"
+      "storyId": "patterns-entitytable--states",
+      "storyIds": [
+        "patterns-entitytable--states"
+      ]
     },
     {
       "name": "EvidenceStamp",
@@ -299,7 +365,10 @@
           "packages/rly/test/patterns/EvidenceStamp.test.tsx"
         ]
       },
-      "storyId": "patterns-evidencestamp--compact-forced-colors"
+      "storyId": "patterns-evidencestamp--compact-forced-colors",
+      "storyIds": [
+        "patterns-evidencestamp--compact-forced-colors"
+      ]
     },
     {
       "name": "Field",
@@ -313,7 +382,10 @@
           "packages/rly/test/primitives/Field.test.tsx"
         ]
       },
-      "storyId": "primitives-field--states"
+      "storyId": "primitives-field--states",
+      "storyIds": [
+        "primitives-field--states"
+      ]
     },
     {
       "name": "FreshnessStamp",
@@ -327,7 +399,10 @@
           "packages/rly/test/patterns/FreshnessStamp.test.tsx"
         ]
       },
-      "storyId": "patterns-freshnessstamp--matrix"
+      "storyId": "patterns-freshnessstamp--matrix",
+      "storyIds": [
+        "patterns-freshnessstamp--matrix"
+      ]
     },
     {
       "name": "GlobalStyles",
@@ -339,7 +414,10 @@
           "packages/rly/test/foundations/GlobalStyles.test.tsx"
         ]
       },
-      "storyId": "foundations-globalstyles--scope"
+      "storyId": "foundations-globalstyles--scope",
+      "storyIds": [
+        "foundations-globalstyles--scope"
+      ]
     },
     {
       "name": "GovernedActionReview",
@@ -353,7 +431,11 @@
           "packages/rly/test/patterns/GovernedActionReview.test.tsx"
         ]
       },
-      "storyId": "patterns-governedactionreview--confirmation"
+      "storyId": "patterns-governedactionreview--confirmation",
+      "storyIds": [
+        "patterns-governedactionreview--confirmation",
+        "patterns-governedactionreview--terminal-states"
+      ]
     },
     {
       "name": "Icon",
@@ -365,7 +447,10 @@
           "packages/rly/test/foundations/Icon.test.tsx"
         ]
       },
-      "storyId": "foundations-icon--catalog"
+      "storyId": "foundations-icon--catalog",
+      "storyIds": [
+        "foundations-icon--catalog"
+      ]
     },
     {
       "name": "IconButton",
@@ -379,7 +464,10 @@
           "packages/rly/test/primitives/IconButton.test.tsx"
         ]
       },
-      "storyId": "primitives-iconbutton--states"
+      "storyId": "primitives-iconbutton--states",
+      "storyIds": [
+        "primitives-iconbutton--states"
+      ]
     },
     {
       "name": "LinkProvider",
@@ -391,7 +479,10 @@
           "packages/rly/test/foundations/LinkProvider.test.tsx"
         ]
       },
-      "storyId": "foundations-linkprovider--framework-bridge"
+      "storyId": "foundations-linkprovider--framework-bridge",
+      "storyIds": [
+        "foundations-linkprovider--framework-bridge"
+      ]
     },
     {
       "name": "PeopleStrip",
@@ -405,7 +496,10 @@
           "packages/rly/test/patterns/PeopleStrip.test.tsx"
         ]
       },
-      "storyId": "patterns-peoplestrip--overflow"
+      "storyId": "patterns-peoplestrip--overflow",
+      "storyIds": [
+        "patterns-peoplestrip--overflow"
+      ]
     },
     {
       "name": "Person",
@@ -419,7 +513,10 @@
           "packages/rly/test/patterns/Person.test.tsx"
         ]
       },
-      "storyId": "patterns-person--states"
+      "storyId": "patterns-person--states",
+      "storyIds": [
+        "patterns-person--states"
+      ]
     },
     {
       "name": "PortalProvider",
@@ -431,7 +528,10 @@
           "packages/rly/test/foundations/PortalProvider.test.tsx"
         ]
       },
-      "storyId": "foundations-portalprovider--custom-target"
+      "storyId": "foundations-portalprovider--custom-target",
+      "storyIds": [
+        "foundations-portalprovider--custom-target"
+      ]
     },
     {
       "name": "RelationshipChain",
@@ -445,7 +545,10 @@
           "packages/rly/test/patterns/RelationshipChain.test.tsx"
         ]
       },
-      "storyId": "patterns-relationshipchain--cardinalities"
+      "storyId": "patterns-relationshipchain--cardinalities",
+      "storyIds": [
+        "patterns-relationshipchain--cardinalities"
+      ]
     },
     {
       "name": "RelationshipTable",
@@ -459,7 +562,10 @@
           "packages/rly/test/patterns/RelationshipTable.test.tsx"
         ]
       },
-      "storyId": "patterns-relationshiptable--equivalence"
+      "storyId": "patterns-relationshiptable--equivalence",
+      "storyIds": [
+        "patterns-relationshiptable--equivalence"
+      ]
     },
     {
       "name": "ReleasePreview",
@@ -473,7 +579,10 @@
           "packages/rly/test/patterns/ReleasePreview.test.tsx"
         ]
       },
-      "storyId": "patterns-releasepreview--interaction"
+      "storyId": "patterns-releasepreview--interaction",
+      "storyIds": [
+        "patterns-releasepreview--interaction"
+      ]
     },
     {
       "name": "ReleaseRelay",
@@ -487,7 +596,11 @@
           "packages/rly/test/patterns/ReleaseRelay.test.tsx"
         ]
       },
-      "storyId": "patterns-releaserelay--catalog"
+      "storyId": "patterns-releaserelay--catalog",
+      "storyIds": [
+        "patterns-releaserelay--catalog",
+        "patterns-releaserelay--geometry-forced-colors"
+      ]
     },
     {
       "name": "ReleaseRow",
@@ -501,7 +614,10 @@
           "packages/rly/test/patterns/ReleaseRow.test.tsx"
         ]
       },
-      "storyId": "patterns-releaserow--six-states"
+      "storyId": "patterns-releaserow--six-states",
+      "storyIds": [
+        "patterns-releaserow--six-states"
+      ]
     },
     {
       "name": "Select",
@@ -515,7 +631,10 @@
           "packages/rly/test/primitives/Select.test.tsx"
         ]
       },
-      "storyId": "primitives-select--states"
+      "storyId": "primitives-select--states",
+      "storyIds": [
+        "primitives-select--states"
+      ]
     },
     {
       "name": "SemanticTokens",
@@ -527,7 +646,10 @@
           "packages/rly/test/tokens/token-contract.test.ts"
         ]
       },
-      "storyId": "foundations-tokens--overview"
+      "storyId": "foundations-tokens--overview",
+      "storyIds": [
+        "foundations-tokens--overview"
+      ]
     },
     {
       "name": "ServiceMark",
@@ -541,7 +663,10 @@
           "packages/rly/test/patterns/ServiceMark.test.tsx"
         ]
       },
-      "storyId": "patterns-servicemark--gallery"
+      "storyId": "patterns-servicemark--gallery",
+      "storyIds": [
+        "patterns-servicemark--gallery"
+      ]
     },
     {
       "name": "Sheet",
@@ -555,7 +680,10 @@
           "packages/rly/test/primitives/Sheet.test.tsx"
         ]
       },
-      "storyId": "primitives-sheet--interaction"
+      "storyId": "primitives-sheet--interaction",
+      "storyIds": [
+        "primitives-sheet--interaction"
+      ]
     },
     {
       "name": "Skeleton",
@@ -569,7 +697,10 @@
           "packages/rly/test/primitives/Skeleton.test.tsx"
         ]
       },
-      "storyId": "primitives-skeleton--gallery"
+      "storyId": "primitives-skeleton--gallery",
+      "storyIds": [
+        "primitives-skeleton--gallery"
+      ]
     },
     {
       "name": "StageRail",
@@ -583,7 +714,10 @@
           "packages/rly/test/patterns/StageRail.test.tsx"
         ]
       },
-      "storyId": "patterns-stagerail--states"
+      "storyId": "patterns-stagerail--states",
+      "storyIds": [
+        "patterns-stagerail--states"
+      ]
     },
     {
       "name": "StateLabel",
@@ -597,7 +731,10 @@
           "packages/rly/test/primitives/StateLabel.test.tsx"
         ]
       },
-      "storyId": "primitives-statelabel--gallery"
+      "storyId": "primitives-statelabel--gallery",
+      "storyIds": [
+        "primitives-statelabel--gallery"
+      ]
     },
     {
       "name": "StatePanel",
@@ -611,7 +748,10 @@
           "packages/rly/test/primitives/StatePanel.test.tsx"
         ]
       },
-      "storyId": "primitives-statepanel--gallery"
+      "storyId": "primitives-statepanel--gallery",
+      "storyIds": [
+        "primitives-statepanel--gallery"
+      ]
     },
     {
       "name": "Surface",
@@ -625,7 +765,10 @@
           "packages/rly/test/primitives/Surface.test.tsx"
         ]
       },
-      "storyId": "primitives-surface--gallery"
+      "storyId": "primitives-surface--gallery",
+      "storyIds": [
+        "primitives-surface--gallery"
+      ]
     },
     {
       "name": "Tabs",
@@ -639,7 +782,10 @@
           "packages/rly/test/primitives/Tabs.test.tsx"
         ]
       },
-      "storyId": "primitives-tabs--interaction"
+      "storyId": "primitives-tabs--interaction",
+      "storyIds": [
+        "primitives-tabs--interaction"
+      ]
     },
     {
       "name": "Text",
@@ -653,7 +799,10 @@
           "packages/rly/test/primitives/Text.test.tsx"
         ]
       },
-      "storyId": "primitives-text--gallery"
+      "storyId": "primitives-text--gallery",
+      "storyIds": [
+        "primitives-text--gallery"
+      ]
     },
     {
       "name": "ThemeProvider",
@@ -665,7 +814,10 @@
           "packages/rly/test/foundations/ThemeProvider.test.tsx"
         ]
       },
-      "storyId": "foundations-themeprovider--controlled"
+      "storyId": "foundations-themeprovider--controlled",
+      "storyIds": [
+        "foundations-themeprovider--controlled"
+      ]
     },
     {
       "name": "TimelineRow",
@@ -679,7 +831,10 @@
           "packages/rly/test/patterns/TimelineRow.test.tsx"
         ]
       },
-      "storyId": "patterns-timelinerow--actor-kinds"
+      "storyId": "patterns-timelinerow--actor-kinds",
+      "storyIds": [
+        "patterns-timelinerow--actor-kinds"
+      ]
     },
     {
       "name": "Verdict",
@@ -693,7 +848,10 @@
           "packages/rly/test/patterns/Verdict.test.tsx"
         ]
       },
-      "storyId": "patterns-verdict--states"
+      "storyId": "patterns-verdict--states",
+      "storyIds": [
+        "patterns-verdict--states"
+      ]
     },
     {
       "name": "WorksetCard",
@@ -707,7 +865,10 @@
           "packages/rly/test/patterns/WorksetCard.test.tsx"
         ]
       },
-      "storyId": "patterns-worksetcard--release-dimensions"
+      "storyId": "patterns-worksetcard--release-dimensions",
+      "storyIds": [
+        "patterns-worksetcard--release-dimensions"
+      ]
     }
   ]
 }

@@ -138,9 +138,9 @@ export const ReleaseIdentity = () => (
 Only diff routes opt into the heavy renderer:
 
 ```tsx
-import { DiffCodeView, DiffWorkerProvider } from "@knpkv/rly/diff"
+import { DiffCodeView, DiffWorkerProvider, type RlyDiffCodeItem } from "@knpkv/rly/diff"
 
-export const CompleteDiff = ({ items }) => (
+export const CompleteDiff = ({ items }: { readonly items: ReadonlyArray<RlyDiffCodeItem> }) => (
   <DiffWorkerProvider poolSize={2}>
     <DiffCodeView initialItems={items} mode="split" />
   </DiffWorkerProvider>

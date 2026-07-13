@@ -296,6 +296,7 @@ describe("component manifest contract", () => {
           styles: ["src/primitives/Button.module.css"],
           variants: [],
           visual: {
+            coverageStoryIds: ["primitives-button--states"],
             story: "stories/primitives/Button.stories.tsx",
             storyId: "primitives-button",
             tests: ["test/primitives/Button.test.tsx"]
@@ -314,7 +315,8 @@ describe("component manifest contract", () => {
             styles: ["packages/rly/src/primitives/Button.module.css"],
             tests: ["packages/rly/test/primitives/Button.test.tsx"]
           },
-          storyId: "primitives-button"
+          storyId: "primitives-button",
+          storyIds: ["primitives-button", "primitives-button--states"]
         }
       ],
       schemaVersion: 1

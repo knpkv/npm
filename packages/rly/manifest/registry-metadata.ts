@@ -34,7 +34,7 @@ export const COMPONENT_REGISTRY_METADATA = {
   ], ["agent", "propose"]),
   AgentThread: registryMetadata("Present an isolated human, agent, and system conversation", [
     "active",
-    "error"
+    "held"
   ], ["agent", "conversation"]),
   Avatar: registryMetadata("Show a person or agent image with a deterministic accessible fallback", [
     "circle",
@@ -212,9 +212,9 @@ export const COMPONENT_REGISTRY_METADATA = {
   ]),
   StageRail: registryMetadata("Summarize progress across controlled delivery stages", [
     "blocked",
+    "building",
     "compact",
-    "complete",
-    "current"
+    "complete"
   ], ["delivery", "progress"]),
   StateLabel: registryMetadata("Name a compact state using text and color-independent tone", [
     "caution",
@@ -278,6 +278,6 @@ export const COMPONENT_REGISTRY_METADATA = {
   ], ["release", "status"]),
   WorksetCard: registryMetadata("Show Jira items together with pull-request and pipeline dimensions", [
     "complete",
-    "error"
+    "gap"
   ], ["relationship", "release"])
 } satisfies Readonly<Record<string, RegistryMetadata>>

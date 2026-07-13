@@ -123,6 +123,11 @@ export const validateManifest = (manifest: ComponentManifest): void => {
     if (component.visual.storyId.length === 0) {
       throw new ContractError({ reason: `Missing story id for ${component.name}` })
     }
+    const storyIds = [component.visual.storyId, ...(component.visual.coverageStoryIds ?? [])]
+    if (storyIds.some((storyId) => storyId.length === 0)) {
+      throw new ContractError({ reason: `Missing coverage story id for ${component.name}` })
+    }
+    unique(storyIds, `story id in ${component.name}`)
     if (!entries.has(component.publicEntry)) {
       throw new ContractError({ reason: `Unknown component entry: ${component.publicEntry}` })
     }
@@ -206,7 +211,8 @@ export const renderVisualCatalog = (manifest: ComponentManifest): string => {
         styles: [...component.styles].sort().map((style) => `packages/rly/${style}`),
         tests: [...component.visual.tests].sort().map((test) => `packages/rly/${test}`)
       },
-      storyId: component.visual.storyId
+      storyId: component.visual.storyId,
+      storyIds: [component.visual.storyId, ...(component.visual.coverageStoryIds ?? [])]
     }))
   return `${JSON.stringify({ schemaVersion: 1, components }, null, 2)}\n`
 }

@@ -364,7 +364,7 @@
       "states": [
         "active",
         "default",
-        "error"
+        "held"
       ],
       "status": "stable",
       "variants": []
@@ -3701,9 +3701,9 @@
       "slots": [],
       "states": [
         "blocked",
+        "building",
         "compact",
         "complete",
-        "current",
         "default"
       ],
       "status": "stable",
@@ -4738,7 +4738,7 @@
       "states": [
         "complete",
         "default",
-        "error"
+        "gap"
       ],
       "status": "stable",
       "variants": []

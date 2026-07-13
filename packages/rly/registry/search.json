@@ -104,14 +104,14 @@
       "states": [
         "active",
         "default",
-        "error"
+        "held"
       ],
       "terms": [
         "active",
         "agent",
         "agentthread",
         "conversation",
-        "error",
+        "held",
         "pattern"
       ]
     },
@@ -979,16 +979,16 @@
       "name": "StageRail",
       "states": [
         "blocked",
+        "building",
         "compact",
         "complete",
-        "current",
         "default"
       ],
       "terms": [
         "blocked",
+        "building",
         "compact",
         "complete",
-        "current",
         "default",
         "delivery",
         "pattern",
@@ -1251,11 +1251,11 @@
       "states": [
         "complete",
         "default",
-        "error"
+        "gap"
       ],
       "terms": [
         "complete",
-        "error",
+        "gap",
         "pattern",
         "relationship",
         "release",

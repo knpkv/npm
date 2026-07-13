@@ -53,6 +53,21 @@ describe("registry source validation", () => {
     expect(findRegistrySourceFailures(componentManifest, files).join("\n")).toMatch(/a11y|docs|principal/)
   })
 
+  it("does not credit sibling or hidden stories to the referenced navigable story", () => {
+    const files = new Map(registryFiles())
+    const storyPath = "stories/diff/DiffCodeView.stories.tsx"
+    const story = files.get(storyPath)
+    if (story === undefined) throw new Error("DiffCodeView story fixture is missing")
+    files.set(storyPath, story.replace("export const StackedWrapped", "const StackedWrapped"))
+    expect(findRegistrySourceFailures(componentManifest, files)).toEqual(
+      expect.arrayContaining([
+        "story diff-diffcodeview--workbench does not cover mode=stacked",
+        "story diff-diffcodeview--workbench does not cover state=strict",
+        "story diff-diffcodeview--workbench does not cover virtualization=strict"
+      ])
+    )
+  })
+
   it("rejects undeclared browser dependencies, host APIs, manifest dependencies, and relative escapes", () => {
     const files = new Map(registryFiles())
     files.set(

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest"
-import componentManifestSource from "../../component-manifest.ts?raw"
-import registryMetadataSource from "../../manifest/registry-metadata.ts?raw"
 import { createScaffoldComponentPlan, type ScaffoldComponentOptions } from "../../scripts/scaffolder.js"
+
+const sourceModules = import.meta.glob<string>(["../../component-manifest.ts", "../../manifest/registry-metadata.ts"], {
+  eager: true,
+  import: "default",
+  query: "?raw"
+})
+
+const readSource = (path: string): string => {
+  const source = sourceModules[path]
+  if (source === undefined) throw new Error(`Missing raw scaffold source ${path}`)
+  return source
+}
+
+const componentManifestSource = readSource("../../component-manifest.ts")
+const registryMetadataSource = readSource("../../manifest/registry-metadata.ts")
 
 describe("component scaffolder", () => {
   it("plans source, style, navigable story, DOM test, metadata, and public manifest entry together", () => {

@@ -47,6 +47,7 @@ export interface ComponentRecord {
     readonly values: readonly [string, ...ReadonlyArray<string>]
   }>
   readonly visual: {
+    readonly coverageStoryIds?: ReadonlyArray<string>
     readonly story: `stories/${string}.stories.tsx`
     readonly storyId: string
     readonly tests: ReadonlyArray<`test/${string}.test.ts` | `test/${string}.test.tsx`>
@@ -175,6 +176,7 @@ export const componentManifest = {
         { defaultValue: "buffered", name: "virtualization", values: ["buffered", "strict"] }
       ],
       visual: {
+        coverageStoryIds: ["diff-diffcodeview--stacked-wrapped"],
         story: "stories/diff/DiffCodeView.stories.tsx",
         storyId: "diff-diffcodeview--workbench",
         tests: ["test/diff/DiffCodeView.test.tsx"]
@@ -246,6 +248,7 @@ export const componentManifest = {
         { name: "anchor", values: ["current", "stale"] }
       ],
       visual: {
+        coverageStoryIds: ["diff-difffinding--stale-anchor"],
         story: "stories/diff/DiffFinding.stories.tsx",
         storyId: "diff-difffinding--human-and-agent",
         tests: ["test/diff/DiffFinding.test.tsx"]
@@ -527,6 +530,7 @@ export const componentManifest = {
       styles: ["src/primitives/Dialog.module.css"],
       variants: [{ defaultValue: "default", name: "size", values: ["default", "wide"] }],
       visual: {
+        coverageStoryIds: ["primitives-dialog--nested-isolation"],
         story: "stories/primitives/Dialog.stories.tsx",
         storyId: "primitives-dialog--interaction",
         tests: ["test/primitives/Dialog.test.tsx"]
@@ -1061,6 +1065,7 @@ export const componentManifest = {
       styles: ["src/patterns/GovernedActionReview.module.css"],
       variants: [],
       visual: {
+        coverageStoryIds: ["patterns-governedactionreview--terminal-states"],
         story: "stories/patterns/GovernedActionReview.stories.tsx",
         storyId: "patterns-governedactionreview--confirmation",
         tests: ["test/patterns/GovernedActionReview.test.tsx"]
@@ -1151,6 +1156,7 @@ export const componentManifest = {
       styles: ["src/patterns/ReleaseRelay.module.css"],
       variants: [{ defaultValue: "compact", name: "size", values: ["compact", "hero"] }],
       visual: {
+        coverageStoryIds: ["patterns-releaserelay--geometry-forced-colors"],
         story: "stories/patterns/ReleaseRelay.stories.tsx",
         storyId: "patterns-releaserelay--catalog",
         tests: ["test/patterns/ReleaseRelay.test.tsx"]

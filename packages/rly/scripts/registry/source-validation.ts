@@ -41,24 +41,6 @@ const kebabCase = (value: string): string =>
     .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
     .toLocaleLowerCase("en-US")
 
-const storyTerms = (source: string, fileName: string): ReadonlySet<string> => {
-  const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
-  const terms = new Set<string>()
-  const add = (value: string): void => {
-    const normalized = kebabCase(value)
-    terms.add(normalized)
-    for (const segment of normalized.split(/[^a-z0-9]+/)) {
-      if (segment.length > 0) terms.add(segment)
-    }
-  }
-  const visit = (node: TypeScript.Node): void => {
-    if (TypeScript.isIdentifier(node) || TypeScript.isStringLiteralLike(node)) add(node.text)
-    TypeScript.forEachChild(node, visit)
-  }
-  visit(sourceFile)
-  return terms
-}
-
 const normalizeRelativePath = (from: string, specifier: string): string => {
   const segments = [...from.split("/").slice(0, -1), ...specifier.split("/")]
   const resolved: Array<string> = []
@@ -81,21 +63,133 @@ const resolveStoryImport = (
     .find((candidate) => candidate.startsWith("stories/") && files.has(candidate))
 }
 
-const completeStoryTerms = (entry: string, files: ReadonlyMap<string, string>): ReadonlySet<string> => {
-  const terms = new Set<string>()
-  const visited = new Set<string>()
-  const visit = (file: string): void => {
-    if (visited.has(file)) return
-    visited.add(file)
-    const source = files.get(file)
-    if (source === undefined) return
-    for (const term of storyTerms(source, file)) terms.add(term)
-    for (const imported of TypeScript.preProcessFile(source).importedFiles) {
-      const resolved = resolveStoryImport(files, file, imported.fileName)
-      if (resolved !== undefined) visit(resolved)
+interface StoryImportBinding {
+  readonly file: string
+  readonly name: string
+}
+
+interface StorySource {
+  readonly bindings: ReadonlyMap<string, TypeScript.Node>
+  readonly imports: ReadonlyMap<string, StoryImportBinding>
+  readonly sourceFile: TypeScript.SourceFile
+}
+
+const sourceBindings = (sourceFile: TypeScript.SourceFile): ReadonlyMap<string, TypeScript.Node> => {
+  const bindings = new Map<string, TypeScript.Node>()
+  for (const statement of sourceFile.statements) {
+    if (
+      (TypeScript.isFunctionDeclaration(statement)
+        || TypeScript.isClassDeclaration(statement)
+        || TypeScript.isInterfaceDeclaration(statement)
+        || TypeScript.isTypeAliasDeclaration(statement))
+      && statement.name !== undefined
+    ) {
+      bindings.set(statement.name.text, statement)
+    } else if (TypeScript.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (TypeScript.isIdentifier(declaration.name)) bindings.set(declaration.name.text, declaration)
+      }
     }
   }
-  visit(entry)
+  return bindings
+}
+
+const storyImports = (
+  sourceFile: TypeScript.SourceFile,
+  file: string,
+  files: ReadonlyMap<string, string>
+): ReadonlyMap<string, StoryImportBinding> => {
+  const imports = new Map<string, StoryImportBinding>()
+  for (const statement of sourceFile.statements) {
+    if (!TypeScript.isImportDeclaration(statement) || !TypeScript.isStringLiteralLike(statement.moduleSpecifier)) {
+      continue
+    }
+    const resolved = resolveStoryImport(files, file, statement.moduleSpecifier.text)
+    const clause = statement.importClause
+    if (resolved === undefined || clause === undefined || clause.isTypeOnly) continue
+    if (clause.name !== undefined) imports.set(clause.name.text, { file: resolved, name: "default" })
+    const namedBindings = clause.namedBindings
+    if (namedBindings === undefined || TypeScript.isNamespaceImport(namedBindings)) continue
+    for (const element of namedBindings.elements) {
+      if (!element.isTypeOnly) {
+        imports.set(element.name.text, { file: resolved, name: element.propertyName?.text ?? element.name.text })
+      }
+    }
+  }
+  return imports
+}
+
+const storyInitializer = (
+  sourceFile: TypeScript.SourceFile,
+  storyName: string
+): TypeScript.Expression | undefined => {
+  for (const statement of sourceFile.statements) {
+    if (!TypeScript.isVariableStatement(statement)) continue
+    const modifiers = TypeScript.getModifiers(statement)
+    if (!modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ExportKeyword)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (TypeScript.isIdentifier(declaration.name) && kebabCase(declaration.name.text) === storyName) {
+        return declaration.initializer
+      }
+    }
+  }
+  return undefined
+}
+
+const completeStoryTerms = (
+  entry: string,
+  storyName: string,
+  files: ReadonlyMap<string, string>
+): ReadonlySet<string> => {
+  const terms = new Set<string>()
+  const sources = new Map<string, StorySource>()
+  const visited = new Set<string>()
+  const sourceFor = (file: string): StorySource | undefined => {
+    const cached = sources.get(file)
+    if (cached !== undefined) return cached
+    const source = files.get(file)
+    if (source === undefined) return undefined
+    const sourceFile = TypeScript.createSourceFile(file, source, TypeScript.ScriptTarget.Latest, true)
+    const storySource = {
+      bindings: sourceBindings(sourceFile),
+      imports: storyImports(sourceFile, file, files),
+      sourceFile
+    }
+    sources.set(file, storySource)
+    return storySource
+  }
+  const add = (value: string): void => {
+    const normalized = kebabCase(value)
+    terms.add(normalized)
+    for (const segment of normalized.split(/[^a-z0-9]+/)) {
+      if (segment.length > 0) terms.add(segment)
+    }
+  }
+  add(storyName)
+  const visit = (file: string, node: TypeScript.Node): void => {
+    const key = `${file}:${node.kind}:${node.pos}:${node.end}`
+    if (visited.has(key)) return
+    visited.add(key)
+    if (TypeScript.isIdentifier(node) || TypeScript.isStringLiteralLike(node) || TypeScript.isJsxText(node)) {
+      add(node.text)
+    }
+    if (TypeScript.isIdentifier(node)) {
+      const storySource = sourceFor(file)
+      const local = storySource?.bindings.get(node.text)
+      if (local !== undefined) visit(file, local)
+      const imported = storySource?.imports.get(node.text)
+      if (imported !== undefined) {
+        const importedSource = sourceFor(imported.file)
+        const importedNode = importedSource?.bindings.get(imported.name)
+        if (importedNode !== undefined) visit(imported.file, importedNode)
+      }
+    }
+    TypeScript.forEachChild(node, (child) => visit(file, child))
+  }
+  const entrySource = sourceFor(entry)
+  if (entrySource === undefined) return terms
+  const initializer = storyInitializer(entrySource.sourceFile, storyName)
+  if (initializer !== undefined) visit(entry, initializer)
   return terms
 }
 
@@ -126,16 +220,22 @@ const validateStory = (
   files: ReadonlyMap<string, string>
 ): ReadonlyArray<string> => {
   const failures: Array<string> = []
-  const terms = completeStoryTerms(component.visual.story, files)
+  const terms = new Set<string>()
+  const storyIds = [component.visual.storyId, ...(component.visual.coverageStoryIds ?? [])]
   if (!/tags:\s*\[\s*["']autodocs["']\s*\]/.test(source)) {
     failures.push(`missing docs metadata ${component.visual.story}`)
   }
-  const storyName = component.visual.storyId.split("--")[1]
   const exports = exportedNames(source, component.visual.story)
-  if (storyName === undefined || ![...exports].some((name) => kebabCase(name) === storyName)) {
-    failures.push(`missing navigable story ${component.visual.storyId}`)
-  } else if (!exportedStoryHasPlay(source, component.visual.story, storyName)) {
-    failures.push(`missing a11y interaction ${component.visual.storyId}`)
+  for (const storyId of storyIds) {
+    const storyName = storyId.split("--")[1]
+    if (storyName === undefined || ![...exports].some((name) => kebabCase(name) === storyName)) {
+      failures.push(`missing navigable story ${storyId}`)
+      continue
+    }
+    if (!exportedStoryHasPlay(source, component.visual.story, storyName)) {
+      failures.push(`missing a11y interaction ${storyId}`)
+    }
+    for (const term of completeStoryTerms(component.visual.story, storyName, files)) terms.add(term)
   }
   for (const variant of component.variants) {
     for (const value of variant.values) {

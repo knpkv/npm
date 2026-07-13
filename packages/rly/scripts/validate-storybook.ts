@@ -55,9 +55,11 @@ const program = Effect.gen(function*() {
     }
   }
   for (const component of componentManifest.components.filter(({ registry }) => registry)) {
-    const entry = index.entries[component.visual.storyId]
-    if (entry === undefined || entry.id !== component.visual.storyId || entry.type !== "story") {
-      failures.push(`missing registry story entry ${component.visual.storyId}`)
+    for (const storyId of [component.visual.storyId, ...(component.visual.coverageStoryIds ?? [])]) {
+      const entry = index.entries[storyId]
+      if (entry === undefined || entry.id !== storyId || entry.type !== "story") {
+        failures.push(`missing registry story entry ${storyId}`)
+      }
     }
   }
   if (failures.length > 0) {
