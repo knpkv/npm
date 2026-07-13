@@ -7,6 +7,7 @@ import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 const ids = {
   assignment: "01890f00-0000-7000-8000-000000000006",
   environment: "01890f00-0000-7000-8000-000000000003",
+  otherEnvironment: "01890f00-0000-7000-8000-000000000009",
   otherRelease: "01890f00-0000-7000-8000-000000000007",
   otherWorkspace: "01890f00-0000-7000-8000-000000000008",
   person: "01890f00-0000-7000-8000-000000000004",
@@ -102,6 +103,26 @@ describe("Release", () => {
         ]
       })
     ).toThrow(/name this release/)
+  })
+
+  it("rejects an environment role outside the release targets", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Release)({
+        ...validRelease,
+        roleAssignments: [
+          {
+            ...releaseOwnerAssignment,
+            role: "deployment-approver",
+            scope: {
+              _tag: "environment",
+              workspaceId: ids.workspace,
+              releaseId: ids.release,
+              environmentId: ids.otherEnvironment
+            }
+          }
+        ]
+      })
+    ).toThrow(/name a release target/)
   })
 
   it("rejects an update time before release creation", () => {

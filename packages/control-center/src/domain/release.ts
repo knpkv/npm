@@ -80,6 +80,15 @@ export const Release = ReleaseRecord.check(
     { expected: "release-scoped assignments to name this release" }
   ),
   Schema.makeFilter(
+    ({ roleAssignments, targetEnvironmentIds }) => {
+      const targets = new Set(targetEnvironmentIds)
+      return roleAssignments.every(({ scope }) =>
+        scope._tag === "environment" ? targets.has(scope.environmentId) : true
+      )
+    },
+    { expected: "environment-scoped assignments to name a release target" }
+  ),
+  Schema.makeFilter(
     ({ roleAssignments }) => {
       const assignmentIds = roleAssignments.map(({ assignmentId }) => assignmentId)
       return new Set(assignmentIds).size === assignmentIds.length

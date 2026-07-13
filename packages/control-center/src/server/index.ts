@@ -6,4 +6,4 @@
  *
  * @packageDocumentation
  */
-export {}
+export * from "./persistence/index.js"

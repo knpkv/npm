@@ -477,6 +477,9 @@ importers:
 
   packages/control-center:
     dependencies:
+      '@effect/sql-libsql':
+        specifier: 4.0.0-beta.97
+        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly

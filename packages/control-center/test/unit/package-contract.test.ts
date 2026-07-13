@@ -9,6 +9,7 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 
 const validManifest = {
   dependencies: {
+    "@effect/sql-libsql": "4.0.0-beta.97",
     "@knpkv/rly": "workspace:^",
     effect: "4.0.0-beta.97",
     react: "^19.2.7",
@@ -75,5 +76,14 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@knpkv/rly": "^0.1.0" }
       })
     ).toContain("@knpkv/rly must use workspace:^")
+  })
+
+  it("rejects a libSQL adapter from a different Effect release", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.98" }
+      })
+    ).toContain("@effect/sql-libsql must align with the pinned Effect beta")
   })
 })

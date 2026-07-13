@@ -42,12 +42,15 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
 
-  const runtimeKeys = ["@knpkv/rly", "effect", "react", "react-dom"]
+  const runtimeKeys = ["@effect/sql-libsql", "@knpkv/rly", "effect", "react", "react-dom"]
   if (!sameKeys(manifest.dependencies, [...runtimeKeys].sort())) {
     violations.push("runtime dependencies must remain the reviewed set")
   }
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
+  }
+  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.97") {
+    violations.push("@effect/sql-libsql must align with the pinned Effect beta")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()

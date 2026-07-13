@@ -1,0 +1,225 @@
+import type { Crypto, FileSystem, Path } from "effect"
+import { Context, Effect, Layer, Predicate } from "effect"
+import type { Success } from "effect/Effect"
+
+import { ContentStore, type ContentStoreService } from "./ContentStore.js"
+import { databaseLayer } from "./Database.js"
+import {
+  type ContentMetadataMismatchError,
+  type DatabaseInitializationError,
+  type MigrationLedgerError,
+  type PersistedRecordError,
+  type PersistenceConfigError,
+  PersistenceOperationError,
+  type QuarantineWriteError,
+  type RecordAlreadyExistsError,
+  type RecordNotFoundError,
+  type RevisionConflictError,
+  type SourceIdentityMismatchError
+} from "./errors.js"
+import { BlobStore } from "./object-store/BlobStore.js"
+import type { BlobStoreError } from "./object-store/BlobStoreError.js"
+import { decodePersistenceConfig } from "./PersistenceConfig.js"
+import {
+  ContentBlobMetadataRepository,
+  EntityRepository,
+  type EntityRepositoryService,
+  PeopleRepository,
+  type PeopleRepositoryService,
+  PluginConnectionRepository,
+  type PluginConnectionRepositoryService,
+  QuarantineRepository,
+  ReleaseRepository,
+  type ReleaseRepositoryService,
+  WorkspaceRepository,
+  type WorkspaceRepositoryService
+} from "./repositories/index.js"
+
+/** Typed failures that may cross the public persistence operation boundary. */
+export type PersistenceOperationFailure =
+  | BlobStoreError
+  | ContentMetadataMismatchError
+  | PersistedRecordError
+  | PersistenceOperationError
+  | QuarantineWriteError
+  | RecordAlreadyExistsError
+  | RecordNotFoundError
+  | RevisionConflictError
+  | SourceIdentityMismatchError
+
+const PUBLIC_OPERATION_ERROR_TAGS = new Set([
+  "BlobContainmentError",
+  "BlobIntegrityError",
+  "BlobNotFoundError",
+  "BlobStoreInputError",
+  "BlobStoreIoError",
+  "BlobTooLargeError",
+  "BlobUnexpectedEofError",
+  "ContentMetadataMismatchError",
+  "PersistedRecordError",
+  "PersistenceOperationError",
+  "QuarantineWriteError",
+  "RecordAlreadyExistsError",
+  "RecordNotFoundError",
+  "RevisionConflictError",
+  "SourceIdentityMismatchError"
+])
+
+const isPersistenceOperationFailure = (error: unknown): error is PersistenceOperationFailure =>
+  Predicate.hasProperty(error, "_tag") &&
+  typeof error._tag === "string" &&
+  PUBLIC_OPERATION_ERROR_TAGS.has(error._tag)
+
+const publicOperation = <Value, Failure, Requirements>(
+  operation: string,
+  effect: Effect.Effect<Value, Failure, Requirements>
+): Effect.Effect<Value, PersistenceOperationFailure, Requirements> =>
+  Effect.catch(
+    effect,
+    (error): Effect.Effect<never, PersistenceOperationFailure> =>
+      isPersistenceOperationFailure(error)
+        ? Effect.fail<PersistenceOperationFailure>(error)
+        : Effect.logError("Control Center persistence boundary rejected an internal error", {
+          operation
+        }).pipe(
+          Effect.andThen(
+            Effect.fail<PersistenceOperationFailure>(new PersistenceOperationError({ operation }))
+          )
+        )
+  )
+
+/** Failures possible while acquiring the durable persistence service. */
+export type PersistenceLayerError =
+  | BlobStoreError
+  | DatabaseInitializationError
+  | MigrationLedgerError
+  | PersistenceConfigError
+
+const makePersistence = Effect.gen(function*() {
+  const content = yield* ContentStore
+  const entities = yield* EntityRepository
+  const people = yield* PeopleRepository
+  const pluginConnections = yield* PluginConnectionRepository
+  const releases = yield* ReleaseRepository
+  const workspaces = yield* WorkspaceRepository
+
+  return {
+    content: {
+      put: (...args: Parameters<ContentStoreService["put"]>) => publicOperation("content.put", content.put(...args)),
+      getMetadata: (...args: Parameters<ContentStoreService["getMetadata"]>) =>
+        publicOperation("content.get-metadata", content.getMetadata(...args)),
+      listMetadata: (...args: Parameters<ContentStoreService["listMetadata"]>) =>
+        publicOperation("content.list-metadata", content.listMetadata(...args)),
+      readAll: (...args: Parameters<ContentStoreService["readAll"]>) =>
+        publicOperation("content.read-all", content.readAll(...args)),
+      readRange: (...args: Parameters<ContentStoreService["readRange"]>) =>
+        publicOperation("content.read-range", content.readRange(...args)),
+      readStream: (...args: Parameters<ContentStoreService["readStream"]>) =>
+        publicOperation("content.read-stream", content.readStream(...args)),
+      verify: (...args: Parameters<ContentStoreService["verify"]>) =>
+        publicOperation("content.verify", content.verify(...args))
+    },
+    entities: {
+      create: (...args: Parameters<EntityRepositoryService["create"]>) =>
+        publicOperation("entity.create", entities.create(...args)),
+      get: (...args: Parameters<EntityRepositoryService["get"]>) =>
+        publicOperation("entity.get", entities.get(...args)),
+      list: (...args: Parameters<EntityRepositoryService["list"]>) =>
+        publicOperation("entity.list", entities.list(...args)),
+      updateSourceRevision: (...args: Parameters<EntityRepositoryService["updateSourceRevision"]>) =>
+        publicOperation("entity.update", entities.updateSourceRevision(...args))
+    },
+    people: {
+      createPerson: (...args: Parameters<PeopleRepositoryService["createPerson"]>) =>
+        publicOperation("people.create-person", people.createPerson(...args)),
+      createRoleAssignment: (...args: Parameters<PeopleRepositoryService["createRoleAssignment"]>) =>
+        publicOperation("people.create-role", people.createRoleAssignment(...args)),
+      getPerson: (...args: Parameters<PeopleRepositoryService["getPerson"]>) =>
+        publicOperation("people.get-person", people.getPerson(...args)),
+      getRoleAssignment: (...args: Parameters<PeopleRepositoryService["getRoleAssignment"]>) =>
+        publicOperation("people.get-role", people.getRoleAssignment(...args)),
+      listRoleAssignments: (...args: Parameters<PeopleRepositoryService["listRoleAssignments"]>) =>
+        publicOperation("people.list-roles", people.listRoleAssignments(...args)),
+      updatePerson: (...args: Parameters<PeopleRepositoryService["updatePerson"]>) =>
+        publicOperation("people.update-person", people.updatePerson(...args)),
+      updateRoleAssignment: (...args: Parameters<PeopleRepositoryService["updateRoleAssignment"]>) =>
+        publicOperation("people.update-role", people.updateRoleAssignment(...args))
+    },
+    pluginConnections: {
+      create: (...args: Parameters<PluginConnectionRepositoryService["create"]>) =>
+        publicOperation("plugin-connection.create", pluginConnections.create(...args)),
+      get: (...args: Parameters<PluginConnectionRepositoryService["get"]>) =>
+        publicOperation("plugin-connection.get", pluginConnections.get(...args)),
+      list: (...args: Parameters<PluginConnectionRepositoryService["list"]>) =>
+        publicOperation("plugin-connection.list", pluginConnections.list(...args)),
+      updateMetadata: (...args: Parameters<PluginConnectionRepositoryService["updateMetadata"]>) =>
+        publicOperation("plugin-connection.update", pluginConnections.updateMetadata(...args))
+    },
+    releases: {
+      append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>
+        publicOperation("release.append", releases.append(...args)),
+      create: (...args: Parameters<ReleaseRepositoryService["create"]>) =>
+        publicOperation("release.create", releases.create(...args)),
+      get: (...args: Parameters<ReleaseRepositoryService["get"]>) =>
+        publicOperation("release.get", releases.get(...args))
+    },
+    workspaces: {
+      create: (...args: Parameters<WorkspaceRepositoryService["create"]>) =>
+        publicOperation("workspace.create", workspaces.create(...args)),
+      get: (...args: Parameters<WorkspaceRepositoryService["get"]>) =>
+        publicOperation("workspace.get", workspaces.get(...args)),
+      updateDisplayName: (...args: Parameters<WorkspaceRepositoryService["updateDisplayName"]>) =>
+        publicOperation("workspace.update", workspaces.updateDisplayName(...args))
+    }
+  }
+})
+
+/** Public repository collection exposed to authenticated server workflows. */
+export interface PersistenceService extends Success<typeof makePersistence> {}
+
+/** Server-only durable state boundary; the database and filesystem stay private. */
+export class Persistence extends Context.Service<Persistence, PersistenceService>()(
+  "@knpkv/control-center/Persistence"
+) {}
+
+const PersistenceFromServices = Layer.effect(Persistence, makePersistence)
+
+/** Build one shared libSQL client and owner-only blob service from decoded input. */
+export const persistenceLayer = (
+  input: unknown
+): Layer.Layer<
+  Persistence,
+  PersistenceLayerError,
+  Crypto.Crypto | FileSystem.FileSystem | Path.Path
+> =>
+  Layer.unwrap(
+    decodePersistenceConfig(input).pipe(
+      Effect.map((config) => {
+        const database = databaseLayer(config)
+        const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+        const contentMetadata = ContentBlobMetadataRepository.layer.pipe(
+          Layer.provide(foundation)
+        )
+        const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
+        const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
+        const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
+        const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
+        const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
+        const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
+        const content = ContentStore.layer.pipe(
+          Layer.provide(Layer.merge(contentMetadata, blobs))
+        )
+        const services = Layer.mergeAll(
+          foundation,
+          contentMetadata,
+          entities,
+          people,
+          pluginConnections,
+          release,
+          content,
+          workspaces
+        )
+        return PersistenceFromServices.pipe(Layer.provide(services))
+      })
+    )
+  )
