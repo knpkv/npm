@@ -136,15 +136,23 @@ export default tseslint.config(
     }
   },
   {
-    files: ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"],
+    files: ["packages/*/src/**/*.{ts,tsx}", "packages/*/test/**/*.{ts,tsx}"],
     rules: {
       "no-console": "error"
     }
   },
   {
-    files: ["packages/*/src/**/*.ts"],
+    files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error"
+    }
+  },
+  {
+    // Prettier remains the repository formatter for JSX. ESLint still applies
+    // every semantic, import, safety, no-console, and no-any rule to TSX.
+    files: ["**/*.tsx"],
+    rules: {
+      "@effect/dprint": "off"
     }
   },
   {
