@@ -1,4 +1,6 @@
-import { relative } from "node:path"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
+import { basename, isAbsolute, relative } from "node:path"
 import type { Plugin } from "vite"
 
 export const CONTROL_CENTER_BUILD_GRAPH_VERSION = 1
@@ -19,8 +21,15 @@ export type ControlCenterBuildGraph = {
 
 const portableId = (packageRoot: string, id: string): string => {
   const withoutQuery = id.split("?", 1)[0] ?? id
+  if (!isAbsolute(withoutQuery)) return withoutQuery.replaceAll("\\", "/")
+  const normalizedId = withoutQuery.replaceAll("\\", "/")
+  const nodeModulesMarker = "/node_modules/"
+  const nodeModulesIndex = normalizedId.lastIndexOf(nodeModulesMarker)
+  if (nodeModulesIndex >= 0) return `npm:${normalizedId.slice(nodeModulesIndex + nodeModulesMarker.length)}`
   const packagePath = relative(packageRoot, withoutQuery).replaceAll("\\", "/")
-  return packagePath.startsWith("../") ? id.replaceAll("\\", "/") : packagePath
+  if (!packagePath.startsWith("../")) return packagePath
+  if (!packagePath.startsWith("../../")) return `workspace:${packagePath.slice(3)}`
+  return `external:${basename(withoutQuery)}`
 }
 
 /** Emit the resolved Rollup module graph used by a Control Center build. */
@@ -57,36 +66,23 @@ export const controlCenterBuildGraph = (packageRoot: string, target: ControlCent
   }
 })
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null
+const BuildModuleSchema = Schema.Struct({
+  dynamicImports: Schema.Array(Schema.String),
+  id: Schema.String,
+  imports: Schema.Array(Schema.String),
+  isEntry: Schema.Boolean
+})
 
-const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
-  Array.isArray(value) && value.every((item) => typeof item === "string")
-
-const decodeModule = (value: unknown): ControlCenterBuildModule | undefined => {
-  if (!isRecord(value)) return undefined
-  const { dynamicImports, id, imports, isEntry } = value
-  return typeof id === "string" &&
-      typeof isEntry === "boolean" &&
-      isStringArray(imports) &&
-      isStringArray(dynamicImports)
-    ? { dynamicImports, id, imports, isEntry }
-    : undefined
-}
+const BuildGraphSchema = Schema.Struct({
+  modules: Schema.Array(BuildModuleSchema),
+  target: Schema.Literals(["client", "server"]),
+  version: Schema.Literal(CONTROL_CENTER_BUILD_GRAPH_VERSION)
+})
 
 /** Decode an emitted graph without trusting build output JSON. */
 export const decodeBuildGraph = (value: unknown): ControlCenterBuildGraph | undefined => {
-  if (!isRecord(value)) return undefined
-  const { modules, target, version } = value
-  if (version !== CONTROL_CENTER_BUILD_GRAPH_VERSION || (target !== "client" && target !== "server")) return undefined
-  if (!Array.isArray(modules)) return undefined
-  const decoded = modules.map(decodeModule)
-  if (decoded.some((module) => module === undefined)) return undefined
-  return {
-    modules: decoded.flatMap((module) => (module === undefined ? [] : [module])),
-    target,
-    version
-  }
+  const decoded = Schema.decodeUnknownResult(BuildGraphSchema)(value)
+  return Result.isSuccess(decoded) ? decoded.success : undefined
 }
 
 /** Return graph contract violations for the selected runtime target. */
@@ -115,6 +111,9 @@ export const inspectBuildGraph = (graph: ControlCenterBuildGraph): ReadonlyArray
 
   if (ids.some((id) => id.split(/[/?#]/).includes("prototypes"))) {
     violations.push(`${graph.target} graph contains prototype source`)
+  }
+  if (ids.some((id) => id.startsWith("/") || /^[A-Za-z]:[\\/]/.test(id))) {
+    violations.push(`${graph.target} graph contains an absolute path`)
   }
   return violations
 }

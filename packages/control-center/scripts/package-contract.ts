@@ -1,5 +1,20 @@
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
+
+const ExportTargetSchema = Schema.Struct({
+  import: Schema.String,
+  types: Schema.String
+})
+
+const PackageManifestSchema = Schema.Struct({
+  dependencies: Schema.Record(Schema.String, Schema.String),
+  engines: Schema.Struct({ node: Schema.String }),
+  exports: Schema.Record(Schema.String, Schema.Unknown),
+  main: Schema.String,
+  name: Schema.String,
+  types: Schema.String,
+  version: Schema.String
+})
 
 const expectedExports: Readonly<Record<string, { readonly import: string; readonly types: string }>> = {
   ".": { import: "./dist/server/index.js", types: "./dist/server/index.d.ts" },
@@ -8,46 +23,46 @@ const expectedExports: Readonly<Record<string, { readonly import: string; readon
   "./server": { import: "./dist/server/server/index.js", types: "./dist/server/server/index.d.ts" }
 }
 
+const semverPattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
 const sameKeys = (record: Readonly<Record<string, unknown>>, expected: ReadonlyArray<string>): boolean => {
   const actual = Object.keys(record).sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
-/** Return manifest violations that would weaken the initial package contract. */
+/** Return manifest violations that would weaken the package contract. */
 export const inspectPackageContract = (value: unknown): ReadonlyArray<string> => {
-  if (!isRecord(value)) return ["package manifest must be an object"]
+  const decoded = Schema.decodeUnknownResult(PackageManifestSchema)(value)
+  if (Result.isFailure(decoded)) return ["package manifest does not match its required structure"]
+
+  const manifest = decoded.success
   const violations: Array<string> = []
-  if (value.name !== "@knpkv/control-center") violations.push("package name must be @knpkv/control-center")
-  if (value.version !== "0.0.0") violations.push("new package version must remain 0.0.0 until changesets version it")
-  if (value.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
-  if (value.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
+  if (manifest.name !== "@knpkv/control-center") violations.push("package name must be @knpkv/control-center")
+  if (!semverPattern.test(manifest.version)) violations.push("package version must be valid semantic versioning")
+  if (manifest.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
+  if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
+  if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
 
-  if (!isRecord(value.engines) || value.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
-
-  if (!isRecord(value.dependencies)) {
-    violations.push("runtime dependencies must be explicit")
-  } else {
-    const runtimeKeys = ["@knpkv/rly", "react", "react-dom"]
-    if (!sameKeys(value.dependencies, [...runtimeKeys].sort())) {
-      violations.push("T01 runtime dependencies must remain the reviewed minimal set")
-    }
-    if (value.dependencies["@knpkv/rly"] !== "workspace:^") {
-      violations.push("@knpkv/rly must use workspace:^")
-    }
+  const runtimeKeys = ["@knpkv/rly", "react", "react-dom"]
+  if (!sameKeys(manifest.dependencies, [...runtimeKeys].sort())) {
+    violations.push("T01 runtime dependencies must remain the reviewed minimal set")
+  }
+  if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
+    violations.push("@knpkv/rly must use workspace:^")
   }
 
-  if (!isRecord(value.exports)) {
-    violations.push("package exports must be explicit")
-  } else {
-    const expectedKeys = Object.keys(expectedExports).sort()
-    if (!sameKeys(value.exports, expectedKeys)) {
-      violations.push("package exports must contain only ., ./api, ./domain, ./server")
-    }
-    for (const [entry, expected] of Object.entries(expectedExports)) {
-      const actual = value.exports[entry]
-      if (!isRecord(actual) || actual.import !== expected.import || actual.types !== expected.types) {
-        violations.push(`invalid ${entry} export target`)
-      }
+  const expectedKeys = Object.keys(expectedExports).sort()
+  if (!sameKeys(manifest.exports, expectedKeys)) {
+    violations.push("package exports must contain only ., ./api, ./domain, ./server")
+  }
+  for (const [entry, expected] of Object.entries(expectedExports)) {
+    const actual = Schema.decodeUnknownResult(ExportTargetSchema)(manifest.exports[entry])
+    if (
+      Result.isFailure(actual) ||
+      actual.success.import !== expected.import ||
+      actual.success.types !== expected.types
+    ) {
+      violations.push(`invalid ${entry} export target`)
     }
   }
   return violations

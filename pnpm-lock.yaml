@@ -236,10 +236,10 @@ importers:
         version: link:../codecommit-web
       '@opentui/core':
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e
-        version: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)
+        version: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)
       '@opentui/react':
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
-        version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)(ws@8.21.0)
+        version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       effect:
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97
@@ -255,7 +255,7 @@ importers:
         version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
       '@storybook/react':
         specifier: ^10.5.0
-        version: 10.5.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7))(typescript@7.0.2)
+        version: 10.5.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7))(typescript@6.0.3)
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14
@@ -638,10 +638,10 @@ importers:
         version: link:../jira-cli
       '@opentui/core':
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e
-        version: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)
+        version: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)
       '@opentui/react':
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
-        version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)(ws@8.21.0)
+        version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       effect:
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97
@@ -9060,9 +9060,9 @@ snapshots:
   '@opentui/core-win32-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
     optional: true
 
-  '@opentui/core@https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)':
+  '@opentui/core@https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)':
     dependencies:
-      bun-ffi-structs: 0.1.2(typescript@7.0.2)
+      bun-ffi-structs: 0.1.2(typescript@6.0.3)
       diff: 8.0.3
       jimp: 1.6.0
       marked: 17.0.1
@@ -9084,9 +9084,9 @@ snapshots:
       - supports-color
       - typescript
 
-  '@opentui/react@https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)(ws@8.21.0)':
+  '@opentui/react@https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)':
     dependencies:
-      '@opentui/core': https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@7.0.2)(web-tree-sitter@0.25.10)
+      '@opentui/core': https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)
       react: 19.2.7
       react-devtools-core: 7.0.1
       react-reconciler: 0.32.0(react@19.2.7)
@@ -10307,22 +10307,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@storybook/react@10.5.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7))(typescript@7.0.2)':
-    dependencies:
-      '@storybook/global': 5.0.0
-      '@storybook/react-dom-shim': 10.5.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7))
-      react: 19.2.7
-      react-docgen: 8.0.3
-      react-docgen-typescript: 2.4.0(typescript@7.0.2)
-      react-dom: 19.2.7(react@19.2.7)
-      storybook: 10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7)
-    optionalDependencies:
-      '@types/react': 19.2.17
-      '@types/react-dom': 19.2.3(@types/react@19.2.17)
-      typescript: 7.0.2
-    transitivePeerDependencies:
-      - supports-color
-
   '@tailwindcss/node@4.3.2':
     dependencies:
       '@jridgewell/remapping': 2.3.5
@@ -11207,9 +11191,9 @@ snapshots:
   buffer-from@1.1.2:
     optional: true
 
-  bun-ffi-structs@0.1.2(typescript@7.0.2):
+  bun-ffi-structs@0.1.2(typescript@6.0.3):
     dependencies:
-      typescript: 7.0.2
+      typescript: 6.0.3
 
   bun-types@1.3.14:
     dependencies:
@@ -13526,10 +13510,6 @@ snapshots:
   react-docgen-typescript@2.4.0(typescript@6.0.3):
     dependencies:
       typescript: 6.0.3
-
-  react-docgen-typescript@2.4.0(typescript@7.0.2):
-    dependencies:
-      typescript: 7.0.2
 
   react-docgen@8.0.3:
     dependencies:

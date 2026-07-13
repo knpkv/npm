@@ -63,4 +63,21 @@ describe("resolved build graph contract", () => {
       })
     ).toBeUndefined()
   })
+
+  it("rejects absolute developer paths in publishable graphs", () => {
+    const clientGraph: ControlCenterBuildGraph = {
+      modules: [
+        {
+          dynamicImports: [],
+          id: "index.html",
+          imports: ["src/client/main.tsx", "/home/developer/workspace/private.ts"],
+          isEntry: true
+        },
+        { dynamicImports: [], id: "src/client/main.tsx", imports: [], isEntry: false }
+      ],
+      target: "client",
+      version: CONTROL_CENTER_BUILD_GRAPH_VERSION
+    }
+    expect(inspectBuildGraph(clientGraph)).toContain("client graph contains an absolute path")
+  })
 })
