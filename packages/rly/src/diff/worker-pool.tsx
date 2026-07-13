@@ -107,7 +107,7 @@ export const DiffWorkerProvider = ({
       })
       if (cleaned) subscription.unsubscribe()
     }
-    setState(nextState)
+    if (!cleaned) setState(nextState)
 
     return () => {
       active = false

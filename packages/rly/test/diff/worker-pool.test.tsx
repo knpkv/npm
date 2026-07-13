@@ -15,6 +15,7 @@ const constructPool = vi.fn()
 const unsubscribeFromStats = vi.fn()
 const terminateWorker = vi.fn()
 let emitStats: ((stats: { readonly workersFailed: boolean }) => void) | undefined
+let emitFailureSynchronously = false
 
 vi.mock("@pierre/diffs/worker", () => ({
   WorkerPoolManager: class {
@@ -24,6 +25,7 @@ vi.mock("@pierre/diffs/worker", () => ({
 
     subscribeToStatChanges(callback: (stats: { readonly workersFailed: boolean }) => void): () => void {
       emitStats = callback
+      if (emitFailureSynchronously) callback({ workersFailed: true })
       return unsubscribeFromStats
     }
 
@@ -63,6 +65,7 @@ afterEach(() => {
   unsubscribeFromStats.mockClear()
   terminateWorker.mockClear()
   emitStats = undefined
+  emitFailureSynchronously = false
   FakeWorker.latestUrl = undefined
   vi.unstubAllGlobals()
 })
@@ -103,6 +106,29 @@ describe("diff worker boundary", () => {
     expect(host.querySelector("[data-worker-state='worker']")).not.toBeNull()
     if (emitStats === undefined) throw new Error("Worker stat subscription was not installed")
     await act(async () => emitStats?.({ workersFailed: true }))
+    expect(host.querySelector("[data-worker-state='fallback']")).not.toBeNull()
+    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
+    expect(terminatePool).toHaveBeenCalledOnce()
+    await act(async () => root.unmount())
+    expect(unsubscribeFromStats).toHaveBeenCalledOnce()
+    expect(terminatePool).toHaveBeenCalledOnce()
+  })
+
+  it("does not re-expose a terminated manager after a synchronous worker failure", async () => {
+    vi.stubGlobal("Worker", FakeWorker)
+    emitFailureSynchronously = true
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const factory = createDiffWorkerFactory({ workerUrl: "/diff-worker.js" })
+    await act(async () =>
+      root.render(
+        <DiffWorkerProvider workerFactory={factory}>
+          <WorkerStateProbe />
+        </DiffWorkerProvider>
+      )
+    )
+
     expect(host.querySelector("[data-worker-state='fallback']")).not.toBeNull()
     expect(unsubscribeFromStats).toHaveBeenCalledOnce()
     expect(terminatePool).toHaveBeenCalledOnce()
