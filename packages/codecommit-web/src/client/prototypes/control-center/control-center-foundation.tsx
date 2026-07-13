@@ -124,7 +124,7 @@ export function ServiceEntityPage({
     object.service === "code"
       ? "Files"
       : object.service === "pipeline"
-        ? "Live execution"
+        ? "Stages"
         : object.service === "jira"
           ? "Description"
           : "Primary"
@@ -257,7 +257,7 @@ export function ServiceEntityPage({
                   : object.service === "confluence"
                     ? "Runbook"
                     : object.service === "pipeline"
-                      ? "Live execution"
+                      ? "Execution"
                       : "Time record"}
             </h2>
             <nav>
@@ -327,8 +327,8 @@ export function ServiceEntityPage({
             </div>
           )}
           {object.service === "pipeline" && (
-            <div className={`cc-pipeline-native ${tab === "Live execution" ? "stages" : "rows"}`}>
-              {tab === "Live execution" ? (
+            <div className={`cc-pipeline-native ${tab === "Stages" ? "stages" : "rows"}`}>
+              {tab === "Stages" ? (
                 <>
                   {(object.tabs[tab] ?? []).slice(0, 3).map((stage, index) => (
                     <button

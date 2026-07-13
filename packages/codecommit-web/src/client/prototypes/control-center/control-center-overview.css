@@ -2509,6 +2509,10 @@
   background: #ff3b30;
   box-shadow: 0 0 0 4px #ff3b3018;
 }
+.cc-pipeline-stream > header > i.passed {
+  background: #248a3d;
+  box-shadow: 0 0 0 4px #248a3d18;
+}
 .cc-pipeline-stream > button {
   position: relative;
   width: 100%;

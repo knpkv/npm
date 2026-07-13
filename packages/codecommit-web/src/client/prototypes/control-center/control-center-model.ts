@@ -485,7 +485,7 @@ export function resolveEntity(id: string): EntityRecord {
         ["OWNER", index % 2 === 0 ? "Alex K." : "Maya Chen"],
         ["PRIORITY", index < 2 ? "High" : "Normal"],
         ["ESTIMATE", String(index % 3 + 1) + " points"],
-        ["WORKSTREAM", "OPS-428 · Live WIP"]
+        ["WORKSTREAM", "OPS-428 · Active work"]
       ],
       tabs: {
         Primary: [
@@ -526,7 +526,7 @@ export function resolveEntity(id: string): EntityRecord {
         ["BRANCH", "feat/ops-428-" + (first ? "retry" : "observability") + " → main"],
         ["COMMIT", first ? "c18a7df" : "b93e12a"],
         ["DIFF", first ? "7 files · +184 −21" : "10 files · +256 −30"],
-        ["WORKSTREAM", "OPS-428 · Live WIP"]
+        ["WORKSTREAM", "OPS-428 · Active work"]
       ],
       tabs: {
         Files: keys.map((key) => "src/retry/" + key.toLowerCase() + ".ts · changed"),
@@ -700,7 +700,7 @@ export function resolveEntity(id: string): EntityRecord {
         ["DURATION", billing ? "6m 14s" : "4m 52s"]
       ],
       tabs: {
-        "Live execution": ["Build · passed", "Preview tests · 64/64 passed", "Evidence published"],
+        Stages: ["Build · passed", "Preview tests · 64/64 passed", "Evidence published"],
         Logs: ["Provider sandbox ready", "All retry scenarios passed", "Preview complete"],
         Artifacts: [
           billing ? "billing-service:ops-428" : "billing-observability:ops-428",
@@ -769,7 +769,7 @@ export function resolveEntity(id: string): EntityRecord {
         ["DURATION", String(8 + releaseIndex) + "m " + String(12 + releaseIndex * 3) + "s"]
       ],
       tabs: {
-        "Live execution": workset.events.map(([time, label, detail]) => time + " · " + label + " · " + detail),
+        Stages: workset.events.map(([time, label, detail]) => time + " · " + label + " · " + detail),
         Logs: workset.events.map(([time, label]) => time + ":00 [" + label.toUpperCase() + "] " + release.service),
         Artifacts: [
           release.service + ":" + release.version,

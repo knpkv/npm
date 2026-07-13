@@ -35,8 +35,8 @@ export function WipView({
     <section className="cc-wip-view">
       <header>
         <div>
-          <span>OPS-428 · LIVE WORK STREAM</span>
-          <h1>Agent is working.</h1>
+          <span>OPS-428 · ACTIVE WORK</span>
+          <h1>{reviewState === "reviewed" ? "Ready to merge." : "Ready for review."}</h1>
           <p>
             {reviewState === "reviewed"
               ? "Review approved. PR #293 is ready to merge."
@@ -163,10 +163,10 @@ export function WipView({
             <header>
               <ServiceIcon service="pipeline" />
               <span>
-                <small>PREVIEW ACTIVITY</small>
-                <b>3 environments verifying OPS-428</b>
+                <small>PREVIEW PASSED</small>
+                <b>billing-preview #1852 · 64/64 checks</b>
               </span>
-              <i />
+              <i className="passed" />
             </header>
             {Object.entries(entityActions)
               .filter(

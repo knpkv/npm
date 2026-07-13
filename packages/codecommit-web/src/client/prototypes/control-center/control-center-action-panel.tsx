@@ -146,7 +146,7 @@ export function ActionViewPanel({
       agentScope === "portfolio"
         ? "PORTFOLIO · 6 RELEASES"
         : agentScope === "wip"
-          ? "LIVE WIP · OPS-428"
+          ? "ACTIVE WORK · OPS-428"
           : agentScope === "investigation"
             ? "FAILURE INVESTIGATION"
             : "AGENT WORKSPACE"

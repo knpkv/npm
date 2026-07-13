@@ -715,7 +715,7 @@ export function VariantB() {
     screen === "entity"
       ? (externalObject?.facts.find(([label]) => label === "RELEASE")?.[1] ?? externalObject?.title ?? "this object")
       : screen === "wip"
-        ? "OPS-428 live work"
+        ? "OPS-428 active work"
         : routeView === "items"
           ? "Linked delivery items"
           : routeView === "timeline"
@@ -745,14 +745,13 @@ export function VariantB() {
             {screen === "overview"
               ? "Release overview"
               : screen === "wip"
-                ? "OPS-428 live work"
+                ? "OPS-428 active work"
                 : screen === "entity"
                   ? (externalObject?.title ?? "Service object")
                   : routeRelease
                     ? `${routeRelease.service} v${routeRelease.version}`
                     : "payments-api v2.18.0"}
           </strong>
-          <small>Live</small>
         </div>
         <nav className="cc-product-nav" aria-label="Control Center views">
           <button className={screen === "overview" ? "active" : ""} onClick={() => navigate("overview")}>
@@ -773,7 +772,7 @@ export function VariantB() {
             className={screen === "wip" || (screen === "entity" && entityContext === "wip") ? "active" : ""}
             onClick={() => navigate("wip")}
           >
-            Live WIP
+            Active work
           </button>
           <button
             className={activeSection === "Items" || (screen === "entity" && entityContext === "items") ? "active" : ""}
@@ -932,7 +931,7 @@ export function VariantB() {
               backEntityId
                 ? `Back to ${resolveEntity(backEntityId).title}`
                 : prototypeParams.get("context") === "wip"
-                  ? "Back to Live WIP"
+                  ? "Back to active work"
                   : prototypeParams.get("context") === "items"
                     ? "Back to linked items"
                     : `Back to ${externalObject.facts.find(([label]) => label === "RELEASE")?.[1] ?? "release overview"}`
