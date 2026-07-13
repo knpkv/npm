@@ -17,8 +17,11 @@ import { classNames, cssClass, defineVariants, requireText } from "../internal/c
 import {
   invalidateModalFocusRestore,
   isHTMLElement,
+  ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
-  useModalIsolation
+  useModalContentRegistration,
+  useModalIsolation,
+  useParentModalReady
 } from "../internal/modal.js"
 import styles from "./Sheet.module.css"
 
@@ -115,9 +118,10 @@ const useSheetState = (): SheetState => {
 const SheetLayer = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const state = useSheetState()
   const layerRef = useRef<HTMLDivElement>(null)
+  useModalContentRegistration()
   useModalIsolation(layerRef, state.open)
   return (
-    <div className={style("layer")} data-rly-sheet-layer="" ref={layerRef}>
+    <div className={style("layer")} data-rly-modal-layer="" data-rly-sheet-layer="" ref={layerRef}>
       {children}
     </div>
   )
@@ -131,8 +135,9 @@ const requireVisibleAction = (value: number | string, component: string): number
 const SheetRoot = (componentProps: SheetRootProps): ReactElement => {
   const { children, defaultOpen = false, onOpenChange, open } = componentProps
   const [defaultState, setDefaultState] = useState(defaultOpen)
+  const isParentModalReady = useParentModalReady()
   const restoreFocusRef = useRef<HTMLElement | null>(null)
-  const resolvedOpen = open ?? defaultState
+  const resolvedOpen = (open ?? defaultState) && isParentModalReady
   const previousOpenRef = useRef(resolvedOpen)
   const requestOpenChange = (nextOpen: boolean): void => {
     if (open === undefined) setDefaultState(nextOpen)
@@ -147,11 +152,13 @@ const SheetRoot = (componentProps: SheetRootProps): ReactElement => {
   }, [resolvedOpen])
 
   return (
-    <SheetStateContext.Provider value={{ open: resolvedOpen, requestOpenChange, restoreFocusRef }}>
-      <RadixDialog.Root modal onOpenChange={requestOpenChange} open={resolvedOpen}>
-        {children}
-      </RadixDialog.Root>
-    </SheetStateContext.Provider>
+    <ModalNestingBoundary>
+      <SheetStateContext.Provider value={{ open: resolvedOpen, requestOpenChange, restoreFocusRef }}>
+        <RadixDialog.Root modal onOpenChange={requestOpenChange} open={resolvedOpen}>
+          {children}
+        </RadixDialog.Root>
+      </SheetStateContext.Provider>
+    </ModalNestingBoundary>
   )
 }
 

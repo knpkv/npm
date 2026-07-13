@@ -4,6 +4,7 @@ import { expect, userEvent, waitFor } from "storybook/test"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { Dialog } from "../../src/primitives/Dialog.js"
 import { Field } from "../../src/primitives/Field.js"
+import { Sheet } from "../../src/primitives/Sheet.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, rowStyle, stackStyle } from "./storyStyles.js"
 
@@ -41,6 +42,41 @@ const DialogInteraction = (): ReactElement => {
             </Dialog.Content>
           </Dialog.Root>
         </div>
+      </main>
+    </PortalProvider>
+  )
+}
+
+const NestedOverlayStack = (): ReactElement => {
+  const topCloseRef = useRef<HTMLButtonElement>(null)
+
+  return (
+    <PortalProvider>
+      <main data-nested-overlay-background="" style={pageStyle}>
+        <Dialog.Root defaultOpen>
+          <Dialog.Content title="Outer release decision">
+            <div style={stackStyle}>
+              <Text>The outer decision remains suspended while deeper context is open.</Text>
+              <Dialog.Close>Close outer dialog</Dialog.Close>
+              <Dialog.Root defaultOpen>
+                <Dialog.Content title="Inner approval detail">
+                  <div style={stackStyle}>
+                    <Text>The inner dialog becomes active after the top sheet closes.</Text>
+                    <Dialog.Close>Close inner dialog</Dialog.Close>
+                    <Sheet.Root defaultOpen>
+                      <Sheet.Content initialFocusRef={topCloseRef} title="Top evidence sheet">
+                        <Sheet.Body style={stackStyle}>
+                          <Text>Only this top layer may receive interaction.</Text>
+                          <Sheet.Close ref={topCloseRef}>Close top sheet</Sheet.Close>
+                        </Sheet.Body>
+                      </Sheet.Content>
+                    </Sheet.Root>
+                  </div>
+                </Dialog.Content>
+              </Dialog.Root>
+            </div>
+          </Dialog.Content>
+        </Dialog.Root>
       </main>
     </PortalProvider>
   )
@@ -93,4 +129,16 @@ export const Interaction: Story = {
     canvasElement.dataset.dialogPlayComplete = "true"
   },
   render: () => <DialogInteraction />
+}
+
+export const NestedIsolation: Story = {
+  args: { children: null, defaultOpen: true },
+  play: async ({ canvas, canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelectorAll('[role="dialog"]')).toHaveLength(3))
+    const layers = canvasElement.querySelectorAll<HTMLElement>("[data-rly-modal-layer]")
+    await expect([...layers].map((layer) => layer.inert)).toEqual([true, true, false])
+    await expect(canvas.getByRole("button", { name: "Close top sheet" })).toHaveFocus()
+    canvasElement.dataset.nestedOverlayPlayComplete = "true"
+  },
+  render: () => <NestedOverlayStack />
 }

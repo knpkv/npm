@@ -16,8 +16,11 @@ import { classNames, cssClass, defineVariants, requireText } from "../internal/c
 import {
   invalidateModalFocusRestore,
   isHTMLElement,
+  ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
-  useModalIsolation
+  useModalContentRegistration,
+  useModalIsolation,
+  useParentModalReady
 } from "../internal/modal.js"
 import { Button, type ButtonProps } from "./Button.js"
 import styles from "./Dialog.module.css"
@@ -27,6 +30,7 @@ const style = (name: string): string => cssClass(styles, name)
 interface DialogState {
   readonly open: boolean
   readonly requestOpenChange: (open: boolean) => void
+  readonly restoreTargetRef: RefObject<HTMLElement | null>
   readonly triggerRef: RefObject<HTMLButtonElement | null>
 }
 
@@ -101,9 +105,10 @@ export type DialogContentProps = Omit<
 const DialogLayer = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const state = useDialogState()
   const ref = useRef<HTMLDivElement>(null)
+  useModalContentRegistration()
   useModalIsolation(ref, state.open)
   return (
-    <div className={style("layer")} data-rly-dialog-layer="" ref={ref}>
+    <div className={style("layer")} data-rly-dialog-layer="" data-rly-modal-layer="" ref={ref}>
       {children}
     </div>
   )
@@ -112,7 +117,8 @@ const DialogLayer = ({ children }: { readonly children: ReactNode }): ReactEleme
 /** Own controlled or reusable default dialog state without exposing Radix contracts. */
 const DialogRoot = ({ children, defaultOpen = false, onOpenChange, open }: DialogRootProps): ReactElement => {
   const [defaultState, setDefaultState] = useState(defaultOpen)
-  const resolvedOpen = open ?? defaultState
+  const isParentModalReady = useParentModalReady()
+  const resolvedOpen = (open ?? defaultState) && isParentModalReady
   const previousOpenRef = useRef(resolvedOpen)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const restoreTargetRef = useRef<HTMLElement | null>(resolvedOpen ? getActiveElement() : null)
@@ -133,11 +139,13 @@ const DialogRoot = ({ children, defaultOpen = false, onOpenChange, open }: Dialo
   }, [resolvedOpen])
 
   return (
-    <DialogStateContext.Provider value={{ open: resolvedOpen, requestOpenChange, triggerRef }}>
-      <RadixDialog.Root modal onOpenChange={requestOpenChange} open={resolvedOpen}>
-        {children}
-      </RadixDialog.Root>
-    </DialogStateContext.Provider>
+    <ModalNestingBoundary>
+      <DialogStateContext.Provider value={{ open: resolvedOpen, requestOpenChange, restoreTargetRef, triggerRef }}>
+        <RadixDialog.Root modal onOpenChange={requestOpenChange} open={resolvedOpen}>
+          {children}
+        </RadixDialog.Root>
+      </DialogStateContext.Provider>
+    </ModalNestingBoundary>
   )
 }
 
@@ -198,6 +206,10 @@ const DialogContent = ({
                 event.preventDefault()
               }}
               onOpenAutoFocus={(event) => {
+                const activeElement = getActiveElement()
+                if (state.triggerRef.current === null && activeElement !== null) {
+                  state.restoreTargetRef.current = activeElement
+                }
                 const target = initialFocusRef?.current
                 if (target !== null && target !== undefined) {
                   event.preventDefault()

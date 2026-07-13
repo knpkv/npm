@@ -57,6 +57,42 @@ test("reflows dialog to a full-screen decision at compact zoom-equivalent width"
   await expectNoHorizontalOverflow(page)
 })
 
+test("keeps only the top layer interactive across dialog and sheet nesting", async ({ page }) => {
+  await page.goto(story("primitives-dialog--nested-isolation"))
+  await expect(page.locator("[data-nested-overlay-play-complete=\"true\"]")).toHaveCount(1)
+
+  const layers = page.locator("[data-rly-modal-layer]")
+  const inertStates = async (): Promise<ReadonlyArray<boolean>> =>
+    layers.evaluateAll((elements) =>
+      elements.map((element) => "inert" in element && typeof element.inert === "boolean" ? element.inert : true)
+    )
+
+  expect(await inertStates()).toEqual([true, true, false])
+  const topClose = page.getByRole("button", { name: "Close top sheet" })
+  await expect(topClose).toBeFocused()
+  await topClose.click()
+
+  await expect(page.locator("[role=\"dialog\"]")).toHaveCount(2)
+  expect(await inertStates()).toEqual([true, false])
+  const innerClose = page.getByRole("button", { name: "Close inner dialog" })
+  await expect(innerClose).toBeFocused()
+  await innerClose.click()
+
+  await expect(page.locator("[role=\"dialog\"]")).toHaveCount(1)
+  expect(await inertStates()).toEqual([false])
+  const outerClose = page.getByRole("button", { name: "Close outer dialog" })
+  await expect(outerClose).toBeFocused()
+  await outerClose.click()
+
+  await expect(page.locator("[role=\"dialog\"]")).toHaveCount(0)
+  expect(
+    await page
+      .locator("[data-nested-overlay-background]")
+      .evaluate((element) => ("inert" in element && typeof element.inert === "boolean" ? element.inert : true))
+  ).toBe(false)
+  await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked")
+})
+
 test("keeps sheet focus, isolation, and compact full-screen geometry deterministic", async ({ page }) => {
   await page.setViewportSize({ height: 800, width: 320 })
   await page.goto(story("primitives-sheet--interaction"))

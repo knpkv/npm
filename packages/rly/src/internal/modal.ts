@@ -1,16 +1,53 @@
-import { type RefObject, useLayoutEffect } from "react"
+import {
+  createContext,
+  createElement,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useLayoutEffect,
+  useState
+} from "react"
 
 interface InertRecord {
   count: number
   readonly previous: boolean
 }
 
+interface ModalNestingState {
+  readonly isContentMounted: boolean
+  readonly setContentMounted: (isMounted: boolean) => void
+}
+
+interface ModalNestingBoundaryProps {
+  readonly children: ReactNode
+}
+
 const inertRecords = new WeakMap<HTMLElement, InertRecord>()
+const ModalNestingContext = createContext<ModalNestingState | null>(null)
 let focusTransitionGeneration = 0
 
 /** Narrows DOM elements through the HTML-only inert contract without relying on a realm-specific constructor. */
 export const isHTMLElement = (element: Element | null): element is HTMLElement =>
   element !== null && "inert" in element && typeof element.inert === "boolean"
+
+/** Stages nested default-open or controlled overlays until their parent content is mounted. */
+export const ModalNestingBoundary = ({ children }: ModalNestingBoundaryProps): ReactElement => {
+  const [isContentMounted, setContentMounted] = useState(false)
+  return createElement(ModalNestingContext.Provider, { value: { isContentMounted, setContentMounted } }, children)
+}
+
+/** Reports whether a logical parent modal is ready to host a nested overlay. */
+export const useParentModalReady = (): boolean => useContext(ModalNestingContext)?.isContentMounted ?? true
+
+/** Registers the current portal content so deeper overlays mount in logical stack order. */
+export const useModalContentRegistration = (): void => {
+  const setContentMounted = useContext(ModalNestingContext)?.setContentMounted
+  useLayoutEffect(() => {
+    setContentMounted?.(true)
+    return () => setContentMounted?.(false)
+  }, [setContentMounted])
+}
 
 const retainInert = (element: HTMLElement): void => {
   const record = inertRecords.get(element)
@@ -46,8 +83,14 @@ export const useModalIsolation = (layerRef: RefObject<HTMLDivElement | null>, is
       if (current === current.ownerDocument.body) break
       const parent = current.parentElement
       if (parent === null) break
+      let hasReachedCurrent = false
       for (const sibling of parent.children) {
-        if (sibling !== current && isHTMLElement(sibling)) {
+        if (sibling === current) {
+          hasReachedCurrent = true
+          continue
+        }
+        const isLaterModalLayer = hasReachedCurrent && sibling.hasAttribute("data-rly-modal-layer")
+        if (!isLaterModalLayer && isHTMLElement(sibling)) {
           retainInert(sibling)
           retained.push(sibling)
         }

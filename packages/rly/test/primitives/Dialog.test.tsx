@@ -171,6 +171,7 @@ describe("Dialog", () => {
     const layers = entry.portal.querySelectorAll<HTMLElement>("[data-rly-dialog-layer]")
     expect(layers).toHaveLength(2)
     expect(layers[0]?.inert).toBe(true)
+    expect(layers[1]?.inert).toBe(false)
     expect(entry.background.inert).toBe(true)
 
     mounted.splice(mounted.indexOf(entry), 1)
@@ -196,13 +197,16 @@ describe("Dialog", () => {
       </Dialog.Root>
     )
     const dialogs = entry.portal.querySelectorAll<HTMLElement>('[role="dialog"]')
+    const layers = entry.portal.querySelectorAll<HTMLElement>("[data-rly-modal-layer]")
     expect(dialogs).toHaveLength(2)
+    expect([...layers].map((layer) => layer.inert)).toEqual([true, false])
     expect(entry.background.inert).toBe(true)
 
     const closeInner = entry.portal.querySelector<HTMLButtonElement>("button:not([aria-label])")
     await act(async () => closeInner?.click())
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
     expect(entry.portal.querySelectorAll('[role="dialog"]')).toHaveLength(1)
+    expect(entry.portal.querySelector<HTMLElement>("[data-rly-modal-layer]")?.inert).toBe(false)
     expect(entry.background.inert).toBe(true)
 
     mounted.splice(mounted.indexOf(entry), 1)
