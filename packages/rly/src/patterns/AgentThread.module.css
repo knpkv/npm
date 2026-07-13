@@ -1,0 +1,192 @@
+@layer rly.components {
+  .root {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    container-type: inline-size;
+    display: grid;
+    min-inline-size: var(--rly-space-0);
+    overflow: hidden;
+  }
+
+  .header,
+  .messageHead,
+  .actor,
+  .actions {
+    align-items: center;
+    display: flex;
+  }
+
+  .header {
+    gap: var(--rly-space-10);
+    padding: var(--rly-space-16) var(--rly-space-20);
+  }
+
+  .header h2 {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .agentGlyph,
+  .avatar {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-agent);
+  }
+
+  .agentGlyph {
+    align-items: center;
+    border: 1px solid currentcolor;
+    border-radius: var(--rly-radius-field);
+    display: inline-flex;
+    flex: 0 0 auto;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / 1 var(--rly-type-meta-font);
+    justify-content: center;
+    min-block-size: var(--rly-space-32);
+    min-inline-size: var(--rly-space-32);
+  }
+
+  .context,
+  .composer {
+    background: var(--rly-color-surface-2);
+    border-block-start: 1px solid var(--rly-color-border-1);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-16) var(--rly-space-20);
+  }
+
+  .context {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+
+  .conceptLabel {
+    color: var(--rly-color-agent);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .messages {
+    list-style: none;
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-0) var(--rly-space-20);
+  }
+
+  .message {
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: var(--rly-space-0);
+    padding-block: var(--rly-space-20);
+  }
+
+  .message + .message {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .messageHead {
+    gap: var(--rly-space-12);
+    justify-content: space-between;
+  }
+
+  .actor {
+    gap: var(--rly-space-10);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .agent .avatar {
+    border: 1px solid var(--rly-color-agent);
+  }
+
+  .human .avatar {
+    color: var(--rly-color-text-1);
+  }
+
+  .system .avatar {
+    color: var(--rly-color-text-2);
+  }
+
+  .actorText {
+    display: grid;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .actorText strong {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    overflow-wrap: anywhere;
+  }
+
+  .actorText span,
+  .messageHead time,
+  .empty {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  .messageHead time {
+    flex: 0 0 auto;
+  }
+
+  .content {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    overflow-wrap: anywhere;
+  }
+
+  .evidence {
+    border-inline-start: var(--rly-space-2) solid var(--rly-color-border-2);
+    min-inline-size: var(--rly-space-0);
+    padding-inline-start: var(--rly-space-12);
+  }
+
+  .actions {
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+
+  .composer {
+    border-block-end: 0;
+  }
+
+  .empty {
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-20);
+  }
+
+  .visuallyHidden {
+    block-size: 1px;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: var(--rly-space-0);
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  @container (max-width: 22rem) {
+    .header,
+    .context,
+    .composer,
+    .empty {
+      padding-inline: var(--rly-space-14);
+    }
+
+    .messages {
+      padding-inline: var(--rly-space-14);
+    }
+
+    .messageHead {
+      align-items: flex-start;
+      display: grid;
+    }
+  }
+}

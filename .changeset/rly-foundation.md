@@ -51,3 +51,10 @@ patterns. Cover six release outcomes, six-ticket and arbitrary-cardinality Jira
 worksets, explicit PR and pipeline dimensions, service-specific full-view
 shells, controlled sorting, complete degraded data states, human and agent
 actors, compact reflow, and focus-safe preview-to-full-view actions.
+
+Add first-class contextual agent and governed-action patterns with exact
+context/evidence/capability ordering, durable human/agent/system threads,
+provider job progress and truthful terminal states, explicit non-authorizing
+agent proposals, and confirmation-gated named human authorization. Cover
+focus stability, cancellation, 320px dark and forced-color layouts, and
+presentation-only callbacks with no provider or vendor execution.

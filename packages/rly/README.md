@@ -278,6 +278,43 @@ Rly does not fetch service data, derive release readiness, execute actions, or
 route between entities. Applications normalize those concerns before passing
 presentation projections and controlled callbacks into these patterns.
 
+## Contextual agents and governed actions
+
+`AgentContextButton` is an explicit, page-level launcher whose visible label
+names both the agent and its exact release or entity context. `AgentDrawer`
+opens a controlled sheet in a fixed order: context, evidence, capabilities,
+thread, then composer. Initial focus lands on the context summary, live updates
+do not steal focus, and closing restores the launcher.
+
+`AgentThread` presents immutable human, agent, and system messages after the
+exact context and before the required composer. Human identities remain
+circular; agents use a rounded square and the reserved agent color.
+`AgentJob` presents caller-owned provider, capability, progress, revision or
+sandbox, evidence, cancellation, and truthful terminal outcomes without
+starting or cancelling work itself.
+
+`AgentProposal` states the core boundary directly: an agent proposal is not
+human authorization. `GovernedActionReview` repeats the exact capability,
+target, expected revision, impact, and evidence beside a named human reviewer.
+Its owned authorization button stays disabled until the controlled exact-action
+confirmation is checked, and terminal outcomes remain visible after review.
+
+```tsx
+import { AgentContextButton, GovernedActionReview } from "@knpkv/rly/patterns"
+
+export const ReleaseAgentEntry = () => (
+  <AgentContextButton
+    agentName="Release Guardian"
+    context="Release v2.4.0 · Copper Orbit"
+    onClick={() => setAgentOpen(true)}
+  />
+)
+```
+
+Callbacks request application-owned state changes only. Rly never contacts an
+agent provider, invokes a vendor capability, derives permission, or treats an
+agent proposal as a human decision.
+
 ## Component catalog
 
 Storybook is the bounded development and review surface for `rly`. It binds to

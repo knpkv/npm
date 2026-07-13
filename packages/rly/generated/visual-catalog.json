@@ -2,6 +2,76 @@
   "schemaVersion": 1,
   "components": [
     {
+      "name": "AgentContextButton",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentContextButton.tsx",
+        "story": "packages/rly/stories/patterns/AgentContextButton.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentContextButton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentContextButton.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentcontextbutton--contexts"
+    },
+    {
+      "name": "AgentDrawer",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentDrawer.tsx",
+        "story": "packages/rly/stories/patterns/AgentDrawer.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentDrawer.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentDrawer.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentdrawer--interaction"
+    },
+    {
+      "name": "AgentJob",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentJob.tsx",
+        "story": "packages/rly/stories/patterns/AgentJob.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentJob.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentJob.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentjob--states"
+    },
+    {
+      "name": "AgentProposal",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentProposal.tsx",
+        "story": "packages/rly/stories/patterns/AgentProposal.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentProposal.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentProposal.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentproposal--states"
+    },
+    {
+      "name": "AgentThread",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentThread.tsx",
+        "story": "packages/rly/stories/patterns/AgentThread.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentThread.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentThread.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentthread--release-thread"
+    },
+    {
       "name": "Avatar",
       "paths": {
         "source": "packages/rly/src/primitives/Avatar.tsx",
@@ -152,6 +222,20 @@
         ]
       },
       "storyId": "foundations-globalstyles--scope"
+    },
+    {
+      "name": "GovernedActionReview",
+      "paths": {
+        "source": "packages/rly/src/patterns/GovernedActionReview.tsx",
+        "story": "packages/rly/stories/patterns/GovernedActionReview.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/GovernedActionReview.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/GovernedActionReview.test.tsx"
+        ]
+      },
+      "storyId": "patterns-governedactionreview--confirmation"
     },
     {
       "name": "Icon",

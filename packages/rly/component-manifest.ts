@@ -579,6 +579,106 @@ export const componentManifest = {
   }, {
     category: "pattern",
     exports: [
+      { kind: "value", name: "AgentContextButton" },
+      { kind: "type", name: "AgentContextButtonProps" },
+      { kind: "type", name: "RlyAgentJobSummary" }
+    ],
+    name: "AgentContextButton",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/AgentContextButton.tsx",
+    status: "stable",
+    styles: ["src/patterns/AgentContextButton.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/AgentContextButton.stories.tsx",
+      storyId: "patterns-agentcontextbutton--contexts",
+      tests: ["test/patterns/AgentContextButton.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "AgentDrawer" },
+      { kind: "type", name: "AgentDrawerProps" }
+    ],
+    name: "AgentDrawer",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/AgentDrawer.tsx",
+    status: "stable",
+    styles: ["src/patterns/AgentDrawer.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/AgentDrawer.stories.tsx",
+      storyId: "patterns-agentdrawer--interaction",
+      tests: ["test/patterns/AgentDrawer.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "AgentJob" },
+      { kind: "type", name: "AgentJobProps" },
+      { kind: "type", name: "RlyAgentJobState" }
+    ],
+    name: "AgentJob",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/AgentJob.tsx",
+    status: "stable",
+    styles: ["src/patterns/AgentJob.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/AgentJob.stories.tsx",
+      storyId: "patterns-agentjob--states",
+      tests: ["test/patterns/AgentJob.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "AgentProposal" },
+      { kind: "type", name: "AgentProposalProps" },
+      { kind: "type", name: "RlyAgentIdentity" },
+      { kind: "type", name: "RlyAgentProposal" },
+      { kind: "type", name: "RlyAgentProposalEvidence" }
+    ],
+    name: "AgentProposal",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/AgentProposal.tsx",
+    status: "stable",
+    styles: ["src/patterns/AgentProposal.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/AgentProposal.stories.tsx",
+      storyId: "patterns-agentproposal--states",
+      tests: ["test/patterns/AgentProposal.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "AgentThread" },
+      { kind: "type", name: "AgentThreadProps" },
+      { kind: "type", name: "RlyAgentThreadActor" },
+      { kind: "type", name: "RlyAgentThreadAgentActor" },
+      { kind: "type", name: "RlyAgentThreadHumanActor" },
+      { kind: "type", name: "RlyAgentThreadMessage" },
+      { kind: "type", name: "RlyAgentThreadSystemActor" }
+    ],
+    name: "AgentThread",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/AgentThread.tsx",
+    status: "stable",
+    styles: ["src/patterns/AgentThread.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/AgentThread.stories.tsx",
+      storyId: "patterns-agentthread--release-thread",
+      tests: ["test/patterns/AgentThread.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
       { kind: "value", name: "CollaboratorGroup" },
       { kind: "value", name: "RLY_COLLABORATOR_GROUP_DEFAULT_VARIANTS" },
       { kind: "value", name: "RLY_COLLABORATOR_GROUP_VARIANTS" },
@@ -681,6 +781,25 @@ export const componentManifest = {
       story: "stories/patterns/FreshnessStamp.stories.tsx",
       storyId: "patterns-freshnessstamp--matrix",
       tests: ["test/patterns/FreshnessStamp.test.tsx"]
+    }
+  }, {
+    category: "pattern",
+    exports: [
+      { kind: "value", name: "GovernedActionReview" },
+      { kind: "type", name: "GovernedActionReviewProps" },
+      { kind: "type", name: "RlyGovernedActionState" }
+    ],
+    name: "GovernedActionReview",
+    publicEntry: "patterns",
+    registry: true,
+    source: "src/patterns/GovernedActionReview.tsx",
+    status: "stable",
+    styles: ["src/patterns/GovernedActionReview.module.css"],
+    variants: [],
+    visual: {
+      story: "stories/patterns/GovernedActionReview.stories.tsx",
+      storyId: "patterns-governedactionreview--confirmation",
+      tests: ["test/patterns/GovernedActionReview.test.tsx"]
     }
   }, {
     category: "pattern",

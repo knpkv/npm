@@ -139,11 +139,17 @@ import {
 } from "@knpkv/rly/foundations"
 import { Button, Dialog, Field, Select, Sheet, Surface, Tabs, Text } from "@knpkv/rly/primitives"
 import {
+  AgentContextButton,
+  AgentDrawer,
+  AgentJob,
+  AgentProposal,
+  AgentThread,
   CollaboratorGroup,
   EntityShell,
   EntityTable,
   EvidenceStamp,
   FreshnessStamp,
+  GovernedActionReview,
   PeopleStrip,
   Person,
   RelationshipChain,
@@ -154,6 +160,7 @@ import {
   ServiceMark,
   StageRail,
   TimelineRow,
+  type RlyAgentProposal,
   type RlyReleasePresentation,
   type RlyRelationship,
   Verdict,
@@ -205,6 +212,21 @@ const packedRelease: RlyReleasePresentation = {
   tone: "positive",
   verdict: "Ready to ship.",
   version: "v2.4.0"
+}
+const packedAgentProposal: RlyAgentProposal = {
+  agent: {
+    avatarFallback: "AI",
+    id: "packed-agent",
+    name: "Release Guardian",
+    role: "Release-scoped agent"
+  },
+  capability: "Update Jira release description",
+  context: "Release v2.4.0 Copper Orbit",
+  evidence: [{ id: "packed-evidence", label: "Jira revision", reference: "RPS-6307@17" }],
+  expectedRevision: "17",
+  id: "packed-proposal",
+  impact: "Replace the Jira issue description only",
+  target: "Jira RPS-6307"
 }
 const markup = renderToStaticMarkup(
   <ThemeProvider theme="dark">
@@ -328,6 +350,74 @@ const markup = renderToStaticMarkup(
       tone="positive"
       verdict="Ready"
     />
+    <AgentContextButton
+      agentName="Release Guardian"
+      context="Release v2.4.0 Copper Orbit"
+      job={{ count: 1, status: "Review running" }}
+    />
+    <AgentDrawer
+      agentName="Release Guardian"
+      capabilities={<span>Packed agent capabilities</span>}
+      composer={<span>Packed agent composer</span>}
+      context={<span>Packed exact release context</span>}
+      contextSummary="Release v2.4.0 Copper Orbit"
+      evidence={<span>Packed agent evidence</span>}
+      onOpenChange={() => undefined}
+      open={false}
+      thread={<span>Packed drawer thread</span>}
+      title="Packed release agent"
+    />
+    <AgentThread
+      composer={<span>Packed thread composer</span>}
+      context={<span>Release v2.4.0 only</span>}
+      heading="Packed release thread"
+      messages={[
+        {
+          actor: {
+            kind: "human",
+            person: { id: "packed-human", name: "Avery Diaz", role: "Release owner" }
+          },
+          content: createElement("span", null, "Check the current blockers."),
+          dateTime: "2026-07-13T14:00:00Z",
+          id: "packed-human-message",
+          time: "14:00"
+        },
+        {
+          actor: { id: "packed-agent", kind: "agent", name: "Release Guardian", role: "Release agent" },
+          content: createElement("span", null, "No current blockers were found."),
+          dateTime: "2026-07-13T14:01:00Z",
+          id: "packed-agent-message",
+          time: "14:01"
+        }
+      ]}
+    />
+    <AgentJob
+      capability="Sandbox review"
+      context={<span>Pull request #291 at 7f4c9b1</span>}
+      evidence={<span>Two immutable evidence references</span>}
+      heading="Packed sandbox review"
+      onCancel={() => undefined}
+      progress={42}
+      provider="Local Codex"
+      revision="7f4c9b1"
+      state="running"
+    />
+    <AgentProposal
+      outcome={<span>Awaiting human review</span>}
+      proposal={packedAgentProposal}
+      state={<span>Proposed</span>}
+    />
+    <GovernedActionReview
+      confirmationLabel="I reviewed this exact target and revision"
+      isConfirmed={false}
+      onAuthorize={() => undefined}
+      onConfirmationChange={() => undefined}
+      onReject={() => undefined}
+      outcome={<span>No action has been authorized</span>}
+      proposal={packedAgentProposal}
+      reviewer={{ id: "packed-reviewer", name: "Dev Shah", role: "Human production approver" }}
+      state="pending"
+    />
     <ol>
       <TimelineRow
         continued={false}
@@ -367,6 +457,12 @@ if (
   || !markup.includes("Packed entities")
   || !markup.includes("Packed entity content")
   || !markup.includes("Packed agent review")
+  || !markup.includes("Release Guardian")
+  || !markup.includes("Packed release thread")
+  || !markup.includes("Packed sandbox review")
+  || !markup.includes("This is an agent proposal. It is not human authorization.")
+  || !markup.includes("Only the named human reviewer can authorize it.")
+  || !markup.includes("I reviewed this exact target and revision")
   || !markup.includes("Release relay, Copper Orbit, symbols bridge, wave, beacon.")
   || !markup.includes("Identity algorithm: relay/v1")
   || !markup.includes("Ready to ship.")
