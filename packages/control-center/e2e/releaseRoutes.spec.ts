@@ -4,13 +4,18 @@ import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 interface ReleaseTransitionGeometry {
   readonly bottom: number
+  readonly clientRectCount: number
   readonly computedName: string
+  readonly display: string
   readonly height: number
+  readonly isPaintVisible: boolean
   readonly left: number
   readonly name: string
+  readonly opacity: number
   readonly part: string
   readonly right: number
   readonly top: number
+  readonly visibility: string
   readonly viewportHeight: number
   readonly viewportWidth: number
   readonly width: number
@@ -19,6 +24,26 @@ interface ReleaseTransitionGeometry {
 interface ReleaseTransitionSnapshot {
   readonly after: ReadonlyArray<ReleaseTransitionGeometry>
   readonly before: ReadonlyArray<ReleaseTransitionGeometry>
+}
+
+interface ReleaseTransitionReadiness {
+  readonly reason?: string
+  readonly state: "pending" | "rejected" | "resolved"
+}
+
+interface BrowserTransitionNameSemantics {
+  readonly accepted: ReadonlyArray<{
+    readonly computedName: string
+    readonly inlineName: string
+    readonly name: string
+  }>
+  readonly rootCollision: BrowserTransitionNameCollision
+  readonly surrogateCollision: BrowserTransitionNameCollision
+}
+
+interface BrowserTransitionNameCollision {
+  readonly computedNames: ReadonlyArray<string>
+  readonly readiness: string
 }
 
 const snapshot = releasePortfolioFixture
@@ -81,6 +106,7 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
   await page.addInitScript({
     content: `
       window.__releaseTransitionSnapshots = [];
+      window.__releaseTransitionReadiness = [];
       const originalStartViewTransition = document.startViewTransition?.bind(document);
       if (originalStartViewTransition) {
         document.startViewTransition = (update) => {
@@ -88,27 +114,45 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
             .filter((element) => element.dataset.rlyReleaseTransitionName)
             .map((element) => {
               const bounds = element.getBoundingClientRect();
+              const computedStyle = getComputedStyle(element);
               return {
                 bottom: bounds.bottom,
-                computedName: getComputedStyle(element).viewTransitionName,
+                clientRectCount: element.getClientRects().length,
+                computedName: computedStyle.viewTransitionName,
+                display: computedStyle.display,
                 height: bounds.height,
+                isPaintVisible: element.checkVisibility({
+                  checkOpacity: true,
+                  checkVisibilityCSS: true
+                }),
                 left: bounds.left,
                 name: element.dataset.rlyReleaseTransitionName,
+                opacity: Number.parseFloat(computedStyle.opacity),
                 part: element.dataset.rlyReleaseTransitionPart,
                 right: bounds.right,
                 top: bounds.top,
+                visibility: computedStyle.visibility,
                 viewportHeight: innerHeight,
                 viewportWidth: innerWidth,
                 width: bounds.width
               };
             });
           const before = collect();
-          return originalStartViewTransition(async () => {
+          const transition = originalStartViewTransition(async () => {
             const result = await update();
-            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
             window.__releaseTransitionSnapshots.push({ before, after: collect() });
             return result;
           });
+          const readiness = { state: 'pending' };
+          window.__releaseTransitionReadiness.push(readiness);
+          transition.ready.then(
+            () => { readiness.state = 'resolved'; },
+            (error) => {
+              readiness.reason = String(error);
+              readiness.state = 'rejected';
+            }
+          );
+          return transition;
         };
       }
     `
@@ -118,12 +162,17 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
 test.beforeEach(async ({ context }) => installReleaseMocks(context))
 
 const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): void => {
+  expect(geometry.clientRectCount).toBeGreaterThan(0)
+  expect(geometry.display).not.toBe("none")
   expect(geometry.width).toBeGreaterThan(0)
   expect(geometry.height).toBeGreaterThan(0)
+  expect(geometry.isPaintVisible).toBe(true)
+  expect(geometry.opacity).toBeGreaterThan(0)
   expect(geometry.right).toBeGreaterThan(0)
   expect(geometry.bottom).toBeGreaterThan(0)
   expect(geometry.left).toBeLessThan(geometry.viewportWidth)
   expect(geometry.top).toBeLessThan(geometry.viewportHeight)
+  expect(geometry.visibility).toBe("visible")
   expect(geometry.computedName).toBe(geometry.name)
 }
 
@@ -183,6 +232,9 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 2")
+  await page.waitForFunction(
+    "window.__releaseTransitionReadiness.length === 2 && window.__releaseTransitionReadiness.every((entry) => entry.state !== 'pending')"
+  )
 
   const expectedIdentities = [
     { name: `release-${release.releaseId}-relay`, part: "relay" },
@@ -198,6 +250,72 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
     expect(snapshot.after.map(transitionIdentity)).toEqual(expectedIdentities)
     for (const geometry of [...snapshot.before, ...snapshot.after]) expectVisibleTransitionGeometry(geometry)
   }
+  const readiness = await page.evaluate<ReadonlyArray<ReleaseTransitionReadiness>>(
+    "window.__releaseTransitionReadiness"
+  )
+  expect(readiness).toEqual([{ state: "resolved" }, { state: "resolved" }])
+})
+
+test("matches Chromium CSSOM semantics for accepted edge names and rejected collisions", async ({ page }) => {
+  const semantics = await page.evaluate<BrowserTransitionNameSemantics>(`(async () => {
+    const replacementCharacter = String.fromCodePoint(0xfffd);
+    const accepted = ["--", replacementCharacter].map((name) => {
+      const element = document.createElement("div");
+      document.body.append(element);
+      element.style.viewTransitionName = name;
+      const computedName = getComputedStyle(element).viewTransitionName;
+      const inlineName = element.style.viewTransitionName;
+      element.remove();
+      return { computedName, inlineName, name };
+    });
+
+    const collisionReadiness = async (firstName, secondName) => {
+      const host = document.createElement("div");
+      const first = document.createElement("div");
+      const second = document.createElement("div");
+      host.append(first, second);
+      document.body.append(host);
+      first.style.viewTransitionName = firstName;
+      second.style.viewTransitionName = secondName;
+      const computedNames = [getComputedStyle(first).viewTransitionName, getComputedStyle(second).viewTransitionName];
+      const transition = document.startViewTransition(() => undefined);
+      let readiness = "resolved";
+      try {
+        await transition.ready;
+      } catch {
+        readiness = "rejected";
+      }
+      await transition.finished;
+      host.remove();
+      return { computedNames, readiness };
+    };
+
+    const surrogateCollision = await collisionReadiness(String.fromCharCode(0xd800), replacementCharacter);
+    const rootChild = document.createElement("div");
+    document.body.append(rootChild);
+    rootChild.style.viewTransitionName = "root";
+    const rootNames = [
+      getComputedStyle(document.documentElement).viewTransitionName,
+      getComputedStyle(rootChild).viewTransitionName
+    ];
+    const rootTransition = document.startViewTransition(() => undefined);
+    let rootReadiness = "resolved";
+    try {
+      await rootTransition.ready;
+    } catch {
+      rootReadiness = "rejected";
+    }
+    await rootTransition.finished;
+    rootChild.remove();
+    return { accepted, rootCollision: { computedNames: rootNames, readiness: rootReadiness }, surrogateCollision };
+  })()`)
+
+  expect(semantics.accepted).toEqual([
+    { computedName: "--", inlineName: "--", name: "--" },
+    { computedName: "\uFFFD", inlineName: "\uFFFD", name: "\uFFFD" }
+  ])
+  expect(semantics.surrogateCollision).toEqual({ computedNames: ["\uFFFD", "\uFFFD"], readiness: "rejected" })
+  expect(semantics.rootCollision).toEqual({ computedNames: ["root", "root"], readiness: "rejected" })
 })
 
 test("renders a compact full-screen sheet and returns direct loads to the semantic parent", async ({ page }) => {
@@ -231,6 +349,7 @@ test("uses the immediate reduced-motion path at a 200%-zoom-equivalent width", a
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 })
 
+// The 40px spacing token preserves one readable dossier row while the decision rail stays fixed.
 test("keeps the decision rail and dossier usable in short desktop viewports", async ({ page }) => {
   const viewports = [
     { height: 240, width: 641 },
@@ -244,40 +363,79 @@ test("keeps the decision rail and dossier usable in short desktop viewports", as
     const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
     const footer = page.locator("[data-rly-release-preview-footer='dialog']")
     const dossier = page.locator("[data-rly-release-preview-scroll='dialog']")
+    const fullViewButton = page.getByRole("button", { name: "Open Copper Finch full view" })
     await expect(dialog).toBeVisible()
     await expect(page.locator("[data-rly-release-preview-presentation='dialog']")).toBeVisible()
-    await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
+    await expect(fullViewButton).toBeInViewport({ ratio: 1 })
 
     const geometry = await page.evaluate<
       {
         readonly dialogBottom: number
+        readonly dialogLeft: number
+        readonly dialogRight: number
         readonly dialogTop: number
         readonly dossierClientHeight: number
         readonly dossierScrollHeight: number
         readonly footerBottom: number
         readonly footerTop: number
+        readonly fullViewButtonBottom: number
+        readonly fullViewButtonLeft: number
+        readonly fullViewButtonRight: number
+        readonly fullViewButtonTop: number
+        readonly readableDossierMinBlockSize: number
+        readonly viewportHeight: number
+        readonly viewportWidth: number
       } | null
     >(`(() => {
       const dialogElement = document.querySelector("[role='dialog']");
       const footerElement = document.querySelector("[data-rly-release-preview-footer='dialog']");
       const dossierElement = document.querySelector("[data-rly-release-preview-scroll='dialog']");
-      if (dialogElement === null || footerElement === null || dossierElement === null) return null;
+      const fullViewButtonElement = footerElement?.querySelector("button");
+      if (
+        dialogElement === null ||
+        footerElement === null ||
+        dossierElement === null ||
+        fullViewButtonElement === null ||
+        fullViewButtonElement === undefined
+      ) return null;
       const dialogBounds = dialogElement.getBoundingClientRect();
       const footerBounds = footerElement.getBoundingClientRect();
+      const fullViewButtonBounds = fullViewButtonElement.getBoundingClientRect();
+      const readableDossierMinBlockSize = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--rly-space-40")
+      );
       return {
         dialogBottom: dialogBounds.bottom,
+        dialogLeft: dialogBounds.left,
+        dialogRight: dialogBounds.right,
         dialogTop: dialogBounds.top,
         dossierClientHeight: dossierElement.clientHeight,
         dossierScrollHeight: dossierElement.scrollHeight,
         footerBottom: footerBounds.bottom,
-        footerTop: footerBounds.top
+        footerTop: footerBounds.top,
+        fullViewButtonBottom: fullViewButtonBounds.bottom,
+        fullViewButtonLeft: fullViewButtonBounds.left,
+        fullViewButtonRight: fullViewButtonBounds.right,
+        fullViewButtonTop: fullViewButtonBounds.top,
+        readableDossierMinBlockSize,
+        viewportHeight: innerHeight,
+        viewportWidth: innerWidth
       };
     })()`)
     expect(geometry).not.toBeNull()
     if (geometry === null) throw new Error(`Release preview geometry was unavailable at ${viewport.width}px`)
+    expect(geometry.dialogTop).toBeGreaterThanOrEqual(0)
+    expect(geometry.dialogLeft).toBeGreaterThanOrEqual(0)
+    expect(geometry.dialogBottom).toBeLessThanOrEqual(geometry.viewportHeight)
+    expect(geometry.dialogRight).toBeLessThanOrEqual(geometry.viewportWidth)
     expect(geometry.footerTop).toBeGreaterThanOrEqual(geometry.dialogTop)
     expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.dialogBottom)
-    expect(geometry.dossierClientHeight).toBeGreaterThan(0)
+    expect(geometry.fullViewButtonTop).toBeGreaterThanOrEqual(0)
+    expect(geometry.fullViewButtonLeft).toBeGreaterThanOrEqual(0)
+    expect(geometry.fullViewButtonBottom).toBeLessThanOrEqual(geometry.viewportHeight)
+    expect(geometry.fullViewButtonRight).toBeLessThanOrEqual(geometry.viewportWidth)
+    expect(geometry.readableDossierMinBlockSize).toBeGreaterThan(0)
+    expect(geometry.dossierClientHeight).toBeGreaterThanOrEqual(geometry.readableDossierMinBlockSize)
     expect(geometry.dossierScrollHeight).toBeGreaterThan(geometry.dossierClientHeight)
     await expect(footer).toBeVisible()
     await expect(dossier).toBeVisible()
@@ -291,7 +449,7 @@ test("keeps the decision rail and dossier usable in short desktop viewports", as
     const scrolledFooter = await footer.boundingBox()
     expect(scrolledFooter).not.toBeNull()
     expect(scrolledFooter?.y).toBe(geometry.footerTop)
-    await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
+    await fullViewButton.click()
     await expect(page).toHaveURL(fullPath)
   }
 })

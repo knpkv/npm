@@ -26,19 +26,13 @@ describe("Control Center rly CSS token validation", () => {
     ])
   })
 
-  it("accepts generated, unconditional root, same-rule, registered, and fallback definitions", () => {
+  it("accepts generated, unconditional root, same-rule, and fallback definitions", () => {
     const source = `
-      @property --rly-registered-local {
-        syntax: "<length>";
-        initial-value: 1rem;
-        inherits: false;
-      }
       :root { --rly-module-local: 2rem; }
       .valid {
         --rly-same-rule: 3rem;
         border-radius: var(--rly-radius-group);
         gap: var(--rly-module-local);
-        margin: var(--rly-registered-local);
         padding: var(--rly-optional-space, var(--rly-space-8));
         scroll-margin: var(--rly-same-rule);
       }
@@ -62,34 +56,31 @@ describe("Control Center rly CSS token validation", () => {
   })
 
   it.each([
-    ["missing", "syntax: \"<length>\"; inherits: false;"],
-    ["empty", "syntax: \"<length>\"; inherits: false; initial-value:;"],
-    ["comment-only", "syntax: \"<length>\"; inherits: false; initial-value: /* unavailable */;"],
-    ["missing-syntax", "inherits: false; initial-value: 1rem;"],
-    ["invalid-syntax", "syntax: <length>; inherits: false; initial-value: 1rem;"],
-    ["missing-inherits", "syntax: \"<length>\"; initial-value: 1rem;"]
-  ])("rejects an unusable %s @property registration", (_, descriptors) => {
+    ["complete-looking", "@property --rly-registered { syntax: \"<length>\"; inherits: false; initial-value: 1px; }"],
+    ["syntax mismatch", "@property --rly-registered { syntax: \"<length>\"; inherits: false; initial-value: red; }"],
+    [
+      "relative initial value",
+      "@property --rly-registered { syntax: \"<length>\"; inherits: false; initial-value: 1rem; }"
+    ],
+    [
+      "malformed syntax",
+      "@property --rly-registered { syntax: \"<length>\" junk \"\"; inherits: false; initial-value: 1px; }"
+    ],
+    [
+      "duplicate registrations",
+      `@property --rly-registered { syntax: "<length>"; inherits: false; initial-value: 1px; }
+       @property --rly-registered { syntax: "*"; inherits: false; initial-value: red; }`
+    ]
+  ])("does not let a %s @property registration suppress a violation", (_, registration) => {
     const source = `
-      @property --rly-unusable { ${descriptors} }
-      .consumer { margin: var(--rly-unusable); }
+      ${registration}
+      .consumer { margin: var(--rly-registered); }
     `
 
+    expect(declaredRlyCssTokens(source)).not.toContain("--rly-registered")
     expect(inspectRlyCssTokens("packages/rly/src/property.module.css", source, generatedTokens)).toEqual([
-      expect.objectContaining({ sourcePath: "packages/rly/src/property.module.css", token: "--rly-unusable" })
+      expect.objectContaining({ sourcePath: "packages/rly/src/property.module.css", token: "--rly-registered" })
     ])
-  })
-
-  it("accepts a complete @property registration with a quoted initial value", () => {
-    const source = `
-      @property --rly-label {
-        syntax: "<string>";
-        inherits: false;
-        initial-value: "ready";
-      }
-      .consumer { content: var(--rly-label); }
-    `
-
-    expect(inspectRlyCssTokens("packages/rly/src/property.module.css", source, generatedTokens)).toEqual([])
   })
 
   it("ignores token-shaped text in comments and strings", () => {

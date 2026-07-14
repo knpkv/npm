@@ -29,6 +29,7 @@ const expectInInitialViewport = async (page: Page, selector: string): Promise<vo
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth)
 }
 
+// The 40px spacing token preserves one readable dossier row while the decision rail stays fixed.
 const expectPersistentDecisionRail = async (page: Page, presentation: "dialog" | "sheet"): Promise<void> => {
   const geometry = await page.evaluate((currentPresentation) => {
     const surface = document.querySelector<HTMLElement>("[role='dialog']")
@@ -46,15 +47,27 @@ const expectPersistentDecisionRail = async (page: Page, presentation: "dialog" |
       dossierScrollHeight: dossier.scrollHeight,
       footerBottom: footerBounds.bottom,
       footerTop: footerBounds.top,
+      readableDossierMinBlockSize: Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--rly-space-40")
+      ),
       surfaceBottom: surfaceBounds.bottom,
-      surfaceTop: surfaceBounds.top
+      surfaceLeft: surfaceBounds.left,
+      surfaceRight: surfaceBounds.right,
+      surfaceTop: surfaceBounds.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth
     }
   }, presentation)
   expect(geometry).not.toBeNull()
   if (geometry === null) throw new Error(`Release preview ${presentation} decision rail geometry was unavailable`)
+  expect(geometry.surfaceTop).toBeGreaterThanOrEqual(0)
+  expect(geometry.surfaceLeft).toBeGreaterThanOrEqual(0)
+  expect(geometry.surfaceBottom).toBeLessThanOrEqual(geometry.viewportHeight)
+  expect(geometry.surfaceRight).toBeLessThanOrEqual(geometry.viewportWidth)
   expect(geometry.footerTop).toBeGreaterThanOrEqual(geometry.surfaceTop)
   expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.surfaceBottom)
-  expect(geometry.dossierClientHeight).toBeGreaterThan(0)
+  expect(geometry.readableDossierMinBlockSize).toBeGreaterThan(0)
+  expect(geometry.dossierClientHeight).toBeGreaterThanOrEqual(geometry.readableDossierMinBlockSize)
   expect(geometry.dossierScrollHeight).toBeGreaterThan(geometry.dossierClientHeight)
   const scrolled = await page.evaluate((currentPresentation) => {
     const footer = document.querySelector<HTMLElement>(

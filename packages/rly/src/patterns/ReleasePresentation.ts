@@ -22,7 +22,7 @@ export interface RlyReleaseTransitionNames {
 }
 
 const cssCustomIdentifier =
-  /^(?:--[A-Za-z0-9_\-\u0080-\u{10ffff}]+|-?[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_\-\u0080-\u{10ffff}]*)$/u
+  /^(?:--[A-Za-z0-9_\-\u0080-\uD7FF\uE000-\u{10ffff}]*|-?[A-Za-z_\u0080-\uD7FF\uE000-\u{10ffff}][A-Za-z0-9_\-\u0080-\uD7FF\uE000-\u{10ffff}]*)$/u
 
 const reservedViewTransitionNames = new Set([
   "auto",
@@ -33,6 +33,7 @@ const reservedViewTransitionNames = new Set([
   "none",
   "revert",
   "revert-layer",
+  "root",
   "unset"
 ])
 
@@ -41,10 +42,15 @@ export const validateReleaseTransitionNames = (
   names: RlyReleaseTransitionNames | undefined
 ): RlyReleaseTransitionNames | undefined => {
   if (names === undefined) return undefined
+  const snapshot: RlyReleaseTransitionNames = {
+    relay: names.relay,
+    verdict: names.verdict,
+    version: names.version
+  }
   const entries: ReadonlyArray<readonly ["relay" | "verdict" | "version", string]> = [
-    ["relay", names.relay],
-    ["verdict", names.verdict],
-    ["version", names.version]
+    ["relay", snapshot.relay],
+    ["verdict", snapshot.verdict],
+    ["version", snapshot.version]
   ]
   const seen = new Set<string>()
   for (const [part, suppliedName] of entries) {
@@ -58,7 +64,7 @@ export const validateReleaseTransitionNames = (
     if (seen.has(name)) throw new Error(`Release transition names must be unique: ${name}`)
     seen.add(name)
   }
-  return names
+  return Object.freeze(snapshot)
 }
 
 type RlyReleaseFreshnessTime =

@@ -55,11 +55,46 @@ const generatedTransitionNames = {
   version: "release-01890f6f-6d6a-7cc0-98d2-000000000001-version"
 } satisfies RlyReleaseTransitionNames
 
+const edgeTransitionNames = {
+  relay: "--",
+  verdict: "\uFFFD",
+  version: generatedTransitionNames.version
+} satisfies RlyReleaseTransitionNames
+
+const changingTransitionNames = (): {
+  readonly names: RlyReleaseTransitionNames
+  readonly reads: () => readonly [number, number, number]
+} => {
+  let relayReads = 0
+  let verdictReads = 0
+  let versionReads = 0
+  return {
+    names: {
+      get relay() {
+        relayReads += 1
+        return relayReads === 1 ? generatedTransitionNames.relay : "none"
+      },
+      get verdict() {
+        verdictReads += 1
+        return verdictReads === 1 ? generatedTransitionNames.verdict : "root"
+      },
+      get version() {
+        versionReads += 1
+        return versionReads === 1 ? generatedTransitionNames.version : "123-release"
+      }
+    },
+    reads: () => [relayReads, verdictReads, versionReads]
+  }
+}
+
 const invalidTransitionNames: ReadonlyArray<readonly [RlyReleaseTransitionNames, string]> = [
   [{ ...generatedTransitionNames, relay: " " }, "Release transition relay name must contain visible text"],
   [{ ...generatedTransitionNames, relay: "none" }, "must not use a reserved CSS value: none"],
   [{ ...generatedTransitionNames, verdict: "unset" }, "must not use a reserved CSS value: unset"],
   [{ ...generatedTransitionNames, version: "auto" }, "must not use a reserved CSS value: auto"],
+  [{ ...generatedTransitionNames, relay: "root" }, "must not use a reserved CSS value: root"],
+  [{ ...generatedTransitionNames, relay: "\uD800" }, "must be a valid unescaped CSS custom identifier"],
+  [{ ...generatedTransitionNames, relay: "\uDC00" }, "must be a valid unescaped CSS custom identifier"],
   [{ ...generatedTransitionNames, relay: "123-release" }, "must be a valid unescaped CSS custom identifier"],
   [
     { ...generatedTransitionNames, verdict: generatedTransitionNames.version },
@@ -202,6 +237,26 @@ describe("ReleasePreview", () => {
         ["verdict", generatedTransitionNames.verdict]
       ]
     )
+  })
+
+  it("accepts browser-stable edge identifiers and snapshots changing accessor values", async () => {
+    const { portal: edgePortal } = await mount(preview({ transitionNames: edgeTransitionNames }))
+    const edgeParts = [...edgePortal.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]")]
+    expect(edgeParts.map((part) => part.dataset.rlyReleaseTransitionName)).toEqual([
+      edgeTransitionNames.relay,
+      edgeTransitionNames.version,
+      edgeTransitionNames.verdict
+    ])
+
+    const probe = changingTransitionNames()
+    const { portal: changingPortal } = await mount(preview({ transitionNames: probe.names }))
+    const changingParts = [...changingPortal.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]")]
+    expect(changingParts.map((part) => part.dataset.rlyReleaseTransitionName)).toEqual([
+      generatedTransitionNames.relay,
+      generatedTransitionNames.version,
+      generatedTransitionNames.verdict
+    ])
+    expect(probe.reads()).toEqual([1, 1, 1])
   })
 
   it("rejects unsafe or colliding transition names at the public ReleasePreview contract", () => {

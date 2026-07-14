@@ -14,8 +14,6 @@ interface CssBlock {
 
 const CUSTOM_PROPERTY_DECLARATION = /(?:^|[;{])\s*(--rly-[A-Za-z0-9_-]+)\s*:/gmu
 const CUSTOM_PROPERTY_REFERENCE = /\bvar\s*\(\s*(--rly-[A-Za-z0-9_-]+)/giu
-const RLY_PROPERTY_HEADER = /^@property\s+(--rly-[A-Za-z0-9_-]+)\s*$/iu
-const CSS_WIDE_KEYWORDS = new Set(["inherit", "initial", "revert", "revert-layer", "unset"])
 
 const sanitizeCss = (source: string): string => {
   let isComment = false
@@ -109,54 +107,6 @@ const containingBlock = (blocks: ReadonlyArray<CssBlock>, index: number): number
   return containing
 }
 
-const descriptorValue = (
-  source: string,
-  sanitized: string,
-  block: CssBlock,
-  descriptor: string
-): string | null => {
-  const blockSource = sanitized.slice(block.open + 1, block.close)
-  const pattern = new RegExp(`(?:^|;)\\s*${descriptor}\\s*:`, "imu")
-  const match = pattern.exec(blockSource)
-  if (match === null) return null
-  const valueStart = block.open + 1 + match.index + match[0].length
-  const semicolon = sanitized.indexOf(";", valueStart)
-  const valueEnd = semicolon === -1 || semicolon > block.close ? block.close : semicolon
-
-  let withoutComments = ""
-  let isComment = false
-  for (let index = valueStart; index < valueEnd; index += 1) {
-    const character = source.charAt(index)
-    const nextCharacter = source.charAt(index + 1)
-    if (isComment) {
-      if (character === "*" && nextCharacter === "/") {
-        index += 1
-        isComment = false
-      }
-    } else if (character === "/" && nextCharacter === "*") {
-      index += 1
-      isComment = true
-    } else {
-      withoutComments += character
-    }
-  }
-
-  const value = withoutComments.trim()
-  return value.length === 0 ? null : value
-}
-
-const hasUsablePropertyRegistration = (source: string, sanitized: string, block: CssBlock): boolean => {
-  const syntax = descriptorValue(source, sanitized, block, "syntax")
-  const inherits = descriptorValue(source, sanitized, block, "inherits")?.toLowerCase()
-  const initialValue = descriptorValue(source, sanitized, block, "initial-value")
-  if (syntax === null || (inherits !== "false" && inherits !== "true") || initialValue === null) return false
-  const syntaxQuote = syntax.charAt(0)
-  if ((syntaxQuote !== "\"" && syntaxQuote !== "'") || syntax.at(-1) !== syntaxQuote) return false
-
-  const normalizedInitialValue = initialValue.toLowerCase()
-  return !CSS_WIDE_KEYWORDS.has(normalizedInitialValue) && !/\bvar\s*\(/iu.test(sanitizeCss(initialValue))
-}
-
 const isUnconditionalBlock = (blocks: ReadonlyArray<CssBlock>, block: CssBlock): boolean => {
   let parent = block.parent
   while (parent !== null) {
@@ -171,7 +121,6 @@ const isGlobalRootRule = (blocks: ReadonlyArray<CssBlock>, block: CssBlock): boo
   block.header === ":root" && isUnconditionalBlock(blocks, block)
 
 const tokenDefinitions = (
-  source: string,
   sanitized: string,
   blocks: ReadonlyArray<CssBlock>
 ): {
@@ -197,25 +146,16 @@ const tokenDefinitions = (
     if (block !== undefined && isGlobalRootRule(blocks, block)) global.add(token)
   }
 
-  for (const block of blocks) {
-    const property = RLY_PROPERTY_HEADER.exec(block.header)?.[1]
-    if (
-      property !== undefined &&
-      isUnconditionalBlock(blocks, block) &&
-      hasUsablePropertyRegistration(source, sanitized, block)
-    ) {
-      all.add(property)
-      global.add(property)
-    }
-  }
-
   return { all, global, localByBlock }
 }
 
-/** Extract declared tokens and complete, usable custom-property registrations from a stylesheet contract. */
+/**
+ * Extract literal rly declarations from a stylesheet contract.
+ * `@property` registrations are intentionally excluded: this guardrail does not reimplement CSS value grammar.
+ */
 export const declaredRlyCssTokens = (source: string): ReadonlySet<string> => {
   const sanitized = sanitizeCss(source)
-  return tokenDefinitions(source, sanitized, cssBlocks(sanitized)).all
+  return tokenDefinitions(sanitized, cssBlocks(sanitized)).all
 }
 
 const hasFallback = (source: string, tokenEnd: number): boolean => {
@@ -243,7 +183,10 @@ const sourcePosition = (source: string, index: number): { readonly column: numbe
   return { column: index - lineStart, line }
 }
 
-/** Find unresolved rly `var()` references using only generated, global, same-rule, or fallback definitions. */
+/**
+ * Find unresolved rly `var()` references using only generated, unconditional root, same-rule, or fallback definitions.
+ * An `@property` registration never suppresses a violation because registration alone provides no contract value.
+ */
 export const inspectRlyCssTokens = (
   sourcePath: string,
   source: string,
@@ -251,7 +194,7 @@ export const inspectRlyCssTokens = (
 ): ReadonlyArray<RlyCssTokenViolation> => {
   const sanitized = sanitizeCss(source)
   const blocks = cssBlocks(sanitized)
-  const definitions = tokenDefinitions(source, sanitized, blocks)
+  const definitions = tokenDefinitions(sanitized, blocks)
   const violations: Array<RlyCssTokenViolation> = []
 
   for (const match of sanitized.matchAll(CUSTOM_PROPERTY_REFERENCE)) {
