@@ -14,6 +14,13 @@ export interface RlyReleaseFact {
   readonly value: string
 }
 
+/** Caller-owned names for the sole orchestrated row → preview → full release transition. */
+export interface RlyReleaseTransitionNames {
+  readonly relay: string
+  readonly verdict: string
+  readonly version: string
+}
+
 type RlyReleaseFreshnessTime =
   | { readonly freshnessDateTime: string; readonly freshnessTime: string }
   | { readonly freshnessDateTime?: never; readonly freshnessTime?: never }

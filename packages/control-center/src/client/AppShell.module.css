@@ -101,6 +101,11 @@
   padding-block: clamp(3.5rem, 8vw, 7rem);
 }
 
+:global(::view-transition-group(*)) {
+  animation-duration: var(--rly-motion-deliberate-duration);
+  animation-timing-function: var(--rly-motion-deliberate-easing);
+}
+
 @media (max-width: 48rem) {
   .header {
     grid-template-columns: 1fr auto;

@@ -161,7 +161,7 @@
     padding: var(--rly-space-16) var(--rly-space-24);
   }
 
-  @media (max-width: 30rem) {
+  @media (max-width: 40rem) {
     .content {
       border: 0;
       border-radius: var(--rly-space-0);

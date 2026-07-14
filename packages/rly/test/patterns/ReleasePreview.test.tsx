@@ -123,6 +123,13 @@ describe("ReleasePreview", () => {
     expect(dialog.textContent).toContain("Three checks attached")
     expect(dialog.textContent).toContain("Ask the release agent")
     expect(dialog.textContent).toContain("Close preview")
+    const scrollRegion = dialog.querySelector("[data-rly-release-preview-scroll='dialog']")
+    const footer = dialog.querySelector("[data-rly-release-preview-footer='dialog']")
+    expect(scrollRegion).not.toBeNull()
+    expect(footer).not.toBeNull()
+    expect(scrollRegion?.parentElement).toBe(footer?.parentElement)
+    expect(scrollRegion?.contains(footer)).toBe(false)
+    expect(footer?.textContent).toContain("Open full view")
   })
 
   it("renders the caller-selected sheet with the same dossier order and explicit unassigned owner", async () => {
@@ -145,6 +152,12 @@ describe("ReleasePreview", () => {
     expect(sheet.querySelector("[data-rly-release-state='unknown']")).not.toBeNull()
     expect(sheet.querySelector("[data-rly-release-preview-presentation='sheet']")).not.toBeNull()
     expect(document.activeElement).toBe(summary)
+    const scrollRegion = sheet.querySelector("[data-rly-release-preview-scroll='sheet']")
+    const footer = sheet.querySelector("[data-rly-release-preview-footer='sheet']")
+    expect(scrollRegion).not.toBeNull()
+    expect(footer).not.toBeNull()
+    expect(scrollRegion?.parentElement).toBe(footer?.parentElement)
+    expect(scrollRegion?.contains(footer)).toBe(false)
     expect(
       [...sheet.querySelectorAll("[data-rly-release-preview-slot]")].map((slot) =>
         slot.getAttribute("data-rly-release-preview-slot")
@@ -155,6 +168,26 @@ describe("ReleasePreview", () => {
       overlay.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }))
     )
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("assigns the same three caller-owned shared geometry parts as ReleaseRow", async () => {
+    const { portal } = await mount(
+      preview({
+        transitionNames: {
+          relay: "release-a-relay",
+          verdict: "release-a-verdict",
+          version: "release-a-version"
+        }
+      })
+    )
+    const parts = [...portal.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]")]
+    expect(parts.map((part) => [part.dataset.rlyReleaseTransitionPart, part.dataset.rlyReleaseTransitionName])).toEqual(
+      [
+        ["relay", "release-a-relay"],
+        ["version", "release-a-version"],
+        ["verdict", "release-a-verdict"]
+      ]
+    )
   })
 
   it("calls the full-view callback exactly once for one activation", async () => {

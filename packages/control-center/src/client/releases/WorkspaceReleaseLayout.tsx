@@ -1,5 +1,5 @@
 import { StatePanel } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import { type ReactElement, useEffect, useRef, useState } from "react"
 import { Link, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router"
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "../portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import {
+  decodeReleaseRouteId,
   decodeWorkspaceRouteId,
   makeReleaseRouteState,
   releaseOriginFromLocation,
@@ -17,9 +18,11 @@ import {
   releasePreviewPath
 } from "./releaseRoutes.js"
 import styles from "./WorkspaceReleaseLayout.module.css"
+import { usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
 
 export interface WorkspaceReleaseOutletContext {
   readonly controller: PortfolioOverviewController
+  readonly requestReleaseFocus: (releaseId: PortfolioReleasePresentation["id"]) => void
   readonly workspaceId: NonNullable<ReturnType<typeof decodeWorkspaceRouteId>>
 }
 
@@ -43,27 +46,66 @@ export const WorkspaceReleaseLayout = (): ReactElement => {
   const controller = usePortfolioOverviewController()
   const location = useLocation()
   const navigate = useNavigate()
+  const prefersReducedMotion = usePrefersReducedReleaseMotion()
+  const overviewRef = useRef<HTMLDivElement>(null)
   const params = useParams()
+  const [pendingReleaseFocus, setPendingReleaseFocus] = useState<PortfolioReleasePresentation["id"] | null>(null)
   const workspaceId = decodeWorkspaceRouteId(params.workspaceId)
-  const isFullRelease = useMatch("/w/:workspaceId/releases/:releaseId") !== null
+  const isOverview = useMatch("/w/:workspaceId/overview") !== null
+  const previewMatch = useMatch("/w/:workspaceId/releases/:releaseId/preview")
+
+  const previewReleaseId = decodeReleaseRouteId(previewMatch?.params.releaseId)
+  const isKnownPreview =
+    workspaceId !== null &&
+    previewReleaseId !== null &&
+    controller.state._tag === "ready" &&
+    controller.state.portfolio.releases.some((release) => release.id === previewReleaseId)
+  const shouldRenderPortfolio = isOverview || isKnownPreview
+
+  useEffect(() => {
+    if (
+      pendingReleaseFocus === null ||
+      workspaceId === null ||
+      controller.state._tag !== "ready" ||
+      location.pathname !== releaseParentPath(workspaceId)
+    ) {
+      return
+    }
+    const releaseEntry = [
+      ...(overviewRef.current?.querySelectorAll<HTMLElement>("[data-portfolio-release-id]") ?? [])
+    ].find((entry) => entry.dataset.portfolioReleaseId === pendingReleaseFocus)
+    releaseEntry?.querySelector<HTMLButtonElement>("button")?.focus()
+    setPendingReleaseFocus(null)
+  }, [controller.state, location.pathname, pendingReleaseFocus, workspaceId])
 
   if (workspaceId === null || !isMatchingWorkspace(controller.state, workspaceId)) return <WorkspaceNotFound />
 
   const onPreviewRelease = (releaseId: PortfolioReleasePresentation["id"]): void => {
     const state = makeReleaseRouteState(workspaceId, releaseId, releaseOriginFromLocation(location))
-    navigate(releasePreviewPath(workspaceId, releaseId), { preventScrollReset: true, state })
+    navigate(releasePreviewPath(workspaceId, releaseId), {
+      preventScrollReset: true,
+      state,
+      viewTransition: !prefersReducedMotion
+    })
   }
-  const outletContext = { controller, workspaceId } satisfies WorkspaceReleaseOutletContext
+  const outletContext = {
+    controller,
+    requestReleaseFocus: setPendingReleaseFocus,
+    workspaceId
+  } satisfies WorkspaceReleaseOutletContext
 
   return (
     <>
-      {isFullRelease ? null : (
-        <PortfolioOverviewView
-          onPreviewRelease={onPreviewRelease}
-          onRetry={controller.onRetry}
-          state={controller.state}
-        />
-      )}
+      {shouldRenderPortfolio ? (
+        <div ref={overviewRef}>
+          <PortfolioOverviewView
+            onPreviewRelease={onPreviewRelease}
+            onRetry={controller.onRetry}
+            previewPathForRelease={(releaseId) => releasePreviewPath(workspaceId, releaseId)}
+            state={controller.state}
+          />
+        </div>
+      ) : null}
       <Outlet context={outletContext} />
     </>
   )

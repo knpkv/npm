@@ -3069,6 +3069,10 @@
         {
           "kind": "type",
           "name": "RlyReleaseState"
+        },
+        {
+          "kind": "type",
+          "name": "RlyReleaseTransitionNames"
         }
       ],
       "files": {

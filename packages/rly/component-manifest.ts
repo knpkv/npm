@@ -1171,7 +1171,8 @@ export const componentManifest = {
         { kind: "type", name: "ReleaseRowProps" },
         { kind: "type", name: "RlyReleaseFact" },
         { kind: "type", name: "RlyReleasePresentation" },
-        { kind: "type", name: "RlyReleaseState" }
+        { kind: "type", name: "RlyReleaseState" },
+        { kind: "type", name: "RlyReleaseTransitionNames" }
       ],
       name: "ReleaseRow",
       publicEntry: "patterns",

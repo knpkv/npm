@@ -16,4 +16,6 @@ Add canonical workspace release routes with compact row-to-preview activation,
 an explicit full-view transition, truthful unavailable-data states, complete
 collaborator context, refresh-safe origin handling, and a release-aware agent
 entry. Preserve focus, inert isolation, scroll locking, browser history, direct
-loads, compact sheets, and unknown-resource behavior across the transition.
+loads, compact sheets, unknown-resource behavior, and reduced-motion-safe
+shared geometry across the transition. Validate every consumed rly CSS token
+against the generated design-system contract during static checks.

@@ -48,7 +48,7 @@
 .releaseList {
   overflow: hidden;
   border-block-start: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-grouped);
+  border-radius: var(--rly-radius-group);
   background: var(--rly-color-surface-1);
 }
 

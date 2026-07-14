@@ -1,3 +1,4 @@
+import type { RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
@@ -72,6 +73,13 @@ export const releasePreviewPath = (workspaceId: WorkspaceIdType, releaseId: Rele
 /** Build the canonical full route for one immutable release identity. */
 export const releaseFullPath = (workspaceId: WorkspaceIdType, releaseId: ReleaseIdType): string =>
   `/w/${segment(workspaceId)}/releases/${segment(releaseId)}`
+
+/** Stable, collision-free geometry names for one release's orchestrated route transition. */
+export const releaseTransitionNames = (releaseId: ReleaseIdType): RlyReleaseTransitionNames => ({
+  relay: `release-${releaseId}-relay`,
+  verdict: `release-${releaseId}-verdict`,
+  version: `release-${releaseId}-version`
+})
 
 /** Capture a location without retaining mutable router objects. */
 export const releaseOriginFromLocation = ({ hash, pathname, search }: LocationParts): ReleaseOrigin => ({

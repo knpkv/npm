@@ -5,7 +5,11 @@ import { Sheet } from "../primitives/Sheet.js"
 import { cssClass, requireText } from "../internal/component.js"
 import { FreshnessStamp } from "./FreshnessStamp.js"
 import { Person } from "./Person.js"
-import { type RlyReleasePresentation, validateReleasePresentation } from "./ReleasePresentation.js"
+import {
+  type RlyReleasePresentation,
+  type RlyReleaseTransitionNames,
+  validateReleasePresentation
+} from "./ReleasePresentation.js"
 import { ReleaseRelay } from "./ReleaseRelay.js"
 import { Verdict } from "./Verdict.js"
 import styles from "./ReleasePreview.module.css"
@@ -39,6 +43,8 @@ export interface ReleasePreviewProps {
   readonly release: RlyReleasePresentation
   /** Required delivery-stage composition supplied by the application. */
   readonly stages: ReactNode
+  /** Optional unique names used while an application-owned View Transition is active. */
+  readonly transitionNames?: RlyReleaseTransitionNames
   /** Required workset composition supplied by the application. */
   readonly workset: ReactNode
 }
@@ -56,6 +62,7 @@ export const ReleasePreview = ({
   primaryAction,
   release: suppliedRelease,
   stages,
+  transitionNames,
   workset
 }: ReleasePreviewProps): ReactElement => {
   const release = validateReleasePresentation(suppliedRelease)
@@ -86,11 +93,21 @@ export const ReleasePreview = ({
           <ReleaseRelay
             algorithm={release.algorithm}
             codename={release.codename}
+            data-rly-release-transition-name={transitionNames?.relay}
+            data-rly-release-transition-part="relay"
             size="hero"
+            style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.relay }}
             symbolIndices={release.symbolIndices}
           />
           <div className={style("releaseMeta")}>
-            <p className={style("version")}>{release.version}</p>
+            <p
+              className={style("version")}
+              data-rly-release-transition-name={transitionNames?.version}
+              data-rly-release-transition-part="version"
+              style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.version }}
+            >
+              {release.version}
+            </p>
             {freshness}
           </div>
         </div>
@@ -118,7 +135,14 @@ export const ReleasePreview = ({
           </div>
         </div>
 
-        <Verdict reason={release.reason} tone={release.tone} verdict={release.verdict} />
+        <Verdict
+          data-rly-release-transition-name={transitionNames?.verdict}
+          data-rly-release-transition-part="verdict"
+          reason={release.reason}
+          style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.verdict }}
+          tone={release.tone}
+          verdict={release.verdict}
+        />
 
         <dl className={style("facts")}>
           {release.facts.map((fact) => (
@@ -150,29 +174,40 @@ export const ReleasePreview = ({
       <div className={style("slot")} data-rly-release-preview-slot="agent-entry">
         {agentEntry}
       </div>
-      <div className={style("fullView")}>
-        <Button className={style("fullViewButton")} onClick={onOpenFullView} size="default" variant="secondary">
-          {visibleOpenFullViewLabel}
-        </Button>
-      </div>
     </div>
+  )
+
+  const fullViewAction = (
+    <Button className={style("fullViewButton")} onClick={onOpenFullView} size="default" variant="secondary">
+      {visibleOpenFullViewLabel}
+    </Button>
   )
 
   return presentation === "sheet" ? (
     <Sheet.Root onOpenChange={onOpenChange} open={open}>
       <Sheet.Content initialFocusRef={summaryRef} title={title}>
-        <Sheet.Body>{dossier}</Sheet.Body>
+        <Sheet.Body data-rly-release-preview-scroll="sheet">{dossier}</Sheet.Body>
+        <Sheet.Footer className={style("sheetFooter")} data-rly-release-preview-footer="sheet">
+          {fullViewAction}
+        </Sheet.Footer>
       </Sheet.Content>
     </Sheet.Root>
   ) : (
     <Dialog.Root onOpenChange={onOpenChange} open={open}>
-      <Dialog.Content initialFocusRef={summaryRef} size="wide" title={title}>
-        <div className={style("dialogClose")}>
-          <Dialog.Close size="compact" variant="quiet">
-            Close preview
-          </Dialog.Close>
+      <Dialog.Content className={style("dialogSurface")} initialFocusRef={summaryRef} size="wide" title={title}>
+        <div className={style("dialogFrame")}>
+          <div className={style("dialogClose")}>
+            <Dialog.Close size="compact" variant="quiet">
+              Close preview
+            </Dialog.Close>
+          </div>
+          <div className={style("dialogScroll")} data-rly-release-preview-scroll="dialog">
+            {dossier}
+          </div>
+          <footer className={style("dialogFooter")} data-rly-release-preview-footer="dialog">
+            {fullViewAction}
+          </footer>
         </div>
-        {dossier}
       </Dialog.Content>
     </Dialog.Root>
   )

@@ -15,6 +15,18 @@ import { pageStyle, rowStyle, stackStyle } from "../primitives/storyStyles.js"
 
 const slotStackStyle: CSSProperties = { ...stackStyle, maxWidth: "none" }
 
+const expectInInitialViewport = async (element: HTMLElement): Promise<void> => {
+  const view = element.ownerDocument.defaultView
+  if (view === null) throw new Error("ReleasePreview viewport was unavailable")
+  await waitFor(() => {
+    const bounds = element.getBoundingClientRect()
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.bottom).toBeLessThanOrEqual(view.innerHeight)
+    expect(bounds.right).toBeLessThanOrEqual(view.innerWidth)
+  })
+}
+
 const release = {
   algorithm: "rly-relay-v1",
   approver: { id: "dev", name: "Dev Shah", role: "Production approver" },
@@ -206,6 +218,8 @@ export const Interaction: Story = {
     if (summary === null) throw new Error("ReleasePreview summary did not render")
     await waitFor(() => expect(dialog).toBeVisible())
     await expect(summary).toHaveFocus()
+    const fullViewAction = canvas.getByRole("button", { name: "Open full view" })
+    await expectInInitialViewport(fullViewAction)
     await expect(
       [...dialog.querySelectorAll("[data-rly-release-preview-slot]")].map((slot) =>
         slot.getAttribute("data-rly-release-preview-slot")
@@ -213,7 +227,7 @@ export const Interaction: Story = {
     ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
     await userEvent.tab()
     await expect(canvas.getByRole("button", { name: "Deploy release" })).toHaveFocus()
-    await userEvent.click(canvas.getByRole("button", { name: "Open full view" }))
+    await userEvent.click(fullViewAction)
     await expect(canvas.getByRole("status")).toHaveTextContent("Full view opened 1 times.")
     await userEvent.keyboard("{Escape}")
     await waitFor(() => expect(trigger).toHaveFocus())
@@ -250,7 +264,9 @@ export const CompactForcedColors: Story = {
     await expect(canvas.getByText("The Deliberately Long Copper Finch Identity")).toBeVisible()
     await expect(canvas.getByText("Readiness not evaluated")).toBeVisible()
     await expect(canvas.getByText("Unassigned")).toBeVisible()
-    await expect(canvas.getByRole("button", { name: "Open the complete production release view" })).toBeVisible()
+    const fullViewAction = canvas.getByRole("button", { name: "Open the complete production release view" })
+    await expect(fullViewAction).toBeVisible()
+    await expectInInitialViewport(fullViewAction)
     await expect(canvas.getByRole("list", { name: "Complete release collaborators" })).toBeVisible()
     await expect(canvasElement.querySelectorAll("[data-rly-release-preview-slot]")).toHaveLength(6)
     canvasElement.dataset.releasePreviewCompactPlayComplete = "true"

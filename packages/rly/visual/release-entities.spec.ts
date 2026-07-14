@@ -11,6 +11,24 @@ const expectNoHorizontalOverflow = async (page: Page): Promise<void> => {
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
 }
 
+const expectInInitialViewport = async (page: Page, selector: string): Promise<void> => {
+  const geometry = await page.locator(selector).evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return {
+      bottom: bounds.bottom,
+      left: bounds.left,
+      right: bounds.right,
+      top: bounds.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth
+    }
+  })
+  expect(geometry.top).toBeGreaterThanOrEqual(0)
+  expect(geometry.left).toBeGreaterThanOrEqual(0)
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight)
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth)
+}
+
 test("keeps six release outcomes distinct and scan-friendly", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_400, width: 1_440 })
   await page.goto(story("patterns-releaserow--six-states"))
@@ -39,7 +57,7 @@ test("keeps six release outcomes distinct and scan-friendly", async ({ page }, t
 })
 
 test("moves from release row to controlled preview and restores focus", async ({ page }, testInfo) => {
-  await page.setViewportSize({ height: 1_100, width: 1_200 })
+  await page.setViewportSize({ height: 800, width: 1_200 })
   await page.goto(story("patterns-releasepreview--interaction"))
 
   const trigger = page.getByRole("button", { name: "Preview Copper Finch" })
@@ -52,14 +70,24 @@ test("moves from release row to controlled preview and restores focus", async ({
       slots.map((slot) => slot.getAttribute("data-rly-release-preview-slot"))
     )
   ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
+  await expectInInitialViewport(page, "[data-rly-release-preview-footer='dialog']")
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("release-preview.png") })
   await page.keyboard.press("Escape")
   await expect(trigger).toBeFocused()
 
-  await page.setViewportSize({ height: 1_200, width: 320 })
-  await page.goto(story("patterns-releasepreview--compact-forced-colors", "active"))
-  await expect(page.getByRole("dialog")).toBeVisible()
-  await expectNoHorizontalOverflow(page)
+  for (const width of [480, 496, 640]) {
+    await page.setViewportSize({ height: 800, width })
+    await page.goto(story("patterns-releasepreview--compact-forced-colors", "active"))
+    const sheet = page.getByRole("dialog")
+    await expect(sheet).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+    await expectInInitialViewport(page, "[data-rly-release-preview-footer='sheet']")
+    const geometry = await sheet.boundingBox()
+    if (geometry === null) throw new Error(`Release preview sheet geometry was unavailable at ${width}px`)
+    expect(geometry.x).toBe(0)
+    expect(geometry.width).toBe(width)
+    expect(geometry.height).toBe(800)
+  }
 })
 
 test("shows six Jira items with PR and pipeline dimensions", async ({ page }, testInfo) => {

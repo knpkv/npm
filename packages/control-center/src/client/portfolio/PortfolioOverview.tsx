@@ -1,7 +1,7 @@
-import { ReleaseRow } from "@knpkv/rly/patterns"
+import { ReleaseRow, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
-import { Link, useLocation, useNavigate } from "react-router"
+import { Link, Navigate, useLocation, useViewTransitionState } from "react-router"
 
 import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
@@ -12,7 +12,7 @@ import {
   type PortfolioSnapshotLoadState,
   usePortfolioSnapshot
 } from "./usePortfolioSnapshot.js"
-import { releaseOriginFromLocation, makeReleaseRouteState, releasePreviewPath } from "../releases/releaseRoutes.js"
+import { releaseParentPath, releaseTransitionNames } from "../releases/releaseRoutes.js"
 import styles from "./PortfolioOverview.module.css"
 
 export type PortfolioOverviewState =
@@ -32,6 +32,7 @@ export type PortfolioOverviewState =
 export interface PortfolioOverviewViewProps {
   readonly onPreviewRelease: (releaseId: PortfolioReleasePresentation["id"]) => void
   readonly onRetry: () => void
+  readonly previewPathForRelease?: (releaseId: PortfolioReleasePresentation["id"]) => string
   readonly state: PortfolioOverviewState
 }
 
@@ -43,6 +44,7 @@ export interface PortfolioOverviewController {
 interface ReleaseDossierProps {
   readonly onPreview: () => void
   readonly release: PortfolioReleasePresentation
+  readonly transitionNames?: RlyReleaseTransitionNames
 }
 
 const connectionPresentation = (
@@ -207,9 +209,14 @@ const FailedPortfolio = ({
   )
 }
 
-const ReleaseDossier = ({ onPreview, release }: ReleaseDossierProps): ReactElement => (
+const ReleaseDossier = ({ onPreview, release, transitionNames }: ReleaseDossierProps): ReactElement => (
   <div className={styles.releaseEntry} data-portfolio-release-id={release.id}>
-    <ReleaseRow onPreview={onPreview} previewLabel={`Preview ${release.relay.codename}`} release={release.release} />
+    <ReleaseRow
+      onPreview={onPreview}
+      previewLabel={`Preview ${release.relay.codename}`}
+      release={release.release}
+      {...(transitionNames === undefined ? {} : { transitionNames })}
+    />
     {release.source.warning === null ? null : (
       <StatePanel
         announce="polite"
@@ -222,19 +229,50 @@ const ReleaseDossier = ({ onPreview, release }: ReleaseDossierProps): ReactEleme
   </div>
 )
 
+const TransitioningReleaseDossier = ({
+  onPreview,
+  originPath,
+  previewPath,
+  release
+}: ReleaseDossierProps & { readonly originPath: string; readonly previewPath: string }): ReactElement => {
+  const location = useLocation()
+  const isTransitioning = useViewTransitionState(previewPath)
+  return (
+    <ReleaseDossier
+      onPreview={onPreview}
+      release={release}
+      {...(isTransitioning && location.pathname === originPath
+        ? { transitionNames: releaseTransitionNames(release.id) }
+        : {})}
+    />
+  )
+}
+
 const ReadyPortfolio = ({
   onPreviewRelease,
-  portfolio
+  portfolio,
+  previewPathForRelease
 }: {
   readonly onPreviewRelease: (releaseId: PortfolioReleasePresentation["id"]) => void
   readonly portfolio: PortfolioPresentation
+  readonly previewPathForRelease?: (releaseId: PortfolioReleasePresentation["id"]) => string
 }): ReactElement => {
   if (portfolio.releases.length === 0) return <EmptyPortfolio />
   return (
     <div className={styles.releaseList}>
-      {portfolio.releases.map((release) => (
-        <ReleaseDossier key={release.id} onPreview={() => onPreviewRelease(release.id)} release={release} />
-      ))}
+      {portfolio.releases.map((release) =>
+        previewPathForRelease === undefined ? (
+          <ReleaseDossier key={release.id} onPreview={() => onPreviewRelease(release.id)} release={release} />
+        ) : (
+          <TransitioningReleaseDossier
+            key={release.id}
+            onPreview={() => onPreviewRelease(release.id)}
+            originPath={releaseParentPath(portfolio.workspaceId)}
+            previewPath={previewPathForRelease(release.id)}
+            release={release}
+          />
+        )
+      )}
     </div>
   )
 }
@@ -243,12 +281,13 @@ const ReadyPortfolio = ({
 export const PortfolioOverviewView = ({
   onPreviewRelease,
   onRetry,
+  previewPathForRelease,
   state
 }: PortfolioOverviewViewProps): ReactElement => (
   <section aria-labelledby="portfolio-title" className={styles.root}>
     <header className={styles.hero}>
       <div className={styles.heroCopy}>
-        <Text as="h1" className={styles.title} id="portfolio-title" variant="verdict">
+        <Text as="h1" className={styles.title} id="portfolio-title" tabIndex={-1} variant="verdict">
           Every release. One view.
         </Text>
         <Text className={styles.lede} tone="secondary" variant="body-large">
@@ -275,7 +314,11 @@ export const PortfolioOverviewView = ({
       {state._tag === "loading" ? <LoadingPortfolio /> : null}
       {state._tag === "failed" ? <FailedPortfolio failure={state.failure} onRetry={onRetry} /> : null}
       {state._tag === "ready" ? (
-        <ReadyPortfolio onPreviewRelease={onPreviewRelease} portfolio={state.portfolio} />
+        <ReadyPortfolio
+          onPreviewRelease={onPreviewRelease}
+          portfolio={state.portfolio}
+          {...(previewPathForRelease === undefined ? {} : { previewPathForRelease })}
+        />
       ) : null}
     </div>
   </section>
@@ -332,18 +375,8 @@ export const usePortfolioOverviewController = (): PortfolioOverviewController =>
 
 /** Load and present the authenticated server portfolio at the root application route. */
 export const PortfolioOverview = (): ReactElement => {
-  const location = useLocation()
-  const navigate = useNavigate()
   const controller = usePortfolioOverviewController()
   const { state } = controller
-  const onPreviewRelease = (releaseId: PortfolioReleasePresentation["id"]): void => {
-    if (state._tag !== "ready") return
-    const routeState = makeReleaseRouteState(
-      state.portfolio.workspaceId,
-      releaseId,
-      releaseOriginFromLocation(location)
-    )
-    navigate(releasePreviewPath(state.portfolio.workspaceId, releaseId), { state: routeState })
-  }
-  return <PortfolioOverviewView onPreviewRelease={onPreviewRelease} onRetry={controller.onRetry} state={state} />
+  if (state._tag === "ready") return <Navigate replace to={releaseParentPath(state.portfolio.workspaceId)} />
+  return <PortfolioOverviewView onPreviewRelease={() => undefined} onRetry={controller.onRetry} state={state} />
 }

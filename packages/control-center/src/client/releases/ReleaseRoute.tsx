@@ -10,7 +10,7 @@ import {
 } from "@knpkv/rly/patterns"
 import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useEffect, useRef, useState } from "react"
-import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
+import { Link, useLocation, useNavigate, useOutletContext, useParams, useViewTransitionState } from "react-router"
 
 import { PortfolioOverviewView } from "../portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
@@ -21,10 +21,12 @@ import {
   resolveReleaseOrigin,
   releaseFullPath,
   releaseOriginHref,
-  releaseParentPath
+  releaseParentPath,
+  releasePreviewPath,
+  releaseTransitionNames
 } from "./releaseRoutes.js"
 import styles from "./ReleaseRoute.module.css"
-import { useCompactReleasePreview } from "./useCompactReleasePreview.js"
+import { useCompactReleasePreview, usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
 
 interface ReleaseRouteSelection {
   readonly release: PortfolioReleasePresentation
@@ -41,23 +43,33 @@ const selectRelease = (
   return release === undefined ? null : { release, releaseId }
 }
 
-const ReleaseNotFound = ({ workspaceId }: Pick<WorkspaceReleaseOutletContext, "workspaceId">): ReactElement => (
-  <section className={styles.state}>
-    <StatePanel
-      action={<Link to={releaseParentPath(workspaceId)}>Return to workspace overview</Link>}
-      description="This release does not exist in the current workspace snapshot. It may have been removed or the address may be incorrect."
-      title="Release not found"
-    />
-  </section>
-)
+const ReleaseNotFound = ({ workspaceId }: Pick<WorkspaceReleaseOutletContext, "workspaceId">): ReactElement => {
+  const stateRef = useRef<HTMLElement>(null)
+  useEffect(() => stateRef.current?.focus(), [])
+  return (
+    <section className={styles.state} data-release-not-found="" ref={stateRef} tabIndex={-1}>
+      <StatePanel
+        action={<Link to={releaseParentPath(workspaceId)}>Return to workspace overview</Link>}
+        description="This release does not exist in the current workspace snapshot. It may have been removed or the address may be incorrect."
+        title="Release not found"
+      />
+    </section>
+  )
+}
 
-const ReleaseRouteLoading = ({ context }: { readonly context: WorkspaceReleaseOutletContext }): ReactElement => (
-  <PortfolioOverviewView
-    onPreviewRelease={() => undefined}
-    onRetry={context.controller.onRetry}
-    state={context.controller.state}
-  />
-)
+const ReleaseRouteLoading = ({ context }: { readonly context: WorkspaceReleaseOutletContext }): ReactElement => {
+  const stateRef = useRef<HTMLDivElement>(null)
+  useEffect(() => stateRef.current?.querySelector<HTMLElement>("#portfolio-title")?.focus(), [])
+  return (
+    <div ref={stateRef}>
+      <PortfolioOverviewView
+        onPreviewRelease={() => undefined}
+        onRetry={context.controller.onRetry}
+        state={context.controller.state}
+      />
+    </div>
+  )
+}
 
 const ReleaseAction = (): ReactElement => (
   <Button disabled size="principal" stretch variant="primary">
@@ -126,39 +138,34 @@ const CompleteCollaborators = ({ release }: { readonly release: PortfolioRelease
     />
   )
 
-type PreviewExit = "full" | "origin" | null
+type PreviewExit = "origin" | null
 
 const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRouteSelection }): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const isCompact = useCompactReleasePreview()
+  const prefersReducedMotion = usePrefersReducedReleaseMotion()
   const location = useLocation()
   const navigate = useNavigate()
   const [exit, setExit] = useState<PreviewExit>(null)
   const [isOpen, setIsOpen] = useState(true)
   const resolvedOrigin = resolveReleaseOrigin(location.state, context.workspaceId, selection.releaseId)
   const originHref = releaseOriginHref(resolvedOrigin.origin)
+  const fullPath = releaseFullPath(context.workspaceId, selection.releaseId)
+  const previewPath = releasePreviewPath(context.workspaceId, selection.releaseId)
+  const isPreviewTransitioning = useViewTransitionState(previewPath)
+  const isFullTransitioning = useViewTransitionState(fullPath)
+  const transitionNames =
+    isPreviewTransitioning || isFullTransitioning ? releaseTransitionNames(selection.releaseId) : undefined
 
   useEffect(() => {
     if (isOpen || exit === null) return
-    if (exit === "full") {
-      navigate(releaseFullPath(context.workspaceId, selection.releaseId), { state: location.state })
-      return
-    }
     if (resolvedOrigin.isStored) navigate(-1)
     else navigate(originHref, { replace: true })
-  }, [
-    context.workspaceId,
-    exit,
-    isOpen,
-    location.state,
-    navigate,
-    originHref,
-    resolvedOrigin.isStored,
-    selection.releaseId
-  ])
+  }, [context.workspaceId, exit, isOpen, navigate, originHref, resolvedOrigin.isStored, selection.releaseId])
 
-  const requestExit = (nextExit: Exclude<PreviewExit, null>): void => {
-    setExit(nextExit)
+  const requestOrigin = (): void => {
+    context.requestReleaseFocus(selection.releaseId)
+    setExit("origin")
     setIsOpen(false)
   }
 
@@ -168,15 +175,16 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
       collaborators={<CompleteCollaborators release={selection.release} />}
       evidence={<ReleaseEvidence release={selection.release} />}
       onOpenChange={(open) => {
-        if (!open) requestExit("origin")
+        if (!open) requestOrigin()
       }}
-      onOpenFullView={() => requestExit("full")}
+      onOpenFullView={() => navigate(fullPath, { state: location.state, viewTransition: !prefersReducedMotion })}
       open={isOpen}
       openFullViewLabel={`Open ${selection.release.relay.codename} full view`}
       presentation={isCompact ? "sheet" : "dialog"}
       primaryAction={<ReleaseAction />}
       release={selection.release.release}
       stages={<StageRail heading="Release stages" stages={selection.release.stages} />}
+      {...(transitionNames === undefined ? {} : { transitionNames })}
       workset={
         <div className={styles.previewDetails}>
           <MissingRelationships />
@@ -187,10 +195,10 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
 }
 
 /** Render the canonical release preview over its still-mounted workspace origin. */
-export const ReleasePreviewRoute = (): ReactElement | null => {
+export const ReleasePreviewRoute = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const params = useParams()
-  if (context.controller.state._tag !== "ready") return null
+  if (context.controller.state._tag !== "ready") return <ReleaseRouteLoading context={context} />
   const selection = selectRelease(context, params.releaseId)
   return selection === null ? (
     <ReleaseNotFound workspaceId={context.workspaceId} />
@@ -205,6 +213,9 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
   const headingRef = useRef<HTMLHeadingElement>(null)
   const origin = readReleaseOrigin(location.state, context.workspaceId, selection.releaseId)
   const release = selection.release
+  const fullPath = releaseFullPath(context.workspaceId, selection.releaseId)
+  const isTransitioning = useViewTransitionState(fullPath)
+  const transitionNames = isTransitioning ? releaseTransitionNames(selection.releaseId) : undefined
 
   useEffect(() => headingRef.current?.focus(), [])
 
@@ -218,7 +229,10 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
           <ReleaseRelay
             algorithm={release.relay.algorithm}
             codename={release.relay.codename}
+            data-rly-release-transition-name={transitionNames?.relay}
+            data-rly-release-transition-part="relay"
             size="hero"
+            style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.relay }}
             symbolIndices={release.relay.symbolIndices}
           />
           {release.source.freshnessDateTime === null || release.source.freshnessTime === null ? (
@@ -235,11 +249,25 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
           <Text as="h1" id="release-title" ref={headingRef} tabIndex={-1} variant="verdict">
             {release.serviceName}
           </Text>
-          <Text as="code" tone="secondary" variant="code">
+          <Text
+            as="code"
+            data-rly-release-transition-name={transitionNames?.version}
+            data-rly-release-transition-part="version"
+            style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.version }}
+            tone="secondary"
+            variant="code"
+          >
             {release.version}
           </Text>
         </div>
-        <Verdict reason={release.readinessReason} tone="neutral" verdict="Readiness not evaluated" />
+        <Verdict
+          data-rly-release-transition-name={transitionNames?.verdict}
+          data-rly-release-transition-part="verdict"
+          reason={release.readinessReason}
+          style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.verdict }}
+          tone="neutral"
+          verdict="Readiness not evaluated"
+        />
         <ReleaseAction />
       </header>
 

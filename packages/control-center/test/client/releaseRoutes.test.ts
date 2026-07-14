@@ -9,7 +9,8 @@ import {
   releaseOriginFromLocation,
   releaseOriginHref,
   releaseParentPath,
-  releasePreviewPath
+  releasePreviewPath,
+  releaseTransitionNames
 } from "../../src/client/releases/releaseRoutes.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
@@ -23,6 +24,11 @@ describe("release routes", () => {
     expect(releaseParentPath(workspaceId)).toBe(`/w/${workspaceId}/overview`)
     expect(releasePreviewPath(workspaceId, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}/preview`)
     expect(releaseFullPath(workspaceId, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}`)
+    expect(releaseTransitionNames(releaseId)).toEqual({
+      relay: `release-${releaseId}-relay`,
+      verdict: `release-${releaseId}-verdict`,
+      version: `release-${releaseId}-version`
+    })
     expect(decodeWorkspaceRouteId(workspaceId)).toBe(workspaceId)
     expect(decodeReleaseRouteId(releaseId)).toBe(releaseId)
     expect(decodeWorkspaceRouteId("not-a-workspace")).toBeNull()

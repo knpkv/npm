@@ -77,6 +77,31 @@ describe("ReleaseRow", () => {
     expect(contradictory?.textContent).toContain("The caller explicitly supplied this outcome.")
   })
 
+  it("assigns caller-owned shared geometry only while a release transition is active", () => {
+    const row = render(
+      <ReleaseRow
+        onPreview={() => undefined}
+        release={release}
+        transitionNames={{ relay: "release-a-relay", verdict: "release-a-verdict", version: "release-a-version" }}
+      />
+    )
+    const parts = [...(row?.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]") ?? [])]
+    expect(parts.map((part) => [part.dataset.rlyReleaseTransitionPart, part.dataset.rlyReleaseTransitionName])).toEqual(
+      [
+        ["relay", "release-a-relay"],
+        ["version", "release-a-version"],
+        ["verdict", "release-a-verdict"]
+      ]
+    )
+
+    const idleRow = render(<ReleaseRow onPreview={() => undefined} release={release} />)
+    expect(
+      [...(idleRow?.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]") ?? [])].every(
+        (part) => part.dataset.rlyReleaseTransitionName === undefined
+      )
+    ).toBe(true)
+  })
+
   it("represents every release state through data only while preserving visible content", () => {
     const states = [
       "blocked",

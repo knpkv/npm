@@ -19,6 +19,31 @@
     gap: var(--rly-space-32);
   }
 
+  .dialogSurface {
+    block-size: min(48rem, calc(100dvh - var(--rly-space-32)));
+    grid-template-rows: auto minmax(var(--rly-space-0), 1fr);
+    overflow: hidden;
+  }
+
+  .dialogSurface > :last-child,
+  .dialogFrame,
+  .dialogScroll {
+    min-block-size: var(--rly-space-0);
+  }
+
+  .dialogFrame {
+    block-size: 100%;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
+  }
+
+  .dialogScroll {
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-4);
+  }
+
   .summary {
     gap: var(--rly-space-32);
   }
@@ -99,9 +124,16 @@
     padding-block-start: var(--rly-space-24);
   }
 
-  .fullView {
+  .dialogFooter,
+  .sheetFooter {
+    background: var(--rly-color-surface-1);
+    border-block-start: 1px solid var(--rly-color-border-1);
     display: flex;
     justify-content: flex-end;
+  }
+
+  .dialogFooter {
+    padding-block-start: var(--rly-space-16);
   }
 
   .dialogClose {
@@ -109,7 +141,7 @@
     justify-content: flex-end;
   }
 
-  @media (max-width: 25rem) {
+  @media (max-width: 40rem) {
     .body,
     .summary {
       gap: var(--rly-space-20);
@@ -136,6 +168,10 @@
     }
 
     .fullViewButton {
+      inline-size: 100%;
+    }
+
+    .sheetFooter {
       inline-size: 100%;
     }
   }

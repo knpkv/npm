@@ -3,11 +3,20 @@ import { Button } from "../primitives/Button.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import { FreshnessStamp } from "./FreshnessStamp.js"
 import { Person } from "./Person.js"
-import { type RlyReleasePresentation, validateReleasePresentation } from "./ReleasePresentation.js"
+import {
+  type RlyReleasePresentation,
+  type RlyReleaseTransitionNames,
+  validateReleasePresentation
+} from "./ReleasePresentation.js"
 import { ReleaseRelay } from "./ReleaseRelay.js"
 import styles from "./ReleaseRow.module.css"
 
-export type { RlyReleaseFact, RlyReleasePresentation, RlyReleaseState } from "./ReleasePresentation.js"
+export type {
+  RlyReleaseFact,
+  RlyReleasePresentation,
+  RlyReleaseState,
+  RlyReleaseTransitionNames
+} from "./ReleasePresentation.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
@@ -21,6 +30,8 @@ export type ReleaseRowProps = Omit<ComponentPropsWithRef<"article">, "children">
   readonly previewLabel?: string
   /** Complete presentation projection supplied by the application. */
   readonly release: RlyReleasePresentation
+  /** Optional unique names used while an application-owned View Transition is active. */
+  readonly transitionNames?: RlyReleaseTransitionNames
 }
 
 /** Render a full-width release dossier row without deriving release state or readiness. */
@@ -30,6 +41,7 @@ export const ReleaseRow = ({
   onPreview,
   previewLabel = "Preview release",
   release: suppliedRelease,
+  transitionNames,
   ...props
 }: ReleaseRowProps): ReactElement => {
   const release = validateReleasePresentation(suppliedRelease)
@@ -58,14 +70,30 @@ export const ReleaseRow = ({
         <ReleaseRelay
           algorithm={release.algorithm}
           codename={release.codename}
+          data-rly-release-transition-name={transitionNames?.relay}
+          data-rly-release-transition-part="relay"
           size="compact"
+          style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.relay }}
           symbolIndices={release.symbolIndices}
         />
-        <p className={style("version")}>{release.version}</p>
+        <p
+          className={style("version")}
+          data-rly-release-transition-name={transitionNames?.version}
+          data-rly-release-transition-part="version"
+          style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.version }}
+        >
+          {release.version}
+        </p>
         {freshness}
       </div>
 
-      <section aria-labelledby={verdictId} className={style("verdictBlock")}>
+      <section
+        aria-labelledby={verdictId}
+        className={style("verdictBlock")}
+        data-rly-release-transition-name={transitionNames?.verdict}
+        data-rly-release-transition-part="verdict"
+        style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.verdict }}
+      >
         <h2 className={style("verdict")} id={verdictId}>
           {release.verdict}
         </h2>
