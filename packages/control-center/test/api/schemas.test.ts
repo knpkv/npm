@@ -409,6 +409,9 @@ describe("public API schemas", () => {
     for (const event of encodedEvents) {
       assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ControlCenterLiveEvent)(event)))
     }
+    for (const event of encodedEvents.slice(2)) {
+      assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ControlCenterLiveEvent)({ ...event, id: undefined })))
+    }
     assert.isTrue(
       Result.isFailure(
         Schema.decodeUnknownResult(ControlCenterLiveEvent)({

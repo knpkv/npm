@@ -61,7 +61,7 @@ export type PortfolioInvalidatedLiveEvent = typeof PortfolioInvalidatedLiveEvent
 
 /** Replay-gap instruction; it deliberately has no SSE ID so it cannot advance resume state. */
 export const StreamResetRequiredLiveEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.Never),
+  id: Schema.optionalKey(Schema.Undefined),
   event: Schema.Literal("stream.reset-required"),
   data: Schema.fromJsonString(StreamResetRequired)
 }).annotate({ identifier: "StreamResetRequiredLiveEvent" })
@@ -71,7 +71,7 @@ export type StreamResetRequiredLiveEvent = typeof StreamResetRequiredLiveEvent.T
 
 /** Keepalive event; it deliberately has no SSE ID so it cannot advance resume state. */
 export const StreamHeartbeatLiveEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.Never),
+  id: Schema.optionalKey(Schema.Undefined),
   event: Schema.Literal("stream.heartbeat"),
   data: Schema.fromJsonString(StreamHeartbeat)
 }).annotate({ identifier: "StreamHeartbeatLiveEvent" })
