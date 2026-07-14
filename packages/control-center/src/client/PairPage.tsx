@@ -12,12 +12,13 @@ import { pairingFailureMessage } from "./PairingFailure.js"
 import { releaseParentPath } from "./releases/releaseRoutes.js"
 import styles from "./pages.module.css"
 
-const pairBrowser = (rawPairingCode: string) =>
+const pairBrowser = Effect.fn("PairPage.pairBrowser")((rawPairingCode: string) =>
   Effect.gen(function* () {
     const pairingCode = yield* Schema.decodeUnknownEffect(PairingCode)(rawPairingCode.trim())
     const client = yield* makeControlCenterApiClient()
     return yield* client.session.pair({ payload: { pairingCode } })
   }).pipe(Effect.provide(FetchHttpClient.layer))
+)
 
 /** Pair the current tab without ever exposing the opaque session cookie to JavaScript. */
 export const PairPage = (): ReactElement => {

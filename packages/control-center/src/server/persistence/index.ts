@@ -12,6 +12,12 @@ export {
   BlobTooLargeError,
   BlobUnexpectedEofError
 } from "./object-store/BlobStoreError.js"
-export * from "./Persistence.js"
+export {
+  Persistence,
+  persistenceLayer,
+  type PersistenceLayerError,
+  type PersistenceOperationFailure,
+  type PersistenceService
+} from "./Persistence.js"
 export * from "./PersistenceConfig.js"
 export * from "./repositories/models.js"

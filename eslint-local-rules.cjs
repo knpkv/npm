@@ -98,7 +98,53 @@ const isSilentRejectionHandler = (handler) => {
   return returned === null || isUndefinedExpression(returned)
 }
 
+const HTTP_HANDLER_STABLE_SERVICE_SOURCES = [
+  "../auth/Auth.js",
+  "./ApiConfiguration.js",
+  "./ApplicationServices.js",
+  "./LiveStreamAdmission.js"
+]
+
+const isHttpHandleCallback = (node) => {
+  if (node.type !== "ArrowFunctionExpression" && node.type !== "FunctionExpression") return false
+  const parent = node.parent
+  if (parent?.type !== "CallExpression" || !parent.arguments.includes(node)) return false
+  return parent.callee.type === "MemberExpression" && staticPropertyName(parent.callee.property) === "handle"
+}
+
 module.exports = {
+  "no-stable-service-yield-in-http-handler": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "bind stable Effect services once at the HttpApiBuilder group boundary",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        nestedStableService:
+          "Bind {{service}} at the HttpApiBuilder group boundary; request handlers should yield only request-scoped services."
+      }
+    },
+    create(context) {
+      return {
+        YieldExpression(node) {
+          if (node.argument?.type !== "Identifier") return
+          const definition = importedBinding(context, node.argument)
+          if (!isValueImport(definition) || !HTTP_HANDLER_STABLE_SERVICE_SOURCES.includes(importSource(definition))) {
+            return
+          }
+          if (!context.sourceCode.getAncestors(node).some(isHttpHandleCallback)) return
+          context.report({
+            data: { service: node.argument.name },
+            messageId: "nestedStableService",
+            node
+          })
+        }
+      }
+    }
+  },
   "no-silent-run-promise-rejection": {
     meta: {
       type: "problem",

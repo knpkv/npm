@@ -255,6 +255,8 @@ describe("Control Center API handlers", () => {
           Layer.mergeAll(
             Layer.succeed(Auth, authentication),
             Layer.succeed(ApiBindConfiguration, bind),
+            Layer.succeed(MediaReads, media),
+            Layer.succeed(PluginAdministration, plugins),
             Layer.succeed(Clock.Clock, instrumentedClock),
             Layer.succeed(LiveEvents, trackedLiveEvents),
             portfolioLayer,
@@ -333,6 +335,8 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(MediaReads, media),
+          Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
           NodeHttpServer.layerHttpServices,
@@ -419,6 +423,8 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, streamAuthentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(MediaReads, media),
+          Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
           NodeHttpServer.layerHttpServices,
@@ -514,6 +520,8 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(MediaReads, media),
+          Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
           NodeHttpServer.layerHttpServices,
@@ -619,6 +627,8 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(MediaReads, media),
+          Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
           NodeHttpServer.layerHttpServices,

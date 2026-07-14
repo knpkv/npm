@@ -14,6 +14,7 @@ import {
   initialJavaScriptArtifacts,
   inspectClientBuildContract
 } from "./clientBuildContract.js"
+import { inspectServerDeclarationContract } from "./serverDeclarationContract.js"
 
 class DistValidationError extends Data.TaggedError("DistValidationError")<{
   readonly reason: string
@@ -66,7 +67,9 @@ const program = Effect.gen(function*() {
       "dist/server/domain/index.js",
       "dist/server/server/index.d.ts",
       "dist/server/server/index.js",
+      "dist/server/server/auth/index.d.ts",
       "dist/server/server/cli.js",
+      "dist/server/server/persistence/index.d.ts",
       "dist/server/build-graph.json"
     ]
   ) {
@@ -112,6 +115,24 @@ const program = Effect.gen(function*() {
     failures.push("missing import-clean PluginDefinitionV1 declaration")
   }
 
+  const publicServerDeclarationPaths = {
+    authIndex: path.join(serverRoot, "server/auth/index.d.ts"),
+    persistenceIndex: path.join(serverRoot, "server/persistence/index.d.ts"),
+    serverIndex: path.join(serverRoot, "server/index.d.ts")
+  }
+  if (
+    (yield* fs.exists(publicServerDeclarationPaths.authIndex)) &&
+    (yield* fs.exists(publicServerDeclarationPaths.persistenceIndex)) &&
+    (yield* fs.exists(publicServerDeclarationPaths.serverIndex))
+  ) {
+    const declarationViolations = inspectServerDeclarationContract({
+      authIndex: yield* fs.readFileString(publicServerDeclarationPaths.authIndex),
+      persistenceIndex: yield* fs.readFileString(publicServerDeclarationPaths.persistenceIndex),
+      serverIndex: yield* fs.readFileString(publicServerDeclarationPaths.serverIndex)
+    })
+    for (const violation of declarationViolations) failures.push(violation)
+  }
+
   const packedConsumerPath = path.join(packageRoot, "packed-plugin-definition-consumer.mts")
   const packedConsumerSource = `import type { PluginDefinitionV1 } from ${
     JSON.stringify(
@@ -128,17 +149,24 @@ const program = Effect.gen(function*() {
     verbatimModuleSyntax: true
   }
   const defaultCompilerHost = ts.createCompilerHost(compilerOptions)
+  const forbiddenFactoryConsumerPath = path.join(packageRoot, "forbidden-server-factory-consumer.mts")
+  const forbiddenFactoryConsumerSource = `import { authLayerFromDatabase, persistenceLayerFromDatabase } from ${
+    JSON.stringify(path.join(serverRoot, "server/index.js"))
+  }\nvoid authLayerFromDatabase\nvoid persistenceLayerFromDatabase\n`
+  const virtualSources = new Map([
+    [forbiddenFactoryConsumerPath, forbiddenFactoryConsumerSource],
+    [packedConsumerPath, packedConsumerSource]
+  ])
   const compilerHost: ts.CompilerHost = {
     ...defaultCompilerHost,
-    fileExists: (fileName) => fileName === packedConsumerPath || defaultCompilerHost.fileExists(fileName),
-    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) =>
-      fileName === packedConsumerPath
-        ? ts.createSourceFile(fileName, packedConsumerSource, languageVersion, true, ts.ScriptKind.TS)
-        : defaultCompilerHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile),
-    readFile: (fileName) =>
-      fileName === packedConsumerPath
-        ? packedConsumerSource
-        : defaultCompilerHost.readFile(fileName)
+    fileExists: (fileName) => virtualSources.has(fileName) || defaultCompilerHost.fileExists(fileName),
+    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+      const virtualSource = virtualSources.get(fileName)
+      return virtualSource === undefined
+        ? defaultCompilerHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile)
+        : ts.createSourceFile(fileName, virtualSource, languageVersion, true, ts.ScriptKind.TS)
+    },
+    readFile: (fileName) => virtualSources.get(fileName) ?? defaultCompilerHost.readFile(fileName)
   }
   const packedDiagnostics = ts.getPreEmitDiagnostics(
     ts.createProgram({ rootNames: [packedConsumerPath], options: compilerOptions, host: compilerHost })
@@ -147,6 +175,24 @@ const program = Effect.gen(function*() {
     failures.push(
       `packed PluginDefinitionV1 consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`
     )
+  }
+
+  const forbiddenFactoryDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({ rootNames: [forbiddenFactoryConsumerPath], options: compilerOptions, host: compilerHost })
+  )
+  const forbiddenFactoryNames = ["authLayerFromDatabase", "persistenceLayerFromDatabase"]
+  for (const factoryName of forbiddenFactoryNames) {
+    const isHidden = forbiddenFactoryDiagnostics.some((diagnostic) => {
+      const message = formatTypeScriptDiagnostic(diagnostic)
+      return [2305, 2459, 2724].includes(diagnostic.code) && message.includes(factoryName)
+    })
+    if (!isHidden) failures.push(`public server entry exposes internal factory ${factoryName}`)
+  }
+  for (const diagnostic of forbiddenFactoryDiagnostics) {
+    const message = formatTypeScriptDiagnostic(diagnostic)
+    const isExpected = [2305, 2459, 2724].includes(diagnostic.code) &&
+      forbiddenFactoryNames.some((factoryName) => message.includes(factoryName))
+    if (!isExpected) failures.push(`private server factory consumer typecheck failed: ${message}`)
   }
 
   const declarationCompilerOptions: ts.CompilerOptions = {

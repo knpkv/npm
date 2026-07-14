@@ -1,4 +1,4 @@
-export { Auth, authLayer, authLayerFromDatabase } from "./Auth.js"
+export { Auth, authLayer } from "./Auth.js"
 export {
   AuthCryptoError,
   AuthPermissionDeniedError,

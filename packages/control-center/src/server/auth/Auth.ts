@@ -303,7 +303,9 @@ export class Auth extends Context.Service<Auth, Effect.Success<typeof makeAuth>>
 }
 
 /** Build a standalone Auth service from persistence configuration. */
-export const authLayer = (persistenceConfigInput: unknown) => {
+export const authLayer = (
+  persistenceConfigInput: unknown
+): Layer.Layer<Auth, Layer.Error<ReturnType<typeof databaseLayer>>, Crypto.Crypto> => {
   const database = databaseLayer(persistenceConfigInput)
   const quarantine = QuarantineRepository.layer.pipe(Layer.provide(database))
   const repository = AuthRepository.layer.pipe(

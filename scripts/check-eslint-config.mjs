@@ -73,6 +73,63 @@ await assertRuleDiagnostics({
 })
 
 await assertRuleDiagnostics({
+  code: `export const layerFactory = () => ({ service: "auth" })`,
+  expected: 1,
+  filePath: "packages/control-center/src/server/auth/Auth.ts",
+  ruleId: "@typescript-eslint/explicit-module-boundary-types"
+})
+
+await assertRuleDiagnostics({
+  code: `export const layerFactory = () => ({ service: "application" })`,
+  expected: 0,
+  filePath: "packages/control-center/src/server/application/not-reviewed.ts",
+  ruleId: "@typescript-eslint/explicit-module-boundary-types"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import { Auth } from "../auth/Auth.js"
+    import { CurrentSession } from "../../api/session.js"
+    import { PluginAdministration } from "./ApplicationServices.js"
+    handlers
+      .handle("first", () => Effect.gen(function*() {
+        const auth = yield* Auth
+        const session = yield* CurrentSession
+        return { auth, session }
+      }))
+      .handle("second", function() {
+        return Effect.gen(function*() {
+          return yield* PluginAdministration
+        })
+      })
+  `,
+  expected: 2,
+  filePath: "packages/control-center/src/server/api/Handlers.ts",
+  ruleId: "local-rules/no-stable-service-yield-in-http-handler"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Effect from "effect/Effect"
+    import { Auth } from "../auth/Auth.js"
+    import { CurrentSession } from "../../api/session.js"
+    import { PluginAdministration } from "./ApplicationServices.js"
+    Effect.gen(function*() {
+      const auth = yield* Auth
+      const plugins = yield* PluginAdministration
+      return handlers.handle("first", () => Effect.gen(function*() {
+        const session = yield* CurrentSession
+        return { auth, plugins, session }
+      }))
+    })
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/api/Handlers.ts",
+  ruleId: "local-rules/no-stable-service-yield-in-http-handler"
+})
+
+await assertRuleDiagnostics({
   code: `
     import * as CanonicalSchemas from "./canonical-wire.js"
     export { type NumberFromString } from "effect/Schema"

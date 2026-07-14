@@ -76,58 +76,54 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
   "session",
   (handlers) =>
-    handlers
-      .handle("pair", ({ payload }) =>
-        Effect.gen(function*() {
-          yield* authorizePairingRequest()
-          const auth = yield* Auth
-          const config = yield* ApiBindConfiguration
-          const issued = yield* mapCredentialAuthenticationFailures(
-            auth.consumePairingCode(Redacted.make(payload.pairingCode))
-          )
-          const cookie = sessionCookiePolicy(config)
-          yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
-          return {
-            csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
-            session: issued.session
-          }
-        }))
-      .handle("current", ({ request }) =>
-        Effect.gen(function*() {
-          const auth = yield* Auth
-          const recovered = yield* mapAuthenticationFailures(
-            auth.recoverCsrfToken(currentSessionToken(request))
-          )
-          return {
-            csrfToken: CsrfToken.make(Redacted.value(recovered.csrfToken)),
-            session: recovered.session
-          }
-        }))
-      .handle("list", ({ request }) =>
-        Effect.gen(function*() {
-          const auth = yield* Auth
-          return yield* mapAuthenticationFailures(
-            auth.listSessions(currentSessionToken(request))
-          )
-        }))
-      .handle("revoke", ({ params, request }) =>
-        Effect.gen(function*() {
-          const auth = yield* Auth
-          yield* mapAuthenticationFailures(
-            auth.revokeSession(currentSessionToken(request), params.sessionId)
-          )
-        }))
-      .handle("logout", ({ request }) =>
-        Effect.gen(function*() {
-          const auth = yield* Auth
-          const config = yield* ApiBindConfiguration
-          yield* mapAuthenticationFailures(auth.logout(currentSessionToken(request)))
-          const cookie = sessionCookiePolicy(config)
-          yield* HttpApiBuilder.securitySetCookie(sessionCookie, "", {
-            ...cookie,
-            maxAge: 0
-          })
-        }))
+    Effect.gen(function*() {
+      const auth = yield* Auth
+      const config = yield* ApiBindConfiguration
+      const cookie = sessionCookiePolicy(config)
+      return handlers
+        .handle("pair", ({ payload }) =>
+          Effect.gen(function*() {
+            yield* authorizePairingRequest()
+            const issued = yield* mapCredentialAuthenticationFailures(
+              auth.consumePairingCode(Redacted.make(payload.pairingCode))
+            )
+            yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
+            return {
+              csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
+              session: issued.session
+            }
+          }))
+        .handle("current", ({ request }) =>
+          Effect.gen(function*() {
+            const recovered = yield* mapAuthenticationFailures(
+              auth.recoverCsrfToken(currentSessionToken(request))
+            )
+            return {
+              csrfToken: CsrfToken.make(Redacted.value(recovered.csrfToken)),
+              session: recovered.session
+            }
+          }))
+        .handle("list", ({ request }) =>
+          Effect.gen(function*() {
+            return yield* mapAuthenticationFailures(
+              auth.listSessions(currentSessionToken(request))
+            )
+          }))
+        .handle("revoke", ({ params, request }) =>
+          Effect.gen(function*() {
+            yield* mapAuthenticationFailures(
+              auth.revokeSession(currentSessionToken(request), params.sessionId)
+            )
+          }))
+        .handle("logout", ({ request }) =>
+          Effect.gen(function*() {
+            yield* mapAuthenticationFailures(auth.logout(currentSessionToken(request)))
+            yield* HttpApiBuilder.securitySetCookie(sessionCookie, "", {
+              ...cookie,
+              maxAge: 0
+            })
+          }))
+    })
 )
 
 /** Secret-free plugin list, health, and configuration metadata handlers. */
@@ -135,73 +131,71 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
   "plugins",
   (handlers) =>
-    handlers
-      .handle("list", () =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          const plugins = yield* PluginAdministration
-          return yield* plugins.list(session.workspaceId).pipe(
-            Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
-          )
-        }))
-      .handle("health", ({ params }) =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          const plugins = yield* PluginAdministration
-          return yield* plugins.health({
-            pluginConnectionId: params.pluginConnectionId,
-            workspaceId: session.workspaceId
-          }).pipe(Effect.catchTags({
-            ApplicationRateLimited: mapApplicationRateLimited,
-            ApplicationResourceNotFound: mapApplicationNotFound,
-            ApplicationServiceUnavailable: mapApplicationUnavailable
+    Effect.gen(function*() {
+      const plugins = yield* PluginAdministration
+      return handlers
+        .handle("list", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* plugins.list(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
           }))
-        }))
-      .handle("configurationMetadata", ({ params }) =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          const plugins = yield* PluginAdministration
-          return yield* plugins.configurationMetadata({
-            pluginConnectionId: params.pluginConnectionId,
-            workspaceId: session.workspaceId
-          }).pipe(Effect.catchTags({
-            ApplicationRateLimited: mapApplicationRateLimited,
-            ApplicationResourceNotFound: mapApplicationNotFound,
-            ApplicationServiceUnavailable: mapApplicationUnavailable
+        .handle("health", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* plugins.health({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
-        }))
-      .handle("configuration", ({ params }) =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          const plugins = yield* PluginAdministration
-          return yield* plugins.configuration({
-            pluginConnectionId: params.pluginConnectionId,
-            workspaceId: session.workspaceId
-          }).pipe(Effect.catchTags({
-            ApplicationRateLimited: mapApplicationRateLimited,
-            ApplicationResourceNotFound: mapApplicationNotFound,
-            ApplicationServiceUnavailable: mapApplicationUnavailable
+        .handle("configurationMetadata", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* plugins.configurationMetadata({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
-        }))
-      .handle("patchConfiguration", ({ params, payload }) =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          if (session.permission !== "workspace-owner") {
-            return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-          }
-          const plugins = yield* PluginAdministration
-          return yield* plugins.patchConfiguration({
-            patch: payload,
-            pluginConnectionId: params.pluginConnectionId,
-            workspaceId: session.workspaceId
-          }).pipe(Effect.catchTags({
-            ApplicationConflict: mapApplicationConflict,
-            ApplicationInvalidRequest: mapApplicationInvalidRequest,
-            ApplicationRateLimited: mapApplicationRateLimited,
-            ApplicationResourceNotFound: mapApplicationNotFound,
-            ApplicationServiceUnavailable: mapApplicationUnavailable
+        .handle("configuration", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* plugins.configuration({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
-        }))
+        .handle("patchConfiguration", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* plugins.patchConfiguration({
+              patch: payload,
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+    })
 )
 
 /** Authenticated bird's-eye portfolio snapshot handler. */
@@ -270,28 +264,30 @@ export const mediaHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
   "media",
   (handlers) =>
-    handlers.handle("read", ({ params }) =>
-      Effect.gen(function*() {
-        const session = yield* CurrentSession
-        const mediaReads = yield* MediaReads
-        const media = yield* mediaReads.read({
-          mediaId: params.mediaId,
-          workspaceId: session.workspaceId
-        }).pipe(Effect.catchTags({
-          ApplicationResourceNotFound: mapApplicationNotFound,
-          ApplicationServiceUnavailable: mapApplicationUnavailable
-        }))
-        if (!validMediaMetadata(media.contentLength, media.contentType)) {
-          return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
-        }
-        yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-          Effect.succeed(HttpServerResponse.setHeaders(response, {
-            "cache-control": "private, no-store",
-            "content-length": String(media.contentLength),
-            "content-type": media.contentType,
-            "x-content-type-options": "nosniff"
+    Effect.gen(function*() {
+      const mediaReads = yield* MediaReads
+      return handlers.handle("read", ({ params }) =>
+        Effect.gen(function*() {
+          const session = yield* CurrentSession
+          const media = yield* mediaReads.read({
+            mediaId: params.mediaId,
+            workspaceId: session.workspaceId
+          }).pipe(Effect.catchTags({
+            ApplicationResourceNotFound: mapApplicationNotFound,
+            ApplicationServiceUnavailable: mapApplicationUnavailable
           }))
-        )
-        return media.body
-      }))
+          if (!validMediaMetadata(media.contentLength, media.contentType)) {
+            return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+          }
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(HttpServerResponse.setHeaders(response, {
+              "cache-control": "private, no-store",
+              "content-length": String(media.contentLength),
+              "content-type": media.contentType,
+              "x-content-type-options": "nosniff"
+            }))
+          )
+          return media.body
+        }))
+    })
 )

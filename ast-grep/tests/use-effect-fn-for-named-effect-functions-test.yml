@@ -1,0 +1,27 @@
+id: use-effect-fn-for-named-effect-functions
+valid:
+  - |
+    const load = Effect.fn("Feature.load")(function*(id: Id) {
+      return yield* repository.load(id)
+    })
+  - |
+    handlers.handle("load", (id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    }))
+  - |
+    const pure = (value: number): number => value + 1
+invalid:
+  - |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  - |
+    const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  - |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    }).pipe(Effect.provide(layer))
+  - |
+    const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())

@@ -1,0 +1,45 @@
+id: use-effect-fn-for-named-effect-functions
+snapshots:
+  ? |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  : labels:
+      - source: |-
+          const load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 88
+  ? |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    }).pipe(Effect.provide(layer))
+  : labels:
+      - source: |-
+          const load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          }).pipe(Effect.provide(layer))
+        style: primary
+        start: 0
+        end: 116
+  ? |
+    const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  : labels:
+      - source: |-
+          const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 109
+  ? |
+    const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())
+  : labels:
+      - source: "const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())"
+        style: primary
+        start: 0
+        end: 70

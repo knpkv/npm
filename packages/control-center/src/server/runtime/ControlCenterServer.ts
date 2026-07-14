@@ -134,7 +134,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
 export const makeControlCenterApplication = <ApplicationError = never, ApplicationRequirements = never>(
   options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
-) => makeApplication(options).application
+): ReturnType<typeof makeApplication<ApplicationError, ApplicationRequirements>>["application"] =>
+  makeApplication(options).application
 
 /** Construct the fully runnable Node HTTP/HTTPS server layer. */
 const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
@@ -155,4 +156,4 @@ const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
 /** Construct the fully runnable Node HTTP/HTTPS server layer. */
 export const makeControlCenterServer = <ApplicationError = never, ApplicationRequirements = never>(
   options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
-) => makeServer(options)
+): ReturnType<typeof makeServer<ApplicationError, ApplicationRequirements>> => makeServer(options)

@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: use-effect-fn-for-named-effect-functions
+language: tsx
+severity: error
+message: "Wrap named Effect functions with Effect.fn for tracing and consistent diagnostics"
+
+rule:
+  any:
+    - pattern: "const $NAME = ($$$ARGS) => Effect.gen($$$BODY)"
+    - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY)"
+    - pattern: "const $NAME = ($$$ARGS) => Effect.gen($$$BODY).pipe($$$OPERATORS)"
+    - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY).pipe($$$OPERATORS)"
+    - pattern: "const $NAME = ($$$ARGS) => Effect.suspend($$$BODY)"
+    - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.suspend($$$BODY)"
+
+files:
+  - "packages/control-center/src/**/*.ts"
+  - "packages/control-center/src/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/generated/**"
+
+note: |
+  Effect.fn gives named operations a stable trace identity and preserves the
+  repository's standard instrumentation seam.
+
+  Prefer:
+
+  const load = Effect.fn("Feature.load")(function*(id: Id) {
+    return yield* repository.load(id)
+  })

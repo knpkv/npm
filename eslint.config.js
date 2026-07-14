@@ -155,6 +155,22 @@ export default tseslint.config(
     }
   },
   {
+    files: [
+      "packages/control-center/src/server/auth/Auth.ts",
+      "packages/control-center/src/server/auth/TerminalRecovery.ts",
+      "packages/control-center/src/server/runtime/ControlCenterServer.ts"
+    ],
+    rules: {
+      "@typescript-eslint/explicit-module-boundary-types": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/src/server/api/Handlers.ts"],
+    rules: {
+      "local-rules/no-stable-service-yield-in-http-handler": "error"
+    }
+  },
+  {
     // Prettier remains the repository formatter for JSX. ESLint still applies
     // every semantic, import, safety, no-console, and no-any rule to TSX.
     files: ["**/*.tsx"],
