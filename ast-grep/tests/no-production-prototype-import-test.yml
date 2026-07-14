@@ -6,6 +6,10 @@ valid:
     import { Variant } from "./control-center-variant-b.js"
   - |
     const page = await import("./components/lazy-page.js")
+  - |
+    import { api } from "@scope/prototype-tools"
+  - |
+    import { api } from "./prototype-tools/index.js"
 invalid:
   - |
     import { ControlCenterPrototype } from "./prototypes/control-center/control-center-prototype.js"
@@ -13,3 +17,5 @@ invalid:
     export { Prototype } from "../prototype/example.js"
   - |
     const fixture = await import("../../prototypes/release.js")
+  - |
+    import { fixture } from "prototypes/release.js"

@@ -10,15 +10,15 @@ rule:
     - kind: import_statement
       has:
         field: source
-        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+        regex: '["''](?:[^"'']*/)?prototypes?(?:/|["''])'
     - kind: export_statement
       has:
         field: source
-        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+        regex: '["''](?:[^"'']*/)?prototypes?(?:/|["''])'
     - pattern: import($SOURCE)
       has:
         field: arguments
-        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+        regex: '["''](?:[^"'']*/)?prototypes?(?:/|["''])'
 
 files:
   - "packages/*/src/**/*.ts"
@@ -37,5 +37,5 @@ ignores:
 note: |
   Prototypes are visual fixtures, not production dependencies. Keep a fixture
   browsable through an isolated development entry or Storybook rather than a
-  route in the published application graph. Non-literal loaders remain covered
-  by package build-graph validation because syntax matching cannot classify them.
+  route in the published application graph. Package build plugins inspect the
+  resolved graph as a second boundary for non-literal loaders and glob imports.
