@@ -9,8 +9,12 @@ import styles from "./pages.module.css"
 const sessionLabel = (permission: SessionSummary["permission"]): string =>
   permission === "workspace-owner" ? "Owner browser paired" : "Browser paired"
 
+interface BrowserSessionStatusProps {
+  readonly anonymousAction?: "link" | "status"
+}
+
 /** Describe this browser's application-wide private session. */
-export const BrowserSessionStatus = (): ReactElement => {
+export const BrowserSessionStatus = ({ anonymousAction = "link" }: BrowserSessionStatusProps = {}): ReactElement => {
   const { state: browserSession } = useBrowserSession()
   const storageAlert = useRef<HTMLSpanElement>(null)
 
@@ -19,6 +23,13 @@ export const BrowserSessionStatus = (): ReactElement => {
   }, [browserSession._tag])
 
   if (browserSession._tag === "anonymous") {
+    if (anonymousAction === "status") {
+      return (
+        <Text className={styles.sessionStatus} tone="secondary" variant="label">
+          Browser not paired
+        </Text>
+      )
+    }
     return (
       <Link className={styles.linkButton} to="/pair">
         Pair this browser

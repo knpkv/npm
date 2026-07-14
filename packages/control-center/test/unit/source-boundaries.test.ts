@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { inspectModuleImports, inspectSourceBoundaries } from "../../scripts/source-boundaries.js"
+import {
+  inspectModuleImports,
+  inspectSourceBoundaries,
+  inspectStylesheetBoundaries
+} from "../../scripts/source-boundaries.js"
 
 describe("Control Center source boundaries", () => {
   it("accepts the intended dependency direction", () => {
@@ -70,6 +74,113 @@ describe("Control Center source boundaries", () => {
       )
     ).toHaveLength(1)
     expect(inspectSourceBoundaries("src/client/fixture.ts", "import \"@knpkv/codecommit-web\"")).toHaveLength(1)
+  })
+
+  it("rejects quoted and unquoted prototype references in stylesheet imports", () => {
+    const sourcePath = "src/client/styles/imports.css"
+    const sources = [
+      "@import \"@knpkv/codecommit-web/styles.css\";",
+      "@import url(\"../../../codecommit-web/src/client/prototypes/control-center/theme.css\");",
+      "@import url(../../../codecommit-web/src/client/prototypes/control-center/tokens.css);"
+    ]
+
+    for (const source of sources) {
+      expect(inspectStylesheetBoundaries(sourcePath, source)).toEqual([
+        {
+          importPath: expect.stringContaining("codecommit-web"),
+          reason: "production code cannot import prototype runtime",
+          sourcePath
+        }
+      ])
+    }
+  })
+
+  it("rejects quoted and unquoted prototype references in stylesheet URLs", () => {
+    const sourcePath = "src/client/styles/assets.css"
+    const sources = [
+      ".hero { background-image: url(\"../../../codecommit-web/src/client/prototypes/control-center/hero.svg\") }",
+      ".hero { background-image: url(../../../codecommit-web/src/client/prototypes/control-center/hero.svg) }"
+    ]
+
+    for (const source of sources) {
+      expect(inspectStylesheetBoundaries(sourcePath, source)).toHaveLength(1)
+    }
+  })
+
+  it("rejects prototype dependencies hidden in CSS Modules compositions", () => {
+    const sourcePath = "src/client/styles/actions.module.css"
+    const sources = [
+      ".action { composes: button from \"@knpkv/codecommit-web/actions.module.css\"; }",
+      ".action { composes: button from '../../../codecommit-web/src/client/prototypes/control-center/actions.module.css'; }",
+      ".action { composes: button from ../../../codecommit-web/src/client/prototypes/control-center/actions.module.css; }"
+    ]
+
+    for (const source of sources) {
+      expect(inspectStylesheetBoundaries(sourcePath, source)).toEqual([
+        {
+          importPath: expect.stringContaining("codecommit-web"),
+          reason: "production code cannot import prototype runtime",
+          sourcePath
+        }
+      ])
+    }
+  })
+
+  it("rejects prototype dependencies hidden in CSS Modules value imports", () => {
+    const sourcePath = "src/client/styles/tokens.module.css"
+    const sources = [
+      "@value accent from \"@knpkv/codecommit-web/tokens.css\";",
+      "@value spacing, radius from '../../../codecommit-web/src/client/prototypes/control-center/tokens.css';",
+      "@value accent from ../../../codecommit-web/src/client/prototypes/control-center/tokens.css;"
+    ]
+
+    for (const source of sources) {
+      expect(inspectStylesheetBoundaries(sourcePath, source)).toHaveLength(1)
+    }
+  })
+
+  it("rejects prototype dependencies hidden in canonical ICSS imports", () => {
+    const sourcePath = "src/client/styles/tokens.module.css"
+    const sources = [
+      ":import(\"@knpkv/codecommit-web/tokens.css\") { accent: brandAccent; }",
+      ":import('../../../codecommit-web/src/client/prototypes/control-center/tokens.css') { spacing: space; }",
+      ":import(../../../codecommit-web/src/client/prototypes/control-center/tokens.css) { radius: radius; }"
+    ]
+
+    for (const source of sources) {
+      expect(inspectStylesheetBoundaries(sourcePath, source)).toHaveLength(1)
+    }
+  })
+
+  it("ignores prototype-looking CSS Modules and ICSS dependencies inside comments", () => {
+    expect(
+      inspectStylesheetBoundaries(
+        "src/client/styles/commented.module.css",
+        [
+          "/* .action { composes: button from \"@knpkv/codecommit-web/actions.module.css\"; } */",
+          "/* @value accent from \"../../../codecommit-web/src/client/prototypes/control-center/tokens.css\"; */",
+          "/* :import(\"@knpkv/codecommit-web/tokens.css\") { accent: brandAccent; } */"
+        ].join("\n")
+      )
+    ).toEqual([])
+  })
+
+  it("accepts ordinary local stylesheet asset URLs", () => {
+    expect(
+      inspectStylesheetBoundaries(
+        "src/client/styles/assets.css",
+        [
+          "@import \"./tokens.css\";",
+          ".action { composes: button from \"./actions.module.css\"; }",
+          "@value accent from \"./tokens.css\";",
+          ":import(\"./tokens.css\") { accent: brandAccent; }",
+          ":import(./spacing.css) { spacing: space; }",
+          ".brand { background-image: url('../assets/brand.svg') }",
+          ".icon { mask-image: url(../assets/icon.svg?v=2#mask) }",
+          ".font { src: url(\"../fonts/inter.woff2\") format(\"woff2\") }"
+        ].join("\n")
+      )
+    ).toEqual([])
   })
 
   it("sees import, export-from, and dynamic import syntax", () => {

@@ -1,6 +1,11 @@
 import { createBrowserRouter, Navigate } from "react-router"
 import { AppShell } from "./AppShell.js"
-import { ReleasesPage, ServicesPage, TodayPage } from "./Pages.js"
+import { ReleasesPage, ServicesPage } from "./Pages.js"
+
+const overviewRoute = async () => {
+  const module = await import("./portfolio/PortfolioOverview.js")
+  return { Component: module.PortfolioOverview }
+}
 
 const pairRoute = async () => {
   const module = await import("./PairPage.js")
@@ -17,7 +22,7 @@ export const router = createBrowserRouter([
   {
     element: <AppShell />,
     children: [
-      { index: true, element: <TodayPage /> },
+      { index: true, lazy: overviewRoute },
       { path: "releases", element: <ReleasesPage /> },
       { path: "services", element: <ServicesPage /> },
       { path: "agent", lazy: agentRoute },

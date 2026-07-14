@@ -22,6 +22,7 @@ interface BrowserSessionContextValue {
   readonly beginHydration: () => symbol
   readonly completeHydration: (attempt: symbol, result: BrowserSessionHydrationResult) => void
   readonly establishSession: (csrfToken: CsrfToken, session: SessionSummary) => void
+  readonly invalidateSession: (expectedSessionId: string) => void
   readonly state: BrowserSessionState
 }
 
@@ -60,6 +61,7 @@ const storeMutationProof = (csrfToken: CsrfToken): boolean => {
 export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps): ReactElement => {
   const [state, setState] = useState<BrowserSessionState>({ _tag: "checking" })
   const hydrationAttempt = useRef<symbol | undefined>(undefined)
+  const currentSessionId = useRef<string | null>(null)
 
   const beginHydration = useCallback((): symbol => {
     const attempt = Symbol("browser-session-hydration")
@@ -71,6 +73,7 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
     if (hydrationAttempt.current !== attempt) return
     hydrationAttempt.current = undefined
     if (result._tag === "authenticated") {
+      currentSessionId.current = result.session.sessionId
       setState(
         storeMutationProof(result.csrfToken)
           ? { _tag: "authenticated", session: result.session }
@@ -78,6 +81,7 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
       )
       return
     }
+    currentSessionId.current = result._tag === "storage-unavailable" ? (result.session?.sessionId ?? null) : null
     if (result._tag === "anonymous") {
       setState(clearMutationProof() ? result : { _tag: "storage-unavailable", session: null })
       return
@@ -87,14 +91,22 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
 
   const establishSession = useCallback((csrfToken: CsrfToken, session: SessionSummary): void => {
     hydrationAttempt.current = undefined
+    currentSessionId.current = session.sessionId
     setState(
       storeMutationProof(csrfToken) ? { _tag: "authenticated", session } : { _tag: "storage-unavailable", session }
     )
   }, [])
 
+  const invalidateSession = useCallback((expectedSessionId: string): void => {
+    if (currentSessionId.current !== expectedSessionId) return
+    hydrationAttempt.current = undefined
+    currentSessionId.current = null
+    setState(clearMutationProof() ? { _tag: "anonymous" } : { _tag: "storage-unavailable", session: null })
+  }, [])
+
   const value = useMemo(
-    () => ({ beginHydration, completeHydration, establishSession, state }),
-    [beginHydration, completeHydration, establishSession, state]
+    () => ({ beginHydration, completeHydration, establishSession, invalidateSession, state }),
+    [beginHydration, completeHydration, establishSession, invalidateSession, state]
   )
   return <BrowserSessionContext value={value}>{children}</BrowserSessionContext>
 }

@@ -21,4 +21,13 @@ export {
   NODE_LISTENER_SECURITY_POLICY,
   type NodeListenerSecurityPolicy
 } from "./NodeTransport.js"
+export {
+  releaseIdFromStartupState,
+  ReleaseSynchronizationStartup,
+  ReleaseSynchronizationStartupConfigurationError,
+  type ReleaseSynchronizationStartupError,
+  releaseSynchronizationStartupLayer,
+  type ReleaseSynchronizationStartupOptions,
+  type ReleaseSynchronizationStartupState
+} from "./ReleaseSynchronizationStartup.js"
 export { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"

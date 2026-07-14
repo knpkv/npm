@@ -1,36 +1,7 @@
-.hero {
-  display: grid;
-  gap: 2rem;
-}
-
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.pulse {
-  inline-size: 0.55rem;
-  block-size: 0.55rem;
-  border-radius: 50%;
-  background: var(--rly-color-success-ink);
-  box-shadow: 0 0 0 0.3rem var(--rly-color-success-tint);
-}
-
-.title {
-  max-inline-size: 12ch;
-  text-wrap: balance;
-}
-
-.lede {
-  max-inline-size: 42rem;
-  text-wrap: pretty;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
 }
 
 .sessionBadge,
@@ -61,24 +32,6 @@
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
   text-decoration: none;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  margin-block-start: 4rem;
-}
-
-.metric {
-  display: grid;
-  gap: 1rem;
-  min-block-size: 13rem;
-  align-content: space-between;
-}
-
-.metricValue {
-  letter-spacing: -0.06em;
 }
 
 .page {
@@ -122,10 +75,4 @@
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
   text-underline-offset: 0.25rem;
-}
-
-@media (max-width: 48rem) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
 }

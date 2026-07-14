@@ -4,6 +4,7 @@ import { migration0002Integrity } from "./0002_integrity.js"
 import { migration0003Auth } from "./0003_auth.js"
 import { migration0004PluginRuntime } from "./0004_plugin_runtime.js"
 import { migration0005PluginConfiguration } from "./0005_plugin_configuration.js"
+import { migration0006PluginSyncPageEvidence } from "./0006_plugin_sync_page_evidence.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -14,7 +15,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 2, name: "integrity_blobs" },
   { id: 3, name: "auth" },
   { id: 4, name: "plugin_runtime" },
-  { id: 5, name: "plugin_configuration" }
+  { id: 5, name: "plugin_configuration" },
+  { id: 6, name: "plugin_sync_page_evidence" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -23,5 +25,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0002_integrity_blobs": migration0002Integrity,
   "0003_auth": migration0003Auth,
   "0004_plugin_runtime": migration0004PluginRuntime,
-  "0005_plugin_configuration": migration0005PluginConfiguration
+  "0005_plugin_configuration": migration0005PluginConfiguration,
+  "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
 })

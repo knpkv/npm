@@ -22,9 +22,11 @@ import { WorkspaceRepository } from "../../src/server/persistence/repositories/w
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000021")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000022")
 const STREAM = Schema.decodeSync(PluginStreamKey)("issues")
+const CORRUPT_ZERO_STREAM = Schema.decodeSync(PluginStreamKey)("corrupt-zero")
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-14T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-14T09:02:00.000Z")
+const HEALTHY_AT_T1: PluginHealth = { _tag: "healthy", checkedAt: T1 }
 const ENTITY_RECORD_KEY = "entity/9655c54eadf49f24afd0ad93c70a0077cd23499f5237317dbb36262b2fb4fac9"
 const SECOND_ENTITY_RECORD_KEY = "entity/6171f60b066a720ed62184749325e4c1af68ad382222c97e34dc27f3913b413b"
 
@@ -128,6 +130,8 @@ const upsertPage = {
   pageId: "page-1",
   expectedRevision: 0,
   checkpointJson: "{\"cursor\":\"one\"}",
+  hasMore: false,
+  successfulHealth: { _tag: "healthy", checkedAt: "2026-07-14T09:01:00.000Z" },
   committedAt: "2026-07-14T09:01:00.000Z",
   events: [{
     _tag: "upsert",
@@ -251,6 +255,23 @@ describe("plugin runtime persistence", () => {
       const committed = yield* database.sql<{ readonly committedAt: string }>`SELECT committed_at AS committedAt
         FROM plugin_sync_pages WHERE page_id = 'page-1'`
       assert.strictEqual(committed[0]?.committedAt, "2026-07-14T09:01:00.000Z")
+      assert.deepStrictEqual(
+        yield* runtime.getLastSuccessfulHealth(WORKSPACE_ID, PLUGIN_ID, STREAM),
+        HEALTHY_AT_T1
+      )
+      const incoherentHealthEvidence = yield* database.sql`UPDATE plugin_sync_pages
+        SET successful_health_digest = NULL WHERE page_id = 'page-1'`.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(incoherentHealthEvidence))
+
+      const paginationFlip = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
+        ...upsertPage,
+        hasMore: true
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(paginationFlip))
+      if (Result.isFailure(paginationFlip)) {
+        assert.instanceOf(paginationFlip.failure, SourceIdentityMismatchError)
+      }
+      assert.strictEqual((yield* runtime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)).revision, 1)
 
       const changedReplay = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
         ...upsertPage,
@@ -265,6 +286,8 @@ describe("plugin runtime persistence", () => {
         pageId: "page-2",
         expectedRevision: 1,
         checkpointJson: "{\"cursor\":\"two\"}",
+        hasMore: false,
+        successfulHealth: { _tag: "healthy", checkedAt: "2026-07-14T09:02:00.000Z" },
         committedAt: "2026-07-14T09:02:00.000Z",
         events: [{
           _tag: "tombstone",
@@ -366,19 +389,36 @@ describe("plugin runtime persistence", () => {
         STREAM,
         0,
         page,
-        T1
+        T1,
+        HEALTHY_AT_T1
       )
       const cache = yield* runtime.getCache(WORKSPACE_ID, PLUGIN_ID, STREAM)
       const evidence = yield* runtime.listEvidence(WORKSPACE_ID, PLUGIN_ID, STREAM)
       assert.strictEqual(stream.revision, 1)
       assert.strictEqual(stream.checkpointJson, "\"checkpoint-1\"")
-      assert.lengthOf(stream.lastPageId ?? "", 64)
+      assert.strictEqual(stream.lastPageId, "f28046917b675318eb7ab8c0b07b919ca6938901de5feacfbf7b0ffc56a7ee45")
       assert.lengthOf(cache, 5)
       assert.lengthOf(evidence, 5)
       assert.deepStrictEqual(
         cache.map(({ state }) => state).sort(),
         ["present", "present", "present", "present", "tombstoned"]
       )
+
+      const paginationFlip = yield* runtime.commitNormalizedPage(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        "jira",
+        STREAM,
+        0,
+        { ...page, hasMore: !page.hasMore },
+        T2,
+        HEALTHY_AT_T1
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(paginationFlip))
+      if (Result.isFailure(paginationFlip)) {
+        assert.instanceOf(paginationFlip.failure, SourceIdentityMismatchError)
+      }
+      assert.strictEqual((yield* runtime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)).revision, 1)
 
       const firstEvent = page.events[0]
       if (firstEvent === undefined) return yield* Effect.die("expected first normalized event")
@@ -394,7 +434,8 @@ describe("plugin runtime persistence", () => {
         STREAM,
         1,
         replayPage,
-        T2
+        T2,
+        HEALTHY_AT_T1
       )
       assert.strictEqual(replayed.revision, 2)
       assert.lengthOf(yield* runtime.listEvidence(WORKSPACE_ID, PLUGIN_ID, STREAM), 5)
@@ -410,7 +451,8 @@ describe("plugin runtime persistence", () => {
           ...replayPage,
           events: [{ ...firstEvent, attributes: { priority: "low" } }]
         },
-        T2
+        T2,
+        HEALTHY_AT_T1
       ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(changedReplay))
       if (Result.isFailure(changedReplay)) {
@@ -559,6 +601,79 @@ describe("plugin runtime persistence", () => {
       const evidence = yield* runtime.listEvidence(WORKSPACE_ID, PLUGIN_ID, STREAM)
       assert.deepStrictEqual(evidence.map(({ pageId }) => pageId), ["z-page", "a-page"])
       assert.deepStrictEqual(evidence.map(({ eventId }) => eventId), ["raw-event-1", "order-event-2"])
+    })))
+
+  it.effect("rejects last-success health unless its page is the exact stream head", () =>
+    withRuntime(Effect.gen(function*() {
+      const database = yield* Database
+      const runtime = yield* PluginRuntimeRepository
+      const quarantine = yield* QuarantineRepository
+      yield* setup
+      yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, upsertPage)
+
+      yield* database.sql`UPDATE plugin_sync_streams SET last_page_id = 'missing-page'`
+      const missingHead = yield* runtime.getLastSuccessfulHealth(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missingHead))
+
+      yield* database.sql`UPDATE plugin_sync_streams SET last_page_id = 'page-1'`
+      yield* database.sql`UPDATE plugin_sync_streams SET revision = 2`
+      const revisionMismatch = yield* runtime.getLastSuccessfulHealth(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(revisionMismatch))
+
+      yield* database.sql`UPDATE plugin_sync_streams SET revision = 1,
+        checkpoint_digest = ${"f".repeat(64)}`
+      const checkpointMismatch = yield* runtime.getLastSuccessfulHealth(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(checkpointMismatch))
+
+      yield* database.sql`UPDATE plugin_sync_streams SET
+        checkpoint_digest = (SELECT checkpoint_digest FROM plugin_sync_pages WHERE page_id = 'page-1'),
+        synchronized_at = '2026-07-14T09:01:01.000Z'`
+      const timeMismatch = yield* runtime.getLastSuccessfulHealth(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(timeMismatch))
+      const quarantined = yield* quarantine.list(WORKSPACE_ID)
+      assert.lengthOf(quarantined, 4)
+      assert.isTrue(quarantined.every(({ occurrenceCount }) => occurrenceCount === 1))
+    })))
+
+  it.effect("rejects revision-zero streams carrying checkpoint or synchronization metadata", () =>
+    withRuntime(Effect.gen(function*() {
+      const database = yield* Database
+      const runtime = yield* PluginRuntimeRepository
+      const quarantine = yield* QuarantineRepository
+      yield* setup
+      yield* database.sql`INSERT INTO plugin_sync_streams (
+        workspace_id, plugin_connection_id, provider_id, stream_key, revision,
+        checkpoint_json, checkpoint_digest, last_page_id, synchronized_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${PLUGIN_ID}, 'jira', ${CORRUPT_ZERO_STREAM}, 0,
+        '{}', ${"0".repeat(64)}, NULL, '2026-07-14T09:01:00.000Z'
+      )`
+
+      const result = yield* runtime.getLastSuccessfulHealth(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        CORRUPT_ZERO_STREAM
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      const quarantined = yield* quarantine.list(WORKSPACE_ID)
+      assert.lengthOf(quarantined, 1)
+      assert.strictEqual(quarantined[0]?.recordKind, "plugin-sync-page")
     })))
 
   it.effect("quarantines corrupted descriptor and cache JSON without trusting it", () =>

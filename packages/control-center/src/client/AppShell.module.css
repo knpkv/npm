@@ -1,12 +1,6 @@
 .root {
   min-block-size: 100dvh;
-  background:
-    radial-gradient(
-      circle at 88% -12%,
-      color-mix(in srgb, var(--rly-color-service-codepipeline) 10%, transparent),
-      transparent 34rem
-    ),
-    var(--rly-color-canvas);
+  background: var(--rly-color-canvas);
   color: var(--rly-color-text-1);
 }
 

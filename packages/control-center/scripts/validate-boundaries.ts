@@ -8,7 +8,11 @@ import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { inspectPackageContract } from "./package-contract.js"
-import { inspectSourceBoundaries, type SourceBoundaryViolation } from "./source-boundaries.js"
+import {
+  inspectSourceBoundaries,
+  inspectStylesheetBoundaries,
+  type SourceBoundaryViolation
+} from "./source-boundaries.js"
 
 class BoundaryValidationError extends Data.TaggedError("BoundaryValidationError")<{
   readonly reason: string
@@ -26,7 +30,7 @@ const sourceFiles: (
       const info = yield* fs.stat(absolute)
       if (info.type === "Directory") {
         for (const file of yield* sourceFiles(fs, path, absolute)) files.push(file)
-      } else if (info.type === "File" && /\.tsx?$/.test(entry)) files.push(absolute)
+      } else if (info.type === "File" && /\.(?:css|tsx?)$/.test(entry)) files.push(absolute)
     }
     return files
   }
@@ -54,7 +58,10 @@ const program = Effect.gen(function*() {
   for (const file of yield* sourceFiles(fs, path, sourceRoot)) {
     const sourcePath = path.relative(packageRoot, file).replaceAll("\\", "/")
     const source = yield* fs.readFileString(file)
-    for (const violation of inspectSourceBoundaries(sourcePath, source)) violations.push(violation)
+    const fileViolations = sourcePath.endsWith(".css")
+      ? inspectStylesheetBoundaries(sourcePath, source)
+      : inspectSourceBoundaries(sourcePath, source)
+    for (const violation of fileViolations) violations.push(violation)
   }
 
   if (violations.length > 0) {

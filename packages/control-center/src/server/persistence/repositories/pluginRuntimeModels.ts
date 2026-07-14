@@ -75,6 +75,12 @@ export const PluginSyncPage = Schema.Struct({
   pageId: PluginPageId,
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   checkpointJson: jsonText(65_536),
+  hasMore: Schema.Boolean,
+  successfulHealth: PluginHealth.check(
+    Schema.makeFilter(({ _tag }) => _tag === "healthy" || _tag === "degraded", {
+      expected: "usable plugin health for a successfully committed page"
+    })
+  ),
   committedAt: UtcTimestamp,
   events: Schema.Array(PluginSyncEvent).check(
     Schema.makeFilter((events) => events.length <= 500, {

@@ -12,7 +12,7 @@ interface AgentPageContext {
 
 const DEFAULT_CONTEXT: AgentPageContext = {
   description: "The workspace-wide view of release readiness, people, source health, and agent work.",
-  label: "Today",
+  label: "Overview",
   path: "/"
 }
 

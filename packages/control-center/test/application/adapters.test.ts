@@ -1,9 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Result, Schema, Stream } from "effect"
+import * as DateTime from "effect/DateTime"
+import * as TestClock from "effect/testing/TestClock"
 
 import { OpaqueMediaId, OpaqueSecretReference, PluginConfigurationKey } from "../../src/api/index.js"
-import { EnvironmentId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { derivePersonInitials, Person } from "../../src/domain/actors.js"
+import {
+  EnvironmentId,
+  PersonId,
+  PluginConnectionId,
+  ReleaseId,
+  RoleAssignmentId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -32,6 +42,9 @@ const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
+const SNAPSHOT_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:10:00.000Z")
+
+const epochMillis = (timestamp: UtcTimestamp): number => DateTime.toEpochMillis(timestamp)
 
 const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -87,6 +100,42 @@ const release = Schema.decodeSync(Release)({
   updatedAt: "2026-07-14T10:01:00.000Z",
   version: "2.18.0-rc.1",
   workspaceId: WORKSPACE_ID
+})
+
+const currentRelease = Schema.decodeSync(Release)({
+  ...Schema.encodeSync(Release)(release),
+  freshness: {
+    _tag: "current",
+    pluginHealth: { _tag: "healthy", checkedAt: "2026-07-14T10:01:00.000Z" },
+    provenance: {
+      _tag: "provider",
+      sourceRevision: {
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        vendorImmutableId: "release-42",
+        revision: "release-r1",
+        normalizationSchemaVersion: 1,
+        sourceUrl: null,
+        firstObservedAt: "2026-07-14T10:00:00.000Z",
+        lastObservedAt: "2026-07-14T10:00:00.000Z",
+        synchronizedAt: "2026-07-14T10:01:00.000Z"
+      }
+    },
+    sourceObservedAt: "2026-07-14T10:00:00.000Z",
+    staleAfterSeconds: 300,
+    synchronizedAt: "2026-07-14T10:01:00.000Z"
+  },
+  sourceRevisions: [{
+    pluginConnectionId: PLUGIN_ID,
+    providerId: "jira",
+    vendorImmutableId: "release-42",
+    revision: "release-r1",
+    normalizationSchemaVersion: 1,
+    sourceUrl: null,
+    firstObservedAt: "2026-07-14T10:00:00.000Z",
+    lastObservedAt: "2026-07-14T10:00:00.000Z",
+    synchronizedAt: "2026-07-14T10:01:00.000Z"
+  }]
 })
 
 const withApplication = <Success, Failure>(
@@ -347,6 +396,45 @@ describe("application adapters", () => {
       }
     })))
 
+  it.effect("caps compact collaborators deterministically while preserving the total count", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const people = Array.from({ length: 51 }, (_, index) => {
+        const displayName = `Person ${index.toString().padStart(2, "0")}`
+        const personId = Schema.decodeSync(PersonId)(
+          `01890f6f-6d6a-7cc0-98d3-${index.toString(16).padStart(12, "0")}`
+        )
+        return Schema.decodeSync(Person)({
+          personId,
+          displayName,
+          avatar: { _tag: "initials", text: derivePersonInitials(displayName) },
+          isActive: true,
+          sourceIdentities: []
+        })
+      })
+      for (const person of people) yield* persistence.people.createPerson(WORKSPACE_ID, person, T0)
+      const crowdedRelease = Schema.decodeSync(Schema.toType(Release))({
+        ...release,
+        roleAssignments: people.map((person, index) => ({
+          actor: { _tag: "human", personId: person.personId },
+          assignmentId: Schema.decodeSync(RoleAssignmentId)(
+            `01890f6f-6d6a-7cc0-98d4-${index.toString(16).padStart(12, "0")}`
+          ),
+          lifecycle: { _tag: "active", assignedAt: T0 },
+          role: "release-owner",
+          scope: { _tag: "release", releaseId: RELEASE_ID, workspaceId: WORKSPACE_ID }
+        }))
+      })
+      yield* persistence.releases.create(WORKSPACE_ID, crowdedRelease)
+
+      const portfolio = yield* makePortfolioSnapshots
+      const snapshot = yield* portfolio.snapshot(WORKSPACE_ID)
+      assert.strictEqual(snapshot.releases[0]?.collaboratorCount, 51)
+      assert.lengthOf(snapshot.releases[0]?.collaborators ?? [], 50)
+      assert.strictEqual(snapshot.releases[0]?.collaborators[0]?.displayName, "Person 00")
+      assert.strictEqual(snapshot.releases[0]?.collaborators[49]?.displayName, "Person 49")
+    })))
+
   it.effect("returns a compact factual portfolio without deriving readiness", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
@@ -358,9 +446,33 @@ describe("application adapters", () => {
       assert.lengthOf(snapshot.releases, 1)
       assert.strictEqual(snapshot.releases[0]?.lifecycle, "candidate")
       assert.strictEqual(snapshot.releases[0]?.freshness._tag, "missing")
+      assert.deepStrictEqual(snapshot.releases[0]?.collaborators, [])
       assert.strictEqual(snapshot.releases[0]?.collaboratorCount, 0)
       assert.strictEqual(snapshot.releases[0]?.relatedEntityCount, 0)
       assert.lengthOf(snapshot.plugins, 2)
+    })))
+
+  it.effect("ages current release freshness at snapshot time without appending a release revision", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.releases.create(WORKSPACE_ID, currentRelease)
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+
+      const portfolio = yield* makePortfolioSnapshots
+      const snapshot = yield* portfolio.snapshot(WORKSPACE_ID)
+      const persisted = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+
+      assert.isTrue(DateTime.Equivalence(snapshot.generatedAt, SNAPSHOT_AT))
+      const projectedFreshness = snapshot.releases[0]?.freshness
+      if (projectedFreshness?._tag !== "stale") return yield* Effect.die("expected stale projection")
+      const evaluatedAt = projectedFreshness.evaluatedAt
+      assert.isDefined(evaluatedAt)
+      if (evaluatedAt !== undefined) assert.isTrue(DateTime.Equivalence(evaluatedAt, SNAPSHOT_AT))
+      assert.strictEqual(persisted.revision, 1)
+      assert.strictEqual(persisted.release.freshness._tag, "current")
+      if (persisted.release.freshness._tag === "current") {
+        assert.isUndefined(persisted.release.freshness.evaluatedAt)
+      }
     })))
 
   it.effect("resolves only workspace-owned, bounded safe raster media", () =>

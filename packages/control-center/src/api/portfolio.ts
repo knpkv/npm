@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { Freshness } from "../domain/freshness.js"
-import { EnvironmentId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { EnvironmentId, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
 import { ReleaseRelayProjection } from "../domain/releaseRelay.js"
@@ -20,8 +20,37 @@ const MAXIMUM_PORTFOLIO_RELEASES = 200
 const MAXIMUM_TARGET_ENVIRONMENTS = 50
 const MAXIMUM_SNAPSHOT_JSON_BYTES = 1024 * 1024
 const MAXIMUM_COUNT = 1_000_000
+const MAXIMUM_RELEASE_COLLABORATORS = 50
 
 const BoundedCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(MAXIMUM_COUNT))
+
+/** Release-scoped human responsibility shown in the compact portfolio. */
+export const PortfolioReleaseRole = Schema.Literals(["release-owner", "release-approver"])
+
+/** Decoded compact release responsibility. */
+export type PortfolioReleaseRole = typeof PortfolioReleaseRole.Type
+
+/** Named human collaborator resolved from durable workspace identity. */
+export const PortfolioReleaseCollaborator = Schema.Struct({
+  personId: PersonId,
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  avatarFallback: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4)),
+  role: PortfolioReleaseRole
+}).annotate({ identifier: "PortfolioReleaseCollaborator" })
+
+/** Decoded compact release collaborator. */
+export type PortfolioReleaseCollaborator = typeof PortfolioReleaseCollaborator.Type
+
+const BoundedReleaseCollaborators = Schema.Array(PortfolioReleaseCollaborator).check(
+  Schema.makeFilter((collaborators) => collaborators.length <= MAXIMUM_RELEASE_COLLABORATORS, {
+    expected: `at most ${MAXIMUM_RELEASE_COLLABORATORS} release collaborators`
+  }),
+  Schema.makeFilter(
+    (collaborators) =>
+      new Set(collaborators.map(({ personId, role }) => `${personId}\u0000${role}`)).size === collaborators.length,
+    { expected: "unique person and release-role pairs" }
+  )
+)
 
 /** Compact release projection for the authenticated bird's-eye portfolio. */
 export const PortfolioReleaseSummary = Schema.Struct({
@@ -37,6 +66,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
       expected: `at most ${MAXIMUM_TARGET_ENVIRONMENTS} target environments`
     })
   ),
+  collaborators: BoundedReleaseCollaborators,
   collaboratorCount: BoundedCount,
   relatedEntityCount: BoundedCount,
   updatedAt: UtcTimestamp

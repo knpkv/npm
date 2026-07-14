@@ -33,7 +33,13 @@ export {
   PluginsApiGroup,
   RedactedPluginConfigurationValue
 } from "./plugins.js"
-export { PortfolioApiGroup, PortfolioReleaseSummary, PortfolioSnapshot } from "./portfolio.js"
+export {
+  PortfolioApiGroup,
+  PortfolioReleaseCollaborator,
+  PortfolioReleaseRole,
+  PortfolioReleaseSummary,
+  PortfolioSnapshot
+} from "./portfolio.js"
 export {
   CsrfToken,
   CurrentSession,

@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import styles from "./AppShell.module.css"
 
 const navigation: ReadonlyArray<{ readonly label: string; readonly to: string }> = [
-  { label: "Today", to: "/" },
+  { label: "Overview", to: "/" },
   { label: "Releases", to: "/releases" },
   { label: "Services", to: "/services" }
 ]

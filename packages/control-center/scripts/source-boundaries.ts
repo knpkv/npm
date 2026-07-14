@@ -16,6 +16,7 @@ const isPrototypeImport = (importPath: string): boolean =>
 
 const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
+const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
 
 const withoutQuery = (importPath: string): string => importPath.split(/[?#]/, 1)[0] ?? importPath
 
@@ -59,7 +60,7 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
   const isDomain = isWithin(normalizedSource, "src/domain")
   const isServer = isWithin(normalizedSource, "src/server")
 
-  if (isPrototypeImport(importPath)) return "production code cannot import prototype runtime"
+  if (isPrototypeImport(importPath)) return PROTOTYPE_RUNTIME_REASON
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
   if (
     target !== undefined &&
@@ -141,6 +142,55 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
   visit(sourceFile)
   return imports
 }
+
+type StylesheetReference = {
+  readonly index: number
+  readonly value: string
+}
+
+const stylesheetReferences = (source: string): ReadonlyArray<string> => {
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//gu, (comment) => " ".repeat(comment.length))
+  const references: Array<StylesheetReference> = []
+  const directImports = /@import\s+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/giu
+  const urls = /url\(\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^"')]*?))\s*\)/giu
+  const moduleCompositions = /\bcomposes\s*:[^;{}]*?\bfrom\s+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s;{}]+))/giu
+  const icssValues = /@value\b[^;{}]*?\bfrom\s+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s;{}]+))/giu
+  const icssImports = /:import\s*\(\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s"')]+))\s*\)/giu
+
+  for (const match of withoutComments.matchAll(directImports)) {
+    const value = match[1] ?? match[2]
+    if (value !== undefined) references.push({ index: match.index, value })
+  }
+  for (const match of withoutComments.matchAll(urls)) {
+    const value = (match[1] ?? match[2] ?? match[3])?.trim()
+    if (value !== undefined && value.length > 0) references.push({ index: match.index, value })
+  }
+  for (const match of withoutComments.matchAll(moduleCompositions)) {
+    const value = (match[1] ?? match[2] ?? match[3])?.trim()
+    if (value !== undefined && value.length > 0) references.push({ index: match.index, value })
+  }
+  for (const match of withoutComments.matchAll(icssValues)) {
+    const value = (match[1] ?? match[2] ?? match[3])?.trim()
+    if (value !== undefined && value.length > 0) references.push({ index: match.index, value })
+  }
+  for (const match of withoutComments.matchAll(icssImports)) {
+    const value = (match[1] ?? match[2] ?? match[3])?.trim()
+    if (value !== undefined && value.length > 0) references.push({ index: match.index, value })
+  }
+
+  return references.sort((left, right) => left.index - right.index).map(({ value }) => value)
+}
+
+/** Return prototype-boundary violations found in one production stylesheet. */
+export const inspectStylesheetBoundaries = (
+  sourcePath: string,
+  source: string
+): ReadonlyArray<SourceBoundaryViolation> =>
+  stylesheetReferences(source).flatMap((importPath) =>
+    isPrototypeImport(importPath)
+      ? [{ importPath, reason: PROTOTYPE_RUNTIME_REASON, sourcePath }]
+      : []
+  )
 
 /** Return every package-boundary violation found in one production source file. */
 export const inspectSourceBoundaries = (sourcePath: string, source: string): ReadonlyArray<SourceBoundaryViolation> =>

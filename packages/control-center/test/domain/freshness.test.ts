@@ -2,7 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { Freshness } from "../../src/domain/freshness.js"
+import { evaluateFreshnessAt, Freshness } from "../../src/domain/freshness.js"
+import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 
 const PLUGIN_CONNECTION_ID = "01912345-6789-7abc-8def-0123456789ab"
 
@@ -113,6 +114,61 @@ describe("Freshness", () => {
         })
       )
     ).toBe(true)
+  })
+
+  it.effect("ages a persisted current fact at projection time without falsifying plugin health", () =>
+    Effect.gen(function*() {
+      const persisted = yield* Schema.decodeUnknownEffect(Freshness)({
+        _tag: "current",
+        pluginHealth: healthy,
+        provenance: { _tag: "provider", sourceRevision },
+        sourceObservedAt: sourceRevision.lastObservedAt,
+        staleAfterSeconds: 900,
+        synchronizedAt: "2026-07-13T08:31:00.000Z"
+      })
+      const evaluatedAt = Schema.decodeSync(UtcTimestamp)("2026-07-13T08:45:00.001Z")
+      const projected = yield* evaluateFreshnessAt(persisted, evaluatedAt)
+
+      if (projected._tag !== "stale") return yield* Effect.die("expected stale projection")
+      expect(projected.pluginHealth).toEqual(persisted.pluginHealth)
+      expect(projected.evaluatedAt).toEqual(evaluatedAt)
+      expect(projected.provenance._tag).toBe("cache")
+      expect(persisted._tag).toBe("current")
+      if (persisted._tag === "current") expect(persisted).not.toHaveProperty("evaluatedAt")
+    }))
+
+  it("rejects projection evaluation before the recorded plugin health check", () => {
+    const current = Schema.decodeUnknownResult(Freshness)({
+      _tag: "current",
+      evaluatedAt: "2026-07-13T08:31:59.999Z",
+      pluginHealth: healthy,
+      provenance: { _tag: "provider", sourceRevision },
+      sourceObservedAt: sourceRevision.lastObservedAt,
+      staleAfterSeconds: 900,
+      synchronizedAt: "2026-07-13T08:31:00.000Z"
+    })
+    const stale = Schema.decodeUnknownResult(Freshness)({
+      _tag: "stale",
+      evaluatedAt: "2026-07-13T09:00:00.000Z",
+      pluginHealth: {
+        _tag: "unavailable",
+        checkedAt: "2026-07-13T10:00:00.000Z",
+        failureClass: "outage",
+        retryAt: null,
+        safeMessage: "Provider is temporarily unavailable"
+      },
+      provenance: {
+        _tag: "cache",
+        cachedAt: "2026-07-13T08:31:00.000Z",
+        sourceRevision
+      },
+      sourceObservedAt: sourceRevision.lastObservedAt,
+      staleAfterSeconds: 900,
+      synchronizedAt: "2026-07-13T08:31:30.000Z"
+    })
+
+    expect(Result.isFailure(current)).toBe(true)
+    expect(Result.isFailure(stale)).toBe(true)
   })
 
   it("distinguishes a successful missing result from an unavailable source", () => {

@@ -7,3 +7,13 @@ export {
   pluginAdministrationLayer
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
+export {
+  reconcileFakeReleaseProjection,
+  synchronizeFakeRelease,
+  synchronizeFakeReleaseFromMap
+} from "./releaseSynchronization.js"
+export type {
+  ReleaseSynchronizationFailure,
+  ReleaseSynchronizationInput,
+  ReleaseSynchronizationOutcome
+} from "./releaseSynchronization.js"

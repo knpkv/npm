@@ -13,12 +13,24 @@ const pairedSession = {
 }
 
 test("renders the private browser application boundary", async ({ page }) => {
+  await page.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "private-boundary-e2e",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
   await page.goto("/")
-  await expect(page.getByRole("heading", { level: 1, name: "Everything that can ship." })).toBeVisible()
-  await expect(page.getByText("Workspace is private")).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+  await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
-  for (const name of ["Today", "Releases", "Services", "Relay context"]) {
+  for (const name of ["Overview", "Releases", "Services", "Relay context"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
   }
@@ -50,7 +62,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Relay context" })).toBeFocused()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Today" })).toBeFocused()
+  await expect(page.getByRole("link", { name: "Overview" })).toBeFocused()
 })
 
 test("explains credential rejection separately from server availability", async ({ page }) => {
@@ -113,9 +125,38 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await newTab.goto("/releases")
   await expect(newTab.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
   await expect.poll(() => newTab.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
-  await newTab.getByRole("link", { name: "Today" }).click()
+  await newTab.getByRole("link", { name: "Overview" }).click()
   await expect(newTab.getByText("Owner browser paired")).toBeVisible()
   await newTab.close()
+})
+
+test("invalidates a paired browser when the authoritative portfolio rejects its session", async ({ context, page }) => {
+  const csrfToken = "cd".repeat(32)
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken, session: pairedSession }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/portfolio/snapshot", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "portfolio-session-expired-e2e",
+        message: "Session expired"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+
+  await page.goto("/")
+  await expect(page.getByText("Owner browser paired")).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(1)
+  await expect(page.getByText("Release facts stay private")).toBeVisible()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBeNull()
 })
 
 test("ignores a stale session hydration after replacing the paired session", async ({ context, page }) => {
@@ -218,10 +259,11 @@ test("reports a consumed pairing when session storage rejects its mutation proof
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
   await expect(page).toHaveURL("/")
-  const storageAlert = page.getByRole("alert")
-  await expect(storageAlert).toHaveText(
-    "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload."
+  const storageAlert = page.getByText(
+    "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload.",
+    { exact: true }
   )
+  await expect(storageAlert).toHaveAttribute("role", "alert")
   await expect(storageAlert).toBeFocused()
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBeNull()
   expect(pageErrors).toEqual([])
@@ -244,8 +286,8 @@ test("clears a stale mutation proof after authoritative anonymous hydration", as
 
   await page.goto("/releases")
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBeNull()
-  await page.getByRole("link", { name: "Today" }).click()
-  await expect(page.getByRole("link", { name: "Pair this browser" })).toBeVisible()
+  await page.getByRole("link", { name: "Overview" }).click()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(1)
 })
 
 test("reports unavailable storage when an anonymous proof cannot be removed", async ({ context, page }) => {
@@ -272,9 +314,9 @@ test("reports unavailable storage when an anonymous proof cannot be removed", as
   })
 
   await page.goto("/")
-  await expect(page.getByText(
-    "Session storage is unavailable. Check storage permissions or space, then reload."
-  )).toBeVisible()
+  const storageAlert = page.getByRole("alert")
+  await expect(storageAlert).toHaveCount(1)
+  await expect(storageAlert.getByText("Session storage unavailable")).toBeVisible()
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
 })
 
@@ -294,4 +336,5 @@ test("distinguishes a blocked session read from an unavailable server", async ({
 
   await page.goto("/")
   await expect(page.getByText("Session access blocked on this connection")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
 })

@@ -306,6 +306,37 @@ const makePeopleRepository = Effect.gen(function*() {
     })
   })
 
+  const findPersonBySourceIdentity = Effect.fn("PeopleRepository.findPersonBySourceIdentity")(function*(
+    workspaceId: WorkspaceId,
+    identity: PersonSourceIdentity
+  ) {
+    const rows = yield* sql<Record<string, unknown>>`SELECT person_id AS personId
+      FROM person_identities
+      WHERE workspace_id = ${workspaceId}
+        AND plugin_connection_id = ${identity.pluginConnectionId}
+        AND provider_id = ${identity.providerId}
+        AND vendor_person_id = ${identity.vendorPersonId}`.pipe(
+      mapPersistenceOperation("people.find-person-by-source-identity")
+    )
+    if (rows.length === 0) {
+      return yield* new RecordNotFoundError({
+        workspaceId,
+        recordKind: "person-identity",
+        recordKey: identity.pluginConnectionId
+      })
+    }
+    const decoded = Schema.decodeUnknownResult(Schema.Struct({ personId: PersonId }))(rows[0])
+    if (Result.isFailure(decoded)) {
+      return yield* new PersistedRecordError({
+        workspaceId,
+        recordKind: "person-identity",
+        recordKey: identity.pluginConnectionId,
+        diagnosticCode: "person-identity-schema-invalid"
+      })
+    }
+    return yield* getPerson(workspaceId, decoded.success.personId)
+  })
+
   const insertPerson = SqlSchema.void({
     Request: Schema.Struct({
       workspaceId: WorkspaceId,
@@ -531,6 +562,7 @@ const makePeopleRepository = Effect.gen(function*() {
       return yield* getPerson(workspaceId, person.personId)
     }),
     getPerson,
+    findPersonBySourceIdentity,
     updatePerson: Effect.fn("PeopleRepository.updatePerson")(function*(
       workspaceId: WorkspaceId,
       person: Person,

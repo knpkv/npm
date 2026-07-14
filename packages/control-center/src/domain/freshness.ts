@@ -1,4 +1,5 @@
 import * as DateTime from "effect/DateTime"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PluginConnectionId } from "./identifiers.js"
 import { SourceRevision } from "./sourceRevision.js"
@@ -91,7 +92,19 @@ const NoCacheProvenance = Schema.TaggedStruct("none", {
 const sourceAgeSecondsAt = (sourceObservedAt: UtcTimestamp, evaluatedAt: UtcTimestamp): number =>
   (DateTime.toEpochMillis(evaluatedAt) - DateTime.toEpochMillis(sourceObservedAt)) / 1_000
 
+const freshnessEvaluation = {
+  // Older persisted revisions predate explicit projection-time evaluation. In
+  // that case their plugin health check remains the historical evaluation time.
+  evaluatedAt: Schema.optional(UtcTimestamp)
+}
+
+const evaluatedAtOrHealthCheck = (
+  evaluatedAt: UtcTimestamp | undefined,
+  pluginHealth: PluginHealth
+): UtcTimestamp => evaluatedAt ?? pluginHealth.checkedAt
+
 const CurrentFreshness = Schema.TaggedStruct("current", {
+  ...freshnessEvaluation,
   pluginHealth: UsablePluginHealth,
   provenance: Schema.Union([ProviderProvenance, CachedProvenance]),
   sourceObservedAt: UtcTimestamp,
@@ -99,13 +112,14 @@ const CurrentFreshness = Schema.TaggedStruct("current", {
   synchronizedAt: UtcTimestamp
 }).check(
   Schema.makeFilter(
-    ({ pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
+    ({ evaluatedAt, pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
       DateTime.Equivalence(sourceObservedAt, provenance.sourceRevision.lastObservedAt) &&
       DateTime.Order(provenance.sourceRevision.synchronizedAt, synchronizedAt) <= 0 &&
       (provenance._tag === "provider" || DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0) &&
       DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
-      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) >= 0 &&
-      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) <= staleAfterSeconds,
+      (evaluatedAt === undefined || DateTime.Order(pluginHealth.checkedAt, evaluatedAt) <= 0) &&
+      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) >= 0 &&
+      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) <= staleAfterSeconds,
     {
       expected: "current source data to match its revision and remain within its stale threshold"
     }
@@ -113,6 +127,7 @@ const CurrentFreshness = Schema.TaggedStruct("current", {
 )
 
 const StaleFreshness = Schema.TaggedStruct("stale", {
+  ...freshnessEvaluation,
   pluginHealth: PluginHealth,
   provenance: CachedProvenance,
   sourceObservedAt: UtcTimestamp,
@@ -120,12 +135,13 @@ const StaleFreshness = Schema.TaggedStruct("stale", {
   synchronizedAt: UtcTimestamp
 }).check(
   Schema.makeFilter(
-    ({ pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
+    ({ evaluatedAt, pluginHealth, provenance, sourceObservedAt, staleAfterSeconds, synchronizedAt }) =>
       DateTime.Equivalence(sourceObservedAt, provenance.sourceRevision.lastObservedAt) &&
       DateTime.Order(sourceObservedAt, synchronizedAt) <= 0 &&
       DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0 &&
       DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
-      sourceAgeSecondsAt(sourceObservedAt, pluginHealth.checkedAt) > staleAfterSeconds,
+      (evaluatedAt === undefined || DateTime.Order(pluginHealth.checkedAt, evaluatedAt) <= 0) &&
+      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) > staleAfterSeconds,
     {
       expected: "stale cache data to be chronological and beyond its stale threshold"
     }
@@ -161,3 +177,28 @@ export const Freshness = Schema.Union([
 
 /** Decoded normalized-data freshness. */
 export type Freshness = typeof Freshness.Type
+
+/** Re-evaluate persisted freshness for a read projection without rewriting its source facts. */
+export const evaluateFreshnessAt = Effect.fn("Freshness.evaluateAt")(function*(
+  freshness: Freshness,
+  evaluatedAt: UtcTimestamp
+): Effect.fn.Return<Freshness, Schema.SchemaError> {
+  if (freshness._tag !== "current" && freshness._tag !== "stale") return freshness
+  const isStale = freshness._tag === "stale" ||
+    sourceAgeSecondsAt(freshness.sourceObservedAt, evaluatedAt) > freshness.staleAfterSeconds
+  const provenance = isStale
+    ? freshness.provenance._tag === "cache"
+      ? freshness.provenance
+      : {
+        _tag: "cache",
+        cachedAt: freshness.synchronizedAt,
+        sourceRevision: freshness.provenance.sourceRevision
+      }
+    : freshness.provenance
+  return yield* Schema.decodeUnknownEffect(Schema.toType(Freshness))({
+    ...freshness,
+    _tag: isStale ? "stale" : "current",
+    evaluatedAt,
+    provenance
+  })
+})

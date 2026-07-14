@@ -9,7 +9,7 @@ import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import type { PluginHealth } from "../../../domain/freshness.js"
+import { PluginHealth } from "../../../domain/freshness.js"
 import type { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import { NegotiatedPluginDescriptorV1 } from "../../../domain/plugins/descriptor.js"
 import { NormalizedPluginEventV1, type PluginSyncPageV1 } from "../../../domain/plugins/events.js"
@@ -499,10 +499,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
         pageId: page.pageId,
         expectedRevision: page.expectedRevision,
         checkpointJson: page.checkpointJson,
+        hasMore: page.hasMore,
         events: page.events
       })
     )
     const checkpointDigest = yield* digestText(page.checkpointJson)
+    const successfulHealthJson = yield* serialize(yield* Schema.encodeEffect(PluginHealth)(page.successfulHealth))
+    const successfulHealthDigest = yield* digestText(successfulHealthJson)
     const committedAt = encodeTimestamp(page.committedAt)
     const payloadDigests = yield* Effect.forEach(
       page.events,
@@ -548,10 +551,12 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
 
         yield* sql`INSERT INTO plugin_sync_pages (
           workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
-          page_digest, checkpoint_digest, event_count, committed_at
+          page_digest, checkpoint_digest, event_count, committed_at, has_more,
+          successful_health_json, successful_health_digest
         ) VALUES (
           ${workspaceId}, ${pluginConnectionId}, ${page.streamKey}, ${page.pageId}, ${page.expectedRevision},
-          ${pageDigest}, ${checkpointDigest}, ${page.events.length}, ${committedAt}
+          ${pageDigest}, ${checkpointDigest}, ${page.events.length}, ${committedAt}, ${page.hasMore},
+          ${successfulHealthJson}, ${successfulHealthDigest}
         )`
 
         for (let ordinal = 0; ordinal < page.events.length; ordinal++) {
@@ -652,7 +657,8 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     streamKey: PluginStreamKey,
     expectedRevision: number,
     page: PluginSyncPageV1,
-    committedAt: UtcTimestamp
+    committedAt: UtcTimestamp,
+    successfulHealth: PluginHealth
   ) {
     const pageId = yield* digestText(
       yield* serialize({
@@ -737,9 +743,102 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       pageId,
       expectedRevision,
       checkpointJson,
+      hasMore: page.hasMore,
+      successfulHealth: yield* Schema.encodeEffect(PluginHealth)(successfulHealth),
       committedAt: encodeTimestamp(committedAt),
       events
     })
+  })
+
+  const getLastSuccessfulHealth = Effect.fn("PluginRuntimeRepository.getLastSuccessfulHealth")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rows = yield* sql<Record<string, unknown>>`SELECT
+      page.successful_health_json AS successfulHealthJson,
+      page.successful_health_digest AS successfulHealthDigest,
+      page.expected_revision AS pageExpectedRevision,
+      page.checkpoint_digest AS pageCheckpointDigest,
+      page.committed_at AS pageCommittedAt,
+      stream.revision AS streamRevision,
+      stream.last_page_id AS streamLastPageId,
+      stream.checkpoint_digest AS streamCheckpointDigest,
+      stream.synchronized_at AS streamSynchronizedAt
+      FROM plugin_sync_streams AS stream
+      LEFT JOIN plugin_sync_pages AS page
+        ON page.workspace_id = stream.workspace_id
+        AND page.plugin_connection_id = stream.plugin_connection_id
+        AND page.stream_key = stream.stream_key
+        AND page.page_id = stream.last_page_id
+      WHERE stream.workspace_id = ${workspaceId}
+        AND stream.plugin_connection_id = ${pluginConnectionId}
+        AND stream.stream_key = ${streamKey}`
+    if (rows.length === 0) return null
+    const row = rows[0]
+    if (
+      row?.streamRevision === 0 &&
+      row.streamLastPageId === null &&
+      row.streamCheckpointDigest === null &&
+      row.streamSynchronizedAt === null
+    ) return null
+    const healthJson = row?.successfulHealthJson
+    const healthDigest = row?.successfulHealthDigest
+    const exactHead = typeof row?.pageExpectedRevision === "number" &&
+      typeof row.streamRevision === "number" &&
+      row.pageExpectedRevision + 1 === row.streamRevision &&
+      typeof row.pageCheckpointDigest === "string" &&
+      row.pageCheckpointDigest === row.streamCheckpointDigest &&
+      typeof row.pageCommittedAt === "string" &&
+      row.pageCommittedAt === row.streamSynchronizedAt
+    if (!exactHead) {
+      const observedAt = yield* DateTime.now
+      yield* quarantine.recordMalformed(workspaceId, {
+        recordKind: "plugin-sync-page",
+        recordKey: pluginConnectionId,
+        schemaVersion: 1,
+        payloadDigest: yield* digestUnknown(row),
+        diagnosticCode: "plugin-sync-page-schema-invalid",
+        diagnosticSummary: "Plugin sync page failed schema validation.",
+        observedAt
+      })
+      return yield* new PersistedRecordError({
+        workspaceId,
+        recordKind: "plugin-sync-page",
+        recordKey: pluginConnectionId,
+        diagnosticCode: "plugin-sync-page-schema-invalid"
+      })
+    }
+    if (healthJson === null && healthDigest === null) return null
+    const parsed = typeof healthJson === "string"
+      ? Schema.decodeUnknownResult(Schema.fromJsonString(PluginHealth))(healthJson)
+      : null
+    const actualDigest = typeof healthJson === "string" ? yield* digestText(healthJson) : null
+    if (
+      parsed === null ||
+      Result.isFailure(parsed) ||
+      (parsed.success._tag !== "healthy" && parsed.success._tag !== "degraded") ||
+      typeof healthDigest !== "string" ||
+      actualDigest !== healthDigest
+    ) {
+      const observedAt = yield* DateTime.now
+      yield* quarantine.recordMalformed(workspaceId, {
+        recordKind: "plugin-sync-page",
+        recordKey: pluginConnectionId,
+        schemaVersion: 1,
+        payloadDigest: yield* digestUnknown(row),
+        diagnosticCode: "plugin-sync-page-schema-invalid",
+        diagnosticSummary: "Plugin sync page failed schema validation.",
+        observedAt
+      })
+      return yield* new PersistedRecordError({
+        workspaceId,
+        recordKind: "plugin-sync-page",
+        recordKey: pluginConnectionId,
+        diagnosticCode: "plugin-sync-page-schema-invalid"
+      })
+    }
+    return parsed.success
   })
 
   const getCache = Effect.fn("PluginRuntimeRepository.getCache")(function*(
@@ -902,6 +1001,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     commitNormalizedPage,
     commitPage,
     getCache,
+    getLastSuccessfulHealth,
     getRuntime,
     getStream,
     listEvidence,

@@ -9,15 +9,21 @@ import {
   PairingCode,
   PatchPluginConfigurationRequest,
   PluginListResponse,
+  PortfolioReleaseCollaborator,
+  PortfolioReleaseSummary,
   PortfolioSnapshot,
   SessionListResponse
 } from "../../src/api/index.js"
+import { ReleaseId } from "../../src/domain/identifiers.js"
+import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 
 const timestamp = "2026-07-14T10:00:00.000Z"
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
 const sessionId = "01890f6f-6d6a-7cc0-98d2-000000000011"
 const personId = "01890f6f-6d6a-7cc0-98d2-000000000021"
 const pluginConnectionId = "01890f6f-6d6a-7cc0-98d2-000000000031"
+const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000041")
+const environmentId = "01890f6f-6d6a-7cc0-98d2-000000000042"
 
 const encodedSession = {
   sessionId,
@@ -114,6 +120,59 @@ describe("public API schemas", () => {
     assert.isTrue(
       Result.isFailure(Schema.decodeUnknownResult(PluginListResponse)(Array.from({ length: 101 }, () => encodedPlugin)))
     )
+  })
+
+  it("bounds named release collaborators and requires explicit release roles", () => {
+    const collaborator = {
+      personId,
+      displayName: "Ada Lovelace",
+      avatarFallback: "AL",
+      role: "release-owner"
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioReleaseCollaborator)(collaborator)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PortfolioReleaseCollaborator)({
+        ...collaborator,
+        role: "watcher"
+      })
+    ))
+    const release = {
+      releaseId,
+      serviceName: "payments-api",
+      version: "2.18.0-rc.1",
+      lifecycle: "candidate",
+      relay: deriveReleaseRelay(releaseId),
+      freshness: {
+        _tag: "missing",
+        pluginHealth: { _tag: "healthy", checkedAt: timestamp },
+        provenance: { _tag: "none", pluginConnectionId },
+        sourceObservedAt: null,
+        staleAfterSeconds: 300,
+        synchronizedAt: timestamp
+      },
+      targetEnvironmentIds: [environmentId],
+      collaborators: [collaborator],
+      collaboratorCount: 1,
+      relatedEntityCount: 0,
+      updatedAt: timestamp
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioReleaseSummary)(release)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PortfolioReleaseSummary)({
+        ...release,
+        collaborators: [collaborator, collaborator]
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PortfolioReleaseSummary)({
+        ...release,
+        collaborators: Array.from({ length: 51 }, (_, index) => ({
+          ...collaborator,
+          personId: `01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`,
+          role: index % 2 === 0 ? "release-owner" : "release-approver"
+        }))
+      })
+    ))
   })
 
   it("returns a bounded CSRF proof with the authenticated current session", () => {

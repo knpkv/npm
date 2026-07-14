@@ -188,7 +188,44 @@ describe("Control Center migrations", () => {
         "0004_plugin_runtime": migration0004PluginRuntime
       })
       yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
         yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
+        yield* sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000091', 'Legacy', 1,
+          '2026-07-14T09:00:00.000Z', '2026-07-14T09:00:00.000Z'
+        )`
+        yield* sql`INSERT INTO plugin_connections (
+          workspace_id, plugin_connection_id, provider_id, display_name,
+          revision, is_enabled, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000091',
+          '01890f6f-6d6a-7cc0-98d2-000000000092',
+          'jira', 'Legacy Jira', 1, 1,
+          '2026-07-14T09:00:00.000Z', '2026-07-14T09:00:00.000Z'
+        )`
+        yield* sql`INSERT INTO plugin_sync_streams (
+          workspace_id, plugin_connection_id, provider_id, stream_key, revision,
+          checkpoint_json, checkpoint_digest, last_page_id, synchronized_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000091',
+          '01890f6f-6d6a-7cc0-98d2-000000000092',
+          'jira', 'releases', 1, '{}',
+          '0000000000000000000000000000000000000000000000000000000000000000',
+          'legacy-page', '2026-07-14T09:01:00.000Z'
+        )`
+        yield* sql`INSERT INTO plugin_sync_pages (
+          workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
+          page_digest, checkpoint_digest, event_count, committed_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000091',
+          '01890f6f-6d6a-7cc0-98d2-000000000092',
+          'releases', 'legacy-page', 0,
+          '0000000000000000000000000000000000000000000000000000000000000000',
+          '0000000000000000000000000000000000000000000000000000000000000000',
+          0, '2026-07-14T09:01:00.000Z'
+        )`
       }).pipe(
         Effect.provide(
           LibsqlClient.layer({
@@ -206,7 +243,18 @@ describe("Control Center migrations", () => {
           ORDER BY migration_id`
         const tables = yield* database.sql<{ readonly name: string }>`SELECT name FROM sqlite_master
           WHERE type = 'table' AND name LIKE 'plugin_%' ORDER BY name`
-        return { ledger, tables }
+        const pageColumns = yield* database.sql<{
+          readonly name: string
+          readonly notNull: number
+        }>`SELECT name, "notnull" AS "notNull" FROM pragma_table_info('plugin_sync_pages')`
+        const legacyPages = yield* database.sql<{
+          readonly hasMore: number
+          readonly successfulHealthDigest: string | null
+          readonly successfulHealthJson: string | null
+        }>`SELECT has_more AS hasMore, successful_health_json AS successfulHealthJson,
+          successful_health_digest AS successfulHealthDigest
+          FROM plugin_sync_pages WHERE page_id = 'legacy-page'`
+        return { ledger, legacyPages, pageColumns, tables }
       }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
 
       assert.deepStrictEqual(snapshot.ledger, EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name })))
@@ -220,6 +268,21 @@ describe("Control Center migrations", () => {
         "plugin_sync_pages",
         "plugin_sync_streams"
       ])
+      assert.deepStrictEqual(
+        snapshot.pageColumns
+          .filter(({ name }) => name === "has_more" || name.startsWith("successful_health_"))
+          .map(({ name, notNull }) => ({ name, notNull })),
+        [
+          { name: "has_more", notNull: 1 },
+          { name: "successful_health_json", notNull: 0 },
+          { name: "successful_health_digest", notNull: 0 }
+        ]
+      )
+      assert.deepStrictEqual(snapshot.legacyPages, [{
+        hasMore: 0,
+        successfulHealthDigest: null,
+        successfulHealthJson: null
+      }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades an exact previous schema without rewriting its ledger entry", () =>

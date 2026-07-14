@@ -31,6 +31,11 @@ import {
   type ControlCenterBootstrapOptions
 } from "./Bootstrap.js"
 import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
+import {
+  type ReleaseSynchronizationStartupError,
+  releaseSynchronizationStartupLayer,
+  type ReleaseSynchronizationStartupOptions
+} from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 
 type ControlCenterApplicationServices = MediaReads | PluginAdministration | PortfolioSnapshots
@@ -42,6 +47,7 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly secretRoot: SecretRoot
   readonly staticAssets: StaticAssetStoreOptions
   readonly bootstrap?: ControlCenterBootstrapOptions | null
+  readonly releaseSynchronization?: ReleaseSynchronizationStartupOptions | null
   readonly applicationServices?: Layer.Layer<
     ControlCenterApplicationServices,
     ApplicationError,
@@ -55,6 +61,7 @@ export type ControlCenterServerError<ApplicationError = never> =
   | ControlCenterBootstrapError
   | DirectTlsServerError
   | PersistenceLayerError
+  | ReleaseSynchronizationStartupError
   | SecretStoreError
   | ServeError
   | StaticAssetStoreError
@@ -102,7 +109,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     staticApplicationLayer,
     requestUrlBoundaryLayer,
     requestBoundaryLayer,
-    controlCenterBootstrapLayer(options.bootstrap ?? null)
+    releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
+      Layer.provideMerge(controlCenterBootstrapLayer(options.bootstrap ?? null))
+    )
   )
   return {
     application: routes.pipe(Layer.provideMerge(runtimeServices)),

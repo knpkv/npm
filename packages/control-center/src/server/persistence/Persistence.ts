@@ -146,6 +146,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("people.create-role", people.createRoleAssignment(...args)),
       getPerson: (...args: Parameters<PeopleRepositoryService["getPerson"]>) =>
         publicOperation("people.get-person", people.getPerson(...args)),
+      findPersonBySourceIdentity: (...args: Parameters<PeopleRepositoryService["findPersonBySourceIdentity"]>) =>
+        publicOperation("people.find-person-by-source-identity", people.findPersonBySourceIdentity(...args)),
       getRoleAssignment: (...args: Parameters<PeopleRepositoryService["getRoleAssignment"]>) =>
         publicOperation("people.get-role", people.getRoleAssignment(...args)),
       listRoleAssignments: (...args: Parameters<PeopleRepositoryService["listRoleAssignments"]>) =>
@@ -178,6 +180,11 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.commit-normalized-page", pluginRuntime.commitNormalizedPage(...args)),
       getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>
         publicOperation("plugin-runtime.get-cache", pluginRuntime.getCache(...args)),
+      getLastSuccessfulHealth: (...args: Parameters<PluginRuntimeRepositoryService["getLastSuccessfulHealth"]>) =>
+        publicOperation(
+          "plugin-runtime.get-last-successful-health",
+          pluginRuntime.getLastSuccessfulHealth(...args)
+        ),
       getRuntime: (...args: Parameters<PluginRuntimeRepositoryService["getRuntime"]>) =>
         publicOperation("plugin-runtime.get", pluginRuntime.getRuntime(...args)),
       getStream: (...args: Parameters<PluginRuntimeRepositoryService["getStream"]>) =>
