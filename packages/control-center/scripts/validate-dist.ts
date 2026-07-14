@@ -9,6 +9,11 @@ import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import * as ts from "typescript"
 import { type ControlCenterBuildTarget, decodeBuildGraph, inspectBuildGraph } from "./build-graph.js"
+import {
+  decodeClientBuildManifest,
+  initialJavaScriptArtifacts,
+  inspectClientBuildContract
+} from "./clientBuildContract.js"
 
 class DistValidationError extends Data.TaggedError("DistValidationError")<{
   readonly reason: string
@@ -68,9 +73,31 @@ const program = Effect.gen(function*() {
     if (!(yield* fs.exists(path.join(packageRoot, artifact)))) failures.push(`missing ${artifact}`)
   }
 
+  const clientArtifacts = yield* filesWithin(fs, path, clientRoot)
   const serverArtifacts = yield* filesWithin(fs, path, serverRoot)
   const serverFiles = serverArtifacts.map((file) => path.relative(serverRoot, file).replaceAll("\\", "/"))
   if (serverFiles.some((file) => file.startsWith("client/"))) failures.push("server build emitted browser source")
+
+  const clientManifestSource = yield* fs.readFileString(path.join(clientRoot, ".vite/manifest.json"))
+  const clientManifestValue = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+    clientManifestSource
+  ).pipe(Effect.mapError(() => new DistValidationError({ reason: "invalid client manifest JSON" })))
+  const clientManifest = decodeClientBuildManifest(clientManifestValue)
+  if (clientManifest === undefined) {
+    failures.push("invalid client manifest")
+  } else {
+    const clientArtifactPaths = new Map(
+      clientArtifacts.map((file) => [path.relative(clientRoot, file).replaceAll("\\", "/"), file])
+    )
+    const clientArtifactSizes = new Map<string, number>()
+    for (const artifact of initialJavaScriptArtifacts(clientManifest)) {
+      const absolute = clientArtifactPaths.get(artifact)
+      if (absolute === undefined) continue
+      const info = yield* fs.stat(absolute)
+      clientArtifactSizes.set(artifact, Number(info.size))
+    }
+    for (const violation of inspectClientBuildContract(clientManifest, clientArtifactSizes)) failures.push(violation)
+  }
 
   const pluginDefinitionDeclaration = path.join(
     serverRoot,
@@ -146,11 +173,16 @@ const program = Effect.gen(function*() {
 
   for (
     const contract of [
-      { forbidden: ["/src/server/", "@knpkv/control-center/server"], name: "client", root: clientRoot },
-      { forbidden: ["/src/client/", "@knpkv/rly"], name: "server", root: serverRoot }
+      {
+        files: clientArtifacts,
+        forbidden: ["/src/server/", "@knpkv/control-center/server"],
+        name: "client",
+        root: clientRoot
+      },
+      { files: serverArtifacts, forbidden: ["/src/client/", "@knpkv/rly"], name: "server", root: serverRoot }
     ]
   ) {
-    for (const file of yield* filesWithin(fs, path, contract.root)) {
+    for (const file of contract.files) {
       if (!/\.(?:css|html|js|json|map)$/.test(file)) continue
       const source = yield* fs.readFileString(file)
       const forbidden = contract.forbidden.find((fragment) => source.includes(fragment))
