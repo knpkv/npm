@@ -257,6 +257,80 @@ describe("Control Center source boundaries", () => {
     ).toEqual([])
   })
 
+  it("rejects forbidden literal imports behind wrapped require callees", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const parenthesized = (require)(\"../server/parenthesized.js\")",
+          "const asserted = (require as NodeRequire)(\"../server/asserted.js\", { ignored: true })",
+          "const nonNull = require!(\"../server/non-null.js\")"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "../server/parenthesized.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/asserted.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/non-null.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("rejects non-literal imports behind wrapped require callees", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const parenthesized = (path: string) => (require)(path)",
+          "const asserted = (path: string) => (require as NodeRequire)(path, { ignored: true })",
+          "const nonNull = (path: string) => require!(path)"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("accepts wrapped require calls for allowed paths and ignores zero arguments", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const parenthesized = (require)(\"../domain/release.js\")",
+          "const asserted = (require as NodeRequire)(\"../domain/person.js\", { ignored: true })",
+          "const nonNull = require!(\"../domain/pipeline.js\")",
+          "const emptyParenthesized = (require)()",
+          "const emptyAsserted = (require as NodeRequire)()",
+          "const method = obj.require(\"../server/not-a-module-loader.js\")"
+        ].join("\n")
+      )
+    ).toEqual([])
+  })
+
   it("ignores empty import and require calls without indexing past their arguments", () => {
     expect(inspectModuleImports("src/client/module.ts", "import(); require()")).toEqual([])
   })

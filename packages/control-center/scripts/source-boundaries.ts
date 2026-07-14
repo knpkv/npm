@@ -18,6 +18,30 @@ const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
 
+const withoutOuterExpressions = (expression: ts.Expression): ts.Expression => {
+  let current = expression
+
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isPartiallyEmittedExpression(current) ||
+    ts.isExpressionWithTypeArguments(current)
+  ) {
+    current = current.expression
+  }
+
+  return current
+}
+
+const isRequireCall = (node: ts.Node): node is ts.CallExpression => {
+  if (!ts.isCallExpression(node)) return false
+  const callee = withoutOuterExpressions(node.expression)
+  return ts.isIdentifier(callee) && callee.text === "require"
+}
+
 const withoutQuery = (importPath: string): string => importPath.split(/[?#]/, 1)[0] ?? importPath
 
 const normalizedTarget = (sourcePath: string, importPath: string): string | undefined => {
@@ -117,12 +141,7 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
       imports.push(
         argument !== undefined && ts.isStringLiteralLike(argument) ? argument.text : NON_LITERAL_DYNAMIC_IMPORT
       )
-    } else if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "require" &&
-      node.arguments.length >= 1
-    ) {
+    } else if (isRequireCall(node) && node.arguments.length >= 1) {
       const argument = node.arguments[0]
       imports.push(
         argument !== undefined && ts.isStringLiteralLike(argument) ? argument.text : NON_LITERAL_DYNAMIC_IMPORT
