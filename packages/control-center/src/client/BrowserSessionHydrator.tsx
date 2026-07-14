@@ -11,7 +11,9 @@ const loadBrowserSession = Effect.gen(function* () {
   return yield* client.session.current()
 }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const failedSessionState = (failure: unknown): BrowserSessionState => {
+const failedSessionState = (
+  failure: unknown
+): Exclude<BrowserSessionState, { readonly _tag: "authenticated" | "checking" }> => {
   if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") {
     return { _tag: "unavailable" }
   }
@@ -22,24 +24,28 @@ const failedSessionState = (failure: unknown): BrowserSessionState => {
 
 /** Recover this tab's mutation proof once, regardless of its initial route. */
 export const BrowserSessionHydrator = (): ReactElement | null => {
-  const { setState } = useBrowserSession()
+  const { beginHydration, completeHydration } = useBrowserSession()
 
   useEffect(() => {
+    const attempt = beginHydration()
     let isCurrent = true
     Effect.runPromise(loadBrowserSession).then(
       (result) => {
         if (!isCurrent) return
-        sessionStorage.setItem("cc_csrf", result.csrfToken)
-        setState({ _tag: "authenticated", session: result.session })
+        completeHydration(attempt, {
+          _tag: "authenticated",
+          csrfToken: result.csrfToken,
+          session: result.session
+        })
       },
       (failure: unknown) => {
-        if (isCurrent) setState(failedSessionState(failure))
+        if (isCurrent) completeHydration(attempt, failedSessionState(failure))
       }
     )
     return () => {
       isCurrent = false
     }
-  }, [setState])
+  }, [beginHydration, completeHydration])
 
   return null
 }

@@ -21,7 +21,7 @@ const pairBrowser = (rawPairingCode: string) =>
 /** Pair the current tab without ever exposing the opaque session cookie to JavaScript. */
 export const PairPage = (): ReactElement => {
   const navigate = useNavigate()
-  const { setState } = useBrowserSession()
+  const { establishSession } = useBrowserSession()
   const [pairingCode, setPairingCode] = useState("")
   const [error, setError] = useState<string | undefined>()
   const [isPairing, setIsPairing] = useState(false)
@@ -32,8 +32,7 @@ export const PairPage = (): ReactElement => {
     setIsPairing(true)
     Effect.runPromise(pairBrowser(pairingCode)).then(
       (result) => {
-        sessionStorage.setItem("cc_csrf", result.csrfToken)
-        setState({ _tag: "authenticated", session: result.session })
+        establishSession(result.csrfToken, result.session)
         navigate("/", { replace: true })
       },
       (failure) => {

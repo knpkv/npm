@@ -1,5 +1,14 @@
-import type { SessionSummary } from "../api/session.js"
-import { createContext, type ReactElement, type ReactNode, useContext, useMemo, useState } from "react"
+import type { CsrfToken, SessionSummary } from "../api/session.js"
+import {
+  createContext,
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 
 export type BrowserSessionState =
   | { readonly _tag: "anonymous" }
@@ -9,9 +18,17 @@ export type BrowserSessionState =
   | { readonly _tag: "unavailable" }
 
 interface BrowserSessionContextValue {
-  readonly setState: (state: BrowserSessionState) => void
+  readonly beginHydration: () => symbol
+  readonly completeHydration: (attempt: symbol, result: BrowserSessionHydrationResult) => void
+  readonly establishSession: (csrfToken: CsrfToken, session: SessionSummary) => void
   readonly state: BrowserSessionState
 }
+
+type BrowserSessionHydrationResult =
+  | (Extract<BrowserSessionState, { readonly _tag: "authenticated" }> & {
+      readonly csrfToken: CsrfToken
+    })
+  | Exclude<BrowserSessionState, { readonly _tag: "authenticated" | "checking" }>
 
 interface BrowserSessionProviderProps {
   readonly children: ReactNode
@@ -22,7 +39,35 @@ const BrowserSessionContext = createContext<BrowserSessionContextValue | undefin
 /** Hold browser authentication state once for every application route. */
 export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps): ReactElement => {
   const [state, setState] = useState<BrowserSessionState>({ _tag: "checking" })
-  const value = useMemo(() => ({ setState, state }), [state])
+  const hydrationAttempt = useRef<symbol | undefined>(undefined)
+
+  const beginHydration = useCallback((): symbol => {
+    const attempt = Symbol("browser-session-hydration")
+    hydrationAttempt.current = attempt
+    return attempt
+  }, [])
+
+  const completeHydration = useCallback((attempt: symbol, result: BrowserSessionHydrationResult): void => {
+    if (hydrationAttempt.current !== attempt) return
+    hydrationAttempt.current = undefined
+    if (result._tag === "authenticated") {
+      sessionStorage.setItem("cc_csrf", result.csrfToken)
+      setState({ _tag: "authenticated", session: result.session })
+      return
+    }
+    setState(result)
+  }, [])
+
+  const establishSession = useCallback((csrfToken: CsrfToken, session: SessionSummary): void => {
+    hydrationAttempt.current = undefined
+    sessionStorage.setItem("cc_csrf", csrfToken)
+    setState({ _tag: "authenticated", session })
+  }, [])
+
+  const value = useMemo(
+    () => ({ beginHydration, completeHydration, establishSession, state }),
+    [beginHydration, completeHydration, establishSession, state]
+  )
   return <BrowserSessionContext value={value}>{children}</BrowserSessionContext>
 }
 

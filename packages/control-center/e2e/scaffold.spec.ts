@@ -118,6 +118,69 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await newTab.close()
 })
 
+test("ignores a stale session hydration after replacing the paired session", async ({ context, page }) => {
+  const oldCsrfToken = "ef".repeat(32)
+  const newCsrfToken = "cd".repeat(32)
+  const oldSession = {
+    ...pairedSession,
+    permission: "workspace-member",
+    sessionId: "01890f6f-6d6a-7cc0-98d2-000000000004"
+  }
+  let releaseCurrentResponse: (() => void) | undefined
+  let markCurrentStarted: (() => void) | undefined
+  let markCurrentCompleted: (() => void) | undefined
+  const currentStarted = new Promise<void>((resolve) => {
+    markCurrentStarted = resolve
+  })
+  const currentCompleted = new Promise<void>((resolve) => {
+    markCurrentCompleted = resolve
+  })
+  const currentResponseGate = new Promise<void>((resolve) => {
+    releaseCurrentResponse = resolve
+  })
+
+  await context.addCookies([{
+    name: "cc_session",
+    value: "ab".repeat(32),
+    url: "http://127.0.0.1:4173"
+  }])
+  await context.route("**/api/v1/session/current", async (route) => {
+    markCurrentStarted?.()
+    await currentResponseGate
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: oldCsrfToken, session: oldSession }),
+      contentType: "application/json",
+      status: 200
+    })
+    markCurrentCompleted?.()
+  })
+  await context.route("**/api/v1/session/pair", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: newCsrfToken, session: pairedSession }),
+      contentType: "application/json",
+      headers: { "set-cookie": `cc_session=${"bc".repeat(32)}; HttpOnly; Path=/; SameSite=Strict` },
+      status: 200
+    })
+  })
+
+  await page.goto("/pair")
+  await currentStarted
+  await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
+  await page.getByRole("button", { name: "Pair browser" }).click()
+  await expect(page).toHaveURL("/")
+  await expect(page.getByText("Owner browser paired")).toBeVisible()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(newCsrfToken)
+
+  const staleResponse = page.waitForResponse("**/api/v1/session/current")
+  releaseCurrentResponse?.()
+  await currentCompleted
+  await staleResponse
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+  await expect(page.getByText("Owner browser paired")).toBeVisible()
+  await expect(page.getByText("Browser paired", { exact: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(newCsrfToken)
+})
+
 test("distinguishes a blocked session read from an unavailable server", async ({ page }) => {
   await page.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
