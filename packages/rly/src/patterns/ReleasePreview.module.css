@@ -141,10 +141,6 @@
     justify-content: flex-end;
   }
 
-  :global(:active-view-transition) .dialogSurface[data-state="open"] {
-    animation: none;
-  }
-
   @media (max-height: 30rem) {
     .dialogSurface {
       block-size: calc(100dvh - var(--rly-space-16));

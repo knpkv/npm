@@ -86,6 +86,11 @@
     animation: dialog-exit var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
+  .layer[data-rly-dialog-entry-motion="external"] .overlay[data-state="open"],
+  .layer[data-rly-dialog-entry-motion="external"] .content[data-state="open"] {
+    animation: none;
+  }
+
   @keyframes dialog-fade-in {
     from {
       opacity: 0;

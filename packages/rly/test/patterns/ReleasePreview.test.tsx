@@ -224,11 +224,12 @@ describe("ReleasePreview", () => {
   })
 
   it("assigns the same three caller-owned shared geometry parts as ReleaseRow", async () => {
-    const { portal } = await mount(
+    const entry = await mount(
       preview({
         transitionNames: generatedTransitionNames
       })
     )
+    const { portal } = entry
     const parts = [...portal.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]")]
     expect(parts.map((part) => [part.dataset.rlyReleaseTransitionPart, part.dataset.rlyReleaseTransitionName])).toEqual(
       [
@@ -236,6 +237,14 @@ describe("ReleasePreview", () => {
         ["version", generatedTransitionNames.version],
         ["verdict", generatedTransitionNames.verdict]
       ]
+    )
+    expect(portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")).toBe(
+      "external"
+    )
+
+    await act(async () => entry.root.render(<PortalProvider container={entry.portal}>{preview()}</PortalProvider>))
+    expect(portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")).toBe(
+      "external"
     )
   })
 

@@ -97,18 +97,32 @@ export type DialogContentProps = Omit<
 > & {
   readonly children: ReactNode
   readonly description?: string
+  /** Select external when a parent transition already owns the dialog's entry motion. */
+  readonly entryMotion?: "external" | "intrinsic"
   readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly size?: RlyDialogSize
   readonly title: string
 }
 
-const DialogLayer = ({ children }: { readonly children: ReactNode }): ReactElement => {
+const DialogLayer = ({
+  children,
+  entryMotion
+}: {
+  readonly children: ReactNode
+  readonly entryMotion: "external" | "intrinsic"
+}): ReactElement => {
   const state = useDialogState()
   const ref = useRef<HTMLDivElement>(null)
   useModalContentRegistration()
   useModalIsolation(ref, state.open)
   return (
-    <div className={style("layer")} data-rly-dialog-layer="" data-rly-modal-layer="" ref={ref}>
+    <div
+      className={style("layer")}
+      data-rly-dialog-entry-motion={entryMotion}
+      data-rly-dialog-layer=""
+      data-rly-modal-layer=""
+      ref={ref}
+    >
       {children}
     </div>
   )
@@ -177,6 +191,7 @@ const DialogContent = ({
   children,
   className,
   description,
+  entryMotion = "intrinsic",
   initialFocusRef,
   size = "default",
   title,
@@ -190,7 +205,7 @@ const DialogContent = ({
     <PortalBoundary>
       {(container) => (
         <RadixDialog.Portal container={container}>
-          <DialogLayer>
+          <DialogLayer entryMotion={entryMotion}>
             <RadixDialog.Overlay
               className={style("overlay")}
               data-rly-dialog-overlay=""

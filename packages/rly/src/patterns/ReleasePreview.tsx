@@ -68,6 +68,9 @@ export const ReleasePreview = ({
 }: ReleasePreviewProps): ReactElement => {
   const release = validateReleasePresentation(suppliedRelease)
   const validatedTransitionNames = validateReleaseTransitionNames(transitionNames)
+  const entryMotion = useRef<"external" | "intrinsic">(
+    validatedTransitionNames === undefined ? "intrinsic" : "external"
+  ).current
   const visibleOpenFullViewLabel = requireText(openFullViewLabel, "ReleasePreview openFullViewLabel")
   const summaryRef = useRef<HTMLElement>(null)
   const freshness =
@@ -208,7 +211,13 @@ export const ReleasePreview = ({
     </Sheet.Root>
   ) : (
     <Dialog.Root onOpenChange={onOpenChange} open={open}>
-      <Dialog.Content className={style("dialogSurface")} initialFocusRef={summaryRef} size="wide" title={title}>
+      <Dialog.Content
+        className={style("dialogSurface")}
+        entryMotion={entryMotion}
+        initialFocusRef={summaryRef}
+        size="wide"
+        title={title}
+      >
         <div className={style("dialogFrame")}>
           <div className={style("dialogClose")}>
             <Dialog.Close size="compact" variant="quiet">

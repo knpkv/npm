@@ -85,6 +85,19 @@ describe("Dialog", () => {
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
   })
 
+  it("marks externally orchestrated entry motion on the complete modal layer", async () => {
+    const { portal } = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content entryMotion="external" title="Transitioned details">
+          Content
+        </Dialog.Content>
+      </Dialog.Root>
+    )
+    expect(portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")).toBe(
+      "external"
+    )
+  })
+
   it("sets focus, relationships, inert background, scroll lock, and restores focus after Escape", async () => {
     const initialFocusRef = createRef<HTMLInputElement>()
     const { background, host, portal } = await mount(

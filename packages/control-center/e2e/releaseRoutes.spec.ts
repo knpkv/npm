@@ -225,12 +225,18 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   await page.emulateMedia({ reducedMotion: "no-preference" })
   await installTransitionProbe(page)
   await page.goto(overviewPath)
+  // Stretch intrinsic entry motion so a post-transition animation restart stays observably transparent.
+  await page.addStyleTag({
+    content: "[role=\"dialog\"][data-state=\"open\"] { animation-duration: 10s !important; }"
+  })
 
   await page.getByRole("button", { name: "Preview Copper Finch" }).click()
   await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
+  await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
 
-  await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
+  // Bypass actionability waiting so transition two captures the immediate post-transition paint state.
+  await page.getByRole("button", { name: "Open Copper Finch full view" }).dispatchEvent("click")
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 2")
   await page.waitForFunction(
