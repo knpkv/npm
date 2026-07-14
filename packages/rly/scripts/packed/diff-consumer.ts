@@ -15,7 +15,6 @@ export const renderDiffConsumerImports = (): string =>
   RLY_DIFF_THEMES,
   createDiffWorkerFactory,
   normalizeDiffWorkerPoolSize,
-  parseDiffFilePair,
   type RlyDiffCodeAnnotation,
   type RlyDiffCodeItem,
   type RlyDiffCodeScrollTarget,
@@ -100,7 +99,6 @@ type PackedDiffPublicTypes = readonly [
   RlyDiffWorkbenchScope
 ]
 const packedDiffScope: RlyDiffWorkbenchScope = { label: "All changed files", mode: "all-files" }
-const packedParsedDiff = parseDiffFilePair(packedDiffCodeItem)
 const packedDiffExports = [
   DiffCodeView,
   DiffWorkerProvider,
@@ -118,8 +116,7 @@ const expectedDiffExportNames = [
   "DiffWorkerProvider",
   "RLY_DIFF_THEMES",
   "createDiffWorkerFactory",
-  "normalizeDiffWorkerPoolSize",
-  "parseDiffFilePair"
+  "normalizeDiffWorkerPoolSize"
 ]
 const packedDiffTypeCoverage: PackedDiffPublicTypes | undefined = undefined`
 
@@ -158,7 +155,6 @@ export const renderDiffConsumerAssertions = (): string =>
   || !markup.includes("Revision is pinned")
   || !markup.includes("Agent finding · not an approval")
   || !markup.includes("Packed diff review")
-  || packedParsedDiff.name !== "src/release.ts"
   || packedDiffCodeViewProps.initialItems.length !== 1
   || packedDiffExports.some((entry) => entry === undefined)
   || JSON.stringify(packedDiffExportNames) !== JSON.stringify(expectedDiffExportNames)

@@ -6,7 +6,8 @@
     "jsx": "react-jsx",
     "outDir": "dist/dts",
     "rootDir": "src",
-    "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo"
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo",
+    "types": ["vite/client"]
   },
   "include": ["src"],
   "exclude": [

@@ -6,7 +6,7 @@
     "noEmit": true,
     "rootDir": ".",
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.node.tsbuildinfo",
-    "types": ["node", "vite/client", "vitest/globals"]
+    "types": ["node", "vite/client", "vitest/globals", "@vitest/browser-playwright"]
   },
   "include": [
     ".storybook/**/*",
@@ -21,7 +21,6 @@
     "visual",
     "vite.config.ts",
     "vitest.config.ts",
-    "vitest.shims.d.ts",
     "vitest.storybook.config.ts"
   ],
   "exclude": ["dist", "node_modules"]

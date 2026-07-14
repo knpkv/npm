@@ -241,21 +241,6 @@
       ]
     },
     {
-      "name": "DiffParsing",
-      "paths": {
-        "source": "packages/rly/src/diff/parse-diff.ts",
-        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
-        "styles": [],
-        "tests": [
-          "packages/rly/test/diff/parse-diff.test.ts"
-        ]
-      },
-      "storyId": "diff-diffcodeview--workbench",
-      "storyIds": [
-        "diff-diffcodeview--workbench"
-      ]
-    },
-    {
       "name": "DiffThemes",
       "paths": {
         "source": "packages/rly/src/diff/themes.ts",

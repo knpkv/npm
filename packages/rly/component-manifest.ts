@@ -280,22 +280,6 @@ export const componentManifest = {
     },
     {
       category: "diff",
-      exports: [{ kind: "value", name: "parseDiffFilePair" }],
-      name: "DiffParsing",
-      publicEntry: "diff",
-      registry: false,
-      source: "src/diff/parse-diff.ts",
-      status: "experimental",
-      styles: [],
-      variants: [],
-      visual: {
-        story: "stories/diff/DiffCodeView.stories.tsx",
-        storyId: "diff-diffcodeview--workbench",
-        tests: ["test/diff/parse-diff.test.ts"]
-      }
-    },
-    {
-      category: "diff",
       exports: [{ kind: "value", name: "RLY_DIFF_THEMES" }],
       name: "DiffThemes",
       publicEntry: "diff",

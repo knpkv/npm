@@ -126,7 +126,6 @@ describe("public entries", () => {
       "DiffFinding",
       "DiffHeader",
       "DiffWorkbench",
-      "parseDiffFilePair",
       "RLY_DIFF_THEMES",
       "createDiffWorkerFactory",
       "DiffWorkerProvider",

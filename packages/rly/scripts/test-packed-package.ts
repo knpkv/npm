@@ -82,6 +82,23 @@ const program = Effect.scoped(Effect.gen(function*() {
     return yield* Effect.fail(new PackedPackageError({ reason: "Packed diff worker or its WASM runtime is missing" }))
   }
   const packedDiffEntry = yield* run("tar", ["-xOf", archive, "package/dist/diff/index.js"], temporary)
+  const publicDiffDeclarations = new Set([
+    "package/dist/dts/diff/index.d.ts",
+    ...componentManifest.components
+      .filter(({ publicEntry }) => publicEntry === "diff")
+      .map(({ source }) => `package/${source.replace(/^src\//, "dist/dts/").replace(/\.tsx?$/, ".d.ts")}`)
+  ])
+  for (const artifact of publicDiffDeclarations) {
+    const source = yield* run("tar", ["-xOf", archive, artifact], temporary)
+    const leaked = ["parseDiffFilePair", "FileDiffMetadata", "from \"@pierre/diffs\""].find((value) =>
+      source.includes(value)
+    )
+    if (leaked !== undefined) {
+      return yield* Effect.fail(
+        new PackedPackageError({ reason: `Diff declaration boundary leaked ${leaked} through ${artifact}` })
+      )
+    }
+  }
   const packedWorkerSource = yield* run("tar", ["-xOf", archive, diffArtifacts.worker], temporary)
   const diffArtifactFailure = validatePackedDiffArtifactSources({
     diffEntry: packedDiffEntry,

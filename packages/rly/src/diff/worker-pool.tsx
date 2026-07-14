@@ -1,5 +1,3 @@
-/// <reference types="vite/client" />
-
 "use client"
 
 import { WorkerPoolContext } from "@pierre/diffs/react"

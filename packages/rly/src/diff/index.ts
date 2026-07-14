@@ -16,7 +16,6 @@ export { DiffHeader } from "./DiffHeader.js"
 export type { DiffHeaderProps, RlyDiffFindingFilter, RlyDiffLayout } from "./DiffHeader.js"
 export { DiffWorkbench } from "./DiffWorkbench.js"
 export type { DiffWorkbenchProps, RlyDiffWorkbenchFinding, RlyDiffWorkbenchScope } from "./DiffWorkbench.js"
-export { parseDiffFilePair } from "./parse-diff.js"
 export { RLY_DIFF_THEMES } from "./themes.js"
 export type {
   RlyDiffCodeAnnotation,
