@@ -42,7 +42,10 @@ const isNamedImportFrom = (context, identifier, sources, importedNames) => {
 
 const isEffectModule = (context, expression) => {
   if (expression.type === "Identifier") {
-    return isNamespaceImportFrom(context, expression, ["effect/Effect"])
+    return (
+      isNamespaceImportFrom(context, expression, ["effect/Effect"]) ||
+      isNamedImportFrom(context, expression, ["effect"], ["Effect"])
+    )
   }
   return (
     expression.type === "MemberExpression" &&
@@ -82,7 +85,9 @@ const isRunPromiseCall = (context, expression) => {
 
 const isUndefinedExpression = (expression) =>
   (expression.type === "Identifier" && expression.name === "undefined") ||
-  (expression.type === "UnaryExpression" && expression.operator === "void")
+  (expression.type === "UnaryExpression" &&
+    expression.operator === "void" &&
+    (expression.argument.type === "Identifier" || expression.argument.type === "Literal"))
 
 const isSilentRejectionHandler = (handler) => {
   if (handler?.type !== "ArrowFunctionExpression" && handler?.type !== "FunctionExpression") return false
@@ -151,7 +156,9 @@ module.exports = {
         ExportNamedDeclaration(node) {
           if (node.source?.value !== "effect/Schema" || node.exportKind === "type") return
           for (const specifier of node.specifiers) {
-            if (staticPropertyName(specifier.local) === "NumberFromString") report(specifier)
+            if (specifier.exportKind !== "type" && staticPropertyName(specifier.local) === "NumberFromString") {
+              report(specifier)
+            }
           }
         },
         MemberExpression(node) {

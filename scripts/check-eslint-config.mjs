@@ -32,13 +32,15 @@ const assertRuleDiagnostics = async ({ code, expected, filePath, ruleId }) => {
 await assertRuleDiagnostics({
   code: `
     import * as Fx from "effect/Effect"
+    import { Effect as RootFx } from "effect"
     import { runPromise as run } from "effect/Effect"
     Fx.runPromise(program).catch(() => {})
     Fx.runPromise(program).catch(() => void 0)
     Fx.runPromise(program).then(undefined, () => undefined)
+    RootFx.runPromise(program).catch(() => undefined)
     run(program).catch(function () { return })
   `,
-  expected: 4,
+  expected: 5,
   filePath: "packages/control-center/src/client/eslint-run-promise-invalid.ts",
   ruleId: "local-rules/no-silent-run-promise-rejection"
 })
@@ -48,6 +50,8 @@ await assertRuleDiagnostics({
     import * as Fx from "effect/Effect"
     Fx.runPromiseExit(program).then(handleExit)
     Fx.runPromise(program).catch(reportFailure)
+    Fx.runPromise(program).catch((failure) => void reportFailure(failure))
+    Fx.runPromise(program).catch((failure) => void setState(failure))
   `,
   expected: 0,
   filePath: "packages/control-center/src/client/eslint-run-promise-valid.ts",
@@ -71,6 +75,8 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import * as CanonicalSchemas from "./canonical-wire.js"
+    export { type NumberFromString } from "effect/Schema"
+    export type { NumberFromString as NumberFromStringType } from "effect/Schema"
     CanonicalSchemas.NumberFromString
   `,
   expected: 0,
