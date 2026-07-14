@@ -38,19 +38,36 @@ const currentSessionToken = (request: { readonly cookies: Readonly<Record<string
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
 
+const revalidateSession = (
+  auth: Auth["Service"],
+  token: Redacted.Redacted<string>,
+  expected: CurrentSession["Service"]
+): Effect.Effect<boolean> =>
+  auth.authenticate(token).pipe(
+    Effect.result,
+    Effect.map(
+      (authenticated) =>
+        Result.isSuccess(authenticated) &&
+        authenticated.success.sessionId === expected.sessionId &&
+        authenticated.success.workspaceId === expected.workspaceId
+    ),
+    Effect.catchDefect(() =>
+      Effect.logWarning("Closing Control Center live event stream after session revalidation defect", {
+        sessionId: expected.sessionId,
+        workspaceId: expected.workspaceId
+      }).pipe(Effect.as(false))
+    )
+  )
+
 const awaitSessionEnd = (
   auth: Auth["Service"],
   token: Redacted.Redacted<string>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<void> =>
   Effect.sleep(SESSION_REAUTHENTICATION_INTERVAL).pipe(
-    Effect.andThen(Effect.result(auth.authenticate(token))),
-    Effect.flatMap((authenticated) =>
-      Result.isSuccess(authenticated) &&
-        authenticated.success.sessionId === expected.sessionId &&
-        authenticated.success.workspaceId === expected.workspaceId
-        ? Effect.suspend(() => awaitSessionEnd(auth, token, expected))
-        : Effect.void
+    Effect.andThen(revalidateSession(auth, token, expected)),
+    Effect.flatMap((isCurrentSession) =>
+      isCurrentSession ? Effect.suspend(() => awaitSessionEnd(auth, token, expected)) : Effect.void
     )
   )
 

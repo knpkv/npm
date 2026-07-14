@@ -60,7 +60,9 @@ override the checker. Model the value, narrow it, decode it, or use
 
 Control Center public HTTP contracts must use purpose-built canonical wire
 schemas instead of `Schema.NumberFromString`, whose JavaScript coercion accepts
-ambiguous forms such as whitespace, signs, exponents, and hexadecimal.
+ambiguous forms such as whitespace, signs, exponents, and hexadecimal. The
+guardrail matches namespace receivers and named value-import aliases rather
+than relying on the local `Schema` spelling.
 
 ## Agent Guidance
 

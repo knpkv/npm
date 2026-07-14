@@ -471,7 +471,8 @@ const makeDomainEventRepository = Effect.gen(function*() {
       _tag: "page",
       events: decoded.map(({ event }) => event),
       headCursor: snapshot.state.headCursor,
-      nextCursor
+      nextCursor,
+      prunedThroughCursor: snapshot.state.prunedThroughCursor
     }
   })
 

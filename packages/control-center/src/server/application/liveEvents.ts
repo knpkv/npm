@@ -14,9 +14,11 @@ import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 
 const EVENT_PAGE_SIZE = 128
 const HEARTBEAT_INTERVAL = Duration.seconds(25)
+const MAXIMUM_REPLAY_EVENTS = 512
 
 interface LiveEventStreamState {
   readonly cursor: EventCursor
+  readonly replayOriginCursor: EventCursor
   readonly waitBeforePoll: boolean
 }
 
@@ -66,10 +68,14 @@ export const makeLiveEvents = Effect.gen(function*() {
       if (input.after === undefined) {
         const frame = yield* snapshotFrame(input.workspaceId)
         initialFrames = [frame]
-        initialState = { cursor: frame.data.eventCursor, waitBeforePoll: false }
+        initialState = {
+          cursor: frame.data.eventCursor,
+          replayOriginCursor: frame.data.eventCursor,
+          waitBeforePoll: false
+        }
       } else {
         initialFrames = []
-        initialState = { cursor: input.after, waitBeforePoll: false }
+        initialState = { cursor: input.after, replayOriginCursor: input.after, waitBeforePoll: false }
       }
 
       const continuation = Stream.paginate<
@@ -101,17 +107,39 @@ export const makeLiveEvents = Effect.gen(function*() {
               [reset, frame],
               {
                 cursor: frame.data.eventCursor,
+                replayOriginCursor: frame.data.eventCursor,
                 waitBeforePoll: false
               }
             )
           }
 
           if (page.events.length > 0) {
+            if (page.headCursor - state.replayOriginCursor > MAXIMUM_REPLAY_EVENTS) {
+              const frame = yield* snapshotFrame(input.workspaceId)
+              const reset: ControlCenterLiveEvent = {
+                event: "stream.reset-required",
+                data: {
+                  reason: "replay-budget",
+                  requestedCursor: state.cursor,
+                  headCursor: page.headCursor,
+                  prunedThroughCursor: page.prunedThroughCursor
+                }
+              }
+              return continueWith(
+                [reset, frame],
+                {
+                  cursor: frame.data.eventCursor,
+                  replayOriginCursor: frame.data.eventCursor,
+                  waitBeforePoll: false
+                }
+              )
+            }
             const frames = page.events.map(invalidationFrame)
             return continueWith(
               frames,
               {
                 cursor: page.nextCursor,
+                replayOriginCursor: state.replayOriginCursor,
                 waitBeforePoll: false
               }
             )
@@ -126,6 +154,7 @@ export const makeLiveEvents = Effect.gen(function*() {
             [heartbeat],
             {
               cursor: page.headCursor,
+              replayOriginCursor: state.replayOriginCursor,
               waitBeforePoll: true
             }
           )

@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-silent-run-promise-catch
+language: tsx
+severity: error
+message: "Inspect Effect.runPromise failures instead of silently replacing every rejection with undefined."
+
+rule:
+  any:
+    - pattern: Effect.runPromise($$$ARGS).catch(() => undefined)
+    - pattern: Effect.runPromise($$$ARGS).catch(($ERROR) => undefined)
+
+files:
+  - "packages/**/src/**/*.ts"
+  - "packages/**/src/**/*.tsx"
+
+note: |
+  Effect.runPromise rejects for typed failures, defects, and interruption. Use
+  runPromiseExit and distinguish expected cleanup interruption from actionable
+  failures, or handle the rejection explicitly with telemetry and state.

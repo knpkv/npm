@@ -1,5 +1,14 @@
 id: no-number-from-string-in-control-center-api
 valid:
   - CanonicalNonNegativeIntegerFromString
+  - SafeSchema.CanonicalNumberFromString
+  - import { NumberFromStringSchema } from "./wire.js"
+  - import { NumberFromString } from "./canonical-wire.js"
+  - import type { NumberFromString } from "effect/Schema"
+  - import { type NumberFromString as NumberFromStringType } from "effect/Schema"
 invalid:
   - Schema.NumberFromString
+  - S.NumberFromString
+  - Effect.Schema.NumberFromString
+  - import { NumberFromString } from "effect/Schema"
+  - import { NumberFromString as UnsafeWireNumber } from "effect/Schema"

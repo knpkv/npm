@@ -71,11 +71,12 @@ const heartbeatEvent = (cursor: number): StreamHeartbeatLiveEvent => ({
 const resetEvent = (
   requestedCursor: number,
   headCursor = requestedCursor + 10,
-  prunedThroughCursor = requestedCursor
+  prunedThroughCursor = requestedCursor + 1,
+  reason: StreamResetRequired["reason"] = "retention"
 ): StreamResetRequiredLiveEvent => ({
   event: "stream.reset-required",
   data: Schema.decodeUnknownSync(StreamResetRequired)({
-    reason: "retention",
+    reason,
     requestedCursor,
     headCursor,
     prunedThroughCursor
@@ -187,10 +188,7 @@ describe("live portfolio controller", () => {
         onState: (state) => states.push(state),
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
-      )
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       assert.isTrue(states.some((state) => state._tag === "loaded" && state.connection._tag === "reconnecting"))
       yield* TestClock.adjust(250)
@@ -283,8 +281,8 @@ describe("live portfolio controller", () => {
           openings += 1
           return Effect.succeed(
             openings === 1
-              ? Stream.make(resetEvent(10, 20, 10), snapshotEvent(19))
-              : lastingStream([resetEvent(10, 20, 10), snapshotEvent(20)])
+              ? Stream.make(resetEvent(10, 20, 11), snapshotEvent(19))
+              : lastingStream([resetEvent(10, 20, 11), snapshotEvent(20)])
           )
         }
       }
@@ -294,10 +292,7 @@ describe("live portfolio controller", () => {
         onState: (state) => states.push(state),
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
-      )
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       const resetState = states.find((state) => state._tag === "loaded" && state.awaitingResetSnapshot)
       assert.strictEqual(resetState?._tag, "loaded")
@@ -321,17 +316,17 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
-  it("rejects reset metadata whose pruned cursor is beyond the advertised head", () =>
+  it("rejects a reset for another resume cursor without regressing the applied snapshot", () =>
     Effect.gen(function*() {
-      let openings = 0
+      const openedAfter: Array<EventCursor> = []
       const states: Array<PortfolioSnapshotLoadState> = []
       const transport: PortfolioLiveTransport = {
         loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
-        openStream: () => {
-          openings += 1
+        openStream: (after) => {
+          openedAfter.push(after)
           return Effect.succeed(
-            openings === 1
-              ? Stream.make(resetEvent(10, 20, 21))
+            openedAfter.length === 1
+              ? Stream.make(resetEvent(9, 5, 0, "cursor-ahead"), snapshotEvent(5))
               : lastingStream([heartbeatEvent(10)])
           )
         }
@@ -342,10 +337,183 @@ describe("live portfolio controller", () => {
         onState: (state) => states.push(state),
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+
+      assert.isFalse(
+        states.some(
+          (state) =>
+            state._tag === "loaded" && state.snapshot.eventCursor === makePortfolioSnapshot("current", 5).eventCursor
+        )
       )
+      yield* TestClock.adjust(250)
+      assert.deepStrictEqual(openedAfter, [
+        makePortfolioSnapshot("current", 10).eventCursor,
+        makePortfolioSnapshot("current", 10).eventCursor
+      ])
+      const finalState = states.at(-1)
+      assert.strictEqual(finalState?._tag, "loaded")
+      if (finalState?._tag === "loaded") {
+        assert.strictEqual(finalState.snapshot.eventCursor, makePortfolioSnapshot("current", 10).eventCursor)
+        assert.strictEqual(finalState.connection._tag, "connected")
+      }
+      yield* Fiber.interrupt(fiber)
+    }))
+
+  it("accepts a reset correlated with the cursor advanced by a replayed invalidation", () =>
+    Effect.gen(function*() {
+      const refreshedSnapshot = makePortfolioSnapshot("current", 11)
+      const snapshots = [makePortfolioSnapshot("current", 10), refreshedSnapshot]
+      let snapshotIndex = 0
+      let openings = 0
+      const states: Array<PortfolioSnapshotLoadState> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.sync(() => snapshots[snapshotIndex++] ?? refreshedSnapshot),
+        openStream: () => {
+          openings += 1
+          return Effect.succeed(
+            lastingStream([invalidatedEvent(11), resetEvent(11, 20, 12), snapshotEvent(20)])
+          )
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => states.push(state),
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      const finalState = states.at(-1)
+      assert.strictEqual(finalState?._tag, "loaded")
+      if (finalState?._tag === "loaded") {
+        assert.strictEqual(finalState.snapshot.eventCursor, makePortfolioSnapshot("current", 20).eventCursor)
+        assert.strictEqual(finalState.connection._tag, "connected")
+      }
+      assert.strictEqual(snapshotIndex, 2)
+      assert.strictEqual(openings, 1)
+      yield* Fiber.interrupt(fiber)
+    }))
+
+  it("allows only reason-consistent reset cursor ordering", () =>
+    Effect.gen(function*() {
+      const acceptedStates: Array<PortfolioSnapshotLoadState> = []
+      const acceptedTransport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () =>
+          Effect.succeed(
+            lastingStream([
+              resetEvent(10, 5, 0, "cursor-ahead"),
+              snapshotEvent(5),
+              resetEvent(5, 8, 6),
+              snapshotEvent(8)
+            ])
+          )
+      }
+      const accepted = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => acceptedStates.push(state),
+        sessionKey: "session-a",
+        transport: acceptedTransport
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      const lowered = acceptedStates.at(-1)
+      assert.strictEqual(lowered?._tag, "loaded")
+      if (lowered?._tag === "loaded") {
+        assert.strictEqual(lowered.snapshot.eventCursor, makePortfolioSnapshot("current", 8).eventCursor)
+        assert.strictEqual(lowered.connection._tag, "connected")
+      }
+      yield* Fiber.interrupt(accepted)
+
+      let rejectedOpenings = 0
+      const rejectedStates: Array<PortfolioSnapshotLoadState> = []
+      const rejectedTransport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          rejectedOpenings += 1
+          return Effect.succeed(
+            rejectedOpenings === 1 ? Stream.make(resetEvent(10, 10, 0, "gap")) : lastingStream([heartbeatEvent(10)])
+          )
+        }
+      }
+      const rejected = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => rejectedStates.push(state),
+        sessionKey: "session-b",
+        transport: rejectedTransport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+      assert.isFalse(rejectedStates.some((state) => state._tag === "loaded" && state.awaitingResetSnapshot))
+      yield* TestClock.adjust(250)
+      assert.strictEqual(rejectedOpenings, 2)
+      yield* Fiber.interrupt(rejected)
+    }))
+
+  it("accepts only replay-budget resets whose requested cursor does not exceed the head", () =>
+    Effect.gen(function*() {
+      const acceptedStates: Array<PortfolioSnapshotLoadState> = []
+      const acceptedTransport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => Effect.succeed(lastingStream([resetEvent(10, 20, 15, "replay-budget"), snapshotEvent(20)]))
+      }
+      const accepted = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => acceptedStates.push(state),
+        sessionKey: "session-a",
+        transport: acceptedTransport
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      const replaced = acceptedStates.at(-1)
+      assert.strictEqual(replaced?._tag, "loaded")
+      if (replaced?._tag === "loaded") {
+        assert.strictEqual(replaced.snapshot.eventCursor, makePortfolioSnapshot("current", 20).eventCursor)
+        assert.strictEqual(replaced.connection._tag, "connected")
+      }
+      yield* Fiber.interrupt(accepted)
+
+      let rejectedOpenings = 0
+      const rejectedTransport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          rejectedOpenings += 1
+          return Effect.succeed(
+            rejectedOpenings === 1
+              ? Stream.make(resetEvent(10, 9, 0, "replay-budget"))
+              : lastingStream([heartbeatEvent(10)])
+          )
+        }
+      }
+      const rejected = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: () => undefined,
+        sessionKey: "session-b",
+        transport: rejectedTransport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust(250)
+      assert.strictEqual(rejectedOpenings, 2)
+      yield* Fiber.interrupt(rejected)
+    }))
+
+  it("rejects reset metadata whose pruned cursor is beyond the advertised head", () =>
+    Effect.gen(function*() {
+      let openings = 0
+      const states: Array<PortfolioSnapshotLoadState> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          openings += 1
+          return Effect.succeed(
+            openings === 1 ? Stream.make(resetEvent(10, 20, 21)) : lastingStream([heartbeatEvent(10)])
+          )
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => states.push(state),
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       assert.isFalse(states.some((state) => state._tag === "loaded" && state.awaitingResetSnapshot))
       yield* TestClock.adjust(250)
@@ -367,9 +535,7 @@ describe("live portfolio controller", () => {
           Effect.sync(() => {
             openedAfter.push(after)
             activeStreams += 1
-            const source = openedAfter.length === 1
-              ? Stream.fail({ _tag: "TransportFailure" })
-              : Stream.never
+            const source = openedAfter.length === 1 ? Stream.fail({ _tag: "TransportFailure" }) : Stream.never
             return source.pipe(
               Stream.ensuring(
                 Effect.sync(() => {
@@ -386,10 +552,7 @@ describe("live portfolio controller", () => {
         onState: () => undefined,
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
-      )
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       yield* TestClock.adjust(250)
       assert.deepStrictEqual(openedAfter, [
@@ -420,10 +583,7 @@ describe("live portfolio controller", () => {
         onState: () => undefined,
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
-      )
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       yield* TestClock.adjust(250)
       assert.deepStrictEqual(openedAfter, [
@@ -484,10 +644,7 @@ describe("live portfolio controller", () => {
         onState: () => undefined,
         sessionKey: "session-a",
         transport
-      }).pipe(
-        Effect.provideService(Random.Random, deterministicRandom),
-        Effect.forkChild({ startImmediately: true })
-      )
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
 
       assert.strictEqual(openings, 1)
       yield* TestClock.adjust(249)

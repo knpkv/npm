@@ -1,4 +1,6 @@
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Predicate from "effect/Predicate"
 import * as Random from "effect/Random"
 import * as Result from "effect/Result"
@@ -7,7 +9,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
-import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
+import type { ControlCenterLiveEvent, StreamResetRequired } from "../../api/liveEvents.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
 import type { EventCursor } from "../../domain/identifiers.js"
 import {
@@ -36,9 +38,7 @@ export interface PortfolioFailureResolutionInput {
 
 export interface PortfolioLiveTransport {
   readonly loadSnapshot: Effect.Effect<PortfolioSnapshot, unknown>
-  readonly openStream: (
-    after: EventCursor
-  ) => Effect.Effect<Stream.Stream<ControlCenterLiveEvent, unknown>, unknown>
+  readonly openStream: (after: EventCursor) => Effect.Effect<Stream.Stream<ControlCenterLiveEvent, unknown>, unknown>
 }
 
 export interface PortfolioBrowserConnectivity {
@@ -91,6 +91,20 @@ const reconnectDelay = (attempt: number): Effect.Effect<void> =>
     Effect.map((random) => portfolioReconnectDelayMillis(attempt, random)),
     Effect.flatMap(Effect.sleep)
   )
+
+const hasValidResetCursorRelation = (reset: StreamResetRequired): boolean => {
+  if (reset.prunedThroughCursor > reset.headCursor) return false
+  switch (reset.reason) {
+    case "retention":
+      return reset.requestedCursor < reset.prunedThroughCursor
+    case "cursor-ahead":
+      return reset.requestedCursor > reset.headCursor
+    case "gap":
+      return reset.prunedThroughCursor <= reset.requestedCursor && reset.requestedCursor < reset.headCursor
+    case "replay-budget":
+      return reset.requestedCursor <= reset.headCursor
+  }
+}
 
 const browserConnectivity: PortfolioBrowserConnectivity = {
   isOnline: Effect.sync(() => navigator.onLine),
@@ -162,11 +176,19 @@ const runController = ({
         yield* publish({ _tag: "stream-snapshot", snapshot })
       })
 
-    const consumeStream = (stream: Stream.Stream<ControlCenterLiveEvent, unknown>): Effect.Effect<never, unknown> =>
+    const consumeStream = (
+      stream: Stream.Stream<ControlCenterLiveEvent, unknown>,
+      resumeCursor: EventCursor
+    ): Effect.Effect<never, unknown> =>
       Effect.gen(function*() {
         let resetHeadCursor = currentState._tag === "loaded" && currentState.awaitingResetSnapshot
           ? currentState.minimumRefreshCursor
           : null
+        let streamCursor = resumeCursor
+
+        const advanceStreamCursor = (cursor: EventCursor): void => {
+          if (cursor > streamCursor) streamCursor = cursor
+        }
 
         const consumeEvent = (event: ControlCenterLiveEvent): Effect.Effect<void, unknown> => {
           switch (event.event) {
@@ -177,6 +199,11 @@ const runController = ({
               if (resetHeadCursor !== null && event.id < resetHeadCursor) {
                 return Effect.fail(new PortfolioStreamProtocolError())
               }
+              if (resetHeadCursor === null) {
+                advanceStreamCursor(event.id)
+              } else {
+                streamCursor = event.id
+              }
               if (resetHeadCursor === null && event.id < appliedCursor) return Effect.void
               resetHeadCursor = null
               return publish({ _tag: "stream-snapshot", snapshot: event.data })
@@ -185,6 +212,7 @@ const runController = ({
               if (resetHeadCursor !== null || event.id !== event.data.eventCursor) {
                 return Effect.fail(new PortfolioStreamProtocolError())
               }
+              advanceStreamCursor(event.id)
               const appliedCursor = appliedPortfolioCursor(currentState)
               if (appliedCursor === null || event.id <= appliedCursor) return Effect.void
               return publish({ _tag: "invalidated", eventCursor: event.id }).pipe(
@@ -192,7 +220,7 @@ const runController = ({
               )
             }
             case "stream.reset-required": {
-              if (event.data.prunedThroughCursor > event.data.headCursor) {
+              if (event.data.requestedCursor !== streamCursor || !hasValidResetCursorRelation(event.data)) {
                 return Effect.fail(new PortfolioStreamProtocolError())
               }
               resetHeadCursor = resetHeadCursor === null || event.data.headCursor > resetHeadCursor
@@ -205,6 +233,7 @@ const runController = ({
               {
                 const appliedCursor = appliedPortfolioCursor(currentState)
                 if (appliedCursor === null) return Effect.fail(new PortfolioStreamProtocolError())
+                advanceStreamCursor(event.data.eventCursor)
                 if (event.data.eventCursor <= appliedCursor) return publish({ _tag: "caught-up" })
                 return publish({ _tag: "invalidated", eventCursor: event.data.eventCursor }).pipe(
                   Effect.andThen(refreshSnapshot(event.data.eventCursor))
@@ -234,7 +263,7 @@ const runController = ({
           const streamResult = yield* Effect.result(
             Effect.gen(function*() {
               const stream = yield* transport.openStream(cursor)
-              return yield* consumeStream(stream)
+              return yield* consumeStream(stream, cursor)
             })
           )
           if (Result.isSuccess(streamResult)) return yield* Effect.never
@@ -257,9 +286,8 @@ const runController = ({
   })
 
 /** Run one session-isolated authoritative snapshot and live invalidation controller. */
-export const runPortfolioLiveController = (
-  options: RunPortfolioLiveControllerOptions
-): Effect.Effect<never> => runController(options)
+export const runPortfolioLiveController = (options: RunPortfolioLiveControllerOptions): Effect.Effect<never> =>
+  runController(options)
 
 /** Load an authoritative portfolio and keep it current through the generated SSE client. */
 export const usePortfolioSnapshot = (
@@ -295,7 +323,10 @@ export const usePortfolioSnapshot = (
       )
       : run(dependencies.transport, dependencies.connectivity)
 
-    Effect.runPromise(program, { signal: abortController.signal }).catch(() => undefined)
+    Effect.runPromiseExit(program, { signal: abortController.signal }).then((exit) => {
+      if (!isCurrent || Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return
+      setState({ _tag: "failed", failure: "unavailable", sessionKey })
+    })
     return () => {
       isCurrent = false
       abortController.abort()

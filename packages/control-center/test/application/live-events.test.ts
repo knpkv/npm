@@ -120,6 +120,32 @@ describe("durable live events", () => {
       if (frames[129]?.event === "stream.heartbeat") assert.strictEqual(frames[129].data.eventCursor, 129)
     })))
 
+  it.effect("replaces state instead of replaying a journal beyond the per-stream budget", () =>
+    withLivePersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* createWorkspace(persistence, WORKSPACE_ID)
+      yield* Effect.forEach(
+        Array.from({ length: 513 }, (_, index) => index + 1),
+        (index) => appendInvalidation(persistence, WORKSPACE_ID, index),
+        { concurrency: 1, discard: true }
+      )
+      const { events } = yield* liveServices
+
+      const frames = yield* events.open({ workspaceId: WORKSPACE_ID, after: EventCursor.make(0) }).pipe(
+        Effect.flatMap((stream) => collect(stream, 3))
+      )
+
+      assert.strictEqual(frames[0]?.event, "stream.reset-required")
+      if (frames[0]?.event === "stream.reset-required") {
+        assert.strictEqual(frames[0].data.reason, "replay-budget")
+        assert.strictEqual(frames[0].data.requestedCursor, 0)
+        assert.strictEqual(frames[0].data.headCursor, 513)
+      }
+      assert.strictEqual(frames[1]?.event, "portfolio.snapshot")
+      assert.strictEqual(frames[1]?.id, 513)
+      assert.strictEqual(frames[2]?.event, "stream.heartbeat")
+    })))
+
   it.effect("resets a pruned cursor before replacing state with a fresh snapshot", () =>
     withLivePersistence(Effect.gen(function*() {
       const persistence = yield* Persistence

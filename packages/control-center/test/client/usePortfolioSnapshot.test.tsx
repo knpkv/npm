@@ -47,6 +47,26 @@ const PortfolioProbe = ({
 }
 
 describe("usePortfolioSnapshot", () => {
+  it("surfaces an unexpected controller defect instead of freezing the loading state", async () => {
+    const dependencies: PortfolioSnapshotDependencies = {
+      connectivity: onlineConnectivity,
+      transport: {
+        loadSnapshot: Effect.die("portfolio-runtime-defect"),
+        openStream: () => Effect.succeed(Stream.never)
+      }
+    }
+    const host = document.createElement("div")
+    const root = createRoot(host)
+    mountedRoot = root
+
+    await act(async () => {
+      root.render(<PortfolioProbe dependencies={dependencies} sessionKey="session-a" />)
+      await Promise.resolve()
+    })
+
+    expect(host.textContent).toBe("failed")
+  })
+
   it("closes the generated stream across StrictMode cleanup and final unmount", async () => {
     const streamOpened = Deferred.makeUnsafe<void>()
     let activeStreams = 0

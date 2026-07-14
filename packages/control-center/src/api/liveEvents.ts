@@ -21,7 +21,7 @@ export const EventCursorFromString = CanonicalNonNegativeIntegerFromString.pipe(
 
 /** Replay boundary telling a client to replace local state with an authoritative snapshot. */
 export const StreamResetRequired = Schema.Struct({
-  reason: Schema.Literals(["retention", "cursor-ahead", "gap"]),
+  reason: Schema.Literals(["retention", "cursor-ahead", "gap", "replay-budget"]),
   requestedCursor: EventCursor,
   headCursor: EventCursor,
   prunedThroughCursor: EventCursor

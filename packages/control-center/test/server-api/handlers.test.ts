@@ -1,7 +1,7 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
@@ -199,6 +199,98 @@ describe("Control Center API handlers", () => {
           trackedHandler
         ])
       )
+    }))
+
+  it.effect("contains periodic authentication defects at the raw SSE boundary", () =>
+    Effect.gen(function*() {
+      const secretCanary = "periodic-auth-defect-secret-canary"
+      const authenticationCalls = yield* Ref.make(0)
+      const activeSubscriptions = yield* Ref.make(0)
+      const closed = yield* Deferred.make<void>()
+      const sleepScheduled = yield* Deferred.make<void>()
+      const testClock = yield* TestClock.testClockWith((clock) => Effect.succeed(clock))
+      const instrumentedClock: Clock.Clock = {
+        ...testClock,
+        sleep: (duration) => Deferred.succeed(sleepScheduled, void 0).pipe(Effect.andThen(testClock.sleep(duration)))
+      }
+      const authentication = Auth.of({
+        ...streamAuthentication,
+        authenticate: () =>
+          Ref.getAndUpdate(authenticationCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) => (count === 0 ? Effect.succeed(session) : Effect.die(secretCanary)))
+          )
+      })
+      const trackedLiveEvents = LiveEvents.of({
+        open: () =>
+          Ref.update(activeSubscriptions, (count) => count + 1).pipe(
+            Effect.as(
+              Stream.never.pipe(
+                Stream.ensuring(
+                  Ref.update(activeSubscriptions, (count) => count - 1).pipe(
+                    Effect.andThen(Deferred.succeed(closed, void 0))
+                  )
+                )
+              )
+            )
+          )
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used")
+      })
+      const media = MediaReads.of({ read: () => Effect.die("not used") })
+      const bind = yield* decodeBindConfig({})
+      const requestContext = Context.empty().pipe(
+        Context.add(Auth, authentication),
+        Context.add(ApiBindConfiguration, bind),
+        Context.add(MediaReads, media),
+        Context.add(PluginAdministration, plugins),
+        Context.add(LiveEvents, trackedLiveEvents)
+      )
+      const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(Auth, authentication),
+            Layer.succeed(ApiBindConfiguration, bind),
+            Layer.succeed(Clock.Clock, instrumentedClock),
+            Layer.succeed(LiveEvents, trackedLiveEvents),
+            portfolioLayer,
+            NodeHttpServer.layerHttpServices,
+            NodeServices.layer
+          )
+        )
+      )
+      const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+
+      yield* Effect.gen(function*() {
+        const response = yield* Effect.promise(() =>
+          webHandler.handler(
+            new Request("http://127.0.0.1:4173/api/v1/events", {
+              headers: {
+                cookie: `cc_session=${"ab".repeat(32)}`,
+                host: "127.0.0.1:4173",
+                origin: "http://127.0.0.1:4173"
+              }
+            }),
+            requestContext
+          )
+        )
+        assert.strictEqual(response.status, 200)
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+
+        const responseBody = yield* Effect.promise(() => response.text()).pipe(Effect.forkChild)
+        yield* Deferred.await(sleepScheduled)
+        yield* testClock.adjust(Duration.seconds(25))
+        const rawSse = yield* Fiber.join(responseBody)
+        yield* Deferred.await(closed)
+
+        assert.notInclude(rawSse, secretCanary)
+        assert.notInclude(rawSse, "effect/httpapi/stream/failure")
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 0)
+      }).pipe(Effect.ensuring(Effect.promise(() => webHandler.dispose())))
     }))
 
   it("recovers a session-bound CSRF proof only through an authenticated allowed-origin read", async () => {

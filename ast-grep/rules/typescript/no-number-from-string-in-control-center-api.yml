@@ -6,12 +6,23 @@ severity: error
 message: "Use a canonical wire-number schema instead of JavaScript-coercing Schema.NumberFromString in public HTTP contracts."
 
 rule:
-  pattern: Schema.NumberFromString
+  any:
+    - pattern: $NAMESPACE.NumberFromString
+    - all:
+        - kind: import_specifier
+        - has:
+            field: name
+            regex: ^NumberFromString$
+        - not:
+            regex: ^type\s
+        - inside:
+            pattern: import { $$$IMPORTS } from "effect/Schema"
+            stopBy: end
 
 files:
   - "packages/control-center/src/api/**/*.ts"
 
 note: |
-  Schema.NumberFromString accepts ambiguous JavaScript forms such as whitespace,
-  leading zeroes, signs, exponents, and hexadecimal. Public HTTP contracts must
-  import a purpose-built canonical wire schema with an explicit grammar and bounds.
+  NumberFromString accepts ambiguous JavaScript forms such as whitespace, leading
+  zeroes, signs, exponents, and hexadecimal. Public HTTP contracts must import a
+  purpose-built canonical wire schema with an explicit grammar and bounds.

@@ -109,6 +109,7 @@ export type DomainEventPage<Event> =
     readonly events: ReadonlyArray<Event>
     readonly headCursor: typeof EventCursor.Type
     readonly nextCursor: typeof EventCursor.Type
+    readonly prunedThroughCursor: typeof EventCursor.Type
   }
   | {
     readonly _tag: "reset"

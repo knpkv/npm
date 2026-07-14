@@ -104,6 +104,7 @@ describe("DomainEventRepository", () => {
           )
           assert.strictEqual(alphaPage.headCursor, 2)
           assert.strictEqual(alphaPage.nextCursor, 2)
+          assert.strictEqual(alphaPage.prunedThroughCursor, 0)
         }
 
         const betaPage = yield* events.pageAfter(WORKSPACE_B, EventCursor.make(0), 128)
@@ -112,6 +113,7 @@ describe("DomainEventRepository", () => {
           assert.deepStrictEqual(betaPage.events.map(({ eventId: id }) => id), [betaOne.eventId])
           assert.strictEqual(betaPage.headCursor, 1)
           assert.strictEqual(betaPage.nextCursor, 1)
+          assert.strictEqual(betaPage.prunedThroughCursor, 0)
         }
       })
     ))
