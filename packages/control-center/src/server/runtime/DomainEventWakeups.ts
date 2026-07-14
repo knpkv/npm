@@ -6,10 +6,11 @@ import * as Stream from "effect/Stream"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 
-const WAKEUP_CAPACITY = 64
+/** Maximum lossy wake hints retained while the durable journal remains authoritative. */
+export const DOMAIN_EVENT_WAKEUP_CAPACITY = 64
 
 const makeDomainEventWakeups = Effect.gen(function*() {
-  const pubsub = yield* PubSub.sliding<WorkspaceId>({ capacity: WAKEUP_CAPACITY })
+  const pubsub = yield* PubSub.sliding<WorkspaceId>({ capacity: DOMAIN_EVENT_WAKEUP_CAPACITY })
   yield* Effect.addFinalizer(() => PubSub.shutdown(pubsub))
 
   return {

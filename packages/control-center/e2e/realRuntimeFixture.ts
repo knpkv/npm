@@ -10,6 +10,22 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { createServer } from "node:net"
 
+import { BenchmarkInvariantError } from "../scripts/benchmarkErrors.js"
+import {
+  CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS,
+  generateControlCenterBenchmarkFixture
+} from "../scripts/benchmarkFixture.js"
+import {
+  controlCenterRuntimeBenchmarkOutputPath,
+  type ControlCenterRuntimeBenchmarkReport,
+  makeControlCenterRuntimeBenchmarkReport,
+  type MakeControlCenterRuntimeBenchmarkReportInput,
+  writeControlCenterRuntimeBenchmarkReport
+} from "../scripts/benchmarkRuntimeReport.js"
+import { DomainEventId, EntityId, ReleaseId } from "../src/domain/identifiers.js"
+import { Release } from "../src/domain/release.js"
+import { deriveReleaseRelay } from "../src/domain/releaseRelay.js"
+import { SourceRevision } from "../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../src/domain/utcTimestamp.js"
 import {
   type ReleaseSynchronizationInput,
@@ -17,6 +33,7 @@ import {
 } from "../src/server/application/releaseSynchronization.js"
 import { Persistence, persistenceLayer } from "../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../src/server/persistence/PersistenceConfig.js"
+import { DomainEventDedupeKey } from "../src/server/persistence/repositories/domainEventModels.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../src/server/persistence/repositories/models.js"
 import { makeFakePluginRuntime } from "../src/server/plugins/fake/FakePluginDefinition.js"
 import { PluginConnection } from "../src/server/plugins/PluginConnection.js"
@@ -55,7 +72,7 @@ const acquireEphemeralPort = Effect.tryPromise({
           reject(new Error("ephemeral listener did not expose an internet port"))
           return
         }
-        probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
+        probe.close((error) => (error === undefined ? resolve(address.port) : reject(error)))
       })
     }),
   catch: (cause) => new Error("could not reserve an ephemeral browser-test port", { cause })
@@ -154,9 +171,30 @@ const disposeAll = async (
 
 export interface RealRuntimeFixture {
   readonly dispose: () => Promise<void>
+  readonly lifecycleEvidence: () => RealRuntimeLifecycleEvidence
   readonly origin: string
   readonly pairThroughUi: (page: Page) => Promise<void>
+  readonly seedBenchmarkPersistence: () => Promise<RealRuntimePersistenceEvidence>
   readonly synchronizeUpdate: () => Promise<void>
+  readonly writeBenchmarkReport: (
+    input: MakeControlCenterRuntimeBenchmarkReportInput
+  ) => Promise<{ readonly outputPath: string; readonly report: ControlCenterRuntimeBenchmarkReport }>
+}
+
+/** Observable resource counters owned by the managed browser-test server fixture. */
+export interface RealRuntimeLifecycleEvidence {
+  readonly activeManagedServers: number
+  readonly disposedManagedServers: number
+}
+
+/** Actual durable cardinalities observed after seeding the large runtime benchmark. */
+export interface RealRuntimePersistenceEvidence {
+  readonly freshIngestionMilliseconds: number
+  readonly generatedEdges: number
+  readonly generatedFiles: number
+  readonly persistedEntities: number
+  readonly persistedEvents: number
+  readonly persistedReleases: number
 }
 
 /** Start one real Control Center server whose resources remain owned until explicit fixture disposal. */
@@ -202,12 +240,129 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
     }
 
     let disposed = false
+    const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
     return {
+      seedBenchmarkPersistence: async () => {
+        const fixture = generateControlCenterBenchmarkFixture()
+        const persistence = Context.get(context, Persistence)
+        const fixtureTime = await typedServerRuntime.runPromise(
+          Schema.decodeUnknownEffect(UtcTimestamp)(REAL_FIXTURE_TIME_INPUT)
+        )
+        return await typedServerRuntime.runPromise(
+          Effect.gen(function*() {
+            const startedAt = yield* Effect.clockWith((clock) => clock.currentTimeNanos)
+            const before = yield* persistence.events.streamState(REAL_WORKSPACE_ID)
+            if (before.headCursor > CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.timelineEvents) {
+              return yield* new BenchmarkInvariantError({
+                reason: "Benchmark journal already exceeds its target cardinality."
+              })
+            }
+            yield* persistence.transact(
+              Effect.gen(function*() {
+                yield* Effect.forEach(
+                  fixture.releases.slice(0, CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases - 1),
+                  (benchmarkRelease) => {
+                    const releaseId = ReleaseId.make(benchmarkRelease.id)
+                    const release = Schema.decodeSync(Release)({
+                      createdAt: REAL_FIXTURE_TIME_INPUT,
+                      freshness: {
+                        _tag: "unavailable",
+                        pluginHealth: { _tag: "disabled", checkedAt: REAL_FIXTURE_TIME_INPUT },
+                        provenance: { _tag: "none", pluginConnectionId: REAL_PLUGIN_ID },
+                        sourceObservedAt: null,
+                        staleAfterSeconds: 300,
+                        synchronizedAt: null
+                      },
+                      id: releaseId,
+                      lifecycle: "candidate",
+                      relay: deriveReleaseRelay(releaseId),
+                      roleAssignments: [],
+                      serviceName: benchmarkRelease.serviceName,
+                      sourceRevisions: [],
+                      targetEnvironmentIds: [],
+                      updatedAt: REAL_FIXTURE_TIME_INPUT,
+                      version: benchmarkRelease.version,
+                      workspaceId: REAL_WORKSPACE_ID
+                    })
+                    return persistence.releases.create(REAL_WORKSPACE_ID, release)
+                  },
+                  { concurrency: 1, discard: true }
+                )
+                yield* Effect.forEach(
+                  fixture.entities,
+                  (benchmarkEntity) => {
+                    const entityId = EntityId.make(
+                      `01890f6f-6d6a-7cc0-98d2-${String(benchmarkEntity.ordinal + 200_000).padStart(12, "0")}`
+                    )
+                    const sourceRevision = Schema.decodeSync(SourceRevision)({
+                      firstObservedAt: REAL_FIXTURE_TIME_INPUT,
+                      lastObservedAt: REAL_FIXTURE_TIME_INPUT,
+                      normalizationSchemaVersion: 1,
+                      pluginConnectionId: REAL_PLUGIN_ID,
+                      providerId: "jira",
+                      revision: `benchmark-entity-${benchmarkEntity.ordinal}`,
+                      sourceUrl: null,
+                      synchronizedAt: REAL_FIXTURE_TIME_INPUT,
+                      vendorImmutableId: benchmarkEntity.id
+                    })
+                    return persistence.entities.create(REAL_WORKSPACE_ID, {
+                      createdAt: fixtureTime,
+                      entityId,
+                      entityType: benchmarkEntity.kind,
+                      sourceRevision
+                    })
+                  },
+                  { concurrency: 1, discard: true }
+                )
+                yield* Effect.forEach(
+                  Array.from(
+                    { length: CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.timelineEvents - before.headCursor },
+                    (_, index) => before.headCursor + index + 1
+                  ),
+                  (ordinal) =>
+                    persistence.events.append(REAL_WORKSPACE_ID, {
+                      causationId: null,
+                      correlationId: null,
+                      dedupeKey: DomainEventDedupeKey.make(`browser-benchmark-${ordinal}`),
+                      eventId: DomainEventId.make(
+                        `01890f6f-6d6a-7cc0-98d2-${String(ordinal + 100_000).padStart(12, "0")}`
+                      ),
+                      eventType: "portfolio-invalidated",
+                      metadata: {},
+                      occurredAt: fixtureTime,
+                      payload: { reason: "release-projection" },
+                      schemaVersion: 1
+                    }),
+                  { concurrency: 1, discard: true }
+                )
+              })
+            )
+            const releases = yield* persistence.releases.list(
+              REAL_WORKSPACE_ID,
+              CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases
+            )
+            const entities = yield* persistence.entities.list(REAL_WORKSPACE_ID)
+            const events = yield* persistence.events.streamState(REAL_WORKSPACE_ID)
+            const completedAt = yield* Effect.clockWith((clock) => clock.currentTimeNanos)
+            return {
+              freshIngestionMilliseconds: Number(completedAt - startedAt) / 1_000_000,
+              generatedEdges: fixture.edges.length,
+              generatedFiles: fixture.files.length,
+              persistedEntities: entities.length,
+              persistedEvents: events.headCursor,
+              persistedReleases: releases.length
+            }
+          })
+        )
+      },
       dispose: async () => {
         if (disposed) return
         disposed = true
         await disposeAll(typedServerRuntime, allocated.dataRoot)
+        lifecycleEvidence.activeManagedServers = 0
+        lifecycleEvidence.disposedManagedServers += 1
       },
+      lifecycleEvidence: () => ({ ...lifecycleEvidence }),
       origin: allocated.origin,
       pairThroughUi: async (page) => {
         await page.goto(`${allocated.origin}/pair`)
@@ -223,7 +378,16 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
         if (outcome._tag !== "synchronized" || outcome.releaseId !== REAL_RELEASE_ID) {
           throw new Error("real runtime did not apply its incremental release synchronization")
         }
-      }
+      },
+      writeBenchmarkReport: async (input) =>
+        await Effect.runPromise(
+          Effect.gen(function*() {
+            const report = yield* makeControlCenterRuntimeBenchmarkReport(input)
+            const outputPath = yield* controlCenterRuntimeBenchmarkOutputPath
+            yield* writeControlCenterRuntimeBenchmarkReport(report, outputPath)
+            return { outputPath, report }
+          }).pipe(Effect.provide(NodeServices.layer))
+        )
     }
   } catch (failure) {
     return await disposeFailedFixtureSetup(failure, () => disposeAll(serverRuntime, allocated.dataRoot))

@@ -12,9 +12,12 @@ import { ApplicationServiceUnavailable, LiveEvents, PortfolioSnapshots } from ".
 import { Persistence } from "../persistence/Persistence.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 
-const EVENT_PAGE_SIZE = 128
+/** Maximum durable events read into one SSE replay page. */
+export const LIVE_EVENT_PAGE_SIZE = 128
 const HEARTBEAT_INTERVAL = Duration.seconds(25)
-const MAXIMUM_REPLAY_EVENTS = 512
+
+/** Maximum durable replay distance before an authoritative snapshot reset. */
+export const MAXIMUM_LIVE_EVENT_REPLAY_EVENTS = 512
 
 interface LiveEventStreamState {
   readonly cursor: EventCursor
@@ -91,7 +94,7 @@ export const makeLiveEvents = Effect.gen(function*() {
             )
           }
 
-          const page = yield* persistence.events.pageAfter(input.workspaceId, state.cursor, EVENT_PAGE_SIZE)
+          const page = yield* persistence.events.pageAfter(input.workspaceId, state.cursor, LIVE_EVENT_PAGE_SIZE)
           if (page._tag === "reset") {
             const frame = yield* snapshotFrame(input.workspaceId)
             const reset: ControlCenterLiveEvent = {
@@ -114,7 +117,7 @@ export const makeLiveEvents = Effect.gen(function*() {
           }
 
           if (page.events.length > 0) {
-            if (page.headCursor - state.replayOriginCursor > MAXIMUM_REPLAY_EVENTS) {
+            if (page.headCursor - state.replayOriginCursor > MAXIMUM_LIVE_EVENT_REPLAY_EVENTS) {
               const frame = yield* snapshotFrame(input.workspaceId)
               const reset: ControlCenterLiveEvent = {
                 event: "stream.reset-required",
