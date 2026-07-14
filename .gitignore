@@ -31,6 +31,8 @@ scratchpad/**/*.ts
 .claude
 .patterns
 .specs/*
+!.specs/control-center/
+!.specs/control-center/**
 .context/
 .reference/
 .reviews/

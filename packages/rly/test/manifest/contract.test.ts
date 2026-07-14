@@ -1,3 +1,4 @@
+import * as TypeScript from "typescript"
 import { describe, expect, it } from "vitest"
 import {
   type ComponentManifest,
@@ -19,10 +20,69 @@ const manifestWithEntries = (entries: ReadonlyArray<ModuleEntry>): ComponentMani
   entries
 })
 
+const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
+  typeof value === "object" && value !== null
+
+const designExportInventory = (source: string): ReadonlyArray<string> => {
+  const inventory = source
+    .split("\n")
+    .find((line) => line.startsWith("**rly**, published as `@knpkv/rly`, exports only"))
+  if (inventory === undefined) throw new Error("Approved rly export inventory is missing")
+
+  return [...inventory.matchAll(/`(\.[^`]*)`/g)]
+    .flatMap((match) => (match[1] === undefined ? [] : [match[1]]))
+    .sort()
+}
+
+const generatedPackageExports = (): ReadonlyArray<string> => {
+  const rendered: unknown = JSON.parse(renderPackageJson(componentManifest, {}))
+  if (!isRecord(rendered) || !isRecord(rendered.exports)) {
+    throw new Error("Generated rly package exports are missing")
+  }
+
+  return Object.keys(rendered.exports).sort()
+}
+
+const approvedDesignSource = TypeScript.sys.readFile(
+  new URL("../../../../.specs/control-center/design.md", import.meta.url).pathname
+)
+if (approvedDesignSource === undefined) throw new Error("Approved Control Center design is missing")
+
+const exportInventoryDrift = (
+  approved: ReadonlyArray<string>,
+  generated: ReadonlyArray<string>
+): { readonly missing: ReadonlyArray<string>; readonly unexpected: ReadonlyArray<string> } => ({
+  missing: generated.filter((entry) => !approved.includes(entry)),
+  unexpected: approved.filter((entry) => !generated.includes(entry))
+})
+
 const buttonRegistryMetadata = componentManifest.registryMetadata.Button
 if (buttonRegistryMetadata === undefined) throw new Error("Button registry metadata is missing")
 
 describe("component manifest contract", () => {
+  it("keeps the approved design export inventory aligned with generated package exports", () => {
+    expect(exportInventoryDrift(designExportInventory(approvedDesignSource), generatedPackageExports())).toEqual({
+      missing: [],
+      unexpected: []
+    })
+  })
+
+  it("detects a missing design export while accepting inventory reordering", () => {
+    const generated = generatedPackageExports()
+    const withoutSearch = designExportInventory(approvedDesignSource).filter(
+      (entry) => entry !== "./registry/search.json"
+    )
+
+    expect(exportInventoryDrift(withoutSearch, generated)).toEqual({
+      missing: ["./registry/search.json"],
+      unexpected: []
+    })
+    expect(exportInventoryDrift([...generated].reverse(), generated)).toEqual({
+      missing: [],
+      unexpected: []
+    })
+  })
+
   it("renders deterministically when entries and components are reordered", () => {
     const reordered: ComponentManifest = {
       ...manifestWithEntries([...componentManifest.entries].reverse()),
