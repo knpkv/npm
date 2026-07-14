@@ -37,9 +37,109 @@ snapshots:
         start: 0
         end: 109
   ? |
+    const load = function loadItem(id: Id) {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      })
+    }
+  : labels:
+      - source: |-
+          const load = function loadItem(id: Id) {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            })
+          }
+        style: primary
+        start: 0
+        end: 119
+  ? |
+    const load = function loadItem(id: Id) {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      }).pipe(Effect.provide(layer))
+    }
+  : labels:
+      - source: |-
+          const load = function loadItem(id: Id) {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            }).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 147
+  ? |
+    const load = function loadItem(id: Id): Effect.Effect<Item> {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      }).pipe(Effect.provide(layer))
+    }
+  : labels:
+      - source: |-
+          const load = function loadItem(id: Id): Effect.Effect<Item> {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            }).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 168
+  ? |
     const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())
   : labels:
       - source: "const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())"
         style: primary
         start: 0
         end: 70
+  ? |
+    function load(id: Id): Effect.Effect<Item> {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      })
+    }
+  : labels:
+      - source: |-
+          function load(id: Id): Effect.Effect<Item> {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            })
+          }
+        style: primary
+        start: 0
+        end: 123
+  ? |
+    function load(id: Id): Effect.Effect<Item> {
+      return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
+    }
+  : labels:
+      - source: |-
+          function load(id: Id): Effect.Effect<Item> {
+            return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 125
+  ? |
+    let load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  : labels:
+      - source: |-
+          let load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 86
+  ? |
+    let load = function(id: Id) {
+      return Effect.suspend(() => repository.load(id))
+    }
+  : labels:
+      - source: |-
+          let load = function(id: Id) {
+            return Effect.suspend(() => repository.load(id))
+          }
+        style: primary
+        start: 0
+        end: 82

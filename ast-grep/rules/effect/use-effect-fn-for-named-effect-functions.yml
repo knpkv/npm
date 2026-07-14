@@ -13,6 +13,52 @@ rule:
     - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY).pipe($$$OPERATORS)"
     - pattern: "const $NAME = ($$$ARGS) => Effect.suspend($$$BODY)"
     - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.suspend($$$BODY)"
+    - pattern: "let $NAME = ($$$ARGS) => Effect.gen($$$BODY)"
+    - pattern: "let $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY)"
+    - pattern: "let $NAME = ($$$ARGS) => Effect.gen($$$BODY).pipe($$$OPERATORS)"
+    - pattern: "let $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY).pipe($$$OPERATORS)"
+    - pattern: "let $NAME = ($$$ARGS) => Effect.suspend($$$BODY)"
+    - pattern: "let $NAME = ($$$ARGS): $RETURN => Effect.suspend($$$BODY)"
+    - pattern: "const $NAME = function ($$$ARGS) { return Effect.gen($$$BODY) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS) { return Effect.gen($$$BODY) }"
+    - pattern: "const $NAME = function ($$$ARGS): $RETURN { return Effect.gen($$$BODY) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS): $RETURN { return Effect.gen($$$BODY) }"
+    - pattern: "const $NAME = function ($$$ARGS) { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS) { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function ($$$ARGS): $RETURN { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS): $RETURN { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function ($$$ARGS) { return Effect.suspend($$$BODY) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS) { return Effect.suspend($$$BODY) }"
+    - pattern: "const $NAME = function ($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
+    - pattern: "const $NAME = function ($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function ($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "const $NAME = function $INNER($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function ($$$ARGS) { return Effect.gen($$$BODY) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS) { return Effect.gen($$$BODY) }"
+    - pattern: "let $NAME = function ($$$ARGS): $RETURN { return Effect.gen($$$BODY) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS): $RETURN { return Effect.gen($$$BODY) }"
+    - pattern: "let $NAME = function ($$$ARGS) { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS) { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function ($$$ARGS): $RETURN { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS): $RETURN { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function ($$$ARGS) { return Effect.suspend($$$BODY) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS) { return Effect.suspend($$$BODY) }"
+    - pattern: "let $NAME = function ($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
+    - pattern: "let $NAME = function ($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function ($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "let $NAME = function $INNER($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "function $NAME($$$ARGS) { return Effect.gen($$$BODY) }"
+    - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.gen($$$BODY) }"
+    - pattern: "function $NAME($$$ARGS) { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "function $NAME($$$ARGS) { return Effect.suspend($$$BODY) }"
+    - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.suspend($$$BODY) }"
+    - pattern: "function $NAME($$$ARGS) { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+    - pattern: "function $NAME($$$ARGS): $RETURN { return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
 
 files:
   - "packages/control-center/src/**/*.ts"
@@ -26,8 +72,9 @@ ignores:
   - "**/generated/**"
 
 note: |
-  Effect.fn gives named operations a stable trace identity and preserves the
-  repository's standard instrumentation seam.
+  Effect.fn gives named arrow functions, function expressions, and function
+  declarations a stable trace identity and preserves the repository's standard
+  instrumentation seam.
 
   Prefer:
 

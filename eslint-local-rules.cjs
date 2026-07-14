@@ -98,12 +98,51 @@ const isSilentRejectionHandler = (handler) => {
   return returned === null || isUndefinedExpression(returned)
 }
 
-const HTTP_HANDLER_STABLE_SERVICE_SOURCES = [
-  "../auth/Auth.js",
-  "./ApiConfiguration.js",
-  "./ApplicationServices.js",
-  "./LiveStreamAdmission.js"
+const HTTP_HANDLER_REQUEST_SERVICE_IMPORTS = [
+  { importedName: "CurrentSession", source: "../../api/session.js" },
+  { importedName: "CurrentSession", source: "../../api/index.js" }
 ]
+
+const importReference = (context, expression, seen = new Set()) => {
+  if (seen.has(expression)) return undefined
+  seen.add(expression)
+  if (expression.type === "MemberExpression" && expression.object.type === "Identifier") {
+    const definition = importedBinding(context, expression.object)
+    if (isValueImport(definition) && definition.node.type === "ImportNamespaceSpecifier") {
+      return { definition, importedName: staticPropertyName(expression.property) }
+    }
+    return undefined
+  }
+  if (expression.type !== "Identifier") return undefined
+
+  let scope = context.sourceCode.getScope(expression)
+  while (scope !== null) {
+    const variable = scope.set.get(expression.name)
+    if (variable !== undefined) {
+      const importDefinition = variable.defs.find((definition) => definition.type === "ImportBinding")
+      if (isValueImport(importDefinition)) {
+        return {
+          definition: importDefinition,
+          importedName:
+            importDefinition.node.type === "ImportSpecifier"
+              ? staticPropertyName(importDefinition.node.imported)
+              : undefined
+        }
+      }
+      const variableDefinition = variable.defs.find(
+        (definition) => definition.type === "Variable" && definition.node.init !== null
+      )
+      return variableDefinition === undefined ? undefined : importReference(context, variableDefinition.node.init, seen)
+    }
+    scope = scope.upper
+  }
+  return undefined
+}
+
+const isAllowedHttpHandlerRequestService = ({ definition, importedName }) =>
+  HTTP_HANDLER_REQUEST_SERVICE_IMPORTS.some(
+    (allowed) => importSource(definition) === allowed.source && importedName === allowed.importedName
+  )
 
 const isHttpHandleCallback = (node) => {
   if (node.type !== "ArrowFunctionExpression" && node.type !== "FunctionExpression") return false
@@ -130,14 +169,12 @@ module.exports = {
     create(context) {
       return {
         YieldExpression(node) {
-          if (node.argument?.type !== "Identifier") return
-          const definition = importedBinding(context, node.argument)
-          if (!isValueImport(definition) || !HTTP_HANDLER_STABLE_SERVICE_SOURCES.includes(importSource(definition))) {
-            return
-          }
+          if (node.argument === null) return
+          const reference = importReference(context, node.argument)
+          if (reference === undefined || isAllowedHttpHandlerRequestService(reference)) return
           if (!context.sourceCode.getAncestors(node).some(isHttpHandleCallback)) return
           context.report({
-            data: { service: node.argument.name },
+            data: { service: reference.importedName ?? context.sourceCode.getText(node.argument) },
             messageId: "nestedStableService",
             node
           })

@@ -92,6 +92,9 @@ await assertRuleDiagnostics({
     import { Auth } from "../auth/Auth.js"
     import { CurrentSession } from "../../api/session.js"
     import { PluginAdministration } from "./ApplicationServices.js"
+    import { FutureStableService } from "./FutureService.js"
+    import * as Services from "./FutureServices.js"
+    const AliasedStableService = FutureStableService
     handlers
       .handle("first", () => Effect.gen(function*() {
         const auth = yield* Auth
@@ -103,8 +106,17 @@ await assertRuleDiagnostics({
           return yield* PluginAdministration
         })
       })
+      .handle("future", () => Effect.gen(function*() {
+        return yield* FutureStableService
+      }))
+      .handle("namespace", () => Effect.gen(function*() {
+        return yield* Services.FutureStableService
+      }))
+      .handle("alias", () => Effect.gen(function*() {
+        return yield* AliasedStableService
+      }))
   `,
-  expected: 2,
+  expected: 5,
   filePath: "packages/control-center/src/server/api/Handlers.ts",
   ruleId: "local-rules/no-stable-service-yield-in-http-handler"
 })
@@ -113,14 +125,18 @@ await assertRuleDiagnostics({
   code: `
     import * as Effect from "effect/Effect"
     import { Auth } from "../auth/Auth.js"
-    import { CurrentSession } from "../../api/session.js"
+    import { CurrentSession as RequestSession } from "../../api/session.js"
+    import * as SessionServices from "../../api/session.js"
     import { PluginAdministration } from "./ApplicationServices.js"
+    const AliasedRequestSession = RequestSession
     Effect.gen(function*() {
       const auth = yield* Auth
       const plugins = yield* PluginAdministration
       return handlers.handle("first", () => Effect.gen(function*() {
-        const session = yield* CurrentSession
-        return { auth, plugins, session }
+        const session = yield* RequestSession
+        const aliasedSession = yield* AliasedRequestSession
+        const namespaceSession = yield* SessionServices.CurrentSession
+        return { aliasedSession, auth, namespaceSession, plugins, session }
       }))
     })
   `,
