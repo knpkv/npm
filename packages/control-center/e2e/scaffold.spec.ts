@@ -181,6 +181,99 @@ test("ignores a stale session hydration after replacing the paired session", asy
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(newCsrfToken)
 })
 
+test("reports a consumed pairing when session storage rejects its mutation proof", async ({ context, page }) => {
+  const pageErrors: Array<Error> = []
+  page.on("pageerror", (error) => pageErrors.push(error))
+  await page.addInitScript(() => {
+    const storagePrototype = Object.getPrototypeOf(sessionStorage)
+    const originalSetItem = storagePrototype.setItem
+    storagePrototype.setItem = function(key: string, value: string): void {
+      if (key === "cc_csrf") throw new DOMException("Storage is disabled", "SecurityError")
+      originalSetItem.call(this, key, value)
+    }
+  })
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "storage-pairing-e2e",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+  await context.route("**/api/v1/session/pair", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: "cd".repeat(32), session: pairedSession }),
+      contentType: "application/json",
+      headers: { "set-cookie": `cc_session=${"bc".repeat(32)}; HttpOnly; Path=/; SameSite=Strict` },
+      status: 200
+    })
+  })
+
+  await page.goto("/pair")
+  await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
+  await page.getByRole("button", { name: "Pair browser" }).click()
+  await expect(page).toHaveURL("/")
+  await expect(page.getByText(
+    "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload."
+  )).toBeVisible()
+  expect(pageErrors).toEqual([])
+})
+
+test("clears a stale mutation proof after authoritative anonymous hydration", async ({ context, page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("cc_csrf", "ef".repeat(32)))
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "anonymous-cleanup-e2e",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+
+  await page.goto("/releases")
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBeNull()
+  await page.getByRole("link", { name: "Today" }).click()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toBeVisible()
+})
+
+test("reports unavailable storage when an anonymous proof cannot be removed", async ({ context, page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("cc_csrf", "ef".repeat(32))
+    const storagePrototype = Object.getPrototypeOf(sessionStorage)
+    const originalRemoveItem = storagePrototype.removeItem
+    storagePrototype.removeItem = function(key: string): void {
+      if (key === "cc_csrf") throw new DOMException("Storage is disabled", "SecurityError")
+      originalRemoveItem.call(this, key)
+    }
+  })
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "storage-cleanup-e2e",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+
+  await page.goto("/")
+  await expect(page.getByText(
+    "Session storage is unavailable. Check storage permissions or space, then reload."
+  )).toBeVisible()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
+})
+
 test("distinguishes a blocked session read from an unavailable server", async ({ page }) => {
   await page.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({

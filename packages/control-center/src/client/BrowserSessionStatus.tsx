@@ -27,6 +27,15 @@ export const BrowserSessionStatus = (): ReactElement => {
       </Text>
     )
   }
+  if (browserSession._tag === "storage-unavailable") {
+    return (
+      <Text className={styles.sessionStatus} tone="secondary" variant="label">
+        {browserSession.session === null
+          ? "Session storage is unavailable. Check storage permissions or space, then reload."
+          : "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload."}
+      </Text>
+    )
+  }
   return (
     <Text className={styles.sessionStatus} tone="secondary" variant="label">
       {browserSession._tag === "checking"

@@ -15,6 +15,7 @@ export type BrowserSessionState =
   | { readonly _tag: "authenticated"; readonly session: SessionSummary }
   | { readonly _tag: "blocked" }
   | { readonly _tag: "checking" }
+  | { readonly _tag: "storage-unavailable"; readonly session: SessionSummary | null }
   | { readonly _tag: "unavailable" }
 
 interface BrowserSessionContextValue {
@@ -36,6 +37,24 @@ interface BrowserSessionProviderProps {
 
 const BrowserSessionContext = createContext<BrowserSessionContextValue | undefined>(undefined)
 
+const storeMutationProof = (csrfToken: CsrfToken): boolean => {
+  try {
+    sessionStorage.setItem("cc_csrf", csrfToken)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const clearMutationProof = (): boolean => {
+  try {
+    sessionStorage.removeItem("cc_csrf")
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Hold browser authentication state once for every application route. */
 export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps): ReactElement => {
   const [state, setState] = useState<BrowserSessionState>({ _tag: "checking" })
@@ -51,8 +70,15 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
     if (hydrationAttempt.current !== attempt) return
     hydrationAttempt.current = undefined
     if (result._tag === "authenticated") {
-      sessionStorage.setItem("cc_csrf", result.csrfToken)
-      setState({ _tag: "authenticated", session: result.session })
+      setState(
+        storeMutationProof(result.csrfToken)
+          ? { _tag: "authenticated", session: result.session }
+          : { _tag: "storage-unavailable", session: result.session }
+      )
+      return
+    }
+    if (result._tag === "anonymous") {
+      setState(clearMutationProof() ? result : { _tag: "storage-unavailable", session: null })
       return
     }
     setState(result)
@@ -60,8 +86,9 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
 
   const establishSession = useCallback((csrfToken: CsrfToken, session: SessionSummary): void => {
     hydrationAttempt.current = undefined
-    sessionStorage.setItem("cc_csrf", csrfToken)
-    setState({ _tag: "authenticated", session })
+    setState(
+      storeMutationProof(csrfToken) ? { _tag: "authenticated", session } : { _tag: "storage-unavailable", session }
+    )
   }, [])
 
   const value = useMemo(
