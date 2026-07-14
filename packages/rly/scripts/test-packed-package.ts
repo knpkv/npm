@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import * as TypeScript from "typescript"
 import { componentManifest } from "../component-manifest.js"
 import { componentStyleSources } from "./contract.js"
 import { findPackedDiffArtifacts, validatePackedDiffArtifactSources } from "./packed/diff-assets.js"
@@ -21,6 +22,7 @@ import {
   renderNormalEntryConsumer,
   renderNormalEntryViteConfig
 } from "./packed/normal-entry.js"
+import { findForbiddenPublicTypeOrigins } from "./packed/public-type-origins.js"
 import { PACKED_REGISTRY_ARTIFACTS, validatePackedRegistry } from "./packed/registry.js"
 
 class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
@@ -82,23 +84,6 @@ const program = Effect.scoped(Effect.gen(function*() {
     return yield* Effect.fail(new PackedPackageError({ reason: "Packed diff worker or its WASM runtime is missing" }))
   }
   const packedDiffEntry = yield* run("tar", ["-xOf", archive, "package/dist/diff/index.js"], temporary)
-  const publicDiffDeclarations = new Set([
-    "package/dist/dts/diff/index.d.ts",
-    ...componentManifest.components
-      .filter(({ publicEntry }) => publicEntry === "diff")
-      .map(({ source }) => `package/${source.replace(/^src\//, "dist/dts/").replace(/\.tsx?$/, ".d.ts")}`)
-  ])
-  for (const artifact of publicDiffDeclarations) {
-    const source = yield* run("tar", ["-xOf", archive, artifact], temporary)
-    const leaked = ["parseDiffFilePair", "FileDiffMetadata", "from \"@pierre/diffs\""].find((value) =>
-      source.includes(value)
-    )
-    if (leaked !== undefined) {
-      return yield* Effect.fail(
-        new PackedPackageError({ reason: `Diff declaration boundary leaked ${leaked} through ${artifact}` })
-      )
-    }
-  }
   const packedWorkerSource = yield* run("tar", ["-xOf", archive, diffArtifacts.worker], temporary)
   const diffArtifactFailure = validatePackedDiffArtifactSources({
     diffEntry: packedDiffEntry,
@@ -553,6 +538,35 @@ void [${references}]
   )
 
   yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
+  const packedDiffDeclarationEntry = yield* fs.realPath(
+    path.join(packageRoot, "dist/dts/diff/index.d.ts")
+  )
+  const packedDeclarationProgram = TypeScript.createProgram({
+    rootNames: [packedDiffDeclarationEntry],
+    options: {
+      module: TypeScript.ModuleKind.NodeNext,
+      moduleResolution: TypeScript.ModuleResolutionKind.NodeNext,
+      skipLibCheck: false,
+      strict: true,
+      target: TypeScript.ScriptTarget.ES2022
+    }
+  })
+  const forbiddenTypeOrigins = findForbiddenPublicTypeOrigins(
+    packedDeclarationProgram,
+    packedDiffDeclarationEntry,
+    ["@pierre/diffs"]
+  )
+  if (forbiddenTypeOrigins.length > 0) {
+    return yield* Effect.fail(
+      new PackedPackageError({
+        reason: `Diff public types expose vendor declarations: ${
+          forbiddenTypeOrigins
+            .map(({ exportName, sourceFile }) => `${exportName} via ${sourceFile}`)
+            .join(", ")
+        }`
+      })
+    )
+  }
   yield* run(
     "node",
     [
@@ -699,5 +713,5 @@ NodeRuntime.runMain(
     Effect.tapError((error) => Console.error(error)),
     Effect.provide(NodeServices.layer)
   ),
-  { disableErrorReporting: true }
+  { disableErrorReporting: false }
 )

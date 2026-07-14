@@ -8,6 +8,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { componentManifest } from "../component-manifest.js"
 import { validateComponentsRegistry } from "./registry/registry-validation.js"
+import { findProjectDeclarationShims } from "./source-contract.js"
 
 class RegistryValidationError extends Data.TaggedError("RegistryValidationError")<{
   readonly reason: string
@@ -36,6 +37,39 @@ const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const packageRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
+  const ignoredSourceDirectories = new Set([
+    ".git",
+    "coverage",
+    "dist",
+    "generated",
+    "node_modules",
+    "playwright-report",
+    "storybook-static",
+    "test-results"
+  ])
+  const ownedFiles: Array<string> = []
+  const pendingDirectories: Array<string> = [""]
+  while (pendingDirectories.length > 0) {
+    const relativeDirectory = pendingDirectories.pop()
+    if (relativeDirectory === undefined) continue
+    for (const entry of yield* fs.readDirectory(path.join(packageRoot, relativeDirectory))) {
+      const relative = relativeDirectory.length === 0 ? entry : path.join(relativeDirectory, entry)
+      const info = yield* fs.stat(path.join(packageRoot, relative))
+      if (info.type === "Directory") {
+        if (!ignoredSourceDirectories.has(relative.split(path.sep)[0] ?? relative)) {
+          pendingDirectories.push(relative)
+        }
+      } else if (info.type === "File") {
+        ownedFiles.push(relative)
+      }
+    }
+  }
+  const declarationShims = findProjectDeclarationShims(ownedFiles)
+  if (declarationShims.length > 0) {
+    return yield* new RegistryValidationError({
+      reason: `project-owned declaration shims are forbidden: ${declarationShims.join(", ")}`
+    })
+  }
   const registryRoot = path.join(packageRoot, "registry")
   const schema = yield* Schema.decodeUnknownEffect(Json)(
     yield* fs.readFileString(path.join(registryRoot, "schema.json"))

@@ -43,6 +43,18 @@ Use ast-grep for syntactic patterns that are precise without type information:
   at boundary code or Effect services where available.
 - Keep service access readable: bind `const service = yield* Service` before
   calling service methods.
+- Give named Effect operations a stable trace identity with `Effect.fn`. The
+  Control Center ast-grep rule covers arrow functions, function expressions,
+  and function declarations that directly return `Effect.gen`, a piped
+  `Effect.gen`, or `Effect.suspend`.
+- Keep indefinite retry controllers iterative inside one `Effect.fn`. Direct
+  self-recursion keeps each parent tracing span open until the recursive tail
+  exits and can grow an unbounded active-span chain; a dedicated rule rejects
+  that shape, including explicitly typed declarations.
+- In Control Center HTTP groups, acquire stable application services once in
+  the `HttpApiBuilder.group` callback. The binding-aware local ESLint rule
+  rejects those services inside `.handle(...)` callbacks while allowing the
+  request-scoped `CurrentSession` service there.
 - Stay on Effect v4 APIs: use `Context.Service`, `Effect.catch`, and
   `Effect.gen({ self: this }, ...)` instead of stale v3 forms.
 - Preserve CLI failure semantics: when a CLI entrypoint formats command failures
@@ -72,6 +84,22 @@ Awaited cleanup immediately before rethrowing a caught failure must preserve
 both causes when cleanup can fail. The ast-grep rule rejects the unsafe direct
 `await cleanup(); throw originalFailure` shape; aggregate the setup and cleanup
 failures instead.
+
+Reviewed Control Center server entrypoints require explicit exported return
+types. This check is deliberately scoped to `Auth.ts`, `TerminalRecovery.ts`,
+and `ControlCenterServer.ts`; expand the file list only after annotating and
+reviewing another boundary.
+
+Built package validation also compiles negative consumers for internal
+auth/persistence layer factories and scans the emitted public declaration
+chain. This protects the package boundary against a source barrel accidentally
+making database implementation details importable.
+
+The `rly` registry check rejects project-owned `.d.ts` shims; framework and
+test globals belong in the relevant `tsconfig` `types` list. Its packed-package
+test walks the declaration symbols reachable from each public diff export and
+rejects types originating in `@pierre/diffs`, including package subpaths,
+without treating private renderer/worker declarations as public API.
 
 ## Agent Guidance
 
