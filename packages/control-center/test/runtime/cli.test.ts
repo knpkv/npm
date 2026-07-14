@@ -191,7 +191,7 @@ describe("Control Center CLI", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades a claimed legacy marker and retains the relative no-replace claim", () =>
+  it.effect("rejects a protocol-only staged legacy claim without consuming pending evidence", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -207,21 +207,22 @@ describe("Control Center CLI", () => {
         mode: 0o600
       })
       yield* fileSystem.chmod(stagingMarker, 0o600)
+      const pendingMarker = path.join(stagingRoot, `.control-center-root.pending-${"b".repeat(32)}`)
+      yield* fileSystem.writeFileString(pendingMarker, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+      yield* fileSystem.chmod(pendingMarker, 0o600)
       const stagingName = path.basename(stagingRoot)
       yield* fileSystem.symlink(stagingName, root)
       const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const entriesBefore = (yield* fileSystem.readDirectory(stagingRoot)).sort()
 
-      const prepared = yield* prepareControlCenterDataRoot(dataPaths)
-      const preparedAgain = yield* prepareControlCenterDataRoot(dataPaths)
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
 
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
       assert.strictEqual(yield* fileSystem.readLink(root), stagingName)
-      assert.strictEqual(prepared.dataRoot, stagingRoot)
-      assert.strictEqual(preparedAgain.dataRoot, stagingRoot)
-      assert.strictEqual((yield* fileSystem.stat(root)).type, "Directory")
-      assert.strictEqual(
-        yield* fileSystem.readFileString(path.join(root, ".control-center-root")),
-        boundMarkerContent("data", stagingName)
-      )
+      assert.deepStrictEqual((yield* fileSystem.readDirectory(stagingRoot)).sort(), entriesBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(stagingMarker), DATA_ROOT_MARKER_V1_CONTENT)
+      assert.strictEqual(yield* fileSystem.readFileString(pendingMarker), DATA_ROOT_MARKER_V1_CONTENT)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades a legacy marker on a direct durable root", () =>
@@ -234,6 +235,9 @@ describe("Control Center CLI", () => {
       yield* fileSystem.writeFileString(markerPath, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
       yield* fileSystem.chmod(markerPath, 0o600)
       yield* fileSystem.writeFileString(path.join(root, "durable-state"), "preserved")
+      const pendingMarker = path.join(root, `.control-center-root.pending-${"c".repeat(32)}`)
+      yield* fileSystem.writeFileString(pendingMarker, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+      yield* fileSystem.chmod(pendingMarker, 0o600)
 
       yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root))
 
@@ -241,10 +245,11 @@ describe("Control Center CLI", () => {
         yield* fileSystem.readFileString(markerPath),
         boundMarkerContent(path.basename(root), path.basename(root))
       )
+      assert.isFalse(yield* fileSystem.exists(pendingMarker))
       assert.strictEqual(yield* fileSystem.readFileString(path.join(root, "durable-state")), "preserved")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades a durable staged legacy root selected by its configured claim", () =>
+  it.effect("rejects a durable staged legacy root without mutating recovery evidence", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -260,14 +265,22 @@ describe("Control Center CLI", () => {
       yield* fileSystem.chmod(markerPath, 0o600)
       yield* fileSystem.writeFileString(path.join(stagingRoot, "durable-state"), "preserved")
       yield* fileSystem.symlink(path.basename(stagingRoot), root)
+      const entriesBefore = (yield* fileSystem.readDirectory(stagingRoot)).sort()
 
-      const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root))
-
-      assert.strictEqual(prepared.dataRoot, stagingRoot)
-      assert.strictEqual(
-        yield* fileSystem.readFileString(markerPath),
-        boundMarkerContent("data", path.basename(stagingRoot))
+      const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root)).pipe(
+        Effect.result
       )
+      const sibling = yield* prepareControlCenterDataRoot(
+        yield* decodeControlCenterDataPaths(path.join(parent, "sibling"))
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+      assert.isTrue(Result.isFailure(sibling))
+      if (Result.isFailure(sibling)) assert.instanceOf(sibling.failure, PersistenceConfigError)
+      assert.strictEqual(yield* fileSystem.readLink(root), path.basename(stagingRoot))
+      assert.deepStrictEqual((yield* fileSystem.readDirectory(stagingRoot)).sort(), entriesBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(markerPath), DATA_ROOT_MARKER_V1_CONTENT)
       assert.strictEqual(yield* fileSystem.readFileString(path.join(stagingRoot, "durable-state")), "preserved")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -303,6 +316,69 @@ describe("Control Center CLI", () => {
       assert.strictEqual(yield* fileSystem.readFileString(path.join(reopened.dataRoot, "durable-state")), "preserved")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("validates all pending markers on a bound v2 root before cleaning them", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-v2-pending-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths)
+      const validPending = path.join(prepared.dataRoot, `.control-center-root.pending-${"7".repeat(32)}`)
+      const invalidPending = path.join(prepared.dataRoot, `.control-center-root.pending-${"8".repeat(32)}`)
+      yield* fileSystem.writeFileString(
+        validPending,
+        boundMarkerContent("data", path.basename(prepared.dataRoot)),
+        { mode: 0o600 }
+      )
+      yield* fileSystem.chmod(validPending, 0o600)
+      yield* fileSystem.writeFileString(invalidPending, "invalid\n", { mode: 0o600 })
+      yield* fileSystem.chmod(invalidPending, 0o600)
+
+      const rejected = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) assert.instanceOf(rejected.failure, PersistenceConfigError)
+      assert.isTrue(yield* fileSystem.exists(validPending))
+      assert.isTrue(yield* fileSystem.exists(invalidPending))
+
+      yield* fileSystem.remove(invalidPending)
+      yield* prepareControlCenterDataRoot(dataPaths)
+
+      assert.isFalse(yield* fileSystem.exists(validPending))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("accepts a pending marker removed concurrently after validation", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-pending-race-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths)
+      const pendingMarker = path.join(prepared.dataRoot, `.control-center-root.pending-${"9".repeat(32)}`)
+      yield* fileSystem.writeFileString(
+        pendingMarker,
+        boundMarkerContent("data", path.basename(prepared.dataRoot)),
+        { mode: 0o600 }
+      )
+      yield* fileSystem.chmod(pendingMarker, 0o600)
+      const racingFileSystem = FileSystem.make({
+        ...fileSystem,
+        remove: (target, options) =>
+          target === pendingMarker
+            ? fileSystem.remove(target, options).pipe(Effect.andThen(fileSystem.remove(target, options)))
+            : fileSystem.remove(target, options)
+      })
+
+      const reopened = yield* prepareControlCenterDataRoot(dataPaths).pipe(
+        Effect.provideService(FileSystem.FileSystem, racingFileSystem)
+      )
+
+      assert.strictEqual(reopened.dataRoot, prepared.dataRoot)
+      assert.isFalse(yield* fileSystem.exists(pendingMarker))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("refuses to create a fresh root when a durable sibling has lost its claim", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -329,6 +405,27 @@ describe("Control Center CLI", () => {
         parentEntries.filter((entry) => entry !== "data")
       )
       assert.deepStrictEqual((yield* fileSystem.readDirectory(prepared.dataRoot)).sort(), durableEntries)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("allows a different claim beside an orphan bound to another basename", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-other-orphan-" })
+      const firstRoot = path.join(parent, "first")
+      const firstPaths = yield* decodeControlCenterDataPaths(firstRoot)
+      const first = yield* prepareControlCenterDataRoot(firstPaths)
+      yield* fileSystem.writeFileString(path.join(first.dataRoot, "durable-state"), "preserved")
+      yield* fileSystem.remove(firstRoot)
+
+      const secondRoot = path.join(parent, "second")
+      const second = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(secondRoot))
+      const firstRestart = yield* prepareControlCenterDataRoot(firstPaths).pipe(Effect.result)
+
+      assert.strictEqual(yield* fileSystem.readFileString(path.join(first.dataRoot, "durable-state")), "preserved")
+      assert.strictEqual(path.join(parent, yield* fileSystem.readLink(secondRoot)), second.dataRoot)
+      assert.isTrue(Result.isFailure(firstRestart))
+      if (Result.isFailure(firstRestart)) assert.instanceOf(firstRestart.failure, PersistenceConfigError)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("does not let an unrelated stale alias hide a lost claim", () =>
@@ -440,9 +537,14 @@ describe("Control Center CLI", () => {
       yield* fileSystem.remove(root)
 
       const restarted = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
+      const sibling = yield* prepareControlCenterDataRoot(
+        yield* decodeControlCenterDataPaths(path.join(parent, "other"))
+      ).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(restarted))
       if (Result.isFailure(restarted)) assert.instanceOf(restarted.failure, PersistenceConfigError)
+      assert.isTrue(Result.isFailure(sibling))
+      if (Result.isFailure(sibling)) assert.instanceOf(sibling.failure, PersistenceConfigError)
       assert.isFalse(yield* fileSystem.exists(root))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -546,6 +648,7 @@ describe("Control Center CLI", () => {
           "padded-base64url",
           "empty-claim",
           "path-like-target",
+          "reserved-claim",
           "duplicate-target",
           "trailing-field",
           "control-character",
@@ -569,6 +672,9 @@ describe("Control Center CLI", () => {
           ? `${markerPrefix}\ntarget-basename:${encodedTarget}\n`
           : invalidCase === "path-like-target"
           ? `${markerPrefix}${encodedClaim}\ntarget-basename:${Encoding.encodeBase64Url("../target")}\n`
+          : invalidCase === "reserved-claim"
+          ? `${markerPrefix}${Encoding.encodeBase64Url(".control-center-incoming-claim")}\n` +
+            `target-basename:${encodedTarget}\n`
           : invalidCase === "duplicate-target"
           ? `${validMarker.slice(0, -1)}\ntarget-basename:${encodedTarget}\n`
           : invalidCase === "trailing-field"
@@ -600,7 +706,7 @@ describe("Control Center CLI", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      for (const stagingType of ["empty", "valid-marker"]) {
+      for (const stagingType of ["empty", "partial-pending", "valid-marker"]) {
         const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-disposable-" })
         const root = path.join(parent, "data")
         const stagingRoot = yield* fileSystem.makeTempDirectory({
@@ -608,16 +714,133 @@ describe("Control Center CLI", () => {
           prefix: ".control-center-incoming-"
         })
         yield* fileSystem.chmod(stagingRoot, 0o700)
-        if (stagingType === "valid-marker") {
+        if (stagingType !== "empty") {
           const markerPath = path.join(stagingRoot, ".control-center-root")
           yield* fileSystem.writeFileString(markerPath, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
           yield* fileSystem.chmod(markerPath, 0o600)
+          if (stagingType === "partial-pending") {
+            const pendingMarker = path.join(stagingRoot, `.control-center-root.pending-${"d".repeat(32)}`)
+            yield* fileSystem.writeFileString(pendingMarker, "@knpkv/control-center:data-root:v2\nclaim-", {
+              mode: 0o600
+            })
+            yield* fileSystem.chmod(pendingMarker, 0o600)
+          }
         }
 
         const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root))
 
         assert.notStrictEqual(prepared.dataRoot, stagingRoot)
         assert.strictEqual(path.join(parent, yield* fileSystem.readLink(root)), prepared.dataRoot)
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("blocks empty reserved staging entries that are not canonical private directories", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      for (const stagingType of ["wrong-mode", "symlink"]) {
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-empty-invalid-" })
+        const root = path.join(parent, "data")
+        const stagingName = `.control-center-incoming-${stagingType}`
+        const stagingRoot = path.join(parent, stagingName)
+        if (stagingType === "symlink") {
+          const externalRoot = path.join(parent, "external")
+          yield* fileSystem.makeDirectory(externalRoot, { mode: 0o700 })
+          yield* fileSystem.symlink(path.basename(externalRoot), stagingRoot)
+        } else {
+          yield* fileSystem.makeDirectory(stagingRoot, { mode: 0o755 })
+        }
+
+        const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root)).pipe(
+          Effect.result
+        )
+
+        assert.isTrue(Result.isFailure(prepared), stagingType)
+        if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+        assert.isFalse(yield* fileSystem.exists(root), stagingType)
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("blocks complete marker-only artifacts copied from another staging target", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      for (const artifactType of ["final", "pending"]) {
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-marker-target-" })
+        const root = path.join(parent, "data")
+        const stagingRoot = yield* fileSystem.makeTempDirectory({
+          directory: parent,
+          prefix: ".control-center-incoming-"
+        })
+        yield* fileSystem.chmod(stagingRoot, 0o700)
+        const markerContent = boundMarkerContent("data", ".control-center-incoming-other")
+        if (artifactType === "final") {
+          const markerPath = path.join(stagingRoot, ".control-center-root")
+          yield* fileSystem.writeFileString(markerPath, markerContent, { mode: 0o600 })
+          yield* fileSystem.chmod(markerPath, 0o600)
+        } else {
+          const finalMarker = path.join(stagingRoot, ".control-center-root")
+          yield* fileSystem.writeFileString(finalMarker, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+          yield* fileSystem.chmod(finalMarker, 0o600)
+          const pendingMarker = path.join(stagingRoot, `.control-center-root.pending-${"f".repeat(32)}`)
+          yield* fileSystem.writeFileString(pendingMarker, markerContent, { mode: 0o600 })
+          yield* fileSystem.chmod(pendingMarker, 0o600)
+        }
+
+        const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root)).pipe(
+          Effect.result
+        )
+
+        assert.isTrue(Result.isFailure(prepared), artifactType)
+        if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+        assert.isFalse(yield* fileSystem.exists(root), artifactType)
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("reinspects transient publication and cleanup directory views", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      for (const race of ["losing-staging", "pending-rename", "probe-removal"]) {
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-reinspect-" })
+        const root = path.join(parent, "data")
+        const stagingRoot = race === "losing-staging"
+          ? undefined
+          : yield* fileSystem.makeTempDirectory({
+            directory: parent,
+            prefix: ".control-center-incoming-"
+          })
+        if (stagingRoot !== undefined) {
+          yield* fileSystem.chmod(stagingRoot, 0o700)
+          const markerPath = path.join(stagingRoot, ".control-center-root")
+          yield* fileSystem.writeFileString(markerPath, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+          yield* fileSystem.chmod(markerPath, 0o600)
+        }
+        let reads = 0
+        const disappearingEntry = race === "pending-rename"
+          ? `.control-center-root.pending-${"3".repeat(32)}`
+          : race === "probe-removal"
+          ? `.control-center-owner-${"4".repeat(32)}`
+          : ".control-center-incoming-disappearing"
+        const racingFileSystem = FileSystem.make({
+          ...fileSystem,
+          readDirectory: (target) =>
+            fileSystem.readDirectory(target).pipe(
+              Effect.map((entries) => {
+                const isRacingDirectory = race === "losing-staging" ? target === parent : target === stagingRoot
+                if (!isRacingDirectory) return entries
+                reads += 1
+                return reads < 3 ? [...entries, disappearingEntry] : entries
+              })
+            )
+        })
+
+        const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root)).pipe(
+          Effect.provideService(FileSystem.FileSystem, racingFileSystem)
+        )
+
+        assert.strictEqual(reads, 3, race)
+        assert.strictEqual(path.join(parent, yield* fileSystem.readLink(root)), prepared.dataRoot, race)
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -716,7 +939,60 @@ describe("Control Center CLI", () => {
       assert.strictEqual(yield* fileSystem.readFileString(path.join(firstPrepared.dataRoot, "durable-state")), "first")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("repairs a durable partial marker left by interrupted setup", () =>
+  it.effect("rejects malformed pending artifacts before deleting any valid pending marker", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      for (const damage of ["content", "mode", "owner", "type"]) {
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-pending-strict-" })
+        yield* fileSystem.chmod(root, 0o700)
+        const markerPath = path.join(root, ".control-center-root")
+        yield* fileSystem.writeFileString(markerPath, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+        yield* fileSystem.chmod(markerPath, 0o600)
+        const validPending = path.join(root, `.control-center-root.pending-${"1".repeat(32)}`)
+        const invalidPending = path.join(root, `.control-center-root.pending-${"2".repeat(32)}`)
+        yield* fileSystem.writeFileString(validPending, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+        yield* fileSystem.chmod(validPending, 0o600)
+        if (damage === "type") {
+          yield* fileSystem.makeDirectory(invalidPending, { mode: 0o700 })
+        } else {
+          yield* fileSystem.writeFileString(
+            invalidPending,
+            damage === "content" ? "invalid\n" : DATA_ROOT_MARKER_V1_CONTENT,
+            { mode: damage === "mode" ? 0o644 : 0o600 }
+          )
+          yield* fileSystem.chmod(invalidPending, damage === "mode" ? 0o644 : 0o600)
+        }
+        const entriesBefore = (yield* fileSystem.readDirectory(root)).sort()
+        const damagedFileSystem = damage === "owner"
+          ? FileSystem.make({
+            ...fileSystem,
+            stat: (target) =>
+              fileSystem.stat(target).pipe(
+                Effect.map((info) =>
+                  target === invalidPending
+                    ? { ...info, uid: Option.map(info.uid, (uid) => uid + 1) }
+                    : info
+                )
+              )
+          })
+          : fileSystem
+
+        const prepared = yield* prepareControlCenterDataRoot(yield* decodeControlCenterDataPaths(root)).pipe(
+          Effect.provideService(FileSystem.FileSystem, damagedFileSystem),
+          Effect.result
+        )
+
+        assert.isTrue(Result.isFailure(prepared), damage)
+        if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+        assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore, damage)
+        assert.strictEqual(yield* fileSystem.readFileString(markerPath), DATA_ROOT_MARKER_V1_CONTENT, damage)
+        assert.isTrue(yield* fileSystem.exists(validPending), damage)
+        assert.isTrue(yield* fileSystem.exists(invalidPending), damage)
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects a truncated final marker without deleting pending recovery evidence", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -732,15 +1008,15 @@ describe("Control Center CLI", () => {
       })
       yield* fileSystem.chmod(pendingMarkerPath, 0o600)
       const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const entriesBefore = (yield* fileSystem.readDirectory(root)).sort()
 
-      yield* prepareControlCenterDataRoot(dataPaths)
-      yield* prepareControlCenterDataRoot(dataPaths)
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
 
-      assert.strictEqual(
-        yield* fileSystem.readFileString(markerPath),
-        boundMarkerContent(path.basename(root), path.basename(root))
-      )
-      assert.notInclude(yield* fileSystem.readDirectory(root), pendingMarkerName)
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+      assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(markerPath), "@knpkv/control-center:data-root:")
+      assert.strictEqual(yield* fileSystem.readFileString(pendingMarkerPath), DATA_ROOT_MARKER_V1_CONTENT)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects a root when files created by this process have a different owner", () =>
@@ -784,6 +1060,33 @@ describe("Control Center CLI", () => {
 
       assert.strictEqual((yield* fileSystem.stat(root)).mode & 0o777, 0o700)
       assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("does not adopt a direct legacy database with a malformed pending marker", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-legacy-pending-" })
+      yield* fileSystem.chmod(root, 0o700)
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.validateMigrationLedger
+      }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
+      const validPending = path.join(root, `.control-center-root.pending-${"5".repeat(32)}`)
+      const invalidPending = path.join(root, `.control-center-root.pending-${"6".repeat(32)}`)
+      yield* fileSystem.writeFileString(validPending, DATA_ROOT_MARKER_V1_CONTENT, { mode: 0o600 })
+      yield* fileSystem.chmod(validPending, 0o600)
+      yield* fileSystem.writeFileString(invalidPending, "invalid\n", { mode: 0o600 })
+      yield* fileSystem.chmod(invalidPending, 0o600)
+      const entriesBefore = (yield* fileSystem.readDirectory(root)).sort()
+
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+      assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore)
+      assert.isFalse(yield* fileSystem.exists(path.join(root, ".control-center-root")))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects a SQLite database without the Control Center migration identity", () =>
