@@ -83,6 +83,8 @@ The exported `PluginConnection` service contains reads, health, sync, complete-d
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. Ordered migrations, workspace-scoped repositories, optimistic revisions, and malformed-record quarantine keep durable state outside the browser. Large content bytes never live in normal SQL rows. Raw SQL, filesystem handles, and resolved storage paths never cross the runtime service boundary; local database and blob-root paths remain explicit, validated server configuration inputs.
 
+A newly created configured data-root pathname is an atomic, relative symlink claim to a private sibling `.control-center-incoming-*` directory. The claim is deliberately retained: replacing it with a directory would reopen the no-clobber race that the claim closes. Startup validates the sibling marker, ownership, and descriptor-pinned identity, then uses canonical operational paths internally. Existing real-directory data roots remain supported unchanged, and moving the parent tree preserves a relative claim.
+
 Secure blob reads and publication require the host to expose opened files and directories through descriptor aliases at `/proc/self/fd` or `/dev/fd`. Operations fail with a typed containment error when neither alias can be verified; the store never falls back to trusting a replaced blob or shard pathname. The data-directory owner and same-UID processes are inside the local trust boundary: descriptor pinning rejects pathname substitution, but it cannot prevent an owner-authorized process from moving, reading, replacing, or deleting the already-open `0700` storage directory.
 
 ## Local authentication

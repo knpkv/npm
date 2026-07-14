@@ -63,8 +63,8 @@ const program = Effect.scoped(
     }
 
     const configured = yield* configuration
-    const dataPaths = yield* decodeControlCenterDataPaths(configured.dataRoot)
-    yield* prepareControlCenterDataRoot(dataPaths)
+    const configuredDataPaths = yield* decodeControlCenterDataPaths(configured.dataRoot)
+    const dataPaths = yield* prepareControlCenterDataRoot(configuredDataPaths)
 
     if (invocation._tag === "recover-owner") {
       const recoveryServices = yield* Layer.build(terminalRecoveryLayer(dataPaths.persistenceConfig))
