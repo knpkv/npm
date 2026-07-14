@@ -185,6 +185,7 @@ test("reports a consumed pairing when session storage rejects its mutation proof
   const pageErrors: Array<Error> = []
   page.on("pageerror", (error) => pageErrors.push(error))
   await page.addInitScript(() => {
+    sessionStorage.setItem("cc_csrf", "ef".repeat(32))
     const storagePrototype = Object.getPrototypeOf(sessionStorage)
     const originalSetItem = storagePrototype.setItem
     storagePrototype.setItem = function(key: string, value: string): void {
@@ -217,9 +218,12 @@ test("reports a consumed pairing when session storage rejects its mutation proof
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
   await expect(page).toHaveURL("/")
-  await expect(page.getByText(
+  const storageAlert = page.getByRole("alert")
+  await expect(storageAlert).toHaveText(
     "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload."
-  )).toBeVisible()
+  )
+  await expect(storageAlert).toBeFocused()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBeNull()
   expect(pageErrors).toEqual([])
 })
 

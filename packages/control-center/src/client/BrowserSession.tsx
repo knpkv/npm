@@ -37,20 +37,21 @@ interface BrowserSessionProviderProps {
 
 const BrowserSessionContext = createContext<BrowserSessionContextValue | undefined>(undefined)
 
-const storeMutationProof = (csrfToken: CsrfToken): boolean => {
+const clearMutationProof = (): boolean => {
   try {
-    sessionStorage.setItem("cc_csrf", csrfToken)
+    sessionStorage.removeItem("cc_csrf")
     return true
   } catch {
     return false
   }
 }
 
-const clearMutationProof = (): boolean => {
+const storeMutationProof = (csrfToken: CsrfToken): boolean => {
   try {
-    sessionStorage.removeItem("cc_csrf")
+    sessionStorage.setItem("cc_csrf", csrfToken)
     return true
   } catch {
+    clearMutationProof()
     return false
   }
 }
