@@ -158,12 +158,19 @@ const program = Effect.gen(function*() {
     verbatimModuleSyntax: true
   }
   const defaultCompilerHost = ts.createCompilerHost(compilerOptions)
+  const offlineBackupConsumerPath = path.join(packageRoot, "offline-backup-consumer.mts")
+  const offlineBackupConsumerSource = `import { createOfflineVerifiedBackup } from ${
+    JSON.stringify(path.join(serverRoot, "server/index.js"))
+  }\nimport type { CreateOfflineVerifiedBackupInput } from ${
+    JSON.stringify(path.join(serverRoot, "server/index.js"))
+  }\nexport const create = (input: CreateOfflineVerifiedBackupInput) => createOfflineVerifiedBackup(input)\n`
   const forbiddenFactoryConsumerPath = path.join(packageRoot, "forbidden-server-factory-consumer.mts")
   const forbiddenFactoryConsumerSource = `import { authLayerFromDatabase, persistenceLayerFromDatabase } from ${
     JSON.stringify(path.join(serverRoot, "server/index.js"))
   }\nvoid authLayerFromDatabase\nvoid persistenceLayerFromDatabase\n`
   const virtualSources = new Map([
     [forbiddenFactoryConsumerPath, forbiddenFactoryConsumerSource],
+    [offlineBackupConsumerPath, offlineBackupConsumerSource],
     [packedConsumerPath, packedConsumerSource]
   ])
   const compilerHost: ts.CompilerHost = {
@@ -184,6 +191,13 @@ const program = Effect.gen(function*() {
     failures.push(
       `packed PluginDefinitionV1 consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`
     )
+  }
+
+  const offlineBackupDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({ rootNames: [offlineBackupConsumerPath], options: compilerOptions, host: compilerHost })
+  )
+  for (const diagnostic of offlineBackupDiagnostics) {
+    failures.push(`packed offline backup consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`)
   }
 
   const forbiddenFactoryDiagnostics = ts.getPreEmitDiagnostics(

@@ -85,6 +85,44 @@ const exportsNamedType = (source: string, typeName: string): boolean => {
   )
 }
 
+interface RequiredReExport {
+  readonly isValue: boolean
+  readonly name: string
+}
+
+const reExportsFromModule = (
+  source: string,
+  moduleName: string,
+  required: ReadonlyArray<RequiredReExport>
+): boolean => {
+  const sourceFile = ts.createSourceFile("index.d.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const expectedModule = `./${moduleName}.js`
+  const satisfied = new Set<string>()
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.moduleSpecifier === undefined ||
+      !ts.isStringLiteralLike(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== expectedModule
+    ) continue
+    const exportClause = statement.exportClause
+    if (exportClause === undefined) {
+      if (!statement.isTypeOnly) return true
+      continue
+    }
+    if (!ts.isNamedExports(exportClause)) continue
+    for (const element of exportClause.elements) {
+      const exportedName = element.propertyName?.text ?? element.name.text
+      const requirement = required.find(({ name }) => name === exportedName)
+      if (
+        requirement !== undefined &&
+        (!requirement.isValue || (!statement.isTypeOnly && !element.isTypeOnly))
+      ) satisfied.add(requirement.name)
+    }
+  }
+  return required.every(({ name }) => satisfied.has(name))
+}
+
 const effectSuccessType = (typeNode: ts.TypeNode): ts.TypeNode | undefined => {
   if (ts.isParenthesizedTypeNode(typeNode)) return effectSuccessType(typeNode.type)
   if (!ts.isTypeReferenceNode(typeNode)) return undefined
@@ -112,8 +150,9 @@ const resolvesToNamedType = (
   return resolvesToNamedType(declaration.type, expectedName, declarations, new Set(visited).add(typeName))
 }
 
-const restoreSuccessType = (source: string): {
+const exportedFunctionSignatureTypes = (source: string, functionName: string): {
   readonly declarations: ReadonlyMap<string, NamedTypeDeclaration>
+  readonly parameter: ts.TypeNode | undefined
   readonly success: ts.TypeNode | undefined
 } => {
   const sourceFile = ts.createSourceFile(
@@ -123,9 +162,10 @@ const restoreSuccessType = (source: string): {
     true,
     ts.ScriptKind.TS
   )
-  const returnType = returnTypeForExportedFunction(sourceFile, "restoreBackup")
+  const returnType = returnTypeForExportedFunction(sourceFile, functionName)
   return {
     declarations: namedTypeDeclarations(sourceFile),
+    parameter: parameterTypeForExportedFunction(sourceFile, functionName),
     success: returnType === undefined ? undefined : effectSuccessType(returnType)
   }
 }
@@ -300,6 +340,90 @@ export const inspectServerDeclarationContract = (
     violations.push("public createVerifiedBackup accepts databaseSourceFile")
   }
 
+  const exposesOfflineBackupInput = exportsNamedType(
+    sources.backupArchive,
+    "CreateOfflineVerifiedBackupInput"
+  )
+  const exposesOfflineBackupOperation = parameterTypeForExportedFunction(
+    ts.createSourceFile(
+      "BackupArchive.d.ts",
+      sources.backupArchive,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    ),
+    "createOfflineVerifiedBackup"
+  ) !== undefined
+  if (exposesOfflineBackupInput !== exposesOfflineBackupOperation) {
+    violations.push(
+      "public server declarations must expose createOfflineVerifiedBackup and CreateOfflineVerifiedBackupInput together"
+    )
+  }
+  if (exposesOfflineBackupOperation) {
+    const requiredOfflineExports: ReadonlyArray<RequiredReExport> = [
+      { isValue: true, name: "createOfflineVerifiedBackup" },
+      { isValue: false, name: "CreateOfflineVerifiedBackupInput" }
+    ]
+    for (
+      const [barrel, source, moduleName] of [
+        ["backup", sources.backupIndex, "BackupArchive"],
+        ["persistence", sources.persistenceIndex, "backup/index"],
+        ["server", sources.serverIndex, "persistence/index"]
+      ] satisfies ReadonlyArray<readonly [string, string, string]>
+    ) {
+      if (!reExportsFromModule(source, moduleName, requiredOfflineExports)) {
+        violations.push(`public ${barrel} barrel must re-export the offline backup API`)
+      }
+    }
+    const offlineBackupSignature = exportedFunctionSignatureTypes(
+      sources.backupArchive,
+      "createOfflineVerifiedBackup"
+    )
+    if (
+      offlineBackupSignature.parameter === undefined ||
+      !resolvesToNamedType(
+        offlineBackupSignature.parameter,
+        "CreateOfflineVerifiedBackupInput",
+        offlineBackupSignature.declarations,
+        new Set()
+      )
+    ) {
+      violations.push("public createOfflineVerifiedBackup must accept CreateOfflineVerifiedBackupInput")
+    }
+    for (const requiredProperty of ["destination", "persistenceConfig"]) {
+      if (
+        !exportedFunctionParameterContainsProperty(
+          sources.backupArchive,
+          "createOfflineVerifiedBackup",
+          requiredProperty
+        )
+      ) {
+        violations.push(`public createOfflineVerifiedBackup input must include ${requiredProperty}`)
+      }
+    }
+    for (const forbiddenProperty of ["configuredDataRoot", "databaseSourceFile", "fileSystem", "sql"]) {
+      if (
+        exportedFunctionParameterContainsProperty(
+          sources.backupArchive,
+          "createOfflineVerifiedBackup",
+          forbiddenProperty
+        )
+      ) {
+        violations.push(`public createOfflineVerifiedBackup input must not include ${forbiddenProperty}`)
+      }
+    }
+    if (
+      offlineBackupSignature.success === undefined ||
+      !resolvesToNamedType(
+        offlineBackupSignature.success,
+        "PublishedBackup",
+        offlineBackupSignature.declarations,
+        new Set()
+      )
+    ) {
+      violations.push("public createOfflineVerifiedBackup must return Effect.Effect<PublishedBackup, ...>")
+    }
+  }
   const backupSources = [
     sources.backupArchive,
     sources.backupIndex,
@@ -336,7 +460,7 @@ export const inspectServerDeclarationContract = (
         violations.push(`public restoreBackup input must not include ${forbiddenProperty}`)
       }
     }
-    const restoreResult = restoreSuccessType(sources.backupArchive)
+    const restoreResult = exportedFunctionSignatureTypes(sources.backupArchive, "restoreBackup")
     if (
       restoreResult.success === undefined ||
       !resolvesToNamedType(restoreResult.success, "RestoredBackup", restoreResult.declarations, new Set())

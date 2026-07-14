@@ -123,6 +123,51 @@ describe("Control Center source boundaries", () => {
     }
   })
 
+  it("keeps CLI backup commands on the public backup barrel", () => {
+    const reason = "the CLI must use the public backup barrel instead of backup or database internals"
+    const internalPaths = [
+      "./persistence/backup/BackupArchive.js",
+      "./persistence/backup/BackupArchiveCore.js",
+      "./persistence/backup/QuiescentBackup.js",
+      "./persistence/backup/DatabaseSnapshot.js",
+      "./persistence/Database.js"
+    ]
+    for (const importPath of internalPaths) {
+      const forbiddenSources = [
+        `import { internal } from ${JSON.stringify(importPath)}`,
+        `export { internal } from ${JSON.stringify(importPath)}`,
+        `export * from ${JSON.stringify(importPath)}`,
+        `const internal = import(${JSON.stringify(importPath)})`,
+        `type Internal = import(${JSON.stringify(importPath)})`,
+        `const internal = require(${JSON.stringify(importPath)})`,
+        `import Internal = require(${JSON.stringify(importPath)})`
+      ]
+      for (const source of forbiddenSources) {
+        expect(inspectSourceBoundaries("src/server/cli.ts", source)).toContainEqual({
+          importPath,
+          reason,
+          sourcePath: "src/server/cli.ts"
+        })
+      }
+    }
+    expect(
+      inspectSourceBoundaries(
+        "src/server/cli.ts",
+        `import { createOfflineVerifiedBackup } from "./persistence/backup/index.js"`
+      )
+    ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/cli.ts",
+        `import { Database, databaseLayer } from "./persistence/Database.js"`
+      )
+    ).toContainEqual({
+      importPath: "./persistence/Database.js",
+      reason,
+      sourcePath: "src/server/cli.ts"
+    })
+  })
+
   it("seals the data-root protocol to its two orchestration owners", () => {
     const reason = "only CLI configuration and the backup archive entry point can import the data-root protocol"
     const forbiddenSources = [

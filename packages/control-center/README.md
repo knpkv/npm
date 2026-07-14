@@ -36,6 +36,28 @@ pnpm --filter @knpkv/control-center start recover-owner
 
 Recovery verifies the owner and mode of the canonical data directory, then requires the exact terminal phrase `ISSUE OWNER RECOVERY CODE`. A successful recovery revokes existing owner sessions and every outstanding pairing code before it prints a replacement single-use code. It is deliberately unavailable over HTTP.
 
+### Offline backup and restore
+
+Stop Control Center and every other process that can write its data root before creating or restoring a backup. The workspace commands below pass the same arguments as the installed `control-center` binary:
+
+```sh
+CONTROL_CENTER_DATA_ROOT=/srv/control-center \
+pnpm --filter @knpkv/control-center start backup /srv/control-center-backups/2026-07-14
+
+pnpm --filter @knpkv/control-center start verify-backup /srv/control-center-backups/2026-07-14
+
+CONTROL_CENTER_DATA_ROOT=/srv/control-center-restored \
+pnpm --filter @knpkv/control-center start restore /srv/control-center-backups/2026-07-14
+```
+
+`backup <archive>` treats `CONTROL_CENTER_DATA_ROOT` as its source. That source must already be a prepared Control Center data root, and its writers must remain stopped for the whole command. Backup does not create, adopt, repair, or migrate the source. The archive pathname must not already exist and must not contain or be contained by the source; publication fails rather than replacing caller-owned data.
+
+`verify-backup <archive>` reads and verifies only the archive. It does not read `CONTROL_CENTER_DATA_ROOT`, even when that variable is set, and it does not modify the archive.
+
+`restore <archive>` treats `CONTROL_CENTER_DATA_ROOT` as its destination. The configured destination must not exist, including as a dangling symlink, and it must not contain or be contained by the archive. Restore verifies the archive before creating the destination, publishes the restored data root without overwriting an existing or concurrently created target, and does not run database migrations. A later normal `control-center` start prepares the restored root and applies any required migrations.
+
+Each successful offline command writes exactly one summary line to standard output and nothing to standard error: `Backup created.`, `Backup verified.`, or `Backup restored.` A valid archive with unavailable reproducible cache content remains usable and instead reports `Backup created with N reproducible cache gaps.`, `Backup verified with N reproducible cache gaps.`, or `Backup restored with N reproducible cache gaps.` Usage and command failures write only to standard error and exit nonzero; command failures use the stable `Control Center command failed (<ErrorTag>).` form without exposing storage paths or secret values.
+
 The Vite development server stays loopback-only and is not the production application server. A new remote browser must pair over trusted HTTPS. The simplest supported setup keeps Control Center on loopback and puts a TLS reverse proxy on the same machine. Configure the proxy to serve a hostname and certificate trusted by the second machine, forward to `http://127.0.0.1:4173`, and overwrite `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`. `X-Forwarded-For` must contain exactly the browser's IP literal: do not append a chain or forward the incoming header. Then start Control Center with the proxy's exact address:
 
 ```nginx
@@ -85,7 +107,7 @@ The server entry owns one scoped libSQL client and an owner-only content-address
 
 A newly created configured data-root pathname is an atomic, relative symlink claim to a private sibling `.control-center-incoming-*` directory. The claim is deliberately retained: replacing it with a directory would reopen the no-clobber race that the claim closes. A move-preserving marker binds both the configured claim basename and the private target basename; startup validates that binding, ownership, and descriptor-pinned identity before using canonical operational paths internally. Existing real-directory data roots remain supported unchanged, except that `.control-center-incoming-*` is reserved for private publication targets and is rejected as a configured data-root basename.
 
-Treat the configured symlink and its sibling target as one data-root unit for its whole lifecycle. Stop Control Center and every process that can write the data root before moving, copying, backing up, restoring, or deleting it. Prefer a verified application or SQLite backup mechanism when one is available; copying live SQLite files is not a safe backup procedure. While all writers remain stopped, operate on the containing parent tree rather than only the configured pathname; the relative claim remains valid after a parent-tree move. Do not dereference the symlink into a standalone copy or delete and recreate it while retaining its target. If the claim is lost and a marked sibling contains durable state, startup fails closed instead of silently creating a fresh database. Recovery is an explicit operator action: inspect the private sibling and verify the recovered unit before restarting. For a bound v2 marker, restore the configured pathname as a relative symlink to the marker's exact target basename. Marker-only siblings from an interrupted first publication carry no application state and do not block a fresh claim.
+Treat the configured symlink and its sibling target as one data-root unit for its whole lifecycle. Stop Control Center and every process that can write the data root before moving, copying, backing up, restoring, or deleting it. Use the [offline backup and restore commands](#offline-backup-and-restore) for portable backups; copying live SQLite files is not a safe backup procedure. While all writers remain stopped, operate on the containing parent tree rather than only the configured pathname; the relative claim remains valid after a parent-tree move. Do not dereference the symlink into a standalone copy or delete and recreate it while retaining its target. If the claim is lost and a marked sibling contains durable state, startup fails closed instead of silently creating a fresh database. Recovery is an explicit operator action: inspect the private sibling and verify the recovered unit before restarting. For a bound v2 marker, restore the configured pathname as a relative symlink to the marker's exact target basename. Marker-only siblings from an interrupted first publication carry no application state and do not block a fresh claim.
 
 Version-one markers do not identify their configured claim. A direct real-directory v1 root can upgrade automatically, but no symlink-backed v1 root can: even a protocol-only target could be selected concurrently through another alias. For offline recovery, stop every writer, take and verify a backup, inspect the sibling target, remove the configured symlink, and move the complete sibling target into the configured pathname as a real directory before restarting. Never select a v1 sibling through a newly created alias. Because a staged v1 root cannot be attributed safely, every existing v1 root beneath a parent must be upgraded as a direct root or recovered offline before creating another data root beneath that parent.
 

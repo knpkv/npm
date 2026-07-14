@@ -85,15 +85,21 @@ both causes when cleanup can fail. The ast-grep rule rejects the unsafe direct
 `await cleanup(); throw originalFailure` shape; aggregate the setup and cleanup
 failures instead.
 
+Control Center path-containment checks must compare complete parent segments.
+The scoped ast-grep rule rejects `relative.startsWith("..")`, which incorrectly
+classifies a child named `..archive` as parent traversal. Match the exact `..`
+segment or `` `..${path.sep}` `` prefix and retain the absolute-path check.
+
 Reviewed Control Center server entrypoints require explicit exported return
 types. This check is deliberately scoped to `Auth.ts`, `TerminalRecovery.ts`,
 and `ControlCenterServer.ts`; expand the file list only after annotating and
 reviewing another boundary.
 
-Built package validation also compiles negative consumers for internal
-auth/persistence layer factories and scans the emitted public declaration
-chain. This protects the package boundary against a source barrel accidentally
-making database implementation details importable.
+Built package validation compiles negative consumers for internal
+auth/persistence layer factories, compiles a positive offline-backup consumer,
+and scans the emitted public declaration chain. This protects the package
+boundary against a source barrel accidentally exposing database implementation
+details or dropping the supported backup API.
 
 The `rly` registry check rejects project-owned `.d.ts` shims; framework and
 test globals belong in the relevant `tsconfig` `types` list. Its packed-package

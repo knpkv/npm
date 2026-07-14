@@ -1,0 +1,23 @@
+id: no-segment-blind-parent-path-check
+snapshots:
+  ? |
+    const isOutside = relative.startsWith("..")
+  : labels:
+      - source: relative.startsWith("..")
+        style: primary
+        start: 18
+        end: 43
+  ? |
+    const isOutside = relative.startsWith('..')
+  : labels:
+      - source: relative.startsWith('..')
+        style: primary
+        start: 18
+        end: 43
+  ? |
+    const isOutside = relative.startsWith(`..`)
+  : labels:
+      - source: relative.startsWith(`..`)
+        style: primary
+        start: 18
+        end: 43

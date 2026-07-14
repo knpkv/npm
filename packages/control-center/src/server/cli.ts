@@ -16,7 +16,17 @@ import * as Stream from "effect/Stream"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
-import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "./cliConfiguration.js"
+import {
+  decodeControlCenterDataPaths,
+  prepareControlCenterDataRoot,
+  resolvePreparedControlCenterDataRoot
+} from "./cliConfiguration.js"
+import {
+  type BackupVerification,
+  createOfflineVerifiedBackup,
+  restoreBackup,
+  verifyBackup
+} from "./persistence/backup/index.js"
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
@@ -31,11 +41,14 @@ const commaSeparated = (value: string): ReadonlyArray<string> =>
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
 
-const configuration = Config.all({
+const dataRootConfiguration = Config.string("CONTROL_CENTER_DATA_ROOT").pipe(
+  Config.withDefault(".control-center")
+)
+
+const serverConfiguration = Config.all({
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
   allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
   allowInsecureLan: Config.boolean("CONTROL_CENTER_ALLOW_INSECURE_LAN").pipe(Config.withDefault(false)),
-  dataRoot: Config.string("CONTROL_CENTER_DATA_ROOT").pipe(Config.withDefault(".control-center")),
   directTlsCertificateRef: Config.string("CONTROL_CENTER_TLS_CERTIFICATE_REF").pipe(Config.withDefault("")),
   directTlsPrivateKeyRef: Config.string("CONTROL_CENTER_TLS_PRIVATE_KEY_REF").pipe(Config.withDefault("")),
   host: Config.string("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
@@ -44,8 +57,20 @@ const configuration = Config.all({
   trustedProxyAddresses: Config.string("CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES").pipe(Config.withDefault(""))
 })
 
-const writeLine = (value: string) =>
+const writeStdoutLine = (value: string) =>
   Stdio.Stdio.use((stdio) => Stream.make(`${value}\n`).pipe(Stream.run(stdio.stdout())))
+
+const writeStderrLine = (value: string) =>
+  Stdio.Stdio.use((stdio) => Stream.make(`${value}\n`).pipe(Stream.run(stdio.stderr())))
+
+const verificationLine = (
+  complete: string,
+  degraded: string,
+  verification: BackupVerification
+): string =>
+  verification._tag === "Complete"
+    ? complete
+    : `${degraded} ${verification.reproducibleBlobGaps.length} reproducible cache gaps.`
 
 class ControlCenterCliUsageError extends Schema.TaggedErrorClass<ControlCenterCliUsageError>()(
   "ControlCenterCliUsageError",
@@ -58,12 +83,45 @@ const program = Effect.scoped(
     const stdio = yield* Stdio.Stdio
     const invocation = classifyControlCenterCliArguments(yield* stdio.args)
     if (invocation._tag === "invalid") {
-      yield* writeLine("Usage: control-center [recover-owner]")
+      yield* writeStderrLine(
+        "Usage: control-center [recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]"
+      )
       return yield* new ControlCenterCliUsageError({ command: invocation.command })
     }
 
-    const configured = yield* configuration
-    const configuredDataPaths = yield* decodeControlCenterDataPaths(configured.dataRoot)
+    if (invocation._tag === "verify-backup") {
+      const verification = yield* verifyBackup(invocation.archiveRoot)
+      yield* writeStdoutLine(
+        verificationLine("Backup verified.", "Backup verified with", verification)
+      )
+      return
+    }
+
+    const configuredDataRoot = yield* dataRootConfiguration
+    if (invocation._tag === "restore") {
+      const restored = yield* restoreBackup({
+        archiveRoot: invocation.archiveRoot,
+        configuredDataRoot
+      })
+      yield* writeStdoutLine(
+        verificationLine("Backup restored.", "Backup restored with", restored.verification)
+      )
+      return
+    }
+
+    const configuredDataPaths = yield* decodeControlCenterDataPaths(configuredDataRoot)
+    if (invocation._tag === "backup") {
+      const existingDataPaths = yield* resolvePreparedControlCenterDataRoot(configuredDataPaths)
+      const published = yield* createOfflineVerifiedBackup({
+        destination: invocation.archiveRoot,
+        persistenceConfig: existingDataPaths.persistenceConfig
+      })
+      yield* writeStdoutLine(
+        verificationLine("Backup created.", "Backup created with", published.verification)
+      )
+      return
+    }
+
     const dataPaths = yield* prepareControlCenterDataRoot(configuredDataPaths)
 
     if (invocation._tag === "recover-owner") {
@@ -74,10 +132,11 @@ const program = Effect.scoped(
         actor: { _tag: "human", personId: DEFAULT_OWNER_ID },
         revokeExistingOwnerSessions: true
       })
-      yield* writeLine(`Recovery pairing code: ${Redacted.value(issued.pairingCode)}`)
+      yield* writeStdoutLine(`Recovery pairing code: ${Redacted.value(issued.pairingCode)}`)
       return
     }
 
+    const configured = yield* serverConfiguration
     const allowedHosts = commaSeparated(configured.allowedHosts)
     const allowedOrigins = commaSeparated(configured.allowedOrigins)
     const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -116,11 +175,11 @@ const program = Effect.scoped(
     )
     const bootstrap = Context.get(services, ControlCenterBootstrap)
 
-    yield* writeLine(`Control Center listening at ${bindConfig.publicOrigin}`)
+    yield* writeStdoutLine(`Control Center listening at ${bindConfig.publicOrigin}`)
     if (bootstrap._tag === "pairing-issued") {
-      yield* writeLine(`Pairing code: ${Redacted.value(bootstrap.pairingCode)}`)
+      yield* writeStdoutLine(`Pairing code: ${Redacted.value(bootstrap.pairingCode)}`)
     } else if (bootstrap._tag === "already-initialized") {
-      yield* writeLine("Workspace ready. Use an existing paired browser.")
+      yield* writeStdoutLine("Workspace ready. Use an existing paired browser.")
     }
     return yield* Effect.never
   })
@@ -141,10 +200,10 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
         : Option.none<string>()
   )
   const message = Option.match(errorTag, {
-    onNone: () => "Control Center stopped unexpectedly.",
-    onSome: (tag) => `Control Center could not start (${tag}).`
+    onNone: () => "Control Center command failed unexpectedly.",
+    onSome: (tag) => `Control Center command failed (${tag}).`
   })
-  return writeLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
+  return writeStderrLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
 }
 
 NodeRuntime.runMain(program.pipe(Effect.catchCause(reportProgramFailure), Effect.provide(NodeServices.layer)), {

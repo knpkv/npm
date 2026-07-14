@@ -8,8 +8,17 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "../../src/server/cliConfiguration.js"
-import { BackupIntegrityError, restoreBackup, verifyBackup } from "../../src/server/persistence/backup/index.js"
+import {
+  decodeControlCenterDataPaths,
+  prepareControlCenterDataRoot,
+  resolvePreparedControlCenterDataRoot
+} from "../../src/server/cliConfiguration.js"
+import {
+  BackupIntegrityError,
+  createOfflineVerifiedBackup,
+  restoreBackup,
+  verifyBackup
+} from "../../src/server/persistence/backup/index.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { MigrationLedgerError, ReproducibleContentUnavailableError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
@@ -22,7 +31,11 @@ import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/pe
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
-import { BlobRoot } from "../../src/server/persistence/PersistenceConfig.js"
+import {
+  BlobRoot,
+  decodePersistenceConfig,
+  type PersistenceConfig
+} from "../../src/server/persistence/PersistenceConfig.js"
 
 const expectedTables = [
   "content_blobs",
@@ -167,20 +180,45 @@ const testConfig = Effect.gen(function*() {
 const snakeToCamel = (value: string): string =>
   value.replace(/_([a-z])/gu, (_, character: string) => character.toUpperCase())
 
-const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersionSixArchive")(function*() {
-  const config = yield* testConfig
-  const previousLoader = LibsqlMigrator.fromRecord({
-    "0001_core_heads": migration0001Core,
-    "0002_integrity_blobs": migration0002Integrity,
-    "0003_auth": migration0003Auth,
-    "0004_plugin_runtime": migration0004PluginRuntime,
-    "0005_plugin_configuration": migration0005PluginConfiguration,
-    "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
-  })
+const VERSION_SIX_MIGRATIONS = EXPECTED_MIGRATIONS.slice(0, 6).map(({ id, name }) => ({
+  migrationId: id,
+  name
+}))
+
+const versionSixLoader = LibsqlMigrator.fromRecord({
+  "0001_core_heads": migration0001Core,
+  "0002_integrity_blobs": migration0002Integrity,
+  "0003_auth": migration0003Auth,
+  "0004_plugin_runtime": migration0004PluginRuntime,
+  "0005_plugin_configuration": migration0005PluginConfiguration,
+  "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
+})
+
+const readMigrationLedger = Effect.fn("ControlCenterMigrationsTest.readMigrationLedger")(function*(
+  config: PersistenceConfig
+) {
+  return yield* Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{ readonly migrationId: number; readonly name: string }>`SELECT
+      migration_id AS migrationId, name
+      FROM ${sql(MIGRATION_LEDGER_TABLE)}
+      ORDER BY migration_id`
+  }).pipe(
+    Effect.provide(
+      LibsqlClient.layer({
+        transformResultNames: snakeToCamel,
+        url: config.databaseUrl
+      })
+    ),
+    Effect.scoped
+  )
+})
+
+const seedVersionSixSource = Effect.fn("ControlCenterMigrationsTest.seedVersionSixSource")(function*(
+  config: PersistenceConfig
+) {
   const legacyWorkspaceId = "01890f6f-6d6a-7cc0-98d2-000000000093"
   const legacyWorkspace = Schema.decodeSync(WorkspaceId)(legacyWorkspaceId)
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
   const cacheBytes = encoder.encode("version-six reproducible cache")
   const durableBytes = encoder.encode("version-six durable evidence")
   const blobStore = yield* makeBlobStore({
@@ -191,7 +229,7 @@ const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersion
 
   yield* Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
+    yield* LibsqlMigrator.run({ loader: versionSixLoader, table: MIGRATION_LEDGER_TABLE })
     yield* sql`INSERT INTO workspaces (
       workspace_id, display_name, revision, created_at, updated_at
     ) VALUES (
@@ -219,10 +257,26 @@ const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersion
     Effect.scoped
   )
 
+  return {
+    cache,
+    cacheBytes,
+    durable,
+    durableBytes,
+    legacyWorkspace,
+    legacyWorkspaceId
+  }
+})
+
+const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersionSixArchive")(function*() {
+  const config = yield* testConfig
+  const seeded = yield* seedVersionSixSource(yield* decodePersistenceConfig(config))
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+
   const snapshot = yield* Effect.gen(function*() {
     const database = yield* Database
     const workspaces = yield* database.sql<{ readonly displayName: string }>`SELECT
-      display_name AS displayName FROM workspaces WHERE workspace_id = ${legacyWorkspaceId}`
+      display_name AS displayName FROM workspaces WHERE workspace_id = ${seeded.legacyWorkspaceId}`
     const streams = yield* database.sql`SELECT workspace_id FROM domain_event_streams`
     const events = yield* database.sql`SELECT workspace_id FROM domain_events`
     const ledger = yield* database.sql<{
@@ -248,12 +302,12 @@ const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersion
   if (archive === undefined) return yield* Effect.fail("missing pre-migration archive")
   return {
     archiveRoot: path.join(backupRoot, archive),
-    cache,
-    cacheBytes,
+    cache: seeded.cache,
+    cacheBytes: seeded.cacheBytes,
     config,
-    durable,
-    durableBytes,
-    legacyWorkspace,
+    durable: seeded.durable,
+    durableBytes: seeded.durableBytes,
+    legacyWorkspace: seeded.legacyWorkspace,
     snapshot
   }
 })
@@ -392,6 +446,81 @@ describe("Control Center migrations", () => {
         successfulHealthDigest: null,
         successfulHealthJson: null
       }])
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("backs up a prepared version 6 root without migrating it before restored startup", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-v6-offline-" })
+      const configuredDataRoot = path.join(parent, "source")
+      const configuredPaths = yield* decodeControlCenterDataPaths(configuredDataRoot)
+      const prepared = yield* prepareControlCenterDataRoot(configuredPaths)
+      const seeded = yield* seedVersionSixSource(prepared.persistenceConfig)
+      const resolved = yield* resolvePreparedControlCenterDataRoot(configuredPaths)
+      const markerPath = path.join(resolved.dataRoot, ".control-center-root")
+      const sourceClaimBefore = yield* fileSystem.readLink(configuredDataRoot)
+      const sourceMarkerBefore = yield* fileSystem.readFileString(markerPath)
+      const sourceMarkerInfoBefore = yield* fileSystem.stat(markerPath)
+
+      assert.notStrictEqual(resolved.dataRoot, configuredDataRoot)
+      assert.strictEqual(path.join(parent, sourceClaimBefore), resolved.dataRoot)
+      assert.match(sourceMarkerBefore, /^@knpkv\/control-center:data-root:v2\n/u)
+      assert.deepStrictEqual(yield* readMigrationLedger(resolved.persistenceConfig), VERSION_SIX_MIGRATIONS)
+
+      const archiveRoot = path.join(parent, "portable-v6")
+      const published = yield* createOfflineVerifiedBackup({
+        destination: archiveRoot,
+        persistenceConfig: resolved.persistenceConfig
+      })
+      const verification = yield* verifyBackup(published.archiveRoot)
+
+      assert.strictEqual(verification._tag, "Complete")
+      assert.strictEqual(verification.manifest.kind, "manual")
+      assert.deepStrictEqual(verification.manifest.migrations, VERSION_SIX_MIGRATIONS)
+      assert.deepStrictEqual(yield* readMigrationLedger(resolved.persistenceConfig), VERSION_SIX_MIGRATIONS)
+      assert.strictEqual(yield* fileSystem.readLink(configuredDataRoot), sourceClaimBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(markerPath), sourceMarkerBefore)
+      const sourceMarkerInfoAfterBackup = yield* fileSystem.stat(markerPath)
+      assert.deepStrictEqual(sourceMarkerInfoAfterBackup.ino, sourceMarkerInfoBefore.ino)
+      assert.deepStrictEqual(sourceMarkerInfoAfterBackup.mtime, sourceMarkerInfoBefore.mtime)
+
+      const restoredDataRoot = path.join(parent, "restored")
+      const restored = yield* restoreBackup({
+        archiveRoot: published.archiveRoot,
+        configuredDataRoot: restoredDataRoot
+      })
+      const restoredConfiguredPaths = yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+      const resolvedRestored = yield* resolvePreparedControlCenterDataRoot(restoredConfiguredPaths)
+
+      assert.deepStrictEqual(yield* readMigrationLedger(resolvedRestored.persistenceConfig), VERSION_SIX_MIGRATIONS)
+      const preparedRestored = yield* prepareControlCenterDataRoot(restoredConfiguredPaths)
+      assert.strictEqual(preparedRestored.dataRoot, resolvedRestored.dataRoot)
+      assert.deepStrictEqual(yield* readMigrationLedger(preparedRestored.persistenceConfig), VERSION_SIX_MIGRATIONS)
+
+      const migratedLedger = yield* Effect.gen(function*() {
+        const database = yield* Database
+        return yield* database.sql<{ readonly migrationId: number; readonly name: string }>`SELECT
+          migration_id AS migrationId, name
+          FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+          ORDER BY migration_id`
+      }).pipe(Effect.provide(databaseLayer(preparedRestored.persistenceConfig)), Effect.scoped)
+      assert.deepStrictEqual(
+        migratedLedger,
+        EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
+      )
+
+      const archiveAfterMigration = yield* verifyBackup(published.archiveRoot)
+      assert.deepStrictEqual(archiveAfterMigration.manifest.migrations, VERSION_SIX_MIGRATIONS)
+      assert.deepStrictEqual(yield* readMigrationLedger(resolved.persistenceConfig), VERSION_SIX_MIGRATIONS)
+      assert.strictEqual(yield* fileSystem.readLink(configuredDataRoot), sourceClaimBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(markerPath), sourceMarkerBefore)
+      assert.deepStrictEqual(
+        yield* fileSystem.readFile(
+          blobPath(path, resolved.persistenceConfig.blobRoot, seeded.legacyWorkspace, seeded.durable.ref.digest).file
+        ),
+        seeded.durableBytes
+      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   for (const cacheState of VERSION_SIX_CACHE_STATES) {

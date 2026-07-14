@@ -33,7 +33,7 @@ export const createVerifiedPreMigrationBackup = Effect.fn(
         FileSystem.FileSystem,
         (fileSystem) =>
           fileSystem.copyFile(input.databaseSourceFile, destination).pipe(
-            Effect.mapError(() => new BackupStorageError({ operation: "copy-database-snapshot" }))
+            Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-database-snapshot" }))
           )
       )
   })

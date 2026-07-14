@@ -20,6 +20,7 @@ const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtim
 const QUIESCENT_BACKUP_REASON = "only Database can import the quiescent pre-migration backup helper"
 const BACKUP_ARCHIVE_CORE_REASON = "only backup entry points can import the archive assembly core"
 const BLOB_STORE_REASON = "only persistence composition and ContentStore can import the physical blob store"
+const CLI_BACKUP_BOUNDARY_REASON = "the CLI must use the public backup barrel instead of backup or database internals"
 const DATA_ROOT_PROTOCOL_REASON =
   "only CLI configuration and the backup archive entry point can import the data-root protocol"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
@@ -170,6 +171,15 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
 
   if (isPrototypeImport(importPath)) return PROTOTYPE_RUNTIME_REASON
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
+  if (
+    normalizedSource === "src/server/cli" &&
+    target !== undefined &&
+    ((isWithin(target, "src/server/persistence/backup") &&
+      target !== "src/server/persistence/backup/index") ||
+      target === "src/server/persistence/Database")
+  ) {
+    return CLI_BACKUP_BOUNDARY_REASON
+  }
   if (
     target === "src/server/persistence/backup/QuiescentBackup" &&
     normalizedSource !== "src/server/persistence/Database"

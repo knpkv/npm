@@ -62,12 +62,14 @@ interface FileDigest {
   readonly digest: BlobDigest
 }
 
-const storageError = (operation: string): BackupStorageError => new BackupStorageError({ operation })
+const storageError = (operation: string, cause: unknown): BackupStorageError =>
+  new BackupStorageError({ cause, operation })
 
 const mapStorage = <Value, Requirements>(
   operation: string,
   effect: Effect.Effect<Value, unknown, Requirements>
-): Effect.Effect<Value, BackupStorageError, Requirements> => effect.pipe(Effect.mapError(() => storageError(operation)))
+): Effect.Effect<Value, BackupStorageError, Requirements> =>
+  effect.pipe(Effect.mapError((cause) => storageError(operation, cause)))
 
 const syncPath = Effect.fn("BackupArchive.syncPath")(function*(pathValue: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -176,10 +178,17 @@ const digestFile = Effect.fn("BackupArchive.digestFile")(function*(
   const cryptoService = yield* Crypto.Crypto
   const byteLength = yield* fileSize(file, artifact, maximumBytes, expectedCanonicalFile)
   const bytes = yield* mapStorage("read-for-digest", fileSystem.readFile(file))
-  if (bytes.byteLength !== byteLength) return yield* storageError("file-size-changed")
+  if (bytes.byteLength !== byteLength) {
+    return yield* storageError("file-size-changed", {
+      _tag: "BackupInvariant",
+      actualByteLength: bytes.byteLength,
+      expectedByteLength: byteLength,
+      reason: "file-size-changed"
+    })
+  }
   const digestBytes = yield* mapStorage("digest", cryptoService.digest("SHA-256", bytes))
   const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Encoding.encodeHex(digestBytes)).pipe(
-    Effect.mapError(() => storageError("decode-digest"))
+    Effect.mapError((cause) => storageError("decode-digest", cause))
   )
   return { byteLength, digest }
 })
@@ -204,7 +213,7 @@ const inspectSnapshotDatabase = Effect.fn("BackupArchive.inspectSnapshotDatabase
   const inspection = Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
     yield* sql`PRAGMA query_only = ON`.pipe(
-      Effect.mapError(() => new BackupSqlError({ operation: "enable-query-only" }))
+      Effect.mapError((cause) => new BackupSqlError({ cause, operation: "enable-query-only" }))
     )
     return yield* readDatabaseSnapshotInventory(sql)
   })
@@ -640,7 +649,7 @@ const publishPhysicalArchive = Effect.fn("BackupArchive.publishPhysicalArchive")
     if (claimed.failure.reason._tag === "AlreadyExists" || targetExists) {
       return yield* new BackupInputError({ operation: "create", reason: "target-raced" })
     }
-    return yield* storageError("claim-archive")
+    return yield* storageError("claim-archive", claimed.failure)
   }
   yield* Ref.set(emptyClaimNeedsCleanup, true)
 
@@ -712,7 +721,7 @@ export const createVerifiedArchive = Effect.fn("BackupArchive.create")(function*
   const database = yield* digestFile(databaseFile, "database", MAXIMUM_DATABASE_BYTES)
   const backupId = yield* cryptoService.randomUUIDv7.pipe(
     Effect.flatMap((value) => Schema.decodeUnknownEffect(BackupId)(value)),
-    Effect.mapError(() => storageError("create-backup-id"))
+    Effect.mapError((cause) => storageError("create-backup-id", cause))
   )
   const ownerIdFile = path.join(stagingRoot, OWNER_ID_NAME)
   yield* mapStorage(

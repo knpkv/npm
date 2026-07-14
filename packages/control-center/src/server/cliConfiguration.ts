@@ -638,6 +638,47 @@ export const claimFreshControlCenterDataRoot = Effect.fn("claimFreshControlCente
   )
 })
 
+/** Resolve an already-prepared data root without creating, repairing, cleaning, or migrating it. */
+export const resolvePreparedControlCenterDataRoot = Effect.fn(
+  "resolvePreparedControlCenterDataRoot"
+)(function*(
+  dataPaths: ControlCenterDataPaths
+): Effect.fn.Return<ControlCenterDataPaths, PersistenceConfigError, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const parent = path.dirname(dataPaths.dataRoot)
+  const claimBasename = path.basename(dataPaths.dataRoot)
+  if (claimBasename.startsWith(DATA_ROOT_STAGING_PREFIX)) return yield* configurationError()
+  if (!(yield* mapConfigurationError(fileSystem.exists(dataPaths.dataRoot)))) {
+    return yield* configurationError()
+  }
+
+  const canonicalRoot = yield* mapConfigurationError(fileSystem.realPath(dataPaths.dataRoot))
+  let operationalPaths = dataPaths
+  if (canonicalRoot !== dataPaths.dataRoot) {
+    const claimedTarget = yield* mapConfigurationError(fileSystem.readLink(dataPaths.dataRoot))
+    const stagingRoot = resolveStagingRoot(path, parent, claimedTarget)
+    if (Option.isNone(stagingRoot) || stagingRoot.value !== canonicalRoot) {
+      return yield* configurationError()
+    }
+    operationalPaths = yield* decodeOperationalDataPaths(stagingRoot.value)
+  }
+
+  const rootInfo = yield* validatePrivateDirectory(fileSystem, operationalPaths.dataRoot)
+  const markerPath = path.join(operationalPaths.dataRoot, DATA_ROOT_MARKER_NAME)
+  if (!(yield* mapConfigurationError(fileSystem.exists(markerPath)))) return yield* configurationError()
+  const marker = yield* validateMarkerForClaim(
+    fileSystem,
+    path,
+    markerPath,
+    rootInfo,
+    claimBasename,
+    path.basename(operationalPaths.dataRoot)
+  )
+  if (marker._tag !== "Bound") return yield* configurationError()
+  return operationalPaths
+})
+
 /** Create or verify a dedicated data root and return its canonical operational paths. */
 export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataRoot")(function*(
   dataPaths: ControlCenterDataPaths

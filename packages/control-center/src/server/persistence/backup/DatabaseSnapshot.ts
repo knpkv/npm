@@ -23,7 +23,7 @@ const mapSql = <Value, Requirements>(
   operation: string,
   effect: Effect.Effect<Value, unknown, Requirements>
 ): Effect.Effect<Value, BackupSqlError, Requirements> =>
-  effect.pipe(Effect.mapError(() => new BackupSqlError({ operation })))
+  effect.pipe(Effect.mapError((cause) => new BackupSqlError({ cause, operation })))
 
 const decodeRows = <SchemaType extends Schema.Top>(
   schema: SchemaType,
@@ -31,8 +31,19 @@ const decodeRows = <SchemaType extends Schema.Top>(
   operation: string
 ): Effect.Effect<ReadonlyArray<SchemaType["Type"]>, BackupSqlError, SchemaType["DecodingServices"]> =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows).pipe(
-    Effect.mapError(() => new BackupSqlError({ operation }))
+    Effect.mapError((cause) => new BackupSqlError({ cause, operation }))
   )
+
+const unexpectedRowCount = (operation: string, actualRowCount: number): BackupSqlError =>
+  new BackupSqlError({
+    cause: {
+      _tag: "BackupInvariant",
+      actualRowCount,
+      expectedRowCount: 1,
+      reason: "unexpected-row-count"
+    },
+    operation
+  })
 
 const tableExists = Effect.fn("BackupDatabase.tableExists")(function*(
   sql: SqlClient.SqlClient,
@@ -55,7 +66,7 @@ const countTable = Effect.fn("BackupDatabase.countTable")(function*(
     sql`SELECT COUNT(*) AS count FROM ${sql(tableName)}`
   ).pipe(Effect.flatMap((value) => decodeRows(CountRow, value, "count-table")))
   const row = rows[0]
-  if (rows.length !== 1 || row === undefined) return yield* new BackupSqlError({ operation: "count-table" })
+  if (rows.length !== 1 || row === undefined) return yield* unexpectedRowCount("count-table", rows.length)
   return row.count
 })
 
@@ -70,7 +81,7 @@ const maximumColumn = Effect.fn("BackupDatabase.maximumColumn")(function*(
     sql`SELECT MAX(${sql(columnName)}) AS maximum FROM ${sql(tableName)}`
   ).pipe(Effect.flatMap((value) => decodeRows(MaximumRow, value, "read-boundary")))
   const row = rows[0]
-  if (rows.length !== 1 || row === undefined) return yield* new BackupSqlError({ operation: "read-boundary" })
+  if (rows.length !== 1 || row === undefined) return yield* unexpectedRowCount("read-boundary", rows.length)
   return row.maximum ?? 0
 })
 
@@ -152,7 +163,7 @@ export const readDatabaseSnapshotInventory = Effect.fn("BackupDatabase.readSnaps
     releaseRevisionRows: yield* countTable(sql, "release_revisions")
   }
   const boundary = yield* Schema.decodeUnknownEffect(BackupBoundaryV1)(boundaryInput).pipe(
-    Effect.mapError(() => new BackupSqlError({ operation: "decode-boundary" }))
+    Effect.mapError((cause) => new BackupSqlError({ cause, operation: "decode-boundary" }))
   )
   return { blobs, boundary, migrations }
 })

@@ -83,13 +83,38 @@ const withForeignOwner = (file: FileSystemType.File): FileSystemType.File => ({
 })
 
 describe("Control Center CLI", () => {
-  it("accepts exactly the serve and recover-owner argument shapes", () => {
+  it("accepts exactly the serve, recovery, and offline backup argument shapes", () => {
     assert.deepStrictEqual(classifyControlCenterCliArguments([]), { _tag: "serve" })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["recover-owner"]), { _tag: "recover-owner" })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["backup", "archive"]), {
+      _tag: "backup",
+      archiveRoot: "archive"
+    })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["verify-backup", "archive"]), {
+      _tag: "verify-backup",
+      archiveRoot: "archive"
+    })
+    assert.deepStrictEqual(classifyControlCenterCliArguments(["restore", "archive"]), {
+      _tag: "restore",
+      archiveRoot: "archive"
+    })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["recover-owner", "unexpected"]), {
       _tag: "invalid",
       command: "recover-owner unexpected"
     })
+    for (
+      const invalid of [
+        ["unknown"],
+        ["backup"],
+        ["backup", ""],
+        ["verify-backup"],
+        ["verify-backup", "archive", "unexpected"],
+        ["restore"],
+        ["restore", "archive", "unexpected"]
+      ]
+    ) {
+      assert.strictEqual(classifyControlCenterCliArguments(invalid)._tag, "invalid")
+    }
   })
 
   it.effect("decodes derived data paths without defecting on invalid environment input", () =>

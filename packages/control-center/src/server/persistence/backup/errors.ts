@@ -21,13 +21,15 @@ export class BackupLimitError extends Schema.TaggedErrorClass<BackupLimitError>(
   maximumBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 }) {}
 
-/** A platform storage operation failed without exposing its path or host cause. */
+/** A platform storage operation failed; callers retain its cause for redacted diagnostics. */
 export class BackupStorageError extends Schema.TaggedErrorClass<BackupStorageError>()("BackupStorageError", {
+  cause: Schema.Defect(),
   operation: BackupOperation
 }) {}
 
-/** A database snapshot or integrity operation failed. */
+/** A database snapshot or integrity operation failed with its diagnostic cause retained. */
 export class BackupSqlError extends Schema.TaggedErrorClass<BackupSqlError>()("BackupSqlError", {
+  cause: Schema.Defect(),
   operation: BackupOperation
 }) {}
 

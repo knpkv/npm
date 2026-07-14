@@ -1,9 +1,15 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema } from "effect"
 
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { createVerifiedBackup, decodePersistenceConfig, verifyBackup } from "../../src/server/persistence/index.js"
+import {
+  BackupSqlError,
+  BackupStorageError,
+  createVerifiedBackup,
+  decodePersistenceConfig,
+  verifyBackup
+} from "../../src/server/persistence/index.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import {
   assertOwnerOnlyTree,
@@ -73,6 +79,21 @@ const ownerMarkerFailure = (failureMoment: "after-rename" | "before-rename") =>
   })
 
 describe("verified backup archive", () => {
+  it("requires diagnostic causes on storage and SQL failures", () => {
+    assert.throws(() =>
+      Schema.decodeUnknownSync(BackupStorageError)({
+        _tag: "BackupStorageError",
+        operation: "read-manifest"
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(BackupSqlError)({
+        _tag: "BackupSqlError",
+        operation: "read-boundary"
+      })
+    )
+  })
+
   it.effect("publishes an owner-only physical archive without changing caller-owned ancestors", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -206,6 +227,8 @@ describe("verified backup archive", () => {
       const root = path.dirname(config.blobRoot)
       const destination = path.join(root, "failed")
       const manifest = path.join(destination, "manifest.json")
+      const missingManifest = path.join(root, "missing", "manifest")
+      const manifestReadCause = yield* Effect.flip(fileSystem.readFile(missingManifest))
       yield* Effect.gen(function*() {
         const database = yield* Database
         const parentSyncs = yield* Ref.make(0)
@@ -217,7 +240,7 @@ describe("verified backup archive", () => {
               : fileSystem.open(target, options),
           readFile: (target) =>
             target === manifest
-              ? fileSystem.readFile(path.join(root, "missing", "manifest"))
+              ? Effect.fail(manifestReadCause)
               : fileSystem.readFile(target)
         })
         const result = yield* Effect.scoped(
@@ -230,6 +253,7 @@ describe("verified backup archive", () => {
         if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupStorageError")
         if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
           assert.strictEqual(result.failure.operation, "read-manifest")
+          assert.strictEqual(result.failure.cause, manifestReadCause)
         }
         assert.isFalse(yield* fileSystem.exists(destination))
         assert.deepStrictEqual(yield* stagingEntries(fileSystem, root, ".control-center-backup-incoming-"), [])
