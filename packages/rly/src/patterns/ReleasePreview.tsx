@@ -28,7 +28,10 @@ export interface ReleasePreviewProps {
   readonly collaborators?: ReactNode
   /** Required evidence composition supplied by the application. */
   readonly evidence: ReactNode
-  /** Entry ownership sampled per open cycle; external suppresses dialog/sheet entry while preserving exit motion. */
+  /**
+   * Defaults to intrinsic and is sampled per open cycle. While open, changes apply to the next cycle.
+   * External suppresses dialog/sheet surface and overlay entry; exit and reduced-motion behavior stay intrinsic.
+   */
   readonly entryMotion?: "external" | "intrinsic"
   /** Called once when the final full-view action is activated. */
   readonly onOpenFullView: () => void

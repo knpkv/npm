@@ -287,6 +287,9 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
   await expect(sheet).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
   await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
+  await page.waitForFunction(
+    "window.__releaseTransitionReadiness.length === 1 && window.__releaseTransitionReadiness[0].state !== 'pending'"
+  )
   await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute(
     "data-rly-sheet-entry-motion",
     "external"
@@ -302,6 +305,11 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
   if (snapshot === undefined) throw new Error("Compact release transition snapshot was unavailable")
   expect(snapshot.before.map(transitionIdentity)).toEqual(snapshot.after.map(transitionIdentity))
   for (const geometry of snapshot.after) expectVisibleTransitionGeometry(geometry)
+  expect(await page.evaluate<ReadonlyArray<ReleaseTransitionReadiness>>("window.__releaseTransitionReadiness")).toEqual(
+    [
+      { state: "resolved" }
+    ]
+  )
   await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 })

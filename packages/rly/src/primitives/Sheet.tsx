@@ -90,7 +90,10 @@ export type SheetContentProps = Omit<
   readonly closeLabel?: string
   /** Optional visible supporting description announced with the title. */
   readonly description?: string
-  /** Entry ownership sampled when the sheet opens; external suppresses surface and overlay entry only. */
+  /**
+   * Defaults to intrinsic and is sampled when the sheet opens. While open, changes apply to the next cycle.
+   * External suppresses surface and overlay entry only; exit stays intrinsic and shared reduced-motion rules apply.
+   */
   readonly entryMotion?: "external" | "intrinsic"
   /** Optional target for deterministic initial focus. Content receives focus by default. */
   readonly initialFocusRef?: RefObject<HTMLElement | null>

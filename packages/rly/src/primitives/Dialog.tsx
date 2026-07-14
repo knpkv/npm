@@ -98,7 +98,10 @@ export type DialogContentProps = Omit<
 > & {
   readonly children: ReactNode
   readonly description?: string
-  /** Entry ownership sampled when the dialog opens; external suppresses surface and overlay entry only. */
+  /**
+   * Defaults to intrinsic and is sampled when the dialog opens. While open, changes apply to the next cycle.
+   * External suppresses surface and overlay entry only; exit stays intrinsic and shared reduced-motion rules apply.
+   */
   readonly entryMotion?: "external" | "intrinsic"
   readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly size?: RlyDialogSize
