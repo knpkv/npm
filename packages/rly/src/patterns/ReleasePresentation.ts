@@ -33,7 +33,6 @@ const reservedViewTransitionNames = new Set([
   "none",
   "revert",
   "revert-layer",
-  "root",
   "unset"
 ])
 
@@ -55,7 +54,7 @@ export const validateReleaseTransitionNames = (
   const seen = new Set<string>()
   for (const [part, suppliedName] of entries) {
     const name = requireText(suppliedName, `Release transition ${part} name`)
-    if (reservedViewTransitionNames.has(name.toLowerCase())) {
+    if (name === "root" || reservedViewTransitionNames.has(name.toLowerCase())) {
       throw new Error(`Release transition ${part} name must not use a reserved CSS value: ${name}`)
     }
     if (!cssCustomIdentifier.test(name)) {

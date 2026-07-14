@@ -39,6 +39,7 @@ interface BrowserTransitionNameSemantics {
   }>
   readonly rootCollision: BrowserTransitionNameCollision
   readonly surrogateCollision: BrowserTransitionNameCollision
+  readonly uppercaseRoot: BrowserTransitionNameCollision
 }
 
 interface BrowserTransitionNameCollision {
@@ -259,7 +260,7 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
 test("matches Chromium CSSOM semantics for accepted edge names and rejected collisions", async ({ page }) => {
   const semantics = await page.evaluate<BrowserTransitionNameSemantics>(`(async () => {
     const replacementCharacter = String.fromCodePoint(0xfffd);
-    const accepted = ["--", replacementCharacter].map((name) => {
+    const accepted = ["--", replacementCharacter, "ROOT"].map((name) => {
       const element = document.createElement("div");
       document.body.append(element);
       element.style.viewTransitionName = name;
@@ -290,6 +291,7 @@ test("matches Chromium CSSOM semantics for accepted edge names and rejected coll
       return { computedNames, readiness };
     };
 
+    const uppercaseRoot = await collisionReadiness("ROOT", "release-other-name");
     const surrogateCollision = await collisionReadiness(String.fromCharCode(0xd800), replacementCharacter);
     const rootChild = document.createElement("div");
     document.body.append(rootChild);
@@ -307,13 +309,23 @@ test("matches Chromium CSSOM semantics for accepted edge names and rejected coll
     }
     await rootTransition.finished;
     rootChild.remove();
-    return { accepted, rootCollision: { computedNames: rootNames, readiness: rootReadiness }, surrogateCollision };
+    return {
+      accepted,
+      rootCollision: { computedNames: rootNames, readiness: rootReadiness },
+      surrogateCollision,
+      uppercaseRoot
+    };
   })()`)
 
   expect(semantics.accepted).toEqual([
     { computedName: "--", inlineName: "--", name: "--" },
-    { computedName: "\uFFFD", inlineName: "\uFFFD", name: "\uFFFD" }
+    { computedName: "\uFFFD", inlineName: "\uFFFD", name: "\uFFFD" },
+    { computedName: "ROOT", inlineName: "ROOT", name: "ROOT" }
   ])
+  expect(semantics.uppercaseRoot).toEqual({
+    computedNames: ["ROOT", "release-other-name"],
+    readiness: "resolved"
+  })
   expect(semantics.surrogateCollision).toEqual({ computedNames: ["\uFFFD", "\uFFFD"], readiness: "rejected" })
   expect(semantics.rootCollision).toEqual({ computedNames: ["root", "root"], readiness: "rejected" })
 })

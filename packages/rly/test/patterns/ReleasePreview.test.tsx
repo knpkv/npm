@@ -58,7 +58,7 @@ const generatedTransitionNames = {
 const edgeTransitionNames = {
   relay: "--",
   verdict: "\uFFFD",
-  version: generatedTransitionNames.version
+  version: "ROOT"
 } satisfies RlyReleaseTransitionNames
 
 const changingTransitionNames = (): {
