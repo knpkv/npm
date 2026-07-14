@@ -38,7 +38,7 @@ interface InitialJavaScriptClosure {
   readonly missingManifestKeys: ReadonlyArray<string>
 }
 
-const isJavaScriptArtifact = (file: string): boolean => file.endsWith(".js")
+const isJavaScriptArtifact = (file: string): boolean => file.endsWith(".js") || file.endsWith(".mjs")
 
 const hasUnsafePathSegment = (file: string): boolean =>
   file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file) || file.split(/[\\/]/).includes("..")

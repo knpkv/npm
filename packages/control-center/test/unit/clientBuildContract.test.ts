@@ -40,6 +40,31 @@ const validArtifactSizes = (): ReadonlyMap<string, number> =>
     ["assets/ui.js", 140_000]
   ])
 
+const validMjsManifest = (): ClientBuildManifest => ({
+  "_client.js": {
+    file: "assets/client.mjs",
+    name: "client"
+  },
+  "_runtime.js": {
+    file: "assets/runtime.mjs"
+  },
+  "_ui.js": {
+    file: "assets/ui.mjs",
+    imports: ["_runtime.js"]
+  },
+  "index.html": {
+    dynamicImports: [CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY],
+    file: "assets/index.mjs",
+    imports: ["_runtime.js", "_ui.js"],
+    isEntry: true
+  },
+  [CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY]: {
+    file: "assets/BrowserSessionHydrator.mjs",
+    imports: ["_client.js"],
+    isDynamicEntry: true
+  }
+})
+
 describe("client build contract", () => {
   it("counts the recursive static closure once and excludes dynamic imports", () => {
     const manifest = validManifest()
@@ -52,12 +77,30 @@ describe("client build contract", () => {
   })
 
   it("rejects a static closure above the deterministic raw-byte budget", () => {
-    const artifactSizes = new Map(validArtifactSizes())
-    artifactSizes.set("assets/ui.js", 153_000)
+    const artifactSizes = new Map([
+      ["assets/index.mjs", 200_000],
+      ["assets/runtime.mjs", 8_000],
+      ["assets/ui.mjs", 153_000]
+    ])
 
-    expect(inspectClientBuildContract(validManifest(), artifactSizes)).toContain(
+    expect(inspectClientBuildContract(validMjsManifest(), artifactSizes)).toContain(
       "initial JavaScript closure is 361000 bytes; budget is 360000 bytes"
     )
+  })
+
+  it("accepts an mjs generated API client outside the initial closure", () => {
+    const artifactSizes = new Map([
+      ["assets/index.mjs", 200_000],
+      ["assets/runtime.mjs", 8_000],
+      ["assets/ui.mjs", 140_000]
+    ])
+
+    expect(initialJavaScriptArtifacts(validMjsManifest())).toEqual([
+      "assets/index.mjs",
+      "assets/runtime.mjs",
+      "assets/ui.mjs"
+    ])
+    expect(inspectClientBuildContract(validMjsManifest(), artifactSizes)).toEqual([])
   })
 
   it("rejects eager session hydration and generated API client code", () => {
@@ -87,13 +130,13 @@ describe("client build contract", () => {
       ...validManifest(),
       "index.html": {
         dynamicImports: [CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY],
-        file: "../outside.js",
+        file: "../outside.mjs",
         imports: ["_missing.js"],
         isEntry: true
       }
     }
     const violations = inspectClientBuildContract(manifest, new Map())
     expect(violations).toContain("initial JavaScript closure references missing manifest entry \"_missing.js\"")
-    expect(violations).toContain("initial JavaScript artifact has an unsafe path: \"../outside.js\"")
+    expect(violations).toContain("initial JavaScript artifact has an unsafe path: \"../outside.mjs\"")
   })
 })
