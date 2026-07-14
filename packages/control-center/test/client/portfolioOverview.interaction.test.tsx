@@ -10,6 +10,8 @@ import { PortfolioOverviewView } from "../../src/client/portfolio/PortfolioOverv
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
+Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
+
 let mountedRoot: Root | undefined
 
 afterEach(async () => {
