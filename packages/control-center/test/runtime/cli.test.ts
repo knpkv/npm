@@ -15,6 +15,48 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
 
+interface RegularFileSnapshot {
+  readonly bytes: Uint8Array
+  readonly metadata: Omit<FileSystemType.File.Info, "atime">
+  readonly name: string
+}
+
+const stableFileMetadata = (info: FileSystemType.File.Info): Omit<FileSystemType.File.Info, "atime"> => ({
+  // Reading the comparison bytes necessarily advances atime on strict-atime filesystems.
+  birthtime: info.birthtime,
+  blksize: info.blksize,
+  blocks: info.blocks,
+  dev: info.dev,
+  gid: info.gid,
+  ino: info.ino,
+  mode: info.mode,
+  mtime: info.mtime,
+  nlink: info.nlink,
+  rdev: info.rdev,
+  size: info.size,
+  type: info.type,
+  uid: info.uid
+})
+
+const snapshotDatabaseFiles = Effect.fn("ControlCenterCliTest.snapshotDatabaseFiles")(function*(
+  fileSystem: FileSystemType.FileSystem,
+  path: Path.Path,
+  root: string
+) {
+  const snapshots: Array<RegularFileSnapshot> = []
+  const entries = (yield* fileSystem.readDirectory(root))
+    .filter((entry) => entry.startsWith("control-center.db"))
+    .sort()
+  for (const name of entries) {
+    const filePath = path.join(root, name)
+    const info = yield* fileSystem.stat(filePath)
+    if (info.type !== "File") continue
+    const bytes = yield* fileSystem.readFile(filePath)
+    snapshots.push({ bytes, metadata: stableFileMetadata(yield* fileSystem.stat(filePath)), name })
+  }
+  return snapshots
+})
+
 const withForeignOwner = (file: FileSystemType.File): FileSystemType.File => ({
   [FileSystem.FileTypeId]: FileSystem.FileTypeId,
   fd: file.fd,
@@ -166,6 +208,92 @@ describe("Control Center CLI", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("reopens a relative claim after its parent directory is moved", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const outer = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-move-" })
+      const originalParent = path.join(outer, "original")
+      const movedParent = path.join(outer, "moved")
+      const originalRoot = path.join(originalParent, "data")
+      yield* fileSystem.makeDirectory(originalParent)
+
+      const originalPaths = yield* decodeControlCenterDataPaths(originalRoot)
+      const prepared = yield* prepareControlCenterDataRoot(originalPaths)
+      const stagingName = path.basename(prepared.dataRoot)
+      yield* fileSystem.writeFileString(path.join(prepared.dataRoot, "durable-state"), "preserved")
+
+      yield* fileSystem.rename(originalParent, movedParent)
+      const movedRoot = path.join(movedParent, "data")
+      const movedPaths = yield* decodeControlCenterDataPaths(movedRoot)
+      const reopened = yield* prepareControlCenterDataRoot(movedPaths)
+      const expectedOperationalRoot = path.join(movedParent, stagingName)
+
+      assert.strictEqual(yield* fileSystem.readLink(movedRoot), stagingName)
+      assert.strictEqual(reopened.dataRoot, expectedOperationalRoot)
+      assert.strictEqual(
+        reopened.persistenceConfig.databaseUrl,
+        `file:${path.join(expectedOperationalRoot, "control-center.db")}`
+      )
+      assert.strictEqual(reopened.persistenceConfig.blobRoot, path.join(expectedOperationalRoot, "blobs"))
+      assert.strictEqual(reopened.secretRoot, path.join(expectedOperationalRoot, "secrets"))
+      assert.strictEqual(yield* fileSystem.readFileString(path.join(reopened.dataRoot, "durable-state")), "preserved")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("refuses to create a fresh root when a durable sibling has lost its claim", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-lost-claim-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths)
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.validateMigrationLedger
+      }).pipe(Effect.provide(databaseLayer(prepared.persistenceConfig)), Effect.scoped)
+      const durableEntries = (yield* fileSystem.readDirectory(prepared.dataRoot)).sort()
+      const parentEntries = (yield* fileSystem.readDirectory(parent)).sort()
+
+      yield* fileSystem.remove(root)
+      const restarted = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(restarted))
+      if (Result.isFailure(restarted)) assert.instanceOf(restarted.failure, PersistenceConfigError)
+      assert.isFalse(yield* fileSystem.exists(root))
+      assert.deepStrictEqual(
+        (yield* fileSystem.readDirectory(parent)).sort(),
+        parentEntries.filter((entry) => entry !== "data")
+      )
+      assert.deepStrictEqual((yield* fileSystem.readDirectory(prepared.dataRoot)).sort(), durableEntries)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("creates multiple independent durable roots beneath the same parent", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-multiple-roots-" })
+      const firstRoot = path.join(parent, "first")
+      const secondRoot = path.join(parent, "second")
+      const firstPaths = yield* decodeControlCenterDataPaths(firstRoot)
+      const firstPrepared = yield* prepareControlCenterDataRoot(firstPaths)
+      yield* fileSystem.writeFileString(path.join(firstPrepared.dataRoot, "durable-state"), "first")
+
+      const secondPaths = yield* decodeControlCenterDataPaths(secondRoot)
+      const secondPrepared = yield* prepareControlCenterDataRoot(secondPaths)
+
+      assert.notStrictEqual(secondPrepared.dataRoot, firstPrepared.dataRoot)
+      assert.strictEqual(
+        path.join(parent, yield* fileSystem.readLink(firstRoot)),
+        firstPrepared.dataRoot
+      )
+      assert.strictEqual(
+        path.join(parent, yield* fileSystem.readLink(secondRoot)),
+        secondPrepared.dataRoot
+      )
+      assert.strictEqual(yield* fileSystem.readFileString(path.join(firstPrepared.dataRoot, "durable-state")), "first")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("repairs a durable partial marker left by interrupted setup", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -248,8 +376,11 @@ describe("Control Center CLI", () => {
         yield* database.sql`DROP TABLE control_center_migrations`
       }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
       const databasePath = path.join(root, "control-center.db")
+      yield* fileSystem.writeFile(`${databasePath}-wal`, Uint8Array.from([1, 2, 3, 4]), { mode: 0o600 })
+      yield* fileSystem.writeFile(`${databasePath}-journal`, Uint8Array.from([5, 6, 7, 8]), { mode: 0o600 })
+      yield* fileSystem.writeFile(`${databasePath}-shm`, Uint8Array.from([9, 10, 11, 12]), { mode: 0o600 })
       const entriesBefore = (yield* fileSystem.readDirectory(root)).sort()
-      const databaseBefore = yield* fileSystem.readFile(databasePath)
+      const databaseFilesBefore = yield* snapshotDatabaseFiles(fileSystem, path, root)
 
       const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
 
@@ -257,7 +388,7 @@ describe("Control Center CLI", () => {
       if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
       assert.notInclude(yield* fileSystem.readDirectory(root), ".control-center-root")
       assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore)
-      assert.deepStrictEqual(yield* fileSystem.readFile(databasePath), databaseBefore)
+      assert.deepStrictEqual(yield* snapshotDatabaseFiles(fileSystem, path, root), databaseFilesBefore)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("adopts a legacy database with an older supported migration prefix", () =>

@@ -26,6 +26,7 @@ const DATA_ROOT_MARKER_NAME = ".control-center-root"
 const DATA_ROOT_MARKER_CONTENT = "@knpkv/control-center:data-root:v1\n"
 const DATA_ROOT_PENDING_MARKER_PREFIX = `${DATA_ROOT_MARKER_NAME}.pending-`
 const DATA_ROOT_STAGING_PREFIX = ".control-center-incoming-"
+const DATA_ROOT_OWNER_PROBE_PREFIX = ".control-center-owner-"
 const SQLITE_HEADER = Uint8Array.from([
   0x53,
   0x51,
@@ -122,6 +123,12 @@ interface PendingMarkerCleanup {
   readonly fileSystem: FileSystem.FileSystem
   readonly path: Path.Path
   readonly rootInfo: FileSystem.File.Info
+}
+
+interface LostClaimDetection {
+  readonly fileSystem: FileSystem.FileSystem
+  readonly parent: string
+  readonly path: Path.Path
 }
 
 const validatePrivateDirectory = Effect.fn("ControlCenterCli.validatePrivateDirectory")(function*(
@@ -353,7 +360,7 @@ const verifyProcessOwnership = Effect.fn("ControlCenterCli.verifyProcessOwnershi
 
         yield* assertIdentity
         const random = yield* mapConfigurationError(cryptoService.randomBytes(16))
-        const probePath = path.join(alias, `.control-center-owner-${Encoding.encodeHex(random)}`)
+        const probePath = path.join(alias, `${DATA_ROOT_OWNER_PROBE_PREFIX}${Encoding.encodeHex(random)}`)
         const probe = yield* mapConfigurationError(
           fileSystem.open(probePath, { flag: "wx", mode: DATA_ROOT_MARKER_MODE })
         )
@@ -386,6 +393,52 @@ const resolveStagingRoot = (path: Path.Path, parent: string, target: string): Op
     ? Option.some(path.join(parent, name))
     : Option.none()
 }
+
+const isTransientDataRootEntry = (entry: string): boolean =>
+  entry === DATA_ROOT_MARKER_NAME ||
+  entry.startsWith(DATA_ROOT_PENDING_MARKER_PREFIX) ||
+  entry.startsWith(DATA_ROOT_OWNER_PROBE_PREFIX)
+
+const isDurableStagingRoot = Effect.fn("ControlCenterCli.isDurableStagingRoot")(function*(
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  stagingRoot: string
+) {
+  const rootInfo = yield* validatePrivateDirectory(fileSystem, stagingRoot).pipe(Effect.result)
+  if (Result.isFailure(rootInfo)) return false
+
+  const markerValidation = yield* validateMarker(
+    fileSystem,
+    path.join(stagingRoot, DATA_ROOT_MARKER_NAME),
+    rootInfo.success
+  ).pipe(Effect.result)
+  if (Result.isFailure(markerValidation)) return false
+
+  const entries = yield* mapConfigurationError(fileSystem.readDirectory(stagingRoot))
+  return entries.some((entry) => !isTransientDataRootEntry(entry))
+})
+
+const refuseLostDataRootClaim = Effect.fn("ControlCenterCli.refuseLostDataRootClaim")(function*(
+  request: LostClaimDetection
+) {
+  const { fileSystem, parent, path } = request
+  const entries = yield* mapConfigurationError(fileSystem.readDirectory(parent))
+  const activeStagingNames: Array<string> = []
+  for (const entry of entries) {
+    const claimedTarget = yield* fileSystem.readLink(path.join(parent, entry)).pipe(Effect.result)
+    if (Result.isFailure(claimedTarget)) continue
+    const stagingRoot = resolveStagingRoot(path, parent, claimedTarget.success)
+    if (Option.isSome(stagingRoot)) activeStagingNames.push(path.basename(stagingRoot.value))
+  }
+
+  for (const entry of entries) {
+    if (!entry.startsWith(DATA_ROOT_STAGING_PREFIX) || path.basename(entry) !== entry) continue
+    if (activeStagingNames.includes(entry)) continue
+    if (yield* isDurableStagingRoot(fileSystem, path, path.join(parent, entry))) {
+      return yield* configurationError()
+    }
+  }
+})
 
 const resolveClaimedDataRoot = Effect.fn("ControlCenterCli.resolveClaimedDataRoot")(function*(
   request: FreshDataRootPublication
@@ -490,6 +543,7 @@ export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataR
 
   if (!existed) {
     yield* mapConfigurationError(fileSystem.makeDirectory(parent, { recursive: true }))
+    yield* refuseLostDataRootClaim({ fileSystem, parent, path })
     yield* publishFreshDataRoot({
       cryptoService,
       dataRoot: dataPaths.dataRoot,
