@@ -240,17 +240,24 @@ describe("plugin runtime persistence", () => {
   it.effect("commits pages atomically, is idempotent, and retains payloads through tombstones", () =>
     withRuntime(Effect.gen(function*() {
       const runtime = yield* PluginRuntimeRepository
+      const quarantine = yield* QuarantineRepository
       yield* setup
 
       const first = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, upsertPage)
       assert.strictEqual(first.revision, 1)
-      const replay = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, upsertPage)
+      const replay = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
+        ...upsertPage,
+        expectedRevision: 1
+      })
       assert.strictEqual(replay.revision, 1)
       const laterReplay = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
         ...upsertPage,
+        expectedRevision: 1,
         committedAt: "2026-07-14T09:02:00.000Z"
       })
       assert.strictEqual(laterReplay.revision, 1)
+      assert.lengthOf(yield* quarantine.list(WORKSPACE_ID), 0)
+      assert.lengthOf(yield* runtime.listEvidence(WORKSPACE_ID, PLUGIN_ID, STREAM), 1)
       const database = yield* Database
       const committed = yield* database.sql<{ readonly committedAt: string }>`SELECT committed_at AS committedAt
         FROM plugin_sync_pages WHERE page_id = 'page-1'`
@@ -265,6 +272,7 @@ describe("plugin runtime persistence", () => {
 
       const paginationFlip = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
         ...upsertPage,
+        expectedRevision: 1,
         hasMore: true
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(paginationFlip))
@@ -275,10 +283,23 @@ describe("plugin runtime persistence", () => {
 
       const changedReplay = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
         ...upsertPage,
+        expectedRevision: 1,
         checkpointJson: "{\"cursor\":\"changed\"}"
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(changedReplay))
       if (Result.isFailure(changedReplay)) assert.instanceOf(changedReplay.failure, SourceIdentityMismatchError)
+
+      const changedEvent = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
+        ...upsertPage,
+        expectedRevision: 1,
+        events: [{
+          ...upsertPage.events[0],
+          eventJson: normalizedPayload("Changed after delivery"),
+          payloadJson: normalizedPayload("Changed after delivery")
+        }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changedEvent))
+      if (Result.isFailure(changedEvent)) assert.instanceOf(changedEvent.failure, SourceIdentityMismatchError)
 
       const tombstoned = yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, {
         providerId: "jira",

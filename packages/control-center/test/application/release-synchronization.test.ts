@@ -272,6 +272,32 @@ describe("fake release synchronization", () => {
       ])
     })))
 
+  it.effect("accepts an at-least-once replay without malformed health or revision churn", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      yield* runScenario(scenario(success(releasePage())))
+
+      const replay = yield* runScenario(
+        scenario(success(releasePage()), SYNCHRONIZED_AT, "checkpoint-1")
+      )
+
+      assert.deepStrictEqual(replay, {
+        _tag: "synchronized",
+        pagesCommitted: 1,
+        releaseId: RELEASE_ID
+      })
+      const stream = yield* persistence.pluginRuntime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.strictEqual(stream.revision, 1)
+      assert.strictEqual(stream.checkpointJson, "\"checkpoint-1\"")
+      assert.lengthOf(yield* persistence.pluginRuntime.listEvidence(WORKSPACE_ID, PLUGIN_ID, STREAM), 3)
+      assert.strictEqual((yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)).revision, 1)
+      assert.strictEqual((yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)).revision, 1)
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+      assert.strictEqual(runtime.health._tag, "healthy")
+      assert.strictEqual(runtime.consecutiveFailures, 0)
+    })))
+
   it.effect("rejects a missing referenced collaborator before checkpoint, cache, or release advance", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* setup

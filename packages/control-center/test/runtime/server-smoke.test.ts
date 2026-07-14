@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -16,6 +17,7 @@ import { createServer } from "node:net"
 
 import { makeControlCenterApiClient } from "../../src/api/client.js"
 import { PairingCode } from "../../src/api/session.js"
+import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
   PersonId,
@@ -24,10 +26,12 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import { makeFakePluginRuntime } from "../../src/server/plugins/fake/FakePluginDefinition.js"
 import { type FakePluginScenario, fakeSyncScriptKey } from "../../src/server/plugins/fake/FakePluginScenario.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -46,7 +50,9 @@ const APPROVER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = EnvironmentId.make("01890f6f-6d6a-7cc0-98d2-000000000076")
 const OWNER_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000077")
 const APPROVER_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000078")
-const FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)("2024-07-14T09:02:00.000Z")
+const RELEASE_STREAM = PluginStreamKey.make("releases")
+const FIXTURE_TIME_INPUT = "2024-07-14T09:02:00.000Z"
+const FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)(FIXTURE_TIME_INPUT)
 
 const fakeDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -58,6 +64,56 @@ const fakeDescriptor = {
   capabilities: [{ capabilityId: "sync.incremental", supportedVersions: [1], requirement: "required" }]
 }
 
+const fakeReleasePage = {
+  checkpointAfterPage: "checkpoint-1",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "release-event-1",
+    observedAt: "2024-07-14T09:01:00.000Z",
+    revision: "release-r1",
+    entityType: "release",
+    vendorImmutableId: "provider-release-42",
+    sourceUrl: "https://jira.example/releases/42",
+    title: "Payments 2.18.0",
+    attributes: {
+      releaseId: RELEASE_ID,
+      serviceName: "payments-api",
+      version: "2.18.0-rc.1",
+      lifecycle: "candidate",
+      targetEnvironmentIds: [ENVIRONMENT_ID],
+      staleAfterSeconds: 300,
+      collaborators: [
+        { personId: OWNER_ID, assignmentId: OWNER_ASSIGNMENT_ID, vendorPersonId: "ada", role: "release-owner" },
+        {
+          personId: APPROVER_ID,
+          assignmentId: APPROVER_ASSIGNMENT_ID,
+          vendorPersonId: "grace",
+          role: "release-approver"
+        }
+      ]
+    }
+  }, {
+    _tag: "UpsertPerson",
+    eventId: "person-1",
+    observedAt: "2024-07-14T09:01:00.000Z",
+    revision: "person-r1",
+    vendorPersonId: "ada",
+    displayName: "Ada Lovelace",
+    avatarUrl: null,
+    active: true
+  }, {
+    _tag: "UpsertPerson",
+    eventId: "person-2",
+    observedAt: "2024-07-14T09:01:00.000Z",
+    revision: "person-r1",
+    vendorPersonId: "grace",
+    displayName: "Grace Hopper",
+    avatarUrl: null,
+    active: true
+  }]
+}
+
 const fakeScenario: FakePluginScenario = {
   descriptor: fakeDescriptor,
   discover: { _tag: "outage" },
@@ -65,55 +121,7 @@ const fakeScenario: FakePluginScenario = {
   sync: {
     [fakeSyncScriptKey("releases", null)]: [{
       _tag: "success",
-      value: {
-        checkpointAfterPage: "checkpoint-1",
-        hasMore: false,
-        events: [{
-          _tag: "UpsertEntity",
-          eventId: "release-event-1",
-          observedAt: "2024-07-14T09:01:00.000Z",
-          revision: "release-r1",
-          entityType: "release",
-          vendorImmutableId: "provider-release-42",
-          sourceUrl: "https://jira.example/releases/42",
-          title: "Payments 2.18.0",
-          attributes: {
-            releaseId: RELEASE_ID,
-            serviceName: "payments-api",
-            version: "2.18.0-rc.1",
-            lifecycle: "candidate",
-            targetEnvironmentIds: [ENVIRONMENT_ID],
-            staleAfterSeconds: 300,
-            collaborators: [
-              { personId: OWNER_ID, assignmentId: OWNER_ASSIGNMENT_ID, vendorPersonId: "ada", role: "release-owner" },
-              {
-                personId: APPROVER_ID,
-                assignmentId: APPROVER_ASSIGNMENT_ID,
-                vendorPersonId: "grace",
-                role: "release-approver"
-              }
-            ]
-          }
-        }, {
-          _tag: "UpsertPerson",
-          eventId: "person-1",
-          observedAt: "2024-07-14T09:01:00.000Z",
-          revision: "person-r1",
-          vendorPersonId: "ada",
-          displayName: "Ada Lovelace",
-          avatarUrl: null,
-          active: true
-        }, {
-          _tag: "UpsertPerson",
-          eventId: "person-2",
-          observedAt: "2024-07-14T09:01:00.000Z",
-          revision: "person-r1",
-          vendorPersonId: "grace",
-          displayName: "Grace Hopper",
-          avatarUrl: null,
-          active: true
-        }]
-      }
+      value: fakeReleasePage
     }]
   },
   readEntity: { _tag: "outage" },
@@ -129,7 +137,7 @@ const makeFakeConnectionMap = Effect.gen(function*() {
   const runtimeContext = yield* Layer.build(runtime.layer)
   const connectionContext = Context.make(PluginConnection, Context.get(runtimeContext, PluginConnection))
   return {
-    contextEffect: () => Effect.succeed(connectionContext),
+    contextEffect: (_scope) => Effect.succeed(connectionContext),
     invalidate: () => Effect.void
   } satisfies PluginConnectionMapV1
 })
@@ -335,6 +343,107 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(portfolio.releases[0]?.releaseId, RELEASE_ID)
       assert.strictEqual(portfolio.releases[0]?.collaboratorCount, 2)
       assert.strictEqual(portfolio.plugins[0]?.providerId, "jira")
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("recovers crash-committed cache while a disabled connection remains provider-inert", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-disabled-" })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const bindConfig = yield* decodeBindConfig({ port })
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+        maxConnections: 1
+      }
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const persistence = yield* Persistence
+          yield* persistence.workspaces.create(WORKSPACE_ID, {
+            displayName: WorkspaceName.make("Runtime disabled recovery"),
+            createdAt: FIXTURE_TIME
+          })
+          yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+            pluginConnectionId: PLUGIN_ID,
+            providerId: "jira",
+            displayName: PluginConnectionDisplayName.make("Disabled Jira"),
+            isEnabled: false,
+            createdAt: FIXTURE_TIME
+          })
+          yield* persistence.pluginRuntime.acceptPluginDescriptor(
+            WORKSPACE_ID,
+            PLUGIN_ID,
+            "jira",
+            fakeDescriptor,
+            0,
+            FIXTURE_TIME
+          )
+          const healthy = yield* Schema.decodeUnknownEffect(PluginHealth)({
+            _tag: "healthy",
+            checkedAt: FIXTURE_TIME_INPUT
+          })
+          const page = yield* Schema.decodeUnknownEffect(PluginSyncPageV1)(fakeReleasePage)
+          yield* persistence.pluginRuntime.commitNormalizedPage(
+            WORKSPACE_ID,
+            PLUGIN_ID,
+            "jira",
+            RELEASE_STREAM,
+            0,
+            page,
+            FIXTURE_TIME,
+            healthy
+          )
+          const missingProjection = yield* persistence.releases.get(
+            WORKSPACE_ID,
+            RELEASE_ID
+          ).pipe(Effect.result)
+          assert.strictEqual(missingProjection._tag, "Failure")
+        }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
+      )
+
+      const providerAcquisitions = yield* Ref.make(0)
+      const fakeConnections = yield* makeFakeConnectionMap
+      const pluginConnections = {
+        contextEffect: (scope: Parameters<PluginConnectionMapV1["contextEffect"]>[0]) =>
+          Ref.update(providerAcquisitions, (count) => count + 1).pipe(
+            Effect.andThen(fakeConnections.contextEffect(scope))
+          ),
+        invalidate: fakeConnections.invalidate
+      } satisfies PluginConnectionMapV1
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        bootstrap: {
+          workspaceId: WORKSPACE_ID,
+          workspaceName: WorkspaceName.make("Runtime disabled recovery"),
+          owner: { _tag: "human", personId: OWNER_ID }
+        },
+        releaseSynchronization: {
+          input: { workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID, streamKey: "releases" },
+          pluginConnections
+        }
+      }))
+      const synchronizationState = Context.get(runtime, ReleaseSynchronizationStartup)
+      const runtimePersistence = Context.get(runtime, Persistence)
+      const release = yield* runtimePersistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+
+      assert.deepStrictEqual(synchronizationState, { _tag: "connection-disabled" })
+      assert.strictEqual(yield* Ref.get(providerAcquisitions), 0)
+      assert.strictEqual(release.release.id, RELEASE_ID)
+      assert.strictEqual(release.release.freshness._tag, "current")
+      if (release.release.freshness._tag === "current") {
+        assert.strictEqual(release.release.freshness.provenance._tag, "cache")
+      }
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

@@ -497,7 +497,6 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
         providerId: page.providerId,
         streamKey: page.streamKey,
         pageId: page.pageId,
-        expectedRevision: page.expectedRevision,
         checkpointJson: page.checkpointJson,
         hasMore: page.hasMore,
         events: page.events

@@ -9,6 +9,7 @@ export {
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
 export {
   reconcileFakeReleaseProjection,
+  recoverFakeReleaseProjection,
   synchronizeFakeRelease,
   synchronizeFakeReleaseFromMap
 } from "./releaseSynchronization.js"

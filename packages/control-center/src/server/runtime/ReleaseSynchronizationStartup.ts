@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema"
 
 import type { ReleaseId } from "../../domain/identifiers.js"
 import {
+  recoverFakeReleaseProjection,
   type ReleaseSynchronizationFailure,
   type ReleaseSynchronizationInput,
   type ReleaseSynchronizationOutcome,
@@ -67,6 +68,7 @@ const makeReleaseSynchronizationStartup = Effect.fn(
     options.input.pluginConnectionId
   )
   if (!connection.isEnabled) {
+    yield* recoverFakeReleaseProjection(options.input)
     return { _tag: "connection-disabled" } satisfies ReleaseSynchronizationStartupState
   }
   const outcome = yield* synchronizeFakeReleaseFromMap(options.input).pipe(

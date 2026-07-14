@@ -350,6 +350,30 @@ export const reconcileFakeReleaseProjection = Effect.fn(
   return yield* reconcileProjection(boundInput, health, evaluatedAt, "cache")
 })
 
+/** Recover the last valid release projection from durable cache without acquiring a provider. */
+export const recoverFakeReleaseProjection = Effect.fn(
+  "ReleaseSynchronization.recoverFakeReleaseProjection"
+)(function*(
+  input: ReleaseSynchronizationInput
+): Effect.fn.Return<Release["id"] | null, ReleaseSynchronizationFailure, Persistence> {
+  const persistence = yield* Persistence
+  const runtime = yield* persistence.pluginRuntime.getRuntime(input.workspaceId, input.pluginConnectionId)
+  const boundInput = yield* bindProvider(input)
+  const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(input.streamKey)
+  const lastSuccessfulHealth = yield* persistence.pluginRuntime.getLastSuccessfulHealth(
+    input.workspaceId,
+    input.pluginConnectionId,
+    streamKey
+  )
+  const recoveryHealth = lastSuccessfulHealth ?? runtime.health
+  return yield* reconcileLastValidProjection(
+    boundInput,
+    recoveryHealth,
+    recoveryHealth.checkedAt,
+    "cache"
+  )
+})
+
 /** Synchronize and materialize one fake release without widening the page transaction boundary. */
 export const synchronizeFakeRelease = Effect.fn("ReleaseSynchronization.synchronizeFakeRelease")(function*(
   input: ReleaseSynchronizationInput
@@ -488,17 +512,8 @@ export const synchronizeFakeReleaseFromMap = Effect.fn(
   ReleaseSynchronizationFailure,
   Persistence | PluginConnectionMap
 > {
-  const persistence = yield* Persistence
-  const runtime = yield* persistence.pluginRuntime.getRuntime(input.workspaceId, input.pluginConnectionId)
+  yield* recoverFakeReleaseProjection(input)
   const boundInput = yield* bindProvider(input)
-  const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(input.streamKey)
-  const lastSuccessfulHealth = yield* persistence.pluginRuntime.getLastSuccessfulHealth(
-    input.workspaceId,
-    input.pluginConnectionId,
-    streamKey
-  )
-  const recoveryHealth = lastSuccessfulHealth ?? runtime.health
-  yield* reconcileLastValidProjection(boundInput, recoveryHealth, recoveryHealth.checkedAt, "cache")
   const connections = yield* PluginConnectionMap
   const synchronized = yield* Effect.result(Effect.scoped(
     Effect.flatMap(
