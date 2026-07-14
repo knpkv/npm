@@ -54,6 +54,7 @@ const hasNoControlCharacters = (value: string): boolean =>
   })
 
 const SafeSourceUrlString = Schema.String.check(
+  Schema.isMaxLength(4_096),
   Schema.makeFilter(hasNoControlCharacters, { expected: "a source URL without control characters" })
 )
 

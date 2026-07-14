@@ -46,6 +46,11 @@ const normalizedTarget = (sourcePath: string, importPath: string): string | unde
 const isWithin = (sourcePath: string, directory: string): boolean =>
   sourcePath === directory || sourcePath.startsWith(`${directory}/`)
 
+const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
+  sourcePath === "src/server/plugins/PluginDefinition" ||
+  isWithin(sourcePath, "src/server/plugins/internal") ||
+  isWithin(sourcePath, "src/server/governance")
+
 const reasonForImport = (sourcePath: string, importPath: string): string | undefined => {
   const normalizedSource = sourcePath.replaceAll("\\", "/").replace(/\.(?:js|jsx|ts|tsx)$/, "")
   const target = normalizedTarget(normalizedSource, importPath)
@@ -56,6 +61,13 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
 
   if (isPrototypeImport(importPath)) return "production code cannot import prototype runtime"
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
+  if (
+    target !== undefined &&
+    isWithin(target, "src/server/plugins/internal") &&
+    !mayImportPluginExecutionInternals(normalizedSource)
+  ) {
+    return "only internal plugin composition and the governed engine can import live plugin execution services"
+  }
   if (isClient && target !== undefined && isWithin(target, "src/server")) {
     return "client code cannot import server code"
   }

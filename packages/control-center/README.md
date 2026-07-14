@@ -28,6 +28,14 @@ The browser application is intentionally private. It consumes `@knpkv/rly`, whil
 
 Release Relay projections are domain data, not presentation state. Each release persists its `relay/v1` codename and three-symbol projection; readers validate that projection against the canonical release ID so a future relay algorithm can be introduced without silently changing existing release identity.
 
+## Plugin contract
+
+The version-one plugin contract is vendor-neutral and capability-negotiated. Descriptors use structured semantic versions and secret-free configuration metadata; each read, sync, diff, proposal, execution, cancellation, and reconciliation capability negotiates its own integer version. Unsupported contract majors, malformed descriptors, and unsupported required capabilities are rejected before an adapter factory runs.
+
+Adapters emit bounded pages of Schema-decoded `UpsertEntity`, `TombstoneEntity`, `AppendEvidence`, `UpsertPerson`, and `ProposeRelationship` events. They cannot choose workspace or connection scope. Canonical descriptor JSON is capped at 60 KiB, normalized attributes, evidence, and governed-action payloads at 256 KiB, and each complete encoded sync page at 1 MiB; adapter transports enforce limits before buffering provider responses. Diff paths are normalized provider-relative paths, and decoded content ranges are valid base64 capped at 1 MiB and at the requested range. A decoded page and its next checkpoint commit in one transaction; replay uses stable event and page identities, malformed pages enter redacted quarantine, and failures never replace the last valid cache.
+
+The exported `PluginConnection` service contains reads, health, sync, complete-diff access, and governed-action proposals only. Every proposal carries its canonical payload digest, and authorization must preserve that digest. Adapters implement a tag-free executor shape; plugin composition seals it behind a non-exported live service that only the governed-action engine may obtain. Source-boundary validation prevents adapters, browser code, and agent code from importing that authority. Safe reads and explicitly idempotent writes use at most three attempts with capped full jitter and decoded `Retry-After`; a stream is retried only before its first emitted page, and excessive `Retry-After` values fail instead of retaining a fiber. Unsafe or ambiguous mutations are reconciled rather than replayed.
+
 ## Persistence boundary
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. Ordered migrations, workspace-scoped repositories, optimistic revisions, and malformed-record quarantine keep durable state outside the browser. Large content bytes never live in normal SQL rows. Raw SQL, filesystem handles, and resolved storage paths never cross the runtime service boundary; local database and blob-root paths remain explicit, validated server configuration inputs.

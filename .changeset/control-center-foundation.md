@@ -9,3 +9,5 @@ Add Schema-backed canonical identities, UTC timestamps, explicit source provenan
 Add ordered libSQL migrations, workspace-scoped optimistic repositories, malformed-record quarantine, and an owner-only content-addressed blob boundary for durable application state.
 
 Add hash-only local pairing and session authentication, owner-controlled device and session revocation, audited terminal-only owner recovery, strict loopback/LAN request policy with explicit TLS secret references, and an owner-only scoped secret store for provider credentials.
+
+Add the versioned vendor-neutral plugin contract, capability negotiation, scoped connection registry, deterministic fake adapter, typed partial-failure and retry policy, atomic checkpoint/cache persistence, and a sealed governed-action execution boundary.

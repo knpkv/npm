@@ -7,11 +7,20 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import * as ts from "typescript"
 import { type ControlCenterBuildTarget, decodeBuildGraph, inspectBuildGraph } from "./build-graph.js"
 
 class DistValidationError extends Data.TaggedError("DistValidationError")<{
   readonly reason: string
 }> {}
+
+const formatTypeScriptDiagnostic = (diagnostic: ts.Diagnostic): string =>
+  ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
+
+const isKnownEffectDeclarationDiagnostic = (diagnostic: ts.Diagnostic): boolean =>
+  diagnostic.code === 2304 &&
+  diagnostic.file?.fileName.replaceAll("\\", "/").includes("/effect/dist/internal/schema/schema.d.ts") === true &&
+  formatTypeScriptDiagnostic(diagnostic).includes("SchemaErrorTypeId")
 
 const filesWithin: (
   fs: FileSystem.FileSystem,
@@ -58,10 +67,81 @@ const program = Effect.gen(function*() {
     if (!(yield* fs.exists(path.join(packageRoot, artifact)))) failures.push(`missing ${artifact}`)
   }
 
-  const serverFiles = (yield* filesWithin(fs, path, serverRoot)).map((file) =>
-    path.relative(serverRoot, file).replaceAll("\\", "/")
-  )
+  const serverArtifacts = yield* filesWithin(fs, path, serverRoot)
+  const serverFiles = serverArtifacts.map((file) => path.relative(serverRoot, file).replaceAll("\\", "/"))
   if (serverFiles.some((file) => file.startsWith("client/"))) failures.push("server build emitted browser source")
+
+  const pluginDefinitionDeclaration = path.join(
+    serverRoot,
+    "server/plugins/PluginDefinitionV1.d.ts"
+  )
+  if (yield* fs.exists(pluginDefinitionDeclaration)) {
+    const declaration = yield* fs.readFileString(pluginDefinitionDeclaration)
+    if (declaration.includes("internal/") || declaration.includes("AuthorizedPluginExecutor")) {
+      failures.push("public PluginDefinitionV1 declaration references live plugin execution internals")
+    }
+  } else {
+    failures.push("missing import-clean PluginDefinitionV1 declaration")
+  }
+
+  const packedConsumerPath = path.join(packageRoot, "packed-plugin-definition-consumer.mts")
+  const packedConsumerSource = `import type { PluginDefinitionV1 } from ${
+    JSON.stringify(
+      path.join(serverRoot, "server/index.js")
+    )
+  }\nexport const descriptor = (definition: PluginDefinitionV1): unknown => definition.rawDescriptor\n`
+  const compilerOptions: ts.CompilerOptions = {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    verbatimModuleSyntax: true
+  }
+  const defaultCompilerHost = ts.createCompilerHost(compilerOptions)
+  const compilerHost: ts.CompilerHost = {
+    ...defaultCompilerHost,
+    fileExists: (fileName) => fileName === packedConsumerPath || defaultCompilerHost.fileExists(fileName),
+    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) =>
+      fileName === packedConsumerPath
+        ? ts.createSourceFile(fileName, packedConsumerSource, languageVersion, true, ts.ScriptKind.TS)
+        : defaultCompilerHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile),
+    readFile: (fileName) =>
+      fileName === packedConsumerPath
+        ? packedConsumerSource
+        : defaultCompilerHost.readFile(fileName)
+  }
+  const packedDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({ rootNames: [packedConsumerPath], options: compilerOptions, host: compilerHost })
+  )
+  for (const diagnostic of packedDiagnostics) {
+    failures.push(
+      `packed PluginDefinitionV1 consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`
+    )
+  }
+
+  const declarationCompilerOptions: ts.CompilerOptions = {
+    ...compilerOptions,
+    lib: ["lib.es2022.d.ts", "lib.esnext.disposable.d.ts", "lib.dom.d.ts"],
+    skipLibCheck: false,
+    types: ["node"]
+  }
+  const declarationDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({
+      rootNames: serverArtifacts.filter((file) => file.endsWith(".d.ts")),
+      options: declarationCompilerOptions
+    })
+  )
+  for (const diagnostic of declarationDiagnostics) {
+    if (isKnownEffectDeclarationDiagnostic(diagnostic)) continue
+    const diagnosticPath = diagnostic.file?.fileName
+    failures.push(
+      `emitted declaration integrity failed${
+        diagnosticPath === undefined ? "" : ` in ${path.relative(packageRoot, diagnosticPath)}`
+      }: ${formatTypeScriptDiagnostic(diagnostic)}`
+    )
+  }
 
   for (
     const contract of [

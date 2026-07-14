@@ -9,6 +9,7 @@
 export * from "./actors.js"
 export * from "./freshness.js"
 export * from "./identifiers.js"
+export * from "./plugins/index.js"
 export * from "./release.js"
 export * from "./releaseRelay.js"
 export * from "./sourceRevision.js"

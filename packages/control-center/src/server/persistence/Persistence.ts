@@ -28,6 +28,8 @@ import {
   type PeopleRepositoryService,
   PluginConnectionRepository,
   type PluginConnectionRepositoryService,
+  PluginRuntimeRepository,
+  type PluginRuntimeRepositoryService,
   QuarantineRepository,
   ReleaseRepository,
   type ReleaseRepositoryService,
@@ -100,6 +102,7 @@ const makePersistence = Effect.gen(function*() {
   const entities = yield* EntityRepository
   const people = yield* PeopleRepository
   const pluginConnections = yield* PluginConnectionRepository
+  const pluginRuntime = yield* PluginRuntimeRepository
   const releases = yield* ReleaseRepository
   const workspaces = yield* WorkspaceRepository
 
@@ -155,6 +158,22 @@ const makePersistence = Effect.gen(function*() {
       updateMetadata: (...args: Parameters<PluginConnectionRepositoryService["updateMetadata"]>) =>
         publicOperation("plugin-connection.update", pluginConnections.updateMetadata(...args))
     },
+    pluginRuntime: {
+      acceptPluginDescriptor: (...args: Parameters<PluginRuntimeRepositoryService["acceptPluginDescriptor"]>) =>
+        publicOperation("plugin-runtime.accept-plugin-descriptor", pluginRuntime.acceptPluginDescriptor(...args)),
+      commitNormalizedPage: (...args: Parameters<PluginRuntimeRepositoryService["commitNormalizedPage"]>) =>
+        publicOperation("plugin-runtime.commit-normalized-page", pluginRuntime.commitNormalizedPage(...args)),
+      getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>
+        publicOperation("plugin-runtime.get-cache", pluginRuntime.getCache(...args)),
+      getRuntime: (...args: Parameters<PluginRuntimeRepositoryService["getRuntime"]>) =>
+        publicOperation("plugin-runtime.get", pluginRuntime.getRuntime(...args)),
+      getStream: (...args: Parameters<PluginRuntimeRepositoryService["getStream"]>) =>
+        publicOperation("plugin-runtime.get-stream", pluginRuntime.getStream(...args)),
+      listEvidence: (...args: Parameters<PluginRuntimeRepositoryService["listEvidence"]>) =>
+        publicOperation("plugin-runtime.list-evidence", pluginRuntime.listEvidence(...args)),
+      recordHealth: (...args: Parameters<PluginRuntimeRepositoryService["recordHealth"]>) =>
+        publicOperation("plugin-runtime.record-health", pluginRuntime.recordHealth(...args))
+    },
     releases: {
       append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>
         publicOperation("release.append", releases.append(...args)),
@@ -203,6 +222,7 @@ export const persistenceLayer = (
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
+        const pluginRuntime = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
@@ -215,6 +235,7 @@ export const persistenceLayer = (
           entities,
           people,
           pluginConnections,
+          pluginRuntime,
           release,
           content,
           workspaces

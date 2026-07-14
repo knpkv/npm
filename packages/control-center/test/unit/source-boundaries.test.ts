@@ -32,6 +32,36 @@ describe("Control Center source boundaries", () => {
     expect(inspectSourceBoundaries("src/api/schema.ts", "import(\"@knpkv/rly\")")).toHaveLength(1)
   })
 
+  it("seals live plugin execution services from adapters, ordinary server, and agent modules", () => {
+    const internalImport = "../plugins/internal/AuthorizedPluginExecutor.js"
+    expect(inspectSourceBoundaries("src/server/routes/action.ts", `import ${JSON.stringify(internalImport)}`))
+      .toContainEqual({
+        importPath: internalImport,
+        reason: "only internal plugin composition and the governed engine can import live plugin execution services",
+        sourcePath: "src/server/routes/action.ts"
+      })
+    expect(inspectSourceBoundaries("src/server/agents/tools.ts", `import ${JSON.stringify(internalImport)}`))
+      .toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/plugins/fake/FakePlugin.ts",
+        "import { AuthorizedPluginExecutor } from \"../internal/AuthorizedPluginExecutor.js\""
+      )
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/plugins/fake/FakePlugin.ts",
+        "import type { AuthorizedPluginExecutorV1 } from \"../PluginExecutor.js\""
+      )
+    ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/governance/GovernedActionEngine.ts",
+        "import { AuthorizedPluginExecutor } from \"../plugins/internal/AuthorizedPluginExecutor.js\""
+      )
+    ).toEqual([])
+  })
+
   it("rejects runtime imports from the approved prototype", () => {
     expect(
       inspectSourceBoundaries(

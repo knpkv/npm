@@ -9,6 +9,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { MigrationLedgerError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
+import { migration0002Integrity } from "../../src/server/persistence/migrations/0002_integrity.js"
+import { migration0003Auth } from "../../src/server/persistence/migrations/0003_auth.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 
 const expectedTables = [
@@ -19,7 +21,12 @@ const expectedTables = [
   "pairing_codes",
   "person_identities",
   "persons",
+  "plugin_cache_entries",
   "plugin_connections",
+  "plugin_runtime_state",
+  "plugin_sync_evidence",
+  "plugin_sync_pages",
+  "plugin_sync_streams",
   "quarantined_records",
   "recovery_audit_events",
   "release_revisions",
@@ -166,6 +173,47 @@ describe("Control Center migrations", () => {
           name
         }))
       )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("upgrades the exact previous ledger by appending only plugin runtime migration 4", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      const previousLoader = LibsqlMigrator.fromRecord({
+        "0001_core_heads": migration0001Core,
+        "0002_integrity_blobs": migration0002Integrity,
+        "0003_auth": migration0003Auth
+      })
+      yield* Effect.gen(function*() {
+        yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
+      }).pipe(
+        Effect.provide(
+          LibsqlClient.layer({
+            transformResultNames: snakeToCamel,
+            url: config.databaseUrl
+          })
+        ),
+        Effect.scoped
+      )
+
+      const snapshot = yield* Effect.gen(function*() {
+        const database = yield* Database
+        const ledger = yield* database.sql<{ readonly migrationId: number; readonly name: string }>`SELECT
+          migration_id AS migrationId, name FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+          ORDER BY migration_id`
+        const tables = yield* database.sql<{ readonly name: string }>`SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name LIKE 'plugin_%' ORDER BY name`
+        return { ledger, tables }
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+      assert.deepStrictEqual(snapshot.ledger, EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name })))
+      assert.deepStrictEqual(snapshot.tables.map(({ name }) => name), [
+        "plugin_cache_entries",
+        "plugin_connections",
+        "plugin_runtime_state",
+        "plugin_sync_evidence",
+        "plugin_sync_pages",
+        "plugin_sync_streams"
+      ])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades an exact previous schema without rewriting its ledger entry", () =>
