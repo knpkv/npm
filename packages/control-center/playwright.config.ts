@@ -25,8 +25,8 @@ export default defineConfig({
       reducedMotion: "reduce"
     },
     locale: "en-US",
-    screenshot: "only-on-failure",
-    trace: "retain-on-failure",
+    screenshot: "off",
+    trace: "off",
     viewport: { height: 800, width: 1280 }
   },
   webServer: {

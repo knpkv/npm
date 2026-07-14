@@ -99,5 +99,5 @@ jobs:
           node-version: 24.10.0
       - name: Install bounded Chromium runtime
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
-      - name: Test the rly catalog
-        run: pnpm --filter @knpkv/rly test:browser
+      - name: Test browser applications and catalogs
+        run: pnpm test:browser

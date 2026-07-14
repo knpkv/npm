@@ -9,6 +9,10 @@ describe("bounded browser configuration", () => {
     expect(playwrightConfig.webServer).toMatchObject({ reuseExistingServer: false })
   })
 
+  it("does not retain credentials in automatic browser artifacts", () => {
+    expect(playwrightConfig.use).toMatchObject({ screenshot: "off", trace: "off" })
+  })
+
   it("rejects resolved CLI overrides", () => {
     expect(() => enforceBoundedRunner(1, false)).not.toThrow()
     expect(() => enforceBoundedRunner(2, false)).toThrow(/exactly one worker/)

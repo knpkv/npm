@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unprotected-cleanup-before-rethrow
+language: tsx
+severity: error
+message: "Preserve the original failure if awaited cleanup can also fail"
+
+rule:
+  pattern:
+    context: |
+      try {
+        $$$TRY
+      } catch ($ERROR) {
+        await $CLEANUP
+        throw $ERROR
+      }
+    selector: catch_clause
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  A rejected cleanup promise replaces the initiating failure in this shape.
+  Catch the cleanup failure and throw an AggregateError containing both causes.

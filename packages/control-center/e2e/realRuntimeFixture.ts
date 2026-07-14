@@ -26,6 +26,7 @@ import { makeControlCenterServer } from "../src/server/runtime/ControlCenterServ
 import { ReleaseSynchronizationStartup } from "../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { SecretRoot } from "../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../src/server/security/BindConfig.js"
+import { disposeFailedFixtureSetup, protectPartialFixtureAllocation } from "./realRuntimeLifecycle.js"
 import {
   REAL_FIXTURE_TIME_INPUT,
   REAL_OWNER_ID,
@@ -73,21 +74,26 @@ const allocateFixture = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const dataRoot = yield* fileSystem.makeTempDirectory({ prefix: "control-center-browser-runtime-" })
-  yield* fileSystem.chmod(dataRoot, 0o700)
-  const port = yield* acquireEphemeralPort
-  return {
-    dataRoot,
-    origin: `http://127.0.0.1:${port}`,
-    persistenceConfig: {
-      blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
-      busyTimeoutMilliseconds: 5_000,
-      databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
-      maxConnections: 1
-    },
-    port,
-    secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
-    staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url))
-  } satisfies AllocatedFixture
+  return yield* protectPartialFixtureAllocation(
+    Effect.gen(function*() {
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      return {
+        dataRoot,
+        origin: `http://127.0.0.1:${port}`,
+        persistenceConfig: {
+          blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+          busyTimeoutMilliseconds: 5_000,
+          databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+          maxConnections: 1
+        },
+        port,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url))
+      } satisfies AllocatedFixture
+    }),
+    fileSystem.remove(dataRoot, { force: true, recursive: true }).pipe(Effect.ignore)
+  )
 }).pipe(Effect.provide(NodeServices.layer))
 
 const seedFixture = (allocated: AllocatedFixture) =>
@@ -220,8 +226,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
       }
     }
   } catch (failure) {
-    await disposeAll(serverRuntime, allocated.dataRoot)
-    throw failure
+    return await disposeFailedFixtureSetup(failure, () => disposeAll(serverRuntime, allocated.dataRoot))
   }
 }
 

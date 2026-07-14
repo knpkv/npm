@@ -68,6 +68,11 @@ import-aware local ESLint rule follows namespace and named imports from Effect,
 including computed access, destructuring, and re-exports, while allowing local
 schema modules that happen to use the same member name.
 
+Awaited cleanup immediately before rethrowing a caught failure must preserve
+both causes when cleanup can fail. The ast-grep rule rejects the unsafe direct
+`await cleanup(); throw originalFailure` shape; aggregate the setup and cleanup
+failures instead.
+
 ## Agent Guidance
 
 When writing or refactoring Effect code:

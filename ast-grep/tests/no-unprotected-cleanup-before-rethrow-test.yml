@@ -1,0 +1,28 @@
+id: no-unprotected-cleanup-before-rethrow
+valid:
+  - |
+    try {
+      await start()
+    } catch (failure) {
+      try {
+        await cleanup()
+      } catch (cleanupFailure) {
+        throw new AggregateError([failure, cleanupFailure])
+      }
+      throw failure
+    }
+  - |
+    try {
+      await start()
+    } catch (failure) {
+      cleanup()
+      throw failure
+    }
+invalid:
+  - |
+    try {
+      await start()
+    } catch (failure) {
+      await cleanup()
+      throw failure
+    }
