@@ -55,6 +55,8 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T09:00:00.000Z")
 const OBSERVED_AT = "2026-07-14T09:01:00.000Z"
 const SYNCHRONIZED_AT = "2026-07-14T09:02:00.000Z"
 const RECENT_FAILURE_AT = "2026-07-14T09:03:00.000Z"
+const STALE_BOUNDARY_AT = "2026-07-14T09:06:00.000Z"
+const STALE_BOUNDARY_CROSSED_AT = "2026-07-14T09:06:00.001Z"
 const STALE_FAILURE_AT = "2026-07-14T09:12:00.000Z"
 
 const epochMillis = (timestamp: string): number => DateTime.toEpochMillis(Schema.decodeSync(UtcTimestamp)(timestamp))
@@ -405,6 +407,46 @@ describe("fake release synchronization", () => {
       assert.strictEqual(projected.release.freshness._tag, "stale")
       assert.strictEqual((yield* persistence.pluginRuntime.getStream(WORKSPACE_ID, PLUGIN_ID, STREAM)).revision, 1)
       assert.lengthOf(yield* persistence.pluginRuntime.getCache(WORKSPACE_ID, PLUGIN_ID, STREAM), 3)
+    })))
+
+  it.effect("appends a recovery revision only when freshness crosses its boundary", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      yield* runScenario(scenario(success(releasePage())))
+
+      yield* TestClock.setTime(epochMillis(RECENT_FAILURE_AT))
+      assert.strictEqual(yield* recoverFakeReleaseProjection(input), RELEASE_ID)
+      assert.strictEqual((yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)).revision, 1)
+
+      yield* TestClock.setTime(epochMillis(STALE_BOUNDARY_AT))
+      assert.strictEqual(yield* recoverFakeReleaseProjection(input), RELEASE_ID)
+      const atBoundary = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+      assert.strictEqual(atBoundary.revision, 1)
+      assert.strictEqual(atBoundary.release.freshness._tag, "current")
+      assert.strictEqual(atBoundary.release.freshness.provenance._tag, "provider")
+
+      yield* TestClock.setTime(epochMillis(STALE_BOUNDARY_CROSSED_AT))
+      assert.strictEqual(yield* recoverFakeReleaseProjection(input), RELEASE_ID)
+      const firstStale = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+      assert.strictEqual(firstStale.revision, 2)
+      assert.strictEqual(firstStale.release.freshness._tag, "stale")
+      assert.strictEqual(DateTime.formatIso(firstStale.release.updatedAt), STALE_BOUNDARY_CROSSED_AT)
+      if (firstStale.release.freshness._tag === "stale") {
+        assert.isDefined(firstStale.release.freshness.evaluatedAt)
+        if (firstStale.release.freshness.evaluatedAt !== undefined) {
+          assert.strictEqual(
+            DateTime.formatIso(firstStale.release.freshness.evaluatedAt),
+            STALE_BOUNDARY_CROSSED_AT
+          )
+        }
+      }
+
+      yield* TestClock.setTime(epochMillis(STALE_FAILURE_AT))
+      assert.strictEqual(yield* recoverFakeReleaseProjection(input), RELEASE_ID)
+      const repeatedStale = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+      assert.strictEqual(repeatedStale.revision, 2)
+      assert.strictEqual(repeatedStale.release.freshness._tag, "stale")
     })))
 
   it.effect("merges a synchronized identity without erasing identities from other plugins", () =>

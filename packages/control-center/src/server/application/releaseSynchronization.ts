@@ -165,6 +165,32 @@ const releasesEqual = Effect.fn("ReleaseSynchronization.releasesEqual")(function
   return releaseEquivalence(encodedLeft, encodedRight)
 })
 
+const recoveryProjectionsEqual = Effect.fn("ReleaseSynchronization.recoveryProjectionsEqual")(function*(
+  previous: Release,
+  projected: Release
+) {
+  const previousFreshness = previous.freshness
+  const projectedFreshness = projected.freshness
+  if (
+    (previousFreshness._tag !== "current" && previousFreshness._tag !== "stale") ||
+    previousFreshness._tag !== projectedFreshness._tag
+  ) return false
+
+  const provenance = previousFreshness._tag === "current" &&
+      previousFreshness.provenance._tag === "provider" &&
+      projectedFreshness._tag === "current" &&
+      projectedFreshness.provenance._tag === "cache"
+    ? previousFreshness.provenance
+    : projectedFreshness.provenance
+  const comparableResult = yield* Schema.decodeUnknownEffect(Schema.toType(Release))({
+    ...projected,
+    freshness: { ...projectedFreshness, evaluatedAt: previousFreshness.evaluatedAt, provenance },
+    updatedAt: previousFreshness._tag === "stale" ? previous.updatedAt : projected.updatedAt
+  }).pipe(Effect.result)
+  if (Result.isFailure(comparableResult)) return false
+  return yield* releasesEqual(previous, comparableResult.success)
+})
+
 const identityKey = ({ pluginConnectionId, providerId, vendorPersonId }: PersonSourceIdentity): string =>
   `${providerId}\u0000${pluginConnectionId}\u0000${vendorPersonId}`
 
@@ -261,18 +287,9 @@ const reconcileProjection = Effect.fn("ReleaseSynchronization.reconcileProjectio
   }
   if (
     provenance === "cache" &&
-    previousRelease?.freshness._tag === "current" &&
-    projection.value.release.freshness._tag === "current"
-  ) {
-    const comparable = {
-      ...projection.value.release,
-      freshness: {
-        ...projection.value.release.freshness,
-        provenance: previousRelease.freshness.provenance
-      }
-    }
-    if (yield* releasesEqual(previousRelease, comparable)) return previousRelease.id
-  }
+    previousRelease !== null &&
+    (yield* recoveryProjectionsEqual(previousRelease, projection.value.release))
+  ) return previousRelease.id
   const persisted = yield* persistRelease(input.workspaceId, projection.value.release)
   return persisted.release.id
 })
