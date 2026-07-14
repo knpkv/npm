@@ -188,6 +188,49 @@ const CompactPreview = (): ReactElement => {
   )
 }
 
+const ExternalMotionPreview = (): ReactElement => {
+  const [entryMotion, setEntryMotion] = useState<"external" | "intrinsic">("external")
+  const [open, setOpen] = useState(false)
+  return (
+    <PortalProvider>
+      <style>{`
+        [data-rly-dialog-overlay][data-state="open"],
+        [role="dialog"][data-state="open"] {
+          animation-duration: 10s !important;
+        }
+      `}</style>
+      <main style={pageStyle}>
+        <div style={stackStyle}>
+          <Text as="h1" variant="section-title">
+            Externally orchestrated preview
+          </Text>
+          <Text tone="secondary">Entry ownership is sampled once and remains stable until this preview closes.</Text>
+          <Button onClick={() => setOpen(true)} variant="primary">
+            Preview with external motion
+          </Button>
+        </div>
+        <ReleasePreview
+          agentEntry={agentSlot}
+          collaborators={collaboratorsSlot}
+          entryMotion={entryMotion}
+          evidence={evidenceSlot}
+          onOpenChange={setOpen}
+          onOpenFullView={() => undefined}
+          open={open}
+          primaryAction={
+            <Button onClick={() => setEntryMotion("intrinsic")} variant="primary">
+              Request intrinsic motion next time
+            </Button>
+          }
+          release={release}
+          stages={stageSlot}
+          workset={worksetSlot}
+        />
+      </main>
+    </PortalProvider>
+  )
+}
+
 const meta = {
   component: ReleasePreview,
   tags: ["autodocs"],
@@ -235,6 +278,49 @@ export const Interaction: Story = {
     canvasElement.dataset.releasePreviewInteractionPlayComplete = "true"
   },
   render: () => <PreviewInteraction />
+}
+
+export const ExternalMotionOwnership: Story = {
+  args: {
+    agentEntry: agentSlot,
+    collaborators: collaboratorsSlot,
+    entryMotion: "external",
+    evidence: evidenceSlot,
+    onOpenChange: () => undefined,
+    onOpenFullView: () => undefined,
+    open: false,
+    primaryAction,
+    release,
+    stages: stageSlot,
+    workset: worksetSlot
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const trigger = canvas.getByRole("button", { name: "Preview with external motion" })
+    await userEvent.click(trigger)
+    const dialog = canvas.getByRole("dialog", { name: "Release preview: v2.4.0 Copper Finch" })
+    const layer = canvasElement.querySelector<HTMLElement>("[data-rly-dialog-layer]")
+    const overlay = canvasElement.querySelector<HTMLElement>("[data-rly-dialog-overlay]")
+    if (layer === null || overlay === null) throw new Error("External preview modal layer did not render")
+    await expect(layer).toHaveAttribute("data-rly-dialog-entry-motion", "external")
+    await expect(getComputedStyle(dialog).animationName).toBe("none")
+    await expect(getComputedStyle(overlay).animationName).toBe("none")
+
+    await userEvent.click(canvas.getByRole("button", { name: "Request intrinsic motion next time" }))
+    await expect(layer).toHaveAttribute("data-rly-dialog-entry-motion", "external")
+    await expect(getComputedStyle(dialog).animationName).toBe("none")
+    await expect(dialog).toBeVisible()
+
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await userEvent.click(trigger)
+    const reopenedDialog = canvas.getByRole("dialog", { name: "Release preview: v2.4.0 Copper Finch" })
+    const reopenedLayer = canvasElement.querySelector<HTMLElement>("[data-rly-dialog-layer]")
+    if (reopenedLayer === null) throw new Error("Reopened preview modal layer did not render")
+    await expect(reopenedLayer).toHaveAttribute("data-rly-dialog-entry-motion", "intrinsic")
+    await expect(getComputedStyle(reopenedDialog).animationName).toMatch(/dialog-enter$/)
+    canvasElement.dataset.releasePreviewExternalMotionPlayComplete = "true"
+  },
+  render: () => <ExternalMotionPreview />
 }
 
 export const CompactForcedColors: Story = {

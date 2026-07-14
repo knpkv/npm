@@ -101,6 +101,11 @@
     animation-name: rly-sheet-start-in;
   }
 
+  .layer[data-rly-sheet-entry-motion="external"] .overlay[data-state="open"],
+  .layer[data-rly-sheet-entry-motion="external"] .content[data-state="open"] {
+    animation: none;
+  }
+
   .header {
     align-items: flex-start;
     border-block-end: 1px solid var(--rly-color-border-1);

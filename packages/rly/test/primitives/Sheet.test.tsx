@@ -124,6 +124,33 @@ describe("Sheet", () => {
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
   })
 
+  it("keeps external entry ownership stable until the next open cycle", async () => {
+    const renderSheet = (open: boolean, entryMotion: "external" | "intrinsic"): ReactElement => (
+      <Sheet.Root onOpenChange={() => undefined} open={open}>
+        <Sheet.Content entryMotion={entryMotion} title="Transitioned details">
+          <Sheet.Body>Content</Sheet.Body>
+        </Sheet.Content>
+      </Sheet.Root>
+    )
+    const entry = await mount(renderSheet(true, "external"))
+    const readEntryMotion = (): string | null | undefined =>
+      entry.portal.querySelector("[data-rly-sheet-layer]")?.getAttribute("data-rly-sheet-entry-motion")
+
+    expect(readEntryMotion()).toBe("external")
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderSheet(true, "intrinsic")}</PortalProvider>)
+    )
+    expect(readEntryMotion()).toBe("external")
+
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderSheet(false, "intrinsic")}</PortalProvider>)
+    )
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderSheet(true, "intrinsic")}</PortalProvider>)
+    )
+    expect(readEntryMotion()).toBe("intrinsic")
+  })
+
   it("keeps nested dismissal and focus restoration scoped to the top sheet", async () => {
     const { host, portal, root } = await mount(
       <Sheet.Root defaultOpen>

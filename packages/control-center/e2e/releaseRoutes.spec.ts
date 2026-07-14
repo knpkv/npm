@@ -268,6 +268,44 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   expect(readiness).toEqual([{ state: "resolved" }, { state: "resolved" }])
 })
 
+test("gives a compact View Transition sole ownership of sheet entry motion", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 640 })
+  await page.emulateMedia({ reducedMotion: "no-preference" })
+  await installTransitionProbe(page)
+  await page.goto(overviewPath)
+  await page.addStyleTag({
+    content: `
+      [data-rly-sheet-overlay][data-state="open"],
+      [data-rly-sheet-side][data-state="open"] {
+        animation-duration: 10s !important;
+      }
+    `
+  })
+
+  await page.getByRole("button", { name: "Preview Copper Finch" }).click()
+  const sheet = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
+  await expect(sheet).toBeVisible()
+  await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
+  await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
+  await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute(
+    "data-rly-sheet-entry-motion",
+    "external"
+  )
+  await expect(sheet).toHaveCSS("animation-name", "none")
+  await expect(page.locator("[data-rly-sheet-overlay]")).toHaveCSS("animation-name", "none")
+
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
+    "window.__releaseTransitionSnapshots"
+  )
+  expect(snapshots).toHaveLength(1)
+  const snapshot = snapshots[0]
+  if (snapshot === undefined) throw new Error("Compact release transition snapshot was unavailable")
+  expect(snapshot.before.map(transitionIdentity)).toEqual(snapshot.after.map(transitionIdentity))
+  for (const geometry of snapshot.after) expectVisibleTransitionGeometry(geometry)
+  await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
+  expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
+})
+
 test("matches Chromium CSSOM semantics for accepted edge names and rejected collisions", async ({ page }) => {
   const semantics = await page.evaluate<BrowserTransitionNameSemantics>(`(async () => {
     const replacementCharacter = String.fromCodePoint(0xfffd);

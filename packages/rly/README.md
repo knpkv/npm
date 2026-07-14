@@ -256,6 +256,12 @@ the collaborator slot can carry every assignment without truncating cardinality.
 The application owns responsive selection through the `presentation` prop; rly
 does not inspect viewport state. Optional shared-transition names are validated
 as unique, non-reserved CSS custom identifiers before they reach inline styles.
+Entry motion is intrinsic by default for both dialog and sheet presentations.
+Set `entryMotion="external"` when a parent View Transition owns the opening
+motion: rly samples that value once for the current closed-to-open cycle and
+suppresses entry animation on both the surface and overlay. Changes while open
+apply only to the next cycle, exit motion remains intrinsic, and reduced-motion
+preferences continue to apply through the shared motion tokens.
 
 `WorksetCard` keeps Jira work, CodeCommit pull-request groups, relationship
 gaps, and CodePipeline executions together without flattening them into a Jira

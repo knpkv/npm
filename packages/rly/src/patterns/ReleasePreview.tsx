@@ -28,7 +28,7 @@ export interface ReleasePreviewProps {
   readonly collaborators?: ReactNode
   /** Required evidence composition supplied by the application. */
   readonly evidence: ReactNode
-  /** Select external when the application already owns this preview's entry motion. */
+  /** Entry ownership sampled per open cycle; external suppresses dialog/sheet entry while preserving exit motion. */
   readonly entryMotion?: "external" | "intrinsic"
   /** Called once when the final full-view action is activated. */
   readonly onOpenFullView: () => void
@@ -202,7 +202,7 @@ export const ReleasePreview = ({
 
   return presentation === "sheet" ? (
     <Sheet.Root onOpenChange={onOpenChange} open={open}>
-      <Sheet.Content initialFocusRef={summaryRef} title={title}>
+      <Sheet.Content entryMotion={entryMotion} initialFocusRef={summaryRef} title={title}>
         <Sheet.Body data-rly-release-preview-scroll="sheet">{dossier}</Sheet.Body>
         <Sheet.Footer className={style("sheetFooter")} data-rly-release-preview-footer="sheet">
           {fullViewAction}

@@ -19,6 +19,7 @@ import {
   ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
+  useModalEntryMotion,
   useModalIsolation,
   useParentModalReady
 } from "../internal/modal.js"
@@ -97,7 +98,7 @@ export type DialogContentProps = Omit<
 > & {
   readonly children: ReactNode
   readonly description?: string
-  /** Select external when a parent transition already owns the dialog's entry motion. */
+  /** Entry ownership sampled when the dialog opens; external suppresses surface and overlay entry only. */
   readonly entryMotion?: "external" | "intrinsic"
   readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly size?: RlyDialogSize
@@ -198,6 +199,7 @@ const DialogContent = ({
   ...props
 }: DialogContentProps): ReactElement => {
   const state = useDialogState()
+  const resolvedEntryMotion = useModalEntryMotion(state.open, entryMotion)
   const visibleTitle = requireText(title, "Dialog title")
   const visibleDescription = description === undefined ? undefined : requireText(description, "Dialog description")
 
@@ -205,7 +207,7 @@ const DialogContent = ({
     <PortalBoundary>
       {(container) => (
         <RadixDialog.Portal container={container}>
-          <DialogLayer entryMotion={entryMotion}>
+          <DialogLayer entryMotion={resolvedEntryMotion}>
             <RadixDialog.Overlay
               className={style("overlay")}
               data-rly-dialog-overlay=""

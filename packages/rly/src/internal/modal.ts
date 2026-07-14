@@ -6,6 +6,7 @@ import {
   type RefObject,
   useContext,
   useLayoutEffect,
+  useRef,
   useState
 } from "react"
 
@@ -26,6 +27,20 @@ interface ModalNestingBoundaryProps {
 const inertRecords = new WeakMap<HTMLElement, InertRecord>()
 const ModalNestingContext = createContext<ModalNestingState | null>(null)
 let focusTransitionGeneration = 0
+
+/** Entry-motion ownership sampled once for each closed-to-open modal cycle. */
+export type ModalEntryMotion = "external" | "intrinsic"
+
+/** Keep entry ownership stable while a modal is open, then resample it for the next open cycle. */
+export const useModalEntryMotion = (open: boolean, requested: ModalEntryMotion): ModalEntryMotion => {
+  const committedCycleRef = useRef({ open, value: requested })
+  const resolved = open && !committedCycleRef.current.open ? requested : committedCycleRef.current.value
+  useLayoutEffect(() => {
+    if (!open) committedCycleRef.current = { open: false, value: requested }
+    else if (!committedCycleRef.current.open) committedCycleRef.current = { open: true, value: requested }
+  }, [open, requested])
+  return resolved
+}
 
 /** Narrows DOM elements through the HTML-only inert contract without relying on a realm-specific constructor. */
 export const isHTMLElement = (element: Element | null): element is HTMLElement =>

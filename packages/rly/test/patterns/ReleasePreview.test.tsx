@@ -199,6 +199,9 @@ describe("ReleasePreview", () => {
     }
 
     expect(portal.querySelector("[data-rly-dialog-overlay]")).toBeNull()
+    expect(portal.querySelector("[data-rly-sheet-layer]")?.getAttribute("data-rly-sheet-entry-motion")).toBe(
+      "intrinsic"
+    )
     expect(sheet.getAttribute("role")).toBe("dialog")
     expect(sheet.textContent).toContain("Release preview: v2.4.1 Copper Finch Pending")
     expect(sheet.textContent).toContain("Readiness not evaluated")
@@ -224,6 +227,11 @@ describe("ReleasePreview", () => {
       overlay.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }))
     )
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("forwards external entry ownership to compact sheets", async () => {
+    const { portal } = await mount(preview({ entryMotion: "external", presentation: "sheet" }))
+    expect(portal.querySelector("[data-rly-sheet-layer]")?.getAttribute("data-rly-sheet-entry-motion")).toBe("external")
   })
 
   it("assigns the same three caller-owned shared geometry parts as ReleaseRow", async () => {

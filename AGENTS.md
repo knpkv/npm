@@ -98,6 +98,8 @@ Ship the applicable guardrail with the fix and prove it catches the original fai
 
 Review agents must include a **Prevention** note with every finding. It should propose the concrete static-analysis matcher or lint rule when the defect is mechanically recognizable, otherwise name the behavioral test or repository instruction that should protect the invariant. A reviewer may recommend no new rule only with a short explanation of why the pattern cannot be detected reliably without excessive false positives.
 
+Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
+
 ### Versioning and Publishing
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.

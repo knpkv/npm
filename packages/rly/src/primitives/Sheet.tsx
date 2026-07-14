@@ -20,6 +20,7 @@ import {
   ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
+  useModalEntryMotion,
   useModalIsolation,
   useParentModalReady
 } from "../internal/modal.js"
@@ -89,6 +90,8 @@ export type SheetContentProps = Omit<
   readonly closeLabel?: string
   /** Optional visible supporting description announced with the title. */
   readonly description?: string
+  /** Entry ownership sampled when the sheet opens; external suppresses surface and overlay entry only. */
+  readonly entryMotion?: "external" | "intrinsic"
   /** Optional target for deterministic initial focus. Content receives focus by default. */
   readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly side?: RlySheetSide
@@ -115,13 +118,25 @@ const useSheetState = (): SheetState => {
   return state
 }
 
-const SheetLayer = ({ children }: { readonly children: ReactNode }): ReactElement => {
+const SheetLayer = ({
+  children,
+  entryMotion
+}: {
+  readonly children: ReactNode
+  readonly entryMotion: "external" | "intrinsic"
+}): ReactElement => {
   const state = useSheetState()
   const layerRef = useRef<HTMLDivElement>(null)
   useModalContentRegistration()
   useModalIsolation(layerRef, state.open)
   return (
-    <div className={style("layer")} data-rly-modal-layer="" data-rly-sheet-layer="" ref={layerRef}>
+    <div
+      className={style("layer")}
+      data-rly-modal-layer=""
+      data-rly-sheet-entry-motion={entryMotion}
+      data-rly-sheet-layer=""
+      ref={layerRef}
+    >
       {children}
     </div>
   )
@@ -198,6 +213,7 @@ const SheetContent = ({
   className,
   closeLabel,
   description,
+  entryMotion = "intrinsic",
   initialFocusRef,
   ref,
   side = RLY_SHEET_DEFAULT_VARIANTS.side,
@@ -206,6 +222,7 @@ const SheetContent = ({
   ...props
 }: SheetContentProps): ReactElement => {
   const state = useSheetState()
+  const resolvedEntryMotion = useModalEntryMotion(state.open, entryMotion)
   const visibleTitle = requireText(title, "Sheet title")
   const visibleDescription = description === undefined ? undefined : requireText(description, "Sheet description")
   const accessibleCloseLabel = requireText(closeLabel ?? `Close ${visibleTitle}`, "Sheet closeLabel")
@@ -223,7 +240,7 @@ const SheetContent = ({
     <PortalBoundary>
       {(container) => (
         <RadixDialog.Portal container={container}>
-          <SheetLayer>
+          <SheetLayer entryMotion={resolvedEntryMotion}>
             <RadixDialog.Overlay
               className={style("overlay")}
               data-rly-sheet-overlay=""

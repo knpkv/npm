@@ -98,6 +98,33 @@ describe("Dialog", () => {
     )
   })
 
+  it("keeps entry ownership stable until the next open cycle", async () => {
+    const renderDialog = (open: boolean, entryMotion: "external" | "intrinsic"): ReactElement => (
+      <Dialog.Root onOpenChange={() => undefined} open={open}>
+        <Dialog.Content entryMotion={entryMotion} title="Transitioned details">
+          Content
+        </Dialog.Content>
+      </Dialog.Root>
+    )
+    const entry = await mount(renderDialog(true, "external"))
+    const readEntryMotion = (): string | null | undefined =>
+      entry.portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")
+
+    expect(readEntryMotion()).toBe("external")
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderDialog(true, "intrinsic")}</PortalProvider>)
+    )
+    expect(readEntryMotion()).toBe("external")
+
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderDialog(false, "intrinsic")}</PortalProvider>)
+    )
+    await act(async () =>
+      entry.root.render(<PortalProvider container={entry.portal}>{renderDialog(true, "intrinsic")}</PortalProvider>)
+    )
+    expect(readEntryMotion()).toBe("intrinsic")
+  })
+
   it("sets focus, relationships, inert background, scroll lock, and restores focus after Escape", async () => {
     const initialFocusRef = createRef<HTMLInputElement>()
     const { background, host, portal } = await mount(
