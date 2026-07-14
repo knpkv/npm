@@ -63,37 +63,39 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
 
   return PortfolioSnapshots.of({
     snapshot: Effect.fn("PortfolioSnapshots.snapshot")(function*(workspaceId) {
-      const releases = yield* persistence.releases.list(workspaceId, MAXIMUM_PORTFOLIO_RELEASES).pipe(
-        Effect.mapError(() => unavailable())
-      )
-      const plugins = yield* listPluginConnectionSummaries(persistence, workspaceId)
-      const generatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-      const releaseSummaries = yield* Effect.forEach(releases, ({ release }) =>
-        Effect.gen(function*() {
-          const collaboratorProjection = yield* releaseCollaborators(persistence, release)
-          const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
-            Effect.mapError(() => unavailable())
-          )
-          return {
-            releaseId: release.id,
-            serviceName: release.serviceName,
-            version: release.version,
-            lifecycle: release.lifecycle,
-            relay: release.relay,
-            freshness,
-            targetEnvironmentIds: release.targetEnvironmentIds,
-            collaborators: collaboratorProjection.collaborators,
-            collaboratorCount: collaboratorProjection.collaboratorCount,
-            sourceRevisionCount: release.sourceRevisions.length,
-            updatedAt: release.updatedAt
-          }
-        }))
-      return {
-        workspaceId,
-        generatedAt,
-        releases: releaseSummaries,
-        plugins
-      } satisfies PortfolioSnapshot
+      return yield* persistence.transact(Effect.gen(function*() {
+        const releases = yield* persistence.releases.list(workspaceId, MAXIMUM_PORTFOLIO_RELEASES)
+        const plugins = yield* listPluginConnectionSummaries(persistence, workspaceId)
+        const { headCursor: eventCursor } = yield* persistence.events.streamState(workspaceId)
+        const generatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+        const releaseSummaries = yield* Effect.forEach(releases, ({ release }) =>
+          Effect.gen(function*() {
+            const collaboratorProjection = yield* releaseCollaborators(persistence, release)
+            const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
+              Effect.mapError(() => unavailable())
+            )
+            return {
+              releaseId: release.id,
+              serviceName: release.serviceName,
+              version: release.version,
+              lifecycle: release.lifecycle,
+              relay: release.relay,
+              freshness,
+              targetEnvironmentIds: release.targetEnvironmentIds,
+              collaborators: collaboratorProjection.collaborators,
+              collaboratorCount: collaboratorProjection.collaboratorCount,
+              sourceRevisionCount: release.sourceRevisions.length,
+              updatedAt: release.updatedAt
+            }
+          }))
+        return {
+          workspaceId,
+          eventCursor,
+          generatedAt,
+          releases: releaseSummaries,
+          plugins
+        } satisfies PortfolioSnapshot
+      })).pipe(Effect.mapError(() => unavailable()))
     })
   })
 })

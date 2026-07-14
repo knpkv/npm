@@ -7,8 +7,9 @@ style preferences into noisy CI failures.
 ## Commands
 
 - `pnpm lint` runs ESLint and ast-grep.
-- `pnpm lint:ast` runs ast-grep rules from `sgconfig.yml`, including the
-  Effect-specific rules in `ast-grep/rules/effect` and TypeScript-wide rules in
+- `pnpm lint:ast` first runs the rule cases in `ast-grep/tests`, then scans with
+  the rules from `sgconfig.yml`, including the Effect-specific rules in
+  `ast-grep/rules/effect` and TypeScript-wide rules in
   `ast-grep/rules/typescript`.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm skills:check` verifies product-local agent skills are synced from
@@ -56,6 +57,10 @@ Type assertions are banned. Do not use `value as Type`, `value as const`, double
 assertions such as `value as unknown as Type`, or any variant of `as` to
 override the checker. Model the value, narrow it, decode it, or use
 `satisfies`.
+
+Control Center public HTTP contracts must use purpose-built canonical wire
+schemas instead of `Schema.NumberFromString`, whose JavaScript coercion accepts
+ambiguous forms such as whitespace, signs, exponents, and hexadecimal.
 
 ## Agent Guidance
 

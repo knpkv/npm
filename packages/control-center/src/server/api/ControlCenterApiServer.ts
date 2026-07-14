@@ -3,7 +3,14 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
-import { mediaHandlersLayer, pluginHandlersLayer, portfolioHandlersLayer, sessionHandlersLayer } from "./Handlers.js"
+import {
+  liveEventHandlersLayer,
+  mediaHandlersLayer,
+  pluginHandlersLayer,
+  portfolioHandlersLayer,
+  sessionHandlersLayer
+} from "./Handlers.js"
+import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
 /** Contract middleware implementations shared by every authenticated API group. */
 export const controlCenterApiMiddlewareLayer = Layer.mergeAll(
@@ -16,8 +23,12 @@ export const controlCenterApiHandlersLayer = Layer.mergeAll(
   sessionHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
-  mediaHandlersLayer
-).pipe(Layer.provide(controlCenterApiMiddlewareLayer))
+  mediaHandlersLayer,
+  liveEventHandlersLayer
+).pipe(
+  Layer.provide(controlCenterApiMiddlewareLayer),
+  Layer.provide(LiveStreamAdmission.layer)
+)
 
 /** Routes for the browser-safe ControlCenterApi contract. */
 export const controlCenterApiLayer = HttpApiBuilder.layer(ControlCenterApi).pipe(

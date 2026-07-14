@@ -3,8 +3,7 @@ import { Context, Effect, Layer, Predicate } from "effect"
 import type { Success } from "effect/Effect"
 
 import { ContentStore, type ContentStoreService } from "./ContentStore.js"
-import type { Database } from "./Database.js"
-import { databaseLayer } from "./Database.js"
+import { Database, databaseLayer } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
   type DatabaseInitializationError,
@@ -24,6 +23,8 @@ import type { BlobStoreError } from "./object-store/BlobStoreError.js"
 import { decodePersistenceConfig } from "./PersistenceConfig.js"
 import {
   ContentBlobMetadataRepository,
+  DomainEventRepository,
+  type DomainEventRepositoryService,
   EntityRepository,
   type EntityRepositoryService,
   PeopleRepository,
@@ -40,6 +41,7 @@ import {
   WorkspaceRepository,
   type WorkspaceRepositoryService
 } from "./repositories/index.js"
+import { mapPersistenceOperation } from "./repositories/internal.js"
 
 /** Typed failures that may cross the public persistence operation boundary. */
 export type PersistenceOperationFailure =
@@ -104,7 +106,9 @@ export type PersistenceLayerError =
   | PersistenceConfigError
 
 const makePersistence = Effect.gen(function*() {
+  const database = yield* Database
   const content = yield* ContentStore
+  const events = yield* DomainEventRepository
   const entities = yield* EntityRepository
   const people = yield* PeopleRepository
   const pluginConnections = yield* PluginConnectionRepository
@@ -114,6 +118,9 @@ const makePersistence = Effect.gen(function*() {
   const workspaces = yield* WorkspaceRepository
 
   return {
+    transact: <Success, Failure, Requirements>(
+      effect: Effect.Effect<Success, Failure, Requirements>
+    ) => database.transaction(effect).pipe(mapPersistenceOperation("persistence.transaction")),
     content: {
       put: (...args: Parameters<ContentStoreService["put"]>) => publicOperation("content.put", content.put(...args)),
       getMetadata: (...args: Parameters<ContentStoreService["getMetadata"]>) =>
@@ -138,6 +145,16 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("entity.list", entities.list(...args)),
       updateSourceRevision: (...args: Parameters<EntityRepositoryService["updateSourceRevision"]>) =>
         publicOperation("entity.update", entities.updateSourceRevision(...args))
+    },
+    events: {
+      append: (...args: Parameters<DomainEventRepositoryService["append"]>) =>
+        publicOperation("domain-event.append", events.append(...args)),
+      pageAfter: (...args: Parameters<DomainEventRepositoryService["pageAfter"]>) =>
+        publicOperation("domain-event.page-after", events.pageAfter(...args)),
+      prune: (...args: Parameters<DomainEventRepositoryService["prune"]>) =>
+        publicOperation("domain-event.prune", events.prune(...args)),
+      streamState: (...args: Parameters<DomainEventRepositoryService["streamState"]>) =>
+        publicOperation("domain-event.stream-state", events.streamState(...args))
     },
     people: {
       createPerson: (...args: Parameters<PeopleRepositoryService["createPerson"]>) =>
@@ -241,6 +258,7 @@ export const persistenceLayerFromDatabase = (
           Layer.provide(foundation)
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
+        const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
         const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
@@ -255,6 +273,7 @@ export const persistenceLayerFromDatabase = (
           foundation,
           contentMetadata,
           entities,
+          events,
           people,
           pluginConnections,
           pluginConfigurations,

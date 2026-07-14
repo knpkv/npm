@@ -1,8 +1,10 @@
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 
+import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
   PatchPluginConfigurationRequest,
@@ -12,7 +14,7 @@ import type {
   PluginHealthResponse
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
-import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import type { EventCursor, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -91,6 +93,14 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
     workspaceId: WorkspaceId
   ) => Effect.Effect<PortfolioSnapshot, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/PortfolioSnapshots") {}
+
+/** Injectable durable replay boundary used by the authenticated SSE handler. */
+export class LiveEvents extends Context.Service<LiveEvents, {
+  readonly open: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly after: EventCursor | undefined
+  }) => Effect.Effect<Stream.Stream<ControlCenterLiveEvent>, ApplicationServiceUnavailable, Scope.Scope>
+}>()("@knpkv/control-center/server/api/LiveEvents") {}
 
 /** Fully authorized media stream whose provider address and storage key remain private. */
 export interface MediaRead {

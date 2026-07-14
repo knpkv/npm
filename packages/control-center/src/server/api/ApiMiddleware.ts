@@ -41,6 +41,7 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
   switch (groupIdentifier) {
     case "media":
     case "portfolio":
+    case "liveEvents":
       return "release-read"
     case "plugins":
       return "provider-configuration"

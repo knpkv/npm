@@ -1,5 +1,6 @@
 /** Durable application adapters for the authenticated HTTP API. @packageDocumentation */
 export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
+export { liveEventsLayer, makeLiveEvents } from "./liveEvents.js"
 export { makeMediaReads, mediaReadsLayer } from "./mediaReads.js"
 export {
   listPluginConnectionSummaries,

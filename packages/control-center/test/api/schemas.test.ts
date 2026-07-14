@@ -2,8 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import { Result, Schema } from "effect"
 
 import {
+  ControlCenterLiveEvent,
   CorrelationResponseHeaders,
   CurrentSessionResponse,
+  EventCursorFromString,
   MediaResponseHeaders,
   OpaqueMediaId,
   PairingCode,
@@ -14,6 +16,7 @@ import {
   PortfolioSnapshot,
   SessionListResponse
 } from "../../src/api/index.js"
+import { PortfolioInvalidatedEventV1 } from "../../src/domain/domainEvent.js"
 import { ReleaseId } from "../../src/domain/identifiers.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 
@@ -24,6 +27,10 @@ const personId = "01890f6f-6d6a-7cc0-98d2-000000000021"
 const pluginConnectionId = "01890f6f-6d6a-7cc0-98d2-000000000031"
 const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000041")
 const environmentId = "01890f6f-6d6a-7cc0-98d2-000000000042"
+const domainEventId = "01890f6f-6d6a-7cc0-98d2-000000000051"
+const causationId = "01890f6f-6d6a-7cc0-98d2-000000000052"
+const entityId = "01890f6f-6d6a-7cc0-98d2-000000000053"
+const jobId = "01890f6f-6d6a-7cc0-98d2-000000000054"
 
 const encodedSession = {
   sessionId,
@@ -289,6 +296,7 @@ describe("public API schemas", () => {
   it("accepts a bounded empty portfolio and rejects duplicate plugin identities", () => {
     const emptySnapshot = {
       workspaceId,
+      eventCursor: 0,
       generatedAt: timestamp,
       releases: [],
       plugins: []
@@ -299,6 +307,122 @@ describe("public API schemas", () => {
         Schema.decodeUnknownResult(PortfolioSnapshot)({
           ...emptySnapshot,
           plugins: [encodedPlugin, encodedPlugin]
+        })
+      )
+    )
+  })
+
+  it("accepts only canonical unsigned-decimal browser cursors", () => {
+    for (const cursor of ["0", "1", String(Number.MAX_SAFE_INTEGER)]) {
+      assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(EventCursorFromString)(cursor)))
+    }
+    for (
+      const cursor of [
+        "",
+        " ",
+        "01",
+        "+1",
+        "-1",
+        "1.5",
+        "1e3",
+        "0x10",
+        String(Number.MAX_SAFE_INTEGER + 1),
+        "NaN"
+      ]
+    ) {
+      assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(EventCursorFromString)(cursor)))
+    }
+  })
+
+  it("validates the durable portfolio invalidation envelope", () => {
+    const valid = {
+      schemaVersion: 1,
+      eventId: domainEventId,
+      eventCursor: 1,
+      workspaceId,
+      eventType: "portfolio-invalidated",
+      occurredAt: timestamp,
+      ingestedAt: timestamp,
+      causationId,
+      correlationId: "release:projection.42",
+      metadata: { releaseId, pluginConnectionId, entityId, jobId },
+      payload: { reason: "release-projection" }
+    }
+
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioInvalidatedEventV1)(valid)))
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PortfolioInvalidatedEventV1)({
+          ...valid,
+          causationId: null,
+          correlationId: null,
+          metadata: {},
+          payload: { reason: "plugin-health" }
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(PortfolioInvalidatedEventV1)({ ...valid, eventCursor: 0 }))
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PortfolioInvalidatedEventV1)({
+          ...valid,
+          correlationId: "not a safe trace",
+          payload: { reason: "arbitrary-json", detail: { unbounded: true } }
+        })
+      )
+    )
+  })
+
+  it("decodes the closed live-event union and keeps control frames from advancing the SSE cursor", () => {
+    const snapshot = {
+      workspaceId,
+      eventCursor: 7,
+      generatedAt: timestamp,
+      releases: [],
+      plugins: []
+    }
+    const invalidation = {
+      schemaVersion: 1,
+      eventId: domainEventId,
+      eventCursor: 7,
+      workspaceId,
+      eventType: "portfolio-invalidated",
+      occurredAt: timestamp,
+      ingestedAt: timestamp,
+      causationId: null,
+      correlationId: "stream:7",
+      metadata: { releaseId },
+      payload: { reason: "release-projection" }
+    }
+    const encodedEvents = [
+      { id: "7", event: "portfolio.snapshot", data: JSON.stringify(snapshot) },
+      { id: "7", event: "portfolio.invalidated", data: JSON.stringify(invalidation) },
+      {
+        event: "stream.reset-required",
+        data: JSON.stringify({ reason: "retention", requestedCursor: 1, headCursor: 7, prunedThroughCursor: 3 })
+      },
+      { event: "stream.heartbeat", data: JSON.stringify({ eventCursor: 7, sentAt: timestamp }) }
+    ]
+
+    for (const event of encodedEvents) {
+      assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ControlCenterLiveEvent)(event)))
+    }
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ControlCenterLiveEvent)({
+          event: "stream.reset-required",
+          id: "7",
+          data: JSON.stringify({ reason: "retention", requestedCursor: 1, headCursor: 7, prunedThroughCursor: 3 })
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ControlCenterLiveEvent)({
+          event: "stream.reset-required",
+          data: JSON.stringify({ reason: "cursor-expired", requestedCursor: 1, headCursor: 7, prunedThroughCursor: 3 })
         })
       )
     )

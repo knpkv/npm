@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { Freshness } from "../domain/freshness.js"
-import { EnvironmentId, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { EnvironmentId, EventCursor, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
 import { ReleaseRelayProjection } from "../domain/releaseRelay.js"
@@ -78,6 +78,7 @@ export type PortfolioReleaseSummary = typeof PortfolioReleaseSummary.Type
 /** Bounded, point-in-time portfolio projection for one authenticated workspace. */
 export const PortfolioSnapshot = Schema.Struct({
   workspaceId: WorkspaceId,
+  eventCursor: EventCursor,
   generatedAt: UtcTimestamp,
   releases: Schema.Array(PortfolioReleaseSummary).check(
     Schema.makeFilter((releases) => releases.length <= MAXIMUM_PORTFOLIO_RELEASES, {

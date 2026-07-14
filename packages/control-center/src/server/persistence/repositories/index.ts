@@ -1,5 +1,7 @@
 /** Workspace, plugin, entity, release, people, blob-metadata, and quarantine repositories. */
 export * from "./contentBlobMetadataRepository.js"
+export * from "./domainEventModels.js"
+export * from "./domainEventRepository.js"
 export * from "./entityRepository.js"
 export * from "./models.js"
 export * from "./peopleRepository.js"

@@ -1,0 +1,5 @@
+id: no-number-from-string-in-control-center-api
+valid:
+  - CanonicalNonNegativeIntegerFromString
+invalid:
+  - Schema.NumberFromString

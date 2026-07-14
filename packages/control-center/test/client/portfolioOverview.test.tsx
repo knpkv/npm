@@ -9,8 +9,30 @@ import {
   selectPortfolioOverviewState
 } from "../../src/client/portfolio/PortfolioOverview.js"
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
-import { resolvePortfolioFailure } from "../../src/client/portfolio/usePortfolioSnapshot.js"
+import {
+  type PortfolioConnectionState,
+  type PortfolioSnapshotLoadState,
+  resolvePortfolioFailure
+} from "../../src/client/portfolio/usePortfolioSnapshot.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
+
+const livePortfolioState: Pick<
+  Extract<PortfolioOverviewState, { readonly _tag: "ready" }>,
+  "connection" | "isSnapshotStale"
+> = {
+  connection: { _tag: "connected" },
+  isSnapshotStale: false
+}
+
+type LiveStatusCase = readonly [PortfolioConnectionState, boolean, string, string]
+
+const liveStatusCases: ReadonlyArray<LiveStatusCase> = [
+  [{ _tag: "connected" }, false, "Live", "Snapshot up to date."],
+  [{ _tag: "connecting" }, false, "Connecting", "Connecting to live updates."],
+  [{ _tag: "reconnecting", attempt: 2 }, true, "Reconnecting", "it may be stale."],
+  [{ _tag: "offline" }, true, "Offline", "it may be stale."],
+  [{ _tag: "connected" }, true, "Updating", "Refreshing the authoritative snapshot."]
+]
 
 const renderOverview = (state: PortfolioOverviewState): string =>
   renderToStaticMarkup(
@@ -33,6 +55,7 @@ describe("PortfolioOverviewView", () => {
   it("explains the authenticated empty portfolio without fake metrics", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("empty"))
     })
     expect(markup).toContain("No releases yet")
@@ -43,6 +66,7 @@ describe("PortfolioOverviewView", () => {
   it("renders one factual dossier with people, lifecycle, readiness, and service provenance", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot())
     })
     expect(markup).toContain('data-portfolio-release-id="01890f6f-6d6a-7cc0-98d2-000000000011"')
@@ -66,9 +90,40 @@ describe("PortfolioOverviewView", () => {
     expect(markup).not.toContain("Preview release")
   })
 
+  it.each(liveStatusCases)(
+    "announces %s state politely while preserving release data",
+    (connection, isSnapshotStale, label, detail) => {
+      const markup = renderOverview({
+        _tag: "ready",
+        connection,
+        isSnapshotStale,
+        portfolio: presentPortfolio(makePortfolioSnapshot())
+      })
+      expect(markup).toContain('role="status"')
+      expect(markup).toContain('aria-live="polite"')
+      expect(markup).toContain('aria-atomic="true"')
+      expect(markup).toContain(label)
+      expect(markup).toContain(detail)
+      expect(markup).toContain("payments-api")
+    }
+  )
+
+  it("does not call an opened transport live before protocol catch-up", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      connection: { _tag: "connecting" },
+      isSnapshotStale: false,
+      portfolio: presentPortfolio(makePortfolioSnapshot())
+    })
+
+    expect(markup).toContain("Connecting")
+    expect(markup).not.toContain("Snapshot up to date.")
+  })
+
   it("keeps the dossier visible beneath an accessible stale-source warning", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("stale"))
     })
     expect(markup).toContain('role="status"')
@@ -81,6 +136,7 @@ describe("PortfolioOverviewView", () => {
   it("keeps recovered facts visible while naming a disabled source truthfully", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("disabled"))
     })
     expect(markup).toContain("payments-api")
@@ -93,6 +149,7 @@ describe("PortfolioOverviewView", () => {
   it("renders one person holding two roles as two explicit, valid responsibility entries", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("dual-role"))
     })
     expect(markup.match(/Avery Bell/gu)).toHaveLength(2)
@@ -103,6 +160,7 @@ describe("PortfolioOverviewView", () => {
   it("states when the compact overview omits collaborators beyond its payload cap", () => {
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("capped"))
     })
     expect(markup).toContain("Showing 2 of 51 collaborators in this overview.")
@@ -115,6 +173,7 @@ describe("PortfolioOverviewView", () => {
     if (release === undefined) throw new Error("Expected one release presentation")
     const markup = renderOverview({
       _tag: "ready",
+      ...livePortfolioState,
       portfolio: {
         ...portfolio,
         releases: [
@@ -151,10 +210,19 @@ describe("PortfolioOverviewView", () => {
 
   it("never presents a snapshot owned by a different or removed browser session", () => {
     const snapshot = makePortfolioSnapshot()
-    expect(selectPortfolioOverviewState({ _tag: "loaded", sessionKey: "session-a", snapshot }, "session-b")).toEqual({
+    const loaded: Extract<PortfolioSnapshotLoadState, { readonly _tag: "loaded" }> = {
+      _tag: "loaded",
+      awaitingResetSnapshot: false,
+      connection: { _tag: "connected" },
+      isSnapshotStale: false,
+      minimumRefreshCursor: null,
+      sessionKey: "session-a",
+      snapshot
+    }
+    expect(selectPortfolioOverviewState(loaded, "session-b")).toEqual({
       _tag: "loading"
     })
-    expect(selectPortfolioOverviewState({ _tag: "loaded", sessionKey: "session-a", snapshot }, null)).toEqual({
+    expect(selectPortfolioOverviewState(loaded, null)).toEqual({
       _tag: "session",
       reason: "anonymous"
     })

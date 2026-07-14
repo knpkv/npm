@@ -1,0 +1,8 @@
+id: no-number-from-string-in-control-center-api
+snapshots:
+  Schema.NumberFromString:
+    labels:
+      - source: Schema.NumberFromString
+        style: primary
+        start: 0
+        end: 23

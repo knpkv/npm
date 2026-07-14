@@ -152,6 +152,7 @@ export type ContentBlobMetadata = typeof ContentBlobMetadata.Type
 /** Persisted record categories whose malformed snapshots may be quarantined. */
 export const QuarantineRecordKind = Schema.Literals([
   "content-metadata",
+  "domain-event",
   "entity-revision",
   "person-avatar",
   "person-identity",
@@ -174,6 +175,8 @@ export type QuarantineRecordKind = typeof QuarantineRecordKind.Type
 /** Bounded diagnostic code that never contains persisted payload data. */
 export const QuarantineReasonCode = Schema.Literals([
   "content-metadata-schema-invalid",
+  "domain-event-payload-digest-mismatch",
+  "domain-event-schema-invalid",
   "entity-revision-schema-invalid",
   "person-identity-schema-invalid",
   "person-schema-invalid",
@@ -205,6 +208,8 @@ export type QuarantineReasonCode = typeof QuarantineReasonCode.Type
 /** Fixed diagnostics prevent malformed payload content entering quarantine text. */
 export const QuarantineDiagnosticSummary = Schema.Literals([
   "Stored content metadata failed schema validation.",
+  "Stored domain event payload digest does not match its content.",
+  "Stored domain event failed schema validation.",
   "Stored entity revision failed schema validation.",
   "Stored person avatar failed schema validation.",
   "Stored person identity failed schema validation.",

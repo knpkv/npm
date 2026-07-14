@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -12,6 +13,7 @@ import { Person } from "../../src/domain/actors.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
+  EventCursor,
   PersonId,
   PluginConnectionId,
   ReleaseId,
@@ -23,10 +25,12 @@ import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makePortfolioSnapshots } from "../../src/server/application/portfolioSnapshots.js"
 import {
+  reconcileFakeReleaseProjection,
   recoverFakeReleaseProjection,
   synchronizeFakeRelease,
   synchronizeFakeReleaseFromMap
 } from "../../src/server/application/releaseSynchronization.js"
+import { PersistenceOperationError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
@@ -38,6 +42,7 @@ import {
 } from "../../src/server/plugins/fake/FakePluginScenario.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
+import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000101")
@@ -172,10 +177,15 @@ const input = {
   streamKey: STREAM
 } satisfies Parameters<typeof synchronizeFakeRelease>[0]
 
-const withPersistence = <Success, Failure>(use: Effect.Effect<Success, Failure, Persistence>) =>
+const releaseServices = (config: Parameters<typeof persistenceLayer>[0]) =>
+  Layer.merge(persistenceLayer(config), DomainEventWakeups.layer)
+
+const withPersistence = <Success, Failure>(
+  use: Effect.Effect<Success, Failure, Crypto.Crypto | DomainEventWakeups | Persistence>
+) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-release-sync-")
-    return yield* use.pipe(Effect.provide(persistenceLayer(config)))
+    return yield* use.pipe(Effect.provide(releaseServices(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 const setup = Effect.gen(function*() {
@@ -266,8 +276,23 @@ describe("fake release synchronization", () => {
       assert.strictEqual((yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)).revision, 1)
       assert.strictEqual((yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID)).revision, 1)
 
+      const eventPage = yield* persistence.events.pageAfter(WORKSPACE_ID, EventCursor.make(0), 128)
+      assert.strictEqual(eventPage._tag, "page")
+      if (eventPage._tag === "page") {
+        assert.strictEqual(eventPage.headCursor, 3)
+        assert.strictEqual(
+          eventPage.events.filter(({ payload }) => payload.reason === "release-projection").length,
+          1
+        )
+        assert.strictEqual(
+          eventPage.events.filter(({ payload }) => payload.reason === "plugin-health").length,
+          2
+        )
+      }
+
       const portfolio = yield* makePortfolioSnapshots
       const snapshot = yield* portfolio.snapshot(WORKSPACE_ID)
+      assert.strictEqual(snapshot.eventCursor, 3)
       assert.lengthOf(snapshot.releases, 1)
       assert.deepStrictEqual(snapshot.releases[0]?.collaborators, [
         { personId: OWNER_ID, displayName: "Ada Lovelace", avatarFallback: "AL", role: "release-owner" },
@@ -299,6 +324,73 @@ describe("fake release synchronization", () => {
       const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
       assert.strictEqual(runtime.health._tag, "healthy")
       assert.strictEqual(runtime.consecutiveFailures, 0)
+    })))
+
+  it.effect("rolls back a plugin-health fact when its invalidation cannot be appended", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      const before = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+      const appendFailure = new PersistenceOperationError({ operation: "test.event-append" })
+      const failingPersistence = Persistence.of({
+        ...persistence,
+        events: {
+          ...persistence.events,
+          append: () => Effect.fail(appendFailure)
+        }
+      })
+
+      const attempted = yield* runScenario(scenario(success(releasePage()))).pipe(
+        Effect.provideService(Persistence, failingPersistence),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(attempted))
+      if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure, appendFailure)
+      assert.deepStrictEqual(yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID), before)
+      assert.strictEqual((yield* persistence.events.streamState(WORKSPACE_ID)).headCursor, 0)
+    })))
+
+  it.effect("rolls back projected people and release when their invalidation cannot be appended", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      const health = yield* Schema.decodeUnknownEffect(PluginHealth)({
+        _tag: "healthy",
+        checkedAt: SYNCHRONIZED_AT
+      })
+      const page = yield* Schema.decodeUnknownEffect(PluginSyncPageV1)(releasePage())
+      yield* persistence.pluginRuntime.commitNormalizedPage(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        "jira",
+        STREAM,
+        0,
+        page,
+        health.checkedAt,
+        health
+      )
+      const appendFailure = new PersistenceOperationError({ operation: "test.projection-event-append" })
+      const failingPersistence = Persistence.of({
+        ...persistence,
+        events: {
+          ...persistence.events,
+          append: () => Effect.fail(appendFailure)
+        }
+      })
+
+      const attempted = yield* reconcileFakeReleaseProjection(input, health, health.checkedAt).pipe(
+        Effect.provideService(Persistence, failingPersistence),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(attempted))
+      if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure, appendFailure)
+      assert.isTrue(Result.isFailure(
+        yield* persistence.people.getPerson(WORKSPACE_ID, OWNER_ID).pipe(Effect.result)
+      ))
+      assert.isTrue(Result.isFailure(
+        yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID).pipe(Effect.result)
+      ))
+      assert.strictEqual((yield* persistence.events.streamState(WORKSPACE_ID)).headCursor, 0)
     })))
 
   it.effect("rejects a missing referenced collaborator before checkpoint, cache, or release advance", () =>
@@ -340,7 +432,7 @@ describe("fake release synchronization", () => {
         Effect.gen(function*() {
           yield* setup
           yield* runScenario(scenario(success(releasePage())))
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
 
       yield* Effect.scoped(
@@ -359,7 +451,7 @@ describe("fake release synchronization", () => {
               { displayName: "Grace Hopper", role: "release-approver" }
             ]
           )
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -624,7 +716,7 @@ describe("fake release synchronization", () => {
           assert.isTrue(Result.isFailure(
             yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID).pipe(Effect.result)
           ))
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
 
       yield* Effect.scoped(
@@ -654,7 +746,7 @@ describe("fake release synchronization", () => {
           assert.strictEqual(release.release.freshness._tag, "stale")
           assert.strictEqual(release.release.freshness.pluginHealth._tag, "unavailable")
           assert.strictEqual(release.release.freshness.provenance._tag, "cache")
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
@@ -666,7 +758,7 @@ describe("fake release synchronization", () => {
         Effect.gen(function*() {
           yield* setup
           yield* runScenario(scenario(success(releasePage())))
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
 
       yield* Effect.scoped(
@@ -681,7 +773,7 @@ describe("fake release synchronization", () => {
             releaseId: RELEASE_ID
           })
           assert.strictEqual((yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)).revision, 1)
-        }).pipe(Effect.provide(persistenceLayer(config)))
+        }).pipe(Effect.provide(releaseServices(config)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 

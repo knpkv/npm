@@ -96,7 +96,10 @@ const unavailablePlugin = {
 }
 
 /** Build a Schema-decoded portfolio fixture without bypassing the public API contract. */
-export const makePortfolioSnapshot = (state: PortfolioFixtureState = "current"): PortfolioSnapshot => {
+export const makePortfolioSnapshot = (
+  state: PortfolioFixtureState = "current",
+  eventCursor = 10
+): PortfolioSnapshot => {
   const releases = state === "empty"
     ? []
     : [{
@@ -149,6 +152,7 @@ export const makePortfolioSnapshot = (state: PortfolioFixtureState = "current"):
     }]
 
   return Schema.decodeUnknownSync(PortfolioSnapshot)({
+    eventCursor,
     generatedAt: "2026-07-14T10:16:00.000Z",
     plugins,
     releases,

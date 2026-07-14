@@ -3,8 +3,11 @@ import { Effect, Result, Schema } from "effect"
 
 import {
   AgentId,
+  DomainEventId,
   EntityId,
   EnvironmentId,
+  EventCursor,
+  JobId,
   PersonId,
   PluginConnectionId,
   ReleaseId,
@@ -20,12 +23,23 @@ const identifierSchemas = [
   { name: "entity", schema: EntityId },
   { name: "person", schema: PersonId },
   { name: "agent", schema: AgentId },
+  { name: "domain event", schema: DomainEventId },
+  { name: "job", schema: JobId },
   { name: "environment", schema: EnvironmentId },
   { name: "plugin connection", schema: PluginConnectionId },
   { name: "role assignment", schema: RoleAssignmentId }
 ]
 
 describe("canonical identifiers", () => {
+  it("keeps event cursors nonnegative and within JavaScript safe integers", () => {
+    for (const cursor of [0, 1, Number.MAX_SAFE_INTEGER]) {
+      assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(EventCursor)(cursor)))
+    }
+    for (const cursor of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.POSITIVE_INFINITY]) {
+      assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(EventCursor)(cursor)))
+    }
+  })
+
   it.each(identifierSchemas)("decodes and encodes a canonical $name ID", ({ schema }) => {
     const decoded = Schema.decodeUnknownResult(schema)(CANONICAL_UUID_V7)
 

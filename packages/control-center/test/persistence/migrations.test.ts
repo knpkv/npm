@@ -12,11 +12,15 @@ import { migration0001Core } from "../../src/server/persistence/migrations/0001_
 import { migration0002Integrity } from "../../src/server/persistence/migrations/0002_integrity.js"
 import { migration0003Auth } from "../../src/server/persistence/migrations/0003_auth.js"
 import { migration0004PluginRuntime } from "../../src/server/persistence/migrations/0004_plugin_runtime.js"
+import { migration0005PluginConfiguration } from "../../src/server/persistence/migrations/0005_plugin_configuration.js"
+import { migration0006PluginSyncPageEvidence } from "../../src/server/persistence/migrations/0006_plugin_sync_page_evidence.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 
 const expectedTables = [
   "content_blobs",
   "control_center_migrations",
+  "domain_event_streams",
+  "domain_events",
   "entities",
   "entity_revisions",
   "pairing_codes",
@@ -178,7 +182,7 @@ describe("Control Center migrations", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades the exact previous ledger by appending only plugin configuration migration 5", () =>
+  it.effect("upgrades the exact previous ledger by appending later migrations", () =>
     Effect.gen(function*() {
       const config = yield* testConfig
       const previousLoader = LibsqlMigrator.fromRecord({
@@ -283,6 +287,62 @@ describe("Control Center migrations", () => {
         successfulHealthDigest: null,
         successfulHealthJson: null
       }])
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("upgrades schema version 6 to workspace-local event streams without rewriting data", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      const previousLoader = LibsqlMigrator.fromRecord({
+        "0001_core_heads": migration0001Core,
+        "0002_integrity_blobs": migration0002Integrity,
+        "0003_auth": migration0003Auth,
+        "0004_plugin_runtime": migration0004PluginRuntime,
+        "0005_plugin_configuration": migration0005PluginConfiguration,
+        "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
+      })
+      const legacyWorkspaceId = "01890f6f-6d6a-7cc0-98d2-000000000093"
+
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
+        yield* sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          ${legacyWorkspaceId}, 'Version Six', 1,
+          '2026-07-14T09:00:00.000Z', '2026-07-14T09:00:00.000Z'
+        )`
+      }).pipe(
+        Effect.provide(
+          LibsqlClient.layer({
+            transformResultNames: snakeToCamel,
+            url: config.databaseUrl
+          })
+        ),
+        Effect.scoped
+      )
+
+      const snapshot = yield* Effect.gen(function*() {
+        const database = yield* Database
+        const workspaces = yield* database.sql<{ readonly displayName: string }>`SELECT
+          display_name AS displayName FROM workspaces WHERE workspace_id = ${legacyWorkspaceId}`
+        const streams = yield* database.sql`SELECT workspace_id FROM domain_event_streams`
+        const events = yield* database.sql`SELECT workspace_id FROM domain_events`
+        const ledger = yield* database.sql<{
+          readonly migrationId: number
+          readonly name: string
+        }>`SELECT migration_id AS migrationId, name
+          FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+          ORDER BY migration_id`
+        return { events, ledger, streams, workspaces }
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+      assert.deepStrictEqual(snapshot.workspaces, [{ displayName: "Version Six" }])
+      assert.deepStrictEqual(snapshot.streams, [])
+      assert.deepStrictEqual(snapshot.events, [])
+      assert.deepStrictEqual(
+        snapshot.ledger,
+        EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
+      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades an exact previous schema without rewriting its ledger entry", () =>

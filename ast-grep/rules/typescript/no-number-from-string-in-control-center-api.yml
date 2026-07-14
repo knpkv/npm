@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-number-from-string-in-control-center-api
+language: tsx
+severity: error
+message: "Use a canonical wire-number schema instead of JavaScript-coercing Schema.NumberFromString in public HTTP contracts."
+
+rule:
+  pattern: Schema.NumberFromString
+
+files:
+  - "packages/control-center/src/api/**/*.ts"
+
+note: |
+  Schema.NumberFromString accepts ambiguous JavaScript forms such as whitespace,
+  leading zeroes, signs, exponents, and hexadecimal. Public HTTP contracts must
+  import a purpose-built canonical wire schema with an explicit grammar and bounds.

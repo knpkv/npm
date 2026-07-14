@@ -12,3 +12,6 @@ languageGlobs:
     - "**/*.mjs"
 
 utilDirs: []
+
+testConfigs:
+  - testDir: ast-grep/tests

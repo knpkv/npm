@@ -63,3 +63,21 @@ export const RoleAssignmentId = canonicalUuid7("RoleAssignmentId")
 
 /** Decoded role-assignment identifier. */
 export type RoleAssignmentId = typeof RoleAssignmentId.Type
+
+/** Workspace-local monotonic position used for durable event replay. */
+export const EventCursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.brand("EventCursor"))
+
+/** Decoded nonnegative event position; persisted event rows start at one. */
+export type EventCursor = typeof EventCursor.Type
+
+/** Canonical identifier of one durable domain event. */
+export const DomainEventId = canonicalUuid7("DomainEventId")
+
+/** Decoded durable domain-event identifier. */
+export type DomainEventId = typeof DomainEventId.Type
+
+/** Canonical identifier of one asynchronous Control Center job. */
+export const JobId = canonicalUuid7("JobId")
+
+/** Decoded asynchronous job identifier. */
+export type JobId = typeof JobId.Type

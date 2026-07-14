@@ -68,6 +68,16 @@ export const invalidRequestApiError = withCorrelation((correlationId) =>
   })
 )
 
+/** Public capacity response for an authenticated live stream rejected before subscription. */
+export const liveStreamCapacityApiError = withCorrelation((correlationId) =>
+  new RateLimitedApiError({
+    code: "rate-limited",
+    correlationId,
+    message: "Too many live update streams are already open.",
+    retryAt: null
+  })
+)
+
 export const serviceUnavailableApiError = (
   retryAt: ApplicationServiceUnavailable["retryAt"] = null
 ) =>

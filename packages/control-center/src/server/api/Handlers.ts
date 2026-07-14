@@ -1,6 +1,9 @@
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as HttpEffect from "effect/unstable/http/HttpEffect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
@@ -12,9 +15,11 @@ import { Auth } from "../auth/Auth.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
-import { MediaReads, PluginAdministration, PortfolioSnapshots } from "./ApplicationServices.js"
+import { LiveEvents, MediaReads, PluginAdministration, PortfolioSnapshots } from "./ApplicationServices.js"
 import {
   forbiddenApiError,
+  invalidRequestApiError,
+  liveStreamCapacityApiError,
   mapApplicationConflict,
   mapApplicationInvalidRequest,
   mapApplicationNotFound,
@@ -24,11 +29,30 @@ import {
   mapCredentialAuthenticationFailures,
   serviceUnavailableApiError
 } from "./ErrorMapping.js"
+import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
 const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "cc_session" })
 
 const currentSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) =>
   Redacted.make(request.cookies.cc_session ?? "")
+
+const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
+
+const awaitSessionEnd = (
+  auth: Auth["Service"],
+  token: Redacted.Redacted<string>,
+  expected: CurrentSession["Service"]
+): Effect.Effect<void> =>
+  Effect.sleep(SESSION_REAUTHENTICATION_INTERVAL).pipe(
+    Effect.andThen(Effect.result(auth.authenticate(token))),
+    Effect.flatMap((authenticated) =>
+      Result.isSuccess(authenticated) &&
+        authenticated.success.sessionId === expected.sessionId &&
+        authenticated.success.workspaceId === expected.workspaceId
+        ? Effect.suspend(() => awaitSessionEnd(auth, token, expected))
+        : Effect.void
+    )
+  )
 
 /** Session pairing, inspection, administration, and logout handlers. */
 export const sessionHandlersLayer = HttpApiBuilder.group(
@@ -176,6 +200,45 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
           return yield* portfolio.snapshot(session.workspaceId).pipe(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
+        }))
+    })
+)
+
+/** Authenticated durable event replay with bounded wakeups and periodic session revalidation. */
+export const liveEventHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "liveEvents",
+  (handlers) =>
+    Effect.gen(function*() {
+      const events = yield* LiveEvents
+      const auth = yield* Auth
+      const admission = yield* LiveStreamAdmission
+      return handlers.handle("stream", ({ headers, query, request }) =>
+        Effect.gen(function*() {
+          const session = yield* CurrentSession
+          const queryCursor = query.after
+          const headerCursor = headers["last-event-id"]
+          if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
+            return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+          }
+          yield* admission.acquire(session.sessionId).pipe(
+            Effect.catchTag(
+              "LiveStreamAdmissionExceeded",
+              () => Effect.flatMap(liveStreamCapacityApiError, Effect.fail)
+            )
+          )
+          const eventStream = yield* events.open({
+            workspaceId: session.workspaceId,
+            after: queryCursor ?? headerCursor
+          }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(HttpServerResponse.setHeaders(response, {
+              "cache-control": "private, no-store",
+              "x-accel-buffering": "no"
+            }))
+          )
+          const token = currentSessionToken(request)
+          return eventStream.pipe(Stream.interruptWhen(awaitSessionEnd(auth, token, session)))
         }))
     })
 )

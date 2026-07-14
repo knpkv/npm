@@ -1,3 +1,4 @@
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -7,18 +8,21 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { Person, type PersonSourceIdentity } from "../../domain/actors.js"
+import type { PortfolioInvalidationReason } from "../../domain/domainEvent.js"
 import { PluginHealth, type PluginHealth as PluginHealthType } from "../../domain/freshness.js"
-import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import { DomainEventId, type PluginConnectionId, type ReleaseId, type WorkspaceId } from "../../domain/identifiers.js"
 import { PluginCheckpointV1, PluginSyncRequestV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
-import { SourceIdentityMismatchError } from "../persistence/errors.js"
+import { PersistenceOperationError, SourceIdentityMismatchError } from "../persistence/errors.js"
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
+import { DomainEventDedupeKey } from "../persistence/repositories/domainEventModels.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { type PluginFailure, pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
+import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import {
   fakeReleaseIdFromCache,
   FakeReleaseNormalizationError,
@@ -107,6 +111,41 @@ const failureHealth = Effect.fn("ReleaseSynchronization.failureHealth")(function
   })
 })
 
+const appendPortfolioInvalidation = Effect.fn(
+  "ReleaseSynchronization.appendPortfolioInvalidation"
+)(function*(input: {
+  readonly workspaceId: WorkspaceId
+  readonly pluginConnectionId: PluginConnectionId
+  readonly releaseId: ReleaseId | null
+  readonly occurredAt: UtcTimestamp
+  readonly reason: PortfolioInvalidationReason
+}) {
+  const cryptoService = yield* Crypto.Crypto
+  const persistence = yield* Persistence
+  const eventId = yield* cryptoService.randomUUIDv7.pipe(
+    Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.random-id" })),
+    Effect.flatMap((value) =>
+      Schema.decodeUnknownEffect(DomainEventId)(value).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.random-id" }))
+      )
+    )
+  )
+  return yield* persistence.events.append(input.workspaceId, {
+    dedupeKey: DomainEventDedupeKey.make(eventId),
+    schemaVersion: 1,
+    eventId,
+    eventType: "portfolio-invalidated",
+    occurredAt: input.occurredAt,
+    causationId: null,
+    correlationId: null,
+    metadata: {
+      ...(input.releaseId === null ? {} : { releaseId: input.releaseId }),
+      pluginConnectionId: input.pluginConnectionId
+    },
+    payload: { reason: input.reason }
+  })
+})
+
 export interface ReleaseSynchronizationInput {
   readonly workspaceId: WorkspaceId
   readonly pluginConnectionId: PluginConnectionId
@@ -140,14 +179,29 @@ const persistHealth = Effect.fn("ReleaseSynchronization.persistHealth")(function
   failed: boolean
 ) {
   const persistence = yield* Persistence
-  const runtime = yield* persistence.pluginRuntime.getRuntime(input.workspaceId, input.pluginConnectionId)
-  return yield* persistence.pluginRuntime.recordHealth(
-    input.workspaceId,
-    input.pluginConnectionId,
-    runtime.revision,
-    health,
-    failed ? runtime.consecutiveFailures + 1 : 0
+  const wakeups = yield* DomainEventWakeups
+  const recorded = yield* persistence.transact(
+    Effect.gen(function*() {
+      const runtime = yield* persistence.pluginRuntime.getRuntime(input.workspaceId, input.pluginConnectionId)
+      const updated = yield* persistence.pluginRuntime.recordHealth(
+        input.workspaceId,
+        input.pluginConnectionId,
+        runtime.revision,
+        health,
+        failed ? runtime.consecutiveFailures + 1 : 0
+      )
+      yield* appendPortfolioInvalidation({
+        workspaceId: input.workspaceId,
+        pluginConnectionId: input.pluginConnectionId,
+        releaseId: null,
+        occurredAt: health.checkedAt,
+        reason: "plugin-health"
+      })
+      return updated
+    })
   )
+  yield* wakeups.notify(input.workspaceId)
+  return recorded
 })
 
 const personEquivalence = Schema.toEquivalence(Schema.toEncoded(Person))
@@ -217,16 +271,19 @@ const persistPerson = Effect.fn("ReleaseSynchronization.persistPerson")(function
   const current = yield* Effect.result(persistence.people.getPerson(workspaceId, person.personId))
   if (Result.isFailure(current)) {
     if (current.failure._tag !== "RecordNotFoundError") return yield* Effect.fail(current.failure)
-    return yield* persistence.people.createPerson(workspaceId, person, updatedAt)
+    return { record: yield* persistence.people.createPerson(workspaceId, person, updatedAt), changed: true }
   }
   const mergedPerson = mergePersonIdentities(current.success.person, person)
-  if (yield* peopleEqual(current.success.person, mergedPerson)) return current.success
-  return yield* persistence.people.updatePerson(
-    workspaceId,
-    mergedPerson,
-    current.success.revision,
-    updatedAt
-  )
+  if (yield* peopleEqual(current.success.person, mergedPerson)) return { record: current.success, changed: false }
+  return {
+    record: yield* persistence.people.updatePerson(
+      workspaceId,
+      mergedPerson,
+      current.success.revision,
+      updatedAt
+    ),
+    changed: true
+  }
 })
 
 const persistRelease = Effect.fn("ReleaseSynchronization.persistRelease")(function*(
@@ -237,10 +294,13 @@ const persistRelease = Effect.fn("ReleaseSynchronization.persistRelease")(functi
   const current = yield* Effect.result(persistence.releases.get(workspaceId, release.id))
   if (Result.isFailure(current)) {
     if (current.failure._tag !== "RecordNotFoundError") return yield* Effect.fail(current.failure)
-    return yield* persistence.releases.create(workspaceId, release)
+    return { record: yield* persistence.releases.create(workspaceId, release), changed: true }
   }
-  if (yield* releasesEqual(current.success.release, release)) return current.success
-  return yield* persistence.releases.append(workspaceId, release, current.success.revision)
+  if (yield* releasesEqual(current.success.release, release)) return { record: current.success, changed: false }
+  return {
+    record: yield* persistence.releases.append(workspaceId, release, current.success.revision),
+    changed: true
+  }
 })
 
 const readPreviousRelease = Effect.fn("ReleaseSynchronization.readPreviousRelease")(function*(
@@ -258,7 +318,7 @@ const readPreviousRelease = Effect.fn("ReleaseSynchronization.readPreviousReleas
   return current.success.release
 })
 
-const reconcileProjection = Effect.fn("ReleaseSynchronization.reconcileProjection")(function*(
+const reconcileProjectionFacts = Effect.fn("ReleaseSynchronization.reconcileProjectionFacts")(function*(
   input: BoundReleaseSynchronizationInput,
   health: PluginHealthType,
   evaluatedAt: UtcTimestamp,
@@ -281,17 +341,46 @@ const reconcileProjection = Effect.fn("ReleaseSynchronization.reconcileProjectio
     provenance,
     previousRelease
   })
-  if (Option.isNone(projection)) return null
+  if (Option.isNone(projection)) return { releaseId: null, changed: false }
+  let changed = false
   for (const person of projection.value.people) {
-    yield* persistPerson(input.workspaceId, person, projection.value.release.updatedAt)
+    const persisted = yield* persistPerson(input.workspaceId, person, projection.value.release.updatedAt)
+    changed = changed || persisted.changed
   }
   if (
     provenance === "cache" &&
     previousRelease !== null &&
     (yield* recoveryProjectionsEqual(previousRelease, projection.value.release))
-  ) return previousRelease.id
+  ) return { releaseId: previousRelease.id, changed }
   const persisted = yield* persistRelease(input.workspaceId, projection.value.release)
-  return persisted.release.id
+  return { releaseId: persisted.record.release.id, changed: changed || persisted.changed }
+})
+
+const reconcileProjection = Effect.fn("ReleaseSynchronization.reconcileProjection")(function*(
+  input: BoundReleaseSynchronizationInput,
+  health: PluginHealthType,
+  evaluatedAt: UtcTimestamp,
+  provenance: "provider" | "cache"
+) {
+  const persistence = yield* Persistence
+  const wakeups = yield* DomainEventWakeups
+  const outcome = yield* persistence.transact(
+    Effect.gen(function*() {
+      const projected = yield* reconcileProjectionFacts(input, health, evaluatedAt, provenance)
+      if (projected.changed) {
+        yield* appendPortfolioInvalidation({
+          workspaceId: input.workspaceId,
+          pluginConnectionId: input.pluginConnectionId,
+          releaseId: projected.releaseId,
+          occurredAt: evaluatedAt,
+          reason: "release-projection"
+        })
+      }
+      return projected
+    })
+  )
+  if (outcome.changed) yield* wakeups.notify(input.workspaceId)
+  return outcome.releaseId
 })
 
 const lastValidProjectionId = Effect.fn("ReleaseSynchronization.lastValidProjectionId")(function*(
@@ -362,7 +451,11 @@ export const reconcileFakeReleaseProjection = Effect.fn(
   input: ReleaseSynchronizationInput,
   health: PluginHealthType,
   evaluatedAt: UtcTimestamp
-): Effect.fn.Return<Release["id"] | null, ReleaseSynchronizationFailure, Persistence> {
+): Effect.fn.Return<
+  Release["id"] | null,
+  ReleaseSynchronizationFailure,
+  Crypto.Crypto | DomainEventWakeups | Persistence
+> {
   const boundInput = yield* bindProvider(input)
   return yield* reconcileProjection(boundInput, health, evaluatedAt, "cache")
 })
@@ -372,7 +465,11 @@ export const recoverFakeReleaseProjection = Effect.fn(
   "ReleaseSynchronization.recoverFakeReleaseProjection"
 )(function*(
   input: ReleaseSynchronizationInput
-): Effect.fn.Return<Release["id"] | null, ReleaseSynchronizationFailure, Persistence> {
+): Effect.fn.Return<
+  Release["id"] | null,
+  ReleaseSynchronizationFailure,
+  Crypto.Crypto | DomainEventWakeups | Persistence
+> {
   const persistence = yield* Persistence
   const runtime = yield* persistence.pluginRuntime.getRuntime(input.workspaceId, input.pluginConnectionId)
   const boundInput = yield* bindProvider(input)
@@ -398,7 +495,7 @@ export const synchronizeFakeRelease = Effect.fn("ReleaseSynchronization.synchron
 ): Effect.fn.Return<
   ReleaseSynchronizationOutcome,
   ReleaseSynchronizationFailure,
-  Persistence | PluginConnection
+  Crypto.Crypto | DomainEventWakeups | Persistence | PluginConnection
 > {
   const persistence = yield* Persistence
   const connection = yield* PluginConnection
@@ -528,7 +625,7 @@ export const synchronizeFakeReleaseFromMap = Effect.fn(
 ): Effect.fn.Return<
   ReleaseSynchronizationOutcome,
   ReleaseSynchronizationFailure,
-  Persistence | PluginConnectionMap
+  Crypto.Crypto | DomainEventWakeups | Persistence | PluginConnectionMap
 > {
   yield* recoverFakeReleaseProjection(input)
   const boundInput = yield* bindProvider(input)

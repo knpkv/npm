@@ -13,6 +13,7 @@ export {
   makeControlCenterApplication,
   makeControlCenterServer
 } from "./ControlCenterServer.js"
+export { DomainEventWakeups } from "./DomainEventWakeups.js"
 export {
   type ControlCenterTransportProtocol,
   controlCenterTransportProtocol,

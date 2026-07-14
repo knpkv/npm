@@ -4,6 +4,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 
 import {
   ControlCenterApi,
+  LiveEventsApiGroup,
   makeControlCenterApiClient,
   makeControlCenterApiUrls,
   MediaApiGroup,
@@ -39,11 +40,32 @@ describe("ControlCenterApi contract", () => {
       "429",
       "503"
     ])
+
+    const eventsPath = specification.paths["/api/v1/events"]
+    assert.isDefined(eventsPath)
+    assert.isDefined(eventsPath.get)
+    assert.deepStrictEqual(Object.keys(eventsPath.get.responses), ["200", "400", "401", "403", "408", "429", "503"])
+    assert.isDefined(eventsPath.get.responses["200"])
+    assert.isDefined(eventsPath.get.responses["200"].content)
+    assert.isDefined(eventsPath.get.responses["200"].content["text/event-stream"])
+    assert.deepStrictEqual(
+      eventsPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
+      [
+        { location: "header", name: "last-event-id", required: false },
+        { location: "query", name: "after", required: false }
+      ]
+    )
   })
 
-  it("keeps the four API groups and endpoint routes explicit", () => {
+  it("keeps the five API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
-    assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), ["session", "plugins", "portfolio", "media"])
+    assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
+      "session",
+      "plugins",
+      "portfolio",
+      "media",
+      "liveEvents"
+    ])
 
     assert.deepStrictEqual(
       Object.entries(SessionApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
@@ -72,6 +94,10 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(
       Object.entries(MediaApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [["read", "GET", "/api/v1/media/:mediaId"]]
+    )
+    assert.deepStrictEqual(
+      Object.entries(LiveEventsApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
+      [["stream", "GET", "/api/v1/events"]]
     )
   })
 
@@ -102,6 +128,9 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(MediaApiGroup.endpoints), {
       read: [SessionCookieAuth.key]
+    })
+    assert.deepStrictEqual(middlewareByEndpoint(LiveEventsApiGroup.endpoints), {
+      stream: [SessionCookieAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")

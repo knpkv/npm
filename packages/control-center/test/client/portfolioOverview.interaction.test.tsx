@@ -37,6 +37,8 @@ describe("PortfolioOverviewView interactions", () => {
               onRetry={vi.fn()}
               state={{
                 _tag: "ready",
+                connection: { _tag: "connected" },
+                isSnapshotStale: false,
                 portfolio: {
                   ...portfolio,
                   releases: [

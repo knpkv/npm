@@ -7,6 +7,7 @@ import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { presentPortfolio, type PortfolioPresentation, type PortfolioReleasePresentation } from "./presentPortfolio.js"
 import {
+  type PortfolioConnectionState,
   type PortfolioLoadFailure,
   type PortfolioSnapshotLoadState,
   usePortfolioSnapshot
@@ -19,7 +20,12 @@ export type PortfolioOverviewState =
       readonly reason: "anonymous" | "blocked" | "checking" | "storage-unavailable" | "unavailable"
     }
   | { readonly _tag: "loading" }
-  | { readonly _tag: "ready"; readonly portfolio: PortfolioPresentation }
+  | {
+      readonly _tag: "ready"
+      readonly connection: PortfolioConnectionState
+      readonly isSnapshotStale: boolean
+      readonly portfolio: PortfolioPresentation
+    }
   | { readonly _tag: "failed"; readonly failure: PortfolioLoadFailure }
 
 export interface PortfolioOverviewViewProps {
@@ -32,6 +38,46 @@ interface ReleaseDossierProps {
 }
 
 const COLLABORATOR_PREVIEW_LIMIT = 3
+
+const connectionPresentation = (
+  connection: PortfolioConnectionState,
+  isSnapshotStale: boolean
+): { readonly detail: string; readonly label: string; readonly tone: "caution" | "positive" | "progress" } => {
+  switch (connection._tag) {
+    case "connecting":
+      return { detail: "Connecting to live updates.", label: "Connecting", tone: "progress" }
+    case "reconnecting":
+      return {
+        detail: "Showing the last snapshot; it may be stale.",
+        label: "Reconnecting",
+        tone: "caution"
+      }
+    case "offline":
+      return { detail: "Showing the last snapshot; it may be stale.", label: "Offline", tone: "caution" }
+    case "connected":
+      return isSnapshotStale
+        ? { detail: "Refreshing the authoritative snapshot.", label: "Updating", tone: "progress" }
+        : { detail: "Snapshot up to date.", label: "Live", tone: "positive" }
+  }
+}
+
+const PortfolioLiveStatus = ({
+  connection,
+  isSnapshotStale
+}: {
+  readonly connection: PortfolioConnectionState
+  readonly isSnapshotStale: boolean
+}): ReactElement => {
+  const presentation = connectionPresentation(connection, isSnapshotStale)
+  return (
+    <div aria-atomic="true" aria-live="polite" className={styles.liveStatus} role="status">
+      <StateLabel label={presentation.label} size="compact" tone={presentation.tone} />
+      <Text tone="tertiary" variant="meta">
+        {presentation.detail}
+      </Text>
+    </div>
+  )
+}
 
 const EmptyPortfolio = (): ReactElement => (
   <StatePanel
@@ -308,9 +354,12 @@ export const PortfolioOverviewView = ({ onRetry, state }: PortfolioOverviewViewP
           <BrowserSessionStatus anonymousAction="status" />
         )}
         {state._tag === "ready" ? (
-          <Text as="time" dateTime={state.portfolio.generatedAt} tone="tertiary" variant="meta">
-            Snapshot {state.portfolio.generatedTime}
-          </Text>
+          <>
+            <PortfolioLiveStatus connection={state.connection} isSnapshotStale={state.isSnapshotStale} />
+            <Text as="time" dateTime={state.portfolio.generatedAt} tone="tertiary" variant="meta">
+              Snapshot {state.portfolio.generatedTime}
+            </Text>
+          </>
         ) : null}
       </div>
     </header>
@@ -333,7 +382,12 @@ const overviewState = (loadState: PortfolioSnapshotLoadState): PortfolioOverview
     case "failed":
       return { _tag: "failed", failure: loadState.failure }
     case "loaded":
-      return { _tag: "ready", portfolio: presentPortfolio(loadState.snapshot) }
+      return {
+        _tag: "ready",
+        connection: loadState.connection,
+        isSnapshotStale: loadState.isSnapshotStale,
+        portfolio: presentPortfolio(loadState.snapshot)
+      }
   }
 }
 

@@ -1,4 +1,5 @@
 import * as Context from "effect/Context"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -14,6 +15,7 @@ import {
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "./Bootstrap.js"
+import type { DomainEventWakeups } from "./DomainEventWakeups.js"
 
 /** Explicit configured startup synchronization; absent options keep normal runtime startup inert. */
 export interface ReleaseSynchronizationStartupOptions {
@@ -83,7 +85,7 @@ export const releaseSynchronizationStartupLayer = (
 ): Layer.Layer<
   ReleaseSynchronizationStartup,
   ReleaseSynchronizationStartupError,
-  ControlCenterBootstrap | Persistence
+  ControlCenterBootstrap | Crypto.Crypto | DomainEventWakeups | Persistence
 > =>
   options === null
     ? Layer.succeed(ReleaseSynchronizationStartup, { _tag: "disabled" })

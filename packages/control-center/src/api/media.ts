@@ -10,6 +10,7 @@ import {
   UnauthorizedApiError
 } from "./errors.js"
 import { SessionCookieAuth } from "./session.js"
+import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
 /** Workspace-scoped opaque media reference that reveals neither provider URLs nor local storage keys. */
 export const OpaqueMediaId = Schema.String.check(
@@ -34,7 +35,7 @@ export type SafeMediaContentType = typeof SafeMediaContentType.Type
 export const MediaResponseHeaders = Schema.Struct({
   "x-correlation-id": CorrelationId,
   "content-type": SafeMediaContentType,
-  "content-length": Schema.NumberFromString.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  "content-length": CanonicalNonNegativeIntegerFromString,
   "cache-control": Schema.Literal("private, no-store"),
   "x-content-type-options": Schema.Literal("nosniff")
 }).annotate({ identifier: "MediaResponseHeaders" })

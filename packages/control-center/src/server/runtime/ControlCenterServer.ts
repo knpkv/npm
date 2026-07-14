@@ -7,7 +7,12 @@ import type { MediaReads, PluginAdministration, PortfolioSnapshots } from "../ap
 import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
-import { mediaReadsLayer, pluginAdministrationLayer, portfolioSnapshotsLayer } from "../application/index.js"
+import {
+  liveEventsLayer,
+  mediaReadsLayer,
+  pluginAdministrationLayer,
+  portfolioSnapshotsLayer
+} from "../application/index.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
 import {
   StaticAssetStore,
@@ -30,6 +35,7 @@ import {
   controlCenterBootstrapLayer,
   type ControlCenterBootstrapOptions
 } from "./Bootstrap.js"
+import { DomainEventWakeups } from "./DomainEventWakeups.js"
 import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
 import {
   type ReleaseSynchronizationStartupError,
@@ -95,6 +101,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence)
   )
+  const liveEventRuntime = liveEventsLayer.pipe(
+    Layer.provide(applicationServices),
+    Layer.provide(persistence),
+    Layer.provideMerge(DomainEventWakeups.layer)
+  )
   const runtimeServices = Layer.mergeAll(
     apiBindConfiguration,
     RequestLimitPolicy.defaultLayer,
@@ -102,7 +113,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     staticAssets,
     persistence,
     authentication,
-    applicationServices
+    applicationServices,
+    liveEventRuntime
   )
   const routes = Layer.mergeAll(
     controlCenterApiLayer,

@@ -19,6 +19,17 @@ export {
   ServiceUnavailableApiError,
   UnauthorizedApiError
 } from "./errors.js"
+export {
+  ControlCenterLiveEvent,
+  EventCursorFromString,
+  LiveEventsApiGroup,
+  PortfolioInvalidatedLiveEvent,
+  PortfolioSnapshotLiveEvent,
+  StreamHeartbeat,
+  StreamHeartbeatLiveEvent,
+  StreamResetRequired,
+  StreamResetRequiredLiveEvent
+} from "./liveEvents.js"
 export { MediaApiGroup, MediaResponseHeaders, OpaqueMediaId, SafeMediaContentType } from "./media.js"
 export {
   OpaqueSecretReference,
