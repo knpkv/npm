@@ -68,7 +68,7 @@ export const PortfolioReleaseSummary = Schema.Struct({
   ),
   collaborators: BoundedReleaseCollaborators,
   collaboratorCount: BoundedCount,
-  relatedEntityCount: BoundedCount,
+  sourceRevisionCount: BoundedCount,
   updatedAt: UtcTimestamp
 }).annotate({ identifier: "PortfolioReleaseSummary" })
 

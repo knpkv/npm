@@ -31,6 +31,8 @@ interface ReleaseDossierProps {
   readonly release: PortfolioReleasePresentation
 }
 
+const COLLABORATOR_PREVIEW_LIMIT = 3
+
 const EmptyPortfolio = (): ReactElement => (
   <StatePanel
     className={styles.statePanel}
@@ -156,6 +158,9 @@ const FailedPortfolio = ({
 const ReleaseDossier = ({ release }: ReleaseDossierProps): ReactElement => {
   const [arePeopleExpanded, setArePeopleExpanded] = useState(false)
   const headingId = `release-${release.id}`
+  const visibleCollaboratorCount = arePeopleExpanded
+    ? release.collaborators.length
+    : Math.min(COLLABORATOR_PREVIEW_LIMIT, release.collaborators.length)
 
   return (
     <Surface
@@ -204,9 +209,9 @@ const ReleaseDossier = ({ release }: ReleaseDossierProps): ReactElement => {
         ) : (
           <>
             <PeopleStrip
-              aria-label={`${release.serviceName} collaborators, showing ${release.collaborators.length} of ${release.collaboratorCount}`}
+              aria-label={`${release.serviceName} collaborators, showing ${visibleCollaboratorCount} of ${release.collaboratorCount}`}
               expanded={arePeopleExpanded}
-              limit={3}
+              limit={COLLABORATOR_PREVIEW_LIMIT}
               onExpandedChange={setArePeopleExpanded}
               people={release.collaborators}
             />

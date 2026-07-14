@@ -84,7 +84,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
             targetEnvironmentIds: release.targetEnvironmentIds,
             collaborators: collaboratorProjection.collaborators,
             collaboratorCount: collaboratorProjection.collaboratorCount,
-            relatedEntityCount: release.sourceRevisions.length,
+            sourceRevisionCount: release.sourceRevisions.length,
             updatedAt: release.updatedAt
           }
         }))

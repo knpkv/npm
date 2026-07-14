@@ -36,6 +36,13 @@ interface SourceHealthPresentation {
   readonly isUnhealthy: boolean
 }
 
+const DISABLED_SOURCE_HEALTH = {
+  label: "Disabled",
+  message: "This source connection is disabled.",
+  tone: "neutral",
+  isUnhealthy: true
+} satisfies SourceHealthPresentation
+
 export interface PortfolioSourcePresentation {
   readonly displayName: string
   readonly freshness: RlyFreshnessState
@@ -99,12 +106,7 @@ const healthPresentation = (health: PluginHealth | null): SourceHealthPresentati
     case "unavailable":
       return { label: "Unavailable", message: health.safeMessage, tone: "critical", isUnhealthy: true }
     case "disabled":
-      return {
-        label: "Disabled",
-        message: "This source connection is disabled.",
-        tone: "neutral",
-        isUnhealthy: true
-      }
+      return DISABLED_SOURCE_HEALTH
   }
 }
 
@@ -157,7 +159,9 @@ const sourcePresentation = (
       tone: "critical",
       isUnhealthy: true
     } satisfies SourceHealthPresentation
-    : healthPresentation(plugin.health)
+    : plugin.isEnabled
+    ? healthPresentation(plugin.health)
+    : DISABLED_SOURCE_HEALTH
   const freshness = freshnessState(release.freshness)
   const timestamp = freshnessTimestamp(release)
   const hasStaleFacts = release.freshness._tag === "stale"
@@ -203,7 +207,7 @@ const releasePresentation = (
     collaboratorCount: release.collaboratorCount,
     facts: [
       { id: "targets", label: "Targets", value: String(release.targetEnvironmentIds.length) },
-      { id: "relationships", label: "Related facts", value: String(release.relatedEntityCount) }
+      { id: "source-revisions", label: "Source revisions", value: String(release.sourceRevisionCount) }
     ],
     id: release.releaseId,
     lifecycleLabel: lifecycle.label,

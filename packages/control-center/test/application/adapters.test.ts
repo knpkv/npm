@@ -448,7 +448,7 @@ describe("application adapters", () => {
       assert.strictEqual(snapshot.releases[0]?.freshness._tag, "missing")
       assert.deepStrictEqual(snapshot.releases[0]?.collaborators, [])
       assert.strictEqual(snapshot.releases[0]?.collaboratorCount, 0)
-      assert.strictEqual(snapshot.releases[0]?.relatedEntityCount, 0)
+      assert.strictEqual(snapshot.releases[0]?.sourceRevisionCount, 0)
       assert.lengthOf(snapshot.plugins, 2)
     })))
 

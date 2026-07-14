@@ -78,6 +78,18 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain("Stale")
   })
 
+  it("keeps recovered facts visible while naming a disabled source truthfully", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      portfolio: presentPortfolio(makePortfolioSnapshot("disabled"))
+    })
+    expect(markup).toContain("payments-api")
+    expect(markup).toContain("Disabled")
+    expect(markup).toContain("Showing preserved source facts")
+    expect(markup).toContain("This source connection is disabled.")
+    expect(markup).not.toContain(">Healthy<")
+  })
+
   it("renders one person holding two roles as two explicit, valid responsibility entries", () => {
     const markup = renderOverview({
       _tag: "ready",
@@ -95,6 +107,31 @@ describe("PortfolioOverviewView", () => {
     })
     expect(markup).toContain("Showing 2 of 51 collaborators in this overview.")
     expect(markup).toContain("payments-api collaborators, showing 2 of 51")
+  })
+
+  it("announces only the collaborators visible while the people strip is collapsed", () => {
+    const portfolio = presentPortfolio(makePortfolioSnapshot())
+    const release = portfolio.releases[0]
+    if (release === undefined) throw new Error("Expected one release presentation")
+    const markup = renderOverview({
+      _tag: "ready",
+      portfolio: {
+        ...portfolio,
+        releases: [
+          {
+            ...release,
+            collaboratorCount: 4,
+            collaborators: [
+              ...release.collaborators,
+              { avatarFallback: "GH", id: "grace:observer", name: "Grace Hopper", role: "Observer" },
+              { avatarFallback: "KT", id: "katherine:reviewer", name: "Katherine Johnson", role: "Reviewer" }
+            ]
+          }
+        ]
+      }
+    })
+    expect(markup).toContain("payments-api collaborators, showing 3 of 4")
+    expect(markup).toContain("Show 1 more people")
   })
 
   it("gives unavailable reads one clear retry action and keeps session-only views private", () => {

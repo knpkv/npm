@@ -5,6 +5,7 @@ import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 export type PortfolioFixtureState =
   | "capped"
   | "current"
+  | "disabled"
   | "dual-role"
   | "empty"
   | "missing-source"
@@ -54,6 +55,20 @@ const staleFreshness = {
   sourceObservedAt: "2026-07-14T10:02:00.000Z",
   staleAfterSeconds: 300,
   synchronizedAt: "2026-07-14T10:06:00.000Z"
+}
+
+const disabledFreshness = {
+  _tag: "stale",
+  evaluatedAt: "2026-07-14T10:16:00.000Z",
+  pluginHealth: { _tag: "healthy", checkedAt: "2026-07-14T10:04:00.000Z" },
+  provenance: {
+    _tag: "cache",
+    cachedAt: "2026-07-14T10:03:00.000Z",
+    sourceRevision
+  },
+  sourceObservedAt: "2026-07-14T10:02:00.000Z",
+  staleAfterSeconds: 300,
+  synchronizedAt: "2026-07-14T10:03:00.000Z"
 }
 
 const unavailableFreshness = {
@@ -106,11 +121,13 @@ export const makePortfolioSnapshot = (state: PortfolioFixtureState = "current"):
         ],
       freshness: state === "stale"
         ? staleFreshness
+        : state === "disabled"
+        ? disabledFreshness
         : state === "unavailable"
         ? unavailableFreshness
         : currentFreshness,
       lifecycle: "candidate",
-      relatedEntityCount: 6,
+      sourceRevisionCount: 1,
       relay: { algorithm: "relay/v1", codename: "Copper Finch", symbolIndices: [6, 3, 7] },
       releaseId: "01890f6f-6d6a-7cc0-98d2-000000000011",
       serviceName: "payments-api",
@@ -125,7 +142,7 @@ export const makePortfolioSnapshot = (state: PortfolioFixtureState = "current"):
       health: state === "stale" || state === "unavailable" || state === "unhealthy"
         ? unavailablePlugin
         : healthyPlugin,
-      isEnabled: true,
+      isEnabled: state !== "disabled",
       pluginConnectionId,
       providerId: "jira",
       updatedAt: "2026-07-14T10:15:00.000Z"

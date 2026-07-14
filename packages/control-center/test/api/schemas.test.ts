@@ -153,7 +153,7 @@ describe("public API schemas", () => {
       targetEnvironmentIds: [environmentId],
       collaborators: [collaborator],
       collaboratorCount: 1,
-      relatedEntityCount: 0,
+      sourceRevisionCount: 0,
       updatedAt: timestamp
     }
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioReleaseSummary)(release)))

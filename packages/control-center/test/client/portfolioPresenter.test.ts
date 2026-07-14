@@ -50,7 +50,7 @@ describe("portfolio presenter", () => {
     })
     expect(release.facts).toEqual([
       { id: "targets", label: "Targets", value: "1" },
-      { id: "relationships", label: "Related facts", value: "6" }
+      { id: "source-revisions", label: "Source revisions", value: "1" }
     ])
   })
 
@@ -66,6 +66,17 @@ describe("portfolio presenter", () => {
     expect(unhealthy.source.freshness).toBe("current")
     expect(unhealthy.source.healthLabel).toBe("Unavailable")
     expect(unhealthy.source.warning).toBe("Jira did not answer the latest health check.")
+  })
+
+  it("presents an administratively disabled source before historical runtime health", () => {
+    const release = presentPortfolio(makePortfolioSnapshot("disabled")).releases[0]
+    if (release === undefined) throw new Error("Expected one disabled-source release")
+
+    expect(release.source.freshness).toBe("stale")
+    expect(release.source.healthLabel).toBe("Disabled")
+    expect(release.source.healthTone).toBe("neutral")
+    expect(release.source.warning).toBe("This source connection is disabled.")
+    expect(release.serviceName).toBe("payments-api")
   })
 
   it("treats a missing authoritative plugin summary as an unhealthy source", () => {
