@@ -82,7 +82,8 @@ const readMigrationLedger = Effect.fn("Database.readMigrationLedger")(function*(
 
 const validateLedger = Effect.fn("Database.validateMigrationLedger")(function*(
   sql: SqlClient.SqlClient,
-  phase: LedgerPhase
+  phase: LedgerPhase,
+  minimumEntries: number
 ): Effect.fn.Return<void, DatabaseInitializationError | MigrationLedgerError> {
   const rows = yield* readMigrationLedger(sql).pipe(
     Effect.mapError((error) => {
@@ -98,7 +99,8 @@ const validateLedger = Effect.fn("Database.validateMigrationLedger")(function*(
   )
   const actual = rows.map(({ migrationId, name }) => `${migrationId}:${name}`)
   const isValid = phase === "before-migration"
-    ? actual.every((label, index) => label === expectedLedgerLabels[index])
+    ? actual.length >= minimumEntries &&
+      actual.every((label, index) => label === expectedLedgerLabels[index])
     : actual.length === expectedLedgerLabels.length &&
       actual.every((label, index) => label === expectedLedgerLabels[index])
 
@@ -189,18 +191,67 @@ const DatabaseFromSql = Layer.effect(
       const sql = yield* SqlClient.SqlClient
 
       yield* configureAndVerifyPragmas(sql)
-      yield* validateLedger(sql, "before-migration")
+      yield* validateLedger(sql, "before-migration", 0)
       yield* runMigrations(sql)
-      yield* validateLedger(sql, "after-migration")
+      yield* validateLedger(sql, "after-migration", expectedLedgerLabels.length)
 
       return Database.of({
         sql,
         transaction: sql.withTransaction,
-        validateMigrationLedger: validateLedger(sql, "after-migration")
+        validateMigrationLedger: validateLedger(sql, "after-migration", expectedLedgerLabels.length)
       })
     })
   )
 )
+
+const makeClientLayer = (
+  busyTimeoutMilliseconds: number,
+  databaseUrl: string,
+  maxConnections: number
+) => {
+  const clientConfig: LocalLibsqlConfig = {
+    concurrency: maxConnections,
+    timeout: busyTimeoutMilliseconds,
+    transformResultNames: snakeToCamel,
+    url: databaseUrl
+  }
+  return LibsqlClient.layer(clientConfig).pipe(
+    Layer.catchCause(() =>
+      Layer.effectContext(
+        Effect.fail(
+          new DatabaseInitializationError({
+            operation: "connect"
+          })
+        )
+      )
+    )
+  )
+}
+
+/** Verify that an existing local database has a non-empty supported Control Center migration ledger. */
+export const validateExistingControlCenterDatabase = Effect.fn(
+  "Database.validateExistingControlCenterDatabase"
+)(function*(
+  input: unknown
+): Effect.fn.Return<
+  void,
+  PersistenceConfigError | DatabaseInitializationError | MigrationLedgerError
+> {
+  const config = yield* decodePersistenceConfig(input)
+  yield* Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* Layer.build(
+        makeClientLayer(
+          config.busyTimeoutMilliseconds,
+          config.databaseUrl,
+          config.maxConnections
+        )
+      )
+      const sql = Context.get(context, SqlClient.SqlClient)
+      yield* validateLedger(sql, "before-migration", 1)
+    })
+  )
+})
 
 /** Build a scoped database layer after decoding secret-free local configuration. */
 export const databaseLayer = (
@@ -212,22 +263,10 @@ export const databaseLayer = (
   Layer.unwrap(
     decodePersistenceConfig(input).pipe(
       Effect.map(({ busyTimeoutMilliseconds, databaseUrl, maxConnections }) => {
-        const clientConfig: LocalLibsqlConfig = {
-          concurrency: maxConnections,
-          timeout: busyTimeoutMilliseconds,
-          transformResultNames: snakeToCamel,
-          url: databaseUrl
-        }
-        const clientLayer = LibsqlClient.layer(clientConfig).pipe(
-          Layer.catchCause(() =>
-            Layer.effectContext(
-              Effect.fail(
-                new DatabaseInitializationError({
-                  operation: "connect"
-                })
-              )
-            )
-          )
+        const clientLayer = makeClientLayer(
+          busyTimeoutMilliseconds,
+          databaseUrl,
+          maxConnections
         )
         return DatabaseFromSql.pipe(Layer.provide(clientLayer))
       })

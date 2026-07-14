@@ -1,13 +1,34 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import type { FileSystem as FileSystemType } from "effect"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 
 import { classifyControlCenterCliArguments } from "../../src/server/cliArguments.js"
 import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "../../src/server/cliConfiguration.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
+
+const withForeignOwner = (file: FileSystemType.File): FileSystemType.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  read: file.read,
+  readAlloc: file.readAlloc,
+  seek: file.seek,
+  stat: file.stat.pipe(
+    Effect.map((info) => ({
+      ...info,
+      uid: Option.map(info.uid, (uid) => uid + 1)
+    }))
+  ),
+  sync: file.sync,
+  truncate: file.truncate,
+  write: file.write,
+  writeAll: file.writeAll
+})
 
 describe("Control Center CLI", () => {
   it("accepts exactly the serve and recover-owner argument shapes", () => {
@@ -80,21 +101,118 @@ describe("Control Center CLI", () => {
       assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("adopts an existing private legacy Control Center root", () =>
+  it.effect("accepts an atomically published root when rename reports an ambiguous failure", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-rename-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const ambiguousRenameFileSystem = FileSystem.make({
+        ...fileSystem,
+        rename: (oldPath, newPath) =>
+          newPath === root
+            ? fileSystem.rename(oldPath, newPath).pipe(
+              Effect.andThen(fileSystem.rename(oldPath, newPath))
+            )
+            : fileSystem.rename(oldPath, newPath)
+      })
+
+      yield* prepareControlCenterDataRoot(dataPaths).pipe(
+        Effect.provideService(FileSystem.FileSystem, ambiguousRenameFileSystem)
+      )
+      yield* prepareControlCenterDataRoot(dataPaths)
+
+      assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("repairs a durable partial marker left by interrupted setup", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-interrupted-" })
+      yield* fileSystem.chmod(root, 0o700)
+      const markerPath = path.join(root, ".control-center-root")
+      yield* fileSystem.writeFileString(markerPath, "@knpkv/control-center:data-root:", { mode: 0o600 })
+      yield* fileSystem.chmod(markerPath, 0o600)
+      const pendingMarkerName = `.control-center-root.pending-${"a".repeat(32)}`
+      const pendingMarkerPath = path.join(root, pendingMarkerName)
+      yield* fileSystem.writeFileString(pendingMarkerPath, "@knpkv/control-center:data-root:v1\n", {
+        mode: 0o600
+      })
+      yield* fileSystem.chmod(pendingMarkerPath, 0o600)
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+
+      yield* prepareControlCenterDataRoot(dataPaths)
+      yield* prepareControlCenterDataRoot(dataPaths)
+
+      assert.strictEqual(
+        yield* fileSystem.readFileString(markerPath),
+        "@knpkv/control-center:data-root:v1\n"
+      )
+      assert.notInclude(yield* fileSystem.readDirectory(root), pendingMarkerName)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects a root when files created by this process have a different owner", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-owner-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      yield* prepareControlCenterDataRoot(dataPaths)
+
+      const foreignOwnerFileSystem = FileSystem.make({
+        ...fileSystem,
+        open: (target, options) =>
+          fileSystem.open(target, options).pipe(
+            Effect.map((file) => target.includes(".control-center-owner-") ? withForeignOwner(file) : file)
+          )
+      })
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(
+        Effect.provideService(FileSystem.FileSystem, foreignOwnerFileSystem),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("adopts an existing private legacy Control Center root", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-legacy-" })
       yield* fileSystem.chmod(root, 0o700)
-      yield* fileSystem.writeFileString(path.join(root, "control-center.db"), "legacy")
-      yield* fileSystem.makeDirectory(path.join(root, "blobs"), { mode: 0o700 })
-      yield* fileSystem.makeDirectory(path.join(root, "secrets"), { mode: 0o700 })
       const dataPaths = yield* decodeControlCenterDataPaths(root)
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.validateMigrationLedger
+      }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
 
       yield* prepareControlCenterDataRoot(dataPaths)
       yield* prepareControlCenterDataRoot(dataPaths)
 
       assert.strictEqual((yield* fileSystem.stat(root)).mode & 0o777, 0o700)
       assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects a SQLite database without the Control Center migration identity", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-invalid-legacy-" })
+      yield* fileSystem.chmod(root, 0o700)
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.sql`DROP TABLE control_center_migrations`
+      }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
+
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(prepared))
+      if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
+      assert.notInclude(yield* fileSystem.readDirectory(root), ".control-center-root")
+      assert.strictEqual((yield* fileSystem.stat(path.join(root, "control-center.db"))).type, "File")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })
