@@ -416,9 +416,9 @@ describe("Control Center source boundaries", () => {
       inspectSourceBoundaries(
         "src/client/module.ts",
         [
-          "const called = require[\"call\"](undefined, \"../server/call.js\")",
-          "const applied = require[\"apply\"](undefined, [\"../server/apply.js\"])",
-          "const boundBefore = require[\"bind\"](undefined, \"../server/bound-before.js\")()",
+          "const called = require[(\"call\")](undefined, \"../server/call.js\")",
+          "const applied = require[(\"apply\")](undefined, [\"../server/apply.js\"])",
+          "const boundBefore = require[(\"bind\")](undefined, \"../server/bound-before.js\")()",
           "const boundAfter = require[\"bind\"](undefined)(\"../server/bound-after.js\")"
         ].join("\n")
       )
@@ -466,9 +466,9 @@ describe("Control Center source boundaries", () => {
       inspectSourceBoundaries(
         "src/client/module.ts",
         [
-          "const called = (path: string) => require[\"call\"](undefined, path)",
-          "const applied = (args: ReadonlyArray<string>) => require[\"apply\"](undefined, args)",
-          "const boundBefore = (path: string) => require[\"bind\"](undefined, path)()",
+          "const called = (path: string) => require[(\"call\")](undefined, path)",
+          "const applied = (args: ReadonlyArray<string>) => require[(\"apply\")](undefined, args)",
+          "const boundBefore = (path: string) => require[(\"bind\")](undefined, path)()",
           "const boundAfter = (path: string) => require[\"bind\"](undefined)(path)"
         ].join("\n")
       )
@@ -498,10 +498,10 @@ describe("Control Center source boundaries", () => {
       inspectSourceBoundaries(
         "src/client/module.ts",
         [
-          "require[\"call\"](undefined)",
-          "require[\"apply\"](undefined, [])",
-          "require[\"bind\"](undefined)()",
-          "obj.require[\"call\"](undefined, \"../server/member-call.js\")",
+          "require[(\"call\")](undefined)",
+          "require[(\"apply\")](undefined, [])",
+          "require[(\"bind\")](undefined)()",
+          "obj.require[(\"call\")](undefined, \"../server/member-call.js\")",
           "obj[\"require\"][\"apply\"](undefined, [\"../server/member-apply.js\"])",
           "obj.require[\"bind\"](undefined)(\"../server/member-bind.js\")",
           "require[member](undefined, \"../server/computed-member.js\")"

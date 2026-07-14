@@ -82,7 +82,7 @@ const isDirectRequireMember = (expression: ts.Expression, memberName: string): b
     return candidate.name.text === memberName && isDirectRequire(candidate.expression)
   }
   if (ts.isElementAccessExpression(candidate)) {
-    const member = candidate.argumentExpression
+    const member = withoutOuterExpressions(candidate.argumentExpression)
     return ts.isStringLiteralLike(member) && member.text === memberName && isDirectRequire(candidate.expression)
   }
   return false
