@@ -37,6 +37,7 @@ export { PortfolioApiGroup, PortfolioReleaseSummary, PortfolioSnapshot } from ".
 export {
   CsrfToken,
   CurrentSession,
+  CurrentSessionResponse,
   MutationCsrf,
   PairingCode,
   PairSessionRequest,

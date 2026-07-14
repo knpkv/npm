@@ -142,6 +142,13 @@ export const authorizeRequest = Effect.fn("RequestSecurity.authorize")(function*
   if (access === "authenticated-read" && mutation) {
     return yield* new RequestSecurityError({ reason: "method-mismatch" })
   }
+  if (
+    access === "authenticated-read" &&
+    request.origin !== null &&
+    !config.allowedOrigins.some((origin) => origin === request.origin)
+  ) {
+    return yield* new RequestSecurityError({ reason: "origin-rejected" })
+  }
   if (access === "public-pair" && method !== "POST") {
     return yield* new RequestSecurityError({ reason: "method-mismatch" })
   }

@@ -1,13 +1,13 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Layer, Schema } from "effect"
+import { Duration, Effect, Layer, Result, Schema } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiError } from "effect/unstable/httpapi"
 
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
-import { requestBoundaryLayer } from "../../src/server/api/RequestBoundary.js"
-import { RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
+import { clientRateLimitKey, requestBoundaryLayer } from "../../src/server/api/RequestBoundary.js"
+import { consumeRequestToken, RequestLimitPolicy, requestRateLimiterLayer } from "../../src/server/api/RequestLimits.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 
 const bindLayer = Layer.effect(ApiBindConfiguration, decodeBindConfig({}))
@@ -47,6 +47,27 @@ const webHandlerLayer = Layer.mergeAll(
 )
 
 describe("API request boundary", () => {
+  it.effect("isolates trusted proxied clients while ignoring spoofed forwarding headers", () =>
+    Effect.gen(function*() {
+      const trustedProxy = "10.0.0.1"
+      const firstClient = clientRateLimitKey([trustedProxy], trustedProxy, "192.168.1.10")
+      const secondClient = clientRateLimitKey([trustedProxy], trustedProxy, "192.168.1.11")
+      const untrustedFirst = clientRateLimitKey([trustedProxy], "203.0.113.9", "192.168.1.10")
+      const untrustedSecond = clientRateLimitKey([trustedProxy], "203.0.113.9", "192.168.1.11")
+
+      assert.notStrictEqual(firstClient, secondClient)
+      assert.strictEqual(untrustedFirst, untrustedSecond)
+      assert.strictEqual(
+        clientRateLimitKey([trustedProxy], trustedProxy, "192.168.1.10, 192.168.1.11"),
+        `peer:${trustedProxy}`
+      )
+
+      yield* consumeRequestToken("read", firstClient)
+      const firstExhausted = yield* consumeRequestToken("read", firstClient).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(firstExhausted))
+      yield* consumeRequestToken("read", secondClient)
+    }).pipe(Effect.provide([limitPolicyLayer, requestRateLimiterLayer])))
+
   it("rejects compressed JSON with typed correlation and global browser headers", async () => {
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     try {

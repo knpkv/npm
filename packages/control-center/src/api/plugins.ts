@@ -1,3 +1,4 @@
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
@@ -27,6 +28,19 @@ import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
 
+const isProviderHttpUrl = Schema.makeFilter((value: string) => {
+  const decoded = Schema.decodeUnknownResult(Schema.URLFromString)(value)
+  if (Result.isFailure(decoded)) return false
+  const url = decoded.success
+  return (
+    (url.protocol === "https:" || url.protocol === "http:") &&
+    url.hostname.length > 0 &&
+    url.username.length === 0 &&
+    url.password.length === 0 &&
+    url.hash.length === 0
+  )
+}, { expected: "an HTTP(S) provider URL without credentials or a fragment" })
+
 /** Stable field key shared by descriptor metadata and configuration values. */
 export const PluginConfigurationKey = Schema.String.check(
   Schema.isTrimmed(),
@@ -46,12 +60,27 @@ export const OpaqueSecretReference = Schema.String.check(
 export type OpaqueSecretReference = typeof OpaqueSecretReference.Type
 
 const configurationValueFields = { key: PluginConfigurationKey }
-const BoundedConfigurationText = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(4_096))
+const BoundedConfigurationText = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096)
+)
+const BoundedConfigurationUrl = BoundedConfigurationText.check(isProviderHttpUrl)
+
+/** Explicit replacement semantics for a redacted secret in a full configuration update. */
+export const SecretReferencePatchOperation = Schema.Union([
+  Schema.TaggedStruct("keep", {}),
+  Schema.TaggedStruct("clear", {}),
+  Schema.TaggedStruct("replace", { reference: OpaqueSecretReference })
+]).pipe(Schema.toTaggedUnion("_tag"))
+
+/** Decoded secret update operation that never requires the current reference to leave the server. */
+export type SecretReferencePatchOperation = typeof SecretReferencePatchOperation.Type
 
 /** Secret-safe current value; secret fields reveal only whether a reference is configured. */
 export const RedactedPluginConfigurationValue = Schema.Union([
   Schema.TaggedStruct("text", { ...configurationValueFields, value: BoundedConfigurationText }),
-  Schema.TaggedStruct("url", { ...configurationValueFields, value: BoundedConfigurationText }),
+  Schema.TaggedStruct("url", { ...configurationValueFields, value: BoundedConfigurationUrl }),
   Schema.TaggedStruct("boolean", { ...configurationValueFields, value: Schema.Boolean }),
   Schema.TaggedStruct("integer", { ...configurationValueFields, value: Schema.Int }),
   Schema.TaggedStruct("select", { ...configurationValueFields, value: BoundedConfigurationText }),
@@ -67,13 +96,13 @@ export type RedactedPluginConfigurationValue = typeof RedactedPluginConfiguratio
 /** Typed configuration update; secret bytes remain outside this endpoint. */
 export const PluginConfigurationPatchValue = Schema.Union([
   Schema.TaggedStruct("text", { ...configurationValueFields, value: BoundedConfigurationText }),
-  Schema.TaggedStruct("url", { ...configurationValueFields, value: BoundedConfigurationText }),
+  Schema.TaggedStruct("url", { ...configurationValueFields, value: BoundedConfigurationUrl }),
   Schema.TaggedStruct("boolean", { ...configurationValueFields, value: Schema.Boolean }),
   Schema.TaggedStruct("integer", { ...configurationValueFields, value: Schema.Int }),
   Schema.TaggedStruct("select", { ...configurationValueFields, value: BoundedConfigurationText }),
   Schema.TaggedStruct("secret-reference", {
     ...configurationValueFields,
-    reference: Schema.NullOr(OpaqueSecretReference)
+    operation: SecretReferencePatchOperation
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 

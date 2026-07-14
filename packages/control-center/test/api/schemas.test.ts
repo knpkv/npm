@@ -3,6 +3,7 @@ import { Result, Schema } from "effect"
 
 import {
   CorrelationResponseHeaders,
+  CurrentSessionResponse,
   MediaResponseHeaders,
   OpaqueMediaId,
   PairingCode,
@@ -115,12 +116,31 @@ describe("public API schemas", () => {
     )
   })
 
+  it("returns a bounded CSRF proof with the authenticated current session", () => {
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(CurrentSessionResponse)({
+        csrfToken: "ab".repeat(32),
+        session: encodedSession
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(CurrentSessionResponse)({
+        csrfToken: "session-secret",
+        session: encodedSession
+      })
+    ))
+  })
+
   it("bounds typed plugin configuration patches and keeps secrets as opaque references", () => {
     const valid = {
       expectedRevision: 4,
       values: [
         { _tag: "boolean", key: "enabled", value: true },
-        { _tag: "secret-reference", key: "token", reference: `secret_${"cd".repeat(32)}` }
+        {
+          _tag: "secret-reference",
+          key: "token",
+          operation: { _tag: "replace", reference: `secret_${"cd".repeat(32)}` }
+        }
       ]
     }
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(valid)))
@@ -147,8 +167,62 @@ describe("public API schemas", () => {
       Result.isFailure(
         Schema.decodeUnknownResult(PatchPluginConfigurationRequest)({
           ...valid,
-          values: [{ _tag: "secret-reference", key: "token", reference: "raw-secret-value" }]
+          values: [{
+            _tag: "secret-reference",
+            key: "token",
+            operation: { _tag: "replace", reference: "raw-secret-value" }
+          }]
         })
+      )
+    )
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PatchPluginConfigurationRequest)({
+          expectedRevision: 4,
+          values: [{ _tag: "secret-reference", key: "token", operation: { _tag: "keep" } }]
+        })
+      )
+    )
+  })
+
+  it("requires non-empty text and explicit HTTP(S) provider URLs", () => {
+    const requestWith = (value: unknown) => ({ expectedRevision: 0, values: [value] })
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(
+          requestWith({ _tag: "url", key: "endpoint", value: "https://jira.example/rest" })
+        )
+      )
+    )
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(
+          requestWith({ _tag: "url", key: "endpoint", value: "http://127.0.0.1:8080" })
+        )
+      )
+    )
+    for (
+      const value of [
+        "",
+        "jira.example",
+        "ftp://jira.example",
+        "https://user:password@jira.example",
+        "https://jira.example/#token"
+      ]
+    ) {
+      assert.isTrue(
+        Result.isFailure(
+          Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(
+            requestWith({ _tag: "url", key: "endpoint", value })
+          )
+        )
+      )
+    }
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PatchPluginConfigurationRequest)(
+          requestWith({ _tag: "text", key: "project", value: "" })
+        )
       )
     )
   })

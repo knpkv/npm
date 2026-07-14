@@ -25,6 +25,9 @@ export const AppShell = (): ReactElement => {
           </span>
           <span className={styles.brandName}>Control Center</span>
         </NavLink>
+        <NavLink className={styles.agent ?? ""} to={agentDestination}>
+          Relay context
+        </NavLink>
         <nav aria-label="Primary" className={styles.nav}>
           {navigation.map((item) => (
             <NavLink className={navClassName} end={item.to === "/"} key={item.to} to={item.to}>
@@ -32,9 +35,6 @@ export const AppShell = (): ReactElement => {
             </NavLink>
           ))}
         </nav>
-        <NavLink className={styles.agent ?? ""} to={agentDestination}>
-          Ask Relay
-        </NavLink>
       </header>
       <main className={styles.main}>
         <Outlet />

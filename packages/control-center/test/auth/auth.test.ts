@@ -152,6 +152,19 @@ describe("Auth", () => {
           (yield* auth.authorizeMutation(first.sessionToken, first.csrfToken)).sessionId,
           first.session.sessionId
         )
+        const recovered = yield* auth.recoverCsrfToken(first.sessionToken)
+        assert.strictEqual(recovered.session.sessionId, first.session.sessionId)
+        assert.notStrictEqual(Redacted.value(recovered.csrfToken), Redacted.value(first.csrfToken))
+        assert.strictEqual(
+          (yield* auth.authorizeMutation(first.sessionToken, recovered.csrfToken)).sessionId,
+          first.session.sessionId
+        )
+        const otherRecovered = yield* auth.recoverCsrfToken(second.sessionToken)
+        const crossSessionCsrf = yield* auth.authorizeMutation(
+          first.sessionToken,
+          otherRecovered.csrfToken
+        ).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(crossSessionCsrf))
         const wrongCsrf = Redacted.make("00".repeat(32))
         const csrfResult = yield* auth.authorizeMutation(first.sessionToken, wrongCsrf).pipe(Effect.result)
         assert.isTrue(Result.isFailure(csrfResult))
@@ -295,6 +308,10 @@ describe("Auth", () => {
           actor: ownerActor
         })
         const first = yield* auth.consumePairingCode(firstCode.pairingCode)
+        const outstandingCode = yield* auth.issuePairingCode(first.sessionToken, {
+          actor: reviewerActor,
+          permission: "reviewer"
+        })
         const inputLayer = yield* terminalInputLayer(`${TERMINAL_RECOVERY_CONFIRMATION}\n`)
         const recovery = yield* recoveryService.issueOwnerRecovery({
           workspaceId: fixtureWorkspaceIds.alpha,
@@ -303,7 +320,12 @@ describe("Auth", () => {
         }).pipe(Effect.provide(inputLayer))
 
         const oldOwnerResult = yield* auth.authenticate(first.sessionToken).pipe(Effect.result)
+        const oldPairingResult = yield* auth.consumePairingCode(outstandingCode.pairingCode).pipe(Effect.result)
         assert.isTrue(Result.isFailure(oldOwnerResult))
+        assert.isTrue(Result.isFailure(oldPairingResult))
+        if (Result.isFailure(oldPairingResult)) {
+          assert.instanceOf(oldPairingResult.failure, CredentialRejectedError)
+        }
         const recovered = yield* auth.consumePairingCode(recovery.pairingCode)
         assert.strictEqual(recovered.session.permission, "workspace-owner")
 

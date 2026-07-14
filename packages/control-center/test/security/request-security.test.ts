@@ -203,6 +203,14 @@ describe("bind and request security", () => {
       const expectedCsrfDigest = yield* hashCsrfToken(csrfToken)
       yield* authorizeRequest(config, request, "authenticated-read")
 
+      const foreignRead = yield* authorizeRequest(
+        config,
+        { ...request, origin: "http://attacker.example" },
+        "authenticated-read"
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(foreignRead))
+      if (Result.isFailure(foreignRead)) assert.strictEqual(foreignRead.failure.reason, "origin-rejected")
+
       const badHost = yield* authorizeRequest(
         config,
         {

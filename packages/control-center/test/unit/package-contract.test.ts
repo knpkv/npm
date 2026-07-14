@@ -27,6 +27,7 @@ const validManifest = {
   },
   main: "./dist/server/index.js",
   name: "@knpkv/control-center",
+  scripts: { start: "node ./dist/server/server/cli.js" },
   types: "./dist/server/index.d.ts",
   version: "0.0.0"
 }
@@ -88,6 +89,15 @@ describe("package contract", () => {
         bin: { "control-center": "./src/server/cli.ts" }
       })
     ).toContain("control-center bin must reference the built server CLI")
+  })
+
+  it("rejects a start script that consumes or drops recovery arguments", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        scripts: { start: "node ./dist/server/server/cli.js serve" }
+      })
+    ).toContain("start must forward arguments to the built server CLI")
   })
 
   it("rejects a libSQL adapter from a different Effect release", () => {

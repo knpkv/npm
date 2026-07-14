@@ -164,6 +164,27 @@ describe("application adapters", () => {
         state: "missing"
       }])
 
+      const missingKeep = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        patch: {
+          expectedRevision: 0,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv" },
+            { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "keep" }
+            }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missingKeep))
+      if (Result.isFailure(missingKeep)) {
+        assert.instanceOf(missingKeep.failure, ApplicationInvalidRequest)
+      }
+
       const nonexistentReference = OpaqueSecretReference.make(`secret_${"a".repeat(64)}`)
       const missingSecret = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -176,7 +197,7 @@ describe("application adapters", () => {
             {
               _tag: "secret-reference",
               key: PluginConfigurationKey.make("token"),
-              reference: nonexistentReference
+              operation: { _tag: "replace", reference: nonexistentReference }
             }
           ]
         }
@@ -197,7 +218,11 @@ describe("application adapters", () => {
           values: [
             { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv" },
             { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
-            { _tag: "secret-reference", key: PluginConfigurationKey.make("token"), reference: secretReference }
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "replace", reference: secretReference }
+            }
           ]
         }
       })
@@ -208,6 +233,30 @@ describe("application adapters", () => {
         state: "configured"
       })
       assert.notInclude(JSON.stringify(configured), secretReference)
+
+      const kept = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv-next" },
+            { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "keep" }
+            }
+          ]
+        }
+      })
+      assert.strictEqual(kept.revision, 2)
+      assert.deepStrictEqual(kept.values[2], {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("token"),
+        state: "configured"
+      })
+      assert.notInclude(JSON.stringify(kept), secretReference)
 
       const stale = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -221,11 +270,15 @@ describe("application adapters", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID,
         patch: {
-          expectedRevision: 1,
+          expectedRevision: 2,
           values: [
             { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv" },
             { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
-            { _tag: "secret-reference", key: PluginConfigurationKey.make("token"), reference: null }
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "clear" }
+            }
           ]
         }
       }).pipe(Effect.result)
@@ -238,11 +291,15 @@ describe("application adapters", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID,
         patch: {
-          expectedRevision: 0,
+          expectedRevision: 1,
           values: [
             { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv" },
             { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
-            { _tag: "secret-reference", key: PluginConfigurationKey.make("token"), reference: secretReference }
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "keep" }
+            }
           ]
         }
       }).pipe(Effect.result)
@@ -268,6 +325,26 @@ describe("application adapters", () => {
           : null,
         "missing"
       )
+      const keepMissing = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        patch: {
+          expectedRevision: 2,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("site"), value: "knpkv-next" },
+            { _tag: "select", key: PluginConfigurationKey.make("project"), value: "PAY" },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("token"),
+              operation: { _tag: "keep" }
+            }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(keepMissing))
+      if (Result.isFailure(keepMissing)) {
+        assert.instanceOf(keepMissing.failure, ApplicationInvalidRequest)
+      }
     })))
 
   it.effect("returns a compact factual portfolio without deriving readiness", () =>

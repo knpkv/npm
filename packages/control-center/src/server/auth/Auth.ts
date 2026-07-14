@@ -18,6 +18,39 @@ import {
 } from "./models.js"
 
 const TOKEN_BYTES = 32
+const CSRF_RECOVERY_CONTEXT = Uint8Array.from([
+  99,
+  111,
+  110,
+  116,
+  114,
+  111,
+  108,
+  45,
+  99,
+  101,
+  110,
+  116,
+  101,
+  114,
+  47,
+  99,
+  115,
+  114,
+  102,
+  45,
+  114,
+  101,
+  99,
+  111,
+  118,
+  101,
+  114,
+  121,
+  47,
+  118,
+  49
+])
 
 const fixedTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
   let difference = left.byteLength ^ right.byteLength
@@ -59,6 +92,22 @@ const makeAuth = Effect.gen(function*() {
     )
     if (bytes.byteLength !== TOKEN_BYTES) return yield* new CredentialRejectedError()
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+      Effect.mapError(() => new AuthCryptoError())
+    )
+    return Encoding.encodeHex(digest)
+  })
+
+  const deriveRecoveredCsrfToken = Effect.fn("Auth.deriveRecoveredCsrfToken")(function*(
+    sessionToken: Redacted.Redacted<string>
+  ) {
+    const tokenBytes = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(sessionToken))).pipe(
+      Effect.mapError(() => new CredentialRejectedError())
+    )
+    if (tokenBytes.byteLength !== TOKEN_BYTES) return yield* new CredentialRejectedError()
+    const input = new Uint8Array(CSRF_RECOVERY_CONTEXT.byteLength + tokenBytes.byteLength)
+    input.set(CSRF_RECOVERY_CONTEXT)
+    input.set(tokenBytes, CSRF_RECOVERY_CONTEXT.byteLength)
+    const digest = yield* cryptoService.digest("SHA-256", input).pipe(
       Effect.mapError(() => new AuthCryptoError())
     )
     return Encoding.encodeHex(digest)
@@ -168,19 +217,39 @@ const makeAuth = Effect.gen(function*() {
       return (yield* authenticateRecord(sessionToken)).summary
     }),
 
+    recoverCsrfToken: Effect.fn("Auth.recoverCsrfToken")(function*(
+      sessionToken: Redacted.Redacted<string>
+    ) {
+      const authenticated = yield* authenticateRecord(sessionToken)
+      const csrfToken = yield* deriveRecoveredCsrfToken(sessionToken)
+      return {
+        csrfToken: Redacted.make(csrfToken),
+        session: authenticated.summary
+      }
+    }),
+
     authorizeMutation: Effect.fn("Auth.authorizeMutation")(function*(
       sessionToken: Redacted.Redacted<string>,
       csrfToken: Redacted.Redacted<string>
     ) {
       const authenticated = yield* authenticateRecord(sessionToken)
       const actualHash = yield* hashCredential(csrfToken)
+      const recoveredCsrfToken = yield* deriveRecoveredCsrfToken(sessionToken)
       const actual = yield* Effect.fromResult(Encoding.decodeHex(actualHash)).pipe(
         Effect.mapError(() => new CredentialRejectedError())
       )
       const expected = yield* Effect.fromResult(Encoding.decodeHex(authenticated.csrfHash)).pipe(
         Effect.mapError(() => new CredentialRejectedError())
       )
-      if (!fixedTimeEqual(actual, expected)) return yield* new CredentialRejectedError()
+      const supplied = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(csrfToken))).pipe(
+        Effect.mapError(() => new CredentialRejectedError())
+      )
+      const recovered = yield* Effect.fromResult(Encoding.decodeHex(recoveredCsrfToken)).pipe(
+        Effect.mapError(() => new CredentialRejectedError())
+      )
+      const matchesIssuedToken = fixedTimeEqual(actual, expected)
+      const matchesRecoveredToken = fixedTimeEqual(supplied, recovered)
+      if (!matchesIssuedToken && !matchesRecoveredToken) return yield* new CredentialRejectedError()
       return authenticated.summary
     }),
 

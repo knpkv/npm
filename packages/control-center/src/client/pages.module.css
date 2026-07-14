@@ -33,6 +33,22 @@
   gap: 0.75rem;
 }
 
+.sessionBadge,
+.sessionStatus {
+  display: inline-flex;
+  min-block-size: 3rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding-inline: 1.25rem;
+  border-radius: var(--rly-radius-control);
+}
+
+.sessionBadge {
+  border: 1px solid color-mix(in srgb, var(--rly-color-success-ink) 34%, var(--rly-color-border-1));
+  background: var(--rly-color-success-tint);
+  color: var(--rly-color-success-ink);
+}
+
 .linkButton {
   display: inline-flex;
   min-block-size: 3rem;

@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
@@ -13,11 +16,11 @@ import * as Stream from "effect/Stream"
 
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
-import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "./persistence/PersistenceConfig.js"
+import { classifyControlCenterCliArguments } from "./cliArguments.js"
+import { decodeControlCenterDataPaths } from "./cliConfiguration.js"
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
-import { SecretRoot } from "./secrets/SecretStore.js"
 import { decodeBindConfig } from "./security/BindConfig.js"
 
 const DEFAULT_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000001")
@@ -53,19 +56,14 @@ const program = Effect.scoped(
     const path = yield* Path.Path
     const stdio = yield* Stdio.Stdio
     const configured = yield* configuration
-    const dataRoot = path.resolve(configured.dataRoot)
+    const dataPaths = yield* decodeControlCenterDataPaths(configured.dataRoot)
+    const dataRoot = dataPaths.dataRoot
     yield* fileSystem.makeDirectory(dataRoot, { recursive: true, mode: 0o700 })
     yield* fileSystem.chmod(dataRoot, 0o700)
 
-    const persistenceConfig: PersistenceConfig = {
-      blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
-      busyTimeoutMilliseconds: 5_000,
-      databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
-      maxConnections: 1
-    }
-    const [command, ...unexpectedArguments] = yield* stdio.args
-    if (command === "recover-owner" && unexpectedArguments.length === 0) {
-      const recoveryServices = yield* Layer.build(terminalRecoveryLayer(persistenceConfig))
+    const invocation = classifyControlCenterCliArguments(yield* stdio.args)
+    if (invocation._tag === "recover-owner") {
+      const recoveryServices = yield* Layer.build(terminalRecoveryLayer(dataPaths.persistenceConfig))
       const recovery = Context.get(recoveryServices, TerminalRecovery)
       const issued = yield* recovery.issueOwnerRecovery({
         workspaceId: DEFAULT_WORKSPACE_ID,
@@ -75,9 +73,9 @@ const program = Effect.scoped(
       yield* writeLine(`Recovery pairing code: ${Redacted.value(issued.pairingCode)}`)
       return
     }
-    if (command !== undefined) {
+    if (invocation._tag === "invalid") {
       yield* writeLine("Usage: control-center [recover-owner]")
-      return yield* new ControlCenterCliUsageError({ command })
+      return yield* new ControlCenterCliUsageError({ command: invocation.command })
     }
 
     const allowedHosts = commaSeparated(configured.allowedHosts)
@@ -110,8 +108,8 @@ const program = Effect.scoped(
         workspaceId: DEFAULT_WORKSPACE_ID,
         workspaceName: WorkspaceName.make("Control Center")
       },
-      persistenceConfig,
-      secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+      persistenceConfig: dataPaths.persistenceConfig,
+      secretRoot: dataPaths.secretRoot,
       staticAssets: { root: staticRoot }
     }))
     const bootstrap = Context.get(services, ControlCenterBootstrap)
@@ -124,6 +122,30 @@ const program = Effect.scoped(
     }
     return yield* Effect.never
   })
-).pipe(Effect.provide(NodeServices.layer))
+)
 
-NodeRuntime.runMain(program)
+const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
+  const error = Cause.findErrorOption(cause)
+  const isUsageError = Option.exists(
+    error,
+    (value) => Predicate.hasProperty(value, "_tag") && value._tag === "ControlCenterCliUsageError"
+  )
+  if (isUsageError) return Effect.failCause(cause)
+  const errorTag = Option.flatMap(
+    error,
+    (value) =>
+      Predicate.hasProperty(value, "_tag") && typeof value._tag === "string"
+        ? Option.some(value._tag)
+        : Option.none<string>()
+  )
+  const message = Option.match(errorTag, {
+    onNone: () => "Control Center stopped unexpectedly.",
+    onSome: (tag) => `Control Center could not start (${tag}).`
+  })
+  return writeLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
+}
+
+NodeRuntime.runMain(
+  program.pipe(Effect.catchCause(reportProgramFailure), Effect.provide(NodeServices.layer)),
+  { disableErrorReporting: true }
+)

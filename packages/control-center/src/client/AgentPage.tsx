@@ -38,7 +38,7 @@ const contexts: Readonly<Record<string, AgentPageContext>> = {
 const contextFor = (path: string | null): AgentPageContext =>
   path === null ? DEFAULT_CONTEXT : (contexts[path] ?? DEFAULT_CONTEXT)
 
-/** Show the workspace agent with the calling page preserved as explicit context. */
+/** Preview the calling page context before a local agent runtime is connected. */
 export const AgentPage = (): ReactElement => {
   const [searchParams] = useSearchParams()
   const context = contextFor(searchParams.get("from"))
@@ -50,10 +50,10 @@ export const AgentPage = (): ReactElement => {
           Workspace agent
         </Text>
         <Text as="h1" id="agent-title" variant="page-title">
-          Relay
+          Relay context
         </Text>
         <Text tone="secondary" variant="body-large">
-          One thread that keeps the page you came from attached to every question, proposal, and check.
+          Preview the workspace context that a local agent will receive. No prompt is sent from this screen.
         </Text>
       </header>
       <Surface as="section" className={styles.agentCard} padding="spacious" shape="grouped" tone="secondary">
@@ -69,16 +69,9 @@ export const AgentPage = (): ReactElement => {
         </Link>
       </Surface>
       <StatePanel
-        action={
-          <Link className={styles.linkButton} to="/pair">
-            Pair this browser
-          </Link>
-        }
         className={styles.agentState}
-        description="Pairing gives Relay a private workspace session. Agent actions will still require evidence and your approval."
-        icon="link"
-        title="Context is ready"
-        tone="progress"
+        description="A local Codex or Claude runner is not connected yet. When it is, agent actions will require evidence and your approval."
+        title="Agent runtime not connected"
       />
     </section>
   )

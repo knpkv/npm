@@ -495,6 +495,11 @@ const makeAuthRepository = Effect.gen(function*() {
     ) {
       yield* database.transaction(
         Effect.gen(function*() {
+          yield* sql`UPDATE pairing_codes
+            SET revoked_at = COALESCE(revoked_at, ${timestamp(input.createdAt)})
+            WHERE workspace_id = ${input.workspaceId}
+              AND consumed_at IS NULL
+              AND revoked_at IS NULL`.pipe(mapStorage("recover-owner"))
           if (revokeExistingOwnerSessions) {
             yield* sql`UPDATE sessions SET revoked_at = COALESCE(revoked_at, ${timestamp(input.createdAt)})
               WHERE workspace_id = ${input.workspaceId}

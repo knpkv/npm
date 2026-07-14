@@ -31,12 +31,18 @@ The first run prints a single-use pairing code and listens at `http://127.0.0.1:
 If the first code was lost after the workspace initialized, or no owner session remains, stop the server and run terminal recovery against the same data root:
 
 ```sh
-pnpm --filter @knpkv/control-center start -- recover-owner
+pnpm --filter @knpkv/control-center start recover-owner
 ```
 
-Recovery verifies the owner and mode of the canonical data directory, then requires the exact terminal phrase `ISSUE OWNER RECOVERY CODE`. A successful recovery revokes existing owner sessions and prints a replacement single-use code. It is deliberately unavailable over HTTP.
+Recovery verifies the owner and mode of the canonical data directory, then requires the exact terminal phrase `ISSUE OWNER RECOVERY CODE`. A successful recovery revokes existing owner sessions and every outstanding pairing code before it prints a replacement single-use code. It is deliberately unavailable over HTTP.
 
-The Vite development server stays loopback-only and is not the production application server. A new remote browser must pair over trusted HTTPS. The simplest supported setup keeps Control Center on loopback and puts a TLS reverse proxy on the same machine. Configure the proxy to serve a hostname and certificate trusted by the second machine, forward to `http://127.0.0.1:4173`, and set `X-Forwarded-Host` and `X-Forwarded-Proto`. Then start Control Center with the proxy's exact address:
+The Vite development server stays loopback-only and is not the production application server. A new remote browser must pair over trusted HTTPS. The simplest supported setup keeps Control Center on loopback and puts a TLS reverse proxy on the same machine. Configure the proxy to serve a hostname and certificate trusted by the second machine, forward to `http://127.0.0.1:4173`, and overwrite `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`. `X-Forwarded-For` must contain exactly the browser's IP literal: do not append a chain or forward the incoming header. Then start Control Center with the proxy's exact address:
+
+```nginx
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Forwarded-For $remote_addr;
+```
 
 ```sh
 CONTROL_CENTER_HOST=127.0.0.1 \
@@ -48,7 +54,7 @@ CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES=127.0.0.1 \
 pnpm --filter @knpkv/control-center start
 ```
 
-Open `https://control.home.arpa` from the second machine and enter the one-time code printed by the server. Replace the example hostname with one that resolves to the server on both machines. If the local proxy connects over IPv6, trust its exact `::1` address instead of `127.0.0.1`. Never add client addresses or a subnet: forwarded headers are accepted only from the exact immediate proxy.
+Open `https://control.home.arpa` from the second machine and enter the one-time code printed by the server. Replace the example hostname with one that resolves to the server on both machines. If the local proxy connects over IPv6, trust its exact `::1` address instead of `127.0.0.1`. Never add client addresses or a subnet: forwarded headers are accepted only from the exact immediate proxy. Malformed, chained, or spoofed client-address headers fall back to the immediate peer for rate limiting.
 
 Direct TLS is also available when certificate and private-key material has already been provisioned into this instance's `SecretStore`; pass the resulting opaque references as `CONTROL_CENTER_TLS_CERTIFICATE_REF` and `CONTROL_CENTER_TLS_PRIVATE_KEY_REF`. The application never accepts certificate paths or key bytes through environment variables.
 

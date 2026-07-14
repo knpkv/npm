@@ -78,6 +78,15 @@ export const PairSessionResponse = Schema.Struct({
 /** Decoded session-pairing response. */
 export type PairSessionResponse = typeof PairSessionResponse.Type
 
+/** Authenticated session metadata with a recoverable, session-bound mutation proof. */
+export const CurrentSessionResponse = Schema.Struct({
+  csrfToken: CsrfToken,
+  session: SessionSummary
+})
+
+/** Decoded current-session response. */
+export type CurrentSessionResponse = typeof CurrentSessionResponse.Type
+
 /** Bounded session-administration response. */
 export const SessionListResponse = Schema.Array(SessionSummary).check(
   Schema.makeFilter((sessions) => sessions.length <= 100, { expected: "at most 100 sessions" })
@@ -138,7 +147,7 @@ const pair = HttpApiEndpoint.post("pair", "/pair", {
 })
 
 const current = HttpApiEndpoint.get("current", "/current", {
-  success: SessionSummary,
+  success: CurrentSessionResponse,
   error: authenticatedErrors
 }).middleware(SessionCookieAuth)
 

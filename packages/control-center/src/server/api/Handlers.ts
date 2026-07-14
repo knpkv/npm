@@ -51,7 +51,17 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
             session: issued.session
           }
         }))
-      .handle("current", () => CurrentSession)
+      .handle("current", ({ request }) =>
+        Effect.gen(function*() {
+          const auth = yield* Auth
+          const recovered = yield* mapAuthenticationFailures(
+            auth.recoverCsrfToken(currentSessionToken(request))
+          )
+          return {
+            csrfToken: CsrfToken.make(Redacted.value(recovered.csrfToken)),
+            session: recovered.session
+          }
+        }))
       .handle("list", ({ request }) =>
         Effect.gen(function*() {
           const auth = yield* Auth

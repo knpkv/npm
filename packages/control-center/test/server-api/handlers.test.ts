@@ -1,13 +1,19 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
-import { CurrentSession, SessionCookieAuth, SessionMutationAuth, SessionSummary } from "../../src/api/session.js"
+import {
+  CurrentSession,
+  CurrentSessionResponse,
+  SessionCookieAuth,
+  SessionMutationAuth,
+  SessionSummary
+} from "../../src/api/session.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import { MediaReads, PluginAdministration, PortfolioSnapshots } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
@@ -76,6 +82,81 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it("recovers a session-bound CSRF proof only through an authenticated allowed-origin read", async () => {
+    const recoveredCsrf = "ef".repeat(32)
+    const authentication = Auth.of({
+      authenticate: () => Effect.succeed(session),
+      authorizeMutation: () => Effect.die("not used"),
+      bootstrapOwnerPairing: () => Effect.die("not used"),
+      consumePairingCode: () => Effect.die("not used"),
+      issuePairingCode: () => Effect.die("not used"),
+      listPairingCodes: () => Effect.die("not used"),
+      listSessions: () => Effect.die("not used"),
+      logout: () => Effect.die("not used"),
+      recoverCsrfToken: () =>
+        Effect.succeed({
+          csrfToken: Redacted.make(recoveredCsrf),
+          session
+        }),
+      revokePairingCode: () => Effect.die("not used"),
+      revokeSession: () => Effect.die("not used")
+    })
+    const plugins = PluginAdministration.of({
+      configuration: () => Effect.die("not used"),
+      configurationMetadata: () => Effect.die("not used"),
+      health: () => Effect.die("not used"),
+      list: () => Effect.die("not used"),
+      patchConfiguration: () => Effect.die("not used")
+    })
+    const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const bind = await Effect.runPromise(decodeBindConfig({}))
+    const requestContext = Context.empty().pipe(
+      Context.add(Auth, authentication),
+      Context.add(ApiBindConfiguration, bind),
+      Context.add(MediaReads, media),
+      Context.add(PluginAdministration, plugins)
+    )
+    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+      Layer.provide(Layer.mergeAll(
+        Layer.succeed(Auth, authentication),
+        Layer.succeed(ApiBindConfiguration, bind),
+        portfolioLayer,
+        NodeHttpServer.layerHttpServices,
+        NodeServices.layer
+      ))
+    )
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    const requestFor = (origin: string) =>
+      new Request(
+        "http://127.0.0.1:4173/api/v1/session/current",
+        {
+          headers: {
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin
+          }
+        }
+      )
+    try {
+      const response = await webHandler.handler(
+        requestFor("http://127.0.0.1:4173"),
+        requestContext
+      )
+      assert.strictEqual(response.status, 200)
+      const responseBody = Schema.decodeUnknownSync(CurrentSessionResponse)(await response.json())
+      assert.strictEqual(responseBody.csrfToken, recoveredCsrf)
+      assert.strictEqual(responseBody.session.sessionId, session.sessionId)
+
+      const foreignOrigin = await webHandler.handler(
+        requestFor("http://attacker.example"),
+        requestContext
+      )
+      assert.strictEqual(foreignOrigin.status, 403)
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
   it("rejects a non-owner plugin configuration mutation through the real auth middleware", async () => {
     const authentication = Auth.of({
       authenticate: () => Effect.succeed(watcherSession),
@@ -86,6 +167,7 @@ describe("Control Center API handlers", () => {
       listPairingCodes: () => Effect.die("not used"),
       listSessions: () => Effect.die("not used"),
       logout: () => Effect.die("not used"),
+      recoverCsrfToken: () => Effect.die("not used"),
       revokePairingCode: () => Effect.die("not used"),
       revokeSession: () => Effect.die("not used")
     })

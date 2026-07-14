@@ -15,6 +15,7 @@ const PackageManifestSchema = Schema.Struct({
   exports: Schema.Record(Schema.String, Schema.Unknown),
   main: Schema.String,
   name: Schema.String,
+  scripts: Schema.Struct({ start: Schema.String }),
   types: Schema.String,
   version: Schema.String.check(Schema.isPattern(semverPattern))
 })
@@ -42,6 +43,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     violations.push("control-center bin must reference the built server CLI")
   }
   if (manifest.name !== "@knpkv/control-center") violations.push("package name must be @knpkv/control-center")
+  if (manifest.scripts.start !== "node ./dist/server/server/cli.js") {
+    violations.push("start must forward arguments to the built server CLI")
+  }
   if (manifest.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
   if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")

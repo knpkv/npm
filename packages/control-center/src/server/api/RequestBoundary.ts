@@ -1,3 +1,5 @@
+import { isIP } from "node:net"
+
 import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -65,8 +67,38 @@ const isJsonPayload = (request: HttpServerRequest.HttpServerRequest): boolean =>
 const hasNoStoreDirective = (value: string | undefined): boolean =>
   value?.split(",").some((directive) => directive.trim().toLowerCase() === "no-store") ?? false
 
-const requestKey = (request: HttpServerRequest.HttpServerRequest): string =>
-  Option.getOrElse(request.remoteAddress, () => "unknown")
+const canonicalIpAddress = (input: string): string | undefined => {
+  if (input.length === 0 || input.length > 64 || input.trim() !== input || isIP(input) === 0) return undefined
+  if (!input.includes(":")) return input
+  const hostname = new URL(`http://[${input}]/`).hostname
+  return hostname.slice(1, -1)
+}
+
+/**
+ * Select the rate-limit identity at the last trusted hop. The forwarding header
+ * must contain exactly one IP because a configured proxy is required to
+ * overwrite, rather than append to, `X-Forwarded-For`.
+ */
+export const clientRateLimitKey = (
+  trustedProxyAddresses: ReadonlyArray<string>,
+  immediatePeer: string | null,
+  forwardedFor: string | undefined
+): string => {
+  const peer = immediatePeer === null ? undefined : canonicalIpAddress(immediatePeer)
+  const trustedPeer = peer !== undefined && trustedProxyAddresses.some((address) => address === peer)
+  if (trustedPeer && forwardedFor !== undefined) {
+    const forwardedClient = canonicalIpAddress(forwardedFor)
+    if (forwardedClient !== undefined) return `client:${forwardedClient}`
+  }
+  return `peer:${peer ?? "unknown"}`
+}
+
+const requestKey = (config: ApiBindConfiguration["Service"], request: HttpServerRequest.HttpServerRequest): string =>
+  clientRateLimitKey(
+    config.trustedProxyAddresses,
+    Option.getOrNull(request.remoteAddress),
+    request.headers["x-forwarded-for"]
+  )
 
 const hasBoundedRequestMetadata = (request: HttpServerRequest.HttpServerRequest): boolean => {
   if (request.url.length > DEFAULT_HTTP_SECURITY_LIMITS.maximumRequestUrlBytes) return false
@@ -148,7 +180,7 @@ export const requestBoundaryLayer = HttpRouter.middleware(
             maximumBytes: policy.maximumBodyBytes,
             metadata: requestBodyMetadata(request)
           }).pipe(Effect.catchTag("RequestBodyPolicyError", mapBodyPolicyFailure))
-          yield* consumeRequestToken(profile, requestKey(request)).pipe(
+          yield* consumeRequestToken(profile, requestKey(bindConfig, request)).pipe(
             Effect.catchTags({
               RequestRateLimitExceeded: mapRequestRateLimitFailure,
               RequestRateLimitUnavailable: mapRequestRateLimitUnavailable

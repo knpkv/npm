@@ -17,6 +17,7 @@ import { PluginConfigurationKey } from "../../api/plugins.js"
 import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
 import {
+  ApplicationConflict,
   ApplicationInvalidRequest,
   ApplicationServiceUnavailable,
   PluginAdministration,
@@ -218,7 +219,7 @@ const validatePatch = Effect.fn("PluginAdministration.validatePatch")(function*(
     const value = valuesByKey.get(field.key)
     const clearsRequiredSecret = field.required &&
       value?._tag === "secret-reference" &&
-      value.reference === null
+      value.operation._tag === "clear"
     if (
       (field.required && value === undefined) ||
       clearsRequiredSecret ||
@@ -236,14 +237,25 @@ const validatePatch = Effect.fn("PluginAdministration.validatePatch")(function*(
 
 const storeValue = Effect.fn("PluginAdministration.storeValue")(function*(
   secrets: SecretStore["Service"],
+  currentValues: ReadonlyMap<string, StoredPluginConfigurationValue>,
   value: PluginConfigurationPatchValue
 ) {
   const key = yield* Schema.decodeUnknownEffect(StoredPluginConfigurationKey)(value.key).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
   )
   if (value._tag !== "secret-reference") return { ...value, key } satisfies StoredPluginConfigurationValue
-  if (value.reference === null) return null
-  const ref = yield* Schema.decodeUnknownEffect(SecretRef)(value.reference).pipe(
+  if (value.operation._tag === "clear") return null
+  let candidateReference: string
+  if (value.operation._tag === "replace") {
+    candidateReference = value.operation.reference
+  } else {
+    const currentValue = currentValues.get(value.key)
+    if (currentValue?._tag !== "secret-reference") {
+      return yield* new ApplicationInvalidRequest()
+    }
+    candidateReference = currentValue.ref
+  }
+  const ref = yield* Schema.decodeUnknownEffect(SecretRef)(candidateReference).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
   )
   yield* Effect.scoped(secrets.resolve(ref).pipe(Effect.asVoid)).pipe(
@@ -258,11 +270,12 @@ const storeValue = Effect.fn("PluginAdministration.storeValue")(function*(
 
 const canonicalValues = Effect.fn("PluginAdministration.canonicalValues")(function*(
   secrets: SecretStore["Service"],
+  currentValues: ReadonlyMap<string, StoredPluginConfigurationValue>,
   values: PatchPluginConfigurationRequest["values"]
 ) {
   const stored: Array<StoredPluginConfigurationValue> = []
   for (const value of values) {
-    const candidate = yield* storeValue(secrets, value)
+    const candidate = yield* storeValue(secrets, currentValues, value)
     if (candidate !== null) stored.push(candidate)
   }
   stored.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
@@ -295,9 +308,20 @@ export const makePluginAdministration = Effect.gen(function*() {
       yield* requireConnection(persistence, workspaceId, pluginConnectionId)
       const descriptor = yield* negotiatedDescriptor(persistence, workspaceId, pluginConnectionId)
       yield* validatePatch(descriptor, patch)
+      const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+        Effect.mapError(mapPersistenceReadError)
+      )
+      const currentRevision = Option.isSome(current) ? current.value.revision : 0
+      if (currentRevision !== patch.expectedRevision) return yield* new ApplicationConflict()
+      const currentValues = new Map<string, StoredPluginConfigurationValue>(
+        Option.isSome(current)
+          ? current.value.values.map((value) => [value.key, value])
+          : []
+      )
       // PATCH is a full replacement: all required descriptor fields must be present.
-      // Opaque secret references are proved readable, then immediately released, before CAS.
-      const values = yield* canonicalValues(secrets, patch.values)
+      // Keep operations resolve only the reference stored at the expected revision. The
+      // repository CAS then prevents that reference from surviving a concurrent replacement.
+      const values = yield* canonicalValues(secrets, currentValues, patch.values)
       yield* persistence.pluginConfigurations.update(
         workspaceId,
         pluginConnectionId,
