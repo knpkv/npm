@@ -26,3 +26,11 @@ invalid:
       await cleanup()
       throw failure
     }
+  - |
+    try {
+      await start()
+    } catch (failure) {
+      recordFailure(failure)
+      await cleanup()
+      throw failure
+    }

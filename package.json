@@ -12,7 +12,7 @@
     "audit": "pnpm audit --prod && pnpm audit --dev",
     "test": "vitest && pnpm test:pack",
     "test:pack": "pnpm --recursive --filter \"./packages/**/*\" --if-present run test:pack",
-    "test:browser": "pnpm --recursive --filter \"./packages/**/*\" --if-present run test:browser",
+    "test:browser": "pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:browser",
     "coverage": "vitest --coverage",
     "check": "pnpm build && pnpm --recursive --filter \"./packages/**/*\" run check",
     "check:tsgo": "pnpm --recursive --filter \"./packages/**/*\" --filter \"!@knpkv/agent-skills\" exec tsgo -b tsconfig.json",

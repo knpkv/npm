@@ -92,7 +92,7 @@ const allocateFixture = Effect.gen(function*() {
         staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url))
       } satisfies AllocatedFixture
     }),
-    fileSystem.remove(dataRoot, { force: true, recursive: true }).pipe(Effect.ignore)
+    fileSystem.remove(dataRoot, { force: true, recursive: true })
   )
 }).pipe(Effect.provide(NodeServices.layer))
 

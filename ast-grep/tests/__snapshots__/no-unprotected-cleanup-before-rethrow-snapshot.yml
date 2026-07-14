@@ -16,3 +16,21 @@ snapshots:
         style: primary
         start: 24
         end: 77
+  ? |
+    try {
+      await start()
+    } catch (failure) {
+      recordFailure(failure)
+      await cleanup()
+      throw failure
+    }
+  : labels:
+      - source: |-
+          catch (failure) {
+            recordFailure(failure)
+            await cleanup()
+            throw failure
+          }
+        style: primary
+        start: 24
+        end: 102

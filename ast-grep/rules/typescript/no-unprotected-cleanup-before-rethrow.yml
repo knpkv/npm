@@ -11,6 +11,7 @@ rule:
       try {
         $$$TRY
       } catch ($ERROR) {
+        $$$BEFORE
         await $CLEANUP
         throw $ERROR
       }
