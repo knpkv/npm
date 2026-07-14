@@ -408,6 +408,7 @@ describe("Control Center closed runtime", () => {
           assert.strictEqual(missingProjection._tag, "Failure")
         }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
       )
+      yield* TestClock.adjust("6 minutes")
 
       const providerAcquisitions = yield* Ref.make(0)
       const fakeConnections = yield* makeFakeConnectionMap
@@ -440,10 +441,9 @@ describe("Control Center closed runtime", () => {
       assert.deepStrictEqual(synchronizationState, { _tag: "connection-disabled" })
       assert.strictEqual(yield* Ref.get(providerAcquisitions), 0)
       assert.strictEqual(release.release.id, RELEASE_ID)
-      assert.strictEqual(release.release.freshness._tag, "current")
-      if (release.release.freshness._tag === "current") {
-        assert.strictEqual(release.release.freshness.provenance._tag, "cache")
-      }
+      assert.strictEqual(release.release.freshness._tag, "stale")
+      assert.strictEqual(release.release.freshness.pluginHealth._tag, "healthy")
+      assert.strictEqual(release.release.freshness.provenance._tag, "cache")
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

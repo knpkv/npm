@@ -366,10 +366,11 @@ export const recoverFakeReleaseProjection = Effect.fn(
     streamKey
   )
   const recoveryHealth = lastSuccessfulHealth ?? runtime.health
+  const evaluatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
   return yield* reconcileLastValidProjection(
     boundInput,
     recoveryHealth,
-    recoveryHealth.checkedAt,
+    evaluatedAt,
     "cache"
   )
 })

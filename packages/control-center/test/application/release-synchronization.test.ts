@@ -23,6 +23,7 @@ import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makePortfolioSnapshots } from "../../src/server/application/portfolioSnapshots.js"
 import {
+  recoverFakeReleaseProjection,
   synchronizeFakeRelease,
   synchronizeFakeReleaseFromMap
 } from "../../src/server/application/releaseSynchronization.js"
@@ -591,19 +592,26 @@ describe("fake release synchronization", () => {
             (yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)).health._tag,
             "unavailable"
           )
-          yield* TestClock.setTime(epochMillis(RECENT_FAILURE_AT))
+          yield* TestClock.setTime(epochMillis(STALE_FAILURE_AT))
+          const recoveredId = yield* recoverFakeReleaseProjection(input)
+          assert.strictEqual(recoveredId, RELEASE_ID)
+          const recovered = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
+          assert.strictEqual(recovered.revision, 1)
+          assert.strictEqual(recovered.release.freshness._tag, "stale")
+          assert.strictEqual(recovered.release.freshness.pluginHealth._tag, "healthy")
+          assert.strictEqual(recovered.release.freshness.provenance._tag, "cache")
+
           const unavailableScenario = {
-            ...scenario({ _tag: "authentication" }, RECENT_FAILURE_AT, "checkpoint-1"),
+            ...scenario({ _tag: "authentication" }, STALE_FAILURE_AT, "checkpoint-1"),
             health: { _tag: "authentication" }
           } satisfies FakePluginScenario
           const outcome = yield* runScenarioFromMap(unavailableScenario)
           assert.deepStrictEqual(outcome, { _tag: "source-unavailable", releaseId: RELEASE_ID })
           const release = yield* persistence.releases.get(WORKSPACE_ID, RELEASE_ID)
-          assert.strictEqual(release.revision, 1)
-          assert.strictEqual(release.release.freshness._tag, "current")
-          if (release.release.freshness._tag === "current") {
-            assert.strictEqual(release.release.freshness.provenance._tag, "cache")
-          }
+          assert.strictEqual(release.revision, 2)
+          assert.strictEqual(release.release.freshness._tag, "stale")
+          assert.strictEqual(release.release.freshness.pluginHealth._tag, "unavailable")
+          assert.strictEqual(release.release.freshness.provenance._tag, "cache")
         }).pipe(Effect.provide(persistenceLayer(config)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))

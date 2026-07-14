@@ -373,6 +373,7 @@ export const normalizeFakeReleaseCache = Effect.fn("FakeRelease.normalizeCache")
   const freshness = isStale
     ? {
       _tag: "stale",
+      evaluatedAt: input.evaluatedAt,
       pluginHealth: input.pluginHealth,
       provenance: { _tag: "cache", cachedAt: releaseRecord.cachedAt, sourceRevision },
       sourceObservedAt: sourceRevision.lastObservedAt,
@@ -381,6 +382,7 @@ export const normalizeFakeReleaseCache = Effect.fn("FakeRelease.normalizeCache")
     }
     : {
       _tag: "current",
+      evaluatedAt: input.evaluatedAt,
       pluginHealth: input.pluginHealth,
       provenance: input.provenance === "provider"
         ? { _tag: "provider", sourceRevision }
