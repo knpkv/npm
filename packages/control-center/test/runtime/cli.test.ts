@@ -1079,14 +1079,18 @@ describe("Control Center CLI", () => {
       yield* fileSystem.chmod(validPending, 0o600)
       yield* fileSystem.writeFileString(invalidPending, "invalid\n", { mode: 0o600 })
       yield* fileSystem.chmod(invalidPending, 0o600)
-      const entriesBefore = (yield* fileSystem.readDirectory(root)).sort()
 
       const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(prepared))
       if (Result.isFailure(prepared)) assert.instanceOf(prepared.failure, PersistenceConfigError)
-      assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore)
+      assert.strictEqual(yield* fileSystem.readFileString(validPending), DATA_ROOT_MARKER_V1_CONTENT)
+      assert.strictEqual(yield* fileSystem.readFileString(invalidPending), "invalid\n")
       assert.isFalse(yield* fileSystem.exists(path.join(root, ".control-center-root")))
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.validateMigrationLedger
+      }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects a SQLite database without the Control Center migration identity", () =>
