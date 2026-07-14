@@ -1,0 +1,92 @@
+id: no-recursive-effect-fn
+snapshots:
+  ? |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      if (attempt > 0) return yield* reconnect(attempt + 1)
+      return yield* connect()
+    })
+  : labels:
+      - source: |-
+          const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+            if (attempt > 0) return yield* reconnect(attempt + 1)
+            return yield* connect()
+          })
+        style: primary
+        start: 0
+        end: 164
+      - source: reconnect(attempt + 1)
+        style: secondary
+        start: 113
+        end: 135
+  ? |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      return yield* Effect.suspend(() => reconnect(attempt + 1))
+    })
+  : labels:
+      - source: |-
+          const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+            return yield* Effect.suspend(() => reconnect(attempt + 1))
+          })
+        style: primary
+        start: 0
+        end: 143
+      - source: reconnect(attempt + 1)
+        style: secondary
+        start: 117
+        end: 139
+  ? |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      return yield* reconnect(attempt + 1).pipe(Effect.annotateLogs("retry"))
+    })
+  : labels:
+      - source: |-
+          const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+            return yield* reconnect(attempt + 1).pipe(Effect.annotateLogs("retry"))
+          })
+        style: primary
+        start: 0
+        end: 156
+      - source: reconnect(attempt + 1)
+        style: secondary
+        start: 96
+        end: 118
+  ? |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      yield* connect(attempt)
+      return yield* reconnect(attempt + 1)
+    })
+  : labels:
+      - source: |-
+          const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+            yield* connect(attempt)
+            return yield* reconnect(attempt + 1)
+          })
+        style: primary
+        start: 0
+        end: 147
+      - source: reconnect(attempt + 1)
+        style: secondary
+        start: 122
+        end: 144
+  ? |
+    const reconnect: (attempt: number) => Effect.Effect<never> = Effect.fn(
+      "Portfolio.reconnect"
+    )(function*(attempt: number) {
+      yield* connect(attempt)
+      yield* reconnect(attempt + 1)
+    })
+  : labels:
+      - source: |-
+          const reconnect: (attempt: number) => Effect.Effect<never> = Effect.fn(
+            "Portfolio.reconnect"
+          )(function*(attempt: number) {
+            yield* connect(attempt)
+            yield* reconnect(attempt + 1)
+          })
+        style: primary
+        start: 0
+        end: 187
+      - source: reconnect(attempt + 1)
+        style: secondary
+        start: 162
+        end: 184

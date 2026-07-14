@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-recursive-effect-fn
+language: tsx
+severity: error
+message: "Do not recurse directly from Effect.fn; use an iterative loop so completed attempts can release tracing scope"
+
+rule:
+  any:
+    - all:
+        - pattern: |
+            const $NAME = Effect.fn($$$TRACE)(function*($$$ARGS) {
+              $$$BODY
+            })
+        - has:
+            pattern: $NAME($$$CALL_ARGS)
+            stopBy: end
+    - all:
+        - pattern: |
+            const $NAME: $TYPE = Effect.fn($$$TRACE)(function*($$$ARGS) {
+              $$$BODY
+            })
+        - has:
+            pattern: $NAME($$$CALL_ARGS)
+            stopBy: end
+
+files:
+  - "packages/control-center/src/**/*.ts"
+  - "packages/control-center/src/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/generated/**"
+
+note: |
+  Effect.fn keeps its tracing span open until the wrapped Effect exits. Direct
+  recursion therefore retains every parent span for the entire recursive tail,
+  which is unbounded for retry controllers. Prefer a loop inside one Effect.fn.

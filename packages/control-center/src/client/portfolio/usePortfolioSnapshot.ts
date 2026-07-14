@@ -245,42 +245,43 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
     return yield* Effect.fail(new PortfolioStreamClosedError())
   })
 
-  const reconnect: (attempt: number) => Effect.Effect<never> = Effect.fn(
-    "PortfolioLiveController.reconnect"
-  )(function*(attempt: number) {
-    const isOnline = yield* connectivity.isOnline
-    if (!isOnline) {
-      yield* publish({ _tag: "offline" })
-      yield* connectivity.waitUntilOnline
-    } else if (attempt > 0) {
-      yield* publish({ _tag: "reconnecting", attempt })
-      yield* reconnectDelay(attempt)
-    }
+  const reconnect = Effect.fn("PortfolioLiveController.reconnect")(function*() {
+    let attempt = 0
+    while (true) {
+      const isOnline = yield* connectivity.isOnline
+      if (!isOnline) {
+        yield* publish({ _tag: "offline" })
+        yield* connectivity.waitUntilOnline
+      } else if (attempt > 0) {
+        yield* publish({ _tag: "reconnecting", attempt })
+        yield* reconnectDelay(attempt)
+      }
 
-    const cursor = appliedPortfolioCursor(currentState)
-    if (cursor === null) return yield* Effect.never
-    const streamResult = yield* Effect.result(
-      Effect.gen(function*() {
-        const stream = yield* transport.openStream(cursor)
-        return yield* consumeStream(stream, cursor)
-      })
-    )
-    if (Result.isSuccess(streamResult)) return yield* Effect.never
+      const cursor = appliedPortfolioCursor(currentState)
+      if (cursor === null) return yield* Effect.never
+      const streamResult = yield* Effect.result(
+        Effect.gen(function*() {
+          const stream = yield* transport.openStream(cursor)
+          return yield* consumeStream(stream, cursor)
+        })
+      )
+      if (Result.isSuccess(streamResult)) return yield* Effect.never
 
-    const failure = classifyFailure(streamResult.failure)
-    if (failure === "session-expired" || failure === "blocked") {
-      const failed = resolvePortfolioFailure({
-        failure: streamResult.failure,
-        onSessionExpired,
-        sessionKey
-      })
-      yield* publish({ _tag: "failed", failure: failed.failure, sessionKey })
-      return yield* Effect.never
+      const failure = classifyFailure(streamResult.failure)
+      if (failure === "session-expired" || failure === "blocked") {
+        const failed = resolvePortfolioFailure({
+          failure: streamResult.failure,
+          onSessionExpired,
+          sessionKey
+        })
+        yield* publish({ _tag: "failed", failure: failed.failure, sessionKey })
+        return yield* Effect.never
+      }
+      attempt += 1
     }
-    return yield* reconnect(attempt + 1)
   })
 
-  return yield* reconnect(0)
+  return yield* reconnect()
 })
 
 /** Run one session-isolated authoritative snapshot and live invalidation controller. */

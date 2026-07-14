@@ -6,6 +6,7 @@ import * as Random from "effect/Random"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
+import * as Tracer from "effect/Tracer"
 
 import {
   type ControlCenterLiveEvent,
@@ -564,6 +565,58 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
       assert.strictEqual(activeStreams, 0)
       assert.strictEqual(closedStreams, 2)
+    }))
+
+  it("keeps one reconnect span across repeated transient failures", () =>
+    Effect.gen(function*() {
+      let activeReconnectSpans = 0
+      let maximumActiveReconnectSpans = 0
+      let reconnectSpansStarted = 0
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options)
+          if (options.name !== "PortfolioLiveController.reconnect") return span
+
+          activeReconnectSpans += 1
+          reconnectSpansStarted += 1
+          maximumActiveReconnectSpans = Math.max(maximumActiveReconnectSpans, activeReconnectSpans)
+          const end = span.end.bind(span)
+          span.end = (endTime, exit) => {
+            if (span.status._tag === "Started") activeReconnectSpans -= 1
+            end(endTime, exit)
+          }
+          return span
+        }
+      })
+      let openings = 0
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () =>
+          Effect.sync(() => {
+            openings += 1
+            return openings <= 5 ? Stream.fail({ _tag: "TransportFailure" }) : Stream.never
+          })
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: () => undefined,
+        sessionKey: "session-a",
+        transport
+      }).pipe(
+        Effect.provideService(Random.Random, deterministicRandom),
+        Effect.provideService(Tracer.Tracer, tracer),
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* TestClock.adjust(8_000)
+      assert.strictEqual(openings, 6)
+      assert.strictEqual(reconnectSpansStarted, 1)
+      assert.strictEqual(maximumActiveReconnectSpans, 1)
+      assert.strictEqual(activeReconnectSpans, 1)
+
+      yield* Fiber.interrupt(fiber)
+      assert.strictEqual(activeReconnectSpans, 0)
     }))
 
   it("does not advance the resume cursor when a snapshot event id mismatches its data", () =>

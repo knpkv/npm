@@ -1,0 +1,42 @@
+id: no-recursive-effect-fn
+valid:
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*() {
+      let attempt = 0
+      while (true) {
+        yield* connect(attempt)
+        attempt += 1
+      }
+    })
+  - |
+    const walk = (node: Node): Effect.Effect<void> => Effect.suspend(() => walk(node.parent))
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*() {
+      return yield* connect()
+    })
+invalid:
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      yield* connect(attempt)
+      return yield* reconnect(attempt + 1)
+    })
+  - |
+    const reconnect: (attempt: number) => Effect.Effect<never> = Effect.fn(
+      "Portfolio.reconnect"
+    )(function*(attempt: number) {
+      yield* connect(attempt)
+      yield* reconnect(attempt + 1)
+    })
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      if (attempt > 0) return yield* reconnect(attempt + 1)
+      return yield* connect()
+    })
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      return yield* reconnect(attempt + 1).pipe(Effect.annotateLogs("retry"))
+    })
+  - |
+    const reconnect = Effect.fn("Portfolio.reconnect")(function*(attempt: number) {
+      return yield* Effect.suspend(() => reconnect(attempt + 1))
+    })
