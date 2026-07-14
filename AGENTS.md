@@ -90,7 +90,7 @@ This project adheres to a strict set of development standards to ensure code qua
 Treat every confirmed review finding as both a defect to fix and a prevention opportunity. Before closing the finding, classify the most durable guardrail that would catch the same defect class earlier:
 
 1. Prefer an `ast-grep` rule for mechanically recognizable source patterns.
-2. Prefer an ESLint rule or configuration when type-aware JavaScript/TypeScript semantics are required.
+2. Prefer an ESLint rule or configuration when scope-, binding-, control-flow-, or type-aware JavaScript/TypeScript semantics are required.
 3. Add a focused automated test when the invariant is behavioral or integration-level.
 4. Add a concise instruction to this file only when the invariant requires human or agent judgment.
 
@@ -140,9 +140,11 @@ Use Effect Platform modules and `effect/unstable/process` for runtime access. Do
 
 ## Effect Static Checks
 
-Effect-specific agent guardrails live in `ast-grep/rules/effect` and run through
-`pnpm lint:ast`. See `docs/effect-static-checks.md` before adding, weakening, or
-working around these rules.
+Effect-specific agent guardrails span the syntactic rules in
+`ast-grep/rules/effect` and the scope- or binding-aware local rules in
+`eslint-local-rules.cjs`. Run `pnpm lint` as the complete gate; `pnpm lint:ast`
+covers only the ast-grep subset. See `docs/effect-static-checks.md` before
+adding, weakening, or working around these rules.
 
 When writing Effect code:
 
