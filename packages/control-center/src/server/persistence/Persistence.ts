@@ -2,6 +2,7 @@ import type { Crypto, FileSystem, Path } from "effect"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { Success } from "effect/Effect"
 
+import type { BackupFailure, MigrationWriteBarrierError } from "./backup/index.js"
 import { ContentStore, type ContentStoreService } from "./ContentStore.js"
 import { Database, databaseLayer } from "./Database.js"
 import {
@@ -100,9 +101,11 @@ const publicOperation = <Value, Failure, Requirements>(
 
 /** Failures possible while acquiring the durable persistence service. */
 export type PersistenceLayerError =
+  | BackupFailure
   | BlobStoreError
   | DatabaseInitializationError
   | MigrationLedgerError
+  | MigrationWriteBarrierError
   | PersistenceConfigError
 
 const makePersistence = Effect.gen(function*() {

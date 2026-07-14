@@ -2,10 +2,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
 import { assert, describe, it } from "@effect/vitest"
-import { Crypto, Effect, Encoding, Exit, Result } from "effect"
+import { Crypto, Effect, Encoding, Exit, Path, Result } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
+import { verifyBackup } from "../../src/server/persistence/backup/index.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { MigrationLedgerError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
@@ -342,6 +343,26 @@ describe("Control Center migrations", () => {
       assert.deepStrictEqual(
         snapshot.ledger,
         EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
+      )
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const backupRoot = path.join(
+        path.dirname(config.blobRoot),
+        "backups",
+        "pre-migration",
+        "v6-to-v7"
+      )
+      const archives = (yield* fileSystem.readDirectory(backupRoot)).filter(
+        (entry) => !entry.startsWith(".control-center-backup-incoming-")
+      )
+      assert.strictEqual(archives.length, 1)
+      const archive = archives[0]
+      if (archive === undefined) return yield* Effect.fail("missing pre-migration archive")
+      const verification = yield* verifyBackup(path.join(backupRoot, archive))
+      assert.strictEqual(verification.manifest.kind, "pre-migration")
+      assert.deepStrictEqual(
+        verification.manifest.migrations,
+        EXPECTED_MIGRATIONS.slice(0, 6).map(({ id, name }) => ({ migrationId: id, name }))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 

@@ -1,8 +1,11 @@
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
-import { Context, Effect, Layer, Schema, Semaphore } from "effect"
+import { Cause, Context, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Semaphore } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
+import type { BackupFailure } from "./backup/errors.js"
+import { MigrationWriteBarrierError } from "./backup/errors.js"
+import { createVerifiedPreMigrationBackup } from "./backup/QuiescentBackup.js"
 import {
   DatabaseInitializationError,
   type MigrationLedgerError,
@@ -10,7 +13,7 @@ import {
   type PersistenceConfigError
 } from "./errors.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE, migrationLoader } from "./migrations/index.js"
-import { decodePersistenceConfig } from "./PersistenceConfig.js"
+import { decodePersistenceConfig, type PersistenceConfig } from "./PersistenceConfig.js"
 import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, JournalModePragmaRow, MigrationLedgerRow } from "./schemas.js"
 
 /** Busy timeout used for bounded local write contention. */
@@ -166,6 +169,95 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
   yield* verify
 })
 
+const checkpointBeforeMigration = Effect.fn("Database.checkpointBeforeMigration")(function*(
+  sql: SqlClient.SqlClient
+): Effect.fn.Return<void, MigrationWriteBarrierError> {
+  yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`.pipe(
+    Effect.catchCause(() => new MigrationWriteBarrierError({ phase: "acquire" }))
+  )
+})
+
+const verifyCheckpointStayedQuiescent = Effect.fn("Database.verifyCheckpointStayedQuiescent")(function*(
+  databaseFile: string
+): Effect.fn.Return<void, MigrationWriteBarrierError, FileSystem.FileSystem> {
+  const fileSystem = yield* FileSystem.FileSystem
+  const walFile = `${databaseFile}-wal`
+  const exists = yield* fileSystem.exists(walFile).pipe(
+    Effect.mapError(() => new MigrationWriteBarrierError({ phase: "verify" }))
+  )
+  if (!exists) return
+  const info = yield* fileSystem.stat(walFile).pipe(
+    Effect.mapError(() => new MigrationWriteBarrierError({ phase: "verify" }))
+  )
+  if (info.type !== "File" || info.size !== 0n) {
+    return yield* new MigrationWriteBarrierError({ phase: "verify" })
+  }
+})
+
+/** Convert transaction commit, rollback, and interruption causes into a redacted typed failure. */
+export const sandboxMigrationTransaction = <Value, Failure, Requirements>(
+  transaction: Effect.Effect<Value, Failure, Requirements>
+): Effect.Effect<Value, Failure | MigrationWriteBarrierError, Requirements> =>
+  transaction.pipe(
+    Effect.catchCause((cause): Effect.Effect<never, Failure | MigrationWriteBarrierError> => {
+      const typedFailure = Cause.findErrorOption(cause)
+      if (Cause.hasDies(cause) || Cause.hasInterrupts(cause) || Option.isNone(typedFailure)) {
+        return Effect.fail<Failure | MigrationWriteBarrierError>(
+          new MigrationWriteBarrierError({ phase: "verify" })
+        )
+      }
+      return Effect.fail<Failure | MigrationWriteBarrierError>(typedFailure.value)
+    })
+  )
+
+/** Hold SQLite's reserved writer transaction across one migration-critical operation. */
+export const withMigrationWriteBarrier = <Value, Failure, Requirements>(
+  sql: SqlClient.SqlClient,
+  databaseSourceFile: string,
+  operation: Effect.Effect<Value, Failure, Requirements>
+): Effect.Effect<
+  Value,
+  Failure | MigrationWriteBarrierError,
+  FileSystem.FileSystem | Requirements
+> =>
+  checkpointBeforeMigration(sql).pipe(
+    Effect.andThen(
+      sandboxMigrationTransaction(sql.withTransaction(
+        verifyCheckpointStayedQuiescent(databaseSourceFile).pipe(Effect.andThen(operation))
+      )).pipe(
+        Effect.catchTag("SqlError", () => new MigrationWriteBarrierError({ phase: "acquire" }))
+      )
+    )
+  )
+
+const createPreMigrationBackup = Effect.fn("Database.createPreMigrationBackup")(function*(
+  config: PersistenceConfig,
+  migrationCount: number,
+  databaseSourceFile: string
+) {
+  const cryptoService = yield* Crypto.Crypto
+  const path = yield* Path.Path
+  const backupId = yield* cryptoService.randomUUIDv7.pipe(
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-ledger" }))
+  )
+  const fromVersion = EXPECTED_MIGRATIONS[migrationCount - 1]?.id ?? 0
+  const toVersion = EXPECTED_MIGRATIONS[EXPECTED_MIGRATIONS.length - 1]?.id ?? 0
+  const destination = path.join(
+    path.dirname(config.blobRoot),
+    "backups",
+    "pre-migration",
+    `v${fromVersion}-to-v${toVersion}`,
+    backupId
+  )
+  yield* Effect.scoped(
+    createVerifiedPreMigrationBackup({
+      destination,
+      databaseSourceFile,
+      persistenceConfig: config
+    })
+  )
+})
+
 const runMigrations = Effect.fn("Database.runMigrations")(function*(
   sql: SqlClient.SqlClient
 ): Effect.fn.Return<void, DatabaseInitializationError> {
@@ -184,17 +276,53 @@ const runMigrations = Effect.fn("Database.runMigrations")(function*(
   )
 })
 
-const DatabaseFromSql = Layer.effect(
-  Database,
-  migrationLock.withPermit(
+const initializeDatabase = Effect.fn("Database.initializeDatabase")(function*(
+  config: PersistenceConfig
+) {
+  yield* migrationLock.withPermit(
+    Effect.scoped(
+      Effect.gen(function*() {
+        const context = yield* Layer.build(
+          makeClientLayer(config.busyTimeoutMilliseconds, config.databaseUrl, 1)
+        )
+        const sql = Context.get(context, SqlClient.SqlClient)
+        const path = yield* Path.Path
+        const databaseSourceFile = yield* path.fromFileUrl(new URL(config.databaseUrl)).pipe(
+          Effect.mapError(() => new DatabaseInitializationError({ operation: "connect" }))
+        )
+
+        yield* configureAndVerifyPragmas(sql)
+        yield* withMigrationWriteBarrier(
+          sql,
+          databaseSourceFile,
+          Effect.gen(function*() {
+            yield* validateLedger(sql, "before-migration", 0)
+            const beforeMigration = yield* readMigrationLedger(sql).pipe(
+              Effect.mapError((error) =>
+                error._tag === "MigrationLedgerError"
+                  ? error
+                  : new DatabaseInitializationError({ operation: "verify-ledger" })
+              )
+            )
+            if (beforeMigration.length > 0 && beforeMigration.length < EXPECTED_MIGRATIONS.length) {
+              yield* createPreMigrationBackup(config, beforeMigration.length, databaseSourceFile)
+            }
+            yield* runMigrations(sql)
+            yield* validateLedger(sql, "after-migration", expectedLedgerLabels.length)
+          })
+        )
+      })
+    )
+  )
+})
+
+const databaseFromSql = () =>
+  Layer.effect(
+    Database,
     Effect.gen(function*() {
       const sql = yield* SqlClient.SqlClient
-
       yield* configureAndVerifyPragmas(sql)
-      yield* validateLedger(sql, "before-migration", 0)
-      yield* runMigrations(sql)
       yield* validateLedger(sql, "after-migration", expectedLedgerLabels.length)
-
       return Database.of({
         sql,
         transaction: sql.withTransaction,
@@ -202,7 +330,6 @@ const DatabaseFromSql = Layer.effect(
       })
     })
   )
-)
 
 const makeClientLayer = (
   busyTimeoutMilliseconds: number,
@@ -258,17 +385,23 @@ export const databaseLayer = (
   input: unknown
 ): Layer.Layer<
   Database,
-  PersistenceConfigError | DatabaseInitializationError | MigrationLedgerError
+  | BackupFailure
+  | DatabaseInitializationError
+  | MigrationLedgerError
+  | MigrationWriteBarrierError
+  | PersistenceConfigError,
+  Crypto.Crypto | FileSystem.FileSystem | Path.Path
 > =>
   Layer.unwrap(
     decodePersistenceConfig(input).pipe(
-      Effect.map(({ busyTimeoutMilliseconds, databaseUrl, maxConnections }) => {
+      Effect.flatMap((config) => initializeDatabase(config).pipe(Effect.as(config))),
+      Effect.map((config) => {
         const clientLayer = makeClientLayer(
-          busyTimeoutMilliseconds,
-          databaseUrl,
-          maxConnections
+          config.busyTimeoutMilliseconds,
+          config.databaseUrl,
+          config.maxConnections
         )
-        return DatabaseFromSql.pipe(Layer.provide(clientLayer))
+        return databaseFromSql().pipe(Layer.provide(clientLayer))
       })
     )
   )

@@ -117,16 +117,25 @@ const program = Effect.gen(function*() {
 
   const publicServerDeclarationPaths = {
     authIndex: path.join(serverRoot, "server/auth/index.d.ts"),
+    backupArchive: path.join(serverRoot, "server/persistence/backup/BackupArchive.d.ts"),
+    backupIndex: path.join(serverRoot, "server/persistence/backup/index.d.ts"),
+    backupManifest: path.join(serverRoot, "server/persistence/backup/BackupManifest.d.ts"),
     persistenceIndex: path.join(serverRoot, "server/persistence/index.d.ts"),
     serverIndex: path.join(serverRoot, "server/index.d.ts")
   }
   if (
     (yield* fs.exists(publicServerDeclarationPaths.authIndex)) &&
+    (yield* fs.exists(publicServerDeclarationPaths.backupArchive)) &&
+    (yield* fs.exists(publicServerDeclarationPaths.backupIndex)) &&
+    (yield* fs.exists(publicServerDeclarationPaths.backupManifest)) &&
     (yield* fs.exists(publicServerDeclarationPaths.persistenceIndex)) &&
     (yield* fs.exists(publicServerDeclarationPaths.serverIndex))
   ) {
     const declarationViolations = inspectServerDeclarationContract({
       authIndex: yield* fs.readFileString(publicServerDeclarationPaths.authIndex),
+      backupArchive: yield* fs.readFileString(publicServerDeclarationPaths.backupArchive),
+      backupIndex: yield* fs.readFileString(publicServerDeclarationPaths.backupIndex),
+      backupManifest: yield* fs.readFileString(publicServerDeclarationPaths.backupManifest),
       persistenceIndex: yield* fs.readFileString(publicServerDeclarationPaths.persistenceIndex),
       serverIndex: yield* fs.readFileString(publicServerDeclarationPaths.serverIndex)
     })

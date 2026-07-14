@@ -17,6 +17,8 @@ const isPrototypeImport = (importPath: string): boolean =>
 const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
+const QUIESCENT_BACKUP_REASON = "only Database can import the quiescent pre-migration backup helper"
+const BACKUP_ARCHIVE_CORE_REASON = "only backup entry points can import the archive assembly core"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
@@ -165,6 +167,19 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
 
   if (isPrototypeImport(importPath)) return PROTOTYPE_RUNTIME_REASON
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
+  if (
+    target === "src/server/persistence/backup/QuiescentBackup" &&
+    normalizedSource !== "src/server/persistence/Database"
+  ) {
+    return QUIESCENT_BACKUP_REASON
+  }
+  if (
+    target === "src/server/persistence/backup/BackupArchiveCore" &&
+    normalizedSource !== "src/server/persistence/backup/BackupArchive" &&
+    normalizedSource !== "src/server/persistence/backup/QuiescentBackup"
+  ) {
+    return BACKUP_ARCHIVE_CORE_REASON
+  }
   if (
     target !== undefined &&
     isWithin(target, "src/server/plugins/internal") &&

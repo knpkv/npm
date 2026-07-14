@@ -1,3 +1,4 @@
+import type { FileSystem, Path } from "effect"
 import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 
 import type { Actor, Role } from "../../domain/actors.js"
@@ -305,7 +306,11 @@ export class Auth extends Context.Service<Auth, Effect.Success<typeof makeAuth>>
 /** Build a standalone Auth service from persistence configuration. */
 export const authLayer = (
   persistenceConfigInput: unknown
-): Layer.Layer<Auth, Layer.Error<ReturnType<typeof databaseLayer>>, Crypto.Crypto> => {
+): Layer.Layer<
+  Auth,
+  Layer.Error<ReturnType<typeof databaseLayer>>,
+  Crypto.Crypto | FileSystem.FileSystem | Path.Path
+> => {
   const database = databaseLayer(persistenceConfigInput)
   const quarantine = QuarantineRepository.layer.pipe(Layer.provide(database))
   const repository = AuthRepository.layer.pipe(

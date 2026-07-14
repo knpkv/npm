@@ -1,9 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Result, Schema } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Path, Result, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 
-import { BUSY_TIMEOUT_MILLISECONDS, Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import {
+  BUSY_TIMEOUT_MILLISECONDS,
+  Database,
+  databaseLayer,
+  sandboxMigrationTransaction,
+  withMigrationWriteBarrier
+} from "../../src/server/persistence/Database.js"
 import { decodePersistenceConfig, PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 
 const testConfig = Effect.gen(function*() {
@@ -54,6 +62,134 @@ describe("Database", () => {
         { concurrency: "unbounded" }
       )
       assert.isTrue(exits.every((exit) => exit._tag === "Success"))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("does not create pre-migration archives for fresh or current schemas", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const config = yield* testConfig
+      const acquire = Effect.gen(function*() {
+        yield* Database
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+      yield* acquire
+      yield* acquire
+      const backupRoot = path.join(path.dirname(config.blobRoot), "backups", "pre-migration")
+      assert.isFalse(yield* fileSystem.exists(backupRoot))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect(
+    "holds a cross-client writer barrier for the complete migration-critical section",
+    () =>
+      Effect.gen(function*() {
+        const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            yield* Database
+          }).pipe(Effect.provide(databaseLayer(config)))
+        )
+        const path = yield* Path.Path
+        const databaseFile = yield* path.fromFileUrl(new URL(config.databaseUrl))
+        const clientConfig: LibsqlClient.LibsqlClientConfig.Full & { readonly timeout: number } = {
+          concurrency: 1,
+          timeout: 10,
+          url: config.databaseUrl
+        }
+        const clientLayer = LibsqlClient.layer(clientConfig)
+        const firstContext = yield* Layer.build(clientLayer)
+        const secondContext = yield* Layer.build(clientLayer)
+        const first = Context.get(firstContext, SqlClient.SqlClient)
+        const second = Context.get(secondContext, SqlClient.SqlClient)
+        yield* second`PRAGMA busy_timeout = 50`
+        const acquired = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const barrier = yield* Effect.forkChild(
+          withMigrationWriteBarrier(
+            first,
+            databaseFile,
+            Deferred.succeed(acquired, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          )
+        )
+        yield* Deferred.await(acquired)
+        const competingWrite = yield* second`INSERT INTO workspaces (
+        workspace_id, display_name, revision, created_at, updated_at
+      ) VALUES (
+        '01890f6f-6d6a-7cc0-98d2-000000000099', 'Competing writer', 1,
+        '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
+      )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(competingWrite))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(barrier)
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    10_000
+  )
+
+  it.effect("sandboxes injected commit and rollback defects as redacted tagged failures", () =>
+    Effect.gen(function*() {
+      const controlledCommitFailure = Effect.succeed("operation-succeeded").pipe(
+        Effect.andThen(Effect.die("injected-commit-failure"))
+      )
+      const controlledRollbackFailure = Effect.fail("operation-failed").pipe(
+        Effect.catchCause(() => Effect.die("injected-rollback-failure"))
+      )
+      const exits = yield* Effect.all([
+        sandboxMigrationTransaction(controlledCommitFailure).pipe(Effect.exit),
+        sandboxMigrationTransaction(controlledRollbackFailure).pipe(Effect.exit)
+      ])
+      for (const exit of exits) {
+        assert.isTrue(Exit.isFailure(exit))
+        if (Exit.isFailure(exit)) {
+          assert.isFalse(Cause.hasDies(exit.cause))
+          const failure = Cause.findErrorOption(exit.cause)
+          assert.isTrue(Option.isSome(failure))
+          if (Option.isSome(failure)) assert.strictEqual(failure.value._tag, "MigrationWriteBarrierError")
+        }
+      }
+    }))
+
+  it.effect("preserves a typed operation failure for the transaction rollback path", () =>
+    Effect.gen(function*() {
+      const failure = yield* sandboxMigrationTransaction(Effect.fail("typed-operation-failure")).pipe(
+        Effect.flip
+      )
+      assert.strictEqual(failure, "typed-operation-failure")
+    }))
+
+  it.effect("commits success and rolls back the outer transaction after a nested savepoint failure", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      const rows = yield* Effect.gen(function*() {
+        const database = yield* Database
+        const successful = database.sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000091', 'Committed', 1,
+          '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
+        )`
+        yield* sandboxMigrationTransaction(database.transaction(successful))
+        const outerInsert = database.sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000092', 'Outer rollback', 1,
+          '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
+        )`
+        const nestedInsert = database.sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000093', 'Nested rollback', 1,
+          '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
+        )`
+        yield* sandboxMigrationTransaction(
+          database.transaction(
+            outerInsert.pipe(
+              Effect.andThen(database.transaction(nestedInsert.pipe(Effect.andThen(Effect.fail("nested")))))
+            )
+          )
+        ).pipe(Effect.ignore)
+        return yield* database.sql<{ readonly workspaceId: string }>`SELECT workspace_id AS workspaceId
+          FROM workspaces ORDER BY workspace_id`
+      }).pipe(Effect.provide(databaseLayer(config)))
+      assert.deepStrictEqual(rows, [{ workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000091" }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rolls back a failed transaction", () =>

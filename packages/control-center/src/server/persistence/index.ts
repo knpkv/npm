@@ -1,4 +1,5 @@
 /** Durable server-only Control Center state. */
+export * from "./backup/index.js"
 export type { PutContentInput, PutContentResult } from "./ContentStore.js"
 export * from "./errors.js"
 export type { BlobRange, BlobRangeRead, BlobReadStream, BlobVerification } from "./object-store/BlobStore.js"
