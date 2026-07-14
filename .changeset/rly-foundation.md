@@ -66,7 +66,9 @@ Add an isolated complete diff entry with explicit file-content states, a
 bird's-eye workbench. Pin and wrap `@pierre/diffs` `CodeView` with split and
 stacked layouts, wrapping, context, selection, annotations, item versioning,
 scrolling, virtualization, bounded workers, and an announced synchronous
-fallback that never silently omits source changes.
+fallback that never silently omits source changes. Give review findings an
+optional implementation-ready prevention plan covering the enforcement layer,
+target rule, reject/allow fixtures, and known detection boundary.
 
 Publish a fail-closed, schema-validated agent registry with deterministic
 component, variant, state, accessibility, search, and source metadata. Add

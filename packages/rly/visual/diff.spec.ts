@@ -64,6 +64,31 @@ test("keeps the six-file bird-eye review, people, and stale evidence visible", a
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-workbench.png") })
 })
 
+test("opens agent prevention details from the keyboard without compact overflow", async ({ page }, testInfo) => {
+  await page.setViewportSize({ height: 1_200, width: 320 })
+  await page.goto(story("diff-difffinding--compact-forced-colors", "active"))
+
+  const prevention = page.locator("[data-rly-diff-finding-prevention='eslint']")
+  const summary = prevention.locator("summary")
+  await expect(prevention).toHaveAttribute("open", "")
+  await summary.focus()
+  await expect(summary).toBeFocused()
+  await summary.press("Enter")
+  await expect(prevention).not.toHaveAttribute("open")
+  await summary.press("Enter")
+  await expect(prevention).toHaveAttribute("open", "")
+  await expect(prevention.getByText("Matcher or invariant")).toBeVisible()
+  await expect(prevention.getByText("Must reject")).toBeVisible()
+  await expect(prevention.getByText("Must allow")).toBeVisible()
+  await expect(prevention.getByText("Boundary")).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("diff-prevention-320.png")
+  })
+})
+
 test("shows the complete 500-file inventory and compact forced-color states", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 900, width: 1_200 })
   await page.goto(story("diff-difffiletree--complete-five-hundred"))

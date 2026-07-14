@@ -18,6 +18,17 @@ const agentFinding = {
   authorName: "Relay reviewer",
   body: "The retry branch creates a fresh idempotency key and can authorize the same payment twice.",
   id: "finding-agent-1",
+  prevention: {
+    boundary: "Ignore generated SDK clients, where retry ownership belongs to the generator.",
+    enforcement: "eslint",
+    existingRuleOrConfig: "local-rules/no-retry-key-replacement",
+    invalidFixture: "A retry callback calls createKey() before the second authorization.",
+    matcherOrInvariant: "A retry callback must reuse the immutable key captured before the callback.",
+    sourcePaths: ["packages/payments/src/**"],
+    summary: "Keep retry attempts bound to the original operation key.",
+    targetFile: "eslint-local-rules.cjs",
+    validFixture: "A retry callback reuses payment.idempotencyKey."
+  },
   severity: "critical",
   source: "agent",
   status: "open",
@@ -25,7 +36,7 @@ const agentFinding = {
 } satisfies RlyDiffFinding
 
 const humanFinding = {
-  ...agentFinding,
+  anchor: agentFinding.anchor,
   authorName: "Mina Chen",
   body: "The audit label should use the customer-facing payment reference.",
   id: "finding-human-1",
@@ -62,6 +73,17 @@ type Story = StoryObj<typeof meta>
 export const HumanAndAgent: Story = {
   play: async ({ args, canvas, canvasElement }) => {
     await expect(canvas.getByText("Agent finding · not an approval")).toBeVisible()
+    await expect(canvas.getByText("Prevent recurrence")).toBeVisible()
+    const prevention = canvasElement.querySelector<HTMLDetailsElement>("[data-rly-diff-finding-prevention='eslint']")
+    if (prevention === null) throw new Error("Agent prevention disclosure did not render")
+    const preventionSummary = prevention.querySelector<HTMLElement>("summary")
+    if (preventionSummary === null) throw new Error("Agent prevention summary did not render")
+    await userEvent.click(preventionSummary)
+    await expect(prevention).toHaveAttribute("open")
+    await expect(within(prevention).getByText("Matcher or invariant")).toBeVisible()
+    await expect(within(prevention).getByText("Must reject")).toBeVisible()
+    await expect(within(prevention).getByText("Must allow")).toBeVisible()
+    await expect(within(prevention).getByText("Boundary")).toBeVisible()
     await expect(canvas.getByText("Human finding")).toBeVisible()
     const agentCard = canvasElement.querySelector<HTMLElement>("[data-rly-diff-finding-source='agent']")
     if (agentCard === null) throw new Error("Agent finding did not render")
@@ -103,6 +125,12 @@ export const CompactForcedColors: Story = {
   play: async ({ canvasElement }) => {
     const canary = canvasElement.querySelector<HTMLElement>("[data-diff-finding-compact]")
     if (canary === null) throw new Error("DiffFinding compact canary did not render")
+    const prevention = canary.querySelector<HTMLDetailsElement>("[data-rly-diff-finding-prevention='eslint']")
+    if (prevention === null) throw new Error("Compact prevention disclosure did not render")
+    const preventionSummary = prevention.querySelector<HTMLElement>("summary")
+    if (preventionSummary === null) throw new Error("Compact prevention summary did not render")
+    await userEvent.click(preventionSummary)
+    await expect(prevention).toHaveAttribute("open")
     await expect(canary.scrollWidth).toBeLessThanOrEqual(canary.clientWidth)
     canvasElement.dataset.diffFindingCompactPlayComplete = "true"
   },

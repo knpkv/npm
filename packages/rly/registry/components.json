@@ -1060,6 +1060,14 @@
         {
           "kind": "type",
           "name": "RlyDiffFindingAnchor"
+        },
+        {
+          "kind": "type",
+          "name": "RlyDiffFindingPrevention"
+        },
+        {
+          "kind": "type",
+          "name": "RlyDiffFindingPreventionEnforcement"
         }
       ],
       "files": {

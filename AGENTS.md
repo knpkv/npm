@@ -98,6 +98,17 @@ Ship the applicable guardrail with the fix and prove it catches the original fai
 
 Review agents must include a **Prevention** note with every finding. It should propose the concrete static-analysis matcher or lint rule when the defect is mechanically recognizable, otherwise name the behavioral test or repository instruction that should protect the invariant. A reviewer may recommend no new rule only with a short explanation of why the pattern cannot be detected reliably without excessive false positives.
 
+Make every **Prevention** note implementation-ready:
+
+- classify it as `ast-grep`, `ESLint`, `type-check`, `test`, `instruction`, or `none`;
+- name the existing rule or configuration to extend before proposing a new one;
+- identify the intended rule/configuration file and the source paths it should cover;
+- sketch the matcher or invariant precisely enough for the remediation agent to implement it;
+- name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
+- call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
+
+The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 ### Versioning and Publishing

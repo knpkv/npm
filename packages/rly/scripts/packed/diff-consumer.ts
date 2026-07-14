@@ -26,6 +26,8 @@ export const renderDiffConsumerImports = (): string =>
   type RlyDiffFileContent,
   type RlyDiffFinding,
   type RlyDiffFindingAnchor,
+  type RlyDiffFindingPrevention,
+  type RlyDiffFindingPreventionEnforcement,
   type RlyDiffFindingFilter,
   type RlyDiffInventory,
   type RlyDiffLayout,
@@ -43,6 +45,17 @@ export const renderDiffConsumerFixture = (): string =>
   path: "src/release.ts"
 }
 const packedDiffInventory: RlyDiffInventory = { files: [packedDiffFile], state: "ready" }
+const packedDiffPrevention: RlyDiffFindingPrevention = {
+  boundary: "Exclude provider-generated clients.",
+  enforcement: "test",
+  existingRuleOrConfig: "release revision contract suite",
+  invalidFixture: "A changed revision is accepted without a matching evidence record.",
+  matcherOrInvariant: "Every changed revision retains an immutable matching evidence record.",
+  sourcePaths: ["packages/control-center/src/domain/**"],
+  summary: "Keep revision and evidence validation coupled.",
+  targetFile: "test/release-revision.test.ts",
+  validFixture: "A changed revision includes the matching immutable evidence record."
+}
 const packedDiffFinding: RlyDiffFinding = {
   anchor: {
     contextHash: "context-7f4c9b1",
@@ -56,6 +69,7 @@ const packedDiffFinding: RlyDiffFinding = {
   authorName: "Release Guardian",
   body: "The release guard now preserves the immutable revision.",
   id: "packed-diff-finding",
+  prevention: packedDiffPrevention,
   severity: "note",
   source: "agent",
   status: "open",
@@ -91,6 +105,8 @@ type PackedDiffPublicTypes = readonly [
   RlyDiffFileContent,
   RlyDiffFinding,
   RlyDiffFindingAnchor,
+  RlyDiffFindingPrevention,
+  RlyDiffFindingPreventionEnforcement,
   RlyDiffFindingFilter,
   RlyDiffInventory,
   RlyDiffLayout,

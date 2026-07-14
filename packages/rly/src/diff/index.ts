@@ -11,7 +11,13 @@ export type {
   RlyDiffInventory
 } from "./DiffFileTree.js"
 export { DiffFinding } from "./DiffFinding.js"
-export type { DiffFindingProps, RlyDiffFinding, RlyDiffFindingAnchor } from "./DiffFinding.js"
+export type {
+  DiffFindingProps,
+  RlyDiffFinding,
+  RlyDiffFindingAnchor,
+  RlyDiffFindingPrevention,
+  RlyDiffFindingPreventionEnforcement
+} from "./DiffFinding.js"
 export { DiffHeader } from "./DiffHeader.js"
 export type { DiffHeaderProps, RlyDiffFindingFilter, RlyDiffLayout } from "./DiffHeader.js"
 export { DiffWorkbench } from "./DiffWorkbench.js"

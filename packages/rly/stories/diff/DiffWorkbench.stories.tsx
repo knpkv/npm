@@ -3,7 +3,7 @@ import { type ReactElement, useState } from "react"
 import { expect, userEvent } from "storybook/test"
 import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
 import { DiffFileTree, type RlyDiffFile } from "../../src/diff/DiffFileTree.js"
-import { DiffFinding, type RlyDiffFinding } from "../../src/diff/DiffFinding.js"
+import { DiffFinding, type RlyDiffFinding, type RlyDiffFindingPrevention } from "../../src/diff/DiffFinding.js"
 import { DiffHeader, type RlyDiffFindingFilter, type RlyDiffLayout } from "../../src/diff/DiffHeader.js"
 import {
   DiffWorkbench,
@@ -94,6 +94,18 @@ const DiffPreview = ({
   )
 }
 
+const agentPrevention = {
+  boundary: "Generated clients keep their generator-owned validation contract.",
+  enforcement: "test",
+  existingRuleOrConfig: "payment retry contract suite",
+  invalidFixture: "A gateway retry creates a second authorization key.",
+  matcherOrInvariant: "Every retry attempt for one payment reuses its immutable authorization key.",
+  sourcePaths: ["packages/payments/src/**"],
+  summary: "Keep gateway retries bound to one authorization key.",
+  targetFile: "packages/payments/test/retry-contract.test.ts",
+  validFixture: "A gateway retry reuses the first attempt's authorization key."
+} satisfies RlyDiffFindingPrevention
+
 const findings = [
   {
     anchor: {
@@ -108,6 +120,7 @@ const findings = [
     authorName: "Relay reviewer",
     body: "The retry now reuses the immutable payment key, preventing a second authorization.",
     id: "agent-current",
+    prevention: agentPrevention,
     severity: "note",
     source: "agent",
     status: "resolved",
@@ -146,6 +159,11 @@ const findings = [
     authorName: "Relay reviewer",
     body: "The evidence list previously omitted the release candidate ticket.",
     id: "agent-stale",
+    prevention: {
+      enforcement: "none",
+      rationale: "The release evidence policy is domain-specific and cannot be inferred safely from syntax alone.",
+      summary: "Keep this invariant in the release review instructions."
+    },
     severity: "warning",
     source: "agent",
     status: "open",
@@ -296,26 +314,30 @@ export const CompactForcedColors: Story = {
   )
 }
 
-const staleFindings = Array.from({ length: 12 }, (_, index): RlyDiffFinding => ({
-  anchor: {
-    contextHash: `ctx-stale-${index}`,
-    currentRevision: "8fa21c7",
-    fileId: "audit",
-    line: index + 1,
-    path: "src/audit/payment-evidence.ts",
-    reason: "A newer revision replaced this immutable review anchor.",
-    revision: "55c102a",
-    side: "before",
-    state: "stale"
-  },
-  authorName: index % 2 === 0 ? "Relay reviewer" : "Mina Chen",
-  body: `Preserved review evidence ${index + 1} remains readable after the source revision changed.`,
-  id: `stale-${index}`,
-  severity: index % 3 === 0 ? "warning" : "note",
-  source: index % 2 === 0 ? "agent" : "human",
-  status: "open",
-  title: `Historical finding ${index + 1}`
-}))
+const staleFindings = Array.from({ length: 12 }, (_, index): RlyDiffFinding => {
+  const finding = {
+    anchor: {
+      contextHash: `ctx-stale-${index}`,
+      currentRevision: "8fa21c7",
+      fileId: "audit",
+      line: index + 1,
+      path: "src/audit/payment-evidence.ts",
+      reason: "A newer revision replaced this immutable review anchor.",
+      revision: "55c102a",
+      side: "before",
+      state: "stale"
+    },
+    authorName: index % 2 === 0 ? "Relay reviewer" : "Mina Chen",
+    body: `Preserved review evidence ${index + 1} remains readable after the source revision changed.`,
+    id: `stale-${index}`,
+    severity: index % 3 === 0 ? "warning" : "note",
+    status: "open",
+    title: `Historical finding ${index + 1}`
+  } satisfies Pick<RlyDiffFinding, "anchor" | "authorName" | "body" | "id" | "severity" | "status" | "title">
+  return index % 2 === 0
+    ? { ...finding, prevention: agentPrevention, source: "agent" }
+    : { ...finding, source: "human" }
+})
 
 export const StaticFindingsOverflow: Story = {
   args: {

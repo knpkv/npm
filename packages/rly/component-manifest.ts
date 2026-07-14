@@ -235,7 +235,9 @@ export const componentManifest = {
         { kind: "value", name: "DiffFinding" },
         { kind: "type", name: "DiffFindingProps" },
         { kind: "type", name: "RlyDiffFinding" },
-        { kind: "type", name: "RlyDiffFindingAnchor" }
+        { kind: "type", name: "RlyDiffFindingAnchor" },
+        { kind: "type", name: "RlyDiffFindingPrevention" },
+        { kind: "type", name: "RlyDiffFindingPreventionEnforcement" }
       ],
       name: "DiffFinding",
       publicEntry: "diff",

@@ -27,17 +27,45 @@ export type RlyDiffFindingAnchor =
       readonly state: "stale"
     }
 
+/** Static or behavioral enforcement layers available to a prevention plan. */
+export type RlyDiffFindingPreventionEnforcement = "ast-grep" | "eslint" | "instruction" | "test" | "type-check"
+
+/** Implementation-ready guardrail suggested by a review finding. */
+export type RlyDiffFindingPrevention =
+  | {
+      readonly boundary: string
+      readonly enforcement: RlyDiffFindingPreventionEnforcement
+      readonly existingRuleOrConfig: string
+      readonly invalidFixture: string
+      readonly matcherOrInvariant: string
+      readonly sourcePaths: ReadonlyArray<string>
+      readonly summary: string
+      readonly targetFile: string
+      readonly validFixture: string
+    }
+  | {
+      readonly enforcement: "none"
+      readonly rationale: string
+      readonly summary: string
+    }
+
 /** Semantic presentation data for one human or agent-authored finding. */
-export interface RlyDiffFinding {
+interface RlyDiffFindingBase {
   readonly anchor: RlyDiffFindingAnchor
   readonly authorName: string
   readonly body: string
   readonly id: string
   readonly severity: "note" | "warning" | "critical"
-  readonly source: "human" | "agent"
   readonly status: "open" | "resolved"
   readonly title: string
 }
+
+/** Semantic presentation data for one human or agent-authored finding. */
+export type RlyDiffFinding = RlyDiffFindingBase &
+  (
+    | { readonly prevention: RlyDiffFindingPrevention; readonly source: "agent" }
+    | { readonly prevention?: RlyDiffFindingPrevention; readonly source: "human" }
+  )
 
 /** Props for a semantic finding card with an application-controlled anchor callback. */
 export type DiffFindingProps = Omit<ComponentPropsWithRef<"article">, "aria-label" | "children"> & {
@@ -63,7 +91,39 @@ const validateFinding = (finding: RlyDiffFinding): void => {
       requireText(finding.anchor.currentRevision, "DiffFinding currentRevision")
     }
   }
+  const prevention = finding.prevention
+  if (finding.source === "agent" && prevention === undefined) {
+    throw new Error("DiffFinding agent findings require a prevention plan")
+  }
+  if (prevention !== undefined) {
+    requireText(prevention.summary, "DiffFinding prevention summary")
+    if (prevention.enforcement === "none") {
+      requireText(prevention.rationale, "DiffFinding prevention rationale")
+    } else {
+      requireText(prevention.existingRuleOrConfig, "DiffFinding prevention existingRuleOrConfig")
+      requireText(prevention.targetFile, "DiffFinding prevention targetFile")
+      requireText(prevention.matcherOrInvariant, "DiffFinding prevention matcherOrInvariant")
+      requireText(prevention.invalidFixture, "DiffFinding prevention invalidFixture")
+      requireText(prevention.validFixture, "DiffFinding prevention validFixture")
+      requireText(prevention.boundary, "DiffFinding prevention boundary")
+      if (prevention.sourcePaths.length === 0) {
+        throw new Error("DiffFinding prevention sourcePaths must contain at least one path")
+      }
+      for (const sourcePath of prevention.sourcePaths) {
+        requireText(sourcePath, "DiffFinding prevention sourcePath")
+      }
+    }
+  }
 }
+
+const enforcementLabels = {
+  "ast-grep": "ast-grep",
+  eslint: "ESLint",
+  instruction: "Agent instruction",
+  none: "Human judgment",
+  test: "Test",
+  "type-check": "Type check"
+} satisfies Readonly<Record<RlyDiffFindingPrevention["enforcement"], string>>
 
 /** Render a finding as evidence; agent authorship never implies human approval. */
 export const DiffFinding = ({ className, finding, onAnchorActivate, ...props }: DiffFindingProps): ReactElement => {
@@ -96,6 +156,57 @@ export const DiffFinding = ({ className, finding, onAnchorActivate, ...props }: 
         <h2 id={titleId}>{finding.title}</h2>
         <p>{finding.body}</p>
       </section>
+
+      {finding.prevention === undefined ? null : (
+        <details className={style("prevention")} data-rly-diff-finding-prevention={finding.prevention.enforcement}>
+          <summary>
+            <span className={style("preventionSummary")}>
+              <span className={style("preventionCopy")}>
+                <strong>Prevent recurrence</strong>
+                <span>{finding.prevention.summary}</span>
+              </span>
+              <code>{enforcementLabels[finding.prevention.enforcement]}</code>
+              <span aria-hidden="true" className={style("preventionIndicator")} />
+            </span>
+          </summary>
+          {finding.prevention.enforcement === "none" ? (
+            <p className={style("rationale")}>{finding.prevention.rationale}</p>
+          ) : (
+            <dl>
+              <div>
+                <dt>Extend</dt>
+                <dd>{finding.prevention.existingRuleOrConfig}</dd>
+              </div>
+              <div>
+                <dt>Change</dt>
+                <dd>
+                  <code>{finding.prevention.targetFile}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Cover</dt>
+                <dd>{finding.prevention.sourcePaths.join(", ")}</dd>
+              </div>
+              <div>
+                <dt>Matcher or invariant</dt>
+                <dd>{finding.prevention.matcherOrInvariant}</dd>
+              </div>
+              <div>
+                <dt>Must reject</dt>
+                <dd>{finding.prevention.invalidFixture}</dd>
+              </div>
+              <div>
+                <dt>Must allow</dt>
+                <dd>{finding.prevention.validFixture}</dd>
+              </div>
+              <div>
+                <dt>Boundary</dt>
+                <dd>{finding.prevention.boundary}</dd>
+              </div>
+            </dl>
+          )}
+        </details>
+      )}
 
       <dl className={style("anchorDetails")}>
         <div>
