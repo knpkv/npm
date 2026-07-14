@@ -1100,11 +1100,18 @@ describe("Control Center CLI", () => {
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-invalid-legacy-" })
       yield* fileSystem.chmod(root, 0o700)
       const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const sourceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-cli-invalid-legacy-source-"
+      })
+      yield* fileSystem.chmod(sourceRoot, 0o700)
+      const sourcePaths = yield* decodeControlCenterDataPaths(sourceRoot)
       yield* Effect.gen(function*() {
         const database = yield* Database
         yield* database.sql`DROP TABLE control_center_migrations`
-      }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
+        yield* database.sql`PRAGMA wal_checkpoint(TRUNCATE)`
+      }).pipe(Effect.provide(databaseLayer(sourcePaths.persistenceConfig)), Effect.scoped)
       const databasePath = path.join(root, "control-center.db")
+      yield* fileSystem.copyFile(path.join(sourceRoot, "control-center.db"), databasePath)
       yield* fileSystem.writeFile(`${databasePath}-wal`, Uint8Array.from([1, 2, 3, 4]), { mode: 0o600 })
       yield* fileSystem.writeFile(`${databasePath}-journal`, Uint8Array.from([5, 6, 7, 8]), { mode: 0o600 })
       yield* fileSystem.writeFile(`${databasePath}-shm`, Uint8Array.from([9, 10, 11, 12]), { mode: 0o600 })
