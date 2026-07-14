@@ -26,6 +26,13 @@ export default defineConfig({
           ]
         },
         {
+          label: "Local AI",
+          items: [
+            { label: "Codex Adapter", link: "/ai-codex/" },
+            { label: "Claude Adapter", link: "/ai-claude/" }
+          ]
+        },
+        {
           label: "Libraries",
           items: [
             { label: "rly Design System", link: "/rly/" },

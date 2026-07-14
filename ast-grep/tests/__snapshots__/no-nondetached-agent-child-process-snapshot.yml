@@ -1,0 +1,36 @@
+id: no-nondetached-agent-child-process
+snapshots:
+  ? |
+    ChildProcess.make("claude", ["--print"], {
+      detached: false,
+      shell: false
+    })
+  : labels:
+      - source: "detached: false"
+        style: primary
+        start: 45
+        end: 60
+      - source: |-
+          ChildProcess.make("claude", ["--print"], {
+            detached: false,
+            shell: false
+          })
+        style: secondary
+        start: 0
+        end: 79
+  ? |
+    ChildProcess.make("codex", {
+      detached: false
+    })
+  : labels:
+      - source: "detached: false"
+        style: primary
+        start: 31
+        end: 46
+      - source: |-
+          ChildProcess.make("codex", {
+            detached: false
+          })
+        style: secondary
+        start: 0
+        end: 49
