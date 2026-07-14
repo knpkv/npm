@@ -63,7 +63,7 @@
 
   .version {
     font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
-      var(--rly-font-code);
+      var(--rly-type-code-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
     overflow-wrap: anywhere;
@@ -139,6 +139,29 @@
   .dialogClose {
     display: flex;
     justify-content: flex-end;
+  }
+
+  @media (max-height: 30rem) {
+    .dialogSurface {
+      block-size: calc(100dvh - var(--rly-space-16));
+      gap: var(--rly-space-8);
+      max-block-size: calc(100dvh - var(--rly-space-16));
+      padding: var(--rly-space-12);
+    }
+
+    .dialogSurface > header > :first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-wrap: nowrap;
+    }
+
+    .dialogFrame {
+      gap: var(--rly-space-8);
+    }
+
+    .dialogFooter {
+      padding-block-start: var(--rly-space-8);
+    }
   }
 
   @media (max-width: 40rem) {

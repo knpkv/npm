@@ -20,7 +20,7 @@
     "lint:config": "node scripts/check-eslint-config.mjs",
     "lint:eslint": "eslint --no-error-on-unmatched-pattern \"**/{src,test,e2e,examples,dtslint}/**/*.{ts,tsx,mjs}\" \"**/scripts/**/*.{ts,tsx}\" \"packages/control-center/{vite,vitest,playwright}.config.ts\"",
     "lint:rly-colors": "pnpm --filter @knpkv/rly lint:colors",
-    "lint:rly-css-tokens": "pnpm --filter @knpkv/control-center lint:css-tokens",
+    "lint:rly-css-tokens": "pnpm --filter @knpkv/control-center lint:rly-css-tokens",
     "lint:ast": "ast-grep test && ast-grep scan --globs '!**/generated/**'",
     "lint:fix": "pnpm lint:eslint --fix && pnpm lint:ast --update-all",
     "format": "prettier --check .",

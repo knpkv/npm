@@ -99,7 +99,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
     margin: var(--rly-space-0);
-    padding: var(--rly-space-10) var(--rly-space-20);
+    padding: calc(var(--rly-space-8) + var(--rly-space-2)) var(--rly-space-20);
   }
 
   .anchorDetails div {
@@ -183,7 +183,7 @@
     .body,
     .anchorDetails,
     .footer {
-      padding-inline: var(--rly-space-14);
+      padding-inline: calc(var(--rly-space-12) + var(--rly-space-2));
     }
   }
 }

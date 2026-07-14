@@ -254,7 +254,8 @@ complete collaborator list, primary action, stages, workset, evidence, and
 contextual agent entry explicit. Primary owner and approver roles stay compact;
 the collaborator slot can carry every assignment without truncating cardinality.
 The application owns responsive selection through the `presentation` prop; rly
-does not inspect viewport state.
+does not inspect viewport state. Optional shared-transition names are validated
+as unique, non-reserved CSS custom identifiers before they reach inline styles.
 
 `WorksetCard` keeps Jira work, CodeCommit pull-request groups, relationship
 gaps, and CodePipeline executions together without flattening them into a Jira

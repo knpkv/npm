@@ -5,9 +5,17 @@ export interface RlyCssTokenViolation {
   readonly token: string
 }
 
+interface CssBlock {
+  readonly close: number
+  readonly header: string
+  readonly open: number
+  readonly parent: number | null
+}
+
 const CUSTOM_PROPERTY_DECLARATION = /(?:^|[;{])\s*(--rly-[A-Za-z0-9_-]+)\s*:/gmu
-const CUSTOM_PROPERTY_REGISTRATION = /@property\s+(--rly-[A-Za-z0-9_-]+)\s*\{/giu
 const CUSTOM_PROPERTY_REFERENCE = /\bvar\s*\(\s*(--rly-[A-Za-z0-9_-]+)/giu
+const RLY_PROPERTY_HEADER = /^@property\s+(--rly-[A-Za-z0-9_-]+)\s*$/iu
+const CSS_WIDE_KEYWORDS = new Set(["inherit", "initial", "revert", "revert-layer", "unset"])
 
 const sanitizeCss = (source: string): string => {
   let isComment = false
@@ -60,22 +68,154 @@ const sanitizeCss = (source: string): string => {
   return sanitized
 }
 
-const collectMatches = (source: string, pattern: RegExp): ReadonlySet<string> => {
-  const matches = new Set<string>()
-  for (const match of source.matchAll(pattern)) {
-    const token = match[1]
-    if (token !== undefined) matches.add(token)
+const cssBlocks = (source: string): ReadonlyArray<CssBlock> => {
+  const blocks: Array<{ close: number; header: string; open: number; parent: number | null }> = []
+  const stack: Array<number> = []
+  let statementStart = 0
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source.charAt(index)
+    if (character === "{") {
+      const blockIndex = blocks.length
+      blocks.push({
+        close: source.length,
+        header: source.slice(statementStart, index).trim(),
+        open: index,
+        parent: stack.at(-1) ?? null
+      })
+      stack.push(blockIndex)
+      statementStart = index + 1
+    } else if (character === ";") {
+      statementStart = index + 1
+    } else if (character === "}") {
+      const blockIndex = stack.pop()
+      if (blockIndex !== undefined) {
+        const block = blocks[blockIndex]
+        if (block !== undefined) blocks[blockIndex] = { ...block, close: index }
+      }
+      statementStart = index + 1
+    }
   }
-  return matches
+
+  return blocks
 }
 
-/** Extract rly custom properties declared or registered by one stylesheet. */
+const containingBlock = (blocks: ReadonlyArray<CssBlock>, index: number): number | null => {
+  let containing: number | null = null
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+    const block = blocks[blockIndex]
+    if (block !== undefined && block.open < index && index < block.close) containing = blockIndex
+  }
+  return containing
+}
+
+const descriptorValue = (
+  source: string,
+  sanitized: string,
+  block: CssBlock,
+  descriptor: string
+): string | null => {
+  const blockSource = sanitized.slice(block.open + 1, block.close)
+  const pattern = new RegExp(`(?:^|;)\\s*${descriptor}\\s*:`, "imu")
+  const match = pattern.exec(blockSource)
+  if (match === null) return null
+  const valueStart = block.open + 1 + match.index + match[0].length
+  const semicolon = sanitized.indexOf(";", valueStart)
+  const valueEnd = semicolon === -1 || semicolon > block.close ? block.close : semicolon
+
+  let withoutComments = ""
+  let isComment = false
+  for (let index = valueStart; index < valueEnd; index += 1) {
+    const character = source.charAt(index)
+    const nextCharacter = source.charAt(index + 1)
+    if (isComment) {
+      if (character === "*" && nextCharacter === "/") {
+        index += 1
+        isComment = false
+      }
+    } else if (character === "/" && nextCharacter === "*") {
+      index += 1
+      isComment = true
+    } else {
+      withoutComments += character
+    }
+  }
+
+  const value = withoutComments.trim()
+  return value.length === 0 ? null : value
+}
+
+const hasUsablePropertyRegistration = (source: string, sanitized: string, block: CssBlock): boolean => {
+  const syntax = descriptorValue(source, sanitized, block, "syntax")
+  const inherits = descriptorValue(source, sanitized, block, "inherits")?.toLowerCase()
+  const initialValue = descriptorValue(source, sanitized, block, "initial-value")
+  if (syntax === null || (inherits !== "false" && inherits !== "true") || initialValue === null) return false
+  const syntaxQuote = syntax.charAt(0)
+  if ((syntaxQuote !== "\"" && syntaxQuote !== "'") || syntax.at(-1) !== syntaxQuote) return false
+
+  const normalizedInitialValue = initialValue.toLowerCase()
+  return !CSS_WIDE_KEYWORDS.has(normalizedInitialValue) && !/\bvar\s*\(/iu.test(sanitizeCss(initialValue))
+}
+
+const isUnconditionalBlock = (blocks: ReadonlyArray<CssBlock>, block: CssBlock): boolean => {
+  let parent = block.parent
+  while (parent !== null) {
+    const parentBlock = blocks[parent]
+    if (parentBlock === undefined || !parentBlock.header.toLowerCase().startsWith("@layer")) return false
+    parent = parentBlock.parent
+  }
+  return true
+}
+
+const isGlobalRootRule = (blocks: ReadonlyArray<CssBlock>, block: CssBlock): boolean =>
+  block.header === ":root" && isUnconditionalBlock(blocks, block)
+
+const tokenDefinitions = (
+  source: string,
+  sanitized: string,
+  blocks: ReadonlyArray<CssBlock>
+): {
+  readonly all: ReadonlySet<string>
+  readonly global: ReadonlySet<string>
+  readonly localByBlock: ReadonlyMap<number, ReadonlySet<string>>
+} => {
+  const all = new Set<string>()
+  const global = new Set<string>()
+  const localByBlock = new Map<number, Set<string>>()
+
+  for (const match of sanitized.matchAll(CUSTOM_PROPERTY_DECLARATION)) {
+    const token = match[1]
+    const index = match.index
+    if (token === undefined || index === undefined) continue
+    const blockIndex = containingBlock(blocks, index + match[0].length)
+    if (blockIndex === null) continue
+    const blockTokens = localByBlock.get(blockIndex) ?? new Set<string>()
+    blockTokens.add(token)
+    localByBlock.set(blockIndex, blockTokens)
+    all.add(token)
+    const block = blocks[blockIndex]
+    if (block !== undefined && isGlobalRootRule(blocks, block)) global.add(token)
+  }
+
+  for (const block of blocks) {
+    const property = RLY_PROPERTY_HEADER.exec(block.header)?.[1]
+    if (
+      property !== undefined &&
+      isUnconditionalBlock(blocks, block) &&
+      hasUsablePropertyRegistration(source, sanitized, block)
+    ) {
+      all.add(property)
+      global.add(property)
+    }
+  }
+
+  return { all, global, localByBlock }
+}
+
+/** Extract declared tokens and complete, usable custom-property registrations from a stylesheet contract. */
 export const declaredRlyCssTokens = (source: string): ReadonlySet<string> => {
   const sanitized = sanitizeCss(source)
-  return new Set([
-    ...collectMatches(sanitized, CUSTOM_PROPERTY_DECLARATION),
-    ...collectMatches(sanitized, CUSTOM_PROPERTY_REGISTRATION)
-  ])
+  return tokenDefinitions(source, sanitized, cssBlocks(sanitized)).all
 }
 
 const hasFallback = (source: string, tokenEnd: number): boolean => {
@@ -103,24 +243,29 @@ const sourcePosition = (source: string, index: number): { readonly column: numbe
   return { column: index - lineStart, line }
 }
 
-/** Find unresolved rly `var()` references while allowing local declarations and explicit fallbacks. */
+/** Find unresolved rly `var()` references using only generated, global, same-rule, or fallback definitions. */
 export const inspectRlyCssTokens = (
   sourcePath: string,
   source: string,
   generatedTokens: ReadonlySet<string>
 ): ReadonlyArray<RlyCssTokenViolation> => {
   const sanitized = sanitizeCss(source)
-  const localTokens = declaredRlyCssTokens(source)
+  const blocks = cssBlocks(sanitized)
+  const definitions = tokenDefinitions(source, sanitized, blocks)
   const violations: Array<RlyCssTokenViolation> = []
 
   for (const match of sanitized.matchAll(CUSTOM_PROPERTY_REFERENCE)) {
     const token = match[1]
     const index = match.index
+    const blockIndex = index === undefined ? null : containingBlock(blocks, index)
+    const isDefinedInSameBlock = blockIndex !== null && token !== undefined &&
+      definitions.localByBlock.get(blockIndex)?.has(token) === true
     if (
       token === undefined ||
       index === undefined ||
       generatedTokens.has(token) ||
-      localTokens.has(token) ||
+      definitions.global.has(token) ||
+      isDefinedInSameBlock ||
       hasFallback(sanitized, index + match[0].length)
     ) {
       continue

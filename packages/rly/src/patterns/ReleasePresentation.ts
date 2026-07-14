@@ -21,6 +21,46 @@ export interface RlyReleaseTransitionNames {
   readonly version: string
 }
 
+const cssCustomIdentifier =
+  /^(?:--[A-Za-z0-9_\-\u0080-\u{10ffff}]+|-?[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_\-\u0080-\u{10ffff}]*)$/u
+
+const reservedViewTransitionNames = new Set([
+  "auto",
+  "default",
+  "inherit",
+  "initial",
+  "match-element",
+  "none",
+  "revert",
+  "revert-layer",
+  "unset"
+])
+
+/** Validate the caller-owned names before they reach CSS View Transition properties. */
+export const validateReleaseTransitionNames = (
+  names: RlyReleaseTransitionNames | undefined
+): RlyReleaseTransitionNames | undefined => {
+  if (names === undefined) return undefined
+  const entries: ReadonlyArray<readonly ["relay" | "verdict" | "version", string]> = [
+    ["relay", names.relay],
+    ["verdict", names.verdict],
+    ["version", names.version]
+  ]
+  const seen = new Set<string>()
+  for (const [part, suppliedName] of entries) {
+    const name = requireText(suppliedName, `Release transition ${part} name`)
+    if (reservedViewTransitionNames.has(name.toLowerCase())) {
+      throw new Error(`Release transition ${part} name must not use a reserved CSS value: ${name}`)
+    }
+    if (!cssCustomIdentifier.test(name)) {
+      throw new Error(`Release transition ${part} name must be a valid unescaped CSS custom identifier: ${name}`)
+    }
+    if (seen.has(name)) throw new Error(`Release transition names must be unique: ${name}`)
+    seen.add(name)
+  }
+  return names
+}
+
 type RlyReleaseFreshnessTime =
   | { readonly freshnessDateTime: string; readonly freshnessTime: string }
   | { readonly freshnessDateTime?: never; readonly freshnessTime?: never }

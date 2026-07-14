@@ -100,7 +100,7 @@
     grid-template-columns: 3ch minmax(var(--rly-space-0), 1fr) auto;
     inline-size: 100%;
     min-block-size: 58px;
-    padding: var(--rly-space-10) var(--rly-space-16);
+    padding: calc(var(--rly-space-8) + var(--rly-space-2)) var(--rly-space-16);
     text-align: start;
   }
 

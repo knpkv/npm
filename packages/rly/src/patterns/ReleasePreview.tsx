@@ -8,7 +8,8 @@ import { Person } from "./Person.js"
 import {
   type RlyReleasePresentation,
   type RlyReleaseTransitionNames,
-  validateReleasePresentation
+  validateReleasePresentation,
+  validateReleaseTransitionNames
 } from "./ReleasePresentation.js"
 import { ReleaseRelay } from "./ReleaseRelay.js"
 import { Verdict } from "./Verdict.js"
@@ -66,6 +67,7 @@ export const ReleasePreview = ({
   workset
 }: ReleasePreviewProps): ReactElement => {
   const release = validateReleasePresentation(suppliedRelease)
+  const validatedTransitionNames = validateReleaseTransitionNames(transitionNames)
   const visibleOpenFullViewLabel = requireText(openFullViewLabel, "ReleasePreview openFullViewLabel")
   const summaryRef = useRef<HTMLElement>(null)
   const freshness =
@@ -93,18 +95,26 @@ export const ReleasePreview = ({
           <ReleaseRelay
             algorithm={release.algorithm}
             codename={release.codename}
-            data-rly-release-transition-name={transitionNames?.relay}
+            data-rly-release-transition-name={validatedTransitionNames?.relay}
             data-rly-release-transition-part="relay"
             size="hero"
-            style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.relay }}
+            style={
+              validatedTransitionNames === undefined
+                ? undefined
+                : { viewTransitionName: validatedTransitionNames.relay }
+            }
             symbolIndices={release.symbolIndices}
           />
           <div className={style("releaseMeta")}>
             <p
               className={style("version")}
-              data-rly-release-transition-name={transitionNames?.version}
+              data-rly-release-transition-name={validatedTransitionNames?.version}
               data-rly-release-transition-part="version"
-              style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.version }}
+              style={
+                validatedTransitionNames === undefined
+                  ? undefined
+                  : { viewTransitionName: validatedTransitionNames.version }
+              }
             >
               {release.version}
             </p>
@@ -136,10 +146,14 @@ export const ReleasePreview = ({
         </div>
 
         <Verdict
-          data-rly-release-transition-name={transitionNames?.verdict}
+          data-rly-release-transition-name={validatedTransitionNames?.verdict}
           data-rly-release-transition-part="verdict"
           reason={release.reason}
-          style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.verdict }}
+          style={
+            validatedTransitionNames === undefined
+              ? undefined
+              : { viewTransitionName: validatedTransitionNames.verdict }
+          }
           tone={release.tone}
           verdict={release.verdict}
         />

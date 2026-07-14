@@ -82,7 +82,7 @@
     align-content: start;
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-grouped);
+    border-radius: var(--rly-radius-group);
     display: grid;
     gap: var(--rly-space-24);
     min-inline-size: var(--rly-space-0);

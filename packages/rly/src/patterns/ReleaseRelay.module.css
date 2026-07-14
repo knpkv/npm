@@ -75,8 +75,8 @@
     --rly-release-relay-tile-size: var(--rly-space-32);
   }
   .compact .tile {
-    block-size: var(--rly-release-relay-tile-size);
-    inline-size: var(--rly-release-relay-tile-size);
+    block-size: var(--rly-release-relay-tile-size, var(--rly-space-32));
+    inline-size: var(--rly-release-relay-tile-size, var(--rly-space-32));
   }
   .compact .codename {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
@@ -87,8 +87,8 @@
     --rly-release-relay-tile-size: calc(var(--rly-space-48) + var(--rly-space-4));
   }
   .hero .tile {
-    block-size: var(--rly-release-relay-tile-size);
-    inline-size: var(--rly-release-relay-tile-size);
+    block-size: var(--rly-release-relay-tile-size, calc(var(--rly-space-48) + var(--rly-space-4)));
+    inline-size: var(--rly-release-relay-tile-size, calc(var(--rly-space-48) + var(--rly-space-4)));
   }
   .hero .codename {
     font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)

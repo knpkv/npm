@@ -31,7 +31,7 @@
 
   .version {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-font-code);
+      var(--rly-type-code-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
     overflow-wrap: anywhere;

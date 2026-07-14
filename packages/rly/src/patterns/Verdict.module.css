@@ -45,9 +45,9 @@
 
   .reasonPanel {
     align-items: start;
-    background: var(--rly-verdict-tone-tint);
+    background: var(--rly-verdict-tone-tint, var(--rly-color-surface-2));
     border-end-end-radius: var(--rly-radius-control);
-    border-inline-start: var(--rly-space-4) solid var(--rly-verdict-tone-ink);
+    border-inline-start: var(--rly-space-4) solid var(--rly-verdict-tone-ink, var(--rly-color-text-2));
     border-start-end-radius: var(--rly-radius-control);
     display: grid;
     gap: var(--rly-space-12);
@@ -58,7 +58,7 @@
   }
 
   .icon {
-    color: var(--rly-verdict-tone-ink);
+    color: var(--rly-verdict-tone-ink, var(--rly-color-text-2));
     display: inline-flex;
   }
 

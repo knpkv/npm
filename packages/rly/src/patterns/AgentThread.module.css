@@ -18,7 +18,7 @@
   }
 
   .header {
-    gap: var(--rly-space-10);
+    gap: calc(var(--rly-space-8) + var(--rly-space-2));
     padding: var(--rly-space-16) var(--rly-space-20);
   }
 
@@ -93,7 +93,7 @@
   }
 
   .actor {
-    gap: var(--rly-space-10);
+    gap: calc(var(--rly-space-8) + var(--rly-space-2));
     min-inline-size: var(--rly-space-0);
   }
 
@@ -177,11 +177,11 @@
     .context,
     .composer,
     .empty {
-      padding-inline: var(--rly-space-14);
+      padding-inline: calc(var(--rly-space-12) + var(--rly-space-2));
     }
 
     .messages {
-      padding-inline: var(--rly-space-14);
+      padding-inline: calc(var(--rly-space-12) + var(--rly-space-2));
     }
 
     .messageHead {

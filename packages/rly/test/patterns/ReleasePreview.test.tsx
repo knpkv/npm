@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
-import type { RlyReleasePresentation } from "../../src/patterns/ReleasePresentation.js"
+import type { RlyReleasePresentation, RlyReleaseTransitionNames } from "../../src/patterns/ReleasePresentation.js"
 import { ReleasePreview } from "../../src/patterns/ReleasePreview.js"
 import { RLY_DIALOG_VARIANTS } from "../../src/primitives/Dialog.js"
 
@@ -48,6 +48,24 @@ const unassignedRelease = {
   verdict: "Readiness not evaluated",
   version: "v2.4.1"
 } satisfies RlyReleasePresentation
+
+const generatedTransitionNames = {
+  relay: "release-01890f6f-6d6a-7cc0-98d2-000000000001-relay",
+  verdict: "release-01890f6f-6d6a-7cc0-98d2-000000000001-verdict",
+  version: "release-01890f6f-6d6a-7cc0-98d2-000000000001-version"
+} satisfies RlyReleaseTransitionNames
+
+const invalidTransitionNames: ReadonlyArray<readonly [RlyReleaseTransitionNames, string]> = [
+  [{ ...generatedTransitionNames, relay: " " }, "Release transition relay name must contain visible text"],
+  [{ ...generatedTransitionNames, relay: "none" }, "must not use a reserved CSS value: none"],
+  [{ ...generatedTransitionNames, verdict: "unset" }, "must not use a reserved CSS value: unset"],
+  [{ ...generatedTransitionNames, version: "auto" }, "must not use a reserved CSS value: auto"],
+  [{ ...generatedTransitionNames, relay: "123-release" }, "must be a valid unescaped CSS custom identifier"],
+  [
+    { ...generatedTransitionNames, verdict: generatedTransitionNames.version },
+    "Release transition names must be unique"
+  ]
+]
 
 interface MountedPreview {
   readonly host: HTMLDivElement
@@ -173,21 +191,23 @@ describe("ReleasePreview", () => {
   it("assigns the same three caller-owned shared geometry parts as ReleaseRow", async () => {
     const { portal } = await mount(
       preview({
-        transitionNames: {
-          relay: "release-a-relay",
-          verdict: "release-a-verdict",
-          version: "release-a-version"
-        }
+        transitionNames: generatedTransitionNames
       })
     )
     const parts = [...portal.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]")]
     expect(parts.map((part) => [part.dataset.rlyReleaseTransitionPart, part.dataset.rlyReleaseTransitionName])).toEqual(
       [
-        ["relay", "release-a-relay"],
-        ["version", "release-a-version"],
-        ["verdict", "release-a-verdict"]
+        ["relay", generatedTransitionNames.relay],
+        ["version", generatedTransitionNames.version],
+        ["verdict", generatedTransitionNames.verdict]
       ]
     )
+  })
+
+  it("rejects unsafe or colliding transition names at the public ReleasePreview contract", () => {
+    for (const [transitionNames, expectedMessage] of invalidTransitionNames) {
+      expect(() => renderToStaticMarkup(preview({ transitionNames }))).toThrow(expectedMessage)
+    }
   })
 
   it("calls the full-view callback exactly once for one activation", async () => {

@@ -4,7 +4,11 @@ import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { RlyReleasePresentation, RlyReleaseState } from "../../src/patterns/ReleasePresentation.js"
+import type {
+  RlyReleasePresentation,
+  RlyReleaseState,
+  RlyReleaseTransitionNames
+} from "../../src/patterns/ReleasePresentation.js"
 import { ReleaseRow } from "../../src/patterns/ReleaseRow.js"
 import { render } from "../primitives/render.js"
 
@@ -31,6 +35,21 @@ const release = {
   verdict: "Ready to deploy",
   version: "v2.4.0"
 } satisfies RlyReleasePresentation
+
+const generatedTransitionNames = {
+  relay: "release-01890f6f-6d6a-7cc0-98d2-000000000001-relay",
+  verdict: "release-01890f6f-6d6a-7cc0-98d2-000000000001-verdict",
+  version: "release-01890f6f-6d6a-7cc0-98d2-000000000001-version"
+} satisfies RlyReleaseTransitionNames
+
+const invalidTransitionNames: ReadonlyArray<readonly [RlyReleaseTransitionNames, string]> = [
+  [{ ...generatedTransitionNames, relay: " " }, "Release transition relay name must contain visible text"],
+  [{ ...generatedTransitionNames, relay: "none" }, "must not use a reserved CSS value: none"],
+  [{ ...generatedTransitionNames, verdict: "INITIAL" }, "must not use a reserved CSS value: INITIAL"],
+  [{ ...generatedTransitionNames, version: "match-element" }, "must not use a reserved CSS value: match-element"],
+  [{ ...generatedTransitionNames, relay: "release / relay" }, "must be a valid unescaped CSS custom identifier"],
+  [{ ...generatedTransitionNames, version: generatedTransitionNames.relay }, "Release transition names must be unique"]
+]
 
 afterEach(() => {
   document.body.replaceChildren()
@@ -79,18 +98,14 @@ describe("ReleaseRow", () => {
 
   it("assigns caller-owned shared geometry only while a release transition is active", () => {
     const row = render(
-      <ReleaseRow
-        onPreview={() => undefined}
-        release={release}
-        transitionNames={{ relay: "release-a-relay", verdict: "release-a-verdict", version: "release-a-version" }}
-      />
+      <ReleaseRow onPreview={() => undefined} release={release} transitionNames={generatedTransitionNames} />
     )
     const parts = [...(row?.querySelectorAll<HTMLElement>("[data-rly-release-transition-part]") ?? [])]
     expect(parts.map((part) => [part.dataset.rlyReleaseTransitionPart, part.dataset.rlyReleaseTransitionName])).toEqual(
       [
-        ["relay", "release-a-relay"],
-        ["version", "release-a-version"],
-        ["verdict", "release-a-verdict"]
+        ["relay", generatedTransitionNames.relay],
+        ["version", generatedTransitionNames.version],
+        ["verdict", generatedTransitionNames.verdict]
       ]
     )
 
@@ -100,6 +115,16 @@ describe("ReleaseRow", () => {
         (part) => part.dataset.rlyReleaseTransitionName === undefined
       )
     ).toBe(true)
+  })
+
+  it("rejects unsafe or colliding transition names at the public ReleaseRow contract", () => {
+    for (const [transitionNames, expectedMessage] of invalidTransitionNames) {
+      expect(() =>
+        renderToStaticMarkup(
+          <ReleaseRow onPreview={() => undefined} release={release} transitionNames={transitionNames} />
+        )
+      ).toThrow(expectedMessage)
+    }
   })
 
   it("represents every release state through data only while preserving visible content", () => {

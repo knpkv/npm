@@ -29,6 +29,50 @@ const expectInInitialViewport = async (page: Page, selector: string): Promise<vo
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth)
 }
 
+const expectPersistentDecisionRail = async (page: Page, presentation: "dialog" | "sheet"): Promise<void> => {
+  const geometry = await page.evaluate((currentPresentation) => {
+    const surface = document.querySelector<HTMLElement>("[role='dialog']")
+    const footer = document.querySelector<HTMLElement>(
+      `[data-rly-release-preview-footer='${currentPresentation}']`
+    )
+    const dossier = document.querySelector<HTMLElement>(
+      `[data-rly-release-preview-scroll='${currentPresentation}']`
+    )
+    if (surface === null || footer === null || dossier === null) return null
+    const surfaceBounds = surface.getBoundingClientRect()
+    const footerBounds = footer.getBoundingClientRect()
+    return {
+      dossierClientHeight: dossier.clientHeight,
+      dossierScrollHeight: dossier.scrollHeight,
+      footerBottom: footerBounds.bottom,
+      footerTop: footerBounds.top,
+      surfaceBottom: surfaceBounds.bottom,
+      surfaceTop: surfaceBounds.top
+    }
+  }, presentation)
+  expect(geometry).not.toBeNull()
+  if (geometry === null) throw new Error(`Release preview ${presentation} decision rail geometry was unavailable`)
+  expect(geometry.footerTop).toBeGreaterThanOrEqual(geometry.surfaceTop)
+  expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.surfaceBottom)
+  expect(geometry.dossierClientHeight).toBeGreaterThan(0)
+  expect(geometry.dossierScrollHeight).toBeGreaterThan(geometry.dossierClientHeight)
+  const scrolled = await page.evaluate((currentPresentation) => {
+    const footer = document.querySelector<HTMLElement>(
+      `[data-rly-release-preview-footer='${currentPresentation}']`
+    )
+    const dossier = document.querySelector<HTMLElement>(
+      `[data-rly-release-preview-scroll='${currentPresentation}']`
+    )
+    if (footer === null || dossier === null) return null
+    dossier.scrollTop = dossier.scrollHeight
+    return { dossierScrollTop: dossier.scrollTop, footerTop: footer.getBoundingClientRect().top }
+  }, presentation)
+  expect(scrolled).not.toBeNull()
+  if (scrolled === null) throw new Error(`Release preview ${presentation} scroll geometry was unavailable`)
+  expect(scrolled.dossierScrollTop).toBeGreaterThan(0)
+  expect(scrolled.footerTop).toBe(geometry.footerTop)
+}
+
 test("keeps six release outcomes distinct and scan-friendly", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_400, width: 1_440 })
   await page.goto(story("patterns-releaserow--six-states"))
@@ -71,6 +115,7 @@ test("moves from release row to controlled preview and restores focus", async ({
     )
   ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
   await expectInInitialViewport(page, "[data-rly-release-preview-footer='dialog']")
+  await expectPersistentDecisionRail(page, "dialog")
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("release-preview.png") })
   await page.keyboard.press("Escape")
   await expect(trigger).toBeFocused()
@@ -87,6 +132,15 @@ test("moves from release row to controlled preview and restores focus", async ({
     expect(geometry.x).toBe(0)
     expect(geometry.width).toBe(width)
     expect(geometry.height).toBe(800)
+    await expectPersistentDecisionRail(page, "sheet")
+  }
+
+  for (const viewport of [{ height: 240, width: 641 }, { height: 320, width: 960 }]) {
+    await page.setViewportSize(viewport)
+    await page.goto(story("patterns-releasepreview--interaction"))
+    await page.getByRole("button", { name: "Preview Copper Finch" }).click()
+    await expectInInitialViewport(page, "[data-rly-release-preview-footer='dialog']")
+    await expectPersistentDecisionRail(page, "dialog")
   }
 })
 

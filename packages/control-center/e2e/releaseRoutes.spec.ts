@@ -2,6 +2,25 @@ import { type BrowserContext, expect, type Page, test } from "@playwright/test"
 
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
+interface ReleaseTransitionGeometry {
+  readonly bottom: number
+  readonly computedName: string
+  readonly height: number
+  readonly left: number
+  readonly name: string
+  readonly part: string
+  readonly right: number
+  readonly top: number
+  readonly viewportHeight: number
+  readonly viewportWidth: number
+  readonly width: number
+}
+
+interface ReleaseTransitionSnapshot {
+  readonly after: ReadonlyArray<ReleaseTransitionGeometry>
+  readonly before: ReadonlyArray<ReleaseTransitionGeometry>
+}
+
 const snapshot = releasePortfolioFixture
 const release = snapshot.releases[0]
 if (release === undefined) throw new Error("Expected one browser release fixture")
@@ -67,7 +86,22 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
         document.startViewTransition = (update) => {
           const collect = () => [...document.querySelectorAll('[data-rly-release-transition-part]')]
             .filter((element) => element.dataset.rlyReleaseTransitionName)
-            .map((element) => [element.dataset.rlyReleaseTransitionPart, element.dataset.rlyReleaseTransitionName]);
+            .map((element) => {
+              const bounds = element.getBoundingClientRect();
+              return {
+                bottom: bounds.bottom,
+                computedName: getComputedStyle(element).viewTransitionName,
+                height: bounds.height,
+                left: bounds.left,
+                name: element.dataset.rlyReleaseTransitionName,
+                part: element.dataset.rlyReleaseTransitionPart,
+                right: bounds.right,
+                top: bounds.top,
+                viewportHeight: innerHeight,
+                viewportWidth: innerWidth,
+                width: bounds.width
+              };
+            });
           const before = collect();
           return originalStartViewTransition(async () => {
             const result = await update();
@@ -82,6 +116,20 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
 }
 
 test.beforeEach(async ({ context }) => installReleaseMocks(context))
+
+const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): void => {
+  expect(geometry.width).toBeGreaterThan(0)
+  expect(geometry.height).toBeGreaterThan(0)
+  expect(geometry.right).toBeGreaterThan(0)
+  expect(geometry.bottom).toBeGreaterThan(0)
+  expect(geometry.left).toBeLessThan(geometry.viewportWidth)
+  expect(geometry.top).toBeLessThan(geometry.viewportHeight)
+  expect(geometry.computedName).toBe(geometry.name)
+}
+
+const transitionIdentity = (
+  geometry: ReleaseTransitionGeometry
+): { readonly name: string; readonly part: string } => ({ name: geometry.name, part: geometry.part })
 
 test("canonicalizes the root before any release activation renders", async ({ page }) => {
   await page.goto("/")
@@ -136,15 +184,20 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 2")
 
-  const expectedNames = [
-    ["relay", `release-${release.releaseId}-relay`],
-    ["version", `release-${release.releaseId}-version`],
-    ["verdict", `release-${release.releaseId}-verdict`]
+  const expectedIdentities = [
+    { name: `release-${release.releaseId}-relay`, part: "relay" },
+    { name: `release-${release.releaseId}-version`, part: "version" },
+    { name: `release-${release.releaseId}-verdict`, part: "verdict" }
   ]
-  expect(await page.evaluate("window.__releaseTransitionSnapshots")).toEqual([
-    { after: expectedNames, before: expectedNames },
-    { after: expectedNames, before: expectedNames }
-  ])
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
+    "window.__releaseTransitionSnapshots"
+  )
+  expect(snapshots).toHaveLength(2)
+  for (const snapshot of snapshots) {
+    expect(snapshot.before.map(transitionIdentity)).toEqual(expectedIdentities)
+    expect(snapshot.after.map(transitionIdentity)).toEqual(expectedIdentities)
+    for (const geometry of [...snapshot.before, ...snapshot.after]) expectVisibleTransitionGeometry(geometry)
+  }
 })
 
 test("renders a compact full-screen sheet and returns direct loads to the semantic parent", async ({ page }) => {
@@ -176,6 +229,71 @@ test("uses the immediate reduced-motion path at a 200%-zoom-equivalent width", a
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeFocused()
   expect(await page.evaluate("window.__releaseTransitionSnapshots.length")).toBe(0)
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
+})
+
+test("keeps the decision rail and dossier usable in short desktop viewports", async ({ page }) => {
+  const viewports = [
+    { height: 240, width: 641 },
+    { height: 320, width: 960 },
+    { height: 400, width: 1_280 }
+  ]
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport)
+    await page.goto(previewPath)
+    const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
+    const footer = page.locator("[data-rly-release-preview-footer='dialog']")
+    const dossier = page.locator("[data-rly-release-preview-scroll='dialog']")
+    await expect(dialog).toBeVisible()
+    await expect(page.locator("[data-rly-release-preview-presentation='dialog']")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
+
+    const geometry = await page.evaluate<
+      {
+        readonly dialogBottom: number
+        readonly dialogTop: number
+        readonly dossierClientHeight: number
+        readonly dossierScrollHeight: number
+        readonly footerBottom: number
+        readonly footerTop: number
+      } | null
+    >(`(() => {
+      const dialogElement = document.querySelector("[role='dialog']");
+      const footerElement = document.querySelector("[data-rly-release-preview-footer='dialog']");
+      const dossierElement = document.querySelector("[data-rly-release-preview-scroll='dialog']");
+      if (dialogElement === null || footerElement === null || dossierElement === null) return null;
+      const dialogBounds = dialogElement.getBoundingClientRect();
+      const footerBounds = footerElement.getBoundingClientRect();
+      return {
+        dialogBottom: dialogBounds.bottom,
+        dialogTop: dialogBounds.top,
+        dossierClientHeight: dossierElement.clientHeight,
+        dossierScrollHeight: dossierElement.scrollHeight,
+        footerBottom: footerBounds.bottom,
+        footerTop: footerBounds.top
+      };
+    })()`)
+    expect(geometry).not.toBeNull()
+    if (geometry === null) throw new Error(`Release preview geometry was unavailable at ${viewport.width}px`)
+    expect(geometry.footerTop).toBeGreaterThanOrEqual(geometry.dialogTop)
+    expect(geometry.footerBottom).toBeLessThanOrEqual(geometry.dialogBottom)
+    expect(geometry.dossierClientHeight).toBeGreaterThan(0)
+    expect(geometry.dossierScrollHeight).toBeGreaterThan(geometry.dossierClientHeight)
+    await expect(footer).toBeVisible()
+    await expect(dossier).toBeVisible()
+    const dossierScrollTop = await page.evaluate<number>(`(() => {
+      const element = document.querySelector("[data-rly-release-preview-scroll='dialog']");
+      if (element === null) return 0;
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    })()`)
+    expect(dossierScrollTop).toBeGreaterThan(0)
+    const scrolledFooter = await footer.boundingBox()
+    expect(scrolledFooter).not.toBeNull()
+    expect(scrolledFooter?.y).toBe(geometry.footerTop)
+    await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
+    await expect(page).toHaveURL(fullPath)
+  }
 })
 
 test("keeps direct full routes stable across refresh and never substitutes an unknown release", async ({ page }) => {

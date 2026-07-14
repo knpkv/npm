@@ -107,7 +107,7 @@
   .notice {
     background: var(--rly-color-surface-2);
     border-block-start: 1px solid var(--rly-color-border-1);
-    padding: var(--rly-space-10) var(--rly-space-20);
+    padding: calc(var(--rly-space-8) + var(--rly-space-2)) var(--rly-space-20);
   }
 
   .viewer {
@@ -155,7 +155,7 @@
   }
 
   .findingList:focus-visible {
-    outline: 2px solid var(--rly-color-focus-ring);
+    outline: 2px solid var(--rly-color-focus);
     outline-offset: -2px;
   }
 
@@ -188,12 +188,12 @@
   @container (max-width: 24rem) {
     .scope,
     .findingsHeader {
-      padding-inline: var(--rly-space-14);
+      padding-inline: calc(var(--rly-space-12) + var(--rly-space-2));
     }
 
     .notice,
     .empty {
-      padding-inline: var(--rly-space-14);
+      padding-inline: calc(var(--rly-space-12) + var(--rly-space-2));
     }
   }
 
