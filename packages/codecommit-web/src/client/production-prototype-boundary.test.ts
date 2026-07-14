@@ -8,12 +8,14 @@ describe("production prototype boundary", () => {
       inspectProductionPrototypeModules(
         [
           "/repo/src/client/main.tsx",
+          "/repo/src/client/prototype/release.tsx",
           "/repo/src/client/prototypes/control-center/page.tsx?import",
           "/repo/src/client/prototypes/release.tsx"
         ],
         "/repo/src/client"
       )
     ).toEqual([
+      "/repo/src/client/prototype/release.tsx",
       "/repo/src/client/prototypes/control-center/page.tsx",
       "/repo/src/client/prototypes/release.tsx"
     ])

@@ -9,9 +9,9 @@ export const inspectProductionPrototypeModules = (
   clientRoot: string
 ): ReadonlyArray<string> => {
   const normalizedRoot = normalizeModuleId(clientRoot).replace(/\/$/u, "")
-  const prototypeRoot = `${normalizedRoot}/prototypes/`
+  const prototypeRoots = [`${normalizedRoot}/prototype/`, `${normalizedRoot}/prototypes/`]
   return Array.from(moduleIds, normalizeModuleId)
-    .filter((moduleId) => moduleId.startsWith(prototypeRoot))
+    .filter((moduleId) => prototypeRoots.some((prototypeRoot) => moduleId.startsWith(prototypeRoot)))
     .sort()
 }
 
