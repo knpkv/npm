@@ -23,7 +23,9 @@ export interface ControlCenterDataPaths {
 const DATA_ROOT_DIRECTORY_MODE = 0o700
 const DATA_ROOT_MARKER_MODE = 0o600
 const DATA_ROOT_MARKER_NAME = ".control-center-root"
-const DATA_ROOT_MARKER_CONTENT = "@knpkv/control-center:data-root:v1\n"
+const DATA_ROOT_MARKER_V1_CONTENT = "@knpkv/control-center:data-root:v1\n"
+const DATA_ROOT_MARKER_V2_PREFIX = "@knpkv/control-center:data-root:v2\nclaim-basename:"
+const DATA_ROOT_MARKER_MAX_BYTES = 8_192
 const DATA_ROOT_PENDING_MARKER_PREFIX = `${DATA_ROOT_MARKER_NAME}.pending-`
 const DATA_ROOT_STAGING_PREFIX = ".control-center-incoming-"
 const DATA_ROOT_OWNER_PROBE_PREFIX = ".control-center-owner-"
@@ -61,6 +63,12 @@ const ConfiguredDataRoot = Schema.String.check(
   Schema.isMaxLength(4_096)
 )
 
+const hasRandomHexSuffix = (entry: string, prefix: string): boolean => {
+  if (!entry.startsWith(prefix)) return false
+  const suffix = entry.slice(prefix.length)
+  return suffix.length === 32 && Array.from(suffix).every((character) => /[0-9a-f]/u.test(character))
+}
+
 const configurationError = (): PersistenceConfigError =>
   new PersistenceConfigError({
     message: "Control Center data root must identify a private, dedicated application directory"
@@ -89,10 +97,12 @@ const descriptorAliases = (
 ]
 
 interface MarkerPublication {
+  readonly claimBasename: string
   readonly cryptoService: Crypto.Crypto
   readonly dataRoot: string
   readonly fileSystem: FileSystem.FileSystem
   readonly markerPath: string
+  readonly targetBasename: string
 }
 
 interface LegacyDataRootValidation {
@@ -131,6 +141,59 @@ interface LostClaimDetection {
   readonly path: Path.Path
 }
 
+type DataRootMarker =
+  | { readonly _tag: "Legacy" }
+  | { readonly _tag: "Bound"; readonly claimBasename: string; readonly targetBasename: string }
+
+const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
+  `${DATA_ROOT_MARKER_V2_PREFIX}${Encoding.encodeBase64Url(claimBasename)}\ntarget-basename:${
+    Encoding.encodeBase64Url(targetBasename)
+  }\n`
+
+const decodeMarkerBasename = (
+  path: Path.Path,
+  encodedBasename: string
+): Result.Result<string, PersistenceConfigError> => {
+  const decodedBasename = Encoding.decodeBase64UrlString(encodedBasename)
+  if (
+    Result.isFailure(decodedBasename) ||
+    decodedBasename.success.length === 0 ||
+    decodedBasename.success.length > 4_096 ||
+    !hasNoControlCharacters(decodedBasename.success) ||
+    decodedBasename.success === "." ||
+    decodedBasename.success === ".." ||
+    path.basename(decodedBasename.success) !== decodedBasename.success ||
+    Encoding.encodeBase64Url(decodedBasename.success) !== encodedBasename
+  ) {
+    return Result.fail(configurationError())
+  }
+  return Result.succeed(decodedBasename.success)
+}
+
+const decodeDataRootMarker = (
+  path: Path.Path,
+  content: string
+): Result.Result<DataRootMarker, PersistenceConfigError> => {
+  if (content === DATA_ROOT_MARKER_V1_CONTENT) return Result.succeed({ _tag: "Legacy" })
+  if (!content.startsWith(DATA_ROOT_MARKER_V2_PREFIX) || !content.endsWith("\n")) {
+    return Result.fail(configurationError())
+  }
+  const encodedFields = content.slice(DATA_ROOT_MARKER_V2_PREFIX.length, -1).split("\ntarget-basename:")
+  if (encodedFields.length !== 2) return Result.fail(configurationError())
+  const encodedClaim = encodedFields[0]
+  const encodedTarget = encodedFields[1]
+  if (encodedClaim === undefined || encodedTarget === undefined) return Result.fail(configurationError())
+  const claimBasename = decodeMarkerBasename(path, encodedClaim)
+  if (Result.isFailure(claimBasename)) return Result.fail(claimBasename.failure)
+  const targetBasename = decodeMarkerBasename(path, encodedTarget)
+  if (Result.isFailure(targetBasename)) return Result.fail(targetBasename.failure)
+  return Result.succeed({
+    _tag: "Bound",
+    claimBasename: claimBasename.success,
+    targetBasename: targetBasename.success
+  })
+}
+
 const validatePrivateDirectory = Effect.fn("ControlCenterCli.validatePrivateDirectory")(function*(
   fileSystem: FileSystem.FileSystem,
   dataRoot: string
@@ -151,6 +214,7 @@ const validatePrivateDirectory = Effect.fn("ControlCenterCli.validatePrivateDire
 
 const validateMarker = Effect.fn("ControlCenterCli.validateDataRootMarker")(function*(
   fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
   markerPath: string,
   rootInfo: FileSystem.File.Info
 ) {
@@ -161,12 +225,30 @@ const validateMarker = Effect.fn("ControlCenterCli.validateDataRootMarker")(func
     markerInfo.type !== "File" ||
     (markerInfo.mode & 0o777) !== DATA_ROOT_MARKER_MODE ||
     !sameOwner(rootInfo, markerInfo) ||
-    Number(markerInfo.size) !== DATA_ROOT_MARKER_CONTENT.length
+    Number(markerInfo.size) > DATA_ROOT_MARKER_MAX_BYTES
   ) {
     return yield* configurationError()
   }
   const content = yield* mapConfigurationError(fileSystem.readFileString(markerPath))
-  if (content !== DATA_ROOT_MARKER_CONTENT) return yield* configurationError()
+  return yield* Effect.fromResult(decodeDataRootMarker(path, content))
+})
+
+const validateMarkerForClaim = Effect.fn("ControlCenterCli.validateDataRootMarkerForClaim")(function*(
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  markerPath: string,
+  rootInfo: FileSystem.File.Info,
+  claimBasename: string,
+  targetBasename: string
+) {
+  const marker = yield* validateMarker(fileSystem, path, markerPath, rootInfo)
+  if (
+    marker._tag === "Bound" &&
+    (marker.claimBasename !== claimBasename || marker.targetBasename !== targetBasename)
+  ) {
+    return yield* configurationError()
+  }
+  return marker
 })
 
 const validateLegacyDataRoot = Effect.fn("ControlCenterCli.validateLegacyDataRoot")(function*(
@@ -244,7 +326,8 @@ const syncPath = Effect.fn("ControlCenterCli.syncDataRootPath")(function*(
 const publishMarker = Effect.fn("ControlCenterCli.publishDataRootMarker")(function*(
   request: MarkerPublication
 ) {
-  const { cryptoService, dataRoot, fileSystem, markerPath } = request
+  const { claimBasename, cryptoService, dataRoot, fileSystem, markerPath, targetBasename } = request
+  const markerContent = boundMarkerContent(claimBasename, targetBasename)
   yield* Effect.scoped(
     Effect.uninterruptible(
       Effect.gen(function*() {
@@ -257,7 +340,7 @@ const publishMarker = Effect.fn("ControlCenterCli.publishDataRootMarker")(functi
           )
         )
         yield* mapConfigurationError(
-          fileSystem.writeFileString(pendingMarker, DATA_ROOT_MARKER_CONTENT, {
+          fileSystem.writeFileString(pendingMarker, markerContent, {
             flag: "wx",
             mode: DATA_ROOT_MARKER_MODE
           })
@@ -274,7 +357,9 @@ const publishMarker = Effect.fn("ControlCenterCli.publishDataRootMarker")(functi
 const validateRepairableMarker = Effect.fn("ControlCenterCli.validateRepairableDataRootMarker")(function*(
   fileSystem: FileSystem.FileSystem,
   markerPath: string,
-  rootInfo: FileSystem.File.Info
+  rootInfo: FileSystem.File.Info,
+  claimBasename: string,
+  targetBasename: string
 ) {
   const canonicalMarker = yield* mapConfigurationError(fileSystem.realPath(markerPath))
   const markerInfo = yield* mapConfigurationError(fileSystem.stat(markerPath))
@@ -283,23 +368,24 @@ const validateRepairableMarker = Effect.fn("ControlCenterCli.validateRepairableD
     markerInfo.type !== "File" ||
     (markerInfo.mode & 0o777) !== DATA_ROOT_MARKER_MODE ||
     !sameOwner(rootInfo, markerInfo) ||
-    Number(markerInfo.size) >= DATA_ROOT_MARKER_CONTENT.length
+    Number(markerInfo.size) >= boundMarkerContent(claimBasename, targetBasename).length
   ) return yield* configurationError()
 
   const content = yield* mapConfigurationError(fileSystem.readFileString(markerPath))
-  if (!DATA_ROOT_MARKER_CONTENT.startsWith(content)) return yield* configurationError()
+  if (
+    !DATA_ROOT_MARKER_V1_CONTENT.startsWith(content) &&
+    !boundMarkerContent(claimBasename, targetBasename).startsWith(content)
+  ) return yield* configurationError()
 })
 
 const removeValidPendingMarkers = Effect.fn("ControlCenterCli.removeValidPendingMarkers")(function*(
-  request: PendingMarkerCleanup
+  request: PendingMarkerCleanup,
+  claimBasename: string,
+  targetBasename: string
 ) {
   const { dataRoot, fileSystem, path, rootInfo } = request
   const entries = yield* mapConfigurationError(fileSystem.readDirectory(dataRoot))
-  const pendingNames = entries.filter((entry) => {
-    if (!entry.startsWith(DATA_ROOT_PENDING_MARKER_PREFIX)) return false
-    const suffix = entry.slice(DATA_ROOT_PENDING_MARKER_PREFIX.length)
-    return suffix.length === 32 && Array.from(suffix).every((character) => /[0-9a-f]/u.test(character))
-  })
+  const pendingNames = entries.filter((entry) => hasRandomHexSuffix(entry, DATA_ROOT_PENDING_MARKER_PREFIX))
 
   for (const pendingName of pendingNames) {
     const pendingPath = path.join(dataRoot, pendingName)
@@ -310,11 +396,14 @@ const removeValidPendingMarkers = Effect.fn("ControlCenterCli.removeValidPending
       pendingInfo.type !== "File" ||
       (pendingInfo.mode & 0o777) !== DATA_ROOT_MARKER_MODE ||
       !sameOwner(rootInfo, pendingInfo) ||
-      Number(pendingInfo.size) > DATA_ROOT_MARKER_CONTENT.length
+      Number(pendingInfo.size) > boundMarkerContent(claimBasename, targetBasename).length
     ) continue
 
     const content = yield* mapConfigurationError(fileSystem.readFileString(pendingPath))
-    if (!DATA_ROOT_MARKER_CONTENT.startsWith(content)) continue
+    if (
+      !DATA_ROOT_MARKER_V1_CONTENT.startsWith(content) &&
+      !boundMarkerContent(claimBasename, targetBasename).startsWith(content)
+    ) continue
     yield* mapConfigurationError(fileSystem.remove(pendingPath))
   }
 
@@ -394,28 +483,68 @@ const resolveStagingRoot = (path: Path.Path, parent: string, target: string): Op
     : Option.none()
 }
 
-const isTransientDataRootEntry = (entry: string): boolean =>
-  entry === DATA_ROOT_MARKER_NAME ||
-  entry.startsWith(DATA_ROOT_PENDING_MARKER_PREFIX) ||
-  entry.startsWith(DATA_ROOT_OWNER_PROBE_PREFIX)
+const isBase64UrlPrefix = (value: string): boolean =>
+  Array.from(value).every((character) => /[0-9A-Za-z_-]/u.test(character))
 
-const isDurableStagingRoot = Effect.fn("ControlCenterCli.isDurableStagingRoot")(function*(
+const isPotentialBoundMarkerPrefix = (path: Path.Path, content: string): boolean => {
+  if (DATA_ROOT_MARKER_V2_PREFIX.startsWith(content)) return true
+  if (!content.startsWith(DATA_ROOT_MARKER_V2_PREFIX)) return false
+  const remaining = content.slice(DATA_ROOT_MARKER_V2_PREFIX.length)
+  const claimTerminator = remaining.indexOf("\n")
+  if (claimTerminator === -1) return isBase64UrlPrefix(remaining)
+  const encodedClaim = remaining.slice(0, claimTerminator)
+  if (!isBase64UrlPrefix(encodedClaim)) return false
+
+  const targetLabel = "target-basename:"
+  const targetField = remaining.slice(claimTerminator + 1)
+  if (targetLabel.startsWith(targetField)) return true
+  if (!targetField.startsWith(targetLabel)) return false
+  const encodedTargetWithTerminator = targetField.slice(targetLabel.length)
+  if (!encodedTargetWithTerminator.endsWith("\n")) return isBase64UrlPrefix(encodedTargetWithTerminator)
+  return Result.isSuccess(decodeDataRootMarker(path, content))
+}
+
+const isPotentialMarkerPrefix = (path: Path.Path, content: string): boolean =>
+  DATA_ROOT_MARKER_V1_CONTENT.startsWith(content) || isPotentialBoundMarkerPrefix(path, content)
+
+const validateProtocolArtifact = Effect.fn("ControlCenterCli.validateDataRootProtocolArtifact")(function*(
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
-  stagingRoot: string
+  stagingRoot: string,
+  rootInfo: FileSystem.File.Info,
+  entry: string
 ) {
-  const rootInfo = yield* validatePrivateDirectory(fileSystem, stagingRoot).pipe(Effect.result)
-  if (Result.isFailure(rootInfo)) return false
+  const isFinalMarker = entry === DATA_ROOT_MARKER_NAME
+  const isOwnerProbe = hasRandomHexSuffix(entry, DATA_ROOT_OWNER_PROBE_PREFIX)
+  const isPendingMarker = hasRandomHexSuffix(entry, DATA_ROOT_PENDING_MARKER_PREFIX)
+  if (!isFinalMarker && !isOwnerProbe && !isPendingMarker) return false
 
-  const markerValidation = yield* validateMarker(
-    fileSystem,
-    path.join(stagingRoot, DATA_ROOT_MARKER_NAME),
-    rootInfo.success
-  ).pipe(Effect.result)
-  if (Result.isFailure(markerValidation)) return false
+  const artifactPath = path.join(stagingRoot, entry)
+  const canonicalArtifact = yield* mapConfigurationError(fileSystem.realPath(artifactPath))
+  const artifactInfo = yield* mapConfigurationError(fileSystem.stat(artifactPath))
+  if (
+    canonicalArtifact !== artifactPath ||
+    artifactInfo.type !== "File" ||
+    (artifactInfo.mode & 0o777) !== DATA_ROOT_MARKER_MODE ||
+    !sameOwner(rootInfo, artifactInfo)
+  ) return yield* configurationError()
 
-  const entries = yield* mapConfigurationError(fileSystem.readDirectory(stagingRoot))
-  return entries.some((entry) => !isTransientDataRootEntry(entry))
+  if (isFinalMarker) {
+    if (Number(artifactInfo.size) > DATA_ROOT_MARKER_MAX_BYTES) return yield* configurationError()
+    const content = yield* mapConfigurationError(fileSystem.readFileString(artifactPath))
+    if (Result.isFailure(decodeDataRootMarker(path, content))) return yield* configurationError()
+    return true
+  }
+
+  if (isOwnerProbe) {
+    if (Number(artifactInfo.size) !== 0) return yield* configurationError()
+    return true
+  }
+
+  if (Number(artifactInfo.size) > DATA_ROOT_MARKER_MAX_BYTES) return yield* configurationError()
+  const content = yield* mapConfigurationError(fileSystem.readFileString(artifactPath))
+  if (!isPotentialMarkerPrefix(path, content)) return yield* configurationError()
+  return true
 })
 
 const refuseLostDataRootClaim = Effect.fn("ControlCenterCli.refuseLostDataRootClaim")(function*(
@@ -423,18 +552,33 @@ const refuseLostDataRootClaim = Effect.fn("ControlCenterCli.refuseLostDataRootCl
 ) {
   const { fileSystem, parent, path } = request
   const entries = yield* mapConfigurationError(fileSystem.readDirectory(parent))
-  const activeStagingNames: Array<string> = []
-  for (const entry of entries) {
-    const claimedTarget = yield* fileSystem.readLink(path.join(parent, entry)).pipe(Effect.result)
-    if (Result.isFailure(claimedTarget)) continue
-    const stagingRoot = resolveStagingRoot(path, parent, claimedTarget.success)
-    if (Option.isSome(stagingRoot)) activeStagingNames.push(path.basename(stagingRoot.value))
-  }
-
   for (const entry of entries) {
     if (!entry.startsWith(DATA_ROOT_STAGING_PREFIX) || path.basename(entry) !== entry) continue
-    if (activeStagingNames.includes(entry)) continue
-    if (yield* isDurableStagingRoot(fileSystem, path, path.join(parent, entry))) {
+    const stagingRoot = path.join(parent, entry)
+    const stagingEntries = yield* fileSystem.readDirectory(stagingRoot).pipe(Effect.result)
+    if (Result.isFailure(stagingEntries)) return yield* configurationError()
+    if (stagingEntries.success.length === 0) continue
+    const rootInfo = yield* validatePrivateDirectory(fileSystem, stagingRoot)
+    let hasDurableEntry = false
+    for (const name of stagingEntries.success) {
+      if (!(yield* validateProtocolArtifact(fileSystem, path, stagingRoot, rootInfo, name))) {
+        hasDurableEntry = true
+      }
+    }
+    if (!hasDurableEntry) continue
+
+    const marker = yield* validateMarker(
+      fileSystem,
+      path,
+      path.join(stagingRoot, DATA_ROOT_MARKER_NAME),
+      rootInfo
+    )
+    if (marker._tag === "Legacy") return yield* configurationError()
+    if (marker.targetBasename !== entry) return yield* configurationError()
+
+    const boundClaim = path.join(parent, marker.claimBasename)
+    const claimedTarget = yield* fileSystem.readLink(boundClaim).pipe(Effect.result)
+    if (Result.isFailure(claimedTarget) || claimedTarget.success !== entry) {
       return yield* configurationError()
     }
   }
@@ -444,9 +588,11 @@ const resolveClaimedDataRoot = Effect.fn("ControlCenterCli.resolveClaimedDataRoo
   request: FreshDataRootPublication
 ) {
   const { cryptoService, dataRoot, fileSystem, parent, path } = request
-  const claimedTarget = yield* fileSystem.readLink(dataRoot).pipe(Effect.result)
-  if (Result.isFailure(claimedTarget)) return dataRoot
-  const stagingRoot = resolveStagingRoot(path, parent, claimedTarget.success)
+  const canonicalRoot = yield* mapConfigurationError(fileSystem.realPath(dataRoot))
+  if (canonicalRoot === dataRoot) return dataRoot
+
+  const claimedTarget = yield* mapConfigurationError(fileSystem.readLink(dataRoot))
+  const stagingRoot = resolveStagingRoot(path, parent, claimedTarget)
   if (Option.isNone(stagingRoot)) return yield* configurationError()
 
   const stagingInfo = yield* validatePrivateDirectory(fileSystem, stagingRoot.value)
@@ -457,10 +603,13 @@ const resolveClaimedDataRoot = Effect.fn("ControlCenterCli.resolveClaimedDataRoo
     initialRootInfo: stagingInfo,
     path
   })
-  yield* validateMarker(
+  yield* validateMarkerForClaim(
     fileSystem,
+    path,
     path.join(stagingRoot.value, DATA_ROOT_MARKER_NAME),
-    stagingInfo
+    stagingInfo,
+    path.basename(dataRoot),
+    path.basename(stagingRoot.value)
   )
   return stagingRoot.value
 })
@@ -476,30 +625,43 @@ const publishFreshDataRoot = Effect.fn("ControlCenterCli.publishFreshDataRoot")(
           fileSystem.makeTempDirectory({ directory: parent, prefix: DATA_ROOT_STAGING_PREFIX })
         )
         const stagingName = path.basename(stagingRoot)
+        const removeUnclaimedStagingRoot = fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(
+          Effect.andThen(syncPath(fileSystem, parent)),
+          Effect.ignore
+        )
         yield* Effect.addFinalizer(() =>
           fileSystem.readLink(dataRoot).pipe(
             Effect.result,
-            Effect.flatMap((claimedTarget) =>
-              Result.isSuccess(claimedTarget) && claimedTarget.success === stagingName
-                ? Effect.void
-                : fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(
-                  Effect.andThen(syncPath(fileSystem, parent)),
-                  Effect.ignore
+            Effect.flatMap((claimedTarget) => {
+              if (Result.isSuccess(claimedTarget)) {
+                return claimedTarget.success === stagingName ? Effect.void : removeUnclaimedStagingRoot
+              }
+              if (claimedTarget.failure.reason._tag === "NotFound") return removeUnclaimedStagingRoot
+              return fileSystem.realPath(dataRoot).pipe(
+                Effect.result,
+                Effect.flatMap((resolvedRoot) =>
+                  Result.isSuccess(resolvedRoot) && resolvedRoot.success !== stagingRoot
+                    ? removeUnclaimedStagingRoot
+                    : Effect.void
                 )
-            )
+              )
+            })
           )
         )
         yield* mapConfigurationError(fileSystem.chmod(stagingRoot, DATA_ROOT_DIRECTORY_MODE))
         yield* publishMarker({
+          claimBasename: path.basename(dataRoot),
           cryptoService,
           dataRoot: stagingRoot,
           fileSystem,
-          markerPath: path.join(stagingRoot, DATA_ROOT_MARKER_NAME)
+          markerPath: path.join(stagingRoot, DATA_ROOT_MARKER_NAME),
+          targetBasename: path.basename(stagingRoot)
         })
         yield* syncPath(fileSystem, stagingRoot)
 
         const claimed = yield* fileSystem.symlink(stagingName, dataRoot).pipe(Effect.result)
         if (Result.isFailure(claimed)) {
+          if (claimed.failure.reason._tag !== "AlreadyExists") return yield* configurationError()
           const existingClaim = yield* fileSystem.readLink(dataRoot).pipe(Effect.result)
           if (Result.isFailure(existingClaim) || existingClaim.success !== stagingName) return
         }
@@ -539,6 +701,8 @@ export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataR
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const parent = path.dirname(dataPaths.dataRoot)
+  const claimBasename = path.basename(dataPaths.dataRoot)
+  if (claimBasename.startsWith(DATA_ROOT_STAGING_PREFIX)) return yield* configurationError()
   const existed = yield* mapConfigurationError(fileSystem.exists(dataPaths.dataRoot))
 
   if (!existed) {
@@ -565,6 +729,7 @@ export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataR
     : yield* decodeControlCenterDataPaths(operationalRoot)
 
   const rootInfo = yield* validatePrivateDirectory(fileSystem, operationalPaths.dataRoot)
+  const targetBasename = path.basename(operationalPaths.dataRoot)
   yield* verifyProcessOwnership({
     cryptoService,
     dataRoot: operationalPaths.dataRoot,
@@ -576,41 +741,77 @@ export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataR
   const hasMarker = yield* mapConfigurationError(fileSystem.exists(markerPath))
   if (!hasMarker) {
     yield* validateLegacyDataRoot({ dataPaths: operationalPaths, fileSystem, path, rootInfo })
-    yield* removeValidPendingMarkers({
-      dataRoot: operationalPaths.dataRoot,
-      fileSystem,
-      path,
-      rootInfo
-    })
-    yield* publishMarker({
-      cryptoService,
-      dataRoot: operationalPaths.dataRoot,
-      fileSystem,
-      markerPath
-    })
-  } else {
-    const markerValidation = yield* validateMarker(fileSystem, markerPath, rootInfo).pipe(Effect.result)
-    if (Result.isFailure(markerValidation)) {
-      yield* validateRepairableMarker(fileSystem, markerPath, rootInfo)
-      yield* removeValidPendingMarkers({
+    yield* removeValidPendingMarkers(
+      {
         dataRoot: operationalPaths.dataRoot,
         fileSystem,
         path,
         rootInfo
-      })
+      },
+      claimBasename,
+      targetBasename
+    )
+    yield* publishMarker({
+      claimBasename,
+      cryptoService,
+      dataRoot: operationalPaths.dataRoot,
+      fileSystem,
+      markerPath,
+      targetBasename
+    })
+  } else {
+    const markerValidation = yield* validateMarkerForClaim(
+      fileSystem,
+      path,
+      markerPath,
+      rootInfo,
+      claimBasename,
+      targetBasename
+    ).pipe(Effect.result)
+    if (Result.isFailure(markerValidation)) {
+      yield* validateRepairableMarker(fileSystem, markerPath, rootInfo, claimBasename, targetBasename)
+      yield* removeValidPendingMarkers(
+        {
+          dataRoot: operationalPaths.dataRoot,
+          fileSystem,
+          path,
+          rootInfo
+        },
+        claimBasename,
+        targetBasename
+      )
       const otherEntries = (yield* mapConfigurationError(fileSystem.readDirectory(operationalPaths.dataRoot)))
         .filter((entry) => entry !== DATA_ROOT_MARKER_NAME)
       if (otherEntries.length > 0) {
         yield* validateLegacyDataRoot({ dataPaths: operationalPaths, fileSystem, path, rootInfo })
       }
       yield* publishMarker({
+        claimBasename,
         cryptoService,
         dataRoot: operationalPaths.dataRoot,
         fileSystem,
-        markerPath
+        markerPath,
+        targetBasename
+      })
+    } else if (markerValidation.success._tag === "Legacy") {
+      yield* publishMarker({
+        claimBasename,
+        cryptoService,
+        dataRoot: operationalPaths.dataRoot,
+        fileSystem,
+        markerPath,
+        targetBasename
       })
     }
   }
-  yield* validateMarker(fileSystem, markerPath, rootInfo)
+  const finalMarker = yield* validateMarkerForClaim(
+    fileSystem,
+    path,
+    markerPath,
+    rootInfo,
+    claimBasename,
+    targetBasename
+  )
+  if (finalMarker._tag !== "Bound") return yield* configurationError()
   return operationalPaths
 })
