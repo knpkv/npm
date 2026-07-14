@@ -64,6 +64,13 @@
     text-transform: uppercase;
   }
 
+  .unassigned {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+  }
+
   .facts {
     border-block: 1px solid var(--rly-color-border-1);
     display: grid;
@@ -93,6 +100,11 @@
   }
 
   .fullView {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .dialogClose {
     display: flex;
     justify-content: flex-end;
   }

@@ -4,8 +4,8 @@ import type { RlyPerson } from "./Person.js"
 import type { RlyReleaseRelaySymbolIndices } from "./ReleaseRelay.js"
 import type { RlyVerdictTone } from "./Verdict.js"
 
-/** The six caller-owned release states represented by the catalog fixtures. */
-export type RlyReleaseState = "blocked" | "ready" | "deploying" | "building" | "shipped" | "held"
+/** Caller-owned release presentation states, including an explicitly unevaluated state. */
+export type RlyReleaseState = "blocked" | "ready" | "deploying" | "building" | "shipped" | "held" | "unknown"
 
 /** One explicit display fact; values are never counted or derived by rly. */
 export interface RlyReleaseFact {
@@ -26,7 +26,7 @@ export type RlyReleasePresentation = RlyReleaseFreshnessTime & {
   readonly facts: ReadonlyArray<RlyReleaseFact>
   readonly freshness: RlyFreshnessState
   readonly id: string
-  readonly owner: RlyPerson
+  readonly owner?: RlyPerson
   readonly reason: string
   readonly state: RlyReleaseState
   readonly symbolIndices: RlyReleaseRelaySymbolIndices
@@ -41,7 +41,8 @@ const releaseStates: Readonly<Record<RlyReleaseState, true>> = {
   deploying: true,
   building: true,
   shipped: true,
-  held: true
+  held: true,
+  unknown: true
 }
 
 /** Validate visible release projection fields without deriving identity or readiness. */

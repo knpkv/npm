@@ -33,6 +33,22 @@ const release = {
   version: "v2.4.0"
 } satisfies RlyReleasePresentation
 
+const unassignedRelease = {
+  algorithm: release.algorithm,
+  codename: "Copper Finch Pending",
+  facts: release.facts,
+  freshness: release.freshness,
+  freshnessDateTime: release.freshnessDateTime,
+  freshnessTime: release.freshnessTime,
+  id: "release-241",
+  reason: "No readiness evaluation has been supplied for this release.",
+  state: "unknown",
+  symbolIndices: release.symbolIndices,
+  tone: "neutral",
+  verdict: "Readiness not evaluated",
+  version: "v2.4.1"
+} satisfies RlyReleasePresentation
+
 interface MountedPreview {
   readonly host: HTMLDivElement
   readonly portal: HTMLDivElement
@@ -55,6 +71,7 @@ const mount = async (element: ReactElement): Promise<MountedPreview> => {
 const preview = (overrides: Partial<Parameters<typeof ReleasePreview>[0]> = {}): ReactElement => (
   <ReleasePreview
     agentEntry={<section aria-label="Agent entry">Ask the release agent</section>}
+    collaborators={<section aria-label="Release collaborators">Four complete assignments</section>}
     evidence={<section aria-label="Evidence">Three checks attached</section>}
     onOpenChange={() => undefined}
     onOpenFullView={() => undefined}
@@ -81,6 +98,7 @@ describe("ReleasePreview", () => {
     if (dialog === null || summary === null) throw new Error("ReleasePreview dialog did not render")
 
     expect(dialog.className).toContain(RLY_DIALOG_VARIANTS.size.wide.className)
+    expect(portal.querySelector("[data-rly-release-preview-presentation='dialog']")).not.toBeNull()
     expect(dialog.textContent).toContain("Release preview: v2.4.0 Copper Finch")
     expect(summary.tabIndex).toBe(-1)
     expect(document.activeElement).toBe(summary)
@@ -97,12 +115,46 @@ describe("ReleasePreview", () => {
       [...portal.querySelectorAll("[data-rly-release-preview-slot]")].map((slot) =>
         slot.getAttribute("data-rly-release-preview-slot")
       )
-    ).toEqual(["primary-action", "stages", "workset", "evidence", "agent-entry"])
+    ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
+    expect(dialog.textContent).toContain("Four complete assignments")
     expect(dialog.textContent).toContain("Deploy release")
     expect(dialog.textContent).toContain("Build, verify, production")
     expect(dialog.textContent).toContain("Fourteen changed files")
     expect(dialog.textContent).toContain("Three checks attached")
     expect(dialog.textContent).toContain("Ask the release agent")
+    expect(dialog.textContent).toContain("Close preview")
+  })
+
+  it("renders the caller-selected sheet with the same dossier order and explicit unassigned owner", async () => {
+    const onOpenChange = vi.fn()
+    const { portal } = await mount(preview({ onOpenChange, presentation: "sheet", release: unassignedRelease }))
+    const sheet = portal.querySelector<HTMLElement>("[data-rly-sheet-side='end']")
+    const summary = portal.querySelector<HTMLElement>("[data-rly-release-preview-summary]")
+    const overlay = portal.querySelector<HTMLElement>("[data-rly-sheet-overlay]")
+    if (sheet === null || summary === null || overlay === null) {
+      throw new Error("ReleasePreview sheet did not render")
+    }
+
+    expect(portal.querySelector("[data-rly-dialog-overlay]")).toBeNull()
+    expect(sheet.getAttribute("role")).toBe("dialog")
+    expect(sheet.textContent).toContain("Release preview: v2.4.1 Copper Finch Pending")
+    expect(sheet.textContent).toContain("Readiness not evaluated")
+    expect(sheet.textContent).toContain("Unassigned")
+    expect(sheet.querySelector("[data-rly-release-owner='unassigned']")).not.toBeNull()
+    expect(sheet.querySelector("[data-rly-release-approver='unassigned']")).not.toBeNull()
+    expect(sheet.querySelector("[data-rly-release-state='unknown']")).not.toBeNull()
+    expect(sheet.querySelector("[data-rly-release-preview-presentation='sheet']")).not.toBeNull()
+    expect(document.activeElement).toBe(summary)
+    expect(
+      [...sheet.querySelectorAll("[data-rly-release-preview-slot]")].map((slot) =>
+        slot.getAttribute("data-rly-release-preview-slot")
+      )
+    ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
+
+    await act(async () =>
+      overlay.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }))
+    )
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it("calls the full-view callback exactly once for one activation", async () => {
@@ -128,10 +180,26 @@ describe("ReleasePreview", () => {
     expect(portal.querySelector('[role="dialog"]')).not.toBeNull()
   })
 
+  it("offers an explicit close action for the desktop dialog", async () => {
+    const onOpenChange = vi.fn()
+    const { portal } = await mount(preview({ onOpenChange }))
+    const close = [...portal.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === "Close preview"
+    )
+    if (close === undefined) throw new Error("ReleasePreview explicit close action did not render")
+    await act(async () => close.click())
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("validates the shared release projection and full-view label", () => {
     expect(() => renderToStaticMarkup(preview({ release: { ...release, reason: " " } }))).toThrow(
       "Release presentation reason"
     )
     expect(() => renderToStaticMarkup(preview({ openFullViewLabel: " " }))).toThrow("ReleasePreview openFullViewLabel")
+  })
+
+  it("keeps the complete collaborators slot optional for existing callers", () => {
+    const markup = renderToStaticMarkup(preview({ collaborators: undefined }))
+    expect(markup).not.toContain('data-rly-release-preview-slot="collaborators"')
   })
 })

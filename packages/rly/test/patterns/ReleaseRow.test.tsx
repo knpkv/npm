@@ -77,14 +77,15 @@ describe("ReleaseRow", () => {
     expect(contradictory?.textContent).toContain("The caller explicitly supplied this outcome.")
   })
 
-  it("represents all six release states through data only while preserving visible content", () => {
+  it("represents every release state through data only while preserving visible content", () => {
     const states = [
       "blocked",
       "ready",
       "deploying",
       "building",
       "shipped",
-      "held"
+      "held",
+      "unknown"
     ] satisfies ReadonlyArray<RlyReleaseState>
     for (const state of states) {
       const row = render(
@@ -97,6 +98,32 @@ describe("ReleaseRow", () => {
       expect(row?.textContent).toContain(`Supplied ${state} verdict`)
       expect(row?.querySelectorAll("dl > div")).toHaveLength(3)
     }
+  })
+
+  it("renders an unknown release with an explicit unassigned owner instead of inventing a person", () => {
+    const unassignedRelease = {
+      algorithm: release.algorithm,
+      approver: release.approver,
+      codename: release.codename,
+      facts: release.facts,
+      freshness: release.freshness,
+      freshnessDateTime: release.freshnessDateTime,
+      freshnessTime: release.freshnessTime,
+      id: "release-unknown",
+      reason: "No readiness evaluation has been supplied for this release.",
+      state: "unknown",
+      symbolIndices: release.symbolIndices,
+      tone: "neutral",
+      verdict: "Readiness not evaluated",
+      version: release.version
+    } satisfies RlyReleasePresentation
+    const row = render(<ReleaseRow onPreview={() => undefined} release={unassignedRelease} />)
+
+    expect(row?.getAttribute("data-rly-release-state")).toBe("unknown")
+    expect(row?.textContent).toContain("Readiness not evaluated")
+    expect(row?.textContent).toContain("Unassigned")
+    expect(row?.querySelector("[data-rly-release-owner='unassigned']")).not.toBeNull()
+    expect(row?.textContent).not.toContain("Mara Bell")
   })
 
   it("calls the preview callback exactly once for one activation", async () => {

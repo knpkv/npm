@@ -67,7 +67,7 @@ export type {
 export { RelationshipTable } from "./RelationshipTable.js"
 export type { RelationshipTableProps } from "./RelationshipTable.js"
 export { ReleasePreview } from "./ReleasePreview.js"
-export type { ReleasePreviewProps } from "./ReleasePreview.js"
+export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {
   ReleaseRelay,
   RLY_RELEASE_RELAY_DEFAULT_VARIANTS,

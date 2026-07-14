@@ -783,14 +783,21 @@
       "name": "ReleasePreview",
       "states": [
         "default",
-        "ready"
+        "dialog",
+        "ready",
+        "sheet",
+        "unknown"
       ],
       "terms": [
+        "dialog",
         "inspect",
         "pattern",
+        "presentation",
         "ready",
         "release",
-        "releasepreview"
+        "releasepreview",
+        "sheet",
+        "unknown"
       ]
     },
     {
@@ -833,7 +840,8 @@
         "deploying",
         "held",
         "ready",
-        "shipped"
+        "shipped",
+        "unknown"
       ],
       "terms": [
         "blocked",
@@ -845,7 +853,8 @@
         "ready",
         "release",
         "releaserow",
-        "shipped"
+        "shipped",
+        "unknown"
       ]
     },
     {

@@ -1,7 +1,7 @@
-import { FreshnessStamp, PeopleStrip, ReleaseRelay, ServiceMark, StageRail, Verdict } from "@knpkv/rly/patterns"
-import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useState } from "react"
-import { Link } from "react-router"
+import { ReleaseRow } from "@knpkv/rly/patterns"
+import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
+import type { ReactElement } from "react"
+import { Link, useLocation, useNavigate } from "react-router"
 
 import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
@@ -12,6 +12,7 @@ import {
   type PortfolioSnapshotLoadState,
   usePortfolioSnapshot
 } from "./usePortfolioSnapshot.js"
+import { releaseOriginFromLocation, makeReleaseRouteState, releasePreviewPath } from "../releases/releaseRoutes.js"
 import styles from "./PortfolioOverview.module.css"
 
 export type PortfolioOverviewState =
@@ -29,15 +30,20 @@ export type PortfolioOverviewState =
   | { readonly _tag: "failed"; readonly failure: PortfolioLoadFailure }
 
 export interface PortfolioOverviewViewProps {
+  readonly onPreviewRelease: (releaseId: PortfolioReleasePresentation["id"]) => void
+  readonly onRetry: () => void
+  readonly state: PortfolioOverviewState
+}
+
+export interface PortfolioOverviewController {
   readonly onRetry: () => void
   readonly state: PortfolioOverviewState
 }
 
 interface ReleaseDossierProps {
+  readonly onPreview: () => void
   readonly release: PortfolioReleasePresentation
 }
-
-const COLLABORATOR_PREVIEW_LIMIT = 3
 
 const connectionPresentation = (
   connection: PortfolioConnectionState,
@@ -201,144 +207,44 @@ const FailedPortfolio = ({
   )
 }
 
-const ReleaseDossier = ({ release }: ReleaseDossierProps): ReactElement => {
-  const [arePeopleExpanded, setArePeopleExpanded] = useState(false)
-  const headingId = `release-${release.id}`
-  const visibleCollaboratorCount = arePeopleExpanded
-    ? release.collaborators.length
-    : Math.min(COLLABORATOR_PREVIEW_LIMIT, release.collaborators.length)
-
-  return (
-    <Surface
-      aria-labelledby={headingId}
-      as="article"
-      className={styles.dossier}
-      data-portfolio-release-id={release.id}
-      padding="spacious"
-      shape="grouped"
-      tone="primary"
-    >
-      <header className={styles.releaseHeader}>
-        <div className={styles.releaseTitle}>
-          <Text as="h2" id={headingId} variant="section-title">
-            {release.serviceName}
-          </Text>
-          <Text as="code" tone="secondary" variant="code">
-            {release.version}
-          </Text>
-        </div>
-        <StateLabel label={release.lifecycleLabel} tone={release.lifecycleTone} />
-      </header>
-
-      <div className={styles.identity}>
-        <ReleaseRelay
-          algorithm={release.relay.algorithm}
-          codename={release.relay.codename}
-          size="hero"
-          symbolIndices={release.relay.symbolIndices}
-        />
-      </div>
-
-      <Verdict
-        className={styles.verdict}
-        reason={release.readinessReason}
-        tone="neutral"
-        verdict="Readiness not evaluated"
+const ReleaseDossier = ({ onPreview, release }: ReleaseDossierProps): ReactElement => (
+  <div className={styles.releaseEntry} data-portfolio-release-id={release.id}>
+    <ReleaseRow onPreview={onPreview} previewLabel={`Preview ${release.relay.codename}`} release={release.release} />
+    {release.source.warning === null ? null : (
+      <StatePanel
+        announce="polite"
+        className={styles.sourceWarning}
+        description={release.source.warning}
+        title="Showing preserved source facts"
+        tone="caution"
       />
+    )}
+  </div>
+)
 
-      <section aria-label="Release collaborators" className={styles.people}>
-        <Text as="h3" variant="card-title">
-          People
-        </Text>
-        {release.collaborators.length === 0 ? (
-          <Text tone="secondary">No release owner or approver is assigned.</Text>
-        ) : (
-          <>
-            <PeopleStrip
-              aria-label={`${release.serviceName} collaborators, showing ${visibleCollaboratorCount} of ${release.collaboratorCount}`}
-              expanded={arePeopleExpanded}
-              limit={COLLABORATOR_PREVIEW_LIMIT}
-              onExpandedChange={setArePeopleExpanded}
-              people={release.collaborators}
-            />
-            {release.collaboratorCount > release.collaborators.length ? (
-              <Text tone="secondary" variant="meta">
-                Showing {release.collaborators.length} of {release.collaboratorCount} collaborators in this overview.
-              </Text>
-            ) : null}
-          </>
-        )}
-      </section>
-
-      <StageRail className={styles.stages} heading="Readiness checks" size="compact" stages={release.stages} />
-
-      <dl className={styles.facts}>
-        {release.facts.map((fact) => (
-          <div className={styles.fact} key={fact.id}>
-            <Text as="dt" tone="tertiary" variant="meta">
-              {fact.label}
-            </Text>
-            <Text as="dd" className={styles.factValue} variant="body-large">
-              {fact.value}
-            </Text>
-          </div>
-        ))}
-      </dl>
-
-      <section aria-label="Release source" className={styles.source}>
-        <div className={styles.sourceIdentity}>
-          {release.source.service === null ? (
-            <Text tone="secondary" variant="label">
-              Source unavailable
-            </Text>
-          ) : (
-            <ServiceMark service={release.source.service} />
-          )}
-          <Text tone="secondary" variant="meta">
-            {release.source.displayName}
-          </Text>
-        </div>
-        <div className={styles.sourceState}>
-          <StateLabel label={release.source.healthLabel} size="compact" tone={release.source.healthTone} />
-          {release.source.freshnessDateTime === null || release.source.freshnessTime === null ? (
-            <FreshnessStamp size="compact" state={release.source.freshness} />
-          ) : (
-            <FreshnessStamp
-              dateTime={release.source.freshnessDateTime}
-              size="compact"
-              state={release.source.freshness}
-              time={release.source.freshnessTime}
-            />
-          )}
-        </div>
-      </section>
-
-      {release.source.warning === null ? null : (
-        <StatePanel
-          announce="polite"
-          className={styles.sourceWarning}
-          description={release.source.warning}
-          title="Showing preserved source facts"
-          tone="caution"
-        />
-      )}
-    </Surface>
-  )
-}
-
-const ReadyPortfolio = ({ portfolio }: { readonly portfolio: PortfolioPresentation }): ReactElement => {
+const ReadyPortfolio = ({
+  onPreviewRelease,
+  portfolio
+}: {
+  readonly onPreviewRelease: (releaseId: PortfolioReleasePresentation["id"]) => void
+  readonly portfolio: PortfolioPresentation
+}): ReactElement => {
   if (portfolio.releases.length === 0) return <EmptyPortfolio />
   return (
     <div className={styles.releaseList}>
       {portfolio.releases.map((release) => (
-        <ReleaseDossier key={release.id} release={release} />
+        <ReleaseDossier key={release.id} onPreview={() => onPreviewRelease(release.id)} release={release} />
       ))}
     </div>
   )
 }
 
 /** Render every Overview outcome from an explicit controlled state. */
-export const PortfolioOverviewView = ({ onRetry, state }: PortfolioOverviewViewProps): ReactElement => (
+export const PortfolioOverviewView = ({
+  onPreviewRelease,
+  onRetry,
+  state
+}: PortfolioOverviewViewProps): ReactElement => (
   <section aria-labelledby="portfolio-title" className={styles.root}>
     <header className={styles.hero}>
       <div className={styles.heroCopy}>
@@ -368,7 +274,9 @@ export const PortfolioOverviewView = ({ onRetry, state }: PortfolioOverviewViewP
       {state._tag === "session" ? <SessionBoundary {...state} /> : null}
       {state._tag === "loading" ? <LoadingPortfolio /> : null}
       {state._tag === "failed" ? <FailedPortfolio failure={state.failure} onRetry={onRetry} /> : null}
-      {state._tag === "ready" ? <ReadyPortfolio portfolio={state.portfolio} /> : null}
+      {state._tag === "ready" ? (
+        <ReadyPortfolio onPreviewRelease={onPreviewRelease} portfolio={state.portfolio} />
+      ) : null}
     </div>
   </section>
 )
@@ -402,8 +310,8 @@ export const selectPortfolioOverviewState = (
   return overviewState(loadState)
 }
 
-/** Load and present the authenticated server portfolio at the root application route. */
-export const PortfolioOverview = (): ReactElement => {
+/** Read the authenticated live portfolio through one shared route-level controller. */
+export const usePortfolioOverviewController = (): PortfolioOverviewController => {
   const { invalidateSession, state: browserSession } = useBrowserSession()
   const readableSession =
     browserSession._tag === "authenticated"
@@ -412,10 +320,30 @@ export const PortfolioOverview = (): ReactElement => {
         ? browserSession.session
         : null
   const controller = usePortfolioSnapshot(readableSession?.sessionId ?? null, invalidateSession)
-  const state = selectPortfolioOverviewState(
-    controller.state,
-    readableSession?.sessionId ?? null,
-    browserSession._tag === "authenticated" ? "checking" : browserSession._tag
-  )
-  return <PortfolioOverviewView onRetry={controller.retry} state={state} />
+  return {
+    onRetry: controller.retry,
+    state: selectPortfolioOverviewState(
+      controller.state,
+      readableSession?.sessionId ?? null,
+      browserSession._tag === "authenticated" ? "checking" : browserSession._tag
+    )
+  }
+}
+
+/** Load and present the authenticated server portfolio at the root application route. */
+export const PortfolioOverview = (): ReactElement => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const controller = usePortfolioOverviewController()
+  const { state } = controller
+  const onPreviewRelease = (releaseId: PortfolioReleasePresentation["id"]): void => {
+    if (state._tag !== "ready") return
+    const routeState = makeReleaseRouteState(
+      state.portfolio.workspaceId,
+      releaseId,
+      releaseOriginFromLocation(location)
+    )
+    navigate(releasePreviewPath(state.portfolio.workspaceId, releaseId), { state: routeState })
+  }
+  return <PortfolioOverviewView onPreviewRelease={onPreviewRelease} onRetry={controller.onRetry} state={state} />
 }

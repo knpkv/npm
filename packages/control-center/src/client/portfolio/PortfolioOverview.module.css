@@ -42,7 +42,14 @@
 .content,
 .releaseList {
   display: grid;
-  gap: 2rem;
+  gap: 1rem;
+}
+
+.releaseList {
+  overflow: hidden;
+  border-block-start: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-grouped);
+  background: var(--rly-color-surface-1);
 }
 
 .statePanel {
@@ -75,94 +82,12 @@
   gap: 1rem;
 }
 
-.dossier {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
-  gap: clamp(2rem, 5vw, 4.5rem);
-  overflow: hidden;
+.releaseEntry {
+  min-inline-size: 0;
 }
 
-.releaseHeader,
-.identity,
-.stages,
-.source,
 .sourceWarning {
-  grid-column: 1 / -1;
-}
-
-.releaseHeader,
-.source,
-.sourceState {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.releaseTitle,
-.people,
-.sourceIdentity {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.releaseTitle {
-  min-inline-size: 0;
-}
-
-.identity {
-  padding-block-end: 2rem;
-  border-block-end: 1px solid var(--rly-color-border-1);
-}
-
-.people {
-  align-content: start;
-}
-
-.verdict {
-  align-self: start;
-}
-
-.facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-  align-self: end;
-  margin: 0;
-  overflow: hidden;
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
-  background: var(--rly-color-border-1);
-}
-
-.fact {
-  display: grid;
-  gap: 0.5rem;
-  min-inline-size: 0;
-  padding: 1rem;
-  background: var(--rly-color-surface-2);
-}
-
-.fact dd {
-  margin: 0;
-}
-
-.factValue {
-  font-weight: var(--rly-type-card-title-weight);
-}
-
-.source {
-  padding-block-start: 2rem;
-  border-block-start: 1px solid var(--rly-color-border-1);
-}
-
-.sourceIdentity {
-  min-inline-size: 0;
-}
-
-.sourceState {
-  justify-content: flex-end;
+  margin: 0 var(--rly-space-24) var(--rly-space-20);
 }
 
 @media (max-width: 48rem) {
@@ -170,8 +95,7 @@
     gap: 4rem;
   }
 
-  .hero,
-  .dossier {
+  .hero {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -183,31 +107,13 @@
     justify-content: flex-start;
   }
 
-  .releaseHeader,
-  .identity,
-  .stages,
-  .source,
-  .sourceWarning {
-    grid-column: auto;
-  }
-
   .loadingRail {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 30rem) {
-  .dossier {
-    gap: 2.5rem;
-  }
-
-  .facts {
-    grid-template-columns: 1fr;
-  }
-
-  .source,
-  .sourceState {
-    align-items: flex-start;
-    flex-direction: column;
+  .sourceWarning {
+    margin-inline: var(--rly-space-16);
   }
 }

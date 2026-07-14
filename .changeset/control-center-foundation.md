@@ -11,3 +11,9 @@ Add ordered libSQL migrations, workspace-scoped optimistic repositories, malform
 Add hash-only local pairing and session authentication, owner-controlled device and session revocation, audited terminal-only owner recovery, strict loopback/LAN request policy with explicit TLS secret references, and an owner-only scoped secret store for provider credentials.
 
 Add the versioned vendor-neutral plugin contract, capability negotiation, scoped connection registry, deterministic fake adapter, typed partial-failure and retry policy, atomic checkpoint/cache persistence, and a sealed governed-action execution boundary.
+
+Add canonical workspace release routes with compact row-to-preview activation,
+an explicit full-view transition, truthful unavailable-data states, complete
+collaborator context, refresh-safe origin handling, and a release-aware agent
+entry. Preserve focus, inert isolation, scroll locking, browser history, direct
+loads, compact sheets, and unknown-resource behavior across the transition.

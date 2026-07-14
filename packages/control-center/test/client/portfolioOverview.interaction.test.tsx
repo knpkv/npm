@@ -18,14 +18,15 @@ afterEach(async () => {
   if (mountedRoot === undefined) return
   await act(async () => mountedRoot?.unmount())
   mountedRoot = undefined
+  document.body.replaceChildren()
 })
 
 describe("PortfolioOverviewView interactions", () => {
-  it("announces the visible collaborator count while expanding and collapsing", async () => {
+  it("opens the exact release preview from one explicit native action", async () => {
     const portfolio = presentPortfolio(makePortfolioSnapshot())
-    const release = portfolio.releases[0]
-    if (release === undefined) throw new Error("Expected one release presentation")
+    const onPreviewRelease = vi.fn()
     const host = document.createElement("div")
+    document.body.append(host)
     const root = createRoot(host)
     mountedRoot = root
 
@@ -34,30 +35,13 @@ describe("PortfolioOverviewView interactions", () => {
         <MemoryRouter>
           <BrowserSessionProvider>
             <PortfolioOverviewView
+              onPreviewRelease={onPreviewRelease}
               onRetry={vi.fn()}
               state={{
                 _tag: "ready",
                 connection: { _tag: "connected" },
                 isSnapshotStale: false,
-                portfolio: {
-                  ...portfolio,
-                  releases: [
-                    {
-                      ...release,
-                      collaboratorCount: 4,
-                      collaborators: [
-                        ...release.collaborators,
-                        { avatarFallback: "GH", id: "grace:observer", name: "Grace Hopper", role: "Observer" },
-                        {
-                          avatarFallback: "KT",
-                          id: "katherine:reviewer",
-                          name: "Katherine Johnson",
-                          role: "Reviewer"
-                        }
-                      ]
-                    }
-                  ]
-                }
+                portfolio
               }}
             />
           </BrowserSessionProvider>
@@ -65,16 +49,15 @@ describe("PortfolioOverviewView interactions", () => {
       )
     )
 
-    expect(host.querySelector('[aria-label="payments-api collaborators, showing 3 of 4"]')).not.toBeNull()
-    const expand = host.querySelector<HTMLButtonElement>('button[aria-label="Show 1 more people"]')
-    if (expand === null) throw new Error("Expected collaborator expansion control")
-    await act(async () => expand.click())
-
-    expect(host.querySelector('[aria-label="payments-api collaborators, showing 4 of 4"]')).not.toBeNull()
-    const collapse = host.querySelector<HTMLButtonElement>('button[aria-label="Show fewer people"]')
-    if (collapse === null) throw new Error("Expected collaborator collapse control")
-    await act(async () => collapse.click())
-
-    expect(host.querySelector('[aria-label="payments-api collaborators, showing 3 of 4"]')).not.toBeNull()
+    const preview = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Preview Copper Finch"
+    )
+    if (preview === undefined) throw new Error("Expected the release preview action")
+    expect(preview.type).toBe("button")
+    preview.focus()
+    expect(document.activeElement).toBe(preview)
+    await act(async () => preview.click())
+    expect(onPreviewRelease).toHaveBeenCalledOnce()
+    expect(onPreviewRelease).toHaveBeenCalledWith("01890f6f-6d6a-7cc0-98d2-000000000011")
   })
 })

@@ -38,7 +38,7 @@ const renderOverview = (state: PortfolioOverviewState): string =>
   renderToStaticMarkup(
     <MemoryRouter>
       <BrowserSessionProvider>
-        <PortfolioOverviewView onRetry={vi.fn()} state={state} />
+        <PortfolioOverviewView onPreviewRelease={vi.fn()} onRetry={vi.fn()} state={state} />
       </BrowserSessionProvider>
     </MemoryRouter>
   )
@@ -76,18 +76,15 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain("Readiness not evaluated")
     expect(markup).toContain("No readiness evidence has been evaluated yet.")
     expect(markup).not.toContain("disconnected")
-    expect(markup).toContain("Build")
-    expect(markup).toContain("Verify")
-    expect(markup).toContain("Production")
+    expect(markup).toContain('data-rly-release-state="unknown"')
     expect(markup).toContain("Avery Bell")
     expect(markup).toContain("Release owner")
     expect(markup).toContain("Mara Singh")
     expect(markup).toContain("Release approver")
-    expect(markup).toContain('aria-label="Jira"')
     expect(markup).toContain("Payments Jira")
     expect(markup).toContain("Healthy")
     expect(markup).toContain("Current")
-    expect(markup).not.toContain("Preview release")
+    expect(markup).toContain("Preview Copper Finch")
   })
 
   it.each(liveStatusCases)(
@@ -157,17 +154,19 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain("Release approver")
   })
 
-  it("states when the compact overview omits collaborators beyond its payload cap", () => {
+  it("shows the authoritative collaborator total when compact people are payload-capped", () => {
     const markup = renderOverview({
       _tag: "ready",
       ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("capped"))
     })
-    expect(markup).toContain("Showing 2 of 51 collaborators in this overview.")
-    expect(markup).toContain("payments-api collaborators, showing 2 of 51")
+    expect(markup).toContain("Collaborators")
+    expect(markup).toContain(">51<")
+    expect(markup).toContain("Avery Bell")
+    expect(markup).toContain("Mara Singh")
   })
 
-  it("announces only the collaborators visible while the people strip is collapsed", () => {
+  it("keeps the overview row compact when complete collaborator detail belongs to preview", () => {
     const portfolio = presentPortfolio(makePortfolioSnapshot())
     const release = portfolio.releases[0]
     if (release === undefined) throw new Error("Expected one release presentation")
@@ -189,8 +188,11 @@ describe("PortfolioOverviewView", () => {
         ]
       }
     })
-    expect(markup).toContain("payments-api collaborators, showing 3 of 4")
-    expect(markup).toContain("Show 1 more people")
+    expect(markup).toContain("Avery Bell")
+    expect(markup).toContain("Mara Singh")
+    expect(markup).not.toContain("Grace Hopper")
+    expect(markup).not.toContain("Katherine Johnson")
+    expect(markup).not.toContain("Show 1 more people")
   })
 
   it("gives unavailable reads one clear retry action and keeps session-only views private", () => {

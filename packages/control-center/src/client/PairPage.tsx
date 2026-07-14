@@ -9,6 +9,7 @@ import { makeControlCenterApiClient } from "../api/client.js"
 import { PairingCode } from "../api/session.js"
 import { useBrowserSession } from "./BrowserSession.js"
 import { pairingFailureMessage } from "./PairingFailure.js"
+import { releaseParentPath } from "./releases/releaseRoutes.js"
 import styles from "./pages.module.css"
 
 const pairBrowser = (rawPairingCode: string) =>
@@ -33,7 +34,7 @@ export const PairPage = (): ReactElement => {
     Effect.runPromise(pairBrowser(pairingCode)).then(
       (result) => {
         establishSession(result.csrfToken, result.session)
-        navigate("/", { replace: true })
+        navigate(releaseParentPath(result.session.workspaceId), { replace: true })
       },
       (failure) => {
         setError(pairingFailureMessage(failure))

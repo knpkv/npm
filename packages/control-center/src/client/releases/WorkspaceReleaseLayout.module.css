@@ -1,0 +1,11 @@
+.state {
+  display: grid;
+  min-block-size: 60dvh;
+  place-items: center;
+}
+
+.state a {
+  color: inherit;
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}

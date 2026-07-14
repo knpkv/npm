@@ -50,7 +50,8 @@ Add release dossier, preview, workset, entity-shell, entity-table, and activity
 patterns. Cover six release outcomes, six-ticket and arbitrary-cardinality Jira
 worksets, explicit PR and pipeline dimensions, service-specific full-view
 shells, controlled sorting, complete degraded data states, human and agent
-actors, compact reflow, and focus-safe preview-to-full-view actions.
+actors, caller-selected dialog or compact-sheet previews, complete collaborator
+slots, and focus-safe preview-to-full-view actions.
 
 Add first-class contextual agent and governed-action patterns with exact
 context/evidence/capability ordering, durable human/agent/system threads,

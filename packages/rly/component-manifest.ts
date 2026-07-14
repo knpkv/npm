@@ -1120,7 +1120,8 @@ export const componentManifest = {
       category: "pattern",
       exports: [
         { kind: "value", name: "ReleasePreview" },
-        { kind: "type", name: "ReleasePreviewProps" }
+        { kind: "type", name: "ReleasePreviewProps" },
+        { kind: "type", name: "RlyReleasePreviewPresentation" }
       ],
       name: "ReleasePreview",
       publicEntry: "patterns",
@@ -1128,8 +1129,9 @@ export const componentManifest = {
       source: "src/patterns/ReleasePreview.tsx",
       status: "stable",
       styles: ["src/patterns/ReleasePreview.module.css"],
-      variants: [],
+      variants: [{ defaultValue: "dialog", name: "presentation", values: ["dialog", "sheet"] }],
       visual: {
+        coverageStoryIds: ["patterns-releasepreview--compact-forced-colors"],
         story: "stories/patterns/ReleasePreview.stories.tsx",
         storyId: "patterns-releasepreview--interaction",
         tests: ["test/patterns/ReleasePreview.test.tsx"]
@@ -1179,6 +1181,7 @@ export const componentManifest = {
       styles: ["src/patterns/ReleaseRow.module.css"],
       variants: [],
       visual: {
+        coverageStoryIds: ["patterns-releaserow--unknown-unassigned"],
         story: "stories/patterns/ReleaseRow.stories.tsx",
         storyId: "patterns-releaserow--six-states",
         tests: ["test/patterns/ReleaseRow.test.tsx"]

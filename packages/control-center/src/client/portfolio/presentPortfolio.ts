@@ -1,6 +1,7 @@
 import type {
   RlyFreshnessState,
   RlyPerson,
+  RlyReleasePresentation,
   RlyReleaseRelaySymbolIndices,
   RlyService,
   RlyStage
@@ -58,10 +59,11 @@ export interface PortfolioReleasePresentation {
   readonly collaborators: ReadonlyArray<RlyPerson>
   readonly collaboratorCount: number
   readonly facts: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
-  readonly id: string
+  readonly id: PortfolioSnapshot["releases"][number]["releaseId"]
   readonly lifecycleLabel: string
   readonly lifecycleTone: RlyStateTone
   readonly readinessReason: string
+  readonly release: RlyReleasePresentation
   readonly relay: {
     readonly algorithm: string
     readonly codename: string
@@ -77,6 +79,7 @@ export interface PortfolioPresentation {
   readonly generatedAt: string
   readonly generatedTime: string
   readonly releases: ReadonlyArray<PortfolioReleasePresentation>
+  readonly workspaceId: PortfolioSnapshot["workspaceId"]
 }
 
 const serviceForProvider = (providerId: PortfolioSnapshot["plugins"][number]["providerId"]): RlyService => {
@@ -197,29 +200,58 @@ const releasePresentation = (
   plugins: PortfolioSnapshot["plugins"]
 ): PortfolioReleasePresentation => {
   const lifecycle = lifecyclePresentation[release.lifecycle]
+  const source = sourcePresentation(release, plugins)
+  const collaborators = release.collaborators.map(({ avatarFallback, displayName, personId, role }) => ({
+    avatarFallback,
+    id: `${personId}:${role}`,
+    name: displayName,
+    role: releaseRoleLabels[role]
+  }))
+  const owner = collaborators.find(({ role }) => role === releaseRoleLabels["release-owner"])
+  const approver = collaborators.find(({ role }) => role === releaseRoleLabels["release-approver"])
+  const facts = [
+    { id: "service", label: "Service", value: release.serviceName },
+    { id: "lifecycle", label: "Lifecycle", value: lifecycle.label },
+    { id: "collaborators", label: "Collaborators", value: String(release.collaboratorCount) },
+    { id: "targets", label: "Targets", value: String(release.targetEnvironmentIds.length) },
+    { id: "source-revisions", label: "Source revisions", value: String(release.sourceRevisionCount) },
+    { id: "source", label: "Source", value: source.displayName },
+    { id: "source-health", label: "Source health", value: source.healthLabel }
+  ]
+  const readinessReason = "No readiness evidence has been evaluated yet."
   return {
-    collaborators: release.collaborators.map(({ avatarFallback, displayName, personId, role }) => ({
-      avatarFallback,
-      id: `${personId}:${role}`,
-      name: displayName,
-      role: releaseRoleLabels[role]
-    })),
+    collaborators,
     collaboratorCount: release.collaboratorCount,
-    facts: [
-      { id: "targets", label: "Targets", value: String(release.targetEnvironmentIds.length) },
-      { id: "source-revisions", label: "Source revisions", value: String(release.sourceRevisionCount) }
-    ],
+    facts,
     id: release.releaseId,
     lifecycleLabel: lifecycle.label,
     lifecycleTone: lifecycle.tone,
-    readinessReason: "No readiness evidence has been evaluated yet.",
+    readinessReason,
+    release: {
+      algorithm: release.relay.algorithm,
+      ...(approver === undefined ? {} : { approver }),
+      codename: release.relay.codename,
+      facts,
+      freshness: source.freshness,
+      ...(source.freshnessDateTime === null || source.freshnessTime === null
+        ? {}
+        : { freshnessDateTime: source.freshnessDateTime, freshnessTime: source.freshnessTime }),
+      id: release.releaseId,
+      ...(owner === undefined ? {} : { owner }),
+      reason: readinessReason,
+      state: "unknown",
+      symbolIndices: release.relay.symbolIndices,
+      tone: "neutral",
+      verdict: "Readiness not evaluated",
+      version: release.version
+    },
     relay: {
       algorithm: release.relay.algorithm,
       codename: release.relay.codename,
       symbolIndices: release.relay.symbolIndices
     },
     serviceName: release.serviceName,
-    source: sourcePresentation(release, plugins),
+    source,
     stages: readinessStages(),
     version: release.version
   }
@@ -229,5 +261,6 @@ const releasePresentation = (
 export const presentPortfolio = (snapshot: PortfolioSnapshot): PortfolioPresentation => ({
   generatedAt: DateTime.formatIso(snapshot.generatedAt),
   generatedTime: formattedTime(snapshot.generatedAt),
-  releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins))
+  releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins)),
+  workspaceId: snapshot.workspaceId
 })

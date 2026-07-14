@@ -75,7 +75,13 @@ export const ReleaseRow = ({
       <div className={style("people")}>
         <div className={style("personGroup")}>
           <span className={style("eyebrow")}>Owner</span>
-          <Person person={release.owner} size="compact" />
+          {release.owner === undefined ? (
+            <span className={style("unassigned")} data-rly-release-owner="unassigned">
+              Unassigned
+            </span>
+          ) : (
+            <Person person={release.owner} size="compact" />
+          )}
         </div>
         {release.approver === undefined ? null : (
           <div className={style("personGroup")}>

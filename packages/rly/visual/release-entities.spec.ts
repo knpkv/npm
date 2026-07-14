@@ -47,7 +47,11 @@ test("moves from release row to controlled preview and restores focus", async ({
   const dialog = page.getByRole("dialog", { name: "Release preview: v2.4.0 Copper Finch" })
   await expect(dialog).toBeVisible()
   await expect(page.locator("[data-rly-release-preview-summary]")).toBeFocused()
-  await expect(dialog.locator("[data-rly-release-preview-slot]")).toHaveCount(5)
+  expect(
+    await dialog.locator("[data-rly-release-preview-slot]").evaluateAll((slots) =>
+      slots.map((slot) => slot.getAttribute("data-rly-release-preview-slot"))
+    )
+  ).toEqual(["collaborators", "primary-action", "stages", "workset", "evidence", "agent-entry"])
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("release-preview.png") })
   await page.keyboard.press("Escape")
   await expect(trigger).toBeFocused()

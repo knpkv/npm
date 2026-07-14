@@ -581,7 +581,8 @@
       },
       "storyId": "patterns-releasepreview--interaction",
       "storyIds": [
-        "patterns-releasepreview--interaction"
+        "patterns-releasepreview--interaction",
+        "patterns-releasepreview--compact-forced-colors"
       ]
     },
     {
@@ -616,7 +617,8 @@
       },
       "storyId": "patterns-releaserow--six-states",
       "storyIds": [
-        "patterns-releaserow--six-states"
+        "patterns-releaserow--six-states",
+        "patterns-releaserow--unknown-unassigned"
       ]
     },
     {

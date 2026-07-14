@@ -172,7 +172,10 @@ export const COMPONENT_REGISTRY_METADATA = {
     "missing"
   ], ["relationship", "table"]),
   ReleasePreview: registryMetadata("Preview release identity, verdict, work, and actions before full navigation", [
-    "ready"
+    "dialog",
+    "ready",
+    "sheet",
+    "unknown"
   ], ["inspect", "release"]),
   ReleaseRelay: registryMetadata("Render the caller-derived stable release codename and three-symbol identity", [
     "compact",
@@ -185,7 +188,8 @@ export const COMPONENT_REGISTRY_METADATA = {
     "deploying",
     "ready",
     "held",
-    "shipped"
+    "shipped",
+    "unknown"
   ], ["navigate", "release"]),
   Select: registryMetadata("Choose one controlled option with complete label and error semantics", [
     "compact",

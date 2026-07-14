@@ -2856,6 +2856,10 @@
         {
           "kind": "type",
           "name": "ReleasePreviewProps"
+        },
+        {
+          "kind": "type",
+          "name": "RlyReleasePreviewPresentation"
         }
       ],
       "files": {
@@ -2871,7 +2875,9 @@
       "importPath": "@knpkv/rly/patterns",
       "name": "ReleasePreview",
       "props": {
-        "defaults": {},
+        "defaults": {
+          "presentation": "dialog"
+        },
         "types": [
           "ReleasePreviewProps"
         ]
@@ -2880,10 +2886,29 @@
       "slots": [],
       "states": [
         "default",
-        "ready"
+        "dialog",
+        "ready",
+        "sheet",
+        "unknown"
       ],
       "status": "stable",
-      "variants": []
+      "variants": [
+        {
+          "defaultValue": "dialog",
+          "description": "Controls the presentation presentation axis of ReleasePreview.",
+          "name": "presentation",
+          "values": [
+            {
+              "description": "Use dialog for the presentation presentation.",
+              "name": "dialog"
+            },
+            {
+              "description": "Use sheet for the presentation presentation.",
+              "name": "sheet"
+            }
+          ]
+        }
+      ]
     },
     {
       "accessibility": {
@@ -3073,7 +3098,8 @@
         "deploying",
         "held",
         "ready",
-        "shipped"
+        "shipped",
+        "unknown"
       ],
       "status": "stable",
       "variants": []

@@ -1,0 +1,73 @@
+.state {
+  display: grid;
+  min-block-size: 60dvh;
+  place-items: center;
+}
+
+.state a,
+.back {
+  color: inherit;
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.previewDetails,
+.evidence,
+.full,
+.fullHeader,
+.fullTitle,
+.section {
+  display: grid;
+}
+
+.previewDetails,
+.evidence {
+  gap: var(--rly-space-16);
+}
+
+.evidenceHeading,
+.fullIdentity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-16);
+}
+
+.evidenceHeading > div {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.full {
+  gap: clamp(4rem, 9vw, 8rem);
+}
+
+.fullHeader {
+  gap: var(--rly-space-32);
+}
+
+.fullTitle {
+  gap: var(--rly-space-12);
+}
+
+.fullTitle h1 {
+  max-inline-size: 12ch;
+  outline: none;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.section {
+  gap: var(--rly-space-24);
+}
+
+@media (max-width: 40rem) {
+  .full {
+    gap: var(--rly-space-64);
+  }
+
+  .fullHeader {
+    gap: var(--rly-space-24);
+  }
+}

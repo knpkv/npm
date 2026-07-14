@@ -246,11 +246,15 @@ not infer links, confidence, readiness, or authorization.
 ## Release dossiers and entity views
 
 `ReleaseRow` is the bird's-eye release dossier: one unique relay, one large
-caller-supplied verdict, named owner and approver, visible facts, and controlled
-preview and agent actions. `ReleasePreview` opens that projection in a
-controlled dialog before the application routes to a full view. Its ordered
-slots keep the primary action, stages, workset, evidence, and contextual agent
-entry explicit.
+caller-supplied verdict, explicit assigned or unassigned ownership, visible
+facts, and controlled preview and agent actions. `ReleasePreview` opens that
+projection in a caller-selected wide dialog or compact full-screen sheet before
+the application routes to a full view. Its ordered slots keep the optional
+complete collaborator list, primary action, stages, workset, evidence, and
+contextual agent entry explicit. Primary owner and approver roles stay compact;
+the collaborator slot can carry every assignment without truncating cardinality.
+The application owns responsive selection through the `presentation` prop; rly
+does not inspect viewport state.
 
 `WorksetCard` keeps Jira work, CodeCommit pull-request groups, relationship
 gaps, and CodePipeline executions together without flattening them into a Jira

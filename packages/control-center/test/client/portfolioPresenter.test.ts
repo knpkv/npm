@@ -49,9 +49,20 @@ describe("portfolio presenter", () => {
       warning: null
     })
     expect(release.facts).toEqual([
+      { id: "service", label: "Service", value: "payments-api" },
+      { id: "lifecycle", label: "Lifecycle", value: "Candidate" },
+      { id: "collaborators", label: "Collaborators", value: "2" },
       { id: "targets", label: "Targets", value: "1" },
-      { id: "source-revisions", label: "Source revisions", value: "1" }
+      { id: "source-revisions", label: "Source revisions", value: "1" },
+      { id: "source", label: "Source", value: "Payments Jira" },
+      { id: "source-health", label: "Source health", value: "Healthy" }
     ])
+    expect(release.release).toMatchObject({
+      owner: release.collaborators[0],
+      approver: release.collaborators[1],
+      state: "unknown",
+      verdict: "Readiness not evaluated"
+    })
   })
 
   it("keeps cached release facts visible when the current source is stale or unhealthy", () => {

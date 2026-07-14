@@ -48,6 +48,12 @@ const stateDetails: Readonly<
     reason: "The release owner intentionally paused delivery while cached evidence is reviewed.",
     tone: "caution",
     verdict: "Held for review"
+  },
+  unknown: {
+    freshness: "current",
+    reason: "No readiness evaluation has been supplied for this release.",
+    tone: "neutral",
+    verdict: "Readiness not evaluated"
   }
 }
 
@@ -64,7 +70,7 @@ const releaseFor = (state: RlyReleaseState): RlyReleasePresentation => ({
   freshnessDateTime: "2026-07-13T09:42:00Z",
   freshnessTime: "09:42 UTC",
   id: `release-${state}`,
-  owner: { id: `owner-${state}`, name: "Mara Bell", role: "Release owner" },
+  ...(state === "unknown" ? {} : { owner: { id: `owner-${state}`, name: "Mara Bell", role: "Release owner" } }),
   reason: stateDetails[state].reason,
   state,
   symbolIndices: [2, 7, 13],
@@ -137,6 +143,18 @@ const CompactCatalog = (): ReactElement => (
   </main>
 )
 
+const UnknownUnassignedCatalog = (): ReactElement => (
+  <main style={catalogStyle}>
+    <div style={headingStyle}>
+      <Text as="h1" variant="section-title">
+        Unevaluated release
+      </Text>
+      <Text tone="secondary">Missing readiness and ownership remain explicit instead of being inferred.</Text>
+    </div>
+    <ReleaseRow onPreview={() => undefined} release={releaseFor("unknown")} />
+  </main>
+)
+
 const meta = {
   component: ReleaseRow,
   tags: ["autodocs"],
@@ -172,4 +190,15 @@ export const Compact: Story = {
     canvasElement.dataset.releaseRowCompactPlayComplete = "true"
   },
   render: () => <CompactCatalog />
+}
+
+export const UnknownUnassigned: Story = {
+  args: { onPreview: () => undefined, release: releaseFor("unknown") },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvasElement.querySelector("[data-rly-release-state='unknown']")).not.toBeNull()
+    await expect(canvas.getByText("Readiness not evaluated")).toBeVisible()
+    await expect(canvas.getByText("Unassigned")).toBeVisible()
+    canvasElement.dataset.releaseRowUnknownPlayComplete = "true"
+  },
+  render: () => <UnknownUnassignedCatalog />
 }

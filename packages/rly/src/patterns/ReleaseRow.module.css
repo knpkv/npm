@@ -77,6 +77,13 @@
     text-transform: uppercase;
   }
 
+  .unassigned {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+  }
+
   .facts {
     display: grid;
     gap: var(--rly-space-16) var(--rly-space-24);
