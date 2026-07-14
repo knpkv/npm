@@ -17,6 +17,7 @@ const isPrototypeImport = (importPath: string): boolean =>
 const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
+const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
   const normalizedSourcePath = sourcePath.toLowerCase()
@@ -77,11 +78,14 @@ const isDirectRequire = (expression: ts.Expression): boolean => {
 
 const isDirectRequireMember = (expression: ts.Expression, memberName: string): boolean => {
   const candidate = withoutOuterExpressions(expression)
-  return (
-    ts.isPropertyAccessExpression(candidate) &&
-    candidate.name.text === memberName &&
-    isDirectRequire(candidate.expression)
-  )
+  if (ts.isPropertyAccessExpression(candidate)) {
+    return candidate.name.text === memberName && isDirectRequire(candidate.expression)
+  }
+  if (ts.isElementAccessExpression(candidate)) {
+    const member = candidate.argumentExpression
+    return ts.isStringLiteralLike(member) && member.text === memberName && isDirectRequire(candidate.expression)
+  }
+  return false
 }
 
 type RequireSpecifier =
@@ -140,7 +144,7 @@ const normalizedTarget = (sourcePath: string, importPath: string): string | unde
     normalized.push(part)
   }
 
-  return normalized.join("/").replace(/\.(?:js|jsx|ts|tsx)$/, "")
+  return normalized.join("/").replace(SCRIPT_EXTENSION, "")
 }
 
 const isWithin = (sourcePath: string, directory: string): boolean =>
@@ -152,7 +156,7 @@ const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
   isWithin(sourcePath, "src/server/governance")
 
 const reasonForImport = (sourcePath: string, importPath: string): string | undefined => {
-  const normalizedSource = sourcePath.replaceAll("\\", "/").replace(/\.(?:js|jsx|ts|tsx)$/, "")
+  const normalizedSource = sourcePath.replaceAll("\\", "/").replace(SCRIPT_EXTENSION, "")
   const target = normalizedTarget(normalizedSource, importPath)
   const isClient = isWithin(normalizedSource, "src/client")
   const isApi = isWithin(normalizedSource, "src/api")
@@ -291,15 +295,13 @@ export const inspectStylesheetBoundaries = (
   source: string
 ): ReadonlyArray<SourceBoundaryViolation> =>
   stylesheetReferences(source).flatMap((importPath) =>
-    isPrototypeImport(importPath)
-      ? [{ importPath, reason: PROTOTYPE_RUNTIME_REASON, sourcePath }]
-      : []
+    isPrototypeImport(importPath) ? [{ importPath, reason: PROTOTYPE_RUNTIME_REASON, sourcePath }] : []
   )
 
 /** Return every package-boundary violation found in one production source file. */
 export const inspectSourceBoundaries = (sourcePath: string, source: string): ReadonlyArray<SourceBoundaryViolation> =>
   (() => {
-    const normalizedSource = sourcePath.replaceAll("\\", "/").replace(/\.(?:js|jsx|ts|tsx)$/, "")
+    const normalizedSource = sourcePath.replaceAll("\\", "/").replace(SCRIPT_EXTENSION, "")
     const classified = normalizedSource === "src/index" ||
       ["src/api", "src/client", "src/domain", "src/server"].some((directory) => isWithin(normalizedSource, directory))
     const structuralViolations: ReadonlyArray<SourceBoundaryViolation> = classified

@@ -30,24 +30,25 @@ describe("Control Center source boundaries", () => {
   })
 
   it("rejects presentation dependencies outside the browser", () => {
-    expect(inspectSourceBoundaries("src/domain/release.ts", "import type { SurfaceProps } from \"@knpkv/rly\""))
-      .toHaveLength(
-        1
-      )
+    expect(
+      inspectSourceBoundaries("src/domain/release.ts", "import type { SurfaceProps } from \"@knpkv/rly\"")
+    ).toHaveLength(1)
     expect(inspectSourceBoundaries("src/server/main.ts", "import \"@knpkv/rly/styles.css\"")).toHaveLength(1)
     expect(inspectSourceBoundaries("src/api/schema.ts", "import(\"@knpkv/rly\")")).toHaveLength(1)
   })
 
   it("seals live plugin execution services from adapters, ordinary server, and agent modules", () => {
     const internalImport = "../plugins/internal/AuthorizedPluginExecutor.js"
-    expect(inspectSourceBoundaries("src/server/routes/action.ts", `import ${JSON.stringify(internalImport)}`))
-      .toContainEqual({
-        importPath: internalImport,
-        reason: "only internal plugin composition and the governed engine can import live plugin execution services",
-        sourcePath: "src/server/routes/action.ts"
-      })
-    expect(inspectSourceBoundaries("src/server/agents/tools.ts", `import ${JSON.stringify(internalImport)}`))
-      .toHaveLength(1)
+    expect(
+      inspectSourceBoundaries("src/server/routes/action.ts", `import ${JSON.stringify(internalImport)}`)
+    ).toContainEqual({
+      importPath: internalImport,
+      reason: "only internal plugin composition and the governed engine can import live plugin execution services",
+      sourcePath: "src/server/routes/action.ts"
+    })
+    expect(
+      inspectSourceBoundaries("src/server/agents/tools.ts", `import ${JSON.stringify(internalImport)}`)
+    ).toHaveLength(1)
     expect(
       inspectSourceBoundaries(
         "src/server/plugins/fake/FakePlugin.ts",
@@ -410,6 +411,41 @@ describe("Control Center source boundaries", () => {
     ])
   })
 
+  it("inspects direct bracket-literal require call, apply, and bind compositions", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const called = require[\"call\"](undefined, \"../server/call.js\")",
+          "const applied = require[\"apply\"](undefined, [\"../server/apply.js\"])",
+          "const boundBefore = require[\"bind\"](undefined, \"../server/bound-before.js\")()",
+          "const boundAfter = require[\"bind\"](undefined)(\"../server/bound-after.js\")"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "../server/call.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/apply.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/bound-before.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/bound-after.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
   it("rejects unverifiable direct require call, apply, and bind compositions", () => {
     expect(
       inspectSourceBoundaries(
@@ -423,6 +459,20 @@ describe("Control Center source boundaries", () => {
         ].join("\n")
       )
     ).toHaveLength(5)
+  })
+
+  it("rejects unverifiable direct bracket-literal require compositions", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const called = (path: string) => require[\"call\"](undefined, path)",
+          "const applied = (args: ReadonlyArray<string>) => require[\"apply\"](undefined, args)",
+          "const boundBefore = (path: string) => require[\"bind\"](undefined, path)()",
+          "const boundAfter = (path: string) => require[\"bind\"](undefined)(path)"
+        ].join("\n")
+      )
+    ).toHaveLength(4)
   })
 
   it("ignores zero-argument direct require compositions and non-direct loaders", () => {
@@ -441,6 +491,42 @@ describe("Control Center source boundaries", () => {
         ].join("\n")
       )
     ).toEqual([])
+  })
+
+  it("ignores empty and non-direct bracket-literal require compositions", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "require[\"call\"](undefined)",
+          "require[\"apply\"](undefined, [])",
+          "require[\"bind\"](undefined)()",
+          "obj.require[\"call\"](undefined, \"../server/member-call.js\")",
+          "obj[\"require\"][\"apply\"](undefined, [\"../server/member-apply.js\"])",
+          "obj.require[\"bind\"](undefined)(\"../server/member-bind.js\")",
+          "require[member](undefined, \"../server/computed-member.js\")"
+        ].join("\n")
+      )
+    ).toEqual([])
+  })
+
+  it("normalizes every supported JavaScript and TypeScript module extension", () => {
+    for (const extension of ["js", "jsx", "ts", "tsx", "mjs", "mts", "cjs", "cts"]) {
+      expect(inspectSourceBoundaries(`src/index.${extension}`, `import "./server/main.${extension}"`)).toEqual([
+        {
+          importPath: `./server/main.${extension}`,
+          reason: "the package root must remain browser-safe",
+          sourcePath: `src/index.${extension}`
+        }
+      ])
+      expect(inspectSourceBoundaries(`src/api/schema.${extension}`, `import "../index.${extension}"`)).toEqual([
+        {
+          importPath: `../index.${extension}`,
+          reason: "API code can import only API or domain code",
+          sourcePath: `src/api/schema.${extension}`
+        }
+      ])
+    }
   })
 
   it("ignores empty import and require calls without indexing past their arguments", () => {
