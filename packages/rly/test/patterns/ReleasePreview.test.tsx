@@ -151,6 +151,9 @@ describe("ReleasePreview", () => {
     if (dialog === null || summary === null) throw new Error("ReleasePreview dialog did not render")
 
     expect(dialog.className).toContain(RLY_DIALOG_VARIANTS.size.wide.className)
+    expect(portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")).toBe(
+      "intrinsic"
+    )
     expect(portal.querySelector("[data-rly-release-preview-presentation='dialog']")).not.toBeNull()
     expect(dialog.textContent).toContain("Release preview: v2.4.0 Copper Finch")
     expect(summary.tabIndex).toBe(-1)
@@ -226,6 +229,7 @@ describe("ReleasePreview", () => {
   it("assigns the same three caller-owned shared geometry parts as ReleaseRow", async () => {
     const entry = await mount(
       preview({
+        entryMotion: "external",
         transitionNames: generatedTransitionNames
       })
     )
@@ -242,7 +246,11 @@ describe("ReleasePreview", () => {
       "external"
     )
 
-    await act(async () => entry.root.render(<PortalProvider container={entry.portal}>{preview()}</PortalProvider>))
+    await act(async () =>
+      entry.root.render(
+        <PortalProvider container={entry.portal}>{preview({ entryMotion: "external" })}</PortalProvider>
+      )
+    )
     expect(portal.querySelector("[data-rly-dialog-layer]")?.getAttribute("data-rly-dialog-entry-motion")).toBe(
       "external"
     )

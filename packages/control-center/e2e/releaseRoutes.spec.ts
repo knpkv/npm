@@ -234,6 +234,11 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
   await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
   await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
+  await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })).toHaveCSS(
+    "animation-name",
+    "none"
+  )
+  await expect(page.locator("[data-rly-dialog-overlay]")).toHaveCSS("animation-name", "none")
 
   // Bypass actionability waiting so transition two captures the immediate post-transition paint state.
   await page.getByRole("button", { name: "Open Copper Finch full view" }).dispatchEvent("click")

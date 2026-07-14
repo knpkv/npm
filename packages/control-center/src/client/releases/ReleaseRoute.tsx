@@ -173,6 +173,7 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
     <ReleasePreview
       agentEntry={<ReleaseAgentEntry release={selection.release} />}
       collaborators={<CompleteCollaborators release={selection.release} />}
+      entryMotion={resolvedOrigin.isStored ? "external" : "intrinsic"}
       evidence={<ReleaseEvidence release={selection.release} />}
       onOpenChange={(open) => {
         if (!open) requestOrigin()

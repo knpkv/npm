@@ -28,6 +28,8 @@ export interface ReleasePreviewProps {
   readonly collaborators?: ReactNode
   /** Required evidence composition supplied by the application. */
   readonly evidence: ReactNode
+  /** Select external when the application already owns this preview's entry motion. */
+  readonly entryMotion?: "external" | "intrinsic"
   /** Called once when the final full-view action is activated. */
   readonly onOpenFullView: () => void
   /** Receives controlled overlay state requests. */
@@ -54,6 +56,7 @@ export interface ReleasePreviewProps {
 export const ReleasePreview = ({
   agentEntry,
   collaborators,
+  entryMotion = "intrinsic",
   evidence,
   onOpenChange,
   onOpenFullView,
@@ -68,9 +71,6 @@ export const ReleasePreview = ({
 }: ReleasePreviewProps): ReactElement => {
   const release = validateReleasePresentation(suppliedRelease)
   const validatedTransitionNames = validateReleaseTransitionNames(transitionNames)
-  const entryMotion = useRef<"external" | "intrinsic">(
-    validatedTransitionNames === undefined ? "intrinsic" : "external"
-  ).current
   const visibleOpenFullViewLabel = requireText(openFullViewLabel, "ReleasePreview openFullViewLabel")
   const summaryRef = useRef<HTMLElement>(null)
   const freshness =
