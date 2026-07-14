@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
 import { PlatformError, SystemError } from "effect/PlatformError"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -65,6 +65,49 @@ describe("model", () => {
         expect(command.args).toContain("plan")
         expect(command.options.detached).toBeUndefined()
         expect(command.options.shell).toBe(false)
+      }
+    }))
+
+  it.effect("forwards only the reviewed Claude child environment", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Say hello" }).pipe(
+        Effect.provide(model({ cwd: "/workspace" })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: success("hello") })),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            ANTHROPIC_API_KEY: "anthropic-api-key",
+            ANTHROPIC_AUTH_TOKEN: "anthropic-auth-token",
+            ANTHROPIC_BASE_URL: "https://anthropic.example.test",
+            AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
+            CLAUDE_CONFIG_DIR: "/home/reviewer/.config/claude",
+            CODEX_THREAD_ID: "session-canary",
+            HOME: "/home/reviewer",
+            PATH: "/reviewed/bin",
+            SENTRY_AUTH_TOKEN: "vendor-canary",
+            USERPROFILE: "C:\\Users\\reviewer",
+            XDG_CONFIG_HOME: "/home/reviewer/.config"
+          }
+        })))
+      )
+
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.options.extendEnv).toBe(false)
+        expect(command.options.env).toEqual({
+          ANTHROPIC_API_KEY: "anthropic-api-key",
+          ANTHROPIC_AUTH_TOKEN: "anthropic-auth-token",
+          ANTHROPIC_BASE_URL: "https://anthropic.example.test",
+          CLAUDE_CONFIG_DIR: "/home/reviewer/.config/claude",
+          HOME: "/home/reviewer",
+          PATH: "/reviewed/bin",
+          USERPROFILE: "C:\\Users\\reviewer",
+          XDG_CONFIG_HOME: "/home/reviewer/.config"
+        })
+        expect(command.options.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+        expect(command.options.env).not.toHaveProperty("CODEX_THREAD_ID")
+        expect(command.options.env).not.toHaveProperty("SENTRY_AUTH_TOKEN")
       }
     }))
 

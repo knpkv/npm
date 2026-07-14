@@ -8,6 +8,7 @@ import { type ClaudeResult, decodeClaudeOutput } from "./protocol.js"
 interface RunOptions {
   readonly access: "read-only" | "workspace-write"
   readonly cwd: string
+  readonly environment: Readonly<Record<string, string>>
   readonly executable: string
   readonly jsonSchema: string | undefined
   readonly maxOutputBytes: number
@@ -96,7 +97,8 @@ export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*
   const promptInput = Stream.make(options.prompt).pipe(Stream.encodeText)
   const command = ChildProcess.make(options.executable, makeArguments(options), {
     cwd: options.cwd,
-    extendEnv: true,
+    env: options.environment,
+    extendEnv: false,
     forceKillAfter: "3 seconds",
     killSignal: "SIGTERM",
     shell: false,

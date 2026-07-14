@@ -30,6 +30,21 @@ export const invalidOutput = (description: string, method: string): AiError.AiEr
     reason: new AiError.InvalidOutputError({ description })
   })
 
+export const configurationFailure = (cause: unknown, method: string): AiError.AiError =>
+  AiError.make({
+    module: MODULE,
+    method,
+    reason: new AiError.InternalProviderError({
+      description: "Unable to read the reviewed Claude CLI environment",
+      metadata: {
+        "claude-cli": {
+          cause: Predicate.isError(cause) ? cause.name : "typed-cause",
+          phase: "configuration"
+        }
+      }
+    })
+  })
+
 export const unsupportedSchema = (cause: unknown, method: string): AiError.AiError =>
   AiError.make({
     module: MODULE,

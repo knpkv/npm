@@ -1,9 +1,9 @@
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Config, Effect, Layer, Option, Schema, Stream } from "effect"
 import type { Duration } from "effect"
 import { LanguageModel, Model } from "effect/unstable/ai"
 import type { AiError, Response } from "effect/unstable/ai"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { invalidInput, invalidOutput, unsupportedSchema } from "./errors.js"
+import { configurationFailure, invalidInput, invalidOutput, unsupportedSchema } from "./errors.js"
 import { renderPrompt } from "./prompt.js"
 import type { ClaudeResult } from "./protocol.js"
 import { runClaude } from "./runner.js"
@@ -13,6 +13,34 @@ const DEFAULT_MAX_STDERR_BYTES = 256 * 1024
 const DEFAULT_TIMEOUT = "2 minutes"
 const STREAM_TEXT_ID = "claude-cli-output"
 const JsonString = Schema.fromJsonString(Schema.Json)
+
+const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
+
+const childEnvironment = Config.all({
+  anthropicApiKey: optionalEnvironmentValue("ANTHROPIC_API_KEY"),
+  anthropicAuthToken: optionalEnvironmentValue("ANTHROPIC_AUTH_TOKEN"),
+  anthropicBaseUrl: optionalEnvironmentValue("ANTHROPIC_BASE_URL"),
+  claudeConfigDirectory: optionalEnvironmentValue("CLAUDE_CONFIG_DIR"),
+  home: optionalEnvironmentValue("HOME"),
+  path: optionalEnvironmentValue("PATH"),
+  userProfile: optionalEnvironmentValue("USERPROFILE"),
+  xdgConfigHome: optionalEnvironmentValue("XDG_CONFIG_HOME")
+}).pipe(
+  Config.map((configured) => ({
+    ...(Option.isSome(configured.anthropicApiKey) ? { ANTHROPIC_API_KEY: configured.anthropicApiKey.value } : {}),
+    ...(Option.isSome(configured.anthropicAuthToken)
+      ? { ANTHROPIC_AUTH_TOKEN: configured.anthropicAuthToken.value }
+      : {}),
+    ...(Option.isSome(configured.anthropicBaseUrl) ? { ANTHROPIC_BASE_URL: configured.anthropicBaseUrl.value } : {}),
+    ...(Option.isSome(configured.claudeConfigDirectory)
+      ? { CLAUDE_CONFIG_DIR: configured.claudeConfigDirectory.value }
+      : {}),
+    ...(Option.isSome(configured.home) ? { HOME: configured.home.value } : {}),
+    ...(Option.isSome(configured.path) ? { PATH: configured.path.value } : {}),
+    ...(Option.isSome(configured.userProfile) ? { USERPROFILE: configured.userProfile.value } : {}),
+    ...(Option.isSome(configured.xdgConfigHome) ? { XDG_CONFIG_HOME: configured.xdgConfigHome.value } : {})
+  }))
+)
 
 /** Options for a local Claude CLI-backed Effect AI model. */
 export interface ClaudeModelOptions {
@@ -78,6 +106,7 @@ const schemaArgument = (
 interface NormalizedOptions {
   readonly access: "read-only" | "workspace-write"
   readonly cwd: string
+  readonly environment: Readonly<Record<string, string>>
   readonly executable: string
   readonly maxOutputBytes: number
   readonly maxStderrBytes: number
@@ -85,32 +114,33 @@ interface NormalizedOptions {
   readonly timeout: Duration.Input
 }
 
-const normalizeOptionsUnsafe = (options: ClaudeModelOptions): NormalizedOptions => ({
-  access: options.access ?? "read-only",
-  cwd: options.cwd,
-  executable: options.executable ?? "claude",
-  maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
-  maxStderrBytes: options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES,
-  model: options.model,
-  timeout: options.timeout ?? DEFAULT_TIMEOUT
-})
-
-const normalizeOptions = (
+const normalizeOptions = Effect.fn("ClaudeCliLanguageModel.normalizeOptions")(function*(
   options: ClaudeModelOptions,
   method: string
-): Effect.Effect<NormalizedOptions, AiError.AiError> => {
-  const normalized = normalizeOptionsUnsafe(options)
+): Effect.fn.Return<NormalizedOptions, AiError.AiError> {
+  const normalized: NormalizedOptions = {
+    access: options.access ?? "read-only",
+    cwd: options.cwd,
+    environment: yield* childEnvironment.pipe(
+      Effect.mapError((cause) => configurationFailure(cause, method))
+    ),
+    executable: options.executable ?? "claude",
+    maxOutputBytes: options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    maxStderrBytes: options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES,
+    model: options.model,
+    timeout: options.timeout ?? DEFAULT_TIMEOUT
+  }
   if (normalized.cwd.trim().length === 0) {
-    return Effect.fail(invalidInput("cwd must not be empty", method))
+    return yield* invalidInput("cwd must not be empty", method)
   }
   if (!Number.isSafeInteger(normalized.maxOutputBytes) || normalized.maxOutputBytes <= 0) {
-    return Effect.fail(invalidInput("maxOutputBytes must be a positive safe integer", method))
+    return yield* invalidInput("maxOutputBytes must be a positive safe integer", method)
   }
   if (!Number.isSafeInteger(normalized.maxStderrBytes) || normalized.maxStderrBytes <= 0) {
-    return Effect.fail(invalidInput("maxStderrBytes must be a positive safe integer", method))
+    return yield* invalidInput("maxStderrBytes must be a positive safe integer", method)
   }
-  return Effect.succeed(normalized)
-}
+  return normalized
+})
 
 const resultText = (result: ClaudeResult, method: string): Effect.Effect<string, AiError.AiError> => {
   if (result.structured_output !== undefined) return encodeJson(result.structured_output, method)
