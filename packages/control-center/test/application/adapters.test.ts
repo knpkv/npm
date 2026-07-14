@@ -488,7 +488,7 @@ describe("application adapters", () => {
       const mediaId = OpaqueMediaId.make(`media_${png.metadata.digest}`)
       assert.instanceOf(
         mapPersistenceReadError(new BlobNotFoundError({ digest: png.metadata.digest })),
-        ApplicationResourceNotFound
+        ApplicationServiceUnavailable
       )
       const opened = yield* media.read({ workspaceId: WORKSPACE_ID, mediaId })
       assert.strictEqual(opened.contentType, "image/png")

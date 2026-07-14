@@ -5,29 +5,35 @@ import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
-import * as Schema from "effect/Schema"
 
+import {
+  boundDataRootMarkerContent as boundMarkerContent,
+  type ControlCenterDataPaths,
+  DATA_ROOT_DIRECTORY_MODE,
+  DATA_ROOT_MARKER_MAX_BYTES,
+  DATA_ROOT_MARKER_MODE,
+  DATA_ROOT_MARKER_NAME,
+  DATA_ROOT_MARKER_V1_CONTENT,
+  DATA_ROOT_MARKER_V2_PREFIX,
+  DATA_ROOT_PENDING_MARKER_PREFIX,
+  DATA_ROOT_STAGING_PREFIX,
+  decodeControlCenterDataPaths,
+  decodeOperationalDataPaths,
+  type FreshDataRootClaimConflict,
+  inspectFreshDataRootClaim,
+  publishDataRootMarker,
+  publishFreshDataRootClaim,
+  syncDataRootPath
+} from "./DataRootProtocol.js"
 import { validateExistingControlCenterDatabase } from "./persistence/Database.js"
 import { PersistenceConfigError } from "./persistence/errors.js"
-import { decodePersistenceConfig, type PersistenceConfig } from "./persistence/PersistenceConfig.js"
-import { SecretRoot } from "./secrets/SecretStore.js"
 
 /** Validated filesystem paths derived from the untrusted data-root environment value. */
-export interface ControlCenterDataPaths {
-  readonly dataRoot: string
-  readonly persistenceConfig: PersistenceConfig
-  readonly secretRoot: SecretRoot
-}
+export { decodeControlCenterDataPaths }
+export type { ControlCenterDataPaths }
 
-const DATA_ROOT_DIRECTORY_MODE = 0o700
-const DATA_ROOT_MARKER_MODE = 0o600
-const DATA_ROOT_MARKER_NAME = ".control-center-root"
-const DATA_ROOT_MARKER_V1_CONTENT = "@knpkv/control-center:data-root:v1\n"
-const DATA_ROOT_MARKER_V2_PREFIX = "@knpkv/control-center:data-root:v2\nclaim-basename:"
-const DATA_ROOT_MARKER_MAX_BYTES = 8_192
-const DATA_ROOT_PENDING_MARKER_PREFIX = `${DATA_ROOT_MARKER_NAME}.pending-`
-const DATA_ROOT_STAGING_PREFIX = ".control-center-incoming-"
 const DATA_ROOT_OWNER_PROBE_PREFIX = ".control-center-owner-"
 const SQLITE_HEADER = Uint8Array.from([
   0x53,
@@ -55,13 +61,6 @@ const hasNoControlCharacters = (value: string): boolean =>
       codePoint !== undefined && !((codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f))
     )
   })
-
-const ConfiguredDataRoot = Schema.String.check(
-  Schema.makeFilter(hasNoControlCharacters, { expected: "a path without control characters" }),
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(4_096)
-)
 
 const hasRandomHexSuffix = (entry: string, prefix: string): boolean => {
   if (!entry.startsWith(prefix)) return false
@@ -145,11 +144,6 @@ interface LostClaimDetection {
 type DataRootMarker =
   | { readonly _tag: "Legacy" }
   | { readonly _tag: "Bound"; readonly claimBasename: string; readonly targetBasename: string }
-
-const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
-  `${DATA_ROOT_MARKER_V2_PREFIX}${Encoding.encodeBase64Url(claimBasename)}\ntarget-basename:${
-    Encoding.encodeBase64Url(targetBasename)
-  }\n`
 
 const decodeMarkerBasename = (
   path: Path.Path,
@@ -315,45 +309,16 @@ const validateLegacyDataRoot = Effect.fn("ControlCenterCli.validateLegacyDataRoo
 })
 
 const syncPath = Effect.fn("ControlCenterCli.syncDataRootPath")(function*(
-  fileSystem: FileSystem.FileSystem,
+  _fileSystem: FileSystem.FileSystem,
   target: string
 ) {
-  yield* Effect.scoped(
-    mapConfigurationError(fileSystem.open(target, { flag: "r" })).pipe(
-      Effect.flatMap((handle) => mapConfigurationError(handle.sync))
-    )
-  )
+  yield* syncDataRootPath(target)
 })
 
 const publishMarker = Effect.fn("ControlCenterCli.publishDataRootMarker")(function*(
   request: MarkerPublication
 ) {
-  const { claimBasename, cryptoService, dataRoot, fileSystem, markerPath, targetBasename } = request
-  const markerContent = boundMarkerContent(claimBasename, targetBasename)
-  yield* Effect.scoped(
-    Effect.uninterruptible(
-      Effect.gen(function*() {
-        const random = yield* mapConfigurationError(cryptoService.randomBytes(16))
-        const pendingMarker = `${markerPath}.pending-${Encoding.encodeHex(random)}`
-        yield* Effect.addFinalizer(() =>
-          fileSystem.remove(pendingMarker, { force: true }).pipe(
-            Effect.andThen(syncPath(fileSystem, dataRoot)),
-            Effect.ignore
-          )
-        )
-        yield* mapConfigurationError(
-          fileSystem.writeFileString(pendingMarker, markerContent, {
-            flag: "wx",
-            mode: DATA_ROOT_MARKER_MODE
-          })
-        )
-        yield* mapConfigurationError(fileSystem.chmod(pendingMarker, DATA_ROOT_MARKER_MODE))
-        yield* syncPath(fileSystem, pendingMarker)
-        yield* mapConfigurationError(fileSystem.rename(pendingMarker, markerPath))
-        yield* syncPath(fileSystem, dataRoot)
-      })
-    )
-  )
+  yield* publishDataRootMarker(request.dataRoot, request.claimBasename, request.targetBasename)
 })
 
 const removeValidPendingMarkers = Effect.fn("ControlCenterCli.removeValidPendingMarkers")(function*(
@@ -624,80 +589,53 @@ const resolveClaimedDataRoot = Effect.fn("ControlCenterCli.resolveClaimedDataRoo
 const publishFreshDataRoot = Effect.fn("ControlCenterCli.publishFreshDataRoot")(function*(
   request: FreshDataRootPublication
 ) {
-  const { cryptoService, dataRoot, fileSystem, parent, path } = request
-  yield* Effect.scoped(
-    Effect.uninterruptible(
-      Effect.gen(function*() {
-        const stagingRoot = yield* mapConfigurationError(
-          fileSystem.makeTempDirectory({ directory: parent, prefix: DATA_ROOT_STAGING_PREFIX })
-        )
-        const stagingName = path.basename(stagingRoot)
-        const removeUnclaimedStagingRoot = fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(
-          Effect.andThen(syncPath(fileSystem, parent)),
-          Effect.ignore
-        )
-        yield* Effect.addFinalizer(() =>
-          fileSystem.readLink(dataRoot).pipe(
-            Effect.result,
-            Effect.flatMap((claimedTarget) => {
-              if (Result.isSuccess(claimedTarget)) {
-                return claimedTarget.success === stagingName ? Effect.void : removeUnclaimedStagingRoot
-              }
-              if (claimedTarget.failure.reason._tag === "NotFound") return removeUnclaimedStagingRoot
-              return fileSystem.realPath(dataRoot).pipe(
-                Effect.result,
-                Effect.flatMap((resolvedRoot) =>
-                  Result.isSuccess(resolvedRoot) && resolvedRoot.success !== stagingRoot
-                    ? removeUnclaimedStagingRoot
-                    : Effect.void
-                )
-              )
-            })
-          )
-        )
-        yield* mapConfigurationError(fileSystem.chmod(stagingRoot, DATA_ROOT_DIRECTORY_MODE))
-        yield* publishMarker({
-          claimBasename: path.basename(dataRoot),
-          cryptoService,
-          dataRoot: stagingRoot,
-          fileSystem,
-          markerPath: path.join(stagingRoot, DATA_ROOT_MARKER_NAME),
-          targetBasename: path.basename(stagingRoot)
-        })
-        yield* syncPath(fileSystem, stagingRoot)
-
-        const claimed = yield* fileSystem.symlink(stagingName, dataRoot).pipe(Effect.result)
-        if (Result.isFailure(claimed)) {
-          if (claimed.failure.reason._tag !== "AlreadyExists") return yield* configurationError()
-          const existingClaim = yield* fileSystem.readLink(dataRoot).pipe(Effect.result)
-          if (Result.isFailure(existingClaim) || existingClaim.success !== stagingName) return
-        }
-        yield* syncPath(fileSystem, parent)
-      })
+  const location = yield* inspectFreshDataRootClaim(request.dataRoot).pipe(Effect.mapError(configurationError))
+  yield* publishFreshDataRootClaim(location, false, () => Effect.void).pipe(
+    Effect.mapError((error) =>
+      Predicate.isTagged(error, "FreshDataRootClaimConflict") || Predicate.isTagged(error, "DataRootProtocolError")
+        ? configurationError()
+        : error
     )
   )
 })
 
-/** Decode every path derived from CONTROL_CENTER_DATA_ROOT into typed configuration failures. */
-export const decodeControlCenterDataPaths = Effect.fn("decodeControlCenterDataPaths")(function*(
-  configuredDataRoot: string
-): Effect.fn.Return<ControlCenterDataPaths, PersistenceConfigError, Path.Path> {
+/**
+ * Populate and exclusively publish a genuinely fresh configured data root.
+ * The initializer may be interrupted while its unclaimed staging root is cleaned;
+ * the completed root is exposed only by the final relative-symlink claim.
+ */
+export const claimFreshControlCenterDataRoot = Effect.fn("claimFreshControlCenterDataRoot")(function*<
+  Failure,
+  Requirements
+>(
+  dataPaths: ControlCenterDataPaths,
+  initialize: (
+    operationalPaths: ControlCenterDataPaths
+  ) => Effect.Effect<void, Failure, Requirements>
+): Effect.fn.Return<
+  ControlCenterDataPaths,
+  Failure | FreshDataRootClaimConflict | PersistenceConfigError,
+  Crypto.Crypto | FileSystem.FileSystem | Path.Path | Requirements
+> {
+  const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const decodedRoot = yield* Schema.decodeUnknownEffect(ConfiguredDataRoot)(configuredDataRoot).pipe(
-    Effect.mapError(configurationError)
-  )
-  const dataRoot = path.resolve(decodedRoot)
-  if (path.dirname(dataRoot) === dataRoot) return yield* configurationError()
-  const persistenceConfig = yield* decodePersistenceConfig({
-    blobRoot: path.join(dataRoot, "blobs"),
-    busyTimeoutMilliseconds: 5_000,
-    databaseUrl: `file:${path.join(dataRoot, "control-center.db")}`,
-    maxConnections: 1
+  const parent = path.dirname(dataPaths.dataRoot)
+  const claimBasename = path.basename(dataPaths.dataRoot)
+  if (claimBasename.startsWith(DATA_ROOT_STAGING_PREFIX)) return yield* configurationError()
+  if (yield* mapConfigurationError(fileSystem.exists(dataPaths.dataRoot))) {
+    return yield* configurationError()
+  }
+  yield* mapConfigurationError(fileSystem.makeDirectory(parent, { recursive: true }))
+  yield* refuseLostDataRootClaim({
+    fileSystem,
+    parent,
+    path,
+    requestedClaimBasename: claimBasename
   })
-  const secretRoot = yield* Schema.decodeUnknownEffect(SecretRoot)(path.join(dataRoot, "secrets")).pipe(
-    Effect.mapError(configurationError)
+  const location = yield* inspectFreshDataRootClaim(dataPaths.dataRoot).pipe(Effect.mapError(configurationError))
+  return yield* publishFreshDataRootClaim(location, true, initialize).pipe(
+    Effect.mapError((error) => Predicate.isTagged(error, "DataRootProtocolError") ? configurationError() : error)
   )
-  return { dataRoot, persistenceConfig, secretRoot }
 })
 
 /** Create or verify a dedicated data root and return its canonical operational paths. */
@@ -738,7 +676,7 @@ export const prepareControlCenterDataRoot = Effect.fn("prepareControlCenterDataR
   })
   const operationalPaths = operationalRoot === dataPaths.dataRoot
     ? dataPaths
-    : yield* decodeControlCenterDataPaths(operationalRoot)
+    : yield* decodeOperationalDataPaths(operationalRoot)
 
   const rootInfo = yield* validatePrivateDirectory(fileSystem, operationalPaths.dataRoot)
   const targetBasename = path.basename(operationalPaths.dataRoot)

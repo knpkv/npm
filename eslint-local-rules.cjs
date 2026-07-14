@@ -70,6 +70,204 @@ const isSchemaModule = (context, expression) => {
   )
 }
 
+const isResultModule = (context, expression) => {
+  if (expression.type === "Identifier") {
+    return (
+      isNamespaceImportFrom(context, expression, ["effect/Result"]) ||
+      isNamedImportFrom(context, expression, ["effect"], ["Result"])
+    )
+  }
+  return (
+    expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === "Result" &&
+    expression.object.type === "Identifier" &&
+    isNamespaceImportFrom(context, expression.object, ["effect"])
+  )
+}
+
+const isResultFailureCall = (context, expression) => {
+  if (expression.type !== "CallExpression" || expression.arguments.length !== 1) return false
+  const callee = expression.callee
+  if (callee.type === "Identifier") {
+    return isNamedImportFrom(context, callee, ["effect", "effect/Result"], ["isFailure"])
+  }
+  return (
+    callee.type === "MemberExpression" &&
+    staticPropertyName(callee.property) === "isFailure" &&
+    isResultModule(context, callee.object)
+  )
+}
+
+const failureTagTarget = (expression) => {
+  if (
+    expression.type !== "MemberExpression" ||
+    staticPropertyName(expression.property) !== "_tag" ||
+    expression.object.type !== "MemberExpression" ||
+    staticPropertyName(expression.object.property) !== "failure"
+  ) {
+    return undefined
+  }
+  return expression.object.object
+}
+
+const stringLiteralValue = (expression) =>
+  expression.type === "Literal" && typeof expression.value === "string" ? expression.value : undefined
+
+const failureTagComparison = (context, expression) => {
+  if (expression.type !== "BinaryExpression" || expression.operator !== "===") return undefined
+  const leftTarget = failureTagTarget(expression.left)
+  const rightTarget = failureTagTarget(expression.right)
+  const leftTag = stringLiteralValue(expression.left)
+  const rightTag = stringLiteralValue(expression.right)
+  if (leftTarget !== undefined && rightTag !== undefined) {
+    return { result: context.sourceCode.getText(leftTarget), tag: rightTag }
+  }
+  if (rightTarget !== undefined && leftTag !== undefined) {
+    return { result: context.sourceCode.getText(rightTarget), tag: leftTag }
+  }
+  return undefined
+}
+
+const flattenLogicalAnd = (expression) =>
+  expression.type === "LogicalExpression" && expression.operator === "&&"
+    ? [...flattenLogicalAnd(expression.left), ...flattenLogicalAnd(expression.right)]
+    : [expression]
+
+const conditionalFailureTag = (context, expression) => {
+  const operands = flattenLogicalAnd(expression)
+  const failureResults = operands
+    .filter((operand) => isResultFailureCall(context, operand))
+    .map((operand) => context.sourceCode.getText(operand.arguments[0]))
+  const comparisons = operands.map((operand) => failureTagComparison(context, operand)).filter(Boolean)
+  if (failureResults.length !== 1 || comparisons.length !== 1) return undefined
+  return comparisons[0].result === failureResults[0] ? comparisons[0] : undefined
+}
+
+const EXPECT_IMPORT_SOURCES = ["@effect/vitest", "@jest/globals", "vitest"]
+const ASSERT_IMPORT_SOURCES = ["@effect/vitest", "vitest"]
+const ASSERT_EQUALITY_METHODS = ["deepEqual", "deepStrictEqual", "equal", "strictEqual"]
+
+const isAssertFunction = (context, expression) => {
+  if (expression.type === "Identifier") {
+    return isNamedImportFrom(context, expression, ASSERT_IMPORT_SOURCES, ["assert"])
+  }
+  return (
+    expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === "assert" &&
+    expression.object.type === "Identifier" &&
+    isNamespaceImportFrom(context, expression.object, ASSERT_IMPORT_SOURCES)
+  )
+}
+
+const isExpectFunction = (context, expression) => {
+  if (expression.type === "Identifier") {
+    return isNamedImportFrom(context, expression, EXPECT_IMPORT_SOURCES, ["expect"])
+  }
+  return (
+    expression.type === "MemberExpression" &&
+    staticPropertyName(expression.property) === "expect" &&
+    expression.object.type === "Identifier" &&
+    isNamespaceImportFrom(context, expression.object, EXPECT_IMPORT_SOURCES)
+  )
+}
+
+const expectInvocation = (context, expression) => {
+  let candidate = expression
+  while (candidate.type === "MemberExpression") candidate = candidate.object
+  return candidate.type === "CallExpression" && isExpectFunction(context, candidate.callee) ? candidate : undefined
+}
+
+const isExpectAssertionCall = (context, expression) =>
+  expression.type === "CallExpression" &&
+  expression.callee.type === "MemberExpression" &&
+  expectInvocation(context, expression.callee.object) !== undefined
+
+const exactExpectTagAssertion = (context, expression, expected) => {
+  if (
+    expression.type !== "CallExpression" ||
+    expression.callee.type !== "MemberExpression" ||
+    !["toBe", "toEqual", "toStrictEqual"].includes(staticPropertyName(expression.callee.property)) ||
+    expression.callee.object.type !== "CallExpression" ||
+    !isExpectFunction(context, expression.callee.object.callee) ||
+    expression.callee.object.arguments.length !== 1 ||
+    expression.arguments.length !== 1
+  ) {
+    return false
+  }
+  const target = failureTagTarget(expression.callee.object.arguments[0])
+  const tag = stringLiteralValue(expression.arguments[0])
+  return target !== undefined && context.sourceCode.getText(target) === expected.result && tag === expected.tag
+}
+
+const isAssertionCall = (context, expression) => {
+  if (expression.type !== "CallExpression") return false
+  if (isAssertFunction(context, expression.callee)) return true
+  return (
+    isExpectAssertionCall(context, expression) ||
+    (expression.callee.type === "MemberExpression" && isAssertFunction(context, expression.callee.object))
+  )
+}
+
+const isAssertEqualityCall = (context, expression) =>
+  expression.type === "CallExpression" &&
+  expression.callee.type === "MemberExpression" &&
+  ASSERT_EQUALITY_METHODS.includes(staticPropertyName(expression.callee.property)) &&
+  isAssertFunction(context, expression.callee.object)
+
+const containsAssertion = (context, node) => {
+  if (
+    node.type === "FunctionDeclaration" ||
+    node.type === "FunctionExpression" ||
+    node.type === "ArrowFunctionExpression"
+  ) {
+    return false
+  }
+  if (node.type === "CallExpression" && isAssertionCall(context, node)) return true
+  const keys = context.sourceCode.visitorKeys[node.type] ?? []
+  return keys.some((key) => {
+    const child = node[key]
+    return Array.isArray(child)
+      ? child.some((entry) => entry !== null && typeof entry === "object" && containsAssertion(context, entry))
+      : child !== null && typeof child === "object" && containsAssertion(context, child)
+  })
+}
+
+const tagAssertion = (context, statement, expected) => {
+  if (statement.type !== "ExpressionStatement") return false
+  if (exactExpectTagAssertion(context, statement.expression, expected)) return true
+  if (!isAssertEqualityCall(context, statement.expression)) return false
+  const args = statement.expression.arguments
+  if (args.length < 2) return false
+  const leftTarget = failureTagTarget(args[0])
+  const rightTarget = failureTagTarget(args[1])
+  const leftTag = stringLiteralValue(args[0])
+  const rightTag = stringLiteralValue(args[1])
+  return (
+    (leftTarget !== undefined &&
+      context.sourceCode.getText(leftTarget) === expected.result &&
+      rightTag === expected.tag) ||
+    (rightTarget !== undefined &&
+      context.sourceCode.getText(rightTarget) === expected.result &&
+      leftTag === expected.tag)
+  )
+}
+
+const directTagAssertion = (context, statement, expected) => {
+  if (tagAssertion(context, statement, expected)) return true
+  if (statement.type !== "IfStatement" || !isResultFailureCall(context, statement.test)) return false
+  const argument = statement.test.arguments[0]
+  if (argument === undefined || context.sourceCode.getText(argument) !== expected.result) return false
+  const body = statement.consequent.type === "BlockStatement" ? statement.consequent.body : [statement.consequent]
+  return body.some((entry) => tagAssertion(context, entry, expected))
+}
+
+const hasDominatingTagAssertion = (context, node, expected) => {
+  const parent = node.parent
+  if (parent?.type !== "BlockStatement" && parent?.type !== "Program") return false
+  const index = parent.body.indexOf(node)
+  return index > 0 && parent.body.slice(0, index).some((statement) => directTagAssertion(context, statement, expected))
+}
+
 const isRunPromiseCall = (context, expression) => {
   if (expression.type !== "CallExpression") return false
   const callee = expression.callee
@@ -152,6 +350,40 @@ const isHttpHandleCallback = (node) => {
 }
 
 module.exports = {
+  "no-conditional-only-result-tag-assertion": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require tests to assert the expected tagged Result failure before narrowing its fields",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        conditionalOnly:
+          "Assert that {{result}}.failure._tag is {{tag}} before conditionally checking tag-specific fields."
+      }
+    },
+    create(context) {
+      return {
+        IfStatement(node) {
+          const expected = conditionalFailureTag(context, node.test)
+          if (
+            expected === undefined ||
+            !containsAssertion(context, node.consequent) ||
+            hasDominatingTagAssertion(context, node, expected)
+          ) {
+            return
+          }
+          context.report({
+            data: { result: expected.result, tag: JSON.stringify(expected.tag) },
+            messageId: "conditionalOnly",
+            node: node.test
+          })
+        }
+      }
+    }
+  },
   "no-stable-service-yield-in-http-handler": {
     meta: {
       type: "problem",

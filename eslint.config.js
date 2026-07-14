@@ -143,6 +143,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/*/test/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-conditional-only-result-tag-assertion": "error"
+    }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error"

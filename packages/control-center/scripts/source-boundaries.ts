@@ -19,6 +19,9 @@ const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
 const QUIESCENT_BACKUP_REASON = "only Database can import the quiescent pre-migration backup helper"
 const BACKUP_ARCHIVE_CORE_REASON = "only backup entry points can import the archive assembly core"
+const BLOB_STORE_REASON = "only persistence composition and ContentStore can import the physical blob store"
+const DATA_ROOT_PROTOCOL_REASON =
+  "only CLI configuration and the backup archive entry point can import the data-root protocol"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
@@ -129,7 +132,7 @@ const normalizedTarget = (sourcePath: string, importPath: string): string | unde
   const cleanImportPath = withoutQuery(importPath)
   if (cleanImportPath === "@knpkv/control-center") return "src/index"
   if (cleanImportPath.startsWith("@knpkv/control-center/")) {
-    return `src/${cleanImportPath.slice("@knpkv/control-center/".length)}`
+    return `src/${cleanImportPath.slice("@knpkv/control-center/".length)}`.replace(SCRIPT_EXTENSION, "")
   }
   if (!cleanImportPath.startsWith(".")) return undefined
   const sourceParts = sourcePath.replaceAll("\\", "/").split("/")
@@ -179,6 +182,26 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     normalizedSource !== "src/server/persistence/backup/QuiescentBackup"
   ) {
     return BACKUP_ARCHIVE_CORE_REASON
+  }
+  if (
+    target === "src/server/DataRootProtocol" &&
+    normalizedSource !== "src/server/cliConfiguration" &&
+    normalizedSource !== "src/server/persistence/backup/BackupArchive"
+  ) {
+    return DATA_ROOT_PROTOCOL_REASON
+  }
+  if (
+    target === "src/server/persistence/object-store/BlobStore" &&
+    normalizedSource !== "src/server/persistence/ContentStore" &&
+    normalizedSource !== "src/server/persistence/Persistence"
+  ) {
+    return BLOB_STORE_REASON
+  }
+  if (
+    target === "src/server/persistence/object-store/BlobPublisher" &&
+    normalizedSource !== "src/server/persistence/object-store/BlobStore"
+  ) {
+    return BLOB_STORE_REASON
   }
   if (
     target !== undefined &&
@@ -232,6 +255,16 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
       if (node.moduleSpecifier !== undefined && ts.isStringLiteralLike(node.moduleSpecifier)) {
         imports.push(node.moduleSpecifier.text)
       }
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      const expression = node.moduleReference.expression
+      imports.push(
+        expression !== undefined && ts.isStringLiteralLike(expression)
+          ? expression.text
+          : NON_LITERAL_DYNAMIC_IMPORT
+      )
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&

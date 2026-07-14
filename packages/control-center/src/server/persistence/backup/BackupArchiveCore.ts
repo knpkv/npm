@@ -16,7 +16,7 @@ import type * as Scope from "effect/Scope"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
 import { BlobDigest } from "../object-store/BlobDigest.js"
-import { blobPath } from "../object-store/BlobStore.js"
+import { blobPath } from "../object-store/BlobPath.js"
 import type { PersistenceConfig } from "../PersistenceConfig.js"
 import {
   BackupId,
@@ -110,7 +110,8 @@ const ensurePublicationParent = Effect.fn("BackupArchive.ensurePublicationParent
 })
 
 const ensurePrivateArchiveDirectory = Effect.fn("BackupArchive.ensurePrivateArchiveDirectory")(function*(
-  directory: string
+  directory: string,
+  expectedCanonicalDirectory: string = directory
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -126,7 +127,7 @@ const ensurePrivateArchiveDirectory = Effect.fn("BackupArchive.ensurePrivateArch
   }
   const canonical = yield* mapStorage("resolve-archive-directory", fileSystem.realPath(directory))
   const info = yield* mapStorage("inspect-archive-directory", fileSystem.stat(directory))
-  if (canonical !== directory || info.type !== "Directory") {
+  if (canonical !== expectedCanonicalDirectory || info.type !== "Directory") {
     return yield* new BackupIntegrityError({
       digest: null,
       reason: "unexpected-artifact",
@@ -144,15 +145,18 @@ const ensurePrivateArchiveDirectory = Effect.fn("BackupArchive.ensurePrivateArch
 const fileSize = Effect.fn("BackupArchive.fileSize")(function*(
   file: string,
   artifact: "blob" | "database" | "manifest",
-  maximumBytes: number
+  maximumBytes: number,
+  expectedCanonicalFile: string = file
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const canonical = yield* mapStorage("resolve-file", fileSystem.realPath(file))
   const info = yield* mapStorage("inspect-file", fileSystem.stat(file))
-  if (canonical !== file || info.type !== "File" || (info.mode & 0o077) !== 0) {
+  if (canonical !== expectedCanonicalFile || info.type !== "File" || (info.mode & 0o077) !== 0) {
     return yield* new BackupIntegrityError({
       digest: null,
-      reason: canonical !== file || info.type !== "File" ? "unexpected-artifact" : "owner-mode-invalid",
+      reason: canonical !== expectedCanonicalFile || info.type !== "File"
+        ? "unexpected-artifact"
+        : "owner-mode-invalid",
       workspaceId: null
     })
   }
@@ -165,11 +169,12 @@ const fileSize = Effect.fn("BackupArchive.fileSize")(function*(
 const digestFile = Effect.fn("BackupArchive.digestFile")(function*(
   file: string,
   artifact: "blob" | "database",
-  maximumBytes: number
+  maximumBytes: number,
+  expectedCanonicalFile: string = file
 ): Effect.fn.Return<FileDigest, BackupFailure, Crypto.Crypto | FileSystem.FileSystem> {
   const fileSystem = yield* FileSystem.FileSystem
   const cryptoService = yield* Crypto.Crypto
-  const byteLength = yield* fileSize(file, artifact, maximumBytes)
+  const byteLength = yield* fileSize(file, artifact, maximumBytes, expectedCanonicalFile)
   const bytes = yield* mapStorage("read-for-digest", fileSystem.readFile(file))
   if (bytes.byteLength !== byteLength) return yield* storageError("file-size-changed")
   const digestBytes = yield* mapStorage("digest", cryptoService.digest("SHA-256", bytes))
@@ -213,6 +218,108 @@ const inspectSnapshotDatabase = Effect.fn("BackupArchive.inspectSnapshotDatabase
     },
     (runtime) => runtime.disposeEffect
   )
+})
+
+const ensureRestoredBlobAncestry = Effect.fn("BackupArchive.ensureRestoredBlobAncestry")(function*(
+  blobRoot: string,
+  canonicalBlobRoot: string,
+  workspaceId: BackupManifestV1["blobs"][number]["workspaceId"],
+  digest: BackupManifestV1["blobs"][number]["digest"]
+) {
+  const path = yield* Path.Path
+  const derived = blobPath(path, blobRoot, workspaceId, digest)
+  const shaRoot = path.join(derived.workspaceDirectory, "sha256")
+  for (
+    const directory of [
+      blobRoot,
+      path.join(blobRoot, "objects"),
+      derived.workspaceDirectory,
+      shaRoot,
+      path.join(shaRoot, digest.slice(0, 2)),
+      derived.objectDirectory
+    ]
+  ) {
+    yield* ensurePrivateArchiveDirectory(
+      directory,
+      path.join(canonicalBlobRoot, path.relative(blobRoot, directory))
+    )
+  }
+})
+
+/** Populate and revalidate an unclaimed physical data root from a verified archive. */
+export const restoreVerifiedArchiveInto = Effect.fn("BackupArchive.restoreInto")(function*(
+  configuredArchiveRoot: string,
+  dataRoot: string,
+  canonicalDataRoot: string,
+  persistenceConfig: PersistenceConfig,
+  verification: BackupVerification
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const archiveRoot = yield* mapStorage("resolve-restore-archive", fileSystem.realPath(configuredArchiveRoot))
+  const databaseFile = path.join(dataRoot, DATABASE_NAME)
+  const canonicalDatabaseFile = path.join(canonicalDataRoot, DATABASE_NAME)
+  const archiveDatabaseFile = path.join(archiveRoot, DATABASE_NAME)
+  yield* mapStorage("copy-restored-database", fileSystem.copyFile(archiveDatabaseFile, databaseFile))
+  yield* mapStorage("secure-restored-database", fileSystem.chmod(databaseFile, BACKUP_FILE_MODE))
+  yield* syncPath(databaseFile)
+
+  const gapKeys = new Set(
+    verification.reproducibleBlobGaps.map((gap) => `${gap.workspaceId}:${gap.digest}`)
+  )
+  const archiveBlobRoot = path.join(archiveRoot, "blobs")
+  for (const blob of verification.manifest.blobs) {
+    if (gapKeys.has(`${blob.workspaceId}:${blob.digest}`)) continue
+    const source = blobPath(path, archiveBlobRoot, blob.workspaceId, blob.digest).file
+    const destination = blobPath(path, persistenceConfig.blobRoot, blob.workspaceId, blob.digest).file
+    yield* ensureRestoredBlobAncestry(
+      persistenceConfig.blobRoot,
+      path.join(canonicalDataRoot, "blobs"),
+      blob.workspaceId,
+      blob.digest
+    )
+    yield* mapStorage("copy-restored-blob", fileSystem.copyFile(source, destination))
+    yield* mapStorage("secure-restored-blob", fileSystem.chmod(destination, BACKUP_FILE_MODE))
+    yield* syncPath(destination)
+    yield* syncPath(path.dirname(destination))
+  }
+
+  const restoredDatabaseDigest = yield* digestFile(
+    databaseFile,
+    "database",
+    MAXIMUM_DATABASE_BYTES,
+    canonicalDatabaseFile
+  )
+  if (
+    restoredDatabaseDigest.digest !== verification.manifest.database.digest ||
+    restoredDatabaseDigest.byteLength !== verification.manifest.database.byteLength
+  ) {
+    return yield* new BackupIntegrityError({
+      digest: verification.manifest.database.digest,
+      reason: "database-digest-mismatch",
+      workspaceId: null
+    })
+  }
+  const inventory = yield* Effect.scoped(inspectSnapshotDatabase(databaseFile))
+  yield* verifyManifestInventory(verification.manifest, inventory)
+  for (const blob of verification.manifest.blobs) {
+    if (gapKeys.has(`${blob.workspaceId}:${blob.digest}`)) continue
+    const restored = blobPath(path, persistenceConfig.blobRoot, blob.workspaceId, blob.digest).file
+    const digest = yield* digestFile(
+      restored,
+      "blob",
+      MAXIMUM_BLOB_BYTES,
+      path.join(canonicalDataRoot, path.relative(dataRoot, restored))
+    )
+    if (digest.digest !== blob.digest || digest.byteLength !== blob.byteLength) {
+      return yield* new BackupIntegrityError({
+        digest: blob.digest,
+        reason: "blob-corrupt",
+        workspaceId: blob.workspaceId
+      })
+    }
+  }
+  yield* syncPath(dataRoot)
 })
 
 const readManifest = Effect.fn("BackupArchive.readManifest")(function*(archiveRoot: string) {

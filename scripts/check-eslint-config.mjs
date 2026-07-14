@@ -73,6 +73,195 @@ await assertRuleDiagnostics({
 })
 
 await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    assert.isTrue(Result.isFailure(result))
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/eslint-result-tag-invalid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { expect } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      expect(result.failure.operation).toBe("read-manifest")
+    }
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/eslint-result-tag-expect-invalid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Vitest from "vitest"
+    import { Result } from "effect"
+    if (Result.isFailure(result)) {
+      Vitest.expect(result.failure._tag).toBe("BackupStorageError")
+    }
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      Vitest.expect(result.failure.operation).toEqual("read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-expect-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Result from "effect/Result"
+    const expect = (value) => ({ toBe: () => value })
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      expect(result.failure.operation).toBe("read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-local-expect-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { expect } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    const assert = { strictEqual: () => undefined }
+    assert.strictEqual(result.failure._tag, "BackupStorageError")
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      expect(result.failure.operation).toBe("read-manifest")
+    }
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/eslint-result-tag-local-assert-invalid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Result from "effect/Result"
+    const assert = { strictEqual: () => undefined }
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-local-assert-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert as verify } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    verify.strictEqual(result.failure._tag, "BackupStorageError")
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      verify.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-aliased-assert-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    assert.notStrictEqual(result.failure._tag, "BackupStorageError")
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/eslint-result-tag-negative-assert-invalid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    assert(result.failure._tag, "BackupStorageError")
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/eslint-result-tag-direct-assert-invalid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    import * as Result from "effect/Result"
+    assert.strictEqual(strictResult.failure._tag, "BackupStorageError")
+    if (Result.isFailure(strictResult) && strictResult.failure._tag === "BackupStorageError") {
+      assert.strictEqual(strictResult.failure.operation, "read-manifest")
+    }
+    assert.equal(equalResult.failure._tag, "BackupStorageError")
+    if (Result.isFailure(equalResult) && equalResult.failure._tag === "BackupStorageError") {
+      assert.equal(equalResult.failure.operation, "read-manifest")
+    }
+    assert.deepEqual(deepResult.failure._tag, "BackupStorageError")
+    if (Result.isFailure(deepResult) && deepResult.failure._tag === "BackupStorageError") {
+      assert.deepEqual(deepResult.failure.operation, "read-manifest")
+    }
+    assert.deepStrictEqual(deepStrictResult.failure._tag, "BackupStorageError")
+    if (Result.isFailure(deepStrictResult) && deepStrictResult.failure._tag === "BackupStorageError") {
+      assert.deepStrictEqual(deepStrictResult.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-assert-equality-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Vitest from "vitest"
+    import * as Result from "effect/Result"
+    Vitest.assert.strictEqual(result.failure._tag, "BackupStorageError")
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      Vitest.assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-namespaced-assert-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    import { Result } from "effect"
+    assert.isTrue(Result.isFailure(result))
+    if (Result.isFailure(result)) {
+      assert.strictEqual(result.failure._tag, "BackupStorageError")
+    }
+    if (Result.isFailure(result) && result.failure._tag === "BackupStorageError") {
+      assert.strictEqual(result.failure.operation, "read-manifest")
+    }
+    if (
+      Result.isFailure(other) &&
+      (other.failure._tag === "BackupInputError" || other.failure._tag === "BackupStorageError")
+    ) {
+      assert.include(["BackupInputError", "BackupStorageError"], other.failure._tag)
+    }
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-result-tag-valid.test.ts",
+  ruleId: "local-rules/no-conditional-only-result-tag-assertion"
+})
+
+await assertRuleDiagnostics({
   code: `export const layerFactory = () => ({ service: "auth" })`,
   expected: 1,
   filePath: "packages/control-center/src/server/auth/Auth.ts",

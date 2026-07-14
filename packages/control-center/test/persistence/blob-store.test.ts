@@ -5,7 +5,8 @@ import { Crypto, Deferred, Effect, Fiber, FileSystem, Path, PlatformError, Ref, 
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { BlobDigest } from "../../src/server/persistence/object-store/BlobDigest.js"
-import { blobPath, makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
+import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
+import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
 import {
   BlobContainmentError,
   BlobIntegrityError,
@@ -55,6 +56,22 @@ const withReadAllocProbe = (
   truncate: (length) => file.truncate(length),
   write: (buffer) => file.write(buffer),
   writeAll: (buffer) => file.writeAll(buffer)
+})
+
+const withWriteAllProbe = (
+  file: FileSystem.File,
+  beforeWriteAll: Effect.Effect<void, PlatformError.PlatformError>
+): FileSystem.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  stat: file.stat,
+  seek: (offset, from) => file.seek(offset, from),
+  sync: file.sync,
+  read: (buffer) => file.read(buffer),
+  readAlloc: (size) => file.readAlloc(size),
+  truncate: (length) => file.truncate(length),
+  write: (buffer) => file.write(buffer),
+  writeAll: (buffer) => beforeWriteAll.pipe(Effect.andThen(file.writeAll(buffer)))
 })
 
 const withBlobStore = <A, E>(
@@ -192,7 +209,7 @@ describe("BlobStore", () => {
       assert.strictEqual(syncsBeforeWinnerContinues, 1)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
-  it.effect("deduplicates verified cache hits and rejects corrupted hits", () =>
+  it.effect("deduplicates verified hits, repairs reproducible corruption, and rejects durable replacement", () =>
     withBlobStore((store, root) =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
@@ -207,13 +224,130 @@ describe("BlobStore", () => {
         const derived = blobPath(path, root, WORKSPACE_A, first.ref.digest)
         yield* fs.writeFile(derived.file, encoder.encode("corrupted"), { mode: 0o600 })
 
-        const corrupted = yield* store.put(WORKSPACE_A, bytes, "reproducible-cache").pipe(Effect.result)
-        assert.isTrue(Result.isFailure(corrupted))
-        if (Result.isFailure(corrupted)) {
-          assert.instanceOf(corrupted.failure, BlobIntegrityError)
+        const corruptPut = yield* store.put(WORKSPACE_A, bytes, "reproducible-cache").pipe(Effect.result)
+        assert.isTrue(Result.isFailure(corruptPut))
+        if (Result.isFailure(corruptPut)) {
+          assert.strictEqual(corruptPut.failure._tag, "BlobIntegrityError")
+        }
+
+        const repaired = yield* store.repairReproducible(WORKSPACE_A, bytes)
+        assert.isTrue(repaired.stored)
+        assert.deepStrictEqual(yield* store.readAll(WORKSPACE_A, first.ref.digest), bytes)
+
+        yield* fs.writeFile(derived.file, encoder.encode("corrupted"), { mode: 0o600 })
+        const durable = yield* store.put(WORKSPACE_A, bytes, "durable").pipe(Effect.result)
+        assert.isTrue(Result.isFailure(durable))
+        if (Result.isFailure(durable)) {
+          assert.strictEqual(durable.failure._tag, "BlobIntegrityError")
+          assert.instanceOf(durable.failure, BlobIntegrityError)
         }
       })
     ))
+
+  it.effect("finishes replacement durability before honoring repair interruption", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-repair-commit-" })
+      const root = Schema.decodeSync(BlobRoot)(directory)
+      const bytes = encoder.encode("restart-visible cache")
+      const initial = yield* makeBlobStore({ blobRoot: root })
+      const stored = yield* initial.put(WORKSPACE_A, bytes, "reproducible-cache")
+      const derived = blobPath(path, root, WORKSPACE_A, stored.ref.digest)
+      yield* fs.writeFile(derived.file, encoder.encode("corrupt cache bytes"), { mode: 0o600 })
+
+      const commitStarted = yield* Deferred.make<void>()
+      const releaseCommit = yield* Deferred.make<void>()
+      const blockCommit = yield* Ref.make(true)
+      const probingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (requestedPath, options) =>
+          fs.open(requestedPath, options).pipe(
+            Effect.map((file) =>
+              requestedPath === derived.objectDirectory && options?.flag === "r"
+                ? withSyncProbe(
+                  file,
+                  Ref.get(blockCommit).pipe(
+                    Effect.flatMap((blocked) =>
+                      blocked
+                        ? Deferred.succeed(commitStarted, undefined).pipe(
+                          Effect.andThen(Deferred.await(releaseCommit))
+                        )
+                        : Effect.void
+                    )
+                  )
+                )
+                : file
+            )
+          )
+      })
+      const repairing = yield* makeBlobStore({ blobRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, probingFileSystem)
+      )
+      const repairFiber = yield* repairing.repairReproducible(WORKSPACE_A, bytes).pipe(
+        Effect.provideService(FileSystem.FileSystem, probingFileSystem),
+        Effect.forkScoped
+      )
+      yield* Deferred.await(commitStarted)
+
+      const interruptFinished = yield* Deferred.make<void>()
+      const interruptFiber = yield* Fiber.interrupt(repairFiber).pipe(
+        Effect.andThen(Deferred.succeed(interruptFinished, undefined)),
+        Effect.forkScoped
+      )
+      yield* Effect.yieldNow
+      assert.isFalse(yield* Deferred.isDone(interruptFinished))
+
+      yield* Ref.set(blockCommit, false)
+      yield* Deferred.succeed(releaseCommit, undefined)
+      yield* Fiber.join(interruptFiber)
+
+      const reopened = yield* makeBlobStore({ blobRoot: root })
+      assert.deepStrictEqual(yield* reopened.readAll(WORKSPACE_A, stored.ref.digest), bytes)
+      assert.deepStrictEqual(yield* fs.readDirectory(derived.objectDirectory), [stored.ref.digest])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("interrupts temporary repair writes without replacing existing bytes", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-repair-write-" })
+      const root = Schema.decodeSync(BlobRoot)(directory)
+      const bytes = encoder.encode("interruptible cache")
+      const corrupt = encoder.encode("existing corruption")
+      const initial = yield* makeBlobStore({ blobRoot: root })
+      const stored = yield* initial.put(WORKSPACE_A, bytes, "reproducible-cache")
+      const derived = blobPath(path, root, WORKSPACE_A, stored.ref.digest)
+      yield* fs.writeFile(derived.file, corrupt, { mode: 0o600 })
+
+      const writeStarted = yield* Deferred.make<void>()
+      const blockingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (requestedPath, options) =>
+          fs.open(requestedPath, options).pipe(
+            Effect.map((file) =>
+              requestedPath.includes(".incoming-")
+                ? withWriteAllProbe(
+                  file,
+                  Deferred.succeed(writeStarted, undefined).pipe(Effect.andThen(Effect.never))
+                )
+                : file
+            )
+          )
+      })
+      const repairing = yield* makeBlobStore({ blobRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, blockingFileSystem)
+      )
+      const repairFiber = yield* repairing.repairReproducible(WORKSPACE_A, bytes).pipe(
+        Effect.provideService(FileSystem.FileSystem, blockingFileSystem),
+        Effect.forkScoped
+      )
+      yield* Deferred.await(writeStarted)
+      yield* Fiber.interrupt(repairFiber)
+
+      assert.deepStrictEqual(yield* fs.readFile(derived.file), corrupt)
+      assert.deepStrictEqual(yield* fs.readDirectory(derived.objectDirectory), [stored.ref.digest])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("does not resolve a digest through another workspace", () =>
     withBlobStore((store) =>

@@ -123,6 +123,101 @@ describe("Control Center source boundaries", () => {
     }
   })
 
+  it("seals the data-root protocol to its two orchestration owners", () => {
+    const reason = "only CLI configuration and the backup archive entry point can import the data-root protocol"
+    const forbiddenSources = [
+      `import { publishFreshDataRootClaim } from "./DataRootProtocol.js"`,
+      `import type { ControlCenterDataPaths } from "./DataRootProtocol.js"`,
+      `export * from "./DataRootProtocol.js"`,
+      `export { publishFreshDataRootClaim } from "./DataRootProtocol.js"`,
+      `const protocol = import("./DataRootProtocol.js")`,
+      `type Protocol = import("./DataRootProtocol.js").ControlCenterDataPaths`,
+      `const protocol = require("./DataRootProtocol.js")`,
+      `import Protocol = require("./DataRootProtocol.js")`
+    ]
+    for (const source of forbiddenSources) {
+      expect(inspectSourceBoundaries("src/server/other.ts", source)).toContainEqual({
+        importPath: "./DataRootProtocol.js",
+        reason,
+        sourcePath: "src/server/other.ts"
+      })
+    }
+    expect(
+      inspectSourceBoundaries(
+        "src/server/other.ts",
+        `import { publishFreshDataRootClaim } from "@knpkv/control-center/server/DataRootProtocol.js"`
+      )
+    ).toContainEqual({
+      importPath: "@knpkv/control-center/server/DataRootProtocol.js",
+      reason,
+      sourcePath: "src/server/other.ts"
+    })
+    const allowedSources: ReadonlyArray<readonly [string, string]> = [
+      [
+        "src/server/cliConfiguration.ts",
+        `import { publishFreshDataRootClaim } from "./DataRootProtocol.js"`
+      ],
+      [
+        "src/server/persistence/backup/BackupArchive.ts",
+        `import { publishFreshDataRootClaim } from "../../DataRootProtocol.js"`
+      ]
+    ]
+    for (const [sourcePath, source] of allowedSources) {
+      expect(inspectSourceBoundaries(sourcePath, source)).toEqual([])
+    }
+  })
+
+  it("seals physical blob repair behind persisted ContentStore authorization", () => {
+    const importPath = "../persistence/object-store/BlobStore.js"
+    const reason = "only persistence composition and ContentStore can import the physical blob store"
+    expect(
+      inspectSourceBoundaries(
+        "src/server/application/mediaReads.ts",
+        `import { BlobStore } from ${JSON.stringify(importPath)}`
+      )
+    ).toContainEqual({
+      importPath,
+      reason,
+      sourcePath: "src/server/application/mediaReads.ts"
+    })
+    for (
+      const sourcePath of [
+        "src/server/persistence/ContentStore.ts",
+        "src/server/persistence/Persistence.ts"
+      ]
+    ) {
+      expect(
+        inspectSourceBoundaries(sourcePath, "import { BlobStore } from \"./object-store/BlobStore.js\"")
+      ).toEqual([])
+    }
+  })
+
+  it("seals the replacement publisher behind the physical BlobStore", () => {
+    const reason = "only persistence composition and ContentStore can import the physical blob store"
+    const forbiddenSources = [
+      `import { makeBlobPublisher } from "../persistence/object-store/BlobPublisher.js"`,
+      `export { makeBlobPublisher } from "../persistence/object-store/BlobPublisher.js"`,
+      `export * from "../persistence/object-store/BlobPublisher.js"`,
+      `const publisher = import("../persistence/object-store/BlobPublisher.js")`,
+      `type Publisher = import("../persistence/object-store/BlobPublisher.js")`,
+      `const publisher = require("../persistence/object-store/BlobPublisher.js")`,
+      `import Publisher = require("../persistence/object-store/BlobPublisher.js")`
+    ]
+    for (const source of forbiddenSources) {
+      expect(inspectSourceBoundaries("src/server/application/mediaWrites.ts", source)).toContainEqual({
+        importPath: "../persistence/object-store/BlobPublisher.js",
+        reason,
+        sourcePath: "src/server/application/mediaWrites.ts"
+      })
+    }
+    expect(
+      inspectSourceBoundaries(
+        "src/server/persistence/object-store/BlobStore.ts",
+        `import { makeBlobPublisher } from "./BlobPublisher.js"`
+      )
+    ).toEqual([])
+  })
+
   it("rejects runtime imports from the approved prototype", () => {
     expect(
       inspectSourceBoundaries(

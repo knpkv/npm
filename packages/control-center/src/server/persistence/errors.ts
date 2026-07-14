@@ -99,6 +99,19 @@ export class ContentMetadataMismatchError extends Schema.TaggedErrorClass<Conten
   }
 ) {}
 
+/** Reproducible bytes are unavailable and the owning adapter may safely refetch them. */
+export class ReproducibleContentUnavailableError extends Schema.TaggedErrorClass<
+  ReproducibleContentUnavailableError
+>()(
+  "ReproducibleContentUnavailableError",
+  {
+    digest: BlobDigest,
+    workspaceId: WorkspaceId,
+    reason: Schema.Literals(["corrupt", "missing"]),
+    recovery: Schema.Literal("refetch")
+  }
+) {}
+
 /** Raised when a compare-and-swap update observes a different persisted revision. */
 export class RevisionConflictError extends Schema.TaggedErrorClass<RevisionConflictError>()(
   "RevisionConflictError",

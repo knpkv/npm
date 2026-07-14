@@ -1,7 +1,7 @@
 import type { Crypto, FileSystem, Path } from "effect"
 import { Effect, Result } from "effect"
 
-import { blobStoreIoError } from "./BlobStoreError.js"
+import { type BlobStoreError, blobStoreIoError } from "./BlobStoreError.js"
 import type { PinnedDirectory } from "./PinnedDirectory.js"
 
 export const BLOB_FILE_MODE = 0o600
@@ -34,7 +34,9 @@ export const makeBlobPublisher = (
   return Effect.fn("BlobStore.publish")(function*(
     directory: PinnedDirectory,
     destinationName: string,
-    bytes: Uint8Array
+    bytes: Uint8Array,
+    mode: "exclusive" | "replace" = "exclusive",
+    commit?: ((destination: string) => Effect.Effect<void, BlobStoreError>) | undefined
   ) {
     const destination = path.join(directory.path, destinationName)
     for (let attempt = 0; attempt < TEMPORARY_NAME_ATTEMPTS; attempt += 1) {
@@ -56,7 +58,10 @@ export const makeBlobPublisher = (
               Effect.mapError((cause) => blobStoreIoError("sync temporary blob", cause))
             )
 
-            const linked = yield* fs.link(temporary, destination).pipe(Effect.result)
+            const linked = yield* (mode === "replace"
+              ? fs.rename(temporary, destination)
+              : fs.link(temporary, destination)).pipe(Effect.result)
+            if (Result.isSuccess(linked) && commit !== undefined) yield* commit(destination)
             return linkResult(linked)
           })
         )

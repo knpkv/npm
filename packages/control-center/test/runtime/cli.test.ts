@@ -111,8 +111,7 @@ describe("Control Center CLI", () => {
         if (Result.isFailure(result)) assert.instanceOf(result.failure, PersistenceConfigError)
       }
 
-      const reservedPaths = yield* decodeControlCenterDataPaths(".control-center-incoming-reserved")
-      const reserved = yield* prepareControlCenterDataRoot(reservedPaths).pipe(Effect.result)
+      const reserved = yield* decodeControlCenterDataPaths(".control-center-incoming-reserved").pipe(Effect.result)
       assert.isTrue(Result.isFailure(reserved))
       if (Result.isFailure(reserved)) assert.instanceOf(reserved.failure, PersistenceConfigError)
     }).pipe(Effect.provide(NodeServices.layer)))
@@ -170,7 +169,7 @@ describe("Control Center CLI", () => {
       const racingFileSystem = FileSystem.make({
         ...fileSystem,
         symlink: (target, linkPath) =>
-          linkPath === root
+          path.basename(linkPath) === path.basename(root)
             ? fileSystem.makeDirectory(root, { mode: 0o700 }).pipe(
               Effect.andThen(fileSystem.symlink(target, linkPath))
             )

@@ -1,9 +1,9 @@
-import type { Stream } from "effect"
 import { Context, Crypto, Effect, FileSystem, Layer, Path, Result, Schema } from "effect"
 
 import { WorkspaceId } from "../../../domain/identifiers.js"
 import { BlobRoot } from "../PersistenceConfig.js"
 import { BlobDigest } from "./BlobDigest.js"
+import { blobPath } from "./BlobPath.js"
 import { BLOB_FILE_MODE, makeBlobPublisher } from "./BlobPublisher.js"
 import { BlobClassification, BlobRef } from "./BlobRef.js"
 import {
@@ -14,6 +14,7 @@ import {
   blobStoreIoError,
   BlobTooLargeError
 } from "./BlobStoreError.js"
+import type { BlobRange, BlobRangeRead, BlobReadStream, BlobVerification } from "./BlobStoreTypes.js"
 import { makeOpenedBlobReader } from "./OpenedBlob.js"
 import { pinDirectory } from "./PinnedDirectory.js"
 
@@ -34,70 +35,10 @@ export interface BlobStoreOptions {
   readonly maximumRangeBytes?: number | undefined
 }
 
-/** Optional bounded segment for stream and range reads. */
-export interface BlobRange {
-  readonly offset: number
-  readonly length: number
-}
-
 /** Result of a content-addressed write. */
 export interface BlobPutResult {
   readonly ref: BlobRef
   readonly stored: boolean
-}
-
-/** Metadata and bytes for a lazy file stream. */
-export interface BlobReadStream {
-  readonly digest: BlobDigest
-  readonly sizeBytes: number
-  readonly integrity: "not-verified"
-  readonly bytes: Stream.Stream<Uint8Array, BlobStoreError>
-}
-
-/** Bounded range bytes; callers can separately request whole-object verification. */
-export interface BlobRangeRead {
-  readonly digest: BlobDigest
-  readonly sizeBytes: number
-  readonly integrity: "not-verified"
-  readonly bytes: Uint8Array
-}
-
-/** Integrity-check result, independent of SQL durability metadata. */
-export interface BlobVerification {
-  readonly digest: BlobDigest
-  readonly sizeBytes: number
-}
-
-/** Derived path shape. It is kept inside the server persistence boundary. */
-export interface BlobPath {
-  readonly workspaceDirectory: string
-  readonly objectDirectory: string
-  readonly file: string
-}
-
-/**
- * Derives the partitioned object path from already-decoded identity values.
- * Runtime service methods decode untrusted inputs before calling this helper.
- */
-export const blobPath = (
-  path: Path.Path,
-  canonicalRoot: string,
-  workspaceId: WorkspaceId,
-  digest: BlobDigest
-): BlobPath => {
-  const workspaceDirectory = path.join(canonicalRoot, "objects", workspaceId)
-  const objectDirectory = path.join(
-    workspaceDirectory,
-    "sha256",
-    digest.slice(0, 2),
-    digest.slice(2, 4)
-  )
-
-  return {
-    workspaceDirectory,
-    objectDirectory,
-    file: path.join(objectDirectory, digest)
-  }
 }
 
 interface BlobStoreService {
@@ -121,6 +62,11 @@ interface BlobStoreService {
     digest: BlobDigest,
     range?: BlobRange | undefined
   ) => Effect.Effect<BlobReadStream, BlobStoreError>
+  /** Replace corrupt bytes only after ContentStore authorizes persisted reproducible-cache metadata. */
+  readonly repairReproducible: (
+    workspaceId: WorkspaceId,
+    bytes: Uint8Array
+  ) => Effect.Effect<BlobPutResult, BlobStoreError>
   readonly verify: (
     workspaceId: WorkspaceId,
     digest: BlobDigest
@@ -462,16 +408,19 @@ export const makeBlobStore: (
           yield* pinned.assertIdentity
         })
       )
-      yield* verify(decodedWorkspaceId, digest)
-      return {
-        ref: new BlobRef({
-          workspaceId: decodedWorkspaceId,
-          digest,
-          sizeBytes: bytes.byteLength,
-          classification: decodedClassification
-        }),
-        stored: false
+      const verification = yield* verify(decodedWorkspaceId, digest).pipe(Effect.result)
+      if (Result.isSuccess(verification)) {
+        return {
+          ref: new BlobRef({
+            workspaceId: decodedWorkspaceId,
+            digest,
+            sizeBytes: bytes.byteLength,
+            classification: decodedClassification
+          }),
+          stored: false
+        }
       }
+      return yield* verification.failure
     }
 
     const linked = yield* Effect.scoped(
@@ -522,6 +471,51 @@ export const makeBlobStore: (
         classification: decodedClassification
       }),
       stored: Result.isSuccess(linked)
+    }
+  })
+
+  const repairReproducible = Effect.fn("BlobStore.repairReproducible")(function*(
+    workspaceId: WorkspaceId,
+    bytes: Uint8Array
+  ) {
+    const decodedWorkspaceId = yield* decodeInput("repair blob", WorkspaceId, workspaceId)
+    if (bytes.byteLength > maximumBlobBytes) {
+      return yield* new BlobTooLargeError({
+        digest: null,
+        actualBytes: bytes.byteLength,
+        maximumBytes: maximumBlobBytes
+      })
+    }
+    const digest = yield* digestBytes(bytes)
+    const derived = blobPath(path, canonicalRoot, decodedWorkspaceId, digest)
+    yield* secureDirectory(derived.objectDirectory)
+    yield* Effect.scoped(
+      Effect.gen(function*() {
+        const pinned = yield* pinDirectory(fs, path, derived.objectDirectory)
+        const replaced = yield* publish(
+          pinned,
+          digest,
+          bytes,
+          "replace",
+          (pinnedDestination) =>
+            fs.chmod(pinnedDestination, BLOB_FILE_MODE).pipe(
+              Effect.mapError((cause) => blobStoreIoError("secure repaired blob", cause)),
+              Effect.andThen(pinned.sync),
+              Effect.andThen(pinned.assertIdentity)
+            )
+        )
+        if (Result.isFailure(replaced)) return yield* blobStoreIoError("repair blob", replaced.failure)
+      })
+    )
+    yield* verify(decodedWorkspaceId, digest)
+    return {
+      ref: new BlobRef({
+        workspaceId: decodedWorkspaceId,
+        digest,
+        sizeBytes: bytes.byteLength,
+        classification: "reproducible-cache"
+      }),
+      stored: true
     }
   })
 
@@ -629,5 +623,5 @@ export const makeBlobStore: (
     }
   })
 
-  return BlobStore.of({ put, readAll, readRange, readStream, verify })
+  return BlobStore.of({ put, readAll, readRange, readStream, repairReproducible, verify })
 })

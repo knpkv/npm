@@ -116,3 +116,9 @@ export interface PublishedBackup {
   readonly archiveRoot: string
   readonly verification: BackupVerification
 }
+
+/** Result returned only after a verified restore has been durably claimed. */
+export interface RestoredBackup {
+  readonly configuredDataRoot: string
+  readonly verification: BackupVerification
+}

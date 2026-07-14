@@ -7,6 +7,56 @@ message: "Wrap named Effect functions with Effect.fn for tracing and consistent 
 
 rule:
   any:
+    - all:
+        - kind: variable_declarator
+        - has:
+            field: value
+            all:
+              - kind: arrow_function
+              - has:
+                  field: type_parameters
+                  kind: type_parameters
+              - has:
+                  field: body
+                  any:
+                    - pattern: Effect.gen($$$BODY)
+                    - pattern: Effect.gen($$$BODY).pipe($$$OPERATORS)
+                    - pattern: Effect.suspend($$$BODY)
+                    - pattern: Effect.suspend($$$BODY).pipe($$$OPERATORS)
+                    - pattern: Effect.uninterruptibleMask($$$BODY)
+                    - pattern: Effect.uninterruptibleMask($$$BODY).pipe($$$OPERATORS)
+    - all:
+        - kind: variable_declarator
+        - has:
+            field: value
+            all:
+              - kind: function_expression
+              - has:
+                  field: type_parameters
+                  kind: type_parameters
+              - has:
+                  field: body
+                  any:
+                    - pattern: "{ return Effect.gen($$$BODY) }"
+                    - pattern: "{ return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+                    - pattern: "{ return Effect.suspend($$$BODY) }"
+                    - pattern: "{ return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+                    - pattern: "{ return Effect.uninterruptibleMask($$$BODY) }"
+                    - pattern: "{ return Effect.uninterruptibleMask($$$BODY).pipe($$$OPERATORS) }"
+    - all:
+        - kind: function_declaration
+        - has:
+            field: type_parameters
+            kind: type_parameters
+        - has:
+            field: body
+            any:
+              - pattern: "{ return Effect.gen($$$BODY) }"
+              - pattern: "{ return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+              - pattern: "{ return Effect.suspend($$$BODY) }"
+              - pattern: "{ return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+              - pattern: "{ return Effect.uninterruptibleMask($$$BODY) }"
+              - pattern: "{ return Effect.uninterruptibleMask($$$BODY).pipe($$$OPERATORS) }"
     - pattern: "const $NAME = ($$$ARGS) => Effect.gen($$$BODY)"
     - pattern: "const $NAME = ($$$ARGS): $RETURN => Effect.gen($$$BODY)"
     - pattern: "const $NAME = ($$$ARGS) => Effect.gen($$$BODY).pipe($$$OPERATORS)"

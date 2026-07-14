@@ -12,7 +12,7 @@ import type { PersistenceOperationFailure } from "../persistence/Persistence.js"
 export const mapPersistenceReadError = (
   error: PersistenceOperationFailure
 ): ApplicationResourceNotFound | ApplicationServiceUnavailable =>
-  error._tag === "RecordNotFoundError" || error._tag === "BlobNotFoundError"
+  error._tag === "RecordNotFoundError"
     ? new ApplicationResourceNotFound()
     : new ApplicationServiceUnavailable({ retryAt: null })
 

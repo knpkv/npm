@@ -15,6 +15,7 @@ import {
   type QuarantineWriteError,
   type RecordAlreadyExistsError,
   type RecordNotFoundError,
+  type ReproducibleContentUnavailableError,
   type RevisionConflictError,
   type SecretReferenceScopeConflictError,
   type SourceIdentityMismatchError
@@ -53,6 +54,7 @@ export type PersistenceOperationFailure =
   | QuarantineWriteError
   | RecordAlreadyExistsError
   | RecordNotFoundError
+  | ReproducibleContentUnavailableError
   | RevisionConflictError
   | SecretReferenceScopeConflictError
   | SourceIdentityMismatchError
@@ -71,6 +73,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "QuarantineWriteError",
   "RecordAlreadyExistsError",
   "RecordNotFoundError",
+  "ReproducibleContentUnavailableError",
   "RevisionConflictError",
   "SecretReferenceScopeConflictError",
   "SourceIdentityMismatchError"

@@ -2,13 +2,16 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
 import { assert, describe, it } from "@effect/vitest"
-import { Crypto, Effect, Encoding, Exit, Path, Result } from "effect"
+import { Crypto, Effect, Encoding, Exit, Path, Result, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
-import { verifyBackup } from "../../src/server/persistence/backup/index.js"
+import { WorkspaceId } from "../../src/domain/identifiers.js"
+import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "../../src/server/cliConfiguration.js"
+import { BackupIntegrityError, restoreBackup, verifyBackup } from "../../src/server/persistence/backup/index.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { MigrationLedgerError } from "../../src/server/persistence/errors.js"
+import { MigrationLedgerError, ReproducibleContentUnavailableError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
 import { migration0002Integrity } from "../../src/server/persistence/migrations/0002_integrity.js"
 import { migration0003Auth } from "../../src/server/persistence/migrations/0003_auth.js"
@@ -16,6 +19,10 @@ import { migration0004PluginRuntime } from "../../src/server/persistence/migrati
 import { migration0005PluginConfiguration } from "../../src/server/persistence/migrations/0005_plugin_configuration.js"
 import { migration0006PluginSyncPageEvidence } from "../../src/server/persistence/migrations/0006_plugin_sync_page_evidence.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
+import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
+import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
+import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import { BlobRoot } from "../../src/server/persistence/PersistenceConfig.js"
 
 const expectedTables = [
   "content_blobs",
@@ -46,6 +53,12 @@ const expectedTables = [
 ]
 
 const EXPECTED_CORE_SCHEMA_DIGEST = "172796a81b2a7525678fec510b69a251ffd4e3ba7f06f0659cf77d535b1152dd"
+const encoder = new TextEncoder()
+const VERSION_SIX_CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T09:00:00.000Z")
+
+type VersionSixCacheState = "complete" | "corrupt" | "missing"
+
+const VERSION_SIX_CACHE_STATES: ReadonlyArray<VersionSixCacheState> = ["complete", "missing", "corrupt"]
 
 const EXPECTED_PREVIOUS_ROWS = [
   {
@@ -153,6 +166,97 @@ const testConfig = Effect.gen(function*() {
 
 const snakeToCamel = (value: string): string =>
   value.replace(/_([a-z])/gu, (_, character: string) => character.toUpperCase())
+
+const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersionSixArchive")(function*() {
+  const config = yield* testConfig
+  const previousLoader = LibsqlMigrator.fromRecord({
+    "0001_core_heads": migration0001Core,
+    "0002_integrity_blobs": migration0002Integrity,
+    "0003_auth": migration0003Auth,
+    "0004_plugin_runtime": migration0004PluginRuntime,
+    "0005_plugin_configuration": migration0005PluginConfiguration,
+    "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
+  })
+  const legacyWorkspaceId = "01890f6f-6d6a-7cc0-98d2-000000000093"
+  const legacyWorkspace = Schema.decodeSync(WorkspaceId)(legacyWorkspaceId)
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const cacheBytes = encoder.encode("version-six reproducible cache")
+  const durableBytes = encoder.encode("version-six durable evidence")
+  const blobStore = yield* makeBlobStore({
+    blobRoot: Schema.decodeSync(BlobRoot)(config.blobRoot)
+  })
+  const cache = yield* blobStore.put(legacyWorkspace, cacheBytes, "reproducible-cache")
+  const durable = yield* blobStore.put(legacyWorkspace, durableBytes, "durable")
+
+  yield* Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
+    yield* sql`INSERT INTO workspaces (
+      workspace_id, display_name, revision, created_at, updated_at
+    ) VALUES (
+      ${legacyWorkspaceId}, 'Version Six', 1,
+      '2026-07-14T09:00:00.000Z', '2026-07-14T09:00:00.000Z'
+    )`
+    yield* sql`INSERT INTO content_blobs (
+      workspace_id, digest, storage_class, byte_length, mime_type, created_at, last_verified_at
+    ) VALUES
+      (
+        ${legacyWorkspaceId}, ${cache.ref.digest}, 'reproducible-cache', ${cacheBytes.byteLength},
+        'text/plain', '2026-07-14T09:00:00.000Z', NULL
+      ),
+      (
+        ${legacyWorkspaceId}, ${durable.ref.digest}, 'durable', ${durableBytes.byteLength},
+        'application/octet-stream', '2026-07-14T09:00:00.000Z', NULL
+      )`
+  }).pipe(
+    Effect.provide(
+      LibsqlClient.layer({
+        transformResultNames: snakeToCamel,
+        url: config.databaseUrl
+      })
+    ),
+    Effect.scoped
+  )
+
+  const snapshot = yield* Effect.gen(function*() {
+    const database = yield* Database
+    const workspaces = yield* database.sql<{ readonly displayName: string }>`SELECT
+      display_name AS displayName FROM workspaces WHERE workspace_id = ${legacyWorkspaceId}`
+    const streams = yield* database.sql`SELECT workspace_id FROM domain_event_streams`
+    const events = yield* database.sql`SELECT workspace_id FROM domain_events`
+    const ledger = yield* database.sql<{
+      readonly migrationId: number
+      readonly name: string
+    }>`SELECT migration_id AS migrationId, name
+      FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+      ORDER BY migration_id`
+    return { events, ledger, streams, workspaces }
+  }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+  const backupRoot = path.join(
+    path.dirname(config.blobRoot),
+    "backups",
+    "pre-migration",
+    "v6-to-v7"
+  )
+  const archives = (yield* fileSystem.readDirectory(backupRoot)).filter(
+    (entry) => !entry.startsWith(".control-center-backup-incoming-")
+  )
+  if (archives.length !== 1) return yield* Effect.fail(`expected one v6 archive, received ${archives.length}`)
+  const archive = archives[0]
+  if (archive === undefined) return yield* Effect.fail("missing pre-migration archive")
+  return {
+    archiveRoot: path.join(backupRoot, archive),
+    cache,
+    cacheBytes,
+    config,
+    durable,
+    durableBytes,
+    legacyWorkspace,
+    snapshot
+  }
+})
 
 describe("Control Center migrations", () => {
   it.effect("creates the exact fresh schema and final ledger", () =>
@@ -290,80 +394,170 @@ describe("Control Center migrations", () => {
       }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades schema version 6 to workspace-local event streams without rewriting data", () =>
-    Effect.gen(function*() {
-      const config = yield* testConfig
-      const previousLoader = LibsqlMigrator.fromRecord({
-        "0001_core_heads": migration0001Core,
-        "0002_integrity_blobs": migration0002Integrity,
-        "0003_auth": migration0003Auth,
-        "0004_plugin_runtime": migration0004PluginRuntime,
-        "0005_plugin_configuration": migration0005PluginConfiguration,
-        "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
-      })
-      const legacyWorkspaceId = "01890f6f-6d6a-7cc0-98d2-000000000093"
+  for (const cacheState of VERSION_SIX_CACHE_STATES) {
+    it.effect(`restores and restarts schema version 6 with ${cacheState} reproducible content`, () =>
+      Effect.gen(function*() {
+        const fixture = yield* makeVersionSixArchive()
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        assert.deepStrictEqual(fixture.snapshot.workspaces, [{ displayName: "Version Six" }])
+        assert.deepStrictEqual(fixture.snapshot.streams, [])
+        assert.deepStrictEqual(fixture.snapshot.events, [])
+        assert.deepStrictEqual(
+          fixture.snapshot.ledger,
+          EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
+        )
 
-      yield* Effect.gen(function*() {
-        const sql = yield* SqlClient.SqlClient
-        yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
-        yield* sql`INSERT INTO workspaces (
-          workspace_id, display_name, revision, created_at, updated_at
-        ) VALUES (
-          ${legacyWorkspaceId}, 'Version Six', 1,
-          '2026-07-14T09:00:00.000Z', '2026-07-14T09:00:00.000Z'
-        )`
-      }).pipe(
-        Effect.provide(
-          LibsqlClient.layer({
-            transformResultNames: snakeToCamel,
-            url: config.databaseUrl
+        const archiveCache = blobPath(
+          path,
+          path.join(fixture.archiveRoot, "blobs"),
+          fixture.legacyWorkspace,
+          fixture.cache.ref.digest
+        ).file
+        if (cacheState === "missing") {
+          yield* fileSystem.remove(archiveCache)
+        } else if (cacheState === "corrupt") {
+          yield* fileSystem.writeFile(archiveCache, encoder.encode("corrupt version-six cache"))
+        }
+
+        const verification = yield* verifyBackup(fixture.archiveRoot)
+        assert.strictEqual(verification.manifest.kind, "pre-migration")
+        assert.deepStrictEqual(
+          verification.manifest.migrations,
+          EXPECTED_MIGRATIONS.slice(0, 6).map(({ id, name }) => ({ migrationId: id, name }))
+        )
+        if (cacheState === "complete") {
+          assert.strictEqual(verification._tag, "Complete")
+          assert.deepStrictEqual(verification.reproducibleBlobGaps, [])
+        } else {
+          assert.strictEqual(verification._tag, "RecoverableCacheGaps")
+          assert.strictEqual(verification.reproducibleBlobGaps.length, 1)
+          assert.strictEqual(verification.reproducibleBlobGaps[0]?.reason, cacheState)
+        }
+
+        const configuredDataRoot = path.join(path.dirname(fixture.config.blobRoot), `restored-v6-${cacheState}`)
+        const restored = yield* restoreBackup({ archiveRoot: fixture.archiveRoot, configuredDataRoot })
+        assert.strictEqual(restored.configuredDataRoot, configuredDataRoot)
+        assert.strictEqual(restored.verification._tag, verification._tag)
+        const prepared = yield* prepareControlCenterDataRoot(
+          yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+        )
+        const restoredConfig = prepared.persistenceConfig
+        const expectedLedger = EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
+        const readRestoredLedger = Effect.gen(function*() {
+          const database = yield* Database
+          return yield* database.sql<{ readonly migrationId: number; readonly name: string }>`SELECT
+            migration_id AS migrationId, name
+            FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+            ORDER BY migration_id`
+        }).pipe(Effect.provide(databaseLayer(restoredConfig)), Effect.scoped)
+        assert.deepStrictEqual(yield* readRestoredLedger, expectedLedger)
+
+        yield* Effect.gen(function*() {
+          const persistence = yield* Persistence
+          assert.deepStrictEqual(
+            yield* persistence.content.readAll(fixture.legacyWorkspace, fixture.durable.ref.digest),
+            fixture.durableBytes
+          )
+          if (cacheState === "complete") {
+            assert.deepStrictEqual(
+              yield* persistence.content.readAll(fixture.legacyWorkspace, fixture.cache.ref.digest),
+              fixture.cacheBytes
+            )
+            return
+          }
+
+          const unavailable = yield* persistence.content.readAll(
+            fixture.legacyWorkspace,
+            fixture.cache.ref.digest
+          ).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(unavailable))
+          if (Result.isFailure(unavailable)) {
+            assert.strictEqual(unavailable.failure._tag, "ReproducibleContentUnavailableError")
+            assert.instanceOf(unavailable.failure, ReproducibleContentUnavailableError)
+            if (unavailable.failure._tag === "ReproducibleContentUnavailableError") {
+              assert.strictEqual(unavailable.failure.recovery, "refetch")
+            }
+          }
+          const repaired = yield* persistence.content.put(fixture.legacyWorkspace, {
+            bytes: fixture.cacheBytes,
+            classification: "reproducible-cache",
+            createdAt: VERSION_SIX_CREATED_AT,
+            mimeType: "text/plain"
           })
-        ),
-        Effect.scoped
-      )
+          assert.isTrue(repaired.stored)
+        }).pipe(Effect.provide(persistenceLayer(restoredConfig)), Effect.scoped)
 
-      const snapshot = yield* Effect.gen(function*() {
-        const database = yield* Database
-        const workspaces = yield* database.sql<{ readonly displayName: string }>`SELECT
-          display_name AS displayName FROM workspaces WHERE workspace_id = ${legacyWorkspaceId}`
-        const streams = yield* database.sql`SELECT workspace_id FROM domain_event_streams`
-        const events = yield* database.sql`SELECT workspace_id FROM domain_events`
-        const ledger = yield* database.sql<{
-          readonly migrationId: number
-          readonly name: string
-        }>`SELECT migration_id AS migrationId, name
-          FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
-          ORDER BY migration_id`
-        return { events, ledger, streams, workspaces }
-      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+        const preparedAgain = yield* prepareControlCenterDataRoot(
+          yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
+        )
+        assert.strictEqual(preparedAgain.dataRoot, prepared.dataRoot)
+        yield* Effect.gen(function*() {
+          const persistence = yield* Persistence
+          assert.deepStrictEqual(
+            yield* persistence.content.readAll(fixture.legacyWorkspace, fixture.cache.ref.digest),
+            fixture.cacheBytes
+          )
+          assert.deepStrictEqual(
+            yield* persistence.content.readAll(fixture.legacyWorkspace, fixture.durable.ref.digest),
+            fixture.durableBytes
+          )
+        }).pipe(Effect.provide(persistenceLayer(preparedAgain.persistenceConfig)), Effect.scoped)
+        assert.deepStrictEqual(yield* readRestoredLedger, expectedLedger)
 
-      assert.deepStrictEqual(snapshot.workspaces, [{ displayName: "Version Six" }])
-      assert.deepStrictEqual(snapshot.streams, [])
-      assert.deepStrictEqual(snapshot.events, [])
-      assert.deepStrictEqual(
-        snapshot.ledger,
-        EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
-      )
+        const restoredMigrationBackupRoot = path.join(
+          prepared.dataRoot,
+          "backups",
+          "pre-migration",
+          `v${EXPECTED_MIGRATIONS[5]?.id ?? 0}-to-v${EXPECTED_MIGRATIONS.at(-1)?.id ?? 0}`
+        )
+        const restoredArchives = yield* fileSystem.readDirectory(restoredMigrationBackupRoot)
+        assert.strictEqual(restoredArchives.length, 1)
+        const restoredArchive = restoredArchives[0]
+        if (restoredArchive === undefined) return yield* Effect.fail("missing restored pre-migration archive")
+        const restoredPreMigration = yield* verifyBackup(path.join(restoredMigrationBackupRoot, restoredArchive))
+        assert.deepStrictEqual(
+          restoredPreMigration.manifest.migrations,
+          EXPECTED_MIGRATIONS.slice(0, 6).map(({ id, name }) => ({ migrationId: id, name }))
+        )
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+  }
+
+  it.effect("rejects a version 6 restore when durable evidence is missing", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeVersionSixArchive()
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const backupRoot = path.join(
-        path.dirname(config.blobRoot),
-        "backups",
-        "pre-migration",
-        "v6-to-v7"
+      yield* fileSystem.remove(
+        blobPath(
+          path,
+          path.join(fixture.archiveRoot, "blobs"),
+          fixture.legacyWorkspace,
+          fixture.durable.ref.digest
+        ).file
       )
-      const archives = (yield* fileSystem.readDirectory(backupRoot)).filter(
-        (entry) => !entry.startsWith(".control-center-backup-incoming-")
-      )
-      assert.strictEqual(archives.length, 1)
-      const archive = archives[0]
-      if (archive === undefined) return yield* Effect.fail("missing pre-migration archive")
-      const verification = yield* verifyBackup(path.join(backupRoot, archive))
-      assert.strictEqual(verification.manifest.kind, "pre-migration")
-      assert.deepStrictEqual(
-        verification.manifest.migrations,
-        EXPECTED_MIGRATIONS.slice(0, 6).map(({ id, name }) => ({ migrationId: id, name }))
-      )
+
+      const verification = yield* verifyBackup(fixture.archiveRoot).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(verification))
+      if (Result.isFailure(verification)) {
+        assert.strictEqual(verification.failure._tag, "BackupIntegrityError")
+        assert.instanceOf(verification.failure, BackupIntegrityError)
+        if (verification.failure._tag === "BackupIntegrityError") {
+          assert.strictEqual(verification.failure.reason, "blob-missing")
+        }
+      }
+
+      const configuredDataRoot = path.join(path.dirname(fixture.config.blobRoot), "restored-v6-durable-gap")
+      const restored = yield* restoreBackup({
+        archiveRoot: fixture.archiveRoot,
+        configuredDataRoot
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(restored))
+      if (Result.isFailure(restored)) {
+        assert.strictEqual(restored.failure._tag, "BackupIntegrityError")
+        assert.instanceOf(restored.failure, BackupIntegrityError)
+      }
+      assert.isFalse(yield* fileSystem.exists(configuredDataRoot))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades an exact previous schema without rewriting its ledger entry", () =>
