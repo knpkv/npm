@@ -18,28 +18,103 @@ const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
 
+const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
+  const normalizedSourcePath = sourcePath.toLowerCase()
+  if (normalizedSourcePath.endsWith(".tsx")) return ts.ScriptKind.TSX
+  if (normalizedSourcePath.endsWith(".jsx")) return ts.ScriptKind.JSX
+  if (
+    normalizedSourcePath.endsWith(".ts") ||
+    normalizedSourcePath.endsWith(".mts") ||
+    normalizedSourcePath.endsWith(".cts")
+  ) {
+    return ts.ScriptKind.TS
+  }
+  if (
+    normalizedSourcePath.endsWith(".js") ||
+    normalizedSourcePath.endsWith(".mjs") ||
+    normalizedSourcePath.endsWith(".cjs")
+  ) {
+    return ts.ScriptKind.JS
+  }
+  return ts.ScriptKind.Unknown
+}
+
 const withoutOuterExpressions = (expression: ts.Expression): ts.Expression => {
   let current = expression
 
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isTypeAssertionExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isSatisfiesExpression(current) ||
-    ts.isNonNullExpression(current) ||
-    ts.isPartiallyEmittedExpression(current) ||
-    ts.isExpressionWithTypeArguments(current)
-  ) {
-    current = current.expression
+  while (true) {
+    if (
+      ts.isParenthesizedExpression(current) ||
+      ts.isTypeAssertionExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isSatisfiesExpression(current) ||
+      ts.isNonNullExpression(current) ||
+      ts.isPartiallyEmittedExpression(current) ||
+      ts.isExpressionWithTypeArguments(current)
+    ) {
+      current = current.expression
+      continue
+    }
+    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      current = current.right
+      continue
+    }
+    if (ts.isCommaListExpression(current)) {
+      const finalExpression = current.elements[current.elements.length - 1]
+      if (finalExpression !== undefined) {
+        current = finalExpression
+        continue
+      }
+    }
+    return current
   }
-
-  return current
 }
 
-const isRequireCall = (node: ts.Node): node is ts.CallExpression => {
-  if (!ts.isCallExpression(node)) return false
+const isDirectRequire = (expression: ts.Expression): boolean => {
+  const candidate = withoutOuterExpressions(expression)
+  return ts.isIdentifier(candidate) && candidate.text === "require"
+}
+
+const isDirectRequireMember = (expression: ts.Expression, memberName: string): boolean => {
+  const candidate = withoutOuterExpressions(expression)
+  return (
+    ts.isPropertyAccessExpression(candidate) &&
+    candidate.name.text === memberName &&
+    isDirectRequire(candidate.expression)
+  )
+}
+
+type RequireSpecifier =
+  | { readonly kind: "expression"; readonly expression: ts.Expression }
+  | { readonly kind: "non-literal" }
+  | { readonly kind: "none" }
+
+const expressionSpecifier = (expression: ts.Expression | undefined): RequireSpecifier =>
+  expression === undefined ? { kind: "none" } : { expression, kind: "expression" }
+
+const appliedRequireSpecifier = (argumentsExpression: ts.Expression | undefined): RequireSpecifier => {
+  if (argumentsExpression === undefined) return { kind: "none" }
+  const candidate = withoutOuterExpressions(argumentsExpression)
+  if (!ts.isArrayLiteralExpression(candidate)) return { kind: "non-literal" }
+  const firstArgument = candidate.elements[0]
+  if (firstArgument === undefined) return { kind: "none" }
+  if (ts.isOmittedExpression(firstArgument) || ts.isSpreadElement(firstArgument)) return { kind: "non-literal" }
+  return { expression: firstArgument, kind: "expression" }
+}
+
+// This intentionally recognizes only syntactic compositions rooted at the named direct loader.
+const requireSpecifier = (node: ts.CallExpression): RequireSpecifier => {
   const callee = withoutOuterExpressions(node.expression)
-  return ts.isIdentifier(callee) && callee.text === "require"
+  if (isDirectRequire(callee)) return expressionSpecifier(node.arguments[0])
+  if (isDirectRequireMember(callee, "call")) return expressionSpecifier(node.arguments[1])
+  if (isDirectRequireMember(callee, "apply")) return appliedRequireSpecifier(node.arguments[1])
+
+  if (ts.isCallExpression(callee) && isDirectRequireMember(callee.expression, "bind")) {
+    const boundSpecifier = callee.arguments[1]
+    return expressionSpecifier(boundSpecifier ?? node.arguments[0])
+  }
+
+  return { kind: "none" }
 }
 
 const withoutQuery = (importPath: string): string => importPath.split(/[?#]/, 1)[0] ?? importPath
@@ -124,7 +199,13 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
 
 /** Inspect all static, exported, and dynamic module specifiers in one source file. */
 export const inspectModuleImports = (sourcePath: string, source: string): ReadonlyArray<string> => {
-  const sourceFile = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const sourceFile = ts.createSourceFile(
+    sourcePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindForSourcePath(sourcePath)
+  )
   const imports: Array<string> = []
 
   const visit = (node: ts.Node): void => {
@@ -141,11 +222,15 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
       imports.push(
         argument !== undefined && ts.isStringLiteralLike(argument) ? argument.text : NON_LITERAL_DYNAMIC_IMPORT
       )
-    } else if (isRequireCall(node) && node.arguments.length >= 1) {
-      const argument = node.arguments[0]
-      imports.push(
-        argument !== undefined && ts.isStringLiteralLike(argument) ? argument.text : NON_LITERAL_DYNAMIC_IMPORT
-      )
+    } else if (ts.isCallExpression(node)) {
+      const specifier = requireSpecifier(node)
+      if (specifier.kind === "non-literal") {
+        imports.push(NON_LITERAL_DYNAMIC_IMPORT)
+      } else if (specifier.kind === "expression") {
+        imports.push(
+          ts.isStringLiteralLike(specifier.expression) ? specifier.expression.text : NON_LITERAL_DYNAMIC_IMPORT
+        )
+      }
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
       const literal = node.argument.literal
       if (ts.isStringLiteralLike(literal)) imports.push(literal.text)

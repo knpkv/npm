@@ -5,6 +5,8 @@ import {
   inspectStylesheetBoundaries
 } from "../../scripts/source-boundaries.js"
 
+const ANGLE_ASSERTED_REQUIRE = "<" + "NodeRequire>require"
+
 describe("Control Center source boundaries", () => {
   it("accepts the intended dependency direction", () => {
     expect(inspectSourceBoundaries("src/client/page.tsx", "import { Thing } from \"../domain/index.js\"")).toEqual([])
@@ -264,6 +266,7 @@ describe("Control Center source boundaries", () => {
         [
           "const parenthesized = (require)(\"../server/parenthesized.js\")",
           "const asserted = (require as NodeRequire)(\"../server/asserted.js\", { ignored: true })",
+          `const angleAsserted = (${ANGLE_ASSERTED_REQUIRE})("../server/angle-asserted.js")`,
           "const nonNull = require!(\"../server/non-null.js\")"
         ].join("\n")
       )
@@ -275,6 +278,11 @@ describe("Control Center source boundaries", () => {
       },
       {
         importPath: "../server/asserted.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/angle-asserted.js",
         reason: "client code cannot import server code",
         sourcePath: "src/client/module.ts"
       },
@@ -326,6 +334,110 @@ describe("Control Center source boundaries", () => {
           "const emptyParenthesized = (require)()",
           "const emptyAsserted = (require as NodeRequire)()",
           "const method = obj.require(\"../server/not-a-module-loader.js\")"
+        ].join("\n")
+      )
+    ).toEqual([])
+  })
+
+  it("uses TypeScript parsing for non-JSX TypeScript extensions", () => {
+    for (const extension of ["ts", "mts", "cts"]) {
+      expect(
+        inspectSourceBoundaries(
+          `src/client/module.${extension}`,
+          `const server = (${ANGLE_ASSERTED_REQUIRE})("../server/angle-asserted.js")`
+        )
+      ).toHaveLength(1)
+    }
+  })
+
+  it("inspects the final operand of comma-expression require callees", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const literal = (0, require)(\"../server/comma.js\")",
+          "const nonLiteral = (path: string) => (console.info, require)(path)",
+          "const allowed = (noop, require)(\"../domain/release.js\")",
+          "const empty = (noop, require)()"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "../server/comma.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("inspects direct require call, apply, and bind compositions", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const called = require.call(undefined, \"../server/call.js\")",
+          "const applied = require.apply(undefined, [\"../server/apply.js\"])",
+          "const boundBefore = require.bind(undefined, \"../server/bound-before.js\")()",
+          "const boundAfter = require.bind(undefined)(\"../server/bound-after.js\")"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "../server/call.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/apply.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/bound-before.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/bound-after.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("rejects unverifiable direct require call, apply, and bind compositions", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const called = (path: string) => require.call(undefined, path)",
+          "const applied = (args: ReadonlyArray<string>) => require.apply(undefined, args)",
+          "const spreadApplied = (args: ReadonlyArray<string>) => require.apply(undefined, [...args])",
+          "const boundBefore = (path: string) => require.bind(undefined, path)()",
+          "const boundAfter = (path: string) => require.bind(undefined)(path)"
+        ].join("\n")
+      )
+    ).toHaveLength(5)
+  })
+
+  it("ignores zero-argument direct require compositions and non-direct loaders", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "require.call(undefined)",
+          "require.apply(undefined, [])",
+          "require.bind(undefined)()",
+          "obj.require(\"../server/member.js\")",
+          "obj.require.call(undefined, \"../server/member-call.js\")",
+          "loader.call(undefined, \"../server/loader-call.js\")",
+          "loader.apply(undefined, [\"../server/loader-apply.js\"])",
+          "loader.bind(undefined)(\"../server/loader-bind.js\")"
         ].join("\n")
       )
     ).toEqual([])
