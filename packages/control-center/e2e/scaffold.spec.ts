@@ -16,6 +16,12 @@ test("renders the private browser application boundary", async ({ page }) => {
   await page.goto("/")
   await expect(page.getByRole("heading", { level: 1, name: "Everything that can ship." })).toBeVisible()
   await expect(page.getByText("Workspace is private")).toBeVisible()
+  await page.keyboard.press("Tab")
+  await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
+  for (const name of ["Today", "Releases", "Services", "Relay context"]) {
+    await page.keyboard.press("Tab")
+    await expect(page.getByRole("link", { name })).toBeFocused()
+  }
   await page.getByRole("link", { name: "Releases" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
   await page.getByRole("link", { name: "Relay context" }).click()
@@ -104,8 +110,28 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
 
   const newTab = await context.newPage()
-  await newTab.goto("/")
-  await expect(newTab.getByText("Owner browser paired")).toBeVisible()
+  await newTab.goto("/releases")
+  await expect(newTab.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
   await expect.poll(() => newTab.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
+  await newTab.getByRole("link", { name: "Today" }).click()
+  await expect(newTab.getByText("Owner browser paired")).toBeVisible()
   await newTab.close()
+})
+
+test("distinguishes a blocked session read from an unavailable server", async ({ page }) => {
+  await page.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "ForbiddenApiError",
+        code: "forbidden",
+        correlationId: "session-e2e",
+        message: "Session reads are blocked on this connection"
+      }),
+      contentType: "application/json",
+      status: 403
+    })
+  })
+
+  await page.goto("/")
+  await expect(page.getByText("Session access blocked on this connection")).toBeVisible()
 })

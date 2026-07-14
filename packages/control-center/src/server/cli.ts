@@ -4,7 +4,6 @@ import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -17,7 +16,7 @@ import * as Stream from "effect/Stream"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
-import { decodeControlCenterDataPaths } from "./cliConfiguration.js"
+import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "./cliConfiguration.js"
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
@@ -27,7 +26,10 @@ const DEFAULT_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000
 const DEFAULT_OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000002")
 
 const commaSeparated = (value: string): ReadonlyArray<string> =>
-  value.split(",").map((part) => part.trim()).filter((part) => part.length > 0)
+  value
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
 
 const configuration = Config.all({
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
@@ -52,16 +54,18 @@ class ControlCenterCliUsageError extends Schema.TaggedErrorClass<ControlCenterCl
 
 const program = Effect.scoped(
   Effect.gen(function*() {
-    const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const stdio = yield* Stdio.Stdio
+    const invocation = classifyControlCenterCliArguments(yield* stdio.args)
+    if (invocation._tag === "invalid") {
+      yield* writeLine("Usage: control-center [recover-owner]")
+      return yield* new ControlCenterCliUsageError({ command: invocation.command })
+    }
+
     const configured = yield* configuration
     const dataPaths = yield* decodeControlCenterDataPaths(configured.dataRoot)
-    const dataRoot = dataPaths.dataRoot
-    yield* fileSystem.makeDirectory(dataRoot, { recursive: true, mode: 0o700 })
-    yield* fileSystem.chmod(dataRoot, 0o700)
+    yield* prepareControlCenterDataRoot(dataPaths)
 
-    const invocation = classifyControlCenterCliArguments(yield* stdio.args)
     if (invocation._tag === "recover-owner") {
       const recoveryServices = yield* Layer.build(terminalRecoveryLayer(dataPaths.persistenceConfig))
       const recovery = Context.get(recoveryServices, TerminalRecovery)
@@ -72,10 +76,6 @@ const program = Effect.scoped(
       })
       yield* writeLine(`Recovery pairing code: ${Redacted.value(issued.pairingCode)}`)
       return
-    }
-    if (invocation._tag === "invalid") {
-      yield* writeLine("Usage: control-center [recover-owner]")
-      return yield* new ControlCenterCliUsageError({ command: invocation.command })
     }
 
     const allowedHosts = commaSeparated(configured.allowedHosts)
@@ -101,17 +101,19 @@ const program = Effect.scoped(
         : {})
     })
     const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
-    const services = yield* Layer.build(makeControlCenterServer({
-      bindConfig,
-      bootstrap: {
-        owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        workspaceName: WorkspaceName.make("Control Center")
-      },
-      persistenceConfig: dataPaths.persistenceConfig,
-      secretRoot: dataPaths.secretRoot,
-      staticAssets: { root: staticRoot }
-    }))
+    const services = yield* Layer.build(
+      makeControlCenterServer({
+        bindConfig,
+        bootstrap: {
+          owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          workspaceName: WorkspaceName.make("Control Center")
+        },
+        persistenceConfig: dataPaths.persistenceConfig,
+        secretRoot: dataPaths.secretRoot,
+        staticAssets: { root: staticRoot }
+      })
+    )
     const bootstrap = Context.get(services, ControlCenterBootstrap)
 
     yield* writeLine(`Control Center listening at ${bindConfig.publicOrigin}`)
@@ -145,7 +147,6 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
   return writeLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
 }
 
-NodeRuntime.runMain(
-  program.pipe(Effect.catchCause(reportProgramFailure), Effect.provide(NodeServices.layer)),
-  { disableErrorReporting: true }
-)
+NodeRuntime.runMain(program.pipe(Effect.catchCause(reportProgramFailure), Effect.provide(NodeServices.layer)), {
+  disableErrorReporting: true
+})

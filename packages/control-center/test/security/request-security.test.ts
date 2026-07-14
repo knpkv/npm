@@ -225,66 +225,81 @@ describe("bind and request security", () => {
       assert.isTrue(Result.isFailure(badHost))
       if (Result.isFailure(badHost)) assert.strictEqual(badHost.failure.reason, "host-rejected")
 
-      const missingOrigin = yield* authorizeAuthenticatedMutation({
-        config,
-        request: { ...request, method: "POST", csrfToken },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)).pipe(Effect.result)
+      const missingOrigin = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: { ...request, method: "POST", csrfToken },
+          capability: "release-action"
+        },
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(missingOrigin))
       if (Result.isFailure(missingOrigin)) {
         assert.strictEqual(missingOrigin.failure.reason, "origin-required")
       }
 
-      const badOrigin = yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...request,
-          method: "POST",
-          origin: "http://attacker.example",
-          csrfToken
+      const badOrigin = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...request,
+            method: "POST",
+            origin: "http://attacker.example",
+            csrfToken
+          },
+          capability: "release-action"
         },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)).pipe(Effect.result)
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(badOrigin))
       if (Result.isFailure(badOrigin)) assert.strictEqual(badOrigin.failure.reason, "origin-rejected")
 
-      const missingCsrf = yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...request,
-          method: "POST",
-          origin: "http://127.0.0.1:4173"
+      const missingCsrf = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...request,
+            method: "POST",
+            origin: "http://127.0.0.1:4173"
+          },
+          capability: "release-action"
         },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)).pipe(Effect.result)
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(missingCsrf))
       if (Result.isFailure(missingCsrf)) assert.strictEqual(missingCsrf.failure.reason, "csrf-required")
 
-      const arbitraryCsrf = yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...request,
-          method: "POST",
-          origin: "http://127.0.0.1:4173",
-          csrfToken: "34".repeat(32)
+      const arbitraryCsrf = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...request,
+            method: "POST",
+            origin: "http://127.0.0.1:4173",
+            csrfToken: "34".repeat(32)
+          },
+          capability: "release-action"
         },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)).pipe(Effect.result)
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(arbitraryCsrf))
       if (Result.isFailure(arbitraryCsrf)) {
         assert.strictEqual(arbitraryCsrf.failure.reason, "csrf-rejected")
       }
 
-      yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...request,
-          method: "POST",
-          origin: "http://127.0.0.1:4173",
-          csrfToken
+      yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...request,
+            method: "POST",
+            origin: "http://127.0.0.1:4173",
+            csrfToken
+          },
+          capability: "release-action"
         },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest))
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      )
 
       yield* authorizeRequest(
         config,
@@ -378,6 +393,7 @@ describe("bind and request security", () => {
       yield* authorizeInsecureLanCapability(config, "release-read")
       yield* authorizeInsecureLanCapability(config, "release-action")
       yield* authorizeInsecureLanCapability(config, "release-agent")
+      yield* authorizeInsecureLanCapability(config, "session-self-read")
       const administrativeCapabilities = [
         "provider-configuration",
         "policy-administration",
@@ -400,11 +416,15 @@ describe("bind and request security", () => {
         capability: "release-read"
       })
 
-      const insecurePairing = yield* authorizeRequest(config, {
-        ...insecureRequest,
-        method: "POST",
-        origin: "http://192.168.1.42:5173"
-      }, "public-pair").pipe(Effect.result)
+      const insecurePairing = yield* authorizeRequest(
+        config,
+        {
+          ...insecureRequest,
+          method: "POST",
+          origin: "http://192.168.1.42:5173"
+        },
+        "public-pair"
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(insecurePairing))
       if (Result.isFailure(insecurePairing)) {
         assert.strictEqual(insecurePairing.failure.reason, "insecure-lan-capability-rejected")
@@ -412,27 +432,33 @@ describe("bind and request security", () => {
 
       const csrfToken = "56".repeat(32)
       const expectedCsrfDigest = yield* hashCsrfToken(csrfToken)
-      yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...insecureRequest,
-          method: "POST",
-          origin: "http://192.168.1.42:5173",
-          csrfToken
+      yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...insecureRequest,
+            method: "POST",
+            origin: "http://192.168.1.42:5173",
+            csrfToken
+          },
+          capability: "release-action"
         },
-        capability: "release-action"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest))
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      )
 
-      const composedAdministration = yield* authorizeAuthenticatedMutation({
-        config,
-        request: {
-          ...insecureRequest,
-          method: "POST",
-          origin: "http://192.168.1.42:5173",
-          csrfToken
+      const composedAdministration = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...insecureRequest,
+            method: "POST",
+            origin: "http://192.168.1.42:5173",
+            csrfToken
+          },
+          capability: "policy-administration"
         },
-        capability: "policy-administration"
-      }, (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)).pipe(Effect.result)
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(composedAdministration))
       if (Result.isFailure(composedAdministration)) {
         assert.strictEqual(composedAdministration.failure.reason, "insecure-lan-capability-rejected")

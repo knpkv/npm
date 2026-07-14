@@ -11,6 +11,16 @@ const navigation: ReadonlyArray<{ readonly label: string; readonly to: string }>
 const navClassName = ({ isActive }: { readonly isActive: boolean }): string =>
   `${styles.navLink ?? ""}${isActive ? ` ${styles.navLinkActive ?? ""}` : ""}`
 
+const PrimaryNavigation = ({ className }: { readonly className: string }): ReactElement => (
+  <nav aria-label="Primary" className={`${styles.nav ?? ""} ${className}`}>
+    {navigation.map((item) => (
+      <NavLink className={navClassName} end={item.to === "/"} key={item.to} to={item.to}>
+        {item.label}
+      </NavLink>
+    ))}
+  </nav>
+)
+
 /** Quiet application chrome that keeps delivery work and the contextual agent one action away. */
 export const AppShell = (): ReactElement => {
   const location = useLocation()
@@ -25,16 +35,11 @@ export const AppShell = (): ReactElement => {
           </span>
           <span className={styles.brandName}>Control Center</span>
         </NavLink>
+        <PrimaryNavigation className={styles.desktopNav ?? ""} />
         <NavLink className={styles.agent ?? ""} to={agentDestination}>
           Relay context
         </NavLink>
-        <nav aria-label="Primary" className={styles.nav}>
-          {navigation.map((item) => (
-            <NavLink className={navClassName} end={item.to === "/"} key={item.to} to={item.to}>
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+        <PrimaryNavigation className={styles.mobileNav ?? ""} />
       </header>
       <main className={styles.main}>
         <Outlet />

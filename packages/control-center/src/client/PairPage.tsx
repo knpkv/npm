@@ -7,6 +7,7 @@ import { useNavigate } from "react-router"
 
 import { makeControlCenterApiClient } from "../api/client.js"
 import { PairingCode } from "../api/session.js"
+import { useBrowserSession } from "./BrowserSession.js"
 import { pairingFailureMessage } from "./PairingFailure.js"
 import styles from "./pages.module.css"
 
@@ -20,6 +21,7 @@ const pairBrowser = (rawPairingCode: string) =>
 /** Pair the current tab without ever exposing the opaque session cookie to JavaScript. */
 export const PairPage = (): ReactElement => {
   const navigate = useNavigate()
+  const { setState } = useBrowserSession()
   const [pairingCode, setPairingCode] = useState("")
   const [error, setError] = useState<string | undefined>()
   const [isPairing, setIsPairing] = useState(false)
@@ -31,6 +33,7 @@ export const PairPage = (): ReactElement => {
     Effect.runPromise(pairBrowser(pairingCode)).then(
       (result) => {
         sessionStorage.setItem("cc_csrf", result.csrfToken)
+        setState({ _tag: "authenticated", session: result.session })
         navigate("/", { replace: true })
       },
       (failure) => {

@@ -117,41 +117,152 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins)
     )
     const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
-      Layer.provide(Layer.mergeAll(
-        Layer.succeed(Auth, authentication),
-        Layer.succeed(ApiBindConfiguration, bind),
-        portfolioLayer,
-        NodeHttpServer.layerHttpServices,
-        NodeServices.layer
-      ))
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(Auth, authentication),
+          Layer.succeed(ApiBindConfiguration, bind),
+          portfolioLayer,
+          NodeHttpServer.layerHttpServices,
+          NodeServices.layer
+        )
+      )
     )
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     const requestFor = (origin: string) =>
-      new Request(
-        "http://127.0.0.1:4173/api/v1/session/current",
-        {
-          headers: {
-            cookie: `cc_session=${"ab".repeat(32)}`,
-            host: "127.0.0.1:4173",
-            origin
-          }
+      new Request("http://127.0.0.1:4173/api/v1/session/current", {
+        headers: {
+          cookie: `cc_session=${"ab".repeat(32)}`,
+          host: "127.0.0.1:4173",
+          origin
         }
-      )
+      })
     try {
-      const response = await webHandler.handler(
-        requestFor("http://127.0.0.1:4173"),
-        requestContext
-      )
+      const response = await webHandler.handler(requestFor("http://127.0.0.1:4173"), requestContext)
       assert.strictEqual(response.status, 200)
       const responseBody = Schema.decodeUnknownSync(CurrentSessionResponse)(await response.json())
       assert.strictEqual(responseBody.csrfToken, recoveredCsrf)
       assert.strictEqual(responseBody.session.sessionId, session.sessionId)
 
-      const foreignOrigin = await webHandler.handler(
-        requestFor("http://attacker.example"),
+      const foreignOrigin = await webHandler.handler(requestFor("http://attacker.example"), requestContext)
+      assert.strictEqual(foreignOrigin.status, 403)
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
+  it("allows only current-session recovery from the session and configuration APIs on insecure LAN", async () => {
+    const recoveredCsrf = "ef".repeat(32)
+    const authentication = Auth.of({
+      authenticate: () => Effect.succeed(session),
+      authorizeMutation: () => Effect.die("blocked insecure-LAN mutation reached CSRF verification"),
+      bootstrapOwnerPairing: () => Effect.die("not used"),
+      consumePairingCode: () => Effect.die("blocked insecure-LAN pairing reached its handler"),
+      issuePairingCode: () => Effect.die("not used"),
+      listPairingCodes: () => Effect.die("not used"),
+      listSessions: () => Effect.die("blocked insecure-LAN session list reached its handler"),
+      logout: () => Effect.die("blocked insecure-LAN logout reached its handler"),
+      recoverCsrfToken: () =>
+        Effect.succeed({
+          csrfToken: Redacted.make(recoveredCsrf),
+          session
+        }),
+      revokePairingCode: () => Effect.die("not used"),
+      revokeSession: () => Effect.die("blocked insecure-LAN revocation reached its handler")
+    })
+    const plugins = PluginAdministration.of({
+      configuration: () => Effect.die("not used"),
+      configurationMetadata: () => Effect.die("not used"),
+      health: () => Effect.die("not used"),
+      list: () => Effect.die("not used"),
+      patchConfiguration: () => Effect.die("blocked insecure-LAN configuration reached its handler")
+    })
+    const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const origin = "http://192.168.1.42:4173"
+    const bind = await Effect.runPromise(
+      decodeBindConfig({
+        host: "0.0.0.0",
+        port: 4173,
+        publicOrigin: origin,
+        allowedHosts: ["192.168.1.42:4173"],
+        allowedOrigins: [origin],
+        allowInsecureLan: true
+      })
+    )
+    const requestContext = Context.empty().pipe(
+      Context.add(Auth, authentication),
+      Context.add(ApiBindConfiguration, bind),
+      Context.add(MediaReads, media),
+      Context.add(PluginAdministration, plugins)
+    )
+    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(Auth, authentication),
+          Layer.succeed(ApiBindConfiguration, bind),
+          portfolioLayer,
+          NodeHttpServer.layerHttpServices,
+          NodeServices.layer
+        )
+      )
+    )
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    const headers = {
+      cookie: `cc_session=${"ab".repeat(32)}`,
+      host: "192.168.1.42:4173",
+      origin
+    }
+    try {
+      const current = await webHandler.handler(
+        new Request(`${origin}/api/v1/session/current`, { headers }),
         requestContext
       )
-      assert.strictEqual(foreignOrigin.status, 403)
+      assert.strictEqual(current.status, 200)
+      assert.strictEqual(
+        Schema.decodeUnknownSync(CurrentSessionResponse)(await current.json()).csrfToken,
+        recoveredCsrf
+      )
+
+      const blockedRequests: ReadonlyArray<readonly [Request, number]> = [
+        [new Request(`${origin}/api/v1/session`, { headers }), 403],
+        [
+          new Request(`${origin}/api/v1/session/pair`, {
+            method: "POST",
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({ pairingCode: "ab".repeat(32) })
+          }),
+          400
+        ],
+        [
+          new Request(`${origin}/api/v1/session/${session.sessionId}`, {
+            method: "DELETE",
+            headers: { ...headers, "x-csrf-token": recoveredCsrf }
+          }),
+          403
+        ],
+        [
+          new Request(`${origin}/api/v1/session/logout`, {
+            method: "POST",
+            headers: { ...headers, "x-csrf-token": recoveredCsrf }
+          }),
+          403
+        ],
+        [
+          new Request(`${origin}/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/configuration`, {
+            method: "PATCH",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              "x-csrf-token": recoveredCsrf
+            },
+            body: JSON.stringify({ expectedRevision: 0, values: [] })
+          }),
+          403
+        ]
+      ]
+      for (const [blockedRequest, expectedStatus] of blockedRequests) {
+        const response = await webHandler.handler(blockedRequest, requestContext)
+        assert.strictEqual(response.status, expectedStatus, `${blockedRequest.method} ${blockedRequest.url}`)
+      }
     } finally {
       await webHandler.dispose()
     }
@@ -187,31 +298,30 @@ describe("Control Center API handlers", () => {
       Context.add(PluginAdministration, plugins)
     )
     const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
-      Layer.provide(Layer.mergeAll(
-        Layer.succeed(Auth, authentication),
-        Layer.succeed(ApiBindConfiguration, bind),
-        portfolioLayer,
-        NodeHttpServer.layerHttpServices,
-        NodeServices.layer
-      ))
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(Auth, authentication),
+          Layer.succeed(ApiBindConfiguration, bind),
+          portfolioLayer,
+          NodeHttpServer.layerHttpServices,
+          NodeServices.layer
+        )
+      )
     )
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     try {
       const response = await webHandler.handler(
-        new Request(
-          "http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/configuration",
-          {
-            method: "PATCH",
-            headers: {
-              "content-type": "application/json",
-              cookie: `cc_session=${"ab".repeat(32)}`,
-              host: "127.0.0.1:4173",
-              origin: "http://127.0.0.1:4173",
-              "x-csrf-token": "cd".repeat(32)
-            },
-            body: JSON.stringify({ expectedRevision: 0, values: [] })
-          }
-        ),
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/configuration", {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 0, values: [] })
+        }),
         requestContext
       )
 

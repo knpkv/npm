@@ -12,6 +12,7 @@ export const InsecureLanCapability = Schema.Literals([
   "release-read",
   "release-action",
   "release-agent",
+  "session-self-read",
   "provider-configuration",
   "policy-administration",
   "pairing-administration",
@@ -212,7 +213,12 @@ export const authorizeInsecureLanCapability = (
   capability: InsecureLanCapability
 ): Effect.Effect<void, RequestSecurityError> => {
   if (config.transportPolicy !== "insecure-lan") return Effect.void
-  if (capability === "release-read" || capability === "release-action" || capability === "release-agent") {
+  if (
+    capability === "release-read" ||
+    capability === "release-action" ||
+    capability === "release-agent" ||
+    capability === "session-self-read"
+  ) {
     return Effect.void
   }
   return Effect.fail(new RequestSecurityError({ reason: "insecure-lan-capability-rejected" }))

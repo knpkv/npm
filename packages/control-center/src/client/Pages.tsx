@@ -1,11 +1,7 @@
 import { StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import { lazy, type ReactElement, Suspense } from "react"
+import type { ReactElement } from "react"
+import { BrowserSessionStatus } from "./BrowserSessionStatus.js"
 import styles from "./pages.module.css"
-
-const BrowserSessionStatus = lazy(async () => {
-  const module = await import("./BrowserSessionStatus.js")
-  return { default: module.BrowserSessionStatus }
-})
 
 const Metric = ({ label, value }: { readonly label: string; readonly value: string }): ReactElement => (
   <Surface as="article" className={styles.metric} padding="spacious" shape="grouped" tone="secondary">
@@ -33,15 +29,7 @@ export const TodayPage = (): ReactElement => (
         One factual view of releases, tickets, pull requests, deployments, collaborators, and agent work.
       </Text>
       <div aria-live="polite" className={styles.actions}>
-        <Suspense
-          fallback={
-            <Text className={styles.sessionStatus} tone="secondary" variant="label">
-              Checking this browser…
-            </Text>
-          }
-        >
-          <BrowserSessionStatus />
-        </Suspense>
+        <BrowserSessionStatus />
       </div>
     </div>
     <div aria-label="Portfolio summary" className={styles.grid}>

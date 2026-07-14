@@ -58,6 +58,10 @@
   background: var(--rly-color-surface-2);
 }
 
+.mobileNav {
+  display: none;
+}
+
 .navLink {
   padding: 0.55rem 0.9rem;
   border-radius: 999px;
@@ -110,11 +114,16 @@
     backdrop-filter: none;
   }
 
-  .nav {
+  .desktopNav {
+    display: none;
+  }
+
+  .mobileNav {
     position: fixed;
     z-index: 20;
     inset-inline: 1rem;
     inset-block-end: 1rem;
+    display: flex;
     justify-content: center;
     box-shadow: 0 1rem 3rem rgb(0 0 0 / 35%);
   }

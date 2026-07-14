@@ -37,7 +37,7 @@ const requestShape = (request: HttpServerRequest.HttpServerRequest) => ({
   remoteAddress: Option.getOrNull(request.remoteAddress)
 })
 
-const capabilityFor = (groupIdentifier: string): InsecureLanCapability => {
+const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): InsecureLanCapability => {
   switch (groupIdentifier) {
     case "media":
     case "portfolio":
@@ -45,7 +45,7 @@ const capabilityFor = (groupIdentifier: string): InsecureLanCapability => {
     case "plugins":
       return "provider-configuration"
     case "session":
-      return "session-administration"
+      return endpointIdentifier === "current" ? "session-self-read" : "session-administration"
     default:
       return "policy-administration"
   }
@@ -72,12 +72,10 @@ export const sessionCookieAuthLayer = Layer.effect(
           const request = yield* HttpServerRequest.HttpServerRequest
           if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
             yield* authorizeAuthenticatedRead({
-              capability: capabilityFor(group.identifier),
+              capability: capabilityFor(group.identifier, endpoint.name),
               config,
               request: requestShape(request)
-            }).pipe(
-              Effect.catchTag("RequestSecurityError", mapReadSecurityFailure)
-            )
+            }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
           }
           const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
           return yield* Effect.provideService(effect, CurrentSession, session)
@@ -97,13 +95,13 @@ export const mutationCsrfLayer = Layer.effect(
     const auth = yield* Auth
     const config = yield* ApiBindConfiguration
     return {
-      csrfToken: (effect, { credential, group }) =>
+      csrfToken: (effect, { credential, endpoint, group }) =>
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
           const sessionToken = Redacted.make(request.cookies.cc_session ?? "")
           yield* authorizeAuthenticatedMutation(
             {
-              capability: capabilityFor(group.identifier),
+              capability: capabilityFor(group.identifier, endpoint.name),
               config,
               request: {
                 ...requestShape(request),
@@ -118,9 +116,7 @@ export const mutationCsrfLayer = Layer.effect(
                   CredentialRejectedError: mapMutationAuthenticationFailure
                 })
               )
-          ).pipe(
-            Effect.catchTag("RequestSecurityError", mapMutationSecurityFailure)
-          )
+          ).pipe(Effect.catchTag("RequestSecurityError", mapMutationSecurityFailure))
           return yield* effect
         })
     }
