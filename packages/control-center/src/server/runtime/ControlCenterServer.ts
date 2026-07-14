@@ -1,0 +1,137 @@
+import * as Layer from "effect/Layer"
+import * as HttpRouter from "effect/unstable/http/HttpRouter"
+import type { ServeError } from "effect/unstable/http/HttpServerError"
+
+import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
+import type { MediaReads, PluginAdministration, PortfolioSnapshots } from "../api/ApplicationServices.js"
+import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
+import { requestBoundaryLayer } from "../api/RequestBoundary.js"
+import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
+import { mediaReadsLayer, pluginAdministrationLayer, portfolioSnapshotsLayer } from "../application/index.js"
+import { authLayerFromDatabase } from "../auth/Auth.js"
+import {
+  StaticAssetStore,
+  type StaticAssetStoreError,
+  type StaticAssetStoreOptions
+} from "../http/security/StaticAssetStore.js"
+import { staticApplicationLayer } from "../http/StaticApplication.js"
+import { databaseLayer } from "../persistence/Database.js"
+import {
+  type Persistence,
+  type PersistenceLayerError,
+  persistenceLayerFromDatabase
+} from "../persistence/Persistence.js"
+import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
+import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
+import type { SecretStoreError } from "../secrets/SecretStoreError.js"
+import type { BindConfig } from "../security/BindConfig.js"
+import {
+  type ControlCenterBootstrapError,
+  controlCenterBootstrapLayer,
+  type ControlCenterBootstrapOptions
+} from "./Bootstrap.js"
+import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
+import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
+
+type ControlCenterApplicationServices = MediaReads | PluginAdministration | PortfolioSnapshots
+
+/** Runtime construction settings after security and persistence decoding. */
+export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
+  readonly bindConfig: BindConfig
+  readonly persistenceConfig: PersistenceConfig
+  readonly secretRoot: SecretRoot
+  readonly staticAssets: StaticAssetStoreOptions
+  readonly bootstrap?: ControlCenterBootstrapOptions | null
+  readonly applicationServices?: Layer.Layer<
+    ControlCenterApplicationServices,
+    ApplicationError,
+    ApplicationRequirements | Persistence | SecretStore
+  >
+}
+
+/** Failures that can prevent the runtime from acquiring or listening. */
+export type ControlCenterServerError<ApplicationError = never> =
+  | ApplicationError
+  | ControlCenterBootstrapError
+  | DirectTlsServerError
+  | PersistenceLayerError
+  | SecretStoreError
+  | ServeError
+  | StaticAssetStoreError
+
+const liveApplicationServices: Layer.Layer<
+  ControlCenterApplicationServices,
+  never,
+  Persistence | SecretStore
+> = Layer.mergeAll(
+  pluginAdministrationLayer,
+  portfolioSnapshotsLayer,
+  mediaReadsLayer
+)
+
+/** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
+const makeApplication = <ApplicationError = never, ApplicationRequirements = never>(
+  options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
+) => {
+  const database = databaseLayer(options.persistenceConfig)
+  const persistence = persistenceLayerFromDatabase(options.persistenceConfig).pipe(
+    Layer.provide(database)
+  )
+  const authentication = authLayerFromDatabase.pipe(Layer.provide(database))
+  const apiBindConfiguration = ApiBindConfiguration.layer(options.bindConfig)
+  const staticAssets = StaticAssetStore.layer(options.staticAssets)
+  const selectedApplicationServices: Layer.Layer<
+    ControlCenterApplicationServices,
+    ApplicationError,
+    ApplicationRequirements | Persistence | SecretStore
+  > = options.applicationServices ?? liveApplicationServices
+  const applicationServices = selectedApplicationServices.pipe(
+    Layer.provide(persistence)
+  )
+  const runtimeServices = Layer.mergeAll(
+    apiBindConfiguration,
+    RequestLimitPolicy.defaultLayer,
+    requestRateLimiterLayer,
+    staticAssets,
+    persistence,
+    authentication,
+    applicationServices
+  )
+  const routes = Layer.mergeAll(
+    controlCenterApiLayer,
+    staticApplicationLayer,
+    requestUrlBoundaryLayer,
+    requestBoundaryLayer,
+    controlCenterBootstrapLayer(options.bootstrap ?? null)
+  )
+  return {
+    application: routes.pipe(Layer.provideMerge(runtimeServices)),
+    runtimeServices
+  }
+}
+
+/** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
+export const makeControlCenterApplication = <ApplicationError = never, ApplicationRequirements = never>(
+  options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
+) => makeApplication(options).application
+
+/** Construct the fully runnable Node HTTP/HTTPS server layer. */
+const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
+  options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
+) => {
+  const secrets = SecretStore.layer({ secretRoot: options.secretRoot }).pipe(
+    Layer.provide(nodeSecretPlatformLayer)
+  )
+  const transport = makeNodeTransportLayer(options.bindConfig)
+  const application = makeApplication(options)
+  return HttpRouter.serve(application.application, { disableLogger: true }).pipe(
+    Layer.provide(application.runtimeServices),
+    Layer.provide(transport),
+    Layer.provide(secrets)
+  )
+}
+
+/** Construct the fully runnable Node HTTP/HTTPS server layer. */
+export const makeControlCenterServer = <ApplicationError = never, ApplicationRequirements = never>(
+  options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
+) => makeServer(options)

@@ -13,6 +13,7 @@
     "e2e",
     "playwright.config.ts",
     "scripts",
+    "src/api",
     "src/domain",
     "src/server",
     "test",

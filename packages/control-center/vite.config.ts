@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
             "api/index": "src/api/index.ts",
             "domain/index": "src/domain/index.ts",
             index: "src/index.ts",
+            "server/cli": "src/server/cli.ts",
             "server/index": "src/server/index.ts"
           },
           output: {

@@ -17,6 +17,43 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+## Run the application
+
+Build once, then start the authenticated application server:
+
+```sh
+pnpm --filter @knpkv/control-center build
+pnpm --filter @knpkv/control-center start
+```
+
+The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
+
+If the first code was lost after the workspace initialized, or no owner session remains, stop the server and run terminal recovery against the same data root:
+
+```sh
+pnpm --filter @knpkv/control-center start -- recover-owner
+```
+
+Recovery verifies the owner and mode of the canonical data directory, then requires the exact terminal phrase `ISSUE OWNER RECOVERY CODE`. A successful recovery revokes existing owner sessions and prints a replacement single-use code. It is deliberately unavailable over HTTP.
+
+The Vite development server stays loopback-only and is not the production application server. A new remote browser must pair over trusted HTTPS. The simplest supported setup keeps Control Center on loopback and puts a TLS reverse proxy on the same machine. Configure the proxy to serve a hostname and certificate trusted by the second machine, forward to `http://127.0.0.1:4173`, and set `X-Forwarded-Host` and `X-Forwarded-Proto`. Then start Control Center with the proxy's exact address:
+
+```sh
+CONTROL_CENTER_HOST=127.0.0.1 \
+CONTROL_CENTER_PORT=4173 \
+CONTROL_CENTER_PUBLIC_ORIGIN=https://control.home.arpa \
+CONTROL_CENTER_ALLOWED_HOSTS=control.home.arpa \
+CONTROL_CENTER_ALLOWED_ORIGINS=https://control.home.arpa \
+CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES=127.0.0.1 \
+pnpm --filter @knpkv/control-center start
+```
+
+Open `https://control.home.arpa` from the second machine and enter the one-time code printed by the server. Replace the example hostname with one that resolves to the server on both machines. If the local proxy connects over IPv6, trust its exact `::1` address instead of `127.0.0.1`. Never add client addresses or a subnet: forwarded headers are accepted only from the exact immediate proxy.
+
+Direct TLS is also available when certificate and private-key material has already been provisioned into this instance's `SecretStore`; pass the resulting opaque references as `CONTROL_CENTER_TLS_CERTIFICATE_REF` and `CONTROL_CENTER_TLS_PRIVATE_KEY_REF`. The application never accepts certificate paths or key bytes through environment variables.
+
+`CONTROL_CENTER_ALLOW_INSECURE_LAN=true` is a deliberately restricted viewing mode, not remote onboarding. It blocks pairing, session administration, provider configuration, policy changes, and secret inspection. A new browser therefore cannot establish its required `HttpOnly` session in that mode; use trusted HTTPS for normal remote access.
+
 ## Public entries
 
 - `@knpkv/control-center` — browser-safe API and domain contracts
@@ -49,6 +86,14 @@ Secure blob reads and publication require the host to expose opened files and di
 Use `authLayer(persistenceConfig)` from `@knpkv/control-center/server` for standalone composition. `TerminalRecovery` is a separate, terminal-only service: it derives the exact canonical `0700` directory from the configured database, requires an exact confirmation phrase, and proves that the running process owns the descriptor-pinned directory before it can issue an owner recovery code. Each successful recovery creates a durable audit event. Recovery is deliberately absent from the HTTP-facing `Auth` service.
 
 Provider credentials belong in `SecretStore`, never normal SQL rows. The store returns opaque references, resolves bytes only inside a scoped zeroizing lease, and uses owner-only atomic files. It has the same `/proc/self/fd` or `/dev/fd` portability requirement and same-UID trust boundary as blob storage.
+
+## HTTP API
+
+The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types.
+
+Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
+
+The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.
 
 ## Network exposure
 

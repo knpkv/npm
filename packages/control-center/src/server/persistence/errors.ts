@@ -111,6 +111,12 @@ export class RevisionConflictError extends Schema.TaggedErrorClass<RevisionConfl
   }
 ) {}
 
+/** Raised when an opaque secret reference is reused outside its durable first-use scope. */
+export class SecretReferenceScopeConflictError extends Schema.TaggedErrorClass<SecretReferenceScopeConflictError>()(
+  "SecretReferenceScopeConflictError",
+  {}
+) {}
+
 /** Raised when a persisted record cannot be decoded into its trusted domain model. */
 export class PersistedRecordError extends Schema.TaggedErrorClass<PersistedRecordError>()(
   "PersistedRecordError",

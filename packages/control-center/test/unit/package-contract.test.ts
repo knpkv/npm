@@ -8,12 +8,15 @@ import * as Schema from "effect/Schema"
 import { inspectPackageContract } from "../../scripts/package-contract.js"
 
 const validManifest = {
+  bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
+    "@effect/platform-node": "4.0.0-beta.97",
     "@effect/sql-libsql": "4.0.0-beta.97",
     "@knpkv/rly": "workspace:^",
     effect: "4.0.0-beta.97",
     react: "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-router": "^8.2.0"
   },
   engines: { node: ">=24" },
   exports: {
@@ -76,6 +79,15 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@knpkv/rly": "^0.1.0" }
       })
     ).toContain("@knpkv/rly must use workspace:^")
+  })
+
+  it("rejects a CLI that bypasses the built server boundary", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        bin: { "control-center": "./src/server/cli.ts" }
+      })
+    ).toContain("control-center bin must reference the built server CLI")
   })
 
   it("rejects a libSQL adapter from a different Effect release", () => {

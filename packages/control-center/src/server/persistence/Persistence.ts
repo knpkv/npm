@@ -3,6 +3,7 @@ import { Context, Effect, Layer, Predicate } from "effect"
 import type { Success } from "effect/Effect"
 
 import { ContentStore, type ContentStoreService } from "./ContentStore.js"
+import type { Database } from "./Database.js"
 import { databaseLayer } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
@@ -15,6 +16,7 @@ import {
   type RecordAlreadyExistsError,
   type RecordNotFoundError,
   type RevisionConflictError,
+  type SecretReferenceScopeConflictError,
   type SourceIdentityMismatchError
 } from "./errors.js"
 import { BlobStore } from "./object-store/BlobStore.js"
@@ -26,6 +28,8 @@ import {
   type EntityRepositoryService,
   PeopleRepository,
   type PeopleRepositoryService,
+  PluginConfigurationRepository,
+  type PluginConfigurationRepositoryService,
   PluginConnectionRepository,
   type PluginConnectionRepositoryService,
   PluginRuntimeRepository,
@@ -47,6 +51,7 @@ export type PersistenceOperationFailure =
   | RecordAlreadyExistsError
   | RecordNotFoundError
   | RevisionConflictError
+  | SecretReferenceScopeConflictError
   | SourceIdentityMismatchError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
@@ -64,6 +69,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "RecordAlreadyExistsError",
   "RecordNotFoundError",
   "RevisionConflictError",
+  "SecretReferenceScopeConflictError",
   "SourceIdentityMismatchError"
 ])
 
@@ -102,6 +108,7 @@ const makePersistence = Effect.gen(function*() {
   const entities = yield* EntityRepository
   const people = yield* PeopleRepository
   const pluginConnections = yield* PluginConnectionRepository
+  const pluginConfigurations = yield* PluginConfigurationRepository
   const pluginRuntime = yield* PluginRuntimeRepository
   const releases = yield* ReleaseRepository
   const workspaces = yield* WorkspaceRepository
@@ -158,6 +165,12 @@ const makePersistence = Effect.gen(function*() {
       updateMetadata: (...args: Parameters<PluginConnectionRepositoryService["updateMetadata"]>) =>
         publicOperation("plugin-connection.update", pluginConnections.updateMetadata(...args))
     },
+    pluginConfigurations: {
+      get: (...args: Parameters<PluginConfigurationRepositoryService["get"]>) =>
+        publicOperation("plugin-configuration.get", pluginConfigurations.get(...args)),
+      update: (...args: Parameters<PluginConfigurationRepositoryService["update"]>) =>
+        publicOperation("plugin-configuration.update", pluginConfigurations.update(...args))
+    },
     pluginRuntime: {
       acceptPluginDescriptor: (...args: Parameters<PluginRuntimeRepositoryService["acceptPluginDescriptor"]>) =>
         publicOperation("plugin-runtime.accept-plugin-descriptor", pluginRuntime.acceptPluginDescriptor(...args)),
@@ -180,7 +193,9 @@ const makePersistence = Effect.gen(function*() {
       create: (...args: Parameters<ReleaseRepositoryService["create"]>) =>
         publicOperation("release.create", releases.create(...args)),
       get: (...args: Parameters<ReleaseRepositoryService["get"]>) =>
-        publicOperation("release.get", releases.get(...args))
+        publicOperation("release.get", releases.get(...args)),
+      list: (...args: Parameters<ReleaseRepositoryService["list"]>) =>
+        publicOperation("release.list", releases.list(...args))
     },
     workspaces: {
       create: (...args: Parameters<WorkspaceRepositoryService["create"]>) =>
@@ -203,25 +218,25 @@ export class Persistence extends Context.Service<Persistence, PersistenceService
 
 const PersistenceFromServices = Layer.effect(Persistence, makePersistence)
 
-/** Build one shared libSQL client and owner-only blob service from decoded input. */
-export const persistenceLayer = (
+/** Build persistence repositories from a caller-owned shared database service. */
+export const persistenceLayerFromDatabase = (
   input: unknown
 ): Layer.Layer<
   Persistence,
-  PersistenceLayerError,
-  Crypto.Crypto | FileSystem.FileSystem | Path.Path
+  BlobStoreError | PersistenceConfigError,
+  Crypto.Crypto | Database | FileSystem.FileSystem | Path.Path
 > =>
   Layer.unwrap(
     decodePersistenceConfig(input).pipe(
       Effect.map((config) => {
-        const database = databaseLayer(config)
-        const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+        const foundation = QuarantineRepository.layer
         const contentMetadata = ContentBlobMetadataRepository.layer.pipe(
           Layer.provide(foundation)
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
+        const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
         const pluginRuntime = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
@@ -235,6 +250,7 @@ export const persistenceLayer = (
           entities,
           people,
           pluginConnections,
+          pluginConfigurations,
           pluginRuntime,
           release,
           content,
@@ -244,3 +260,12 @@ export const persistenceLayer = (
       })
     )
   )
+
+/** Build one shared libSQL client and owner-only blob service from decoded input. */
+export const persistenceLayer = (
+  input: unknown
+): Layer.Layer<
+  Persistence,
+  PersistenceLayerError,
+  Crypto.Crypto | FileSystem.FileSystem | Path.Path
+> => persistenceLayerFromDatabase(input).pipe(Layer.provide(databaseLayer(input)))

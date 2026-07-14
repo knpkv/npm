@@ -61,6 +61,7 @@ const program = Effect.gen(function*() {
       "dist/server/domain/index.js",
       "dist/server/server/index.d.ts",
       "dist/server/server/index.js",
+      "dist/server/server/cli.js",
       "dist/server/build-graph.json"
     ]
   ) {

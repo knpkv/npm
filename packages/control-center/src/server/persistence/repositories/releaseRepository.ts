@@ -51,6 +51,19 @@ const ReleaseRevisionRow = Schema.Struct({
 
 const ReleaseRevisionIdentity = Schema.Struct({ revision: RecordRevision })
 
+/** Maximum number of release heads returned by one portfolio read. */
+export const ReleaseListLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 200 })
+).pipe(Schema.brand("ReleaseListLimit"))
+
+export type ReleaseListLimit = typeof ReleaseListLimit.Type
+
+const ReleaseListHead = Schema.Struct({
+  releaseId: ReleaseId,
+  revision: RecordRevision,
+  updatedAt: UtcTimestamp
+})
+
 const CreateReleaseRequest = Schema.Struct({
   ...ReleaseKey.fields,
   snapshotJson: Schema.String.check(Schema.isNonEmpty()),
@@ -335,6 +348,16 @@ const makeReleaseRepository = Effect.gen(function*() {
       AND release_id = ${releaseId}
     ORDER BY revision DESC`
 
+  const listHeadRows = (workspaceId: WorkspaceId, limit: ReleaseListLimit) =>
+    sql<Record<string, unknown>>`SELECT
+      release_id AS releaseId,
+      current_revision AS revision,
+      updated_at AS updatedAt
+    FROM releases
+    WHERE workspace_id = ${workspaceId}
+    ORDER BY updated_at DESC, release_id
+    LIMIT ${limit}`
+
   const quarantineMalformed = Effect.fn("ReleaseRepository.quarantineMalformed")(function*(
     workspaceId: WorkspaceId,
     releaseId: ReleaseId,
@@ -529,6 +552,45 @@ const makeReleaseRepository = Effect.gen(function*() {
     }),
     get: (workspaceId: WorkspaceId, releaseId: ReleaseId) =>
       get(workspaceId, releaseId).pipe(mapPersistenceOperation("release.get")),
+    list: Effect.fn("ReleaseRepository.list")(function*(
+      workspaceId: WorkspaceId,
+      requestedLimit: number
+    ) {
+      const limit = yield* Schema.decodeUnknownEffect(ReleaseListLimit)(requestedLimit).pipe(
+        Effect.mapError(() => new PersistenceOperationError({ operation: "release.list-limit" }))
+      )
+      const rows = yield* listHeadRows(workspaceId, limit).pipe(
+        mapPersistenceOperation("release.list-heads")
+      )
+      const snapshots: Array<typeof ReleaseSnapshotRecord.Type> = []
+      for (const row of rows) {
+        const head = Schema.decodeUnknownResult(ReleaseListHead)(row)
+        if (Result.isFailure(head)) {
+          const identity = Schema.decodeUnknownResult(Schema.Struct({ releaseId: ReleaseId }))(row)
+          const recordKey = Result.isSuccess(identity) ? identity.success.releaseId : workspaceId
+          yield* quarantineRow({
+            workspaceId,
+            recordKind: "release-head",
+            recordKey,
+            diagnosticCode: "release-head-schema-invalid",
+            diagnosticSummary: "Stored release head failed schema validation.",
+            observedAt: yield* DateTime.now,
+            row
+          })
+          continue
+        }
+        const snapshot = yield* get(workspaceId, head.success.releaseId).pipe(Effect.result)
+        if (Result.isSuccess(snapshot)) {
+          snapshots.push(snapshot.success)
+          continue
+        }
+        if (snapshot.failure._tag === "PersistedRecordError" || snapshot.failure._tag === "RecordNotFoundError") {
+          continue
+        }
+        return yield* snapshot.failure
+      }
+      return snapshots
+    }),
     append: Effect.fn("ReleaseRepository.append")(function*(
       workspaceId: WorkspaceId,
       release: Release,

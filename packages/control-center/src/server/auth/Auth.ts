@@ -2,6 +2,7 @@ import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Sc
 
 import type { Actor, Role } from "../../domain/actors.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
+import type { Database } from "../persistence/Database.js"
 import { databaseLayer } from "../persistence/Database.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthRepository } from "./AuthRepository.js"
@@ -241,3 +242,12 @@ export const authLayer = (persistenceConfigInput: unknown) => {
   )
   return Auth.layer.pipe(Layer.provide(repository))
 }
+
+/** Build Auth from a caller-owned database so a server uses one libSQL client. */
+export const authLayerFromDatabase: Layer.Layer<Auth, never, Crypto.Crypto | Database> = (() => {
+  const quarantine = QuarantineRepository.layer
+  const repository = AuthRepository.layer.pipe(
+    Layer.provideMerge(quarantine)
+  )
+  return Auth.layer.pipe(Layer.provide(repository))
+})()

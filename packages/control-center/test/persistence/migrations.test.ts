@@ -11,6 +11,7 @@ import { MigrationLedgerError } from "../../src/server/persistence/errors.js"
 import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
 import { migration0002Integrity } from "../../src/server/persistence/migrations/0002_integrity.js"
 import { migration0003Auth } from "../../src/server/persistence/migrations/0003_auth.js"
+import { migration0004PluginRuntime } from "../../src/server/persistence/migrations/0004_plugin_runtime.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 
 const expectedTables = [
@@ -22,8 +23,10 @@ const expectedTables = [
   "person_identities",
   "persons",
   "plugin_cache_entries",
+  "plugin_configurations",
   "plugin_connections",
   "plugin_runtime_state",
+  "plugin_secret_bindings",
   "plugin_sync_evidence",
   "plugin_sync_pages",
   "plugin_sync_streams",
@@ -175,13 +178,14 @@ describe("Control Center migrations", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades the exact previous ledger by appending only plugin runtime migration 4", () =>
+  it.effect("upgrades the exact previous ledger by appending only plugin configuration migration 5", () =>
     Effect.gen(function*() {
       const config = yield* testConfig
       const previousLoader = LibsqlMigrator.fromRecord({
         "0001_core_heads": migration0001Core,
         "0002_integrity_blobs": migration0002Integrity,
-        "0003_auth": migration0003Auth
+        "0003_auth": migration0003Auth,
+        "0004_plugin_runtime": migration0004PluginRuntime
       })
       yield* Effect.gen(function*() {
         yield* LibsqlMigrator.run({ loader: previousLoader, table: MIGRATION_LEDGER_TABLE })
@@ -208,8 +212,10 @@ describe("Control Center migrations", () => {
       assert.deepStrictEqual(snapshot.ledger, EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name })))
       assert.deepStrictEqual(snapshot.tables.map(({ name }) => name), [
         "plugin_cache_entries",
+        "plugin_configurations",
         "plugin_connections",
         "plugin_runtime_state",
+        "plugin_secret_bindings",
         "plugin_sync_evidence",
         "plugin_sync_pages",
         "plugin_sync_streams"

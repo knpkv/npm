@@ -9,6 +9,7 @@ const ExportTargetSchema = Schema.Struct({
 })
 
 const PackageManifestSchema = Schema.Struct({
+  bin: Schema.Struct({ "control-center": Schema.String }),
   dependencies: Schema.Record(Schema.String, Schema.String),
   engines: Schema.Struct({ node: Schema.String }),
   exports: Schema.Record(Schema.String, Schema.Unknown),
@@ -37,12 +38,23 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
 
   const manifest = decoded.success
   const violations: Array<string> = []
+  if (manifest.bin["control-center"] !== "./dist/server/server/cli.js") {
+    violations.push("control-center bin must reference the built server CLI")
+  }
   if (manifest.name !== "@knpkv/control-center") violations.push("package name must be @knpkv/control-center")
   if (manifest.main !== "./dist/server/index.js") violations.push("main must reference the browser-safe root entry")
   if (manifest.types !== "./dist/server/index.d.ts") violations.push("types must reference the root declaration")
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
 
-  const runtimeKeys = ["@effect/sql-libsql", "@knpkv/rly", "effect", "react", "react-dom"]
+  const runtimeKeys = [
+    "@effect/platform-node",
+    "@effect/sql-libsql",
+    "@knpkv/rly",
+    "effect",
+    "react",
+    "react-dom",
+    "react-router"
+  ]
   if (!sameKeys(manifest.dependencies, [...runtimeKeys].sort())) {
     violations.push("runtime dependencies must remain the reviewed set")
   }
@@ -51,6 +63,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.97") {
     violations.push("@effect/sql-libsql must align with the pinned Effect beta")
+  }
+  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.97") {
+    violations.push("@effect/platform-node must align with the pinned Effect beta")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()
