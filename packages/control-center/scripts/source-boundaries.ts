@@ -111,7 +111,7 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1
+      node.arguments.length >= 1
     ) {
       const argument = node.arguments[0]
       imports.push(
@@ -121,7 +121,7 @@ export const inspectModuleImports = (sourcePath: string, source: string): Readon
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
       node.expression.text === "require" &&
-      node.arguments.length === 1
+      node.arguments.length >= 1
     ) {
       const argument = node.arguments[0]
       imports.push(

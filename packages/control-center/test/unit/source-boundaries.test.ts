@@ -202,6 +202,65 @@ describe("Control Center source boundaries", () => {
     ])
   })
 
+  it("inspects the first specifier of multi-argument dynamic imports and require calls", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const loadServer = () => import(\"../server/main.js\", { with: { type: \"json\" } })",
+          "const requireServer = () => require(\"../server/legacy.js\", { ignored: true })"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "../server/main.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "../server/legacy.js",
+        reason: "client code cannot import server code",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("rejects non-literal first specifiers in multi-argument dynamic imports and require calls", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        [
+          "const load = (path: string) => import(path, { with: { type: \"json\" } })",
+          "const loadLegacy = (path: string) => require(path, { ignored: true })"
+        ].join("\n")
+      )
+    ).toEqual([
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      },
+      {
+        importPath: "<non-literal dynamic import>",
+        reason: "production dynamic imports must use a literal module path",
+        sourcePath: "src/client/module.ts"
+      }
+    ])
+  })
+
+  it("accepts allowed local multi-argument dynamic imports", () => {
+    expect(
+      inspectSourceBoundaries(
+        "src/client/module.ts",
+        "const load = () => import(\"../domain/release.js\", { with: { type: \"json\" } })"
+      )
+    ).toEqual([])
+  })
+
+  it("ignores empty import and require calls without indexing past their arguments", () => {
+    expect(inspectModuleImports("src/client/module.ts", "import(); require()")).toEqual([])
+  })
+
   it("rejects unclassified bridge modules at the source root", () => {
     expect(inspectSourceBoundaries("src/bridge.ts", "export * from \"./server/index.js\"")).toContainEqual({
       importPath: "<unclassified source>",
