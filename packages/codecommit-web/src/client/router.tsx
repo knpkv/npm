@@ -8,7 +8,6 @@ import { SandboxView } from "./components/sandbox-view.js"
 import { SandboxesPage } from "./components/sandboxes-page.js"
 import { SettingsPage } from "./components/settings-page.js"
 import { StatsPage } from "./components/stats-page.js"
-import { ControlCenterPrototype } from "./prototypes/control-center/control-center-prototype.js"
 
 interface RouteHandle {
   readonly fullWidth?: boolean
@@ -21,7 +20,6 @@ const hasFullWidth = (m: { handle?: unknown }): boolean => isRouteHandle(m.handl
 export const useFullWidthRoute = (): boolean => useMatches().some(hasFullWidth)
 
 export const router = createBrowserRouter([
-  { path: "prototype/control-center", element: <ControlCenterPrototype /> },
   {
     element: <AppLayout />,
     children: [

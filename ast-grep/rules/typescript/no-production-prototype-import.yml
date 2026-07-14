@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-production-prototype-import
+language: tsx
+severity: error
+message: "Production source must not import prototype fixtures"
+
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+    - pattern: import($SOURCE)
+      has:
+        field: arguments
+        regex: '["''][^"'']*(?:^|/)prototypes?(?:/|[^"'']*)["'']'
+
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+
+ignores:
+  - "**/prototypes/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/*.stories.ts"
+  - "**/*.stories.tsx"
+  - "**/generated/**"
+
+note: |
+  Prototypes are visual fixtures, not production dependencies. Keep a fixture
+  browsable through an isolated development entry or Storybook rather than a
+  route in the published application graph. Non-literal loaders remain covered
+  by package build-graph validation because syntax matching cannot classify them.
