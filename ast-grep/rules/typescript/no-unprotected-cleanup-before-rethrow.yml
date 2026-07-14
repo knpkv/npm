@@ -13,6 +13,7 @@ rule:
       } catch ($ERROR) {
         $$$BEFORE
         await $CLEANUP
+        $$$AFTER
         throw $ERROR
       }
     selector: catch_clause

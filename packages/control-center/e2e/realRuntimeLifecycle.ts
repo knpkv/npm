@@ -5,11 +5,21 @@ import * as Effect from "effect/Effect"
 export const protectPartialFixtureAllocation = <A, E, R, E2, R2>(
   allocation: Effect.Effect<A, E, R>,
   removePartialFixture: Effect.Effect<unknown, E2, R2>
-): Effect.Effect<A, E | E2, R | R2> =>
+): Effect.Effect<A, E | E2 | AggregateError, R | R2> =>
   Effect.matchCauseEffect(allocation, {
     onFailure: (allocationCause) =>
       Effect.matchCauseEffect(Effect.uninterruptible(removePartialFixture), {
-        onFailure: (cleanupCause) => Effect.failCause(Cause.combine(allocationCause, cleanupCause)),
+        onFailure: (cleanupCause) => {
+          const allocationFailure = Cause.squash(allocationCause)
+          const cleanupFailure = Cause.squash(cleanupCause)
+          return Effect.fail(
+            new AggregateError(
+              [allocationFailure, cleanupFailure],
+              "real runtime partial allocation and cleanup both failed",
+              { cause: cleanupFailure }
+            )
+          )
+        },
         onSuccess: () => Effect.failCause(allocationCause)
       }),
     onSuccess: Effect.succeed

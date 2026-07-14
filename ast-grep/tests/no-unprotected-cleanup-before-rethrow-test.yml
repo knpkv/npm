@@ -30,6 +30,14 @@ invalid:
     try {
       await start()
     } catch (failure) {
+      await cleanup()
+      recordFailure(failure)
+      throw failure
+    }
+  - |
+    try {
+      await start()
+    } catch (failure) {
       recordFailure(failure)
       await cleanup()
       throw failure
