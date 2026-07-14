@@ -154,7 +154,7 @@ export const makeLiveEvents = Effect.gen(function*() {
             [heartbeat],
             {
               cursor: page.headCursor,
-              replayOriginCursor: state.replayOriginCursor,
+              replayOriginCursor: page.headCursor,
               waitBeforePoll: true
             }
           )

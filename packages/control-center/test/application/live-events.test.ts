@@ -146,6 +146,44 @@ describe("durable live events", () => {
       assert.strictEqual(frames[2]?.event, "stream.heartbeat")
     })))
 
+  it.effect("starts a fresh replay budget after catching up", () =>
+    withLivePersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const wakeups = yield* DomainEventWakeups
+      yield* createWorkspace(persistence, WORKSPACE_ID)
+      yield* Effect.forEach(
+        Array.from({ length: 512 }, (_, index) => index + 1),
+        (index) => appendInvalidation(persistence, WORKSPACE_ID, index),
+        { concurrency: 1, discard: true }
+      )
+      const { events } = yield* liveServices
+      const stream = yield* events.open({ workspaceId: WORKSPACE_ID, after: EventCursor.make(0) })
+      const pull = yield* Stream.toPull(stream)
+
+      const replayed = [
+        ...(yield* pull),
+        ...(yield* pull),
+        ...(yield* pull),
+        ...(yield* pull)
+      ]
+      assert.deepStrictEqual(
+        replayed.map(({ id }) => id),
+        Array.from({ length: 512 }, (_, index) => EventCursor.make(index + 1))
+      )
+      const heartbeat = yield* pull
+      assert.strictEqual(heartbeat[0]?.event, "stream.heartbeat")
+      if (heartbeat[0]?.event === "stream.heartbeat") {
+        assert.strictEqual(heartbeat[0].data.eventCursor, 512)
+      }
+
+      yield* appendInvalidation(persistence, WORKSPACE_ID, 513)
+      yield* wakeups.notify(WORKSPACE_ID)
+      const live = yield* pull
+
+      assert.strictEqual(live[0]?.event, "portfolio.invalidated")
+      assert.strictEqual(live[0]?.id, 513)
+    })))
+
   it.effect("resets a pruned cursor before replacing state with a fresh snapshot", () =>
     withLivePersistence(Effect.gen(function*() {
       const persistence = yield* Persistence

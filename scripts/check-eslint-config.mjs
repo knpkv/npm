@@ -19,3 +19,61 @@ for (const filePath of fixturePaths) {
     throw new Error(`React source linting did not report no-explicit-any at ${filePath}`)
   }
 }
+
+const assertRuleDiagnostics = async ({ code, expected, filePath, ruleId }) => {
+  const [result] = await eslint.lintText(code, { filePath, warnIgnored: true })
+  if (result === undefined) throw new Error(`ESLint returned no result for ${filePath}`)
+  const diagnostics = result.messages.filter((message) => message.ruleId === ruleId)
+  if (diagnostics.length !== expected) {
+    throw new Error(`${ruleId} reported ${diagnostics.length} diagnostics instead of ${expected} for ${filePath}`)
+  }
+}
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    import { runPromise as run } from "effect/Effect"
+    Fx.runPromise(program).catch(() => {})
+    Fx.runPromise(program).catch(() => void 0)
+    Fx.runPromise(program).then(undefined, () => undefined)
+    run(program).catch(function () { return })
+  `,
+  expected: 4,
+  filePath: "packages/control-center/src/client/eslint-run-promise-invalid.ts",
+  ruleId: "local-rules/no-silent-run-promise-rejection"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Fx from "effect/Effect"
+    Fx.runPromiseExit(program).then(handleExit)
+    Fx.runPromise(program).catch(reportFailure)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-run-promise-valid.ts",
+  ruleId: "local-rules/no-silent-run-promise-rejection"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as S from "effect/Schema"
+    import * as Effect from "effect"
+    import { NumberFromString as UnsafeNumber } from "effect/Schema"
+    export { NumberFromString as UnsafeExport } from "effect/Schema"
+    S["NumberFromString"]
+    const { NumberFromString: unsafe } = Effect.Schema
+  `,
+  expected: 4,
+  filePath: "packages/control-center/src/api/eslint-number-from-string-invalid.ts",
+  ruleId: "local-rules/no-number-from-string-in-control-center-api"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as CanonicalSchemas from "./canonical-wire.js"
+    CanonicalSchemas.NumberFromString
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/api/eslint-number-from-string-valid.ts",
+  ruleId: "local-rules/no-number-from-string-in-control-center-api"
+})

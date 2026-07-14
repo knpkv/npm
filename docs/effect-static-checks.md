@@ -25,6 +25,9 @@ Use ast-grep for syntactic patterns that are precise without type information:
   `new Error(...)` inside Effect generators.
 - Keep Effect composition inside Effect code: no `Effect.runPromise`,
   `Effect.runSync`, or `Effect.runFork` inside `Effect.gen`.
+- Do not silently discard `Effect.runPromise` rejections. The import-aware local
+  ESLint rule recognizes namespace aliases, named imports, empty handlers,
+  `void` returns, and rejection callbacks passed to either `catch` or `then`.
 - Use Effect platform services at runtime boundaries: no raw `fs`, raw process
   access, raw `fetch`, raw crypto, or raw timer APIs in package/source Effect
   code.
@@ -60,9 +63,10 @@ override the checker. Model the value, narrow it, decode it, or use
 
 Control Center public HTTP contracts must use purpose-built canonical wire
 schemas instead of `Schema.NumberFromString`, whose JavaScript coercion accepts
-ambiguous forms such as whitespace, signs, exponents, and hexadecimal. The
-guardrail matches namespace receivers and named value-import aliases rather
-than relying on the local `Schema` spelling.
+ambiguous forms such as whitespace, signs, exponents, and hexadecimal. An
+import-aware local ESLint rule follows namespace and named imports from Effect,
+including computed access, destructuring, and re-exports, while allowing local
+schema modules that happen to use the same member name.
 
 ## Agent Guidance
 

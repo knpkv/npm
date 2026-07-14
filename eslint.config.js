@@ -53,6 +53,7 @@ export default tseslint.config(
     },
 
     rules: {
+      "local-rules/no-silent-run-promise-rejection": "error",
       "local-rules/no-opaque-instance-fields": "error",
       "no-fallthrough": "off",
       "no-irregular-whitespace": "off",
@@ -145,6 +146,12 @@ export default tseslint.config(
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/src/api/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-number-from-string-in-control-center-api": "error"
     }
   },
   {

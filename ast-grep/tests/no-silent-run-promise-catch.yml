@@ -1,7 +1,0 @@
-id: no-silent-run-promise-catch
-valid:
-  - Effect.runPromiseExit(program).then(handleExit)
-  - Effect.runPromise(program).catch(reportFailure)
-invalid:
-  - Effect.runPromise(program).catch(() => undefined)
-  - Effect.runPromise(program, { signal }).catch((failure) => undefined)
