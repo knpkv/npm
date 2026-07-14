@@ -53,6 +53,8 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   const runtimeKeys = [
     "@effect/platform-node",
     "@effect/sql-libsql",
+    "@knpkv/ai-claude",
+    "@knpkv/ai-codex",
     "@knpkv/rly",
     "effect",
     "react",
@@ -64,6 +66,15 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
+  }
+  const localAgentDependencies: ReadonlyArray<"@knpkv/ai-claude" | "@knpkv/ai-codex"> = [
+    "@knpkv/ai-claude",
+    "@knpkv/ai-codex"
+  ]
+  for (const dependency of localAgentDependencies) {
+    if (manifest.dependencies[dependency] !== "workspace:^") {
+      violations.push(`${dependency} must use workspace:^`)
+    }
   }
   if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.97") {
     violations.push("@effect/sql-libsql must align with the pinned Effect beta")

@@ -15,7 +15,13 @@ import { Auth } from "../auth/Auth.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
-import { LiveEvents, MediaReads, PluginAdministration, PortfolioSnapshots } from "./ApplicationServices.js"
+import {
+  LiveEvents,
+  MediaReads,
+  PluginAdministration,
+  PortfolioSnapshots,
+  ReleaseAgentTurns
+} from "./ApplicationServices.js"
 import {
   forbiddenApiError,
   invalidRequestApiError,
@@ -211,6 +217,33 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
           return yield* portfolio.snapshot(session.workspaceId).pipe(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
+        }))
+    })
+)
+
+/** Authenticated, workspace-scoped local model turn for one exact release. */
+export const agentHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "agent",
+  (handlers) =>
+    Effect.gen(function*() {
+      const agent = yield* ReleaseAgentTurns
+      return handlers.handle("turn", ({ params, payload }) =>
+        Effect.gen(function*() {
+          const session = yield* CurrentSession
+          if (session.permission !== "workspace-owner") {
+            return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+          }
+          return yield* agent.runTurn({
+            history: payload.history,
+            prompt: payload.prompt,
+            provider: payload.provider,
+            releaseId: params.releaseId,
+            workspaceId: session.workspaceId
+          }).pipe(Effect.catchTags({
+            ApplicationResourceNotFound: mapApplicationNotFound,
+            ApplicationServiceUnavailable: mapApplicationUnavailable
+          }))
         }))
     })
 )

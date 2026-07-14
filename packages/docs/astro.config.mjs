@@ -26,6 +26,10 @@ export default defineConfig({
           ]
         },
         {
+          label: "Applications",
+          items: [{ label: "Control Center", link: "/control-center/" }]
+        },
+        {
           label: "Local AI",
           items: [
             { label: "Codex Adapter", link: "/ai-codex/" },

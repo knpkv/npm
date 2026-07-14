@@ -9,6 +9,12 @@ export {
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
 export {
+  makeReleaseAgentTurns,
+  type ReleaseAgentRuntimeOptions,
+  releaseAgentTurnsLayer,
+  releaseAgentUnavailableLayer
+} from "./releaseAgent.js"
+export {
   reconcileFakeReleaseProjection,
   recoverFakeReleaseProjection,
   synchronizeFakeRelease,

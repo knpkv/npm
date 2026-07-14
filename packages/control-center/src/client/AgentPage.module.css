@@ -1,0 +1,170 @@
+.room,
+.hero,
+.heroCopy,
+.people,
+.starters,
+.composer,
+.legacy,
+.legacyHeader,
+.legacyContext {
+  display: grid;
+}
+
+.room,
+.legacy {
+  gap: clamp(4rem, 9vw, 8rem);
+}
+
+.back {
+  inline-size: fit-content;
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  text-decoration: none;
+}
+
+.back:hover,
+.back:focus-visible {
+  color: var(--rly-color-text-1);
+  text-decoration: underline;
+  text-underline-offset: var(--rly-space-4);
+}
+
+.hero,
+.legacyHeader {
+  gap: var(--rly-space-32);
+}
+
+.heroCopy,
+.legacyHeader {
+  max-inline-size: 58rem;
+}
+
+.heroCopy {
+  gap: var(--rly-space-16);
+}
+
+.heroCopy h1,
+.legacyHeader h1 {
+  max-inline-size: 11ch;
+  letter-spacing: -0.065em;
+  text-wrap: balance;
+}
+
+.heroCopy p,
+.legacyHeader p {
+  max-inline-size: 46rem;
+}
+
+.eyebrow {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.people,
+.starters {
+  gap: var(--rly-space-24);
+}
+
+.suggestionList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--rly-space-12);
+}
+
+.suggestion {
+  min-block-size: 7rem;
+  padding: var(--rly-space-20);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+  font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+    var(--rly-type-card-title-font);
+  text-align: start;
+  transition:
+    border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+}
+
+.suggestion:hover,
+.suggestion:focus-visible {
+  border-color: var(--rly-color-agent);
+  background: var(--rly-color-surface-2);
+  outline: none;
+}
+
+.suggestion:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.thread {
+  border-color: var(--rly-color-border-2);
+}
+
+.threadContext {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8) var(--rly-space-16);
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.threadContext strong {
+  color: var(--rly-color-text-1);
+}
+
+.threadContext span + span::before {
+  margin-inline-end: var(--rly-space-16);
+  color: var(--rly-color-border-2);
+  content: "·";
+}
+
+.composer {
+  gap: var(--rly-space-16);
+}
+
+.composer textarea {
+  min-block-size: 10rem;
+  resize: vertical;
+  font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+    var(--rly-type-body-large-font);
+}
+
+.failure {
+  scroll-margin-block-start: 6rem;
+}
+
+.state {
+  display: grid;
+  min-block-size: 60dvh;
+  place-items: center;
+}
+
+.legacyHeader,
+.legacyContext {
+  gap: var(--rly-space-16);
+}
+
+.legacyContext {
+  max-inline-size: 52rem;
+}
+
+@media (max-width: 48rem) {
+  .suggestionList {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestion {
+    min-block-size: 5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestion {
+    transition: none;
+  }
+}

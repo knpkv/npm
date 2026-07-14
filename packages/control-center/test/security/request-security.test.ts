@@ -376,7 +376,7 @@ describe("bind and request security", () => {
       assert.notInclude(JSON.stringify(rejected), secretCanary)
     }).pipe(Effect.provide(NodeServices.layer)))
 
-  it.effect("blocks administration but permits release work on explicitly insecure LAN", () =>
+  it.effect("blocks agents and administration but permits ordinary release work on explicitly insecure LAN", () =>
     Effect.gen(function*() {
       const config = yield* decodeBindConfig({
         host: "0.0.0.0",
@@ -392,16 +392,16 @@ describe("bind and request security", () => {
       ])
       yield* authorizeInsecureLanCapability(config, "release-read")
       yield* authorizeInsecureLanCapability(config, "release-action")
-      yield* authorizeInsecureLanCapability(config, "release-agent")
       yield* authorizeInsecureLanCapability(config, "session-self-read")
-      const administrativeCapabilities = [
+      const restrictedCapabilities = [
+        "release-agent",
         "provider-configuration",
         "policy-administration",
         "pairing-administration",
         "session-administration",
         "secret-inspection"
       ] satisfies ReadonlyArray<InsecureLanCapability>
-      for (const capability of administrativeCapabilities) {
+      for (const capability of restrictedCapabilities) {
         const result = yield* authorizeInsecureLanCapability(config, capability).pipe(Effect.result)
         assert.isTrue(Result.isFailure(result))
         if (Result.isFailure(result)) {

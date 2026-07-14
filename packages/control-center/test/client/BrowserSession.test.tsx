@@ -70,5 +70,18 @@ describe("BrowserSessionProvider", () => {
     expect(sessionControls().state).toEqual({ _tag: "authenticated", session: sessionB })
     expect(container.textContent).toBe("authenticated")
     expect(sessionStorage.getItem("cc_csrf")).toBe(csrfB)
+    expect(sessionStorage.getItem("cc_session_id")).toBe(sessionB.sessionId)
+  })
+
+  it("removes the thread namespace when the current session is invalidated", () => {
+    const activeSession = makeSession("01890f6f-6d6a-7cc0-98d2-000000000004")
+    const csrf = Schema.decodeSync(CsrfToken)("ab".repeat(32))
+
+    act(() => sessionControls().establishSession(csrf, activeSession))
+    act(() => sessionControls().invalidateSession(activeSession.sessionId))
+
+    expect(sessionStorage.getItem("cc_csrf")).toBeNull()
+    expect(sessionStorage.getItem("cc_session_id")).toBeNull()
+    expect(sessionControls().state).toEqual({ _tag: "anonymous" })
   })
 })

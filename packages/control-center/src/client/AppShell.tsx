@@ -1,12 +1,29 @@
 import type { ReactElement } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
+import type { ReleaseId, WorkspaceId } from "../domain/identifiers.js"
+import { releaseAgentPath } from "./releases/releasePaths.js"
 import styles from "./AppShell.module.css"
 
-const CANONICAL_WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+
+const isWorkspaceId = (value: string | undefined): value is WorkspaceId =>
+  value !== undefined && CANONICAL_ID.test(value)
+
+const isReleaseId = (value: string | undefined): value is ReleaseId => value !== undefined && CANONICAL_ID.test(value)
 
 const workspaceOverviewPath = (pathname: string): string => {
   const workspaceId = pathname.split("/")[2]
-  return workspaceId !== undefined && CANONICAL_WORKSPACE_ID.test(workspaceId) ? `/w/${workspaceId}/overview` : "/"
+  return isWorkspaceId(workspaceId) ? `/w/${workspaceId}/overview` : "/"
+}
+
+const contextualAgentPath = (pathname: string, search: string): string => {
+  const segments = pathname.split("/")
+  const workspaceId = segments[2]
+  const releaseId = segments[4]
+  if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "releases" && isReleaseId(releaseId)) {
+    return releaseAgentPath(workspaceId, releaseId)
+  }
+  return `/agent?from=${encodeURIComponent(`${pathname}${search}`)}`
 }
 
 const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => [
@@ -38,7 +55,7 @@ const PrimaryNavigation = ({
 export const AppShell = (): ReactElement => {
   const location = useLocation()
   const overviewPath = workspaceOverviewPath(location.pathname)
-  const agentDestination = `/agent?from=${encodeURIComponent(`${location.pathname}${location.search}`)}`
+  const agentDestination = contextualAgentPath(location.pathname, location.search)
 
   return (
     <div className={styles.root}>
@@ -51,7 +68,7 @@ export const AppShell = (): ReactElement => {
         </NavLink>
         <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
         <NavLink className={styles.agent ?? ""} to={agentDestination}>
-          Relay context
+          Ask Relay
         </NavLink>
         <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
       </header>

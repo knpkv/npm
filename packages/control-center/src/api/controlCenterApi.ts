@@ -1,5 +1,6 @@
 import { HttpApi } from "effect/unstable/httpapi"
 
+import { AgentApiGroup } from "./agent.js"
 import { LiveEventsApiGroup } from "./liveEvents.js"
 import { MediaApiGroup } from "./media.js"
 import { PluginsApiGroup } from "./plugins.js"
@@ -13,4 +14,5 @@ export class ControlCenterApi extends HttpApi.make("ControlCenterApi")
   .add(PortfolioApiGroup)
   .add(MediaApiGroup)
   .add(LiveEventsApiGroup)
+  .add(AgentApiGroup)
 {}

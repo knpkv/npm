@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 
+import { AgentProvider } from "../api/agent.js"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
@@ -46,6 +47,12 @@ const dataRootConfiguration = Config.string("CONTROL_CENTER_DATA_ROOT").pipe(
 )
 
 const serverConfiguration = Config.all({
+  agentClaudeExecutable: Config.string("CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE").pipe(Config.withDefault("")),
+  agentClaudeModel: Config.string("CONTROL_CENTER_AGENT_CLAUDE_MODEL").pipe(Config.withDefault("")),
+  agentCodexExecutable: Config.string("CONTROL_CENTER_AGENT_CODEX_EXECUTABLE").pipe(Config.withDefault("")),
+  agentCodexModel: Config.string("CONTROL_CENTER_AGENT_CODEX_MODEL").pipe(Config.withDefault("")),
+  agentCwd: Config.string("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
+  agentProviders: Config.string("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
   allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
   allowInsecureLan: Config.boolean("CONTROL_CENTER_ALLOW_INSECURE_LAN").pipe(Config.withDefault(false)),
@@ -137,6 +144,14 @@ const program = Effect.scoped(
     }
 
     const configured = yield* serverConfiguration
+    const agentProviders = yield* Schema.decodeUnknownEffect(
+      Schema.Array(AgentProvider).check(Schema.isUnique())
+    )(commaSeparated(configured.agentProviders))
+    const agentCwd = agentProviders.length === 0
+      ? null
+      : yield* Schema.decodeUnknownEffect(
+        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+      )(configured.agentCwd)
     const allowedHosts = commaSeparated(configured.allowedHosts)
     const allowedOrigins = commaSeparated(configured.allowedOrigins)
     const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -169,6 +184,20 @@ const program = Effect.scoped(
           workspaceName: WorkspaceName.make("Control Center")
         },
         persistenceConfig: dataPaths.persistenceConfig,
+        releaseAgent: agentCwd === null
+          ? null
+          : {
+            cwd: agentCwd,
+            enabledProviders: agentProviders,
+            ...(configured.agentCodexExecutable.length > 0
+              ? { codexExecutable: configured.agentCodexExecutable }
+              : {}),
+            ...(configured.agentCodexModel.length > 0 ? { codexModel: configured.agentCodexModel } : {}),
+            ...(configured.agentClaudeExecutable.length > 0
+              ? { claudeExecutable: configured.agentClaudeExecutable }
+              : {}),
+            ...(configured.agentClaudeModel.length > 0 ? { claudeModel: configured.agentClaudeModel } : {})
+          },
         secretRoot: dataPaths.secretRoot,
         staticAssets: { root: staticRoot }
       })

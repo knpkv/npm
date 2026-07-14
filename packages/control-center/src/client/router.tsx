@@ -14,7 +14,7 @@ const pairRoute = async () => {
 
 const agentRoute = async () => {
   const module = await import("./AgentPage.js")
-  return { Component: module.AgentPage }
+  return { Component: module.ConnectedAgentPage }
 }
 
 const workspaceRoute = async () => {
@@ -58,6 +58,7 @@ export const router = createBrowserRouter([
         children: [
           { path: "overview", lazy: workspaceOverviewRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
+          { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },
           { path: "*", lazy: workspaceNotFoundRoute }
         ]

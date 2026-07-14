@@ -5,6 +5,7 @@ import {
   decodeWorkspaceRouteId,
   makeReleaseRouteState,
   readReleaseOrigin,
+  releaseAgentPath,
   releaseFullPath,
   releaseOriginFromLocation,
   releaseOriginHref,
@@ -22,6 +23,7 @@ if (releaseId === undefined) throw new Error("Expected a release route fixture")
 describe("release routes", () => {
   it("builds one canonical parent, preview, and full path from decoded identities", () => {
     expect(releaseParentPath(workspaceId)).toBe(`/w/${workspaceId}/overview`)
+    expect(releaseAgentPath(workspaceId, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
     expect(releasePreviewPath(workspaceId, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}/preview`)
     expect(releaseFullPath(workspaceId, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}`)
     expect(releaseTransitionNames(releaseId)).toEqual({

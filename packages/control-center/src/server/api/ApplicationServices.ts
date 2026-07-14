@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 
+import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
@@ -14,7 +15,7 @@ import type {
   PluginHealthResponse
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
-import type { EventCursor, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import type { EventCursor, PluginConnectionId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -93,6 +94,23 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
     workspaceId: WorkspaceId
   ) => Effect.Effect<PortfolioSnapshot, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/PortfolioSnapshots") {}
+
+/**
+ * Release-aware conversational boundary. Implementations own context projection,
+ * provider selection, prompt hardening, cancellation, and provider error redaction.
+ */
+export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
+  readonly runTurn: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly provider: AgentProvider
+    readonly prompt: AgentPrompt
+    readonly history: ReadonlyArray<AgentHistoryMessage>
+  }) => Effect.Effect<
+    ReleaseAgentTurnResponse,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+}>()("@knpkv/control-center/server/api/ReleaseAgentTurns") {}
 
 /** Injectable durable replay boundary used by the authenticated SSE handler. */
 export class LiveEvents extends Context.Service<LiveEvents, {

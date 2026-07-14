@@ -41,15 +41,17 @@ const BrowserSessionContext = createContext<BrowserSessionContextValue | undefin
 const clearMutationProof = (): boolean => {
   try {
     sessionStorage.removeItem("cc_csrf")
+    sessionStorage.removeItem("cc_session_id")
     return true
   } catch {
     return false
   }
 }
 
-const storeMutationProof = (csrfToken: CsrfToken): boolean => {
+const storeMutationProof = (csrfToken: CsrfToken, sessionId: string): boolean => {
   try {
     sessionStorage.setItem("cc_csrf", csrfToken)
+    sessionStorage.setItem("cc_session_id", sessionId)
     return true
   } catch {
     clearMutationProof()
@@ -75,7 +77,7 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
     if (result._tag === "authenticated") {
       currentSessionId.current = result.session.sessionId
       setState(
-        storeMutationProof(result.csrfToken)
+        storeMutationProof(result.csrfToken, result.session.sessionId)
           ? { _tag: "authenticated", session: result.session }
           : { _tag: "storage-unavailable", session: result.session }
       )
@@ -93,7 +95,9 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
     hydrationAttempt.current = undefined
     currentSessionId.current = session.sessionId
     setState(
-      storeMutationProof(csrfToken) ? { _tag: "authenticated", session } : { _tag: "storage-unavailable", session }
+      storeMutationProof(csrfToken, session.sessionId)
+        ? { _tag: "authenticated", session }
+        : { _tag: "storage-unavailable", session }
     )
   }, [])
 

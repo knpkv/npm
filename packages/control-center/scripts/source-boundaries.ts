@@ -23,6 +23,7 @@ const BLOB_STORE_REASON = "only persistence composition and ContentStore can imp
 const CLI_BACKUP_BOUNDARY_REASON = "the CLI must use the public backup barrel instead of backup or database internals"
 const DATA_ROOT_PROTOCOL_REASON =
   "only CLI configuration and the backup archive entry point can import the data-root protocol"
+const LOCAL_AGENT_ADAPTER_REASON = "only the release-agent application adapter can import local AI provider packages"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
@@ -170,6 +171,12 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
   const isServer = isWithin(normalizedSource, "src/server")
 
   if (isPrototypeImport(importPath)) return PROTOTYPE_RUNTIME_REASON
+  if (
+    (importPath === "@knpkv/ai-codex" || importPath === "@knpkv/ai-claude") &&
+    normalizedSource !== "src/server/application/releaseAgent"
+  ) {
+    return LOCAL_AGENT_ADAPTER_REASON
+  }
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
   if (
     normalizedSource === "src/server/cli" &&

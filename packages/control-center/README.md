@@ -28,6 +28,25 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
+### Local release agent
+
+Every canonical release page has a release-owned Relay thread. An owner browser sends its bounded prompt and recent thread history through the typed API; the server resolves the current workspace-scoped release projection before each turn and runs the selected local CLI with read-only filesystem access. Provider configuration, credentials, filesystem paths, and raw provider failures remain server-only. Threads are isolated by browser session and currently remain in that tab; provider session identifiers are not treated as durable product state.
+
+Local providers are disabled by default. Enabling one grants that CLI read access to the configured working directory, so use an owner-controlled, least-privilege checkout and trusted HTTPS:
+
+```sh
+CONTROL_CENTER_AGENT_PROVIDERS=codex,claude \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+pnpm --filter @knpkv/control-center start
+
+# Keep local agents disabled while leaving the release UI available.
+pnpm --filter @knpkv/control-center start
+```
+
+`CONTROL_CENTER_AGENT_CWD` is required whenever a provider is enabled; Control Center does not silently grant access to its launch directory.
+
+`CONTROL_CENTER_AGENT_CODEX_EXECUTABLE`, `CONTROL_CENTER_AGENT_CODEX_MODEL`, `CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE`, and `CONTROL_CENTER_AGENT_CLAUDE_MODEL` provide server-only overrides. The respective CLI must already be installed and authenticated for the operating-system user running Control Center. Agent turns have a separate low-rate budget and a 130-second request deadline; each adapter applies a two-minute subprocess deadline and bounded output capture inside that request.
+
 If the first code was lost after the workspace initialized, or no owner session remains, stop the server and run terminal recovery against the same data root:
 
 ```sh
@@ -80,7 +99,7 @@ Open `https://control.home.arpa` from the second machine and enter the one-time 
 
 Direct TLS is also available when certificate and private-key material has already been provisioned into this instance's `SecretStore`; pass the resulting opaque references as `CONTROL_CENTER_TLS_CERTIFICATE_REF` and `CONTROL_CENTER_TLS_PRIVATE_KEY_REF`. The application never accepts certificate paths or key bytes through environment variables.
 
-`CONTROL_CENTER_ALLOW_INSECURE_LAN=true` is a deliberately restricted viewing mode, not remote onboarding. It blocks pairing, session administration, provider configuration, policy changes, and secret inspection. A new browser therefore cannot establish its required `HttpOnly` session in that mode; use trusted HTTPS for normal remote access.
+`CONTROL_CENTER_ALLOW_INSECURE_LAN=true` is a deliberately restricted viewing mode, not remote onboarding. It blocks pairing, session administration, local agent execution, provider configuration, policy changes, and secret inspection. A new browser therefore cannot establish its required `HttpOnly` session in that mode; use trusted HTTPS for normal remote access.
 
 ## Public entries
 
@@ -123,7 +142,7 @@ Provider credentials belong in `SecretStore`, never normal SQL rows. The store r
 
 ## HTTP API
 
-The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types.
+The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, release-aware agent turns, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types. Agent turns are authenticated CSRF-protected mutations; the server derives workspace identity from the session and returns the exact bounded release projection and event cursor used for the answer.
 
 Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
 
@@ -137,6 +156,6 @@ The request boundary applies exact Host and Origin policy, session/CSRF/capabili
 - TLS terminated by an exact allowlist of trusted proxy IPs; or
 - explicitly insecure LAN HTTP.
 
-Insecure LAN mode is for a trusted private network only. It permits release viewing, release actions, and release-agent work, but blocks provider configuration, policy changes, pairing/session administration, and secret inspection. TLS modes set the session cookie `Secure`; every mode uses an opaque `HttpOnly`, `SameSite=Strict` cookie. The authenticated mutation guard composes exact Origin, session CSRF digest, and capability checks so transport middleware cannot accept an unverified token. Forwarded headers are ignored unless the immediate peer is an exact trusted proxy.
+Insecure LAN mode is for a trusted private network only. It permits release viewing and ordinary release actions, but blocks local agent execution, provider configuration, policy changes, pairing/session administration, and secret inspection. TLS modes set the session cookie `Secure`; every mode uses an opaque `HttpOnly`, `SameSite=Strict` cookie. The authenticated mutation guard composes exact Origin, session CSRF digest, and capability checks so transport middleware cannot accept an unverified token. Forwarded headers are ignored unless the immediate peer is an exact trusted proxy.
 
 Wildcard addresses are bind targets, not browser URLs. Use `effectiveReachableUrls` to print the configured public origin and validated private-network addresses without ever presenting `0.0.0.0` or `::` as a destination.

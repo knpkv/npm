@@ -12,6 +12,8 @@ const validManifest = {
   dependencies: {
     "@effect/platform-node": "4.0.0-beta.97",
     "@effect/sql-libsql": "4.0.0-beta.97",
+    "@knpkv/ai-claude": "workspace:^",
+    "@knpkv/ai-codex": "workspace:^",
     "@knpkv/rly": "workspace:^",
     effect: "4.0.0-beta.97",
     react: "^19.2.7",

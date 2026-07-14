@@ -66,6 +66,7 @@ const pairedSession = {
 const overviewPath = `/w/${snapshot.workspaceId}/overview`
 const previewPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}/preview`
 const fullPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}`
+const agentPath = `${fullPath}/agent`
 const unknownReleaseId = "01890f6f-6d6a-7cc0-98d2-000000000098"
 
 const unauthorizedBody = {
@@ -101,6 +102,20 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
   })
   await context.route("**/api/v1/events**", async (route) => route.abort("failed"))
+  await context.route("**/api/v1/agent/releases/*/turns", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify({
+        eventCursor: snapshot.eventCursor,
+        provider: "codex",
+        release,
+        releaseId: release.releaseId,
+        reply: "Approval is current. Production deployment evidence is still missing."
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
 }
 
 const installTransitionProbe = async (page: Page): Promise<void> => {
@@ -219,6 +234,30 @@ test("opens preview first, restores focus, then pushes the canonical full route"
   await page.keyboard.press("Escape")
   await expect(page).toHaveURL(overviewPath)
   await expect(previewButton).toBeFocused()
+})
+
+test("keeps one human-first Relay thread per canonical release", async ({ page }) => {
+  await page.goto(fullPath)
+  await page.getByRole("button", { name: "Ask about this release" }).click()
+  await expect(page).toHaveURL(agentPath)
+  await expect(page.getByRole("heading", { level: 1, name: "Ask Copper Finch." })).toBeVisible()
+  await expect(page.getByText("Avery Bell")).toBeVisible()
+  await expect(page.getByText("Mara Singh")).toBeVisible()
+
+  await page.getByRole("button", { name: "Which evidence is still missing?" }).click()
+  await expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
+    "Which evidence is still missing?"
+  )
+  await page.getByRole("button", { name: "Ask Relay" }).click()
+  await expect(page.getByText("Approval is current. Production deployment evidence is still missing.")).toBeVisible()
+  await expect(page.getByText("Local codex")).toBeVisible()
+
+  await page.reload()
+  const restoredMessages = page.getByLabel("Release thread messages")
+  await expect(restoredMessages.getByText("Which evidence is still missing?")).toBeVisible()
+  await expect(
+    restoredMessages.getByText("Approval is current. Production deployment evidence is still missing.")
+  ).toBeVisible()
 })
 
 test("shares Relay, version, and verdict geometry across the sole orchestrated transition", async ({ page }) => {

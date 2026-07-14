@@ -11,7 +11,10 @@ import {
   liveEventsLayer,
   mediaReadsLayer,
   pluginAdministrationLayer,
-  portfolioSnapshotsLayer
+  portfolioSnapshotsLayer,
+  type ReleaseAgentRuntimeOptions,
+  releaseAgentTurnsLayer,
+  releaseAgentUnavailableLayer
 } from "../application/index.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
 import {
@@ -44,7 +47,7 @@ import {
 } from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 
-type ControlCenterApplicationServices = MediaReads | PluginAdministration | PortfolioSnapshots
+type ControlCenterCoreApplicationServices = MediaReads | PluginAdministration | PortfolioSnapshots
 
 /** Runtime construction settings after security and persistence decoding. */
 export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
@@ -54,8 +57,9 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly staticAssets: StaticAssetStoreOptions
   readonly bootstrap?: ControlCenterBootstrapOptions | null
   readonly releaseSynchronization?: ReleaseSynchronizationStartupOptions | null
+  readonly releaseAgent?: ReleaseAgentRuntimeOptions | null
   readonly applicationServices?: Layer.Layer<
-    ControlCenterApplicationServices,
+    ControlCenterCoreApplicationServices,
     ApplicationError,
     ApplicationRequirements | Persistence | SecretStore
   >
@@ -73,7 +77,7 @@ export type ControlCenterServerError<ApplicationError = never> =
   | StaticAssetStoreError
 
 const liveApplicationServices: Layer.Layer<
-  ControlCenterApplicationServices,
+  ControlCenterCoreApplicationServices,
   never,
   Persistence | SecretStore
 > = Layer.mergeAll(
@@ -94,13 +98,16 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const apiBindConfiguration = ApiBindConfiguration.layer(options.bindConfig)
   const staticAssets = StaticAssetStore.layer(options.staticAssets)
   const selectedApplicationServices: Layer.Layer<
-    ControlCenterApplicationServices,
+    ControlCenterCoreApplicationServices,
     ApplicationError,
     ApplicationRequirements | Persistence | SecretStore
   > = options.applicationServices ?? liveApplicationServices
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence)
   )
+  const releaseAgent = options.releaseAgent === undefined || options.releaseAgent === null
+    ? releaseAgentUnavailableLayer
+    : releaseAgentTurnsLayer(options.releaseAgent).pipe(Layer.provide(applicationServices))
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),
@@ -114,6 +121,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     persistence,
     authentication,
     applicationServices,
+    releaseAgent,
     liveEventRuntime
   )
   const routes = Layer.mergeAll(

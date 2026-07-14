@@ -216,7 +216,6 @@ export const authorizeInsecureLanCapability = (
   if (
     capability === "release-read" ||
     capability === "release-action" ||
-    capability === "release-agent" ||
     capability === "session-self-read"
   ) {
     return Effect.void

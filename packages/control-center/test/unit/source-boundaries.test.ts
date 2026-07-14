@@ -14,6 +14,32 @@ describe("Control Center source boundaries", () => {
     expect(inspectSourceBoundaries("src/client/page.tsx", "import { Surface } from \"@knpkv/rly\"")).toEqual([])
   })
 
+  it("keeps local AI provider packages behind the release-agent adapter", () => {
+    const reason = "only the release-agent application adapter can import local AI provider packages"
+    expect(
+      inspectSourceBoundaries(
+        "src/client/AgentPage.tsx",
+        "import { model } from \"@knpkv/ai-codex\""
+      )
+    ).toContainEqual({
+      importPath: "@knpkv/ai-codex",
+      reason,
+      sourcePath: "src/client/AgentPage.tsx"
+    })
+    expect(
+      inspectSourceBoundaries(
+        "src/server/api/Handlers.ts",
+        "import { model } from \"@knpkv/ai-claude\""
+      )
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/application/releaseAgent.ts",
+        "import { model } from \"@knpkv/ai-codex\""
+      )
+    ).toEqual([])
+  })
+
   it("rejects browser and API imports of server code", () => {
     expect(inspectSourceBoundaries("src/client/page.tsx", "import \"../server/main.js\"")).toEqual([
       {

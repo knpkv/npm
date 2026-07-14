@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 
 import {
+  AgentApiGroup,
   ControlCenterApi,
   LiveEventsApiGroup,
   makeControlCenterApiClient,
@@ -17,7 +18,7 @@ import {
   SessionId,
   SessionMutationAuth
 } from "../../src/api/index.js"
-import { PluginConnectionId } from "../../src/domain/identifiers.js"
+import { PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
   Array.from(middlewares, ({ key }) => key)
@@ -55,16 +56,32 @@ describe("ControlCenterApi contract", () => {
         { location: "query", name: "after", required: false }
       ]
     )
+
+    const agentTurnPath = specification.paths["/api/v1/agent/releases/{releaseId}/turns"]
+    assert.isDefined(agentTurnPath)
+    assert.isDefined(agentTurnPath.post)
+    assert.deepStrictEqual(Object.keys(agentTurnPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "413",
+      "429",
+      "503"
+    ])
   })
 
-  it("keeps the five API groups and endpoint routes explicit", () => {
+  it("keeps the six API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
       "plugins",
       "portfolio",
       "media",
-      "liveEvents"
+      "liveEvents",
+      "agent"
     ])
 
     assert.deepStrictEqual(
@@ -99,6 +116,10 @@ describe("ControlCenterApi contract", () => {
       Object.entries(LiveEventsApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [["stream", "GET", "/api/v1/events"]]
     )
+    assert.deepStrictEqual(
+      Object.entries(AgentApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
+      [["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"]]
+    )
   })
 
   it("requires cookie auth for private reads and separate CSRF proof for mutations", () => {
@@ -132,6 +153,9 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(LiveEventsApiGroup.endpoints), {
       stream: [SessionCookieAuth.key]
     })
+    assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
+      turn: [SessionCookieAuth.key, SessionMutationAuth.key]
+    })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
     assert.strictEqual(SessionCookieAuth.security.sessionCookie.in, "cookie")
@@ -145,6 +169,7 @@ describe("ControlCenterApi contract", () => {
     const sessionId = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-000000000091")
     const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
     const mediaId = Schema.decodeSync(OpaqueMediaId)(`media_${"ab".repeat(32)}`)
+    const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000093")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
@@ -159,6 +184,10 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.media.read({ params: { mediaId } }),
       `https://control.example/api/v1/media/media_${"ab".repeat(32)}`
+    )
+    assert.strictEqual(
+      urls.agent.turn({ params: { releaseId } }),
+      "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/turns"
     )
     assert.isTrue(Effect.isEffect(makeControlCenterApiClient({ baseUrl: "https://control.example" })))
   })

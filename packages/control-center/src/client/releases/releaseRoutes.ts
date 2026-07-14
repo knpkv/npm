@@ -8,6 +8,9 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
+import { releaseParentPath } from "./releasePaths.js"
+
+export { releaseAgentPath, releaseFullPath, releaseParentPath, releasePreviewPath } from "./releasePaths.js"
 
 /** Exact in-application location preserved while release routes are open. */
 export interface ReleaseOrigin {
@@ -49,8 +52,6 @@ const ReleaseRouteStateSchema = Schema.Struct({
   workspaceId: WorkspaceId
 })
 
-const segment = (value: string): string => encodeURIComponent(value)
-
 /** Decode one workspace route segment at the browser boundary. */
 export const decodeWorkspaceRouteId = (value: unknown): WorkspaceIdType | null => {
   const decoded = Schema.decodeUnknownOption(WorkspaceId)(value)
@@ -62,17 +63,6 @@ export const decodeReleaseRouteId = (value: unknown): ReleaseIdType | null => {
   const decoded = Schema.decodeUnknownOption(ReleaseId)(value)
   return Option.isSome(decoded) ? decoded.value : null
 }
-
-/** Build the semantic parent for release routes in one workspace. */
-export const releaseParentPath = (workspaceId: WorkspaceIdType): string => `/w/${segment(workspaceId)}/overview`
-
-/** Build the canonical preview route for one immutable release identity. */
-export const releasePreviewPath = (workspaceId: WorkspaceIdType, releaseId: ReleaseIdType): string =>
-  `/w/${segment(workspaceId)}/releases/${segment(releaseId)}/preview`
-
-/** Build the canonical full route for one immutable release identity. */
-export const releaseFullPath = (workspaceId: WorkspaceIdType, releaseId: ReleaseIdType): string =>
-  `/w/${segment(workspaceId)}/releases/${segment(releaseId)}`
 
 /** Stable, collision-free geometry names for one release's orchestrated route transition. */
 export const releaseTransitionNames = (releaseId: ReleaseIdType): RlyReleaseTransitionNames => ({

@@ -43,6 +43,8 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
     case "portfolio":
     case "liveEvents":
       return "release-read"
+    case "agent":
+      return "release-agent"
     case "plugins":
       return "provider-configuration"
     case "session":

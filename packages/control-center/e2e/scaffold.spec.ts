@@ -30,17 +30,17 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
-  for (const name of ["Overview", "Releases", "Services", "Relay context"]) {
+  for (const name of ["Overview", "Releases", "Services", "Ask Relay"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
   }
   await page.getByRole("link", { name: "Releases" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
-  await page.getByRole("link", { name: "Relay context" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Relay context" })).toBeVisible()
+  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Ask in context." })).toBeVisible()
   await expect(page.getByText("Current context")).toBeVisible()
   await expect(page.getByRole("heading", { level: 2, name: "Releases" })).toBeVisible()
-  await expect(page.getByText("Agent runtime not connected")).toBeVisible()
+  await expect(page.getByText("Open Relay from a release to start an exact, release-owned thread.")).toBeVisible()
 })
 
 test("keeps mobile navigation clear of application identity and content", async ({ page }) => {
@@ -49,7 +49,7 @@ test("keeps mobile navigation clear of application identity and content", async 
 
   const navigationBox = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
   const brandBox = await page.getByRole("link", { name: "Control Center home" }).boundingBox()
-  const agentBox = await page.getByRole("link", { name: "Relay context" }).boundingBox()
+  const agentBox = await page.getByRole("link", { name: "Ask Relay" }).boundingBox()
   if (navigationBox === null || brandBox === null || agentBox === null) {
     throw new Error("mobile application chrome must remain measurable")
   }
@@ -60,7 +60,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Relay context" })).toBeFocused()
+  await expect(page.getByRole("link", { name: "Ask Relay" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Overview" })).toBeFocused()
 })

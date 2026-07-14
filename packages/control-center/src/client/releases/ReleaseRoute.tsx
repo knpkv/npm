@@ -18,6 +18,7 @@ import type { WorkspaceReleaseOutletContext } from "./WorkspaceReleaseLayout.js"
 import {
   decodeReleaseRouteId,
   readReleaseOrigin,
+  releaseAgentPath,
   resolveReleaseOrigin,
   releaseFullPath,
   releaseOriginHref,
@@ -110,14 +111,17 @@ const releaseContextLabel = (release: PortfolioReleasePresentation): string =>
   `${release.serviceName} · ${release.version} · ${release.relay.codename} · ${release.id}`
 
 const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
-  const location = useLocation()
+  const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const navigate = useNavigate()
+  const prefersReducedMotion = usePrefersReducedReleaseMotion()
   return (
     <AgentContextButton
       actionLabel="Ask about this release"
       agentName="Relay"
       context={releaseContextLabel(release)}
-      onClick={() => navigate(`/agent?from=${encodeURIComponent(location.pathname)}`)}
+      onClick={() =>
+        navigate(releaseAgentPath(context.workspaceId, release.id), { viewTransition: !prefersReducedMotion })
+      }
     />
   )
 }
@@ -151,11 +155,15 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
   const resolvedOrigin = resolveReleaseOrigin(location.state, context.workspaceId, selection.releaseId)
   const originHref = releaseOriginHref(resolvedOrigin.origin)
   const fullPath = releaseFullPath(context.workspaceId, selection.releaseId)
+  const agentPath = releaseAgentPath(context.workspaceId, selection.releaseId)
   const previewPath = releasePreviewPath(context.workspaceId, selection.releaseId)
   const isPreviewTransitioning = useViewTransitionState(previewPath)
   const isFullTransitioning = useViewTransitionState(fullPath)
+  const isAgentTransitioning = useViewTransitionState(agentPath)
   const transitionNames =
-    isPreviewTransitioning || isFullTransitioning ? releaseTransitionNames(selection.releaseId) : undefined
+    isPreviewTransitioning || isFullTransitioning || isAgentTransitioning
+      ? releaseTransitionNames(selection.releaseId)
+      : undefined
 
   useEffect(() => {
     if (isOpen || exit === null) return
@@ -215,8 +223,11 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
   const origin = readReleaseOrigin(location.state, context.workspaceId, selection.releaseId)
   const release = selection.release
   const fullPath = releaseFullPath(context.workspaceId, selection.releaseId)
-  const isTransitioning = useViewTransitionState(fullPath)
-  const transitionNames = isTransitioning ? releaseTransitionNames(selection.releaseId) : undefined
+  const agentPath = releaseAgentPath(context.workspaceId, selection.releaseId)
+  const isFullTransitioning = useViewTransitionState(fullPath)
+  const isAgentTransitioning = useViewTransitionState(agentPath)
+  const transitionNames =
+    isFullTransitioning || isAgentTransitioning ? releaseTransitionNames(selection.releaseId) : undefined
 
   useEffect(() => headingRef.current?.focus(), [])
 

@@ -4,6 +4,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
+  agentHandlersLayer,
   liveEventHandlersLayer,
   mediaHandlersLayer,
   pluginHandlersLayer,
@@ -23,6 +24,7 @@ export const controlCenterApiHandlersLayer = Layer.mergeAll(
   sessionHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
+  agentHandlersLayer,
   mediaHandlersLayer,
   liveEventHandlersLayer
 ).pipe(

@@ -14,6 +14,8 @@ import {
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
+  ReleaseAgentTurnRequest,
+  ReleaseAgentTurnResponse,
   SessionListResponse
 } from "../../src/api/index.js"
 import { PortfolioInvalidatedEventV1 } from "../../src/domain/domainEvent.js"
@@ -137,12 +139,14 @@ describe("public API schemas", () => {
       role: "release-owner"
     }
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioReleaseCollaborator)(collaborator)))
-    assert.isTrue(Result.isFailure(
-      Schema.decodeUnknownResult(PortfolioReleaseCollaborator)({
-        ...collaborator,
-        role: "watcher"
-      })
-    ))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PortfolioReleaseCollaborator)({
+          ...collaborator,
+          role: "watcher"
+        })
+      )
+    )
     const release = {
       releaseId,
       serviceName: "payments-api",
@@ -164,37 +168,45 @@ describe("public API schemas", () => {
       updatedAt: timestamp
     }
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PortfolioReleaseSummary)(release)))
-    assert.isTrue(Result.isFailure(
-      Schema.decodeUnknownResult(PortfolioReleaseSummary)({
-        ...release,
-        collaborators: [collaborator, collaborator]
-      })
-    ))
-    assert.isTrue(Result.isFailure(
-      Schema.decodeUnknownResult(PortfolioReleaseSummary)({
-        ...release,
-        collaborators: Array.from({ length: 51 }, (_, index) => ({
-          ...collaborator,
-          personId: `01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`,
-          role: index % 2 === 0 ? "release-owner" : "release-approver"
-        }))
-      })
-    ))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PortfolioReleaseSummary)({
+          ...release,
+          collaborators: [collaborator, collaborator]
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PortfolioReleaseSummary)({
+          ...release,
+          collaborators: Array.from({ length: 51 }, (_, index) => ({
+            ...collaborator,
+            personId: `01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`,
+            role: index % 2 === 0 ? "release-owner" : "release-approver"
+          }))
+        })
+      )
+    )
   })
 
   it("returns a bounded CSRF proof with the authenticated current session", () => {
-    assert.isTrue(Result.isSuccess(
-      Schema.decodeUnknownResult(CurrentSessionResponse)({
-        csrfToken: "ab".repeat(32),
-        session: encodedSession
-      })
-    ))
-    assert.isTrue(Result.isFailure(
-      Schema.decodeUnknownResult(CurrentSessionResponse)({
-        csrfToken: "session-secret",
-        session: encodedSession
-      })
-    ))
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(CurrentSessionResponse)({
+          csrfToken: "ab".repeat(32),
+          session: encodedSession
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(CurrentSessionResponse)({
+          csrfToken: "session-secret",
+          session: encodedSession
+        })
+      )
+    )
   })
 
   it("bounds typed plugin configuration patches and keeps secrets as opaque references", () => {
@@ -233,11 +245,13 @@ describe("public API schemas", () => {
       Result.isFailure(
         Schema.decodeUnknownResult(PatchPluginConfigurationRequest)({
           ...valid,
-          values: [{
-            _tag: "secret-reference",
-            key: "token",
-            operation: { _tag: "replace", reference: "raw-secret-value" }
-          }]
+          values: [
+            {
+              _tag: "secret-reference",
+              key: "token",
+              operation: { _tag: "replace", reference: "raw-secret-value" }
+            }
+          ]
         })
       )
     )
@@ -309,6 +323,98 @@ describe("public API schemas", () => {
           plugins: [encodedPlugin, encodedPlugin]
         })
       )
+    )
+  })
+
+  it("bounds release-agent prompts and history by message count and total content", () => {
+    const valid = {
+      provider: "codex",
+      prompt: "Find the blockers for this release.",
+      history: [
+        { role: "user", content: "What changed?" },
+        { role: "assistant", content: "The release contains one candidate revision." }
+      ]
+    }
+
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentTurnRequest)(valid)))
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({ ...valid, provider: "remote" }))
+    )
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({ ...valid, prompt: " padded " }))
+    )
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({ ...valid, prompt: "p".repeat(8_001) }))
+    )
+    for (const content of ["", " padded ", "h".repeat(12_001)]) {
+      assert.isTrue(
+        Result.isFailure(
+          Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({
+            ...valid,
+            history: [{ role: "user", content }]
+          })
+        )
+      )
+    }
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({
+          ...valid,
+          history: Array.from({ length: 13 }, () => ({ role: "user", content: "next" }))
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ReleaseAgentTurnRequest)({
+          ...valid,
+          history: Array.from({ length: 6 }, () => ({ role: "assistant", content: "a".repeat(11_000) }))
+        })
+      )
+    )
+  })
+
+  it("returns the authoritative bounded release context with each agent reply", () => {
+    const release = {
+      releaseId,
+      serviceName: "payments-api",
+      version: "2.18.0-rc.1",
+      lifecycle: "candidate",
+      relay: deriveReleaseRelay(releaseId),
+      freshness: {
+        _tag: "missing",
+        pluginHealth: { _tag: "healthy", checkedAt: timestamp },
+        provenance: { _tag: "none", pluginConnectionId },
+        sourceObservedAt: null,
+        staleAfterSeconds: 300,
+        synchronizedAt: timestamp
+      },
+      targetEnvironmentIds: [environmentId],
+      collaborators: [],
+      collaboratorCount: 0,
+      sourceRevisionCount: 0,
+      updatedAt: timestamp
+    }
+    const valid = {
+      releaseId,
+      provider: "claude",
+      reply: "This release still needs deployment evidence.",
+      release,
+      eventCursor: 42
+    }
+
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentTurnResponse)(valid)))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnResponse)({ ...valid, reply: "" })))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(ReleaseAgentTurnResponse)({
+          ...valid,
+          releaseId: "01890f6f-6d6a-7cc0-98d2-000000000099"
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnResponse)({ ...valid, reply: "r".repeat(32_001) }))
     )
   })
 

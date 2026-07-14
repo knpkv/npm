@@ -16,9 +16,11 @@ const limitPolicyLayer = Layer.succeed(RequestLimitPolicy, {
   pairing: { limit: 1, window: Duration.minutes(1) },
   read: { limit: 1, window: Duration.minutes(1) },
   mutation: { limit: 1, window: Duration.minutes(1) },
+  agent: { limit: 1, window: Duration.minutes(1) },
   media: { limit: 1, window: Duration.minutes(1) },
   readTimeout: Duration.seconds(5),
-  mutationTimeout: Duration.seconds(5)
+  mutationTimeout: Duration.seconds(5),
+  agentTimeout: Duration.seconds(5)
 })
 
 const schemaDefect = (kind: HttpApiError.HttpApiSchemaError["kind"]) =>

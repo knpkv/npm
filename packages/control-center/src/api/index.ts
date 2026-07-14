@@ -1,5 +1,15 @@
 /** Browser-safe Effect HTTP contracts and generated-client helpers. @packageDocumentation */
 export {
+  AgentApiGroup,
+  AgentHistoryMessage,
+  AgentPrompt,
+  AgentProvider,
+  ReleaseAgentHistoryMessage,
+  ReleaseAgentProvider,
+  ReleaseAgentTurnRequest,
+  ReleaseAgentTurnResponse
+} from "./agent.js"
+export {
   type ControlCenterApiClient,
   type ControlCenterApiClientOptions,
   makeControlCenterApiClient,

@@ -531,6 +531,12 @@ importers:
       '@effect/sql-libsql':
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+      '@knpkv/ai-claude':
+        specifier: workspace:^
+        version: link:../ai-claude
+      '@knpkv/ai-codex':
+        specifier: workspace:^
+        version: link:../ai-codex
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly

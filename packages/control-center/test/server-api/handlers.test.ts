@@ -16,16 +16,17 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
-import { EventCursor } from "../../src/domain/identifiers.js"
+import { EventCursor, ReleaseId } from "../../src/domain/identifiers.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
   LiveEvents,
   MediaReads,
   PluginAdministration,
-  PortfolioSnapshots
+  PortfolioSnapshots,
+  ReleaseAgentTurns
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
-import { liveEventHandlersLayer, portfolioHandlersLayer } from "../../src/server/api/Handlers.js"
+import { agentHandlersLayer, liveEventHandlersLayer, portfolioHandlersLayer } from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
@@ -33,6 +34,7 @@ import {
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
+import { makeNodePortfolioSnapshot } from "../fixtures/portfolio.js"
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
 
@@ -71,6 +73,10 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
     requestedWorkspaceId === session.workspaceId
       ? Effect.succeed(snapshot)
       : Effect.die("portfolio handler crossed a workspace boundary")
+})
+
+const agentLayer = Layer.succeed(ReleaseAgentTurns, {
+  runTurn: () => Effect.die("not used")
 })
 
 const liveEvents = LiveEvents.of({ open: () => Effect.succeed(Stream.never) })
@@ -127,6 +133,78 @@ describe("Control Center API handlers", () => {
         portfolioHandlersTestLayer
       ])
     ))
+
+  it.effect("derives the agent workspace from the authenticated session", () =>
+    Effect.gen(function*() {
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const requestedWorkspace = yield* Ref.make<string | null>(null)
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: (input) =>
+            Ref.set(requestedWorkspace, input.workspaceId).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "The release is waiting for approval."
+              })
+            )
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this ship?", provider: "codex" }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(yield* Ref.get(requestedWorkspace), session.workspaceId)
+      assert.strictEqual(result.releaseId, release.releaseId)
+      assert.strictEqual(result.reply, "The release is waiting for approval.")
+    }))
+
+  it.effect("rejects a watcher before the local agent runtime is invoked", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("watcher reached the local agent runtime")
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.turn({
+          params: { releaseId: ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000011") },
+          payload: { history: [], prompt: "Read a repository secret", provider: "codex" }
+        })
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          watcherMiddlewareLayer,
+          handler
+        ]),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
 
   it.effect("rejects conflicting live-event resume cursors", () =>
     Effect.gen(function*() {
@@ -260,6 +338,7 @@ describe("Control Center API handlers", () => {
             Layer.succeed(Clock.Clock, instrumentedClock),
             Layer.succeed(LiveEvents, trackedLiveEvents),
             portfolioLayer,
+            agentLayer,
             NodeHttpServer.layerHttpServices,
             NodeServices.layer
           )
@@ -339,6 +418,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
         )
@@ -427,6 +507,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
         )
@@ -524,6 +605,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
         )
@@ -581,6 +663,18 @@ describe("Control Center API handlers", () => {
             body: JSON.stringify({ expectedRevision: 0, values: [] })
           }),
           403
+        ],
+        [
+          new Request(`${origin}/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000011/turns`, {
+            method: "POST",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              "x-csrf-token": recoveredCsrf
+            },
+            body: JSON.stringify({ history: [], prompt: "Read a repository secret", provider: "codex" })
+          }),
+          403
         ]
       ]
       for (const [blockedRequest, expectedStatus] of blockedRequests) {
@@ -631,6 +725,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
         )

@@ -49,6 +49,7 @@ type BoundaryApiError =
 
 const profileFor = (request: HttpServerRequest.HttpServerRequest): RequestLimitProfile => {
   if (request.url.startsWith("/api/v1/session/pair")) return "pairing"
+  if (request.url.startsWith("/api/v1/agent/")) return "agent"
   if (request.url.startsWith("/api/v1/media/")) return "media"
   return request.method === "GET" || request.method === "HEAD" ? "read" : "mutation"
 }

@@ -1,0 +1,48 @@
+---
+title: Control Center
+description: Run the release-aware delivery application and its local Relay agent.
+---
+
+`@knpkv/control-center` is a local delivery application that joins release identity, people, source freshness, provider connections, and release-aware agents without exposing server capabilities to browser code.
+
+## Start locally
+
+```bash
+pnpm --filter @knpkv/control-center build
+pnpm --filter @knpkv/control-center start
+```
+
+Open `http://127.0.0.1:4173` and enter the single-use pairing code printed by the server. The Vite development server is intentionally loopback-only; use the authenticated application server and the documented TLS proxy setup for another machine.
+
+## Release threads
+
+Open a release, then choose **Ask Relay**. Each canonical release page keeps the release codename, collaborators, lifecycle, version, and source freshness visible before the first question.
+
+The browser sends a bounded prompt and local thread history to a typed, CSRF-protected endpoint. The server derives the workspace from the authenticated session, loads the exact release projection, and invokes the configured local CLI read-only. The response includes the release projection and event cursor used for the turn, so answers cannot silently substitute another release.
+
+Release threads currently live in the browser tab. Codex and Claude invocations are ephemeral; their internal session identifiers are not product persistence.
+
+## Configure local providers
+
+Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:
+
+```bash
+CONTROL_CENTER_AGENT_PROVIDERS=codex,claude \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+pnpm --filter @knpkv/control-center start
+```
+
+Leave `CONTROL_CENTER_AGENT_PROVIDERS` unset to disable agent execution. Optional executable and model overrides are available through:
+
+- `CONTROL_CENTER_AGENT_CODEX_EXECUTABLE`
+- `CONTROL_CENTER_AGENT_CODEX_MODEL`
+- `CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE`
+- `CONTROL_CENTER_AGENT_CLAUDE_MODEL`
+
+`CONTROL_CENTER_AGENT_CWD` is required whenever a provider is enabled; Control Center never falls back to its launch directory.
+
+Provider paths and options remain server-only. The public API accepts only `codex | claude`, the exact release identifier, a bounded prompt, and bounded history. Only workspace owners over trusted TLS or loopback may execute the local agent; insecure-LAN viewing and watcher sessions cannot. Read-only mode prevents writes but still grants the CLI visibility into its configured checkout, so that directory must contain only material the owner intends the model to read. The server also enforces a dedicated low-rate request budget, subprocess cancellation, and bounded output.
+
+## Review prevention proposals
+
+When Relay is asked for a code review, each actionable finding also asks for a prevention mechanism: an existing or proposed ast-grep rule, ESLint rule, type check, focused test, or repository agent instruction. These are proposals only. Static-analysis changes still require explicit human approval and should include invalid and nearby valid fixtures.

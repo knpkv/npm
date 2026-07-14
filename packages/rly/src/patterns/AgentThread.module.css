@@ -138,6 +138,7 @@
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
     overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
 
   .evidence {
