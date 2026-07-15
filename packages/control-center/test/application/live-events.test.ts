@@ -67,6 +67,19 @@ const appendInvalidation = (
   })
 }
 
+const appendInvalidations = (
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  count: number
+) =>
+  persistence.transact(
+    Effect.forEach(
+      Array.from({ length: count }, (_, index) => index + 1),
+      (index) => appendInvalidation(persistence, workspaceId, index),
+      { concurrency: 1, discard: true }
+    )
+  )
+
 const liveServices = Effect.gen(function*() {
   const portfolio = yield* makePortfolioSnapshots
   const events = yield* makeLiveEvents.pipe(Effect.provideService(PortfolioSnapshots, portfolio))
@@ -124,11 +137,7 @@ describe("durable live events", () => {
     withLivePersistence(Effect.gen(function*() {
       const persistence = yield* Persistence
       yield* createWorkspace(persistence, WORKSPACE_ID)
-      yield* Effect.forEach(
-        Array.from({ length: 513 }, (_, index) => index + 1),
-        (index) => appendInvalidation(persistence, WORKSPACE_ID, index),
-        { concurrency: 1, discard: true }
-      )
+      yield* appendInvalidations(persistence, WORKSPACE_ID, 513)
       const { events } = yield* liveServices
 
       const frames = yield* events.open({ workspaceId: WORKSPACE_ID, after: EventCursor.make(0) }).pipe(
@@ -151,11 +160,7 @@ describe("durable live events", () => {
       const persistence = yield* Persistence
       const wakeups = yield* DomainEventWakeups
       yield* createWorkspace(persistence, WORKSPACE_ID)
-      yield* Effect.forEach(
-        Array.from({ length: 512 }, (_, index) => index + 1),
-        (index) => appendInvalidation(persistence, WORKSPACE_ID, index),
-        { concurrency: 1, discard: true }
-      )
+      yield* appendInvalidations(persistence, WORKSPACE_ID, 512)
       const { events } = yield* liveServices
       const stream = yield* events.open({ workspaceId: WORKSPACE_ID, after: EventCursor.make(0) })
       const pull = yield* Stream.toPull(stream)
