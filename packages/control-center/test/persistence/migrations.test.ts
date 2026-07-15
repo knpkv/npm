@@ -57,7 +57,12 @@ const expectedTables = [
   "governed_action_attempts",
   "governed_action_authorizations",
   "governed_action_denial_policy_evaluations",
+  "governed_action_execution_leases",
+  "governed_action_execution_preparations",
   "governed_action_policy_evaluations",
+  "governed_action_provider_outcome_folds",
+  "governed_action_provider_outcomes",
+  "governed_action_recovery_claims",
   "governed_action_transitions",
   "governed_actions",
   "pairing_codes",
@@ -520,7 +525,7 @@ describe("Control Center migrations", () => {
         return { ledger, ownership, transitionCount }
       }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
 
-      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, 12)
+      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, EXPECTED_MIGRATIONS.at(-1)?.id)
       assert.deepStrictEqual(afterUpgrade.ownership, [])
       assert.deepStrictEqual(afterUpgrade.transitionCount, [{ count: 2 }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
