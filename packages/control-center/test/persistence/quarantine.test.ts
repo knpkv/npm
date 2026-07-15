@@ -34,6 +34,7 @@ const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000014")
 const AGENT_ID = Schema.decodeSync(AgentId)("01890f6f-6d6a-7cc0-98d2-000000000015")
 const ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-000000000016")
+const ENVIRONMENT_NODE_ID = "01890f6f-6d6a-7cc0-98d2-000000000017"
 const EARLIER = Schema.decodeSync(UtcTimestamp)("2026-07-13T09:00:00.000Z")
 const LATER = Schema.decodeSync(UtcTimestamp)("2026-07-13T11:00:00.000Z")
 const DIGEST = Schema.decodeSync(BlobDigest)("a".repeat(64))
@@ -83,6 +84,13 @@ const release = (version: string, updatedAt: string, environmentScoped = false) 
     },
     createdAt: "2026-07-13T10:00:00.000Z",
     updatedAt
+  })
+
+const releaseWithoutTargets = (version: string, updatedAt: string) =>
+  Schema.decodeSync(Release)({
+    ...Schema.encodeSync(Release)(release(version, updatedAt, true)),
+    roleAssignments: [],
+    targetEnvironmentIds: []
   })
 
 const testConfig = Effect.gen(function*() {
@@ -423,6 +431,114 @@ describe("quarantine", () => {
         if (Result.isFailure(staleAppend)) {
           assert.instanceOf(staleAppend.failure, RevisionConflictError)
         }
+      })
+    ))
+
+  it.effect("retains and reactivates target identity referenced by historical records", () =>
+    withReleaseRepositories(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const releases = yield* ReleaseRepository
+        const workspaces = yield* WorkspaceRepository
+        yield* workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Payments"),
+          createdAt: EARLIER
+        })
+        yield* releases.create(
+          WORKSPACE_ID,
+          release("2.18.0-rc.1", "2026-07-13T10:00:00.000Z", true)
+        )
+        yield* database.sql`INSERT INTO delivery_nodes (
+          workspace_id, node_id, node_key_digest, node_kind, endpoint_kind,
+          resolution_state, entity_id, release_id, environment_id,
+          expected_entity_kind, missing_key, created_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ENVIRONMENT_NODE_ID}, ${"b".repeat(64)},
+          'environment', 'environment', 'resolved', NULL, ${RELEASE_ID},
+          ${ENVIRONMENT_ID}, NULL, NULL, '2026-07-13T10:00:00.000Z'
+        )`
+        const withoutTargets = releaseWithoutTargets(
+          "2.18.0-rc.2",
+          "2026-07-13T11:00:00.000Z"
+        )
+        const ended = yield* releases.append(
+          WORKSPACE_ID,
+          withoutTargets,
+          RecordRevision.make(1)
+        )
+
+        const endedRows = yield* database.sql<{
+          readonly activeTargetCount: number
+          readonly createdAt: string
+          readonly endedAt: string | null
+          readonly lifecycleKind: string
+          readonly nodeCount: number
+          readonly roleLifecycleKind: string
+        }>`SELECT
+          lifecycle_kind AS lifecycleKind,
+          ended_at AS endedAt,
+          created_at AS createdAt,
+          (SELECT count(*) FROM release_targets
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND release_id = ${RELEASE_ID}
+              AND lifecycle_kind = 'active') AS activeTargetCount,
+          (SELECT count(*) FROM delivery_nodes
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND node_id = ${ENVIRONMENT_NODE_ID}) AS nodeCount,
+          (SELECT lifecycle_kind FROM role_assignments
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND assignment_id = ${ASSIGNMENT_ID}) AS roleLifecycleKind
+          FROM release_targets
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND release_id = ${RELEASE_ID}
+            AND environment_id = ${ENVIRONMENT_ID}`
+
+        assert.strictEqual(ended.revision, 2)
+        assert.deepStrictEqual(ended.release.targetEnvironmentIds, [])
+        assert.deepStrictEqual(endedRows, [{
+          activeTargetCount: 0,
+          createdAt: "2026-07-13T10:00:00.000Z",
+          lifecycleKind: "ended",
+          endedAt: "2026-07-13T11:00:00.000Z",
+          nodeCount: 1,
+          roleLifecycleKind: "ended"
+        }])
+        const destructiveDelete = yield* database.sql`DELETE FROM release_targets
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND release_id = ${RELEASE_ID}
+            AND environment_id = ${ENVIRONMENT_ID}`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(destructiveDelete))
+
+        const reactivated = yield* releases.append(
+          WORKSPACE_ID,
+          release("2.18.0-rc.3", "2026-07-13T12:00:00.000Z", true),
+          RecordRevision.make(2)
+        )
+        const reactivatedRows = yield* database.sql<{
+          readonly createdAt: string
+          readonly endedAt: string | null
+          readonly lifecycleKind: string
+          readonly nodeCount: number
+        }>`SELECT
+          lifecycle_kind AS lifecycleKind,
+          ended_at AS endedAt,
+          created_at AS createdAt,
+          (SELECT count(*) FROM delivery_nodes
+            WHERE workspace_id = ${WORKSPACE_ID}
+              AND node_id = ${ENVIRONMENT_NODE_ID}) AS nodeCount
+          FROM release_targets
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND release_id = ${RELEASE_ID}
+            AND environment_id = ${ENVIRONMENT_ID}`
+
+        assert.strictEqual(reactivated.revision, 3)
+        assert.deepStrictEqual(reactivated.release.targetEnvironmentIds, [ENVIRONMENT_ID])
+        assert.deepStrictEqual(reactivatedRows, [{
+          createdAt: "2026-07-13T10:00:00.000Z",
+          endedAt: null,
+          lifecycleKind: "active",
+          nodeCount: 1
+        }])
       })
     ))
 })

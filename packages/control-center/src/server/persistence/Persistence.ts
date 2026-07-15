@@ -25,6 +25,9 @@ import type { BlobStoreError } from "./object-store/BlobStoreError.js"
 import { decodePersistenceConfig } from "./PersistenceConfig.js"
 import {
   ContentBlobMetadataRepository,
+  type DeliveryGraphInputError,
+  DeliveryGraphRepository,
+  type DeliveryGraphRepositoryService,
   DomainEventRepository,
   type DomainEventRepositoryService,
   EntityRepository,
@@ -49,6 +52,7 @@ import { mapPersistenceOperation } from "./repositories/internal.js"
 export type PersistenceOperationFailure =
   | BlobStoreError
   | ContentMetadataMismatchError
+  | DeliveryGraphInputError
   | PersistedRecordError
   | PersistenceOperationError
   | QuarantineWriteError
@@ -68,6 +72,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "BlobTooLargeError",
   "BlobUnexpectedEofError",
   "ContentMetadataMismatchError",
+  "DeliveryGraphInputError",
   "PersistedRecordError",
   "PersistenceOperationError",
   "QuarantineWriteError",
@@ -114,6 +119,7 @@ export type PersistenceLayerError =
 const makePersistence = Effect.gen(function*() {
   const database = yield* Database
   const content = yield* ContentStore
+  const deliveryGraph = yield* DeliveryGraphRepository
   const events = yield* DomainEventRepository
   const entities = yield* EntityRepository
   const people = yield* PeopleRepository
@@ -141,6 +147,12 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("content.read-stream", content.readStream(...args)),
       verify: (...args: Parameters<ContentStoreService["verify"]>) =>
         publicOperation("content.verify", content.verify(...args))
+    },
+    deliveryGraph: {
+      read: (...args: Parameters<DeliveryGraphRepositoryService["read"]>) =>
+        publicOperation("delivery-graph.read", deliveryGraph.read(...args)),
+      write: (...args: Parameters<DeliveryGraphRepositoryService["write"]>) =>
+        publicOperation("delivery-graph.write", deliveryGraph.write(...args))
     },
     entities: {
       create: (...args: Parameters<EntityRepositoryService["create"]>) =>
@@ -264,6 +276,7 @@ export const persistenceLayerFromDatabase = (
           Layer.provide(foundation)
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
+        const deliveryGraph = DeliveryGraphRepository.layer
         const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
@@ -278,6 +291,7 @@ export const persistenceLayerFromDatabase = (
         const services = Layer.mergeAll(
           foundation,
           contentMetadata,
+          deliveryGraph,
           entities,
           events,
           people,

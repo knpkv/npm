@@ -66,8 +66,11 @@ export const EntityKind = Schema.Literals([
   "issue",
   "pull-request",
   "page",
+  // Kept for v1–v7 databases; new CodePipeline writes use the execution kind.
   "pipeline",
-  "deployment"
+  "pipeline-execution",
+  "deployment",
+  "time-entry"
 ])
 
 /** Decoded normalized entity category. */

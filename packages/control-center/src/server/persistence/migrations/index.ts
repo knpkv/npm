@@ -6,6 +6,7 @@ import { migration0004PluginRuntime } from "./0004_plugin_runtime.js"
 import { migration0005PluginConfiguration } from "./0005_plugin_configuration.js"
 import { migration0006PluginSyncPageEvidence } from "./0006_plugin_sync_page_evidence.js"
 import { migration0007DomainEvents } from "./0007_domain_events.js"
+import { migration0008DeliveryGraph } from "./0008_delivery_graph.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -18,7 +19,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 4, name: "plugin_runtime" },
   { id: 5, name: "plugin_configuration" },
   { id: 6, name: "plugin_sync_page_evidence" },
-  { id: 7, name: "domain_events" }
+  { id: 7, name: "domain_events" },
+  { id: 8, name: "delivery_graph" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -29,5 +31,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0004_plugin_runtime": migration0004PluginRuntime,
   "0005_plugin_configuration": migration0005PluginConfiguration,
   "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence,
-  "0007_domain_events": migration0007DomainEvents
+  "0007_domain_events": migration0007DomainEvents,
+  "0008_delivery_graph": migration0008DeliveryGraph
 })

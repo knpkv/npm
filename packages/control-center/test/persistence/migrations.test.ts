@@ -27,6 +27,7 @@ import { migration0003Auth } from "../../src/server/persistence/migrations/0003_
 import { migration0004PluginRuntime } from "../../src/server/persistence/migrations/0004_plugin_runtime.js"
 import { migration0005PluginConfiguration } from "../../src/server/persistence/migrations/0005_plugin_configuration.js"
 import { migration0006PluginSyncPageEvidence } from "../../src/server/persistence/migrations/0006_plugin_sync_page_evidence.js"
+import { migration0007DomainEvents } from "../../src/server/persistence/migrations/0007_domain_events.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
@@ -40,10 +41,14 @@ import {
 const expectedTables = [
   "content_blobs",
   "control_center_migrations",
+  "delivery_nodes",
   "domain_event_streams",
   "domain_events",
   "entities",
+  "entity_projection_revisions",
   "entity_revisions",
+  "evidence_claims",
+  "evidence_items",
   "pairing_codes",
   "person_identities",
   "persons",
@@ -57,6 +62,9 @@ const expectedTables = [
   "plugin_sync_streams",
   "quarantined_records",
   "recovery_audit_events",
+  "relationship_heads",
+  "relationship_revision_evidence",
+  "relationship_revisions",
   "release_revisions",
   "release_targets",
   "releases",
@@ -194,6 +202,16 @@ const versionSixLoader = LibsqlMigrator.fromRecord({
   "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence
 })
 
+const versionSevenLoader = LibsqlMigrator.fromRecord({
+  "0001_core_heads": migration0001Core,
+  "0002_integrity_blobs": migration0002Integrity,
+  "0003_auth": migration0003Auth,
+  "0004_plugin_runtime": migration0004PluginRuntime,
+  "0005_plugin_configuration": migration0005PluginConfiguration,
+  "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence,
+  "0007_domain_events": migration0007DomainEvents
+})
+
 const readMigrationLedger = Effect.fn("ControlCenterMigrationsTest.readMigrationLedger")(function*(
   config: PersistenceConfig
 ) {
@@ -292,7 +310,7 @@ const makeVersionSixArchive = Effect.fn("ControlCenterMigrationsTest.makeVersion
     path.dirname(config.blobRoot),
     "backups",
     "pre-migration",
-    "v6-to-v7"
+    `v6-to-v${EXPECTED_MIGRATIONS.at(-1)?.id ?? 0}`
   )
   const archives = (yield* fileSystem.readDirectory(backupRoot)).filter(
     (entry) => !entry.startsWith(".control-center-backup-incoming-")
@@ -339,6 +357,131 @@ describe("Control Center migrations", () => {
           name
         }))
       )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("upgrades version 7 without rewriting existing durable rows", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* LibsqlMigrator.run({
+          loader: versionSevenLoader,
+          table: MIGRATION_LEDGER_TABLE
+        })
+        yield* sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000081', 'Version Seven', 1,
+          '2026-07-15T09:00:00.000Z', '2026-07-15T09:00:00.000Z'
+        )`
+        yield* sql`INSERT INTO domain_event_streams (
+          workspace_id, next_cursor, pruned_through_cursor, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000081', 1, 0,
+          '2026-07-15T09:00:00.000Z'
+        )`
+        yield* sql`INSERT INTO plugin_connections (
+          workspace_id, plugin_connection_id, provider_id, display_name,
+          revision, is_enabled, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000081',
+          '01890f6f-6d6a-7cc0-98d2-000000000082', 'jira', 'Version Seven Jira',
+          1, 1, '2026-07-15T09:00:00.000Z', '2026-07-15T09:00:00.000Z'
+        )`
+        yield* sql`INSERT INTO entities (
+          workspace_id, entity_id, plugin_connection_id, provider_id,
+          vendor_immutable_id, entity_type, current_revision, created_at, updated_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000081',
+          '01890f6f-6d6a-7cc0-98d2-000000000083',
+          '01890f6f-6d6a-7cc0-98d2-000000000082', 'jira', 'V7-42', 'issue', 2,
+          '2026-07-15T09:00:00.000Z', '2026-07-15T09:05:00.000Z'
+        )`
+        yield* sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision,
+          normalization_schema_version, source_url, first_observed_at,
+          last_observed_at, synchronized_at, created_at
+        ) VALUES
+          (
+            '01890f6f-6d6a-7cc0-98d2-000000000081',
+            '01890f6f-6d6a-7cc0-98d2-000000000083', 1, 'v7-source-1', 1, NULL,
+            '2026-07-15T09:00:00.000Z', '2026-07-15T09:00:00.000Z',
+            '2026-07-15T09:01:00.000Z', '2026-07-15T09:01:00.000Z'
+          ),
+          (
+            '01890f6f-6d6a-7cc0-98d2-000000000081',
+            '01890f6f-6d6a-7cc0-98d2-000000000083', 2, 'v7-source-2', 1, NULL,
+            '2026-07-15T09:00:00.000Z', '2026-07-15T09:04:00.000Z',
+            '2026-07-15T09:05:00.000Z', '2026-07-15T09:05:00.000Z'
+          )`
+      }).pipe(
+        Effect.provide(
+          LibsqlClient.layer({
+            transformResultNames: snakeToCamel,
+            url: config.databaseUrl
+          })
+        ),
+        Effect.scoped
+      )
+
+      const snapshot = yield* Effect.gen(function*() {
+        const database = yield* Database
+        yield* database.sql`INSERT INTO entity_projection_revisions (
+          workspace_id, entity_id, projection_revision, source_entity_revision,
+          supersedes_projection_revision, projection_schema_version, entity_state,
+          display_key, title, extension_json, extension_digest, recorded_at
+        ) VALUES (
+          '01890f6f-6d6a-7cc0-98d2-000000000081',
+          '01890f6f-6d6a-7cc0-98d2-000000000083', 1, 2, NULL, 1, 'present',
+          'V7-42', 'Version seven issue', '{"_tag":"issue"}', ${"a".repeat(64)},
+          '2026-07-15T09:06:00.000Z'
+        )`
+        const graphRows = yield* database.sql`SELECT workspace_id FROM delivery_nodes`
+        const projectionRows = yield* database.sql<{
+          readonly projectionRevision: number
+          readonly sourceEntityRevision: number
+        }>`SELECT projection_revision AS projectionRevision,
+            source_entity_revision AS sourceEntityRevision
+          FROM entity_projection_revisions`
+        const ledger = yield* database.sql<{
+          readonly migrationId: number
+          readonly name: string
+        }>`SELECT migration_id AS migrationId, name
+          FROM ${database.sql(MIGRATION_LEDGER_TABLE)}
+          ORDER BY migration_id`
+        const streams = yield* database.sql<{
+          readonly nextCursor: number
+          readonly workspaceId: string
+        }>`SELECT workspace_id AS workspaceId, next_cursor AS nextCursor
+          FROM domain_event_streams`
+        const workspaces = yield* database.sql<{
+          readonly displayName: string
+          readonly workspaceId: string
+        }>`SELECT workspace_id AS workspaceId, display_name AS displayName
+          FROM workspaces`
+        return { graphRows, ledger, projectionRows, streams, workspaces }
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+      assert.deepStrictEqual(snapshot.graphRows, [])
+      assert.deepStrictEqual(snapshot.projectionRows, [{
+        projectionRevision: 1,
+        sourceEntityRevision: 2
+      }])
+      assert.deepStrictEqual(
+        snapshot.ledger,
+        EXPECTED_MIGRATIONS.map(({ id, name }) => ({
+          migrationId: id,
+          name
+        }))
+      )
+      assert.deepStrictEqual(snapshot.streams, [{
+        nextCursor: 1,
+        workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000081"
+      }])
+      assert.deepStrictEqual(snapshot.workspaces, [{
+        displayName: "Version Seven",
+        workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000081"
+      }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades the exact previous ledger by appending later migrations", () =>
@@ -827,7 +970,15 @@ describe("Control Center migrations", () => {
           FROM sqlite_master
           WHERE type = 'table' AND name IN ('content_blobs', 'quarantined_records')
           ORDER BY name`
-        return { coreRows, integrityTables, ledger }
+        const releaseTargetLifecycle = yield* database.sql<{
+          readonly endedAt: string | null
+          readonly lifecycleKind: string
+        }>`SELECT lifecycle_kind AS lifecycleKind, ended_at AS endedAt
+          FROM release_targets
+          WHERE workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000001'
+            AND release_id = '01890f6f-6d6a-7cc0-98d2-000000000003'
+            AND environment_id = '01890f6f-6d6a-7cc0-98d2-000000000006'`
+        return { coreRows, integrityTables, ledger, releaseTargetLifecycle }
       }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
 
       const ledgerAfterReopen = yield* Effect.gen(function*() {
@@ -847,6 +998,10 @@ describe("Control Center migrations", () => {
         { name: "content_blobs" },
         { name: "quarantined_records" }
       ])
+      assert.deepStrictEqual(afterUpgrade.releaseTargetLifecycle, [{
+        endedAt: null,
+        lifecycleKind: "active"
+      }])
       assert.deepStrictEqual(
         afterUpgrade.ledger,
         EXPECTED_MIGRATIONS.map(({ id, name }) => ({

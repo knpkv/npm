@@ -78,6 +78,7 @@ const AppendReleaseRequest = Schema.Struct({
 })
 
 const releaseJson = Schema.fromJsonString(Release)
+const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
 const encodeRelease = Schema.encodeEffect(releaseJson)
 const decodeRelease = Schema.decodeUnknownResult(releaseJson)
 
@@ -140,9 +141,15 @@ const makeReleaseRepository = Effect.gen(function*() {
     }),
     execute: ({ createdAt, environmentId, releaseId, workspaceId }) =>
       sql`INSERT INTO release_targets (
-            workspace_id, release_id, environment_id, created_at
-          ) VALUES (${workspaceId}, ${releaseId}, ${environmentId}, ${createdAt})
-          ON CONFLICT (workspace_id, release_id, environment_id) DO NOTHING`
+            workspace_id, release_id, environment_id, created_at,
+            lifecycle_kind, ended_at
+          ) VALUES (
+            ${workspaceId}, ${releaseId}, ${environmentId}, ${createdAt},
+            'active', NULL
+          )
+          ON CONFLICT (workspace_id, release_id, environment_id) DO UPDATE SET
+            lifecycle_kind = 'active',
+            ended_at = NULL`
   })
 
   const replaceTargets = Effect.fn("ReleaseRepository.replaceTargets")(function*(
@@ -171,22 +178,27 @@ const makeReleaseRepository = Effect.gen(function*() {
       sql`SELECT environment_id AS environmentId
           FROM release_targets
           WHERE workspace_id = ${workspaceId}
-            AND release_id = ${releaseId}`
+            AND release_id = ${releaseId}
+            AND lifecycle_kind = 'active'`
   })
 
-  const deleteObsoleteTargets = Effect.fn("ReleaseRepository.deleteObsoleteTargets")(function*(
+  const endObsoleteTargets = Effect.fn("ReleaseRepository.endObsoleteTargets")(function*(
     workspaceId: WorkspaceId,
     release: Release
   ) {
+    const endedAt = encodeTimestamp(release.updatedAt)
     const desired = new Set(release.targetEnvironmentIds)
     const existing = yield* listTargetHeads({ workspaceId, releaseId: release.id })
     yield* Effect.forEach(
       existing.filter(({ environmentId }) => !desired.has(environmentId)),
       ({ environmentId }) =>
-        sql`DELETE FROM release_targets
+        sql`UPDATE release_targets
+            SET lifecycle_kind = 'ended',
+                ended_at = ${endedAt}
             WHERE workspace_id = ${workspaceId}
               AND release_id = ${release.id}
-              AND environment_id = ${environmentId}`,
+              AND environment_id = ${environmentId}
+              AND lifecycle_kind = 'active'`,
       { discard: true }
     )
   })
@@ -274,6 +286,7 @@ const makeReleaseRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     release: Release
   ) {
+    const updatedAt = encodeTimestamp(release.updatedAt)
     const projected = release.roleAssignments.filter(
       ({ scope }) => scope._tag === "release" || scope._tag === "environment"
     )
@@ -282,9 +295,15 @@ const makeReleaseRepository = Effect.gen(function*() {
     yield* Effect.forEach(
       existing.filter(({ assignmentId }) => !desiredIds.has(assignmentId)),
       ({ assignmentId }) =>
-        sql`DELETE FROM role_assignments
+        sql`UPDATE role_assignments
+            SET lifecycle_kind = 'ended',
+                ended_at = ${updatedAt},
+                revoked_at = NULL,
+                revision = revision + 1,
+                updated_at = ${updatedAt}
             WHERE workspace_id = ${workspaceId}
-              AND assignment_id = ${assignmentId}`,
+              AND assignment_id = ${assignmentId}
+              AND lifecycle_kind = 'active'`,
       { discard: true }
     )
     yield* Effect.forEach(
@@ -542,7 +561,7 @@ const makeReleaseRepository = Effect.gen(function*() {
           })
           yield* replaceTargets(workspaceId, release)
           yield* replaceRoleAssignments(workspaceId, release)
-          yield* deleteObsoleteTargets(workspaceId, release)
+          yield* endObsoleteTargets(workspaceId, release)
         }).pipe(
           mapAlreadyExists({ workspaceId, recordKind: "release", recordKey: release.id }),
           mapPersistenceOperation("release.create")
@@ -648,7 +667,7 @@ const makeReleaseRepository = Effect.gen(function*() {
           })
           yield* replaceTargets(workspaceId, release)
           yield* replaceRoleAssignments(workspaceId, release)
-          yield* deleteObsoleteTargets(workspaceId, release)
+          yield* endObsoleteTargets(workspaceId, release)
         }).pipe(mapPersistenceOperation("release.append"))
       )
       return yield* get(workspaceId, release.id)

@@ -64,6 +64,30 @@ export const RoleAssignmentId = canonicalUuid7("RoleAssignmentId")
 /** Decoded role-assignment identifier. */
 export type RoleAssignmentId = typeof RoleAssignmentId.Type
 
+/** Canonical identifier of one delivery-graph relationship. */
+export const RelationshipId = canonicalUuid7("RelationshipId")
+
+/** Decoded delivery-graph relationship identifier. */
+export type RelationshipId = typeof RelationshipId.Type
+
+/** Canonical identifier of one immutable evidence claim. */
+export const EvidenceClaimId = canonicalUuid7("EvidenceClaimId")
+
+/** Decoded immutable evidence-claim identifier. */
+export type EvidenceClaimId = typeof EvidenceClaimId.Type
+
+/** Canonical identifier of one immutable evidence observation envelope. */
+export const EvidenceId = canonicalUuid7("EvidenceId")
+
+/** Decoded immutable evidence observation identifier. */
+export type EvidenceId = typeof EvidenceId.Type
+
+/** Canonical identifier of one resolved or explicitly missing graph node. */
+export const GraphNodeId = canonicalUuid7("GraphNodeId")
+
+/** Decoded graph-node identifier. */
+export type GraphNodeId = typeof GraphNodeId.Type
+
 /** Workspace-local monotonic position used for durable event replay. */
 export const EventCursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.brand("EventCursor"))
 

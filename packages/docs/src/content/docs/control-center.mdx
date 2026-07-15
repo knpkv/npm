@@ -22,6 +22,14 @@ The browser sends a bounded prompt and local thread history to a typed, CSRF-pro
 
 Release threads currently live in the browser tab. Codex and Claude invocations are ephemeral; their internal session identifiers are not product persistence.
 
+## Delivery graph
+
+Control Center stores delivery traceability as a normalized graph rather than matching Jira keys, branch names, or labels in the browser. Exact source revisions become immutable entity projections. Releases, environments, and provider entities become explicit nodes, including intentionally missing nodes when a required relationship has not been resolved.
+
+Directional relationships connect Jira work, pull requests, pipeline executions, deployments, pages, and time entries. Every relationship revision records lifecycle, confidence, provenance, actor, release or environment scope, and references to immutable evidence claims. Evidence observations have independent verification, validity, and retention metadata, so an expired observation can stop proving readiness without deleting its audit history.
+
+Server workflows use the durable module through two operations: a bounded atomic `write` and a tagged `read`. SQL rows, digests, table joins, and compatibility handling for older pipeline records remain private implementation details. Browser views consume later authenticated projections; they do not receive raw persistence access.
+
 ## Configure local providers
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:
