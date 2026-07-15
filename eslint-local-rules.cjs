@@ -1,3 +1,5 @@
+const path = require("node:path")
+
 const staticPropertyName = (node) => {
   if (node.type === "Identifier") return node.name
   if (node.type === "Literal" && typeof node.value === "string") return node.value
@@ -136,17 +138,16 @@ const hasIsolatedChildEnvironment = (context, options, call) => {
 
 const CHILD_PROCESS_MODULE = "effect/unstable/process/ChildProcess"
 const CHILD_PROCESS_BARREL = "effect/unstable/process"
+const COMMONJS_LOADER_MODULES = new Set(["module", "node:module"])
 const AGENT_COMMAND_SEAMS = new Map([
-  ["packages/ai-claude/src/runner.ts", { importKind: "named", localName: "ChildProcess" }],
-  ["packages/ai-codex/src/internal/process.ts", { importKind: "namespace", localName: "ChildProcess" }]
+  [path.resolve(__dirname, "packages/ai-claude/src/runner.ts"), { importKind: "named", localName: "ChildProcess" }],
+  [
+    path.resolve(__dirname, "packages/ai-codex/src/internal/process.ts"),
+    { importKind: "namespace", localName: "ChildProcess" }
+  ]
 ])
 
-const commandSeamFor = (context) => {
-  const filename = context.physicalFilename.replaceAll("\\", "/")
-  const cwd = context.cwd.replaceAll("\\", "/").replace(/\/$/, "")
-  const relativeFilename = filename.startsWith(`${cwd}/`) ? filename.slice(cwd.length + 1) : filename
-  return AGENT_COMMAND_SEAMS.get(relativeFilename)
-}
+const commandSeamFor = (context) => AGENT_COMMAND_SEAMS.get(path.normalize(context.physicalFilename))
 
 const staticImportExpressionSource = (source) => {
   if (source.type === "Literal" && typeof source.value === "string") return source.value
@@ -538,6 +539,12 @@ module.exports = {
 
       return {
         ImportDeclaration(node) {
+          if (COMMONJS_LOADER_MODULES.has(node.source.value)) {
+            for (const specifier of node.specifiers) {
+              if (node.importKind !== "type" && specifier.importKind !== "type") report(specifier)
+            }
+            return
+          }
           if (node.source.value !== CHILD_PROCESS_MODULE && node.source.value !== CHILD_PROCESS_BARREL) return
           const variables = context.sourceCode.getDeclaredVariables(node)
           for (const specifier of node.specifiers) {
@@ -553,17 +560,32 @@ module.exports = {
         ExportAllDeclaration(node) {
           if (
             node.exportKind !== "type" &&
-            (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL)
+            (node.source.value === CHILD_PROCESS_MODULE ||
+              node.source.value === CHILD_PROCESS_BARREL ||
+              COMMONJS_LOADER_MODULES.has(node.source.value))
           ) {
             report(node)
           }
         },
         ExportNamedDeclaration(node) {
-          if (isSensitiveChildProcessExport(node)) report(node)
+          if (
+            isSensitiveChildProcessExport(node) ||
+            (COMMONJS_LOADER_MODULES.has(node.source?.value) &&
+              node.specifiers.some((specifier) => !isTypeOnlyExport(node, specifier)))
+          ) {
+            report(node)
+          }
         },
         ImportExpression(node) {
           const source = staticImportExpressionSource(node.source)
-          if (source === undefined || source === CHILD_PROCESS_MODULE || source === CHILD_PROCESS_BARREL) report(node)
+          if (
+            source === undefined ||
+            source === CHILD_PROCESS_MODULE ||
+            source === CHILD_PROCESS_BARREL ||
+            COMMONJS_LOADER_MODULES.has(source)
+          ) {
+            report(node)
+          }
         },
         "Program:exit"() {
           for (const binding of approvedBindings) {

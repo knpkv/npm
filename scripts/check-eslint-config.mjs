@@ -1,4 +1,5 @@
 import { ESLint } from "eslint"
+import { fileURLToPath, URL } from "node:url"
 import fixture from "./fixtures/eslint/invalid-component.mjs"
 
 const eslint = new ESLint()
@@ -20,8 +21,8 @@ for (const filePath of fixturePaths) {
   }
 }
 
-const assertRuleDiagnostics = async ({ code, expected, filePath, ruleId }) => {
-  const [result] = await eslint.lintText(code, { filePath, warnIgnored: true })
+const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, filePath, ruleId }) => {
+  const [result] = await eslintInstance.lintText(code, { filePath, warnIgnored: true })
   if (result === undefined) throw new Error(`ESLint returned no result for ${filePath}`)
   const diagnostics = result.messages.filter((message) => message.ruleId === ruleId)
   if (diagnostics.length !== expected) {
@@ -106,8 +107,11 @@ await assertRuleDiagnostics({
     const templateLoaded = import(\`effect/unstable/process/ChildProcess\`)
     const moduleName = "effect/unstable/process/ChildProcess"
     const computedLoaded = import(moduleName)
+    import { createRequire as makeRequire } from "node:module"
+    const require = makeRequire(import.meta.url)
+    const required = require("effect/unstable/process/ChildProcess")
   `,
-  expected: 8,
+  expected: 9,
   filePath: "packages/ai-codex/src/eslint-agent-environment-invalid.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
@@ -123,6 +127,58 @@ await assertRuleDiagnostics({
   `,
   expected: 1,
   filePath: "packages/ai-codex/src/tmp/packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+const aiCodexEslint = new ESLint({
+  cwd: fileURLToPath(new URL("../packages/ai-codex/", import.meta.url))
+})
+const aiClaudeEslint = new ESLint({
+  cwd: fileURLToPath(new URL("../packages/ai-claude/", import.meta.url))
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+  `,
+  eslintInstance: aiCodexEslint,
+  expected: 0,
+  filePath: "src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+  `,
+  eslintInstance: aiCodexEslint,
+  expected: 1,
+  filePath: "src/tmp/packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const makeCommand = (options) =>
+      ChildProcess.make("claude", ["--print"], {
+        env: options.environment,
+        extendEnv: false
+      })
+  `,
+  eslintInstance: aiClaudeEslint,
+  expected: 0,
+  filePath: "src/runner.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
@@ -254,6 +310,7 @@ await assertRuleDiagnostics({
     export type { Command } from "effect/unstable/process/ChildProcess"
     export type * from "effect/unstable/process/ChildProcess"
     export { ChildProcessSpawner } from "effect/unstable/process"
+    import type { Module } from "node:module"
   `,
   expected: 0,
   filePath: "packages/ai-codex/src/type-exports.ts",
