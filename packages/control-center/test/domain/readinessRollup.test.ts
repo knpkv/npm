@@ -364,10 +364,63 @@ describe("release readiness roll-up", () => {
         }]
       })
     )
+    const injectedBlocker = {
+      code: "check-failed",
+      subject: { _tag: "fact", factId: "check.main" },
+      evidenceIds: ready.environments[0].evidenceIds.slice(0, 1)
+    }
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        environments: ready.environments.map((environment, index) =>
+          index === 0 ? { ...environment, blockers: [injectedBlocker] } : environment
+        ),
+        blockers: [injectedBlocker]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        environments: ready.environments.map((environment, index) =>
+          index === 0
+            ? {
+              ...environment,
+              stages: {
+                ...environment.stages,
+                build: {
+                  ...environment.stages.build,
+                  factIds: [
+                    ...environment.stages.build.factIds,
+                    ...environment.stages.build.factIds
+                  ]
+                }
+              }
+            }
+            : environment
+        )
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        environments: ready.environments.map((environment, index) =>
+          index === 0
+            ? {
+              ...environment,
+              sourceFreshness: environment.sourceFreshness.map((source) => ({
+                ...source,
+                evidenceIds: [...source.evidenceIds, ...source.evidenceIds]
+              }))
+            }
+            : environment
+        )
+      })
+    )
 
     const blocked = Schema.encodeSync(ReleaseReadinessAssessment)(
       rollup(environmentAssessment(0, "failed"), environmentAssessment(1))
     )
+    assert.doesNotThrow(() => Schema.decodeUnknownSync(ReleaseReadinessAssessment)(blocked))
     assert.throws(() =>
       Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
         ...blocked,

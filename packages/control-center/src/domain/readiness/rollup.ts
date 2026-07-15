@@ -33,25 +33,31 @@ export const rollUpReleaseReadiness = (
       assessmentId: first.assessmentId,
       environmentId: first.candidate.scope.environmentId,
       candidateDigest: first.candidate.digest,
+      inputComplete: first.inputComplete,
+      facts: first.facts,
       nextEvaluationAt: first.nextEvaluationAt,
       verdict: first.verdict,
       stages: first.stages,
       blockers: first.blockers,
       warnings: first.warnings,
       gaps: first.gaps,
-      sourceFreshness: first.sourceFreshness
+      sourceFreshness: first.sourceFreshness,
+      evidenceIds: first.evidenceIds
     },
     ...environments.filter((assessment) => assessment !== first).map((assessment) => ({
       assessmentId: assessment.assessmentId,
       environmentId: assessment.candidate.scope.environmentId,
       candidateDigest: assessment.candidate.digest,
+      inputComplete: assessment.inputComplete,
+      facts: assessment.facts,
       nextEvaluationAt: assessment.nextEvaluationAt,
       verdict: assessment.verdict,
       stages: assessment.stages,
       blockers: assessment.blockers,
       warnings: assessment.warnings,
       gaps: assessment.gaps,
-      sourceFreshness: assessment.sourceFreshness
+      sourceFreshness: assessment.sourceFreshness,
+      evidenceIds: assessment.evidenceIds
     }))
   ]
   const findings = deriveReleaseReadinessFindings(environmentSummaries)

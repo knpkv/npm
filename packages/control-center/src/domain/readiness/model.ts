@@ -645,14 +645,56 @@ export const EnvironmentReadinessSummary = Schema.Struct({
   assessmentId: ReadinessAssessmentId,
   environmentId: EnvironmentId,
   candidateDigest: ReadinessCandidateDigest,
+  inputComplete: Schema.Boolean,
+  facts: Schema.Array(ReadinessFactEvaluation).check(Schema.isMaxLength(512)),
   nextEvaluationAt: Schema.NullOr(UtcTimestamp),
   verdict: ReadinessVerdict,
   stages: ReadinessStages,
   blockers: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
   warnings: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
   gaps: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
-  sourceFreshness: Schema.Array(ReadinessSourceSummary).check(Schema.isMaxLength(512))
-})
+  sourceFreshness: Schema.Array(ReadinessSourceSummary).check(Schema.isMaxLength(512)),
+  evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(MAX_READINESS_EVIDENCE_REFERENCES))
+}).check(
+  Schema.makeFilter(({ facts }) => isCanonicalStrings(facts.map(({ definition }) => definition.factId)), {
+    expected: "an environment readiness summary to have canonical unique facts"
+  }),
+  Schema.makeFilter(({ blockers, facts, gaps, inputComplete, warnings }) => {
+    const expected = deriveReadinessFindings(facts, inputComplete)
+    return sameOrderedStrings(blockers.map(readinessFindingKey), expected.blockers.map(readinessFindingKey)) &&
+      sameOrderedStrings(warnings.map(readinessFindingKey), expected.warnings.map(readinessFindingKey)) &&
+      sameOrderedStrings(gaps.map(readinessFindingKey), expected.gaps.map(readinessFindingKey))
+  }, { expected: "environment readiness summary findings to match retained facts" }),
+  Schema.makeFilter(({ evidenceIds, facts }) => sameOrderedStrings(evidenceIds, factEvidenceIds(facts)), {
+    expected: "environment readiness summary evidence to match retained facts"
+  }),
+  Schema.makeFilter(({ facts, stages }) => readinessStagesAreEqual(stages, deriveReadinessStages(facts)), {
+    expected: "environment readiness summary stages to match retained facts"
+  }),
+  Schema.makeFilter(({ facts, sourceFreshness }) => {
+    const expected = deriveReadinessSourceSummaries(facts)
+    return sourceFreshness.length === expected.length && sourceFreshness.every((summary, index) => {
+      const item = expected[index]
+      return item !== undefined &&
+        summary.pluginConnectionId === item.pluginConnectionId &&
+        summary.freshness === item.freshness &&
+        summary.health === item.health &&
+        sameOrderedStrings(summary.evidenceIds, item.evidenceIds)
+    })
+  }, { expected: "environment readiness summary sources to match retained facts" }),
+  Schema.makeFilter(({ facts, nextEvaluationAt }) => {
+    const expected = deriveReadinessNextEvaluationAt(facts)
+    return expected === null || nextEvaluationAt === null
+      ? expected === nextEvaluationAt
+      : DateTime.Order(expected, nextEvaluationAt) === 0
+  }, { expected: "environment readiness summary reevaluation time to match retained facts" }),
+  Schema.makeFilter(canonicalAssessmentCollections, {
+    expected: "environment readiness summary collections to be canonical and evidence-bound"
+  }),
+  Schema.makeFilter((summary) => summary.verdict === deriveEnvironmentReadinessVerdict(summary), {
+    expected: "environment readiness summary verdict to match retained facts, findings, and stages"
+  })
+)
 
 /** Immutable release assessment rolled up from current target environments. */
 export const ReleaseReadinessAssessment = Schema.Struct({
@@ -700,11 +742,7 @@ export const ReleaseReadinessAssessment = Schema.Struct({
   Schema.makeFilter(({ environments, evidenceIds }) =>
     sameOrderedStrings(
       evidenceIds,
-      sortedReadinessUnique(environments.flatMap(({ stages }) => [
-        ...stages.build.evidenceIds,
-        ...stages.verify.evidenceIds,
-        ...stages.production.evidenceIds
-      ]))
+      sortedReadinessUnique(environments.flatMap(({ evidenceIds }) => evidenceIds))
     ), { expected: "release readiness evidence to match retained environment summaries" }),
   Schema.makeFilter(canonicalAssessmentCollections, {
     expected: "release readiness collections to be canonical and evidence-bound"
