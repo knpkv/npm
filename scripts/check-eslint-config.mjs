@@ -103,9 +103,26 @@ await assertRuleDiagnostics({
     }
     export { ChildProcess } from "effect/unstable/process"
     const dynamicallyLoaded = import("effect/unstable/process/ChildProcess")
+    const templateLoaded = import(\`effect/unstable/process/ChildProcess\`)
+    const moduleName = "effect/unstable/process/ChildProcess"
+    const computedLoaded = import(moduleName)
   `,
-  expected: 6,
+  expected: 8,
   filePath: "packages/ai-codex/src/eslint-agent-environment-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/tmp/packages/ai-codex/src/internal/process.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
@@ -141,6 +158,7 @@ await assertRuleDiagnostics({
         extendEnv: false,
         stdout: "pipe"
       })
+    const localHelper = import("./known-local-helper.js")
   `,
   expected: 0,
   filePath: "packages/ai-codex/src/internal/process.ts",

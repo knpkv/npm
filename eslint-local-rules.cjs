@@ -116,9 +116,16 @@ const AGENT_COMMAND_SEAMS = new Map([
 ])
 
 const commandSeamFor = (context) => {
-  const filename = context.filename.replaceAll("\\", "/")
-  for (const [suffix, seam] of AGENT_COMMAND_SEAMS) {
-    if (filename.endsWith(suffix)) return seam
+  const filename = context.physicalFilename.replaceAll("\\", "/")
+  const cwd = context.cwd.replaceAll("\\", "/").replace(/\/$/, "")
+  const relativeFilename = filename.startsWith(`${cwd}/`) ? filename.slice(cwd.length + 1) : filename
+  return AGENT_COMMAND_SEAMS.get(relativeFilename)
+}
+
+const staticImportExpressionSource = (source) => {
+  if (source.type === "Literal" && typeof source.value === "string") return source.value
+  if (source.type === "TemplateLiteral" && source.expressions.length === 0) {
+    return source.quasis[0]?.value.cooked
   }
   return undefined
 }
@@ -508,12 +515,8 @@ module.exports = {
           if (node.source?.value === CHILD_PROCESS_MODULE || node.source?.value === CHILD_PROCESS_BARREL) report(node)
         },
         ImportExpression(node) {
-          if (
-            node.source.type === "Literal" &&
-            (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL)
-          ) {
-            report(node)
-          }
+          const source = staticImportExpressionSource(node.source)
+          if (source === undefined || source === CHILD_PROCESS_MODULE || source === CHILD_PROCESS_BARREL) report(node)
         },
         "Program:exit"() {
           for (const binding of approvedBindings) {
