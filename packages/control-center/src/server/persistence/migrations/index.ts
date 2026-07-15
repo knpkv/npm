@@ -15,6 +15,7 @@ import { migration0013GovernedActionExecution } from "./0013_governed_action_exe
 import { migration0014GovernedActionActiveLease } from "./0014_governed_action_active_lease.js"
 import { migration0015GovernedActionIdempotencyRecovery } from "./0015_governed_action_idempotency_recovery.js"
 import { migration0016PluginRuntimeAuthority } from "./0016_plugin_runtime_authority.js"
+import { migration0017GovernedActionPendingOutcome } from "./0017_governed_action_pending_outcome.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -36,7 +37,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 13, name: "governed_action_execution" },
   { id: 14, name: "governed_action_active_lease" },
   { id: 15, name: "governed_action_idempotency_recovery" },
-  { id: 16, name: "plugin_runtime_authority" }
+  { id: 16, name: "plugin_runtime_authority" },
+  { id: 17, name: "governed_action_pending_outcome" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -56,5 +58,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0013_governed_action_execution": migration0013GovernedActionExecution,
   "0014_governed_action_active_lease": migration0014GovernedActionActiveLease,
   "0015_governed_action_idempotency_recovery": migration0015GovernedActionIdempotencyRecovery,
-  "0016_plugin_runtime_authority": migration0016PluginRuntimeAuthority
+  "0016_plugin_runtime_authority": migration0016PluginRuntimeAuthority,
+  "0017_governed_action_pending_outcome": migration0017GovernedActionPendingOutcome
 })

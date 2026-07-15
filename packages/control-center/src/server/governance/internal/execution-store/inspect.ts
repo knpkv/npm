@@ -16,6 +16,7 @@ import type {
   GovernedActionExecutionReference
 } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
+import { makeGovernedActionExecutionPendingDispatchFolder } from "./pending-dispatch.js"
 import { issueGovernedActionPreparationToken } from "./tokens.js"
 
 const PREPARATION_LIFETIME_SECONDS = 30
@@ -30,6 +31,7 @@ const earliest = (left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp =>
   DateTime.Order(left, right) <= 0 ? left : right
 
 const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
+  if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
   if (Predicate.isTagged("RecordNotFoundError")(failure)) {
     return new GovernedActionExecutionStoreError({ operation: "inspect", reason: "not-found" })
   }
@@ -51,10 +53,15 @@ export const makeGovernedActionExecutionInspect = Effect.gen(function*() {
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
+  const pendingDispatch = yield* makeGovernedActionExecutionPendingDispatchFolder
 
   const inspect = Effect.fn("GovernedActionExecutionInspect.inspect")(function*(
     reference: GovernedActionExecutionReference
   ) {
+    const foldedPending = yield* pendingDispatch.foldPending(reference)
+    if (foldedPending !== null) {
+      return { _tag: "inactive", state: foldedPending } satisfies GovernedActionExecutionPlan
+    }
     return yield* transaction.transact(
       "governed-action.execution-inspect",
       Effect.gen(function*() {

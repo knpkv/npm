@@ -31,7 +31,11 @@ import {
   GovernedActionTransitionV1,
   type GovernedActionTransitionV1 as GovernedActionTransition
 } from "../../domain/governedAction/stateMachine.js"
-import { PluginActionPayloadDigest } from "../../domain/plugins/actions.js"
+import {
+  PluginActionDispatchResultV1,
+  type PluginActionDispatchResultV1 as PluginActionDispatchResult,
+  PluginActionPayloadDigest
+} from "../../domain/plugins/actions.js"
 import type { PluginPayloadJson } from "../../domain/plugins/bounds.js"
 
 /** Bounded failure while encoding or hashing governed-action authority. */
@@ -225,6 +229,7 @@ const digestCanonicalJson = Effect.fn("GovernedActionDigests.digestCanonicalJson
 })
 
 const encodeCommand = Schema.encodeEffect(GovernedActionTransitionCommand)
+const encodeDispatchResult = Schema.encodeEffect(PluginActionDispatchResultV1)
 const encodeEvidence = Schema.encodeEffect(GovernedActionEvidenceSet)
 const encodeEnvelope = Schema.encodeEffect(GovernedActionEnvelopeMaterialV1)
 const encodePolicyEvaluation = Schema.encodeEffect(GovernedActionPolicyEvaluationV1)
@@ -236,6 +241,30 @@ const decodeJson = Effect.fn("GovernedActionDigests.decodeJson")(function*(value
   return yield* Schema.decodeUnknownEffect(Schema.Json)(value).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
+})
+
+/** Canonical immutable representation of one immediate provider outcome. */
+export interface EncodedGovernedActionDispatchOutcome {
+  readonly outcomeDigest: string
+  readonly outcomeJson: string
+}
+
+/** Encode and hash the exact versioned provider result retained by the durable execution inbox. */
+export const encodeGovernedActionDispatchOutcome = Effect.fn(
+  "GovernedActionDigests.dispatchOutcome"
+)(function*(result: PluginActionDispatchResult): Effect.fn.Return<
+  EncodedGovernedActionDispatchOutcome,
+  GovernedActionDigestError,
+  Crypto.Crypto
+> {
+  const encoded = yield* encodeDispatchResult(result).pipe(
+    Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
+  )
+  const json = yield* decodeJson(encoded)
+  return {
+    outcomeDigest: yield* digestCanonicalJson(json),
+    outcomeJson: canonicalizeGovernedActionJson(json)
+  }
 })
 
 /** Hash one bounded provider payload independently of object insertion order. */

@@ -126,6 +126,7 @@ export interface GovernedActionExecutionStoreV1 {
     readonly preparationToken: GovernedActionPreparationToken
     readonly preflight: BlockedPluginActionPreflightV1
     readonly observedAt: UtcTimestamp
+    readonly scope: PluginRuntimeScope
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>
   readonly recordDispatch: (input: {
     readonly permitToken: GovernedActionPermitToken

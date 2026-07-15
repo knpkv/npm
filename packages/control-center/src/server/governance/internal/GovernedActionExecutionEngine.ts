@@ -120,7 +120,8 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
           const state = yield* store.recordBlocked({
             preparationToken: preparation.preparationToken,
             preflight,
-            observedAt
+            observedAt,
+            scope: preparation.scope
           })
           return { _tag: "advanced", state } satisfies GovernedActionExecutionResult
         }
