@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, Fiber, Layer, Sink, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Sink, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -10,7 +10,9 @@ const fakeProcessLayer = (
   stdout: Stream.Stream<Uint8Array>,
   exitCode: Effect.Effect<ChildProcessSpawner.ExitCode> = Effect.succeed(ChildProcessSpawner.ExitCode(0)),
   options?: {
+    readonly kills?: Array<"killed">
     readonly releases?: Array<"released">
+    readonly running?: { value: boolean }
     readonly stderr?: Stream.Stream<Uint8Array>
   }
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
@@ -23,8 +25,12 @@ const fakeProcessLayer = (
         exitCode,
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
+        isRunning: Effect.sync(() => options?.running?.value ?? false),
+        kill: () =>
+          Effect.sync(() => {
+            if (options?.running !== undefined) options.running.value = false
+            options?.kills?.push("killed")
+          }),
         pid: ChildProcessSpawner.ProcessId(42),
         reref: Effect.void,
         stderr: options?.stderr ?? Stream.empty,
@@ -32,17 +38,27 @@ const fakeProcessLayer = (
         stdout,
         unref: Effect.succeed(Effect.void)
       })
-      const acquire = Effect.succeed(handle)
+      const acquire = Effect.sync(() => {
+        if (options?.running !== undefined) options.running.value = true
+        return handle
+      })
       return options?.releases === undefined
         ? acquire
         : Effect.acquireRelease(
           acquire,
-          () => Effect.sync(() => options.releases?.push("released"))
+          () =>
+            handle.isRunning.pipe(
+              Effect.flatMap((running) => running ? handle.kill() : Effect.void),
+              Effect.andThen(Effect.sync(() => options.releases?.push("released")))
+            )
         )
     })
   )
 
-const expectProviderPhase = (error: { readonly reason: unknown }, phase: "process" | "timeout") => {
+const expectProviderPhase = (
+  error: { readonly reason: unknown },
+  phase: "configuration" | "process" | "protocol" | "timeout"
+) => {
   expect(error.reason).toMatchObject({
     _tag: "InternalProviderError",
     metadata: { "codex-cli": { phase } }
@@ -102,6 +118,41 @@ describe("streamEvents", () => {
       expect(releases).toEqual(["released"])
     }))
 
+  it.effect("terminates and releases a live process when its consumer is interrupted", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const firstEvent = yield* Deferred.make<void>()
+      const kills: Array<"killed"> = []
+      const releases: Array<"released"> = []
+      const running = { value: false }
+      const stdout = Stream.make("{\"type\":\"turn.started\"}\n").pipe(
+        Stream.encodeText,
+        Stream.concat(Stream.never)
+      )
+      const fiber = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(calls, stdout, Effect.never, {
+          kills,
+          releases,
+          running,
+          stderr: Stream.never
+        })),
+        Stream.tap(() => Deferred.succeed(firstEvent, void 0)),
+        Stream.runDrain,
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* Deferred.await(firstEvent)
+      expect(running.value).toBe(true)
+      expect(kills).toEqual([])
+      expect(releases).toEqual([])
+
+      yield* Fiber.interrupt(fiber)
+
+      expect(running.value).toBe(false)
+      expect(kills).toEqual(["killed"])
+      expect(releases).toEqual(["released"])
+    }))
+
   it.effect("uses the isolated environment for native event streams", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -139,6 +190,23 @@ describe("streamEvents", () => {
       }
     }))
 
+  it.effect("maps environment provider failures before spawning native event streams", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const failingProvider = ConfigProvider.make(() =>
+        Effect.fail(new ConfigProvider.SourceError({ message: "environment unavailable" }))
+      )
+      const error = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(calls, Stream.empty)),
+        Stream.provide(ConfigProvider.layer(failingProvider)),
+        Stream.runDrain,
+        Effect.flip
+      )
+
+      expectProviderPhase(error, "configuration")
+      expect(calls).toHaveLength(0)
+    }))
+
   it.effect("accepts a multibyte prompt exactly at its UTF-8 byte limit", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -168,25 +236,34 @@ describe("streamEvents", () => {
   it.effect("rejects malformed JSONL through the typed error channel", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
-      const exit = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
-        Stream.provide(fakeProcessLayer(calls, Stream.make("not-json\n").pipe(Stream.encodeText))),
+      const releases: Array<"released"> = []
+      const error = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(
+          calls,
+          Stream.make("not-json\n").pipe(Stream.encodeText),
+          undefined,
+          { releases }
+        )),
         Stream.runDrain,
-        Effect.exit
+        Effect.flip
       )
 
-      expect(Exit.isFailure(exit)).toBe(true)
+      expectProviderPhase(error, "protocol")
+      expect(releases).toEqual(["released"])
     }))
 
   it.effect("rejects valid JSON that is not a Codex event", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
-      const exit = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
-        Stream.provide(fakeProcessLayer(calls, Stream.make("42\n").pipe(Stream.encodeText))),
+      const releases: Array<"released"> = []
+      const error = yield* streamEvents({ cwd: "/workspace", prompt: "Start" }).pipe(
+        Stream.provide(fakeProcessLayer(calls, Stream.make("42\n").pipe(Stream.encodeText), undefined, { releases })),
         Stream.runDrain,
-        Effect.exit
+        Effect.flip
       )
 
-      expect(Exit.isFailure(exit)).toBe(true)
+      expectProviderPhase(error, "protocol")
+      expect(releases).toEqual(["released"])
     }))
 
   it.effect("times out and releases a never-ending process", () =>
