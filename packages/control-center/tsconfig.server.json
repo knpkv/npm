@@ -11,5 +11,6 @@
     "types": ["node"]
   },
   "include": ["src/index.ts", "src/api", "src/domain", "src/server"],
-  "exclude": ["dist", "node_modules", "src/client"]
+  "exclude": ["dist", "node_modules", "src/client"],
+  "references": [{ "path": "../ai-claude/tsconfig.build.json" }, { "path": "../ai-codex/tsconfig.build.json" }]
 }
