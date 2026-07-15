@@ -1,0 +1,215 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Schema } from "effect"
+
+import {
+  assessEnvironmentReadiness,
+  EnvironmentReadinessAssessment,
+  EnvironmentReadinessEvaluationInput,
+  ReleaseReadinessAssessment,
+  ReleaseReadinessRollupInput,
+  rollUpReleaseReadiness
+} from "../../src/domain/readiness/index.js"
+
+const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000301"
+const releaseId = "01890f6f-6d6a-7cc0-98d2-000000000302"
+const pluginConnectionId = "01890f6f-6d6a-7cc0-98d2-000000000303"
+const firstEnvironmentId = "01890f6f-6d6a-7cc0-98d2-000000000304"
+const secondEnvironmentId = "01890f6f-6d6a-7cc0-98d2-000000000305"
+const environmentIds = [firstEnvironmentId, secondEnvironmentId]
+const firstAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000306"
+const secondAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000307"
+const releaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000308"
+const ruleDigest = `sha256:${"c".repeat(64)}`
+
+type BuildState = "succeeded" | "running" | "failed"
+type DeploymentState = "not-started" | "deploying" | "succeeded"
+
+const environmentAssessment = (
+  index: 0 | 1,
+  build: BuildState = "succeeded",
+  deployment: DeploymentState = "not-started"
+) => {
+  const environmentId = index === 0 ? firstEnvironmentId : secondEnvironmentId
+  const assessmentId = index === 0 ? firstAssessmentId : secondAssessmentId
+  const evidenceId = index === 0
+    ? "01890f6f-6d6a-7cc0-98d2-000000000311"
+    : "01890f6f-6d6a-7cc0-98d2-000000000312"
+  const evidence = (state: string) =>
+    state === "not-started" ? [] : [{
+      evidenceId,
+      source: { _tag: "plugin", pluginConnectionId, health: "healthy" },
+      freshness: "current",
+      validity: "valid",
+      reevaluateAt: index === 0 ? "2026-07-15T10:15:00.000Z" : "2026-07-15T10:30:00.000Z"
+    }]
+  const raw = {
+    assessmentId,
+    previousAssessmentId: null,
+    candidate: {
+      workspaceId,
+      releaseRevision: 4,
+      artifactRevision: "git:release-4",
+      digest: `sha256:${index === 0 ? "d".repeat(64) : "e".repeat(64)}`,
+      scope: { _tag: "environment", releaseId, environmentId }
+    },
+    rule: { ruleId: "delivery-v1", version: 1, digest: ruleDigest },
+    derivationVersion: 1,
+    evaluatedAt: "2026-07-15T10:00:00.000Z",
+    complete: true,
+    definitions: [
+      { factId: "build.main", kind: "execution", requirement: "required" },
+      { factId: "check.main", kind: "check", requirement: "required" },
+      { factId: "deploy.target", kind: "deployment", requirement: "advisory" }
+    ],
+    observations: [
+      {
+        factId: "build.main",
+        state: { _tag: "execution", status: build, progress: null },
+        evidence: evidence(build)
+      },
+      {
+        factId: "check.main",
+        state: { _tag: "check", status: "passed" },
+        evidence: evidence("passed")
+      },
+      {
+        factId: "deploy.target",
+        state: { _tag: "deployment", status: deployment, progress: null },
+        evidence: evidence(deployment)
+      }
+    ]
+  }
+  return assessEnvironmentReadiness(Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)(raw))
+}
+
+const rawRollup = (
+  first: EnvironmentReadinessAssessment,
+  second: EnvironmentReadinessAssessment
+) => ({
+  assessmentId: releaseAssessmentId,
+  previousAssessmentId: null,
+  candidate: {
+    workspaceId,
+    releaseRevision: 4,
+    artifactRevision: "git:release-4",
+    digest: `sha256:${"f".repeat(64)}`,
+    scope: { _tag: "release", releaseId }
+  },
+  evaluatedAt: "2026-07-15T10:01:00.000Z",
+  environments: [
+    Schema.encodeSync(EnvironmentReadinessAssessment)(first),
+    Schema.encodeSync(EnvironmentReadinessAssessment)(second)
+  ]
+})
+
+const rollup = (
+  first: EnvironmentReadinessAssessment,
+  second: EnvironmentReadinessAssessment
+) => rollUpReleaseReadiness(Schema.decodeUnknownSync(ReleaseReadinessRollupInput)(rawRollup(first, second)))
+
+describe("release readiness roll-up", () => {
+  it("uses deterministic cross-environment precedence", () => {
+    assert.strictEqual(
+      rollup(
+        environmentAssessment(0, "failed"),
+        environmentAssessment(1, "succeeded", "deploying")
+      ).verdict,
+      "blocked"
+    )
+    assert.strictEqual(
+      rollup(
+        environmentAssessment(0, "running"),
+        environmentAssessment(1, "succeeded", "deploying")
+      ).verdict,
+      "deploying"
+    )
+    assert.strictEqual(
+      rollup(
+        environmentAssessment(0, "succeeded", "succeeded"),
+        environmentAssessment(1)
+      ).verdict,
+      "ready"
+    )
+    assert.strictEqual(
+      rollup(
+        environmentAssessment(0, "succeeded", "succeeded"),
+        environmentAssessment(1, "succeeded", "succeeded")
+      ).verdict,
+      "shipped"
+    )
+  })
+
+  it("retains compact per-environment identity, evidence, and earliest reevaluation", () => {
+    const assessment = rollup(environmentAssessment(0), environmentAssessment(1))
+    const encoded = Schema.encodeSync(ReleaseReadinessAssessment)(assessment)
+
+    assert.deepEqual(assessment.environments.map(({ environmentId }) => String(environmentId)), [...environmentIds])
+    assert.strictEqual(encoded.nextEvaluationAt, "2026-07-15T10:15:00.000Z")
+    assert.lengthOf(assessment.evidenceIds, 2)
+    assert.doesNotThrow(() => Schema.decodeUnknownSync(ReleaseReadinessAssessment)(encoded))
+  })
+
+  it("is deterministic across child ordering", () => {
+    const first = environmentAssessment(0)
+    const second = environmentAssessment(1)
+    const forward = Schema.decodeUnknownSync(ReleaseReadinessRollupInput)(rawRollup(first, second))
+    const reverseRaw = rawRollup(first, second)
+    const reverse = Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+      ...reverseRaw,
+      environments: reverseRaw.environments.slice().reverse()
+    })
+
+    assert.deepEqual(
+      Schema.encodeSync(ReleaseReadinessAssessment)(rollUpReleaseReadiness(forward)),
+      Schema.encodeSync(ReleaseReadinessAssessment)(rollUpReleaseReadiness(reverse))
+    )
+  })
+
+  it("rejects duplicate environments and mixed release or rule provenance", () => {
+    const first = environmentAssessment(0)
+    const second = environmentAssessment(1)
+    const raw = rawRollup(first, second)
+    const encodedFirst = Schema.encodeSync(EnvironmentReadinessAssessment)(first)
+    const encodedSecond = Schema.encodeSync(EnvironmentReadinessAssessment)(second)
+
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        environments: [encodedFirst, encodedFirst]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        environments: [
+          encodedFirst,
+          {
+            ...encodedSecond,
+            candidate: {
+              ...encodedSecond.candidate,
+              scope: { ...encodedSecond.candidate.scope, releaseId: environmentIds[0] }
+            }
+          }
+        ]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        environments: [encodedFirst, { ...encodedSecond, derivationVersion: 2 }]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        candidate: { ...raw.candidate, releaseRevision: 5 }
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        evaluatedAt: "2026-07-15T09:59:59.999Z"
+      })
+    )
+  })
+})

@@ -82,6 +82,12 @@ export const EvidenceId = canonicalUuid7("EvidenceId")
 /** Decoded immutable evidence observation identifier. */
 export type EvidenceId = typeof EvidenceId.Type
 
+/** Canonical identifier of one immutable readiness assessment. */
+export const ReadinessAssessmentId = canonicalUuid7("ReadinessAssessmentId")
+
+/** Decoded immutable readiness-assessment identifier. */
+export type ReadinessAssessmentId = typeof ReadinessAssessmentId.Type
+
 /** Canonical identifier of one resolved or explicitly missing graph node. */
 export const GraphNodeId = canonicalUuid7("GraphNodeId")
 
