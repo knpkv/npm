@@ -4,7 +4,7 @@ import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { CodexModelOptions } from "../model.js"
-import { makeArguments, normalizeOptions } from "./configuration.js"
+import { makeArguments, normalizeOptions, validatePrompt } from "./configuration.js"
 import { CodexTransportError, invalidRequest, transportToAiError } from "./errors.js"
 import { runCodex } from "./process.js"
 import { renderPrompt } from "./prompt.js"
@@ -128,6 +128,7 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
 
   const options = yield* normalizeOptions(modelOptions, method)
   const prompt = yield* renderPrompt(method, providerOptions.prompt)
+  yield* validatePrompt(prompt, options.maxPromptBytes, method)
 
   return yield* Effect.scoped(Effect.gen(function*() {
     const schemaFile = providerOptions.responseFormat.type === "json"

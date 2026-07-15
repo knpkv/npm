@@ -14,7 +14,8 @@ const program = LanguageModel.generateText({
 ```
 
 `cwd` is required. The model defaults to the `codex` executable, read-only
-access, a two-minute timeout, 1 MiB of stdout, and 64 KiB of stderr. Every turn
+access, a two-minute timeout, 1 MiB each for the rendered prompt and stdout,
+and 64 KiB of stderr. Every turn
 uses an ephemeral `codex exec --json` process, sends the prompt over stdin, and
 cleans up its process and temporary structured-output schema when interrupted.
 The child does not inherit the parent environment: only reviewed Codex,

@@ -5,8 +5,10 @@ import { configurationFailure, invalidRequest } from "./errors.js"
 
 const DEFAULT_EXECUTABLE = "codex"
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576
+const DEFAULT_MAX_PROMPT_BYTES = 1_048_576
 const DEFAULT_MAX_STDERR_BYTES = 65_536
 const DEFAULT_TIMEOUT = "2 minutes"
+const textEncoder = new TextEncoder()
 
 const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
 
@@ -54,6 +56,7 @@ export interface NormalizedOptions {
   readonly environment: Readonly<Record<string, string>>
   readonly executable: string
   readonly maxOutputBytes: number
+  readonly maxPromptBytes: number
   readonly maxStderrBytes: number
   readonly model: string | undefined
   readonly timeout: NonNullable<CodexModelOptions["timeout"]>
@@ -65,12 +68,16 @@ export const normalizeOptions = (
 ): Effect.Effect<NormalizedOptions, AiError.AiError> =>
   Effect.gen(function*() {
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
+    const maxPromptBytes = options.maxPromptBytes ?? DEFAULT_MAX_PROMPT_BYTES
     const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES
     if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
       return yield* invalidRequest(method, "maxOutputBytes", "must be a positive safe integer")
     }
     if (!Number.isSafeInteger(maxStderrBytes) || maxStderrBytes <= 0) {
       return yield* invalidRequest(method, "maxStderrBytes", "must be a positive safe integer")
+    }
+    if (!Number.isSafeInteger(maxPromptBytes) || maxPromptBytes <= 0) {
+      return yield* invalidRequest(method, "maxPromptBytes", "must be a positive safe integer")
     }
     if (options.cwd.trim().length === 0) {
       return yield* invalidRequest(method, "cwd", "must not be empty")
@@ -86,11 +93,28 @@ export const normalizeOptions = (
       },
       executable: options.executable ?? DEFAULT_EXECUTABLE,
       maxOutputBytes,
+      maxPromptBytes,
       maxStderrBytes,
       model: options.model,
       timeout: options.timeout ?? DEFAULT_TIMEOUT
     }
   })
+
+export const validatePrompt = Effect.fn("CodexConfiguration.validatePrompt")(function*(
+  prompt: string,
+  maximumBytes: number,
+  method: string
+) {
+  const bytes = textEncoder.encode(prompt).byteLength
+  if (bytes > maximumBytes) {
+    return yield* invalidRequest(
+      method,
+      "prompt",
+      `must not exceed ${maximumBytes} UTF-8 bytes`
+    )
+  }
+  return prompt
+})
 
 export const makeArguments = (
   options: NormalizedOptions,

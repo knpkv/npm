@@ -180,4 +180,18 @@ describe("model", () => {
 
       expect(Exit.isFailure(exit)).toBe(true)
     }))
+
+  it.effect("rejects an oversized rendered prompt before spawning", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* LanguageModel.generateText({ prompt: "éé" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", maxPromptBytes: 8 })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("unused") })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(0)
+    }))
 })

@@ -23,6 +23,7 @@ model({
   environment?,
   access?,
   timeout?,
+  maxPromptBytes?,
   maxOutputBytes?,
   maxStderrBytes?
 })
@@ -36,6 +37,7 @@ model({
 | `environment`    | No       | Explicit extra child variables for custom provider `env_key` values.    |
 | `access`         | No       | `read-only` or `workspace-write`. Defaults to `read-only`.              |
 | `timeout`        | No       | Maximum lifetime of one local process.                                  |
+| `maxPromptBytes` | No       | Maximum rendered prompt size in UTF-8 bytes. Defaults to 1 MiB.         |
 | `maxOutputBytes` | No       | Maximum accepted stdout before the request fails.                       |
 | `maxStderrBytes` | No       | Maximum retained stderr used for a bounded failure description.         |
 

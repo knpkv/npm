@@ -79,6 +79,32 @@ describe("streamEvents", () => {
       expect(Array.from(events)).toEqual(["{\"type\":\"turn.started\"}"])
     }))
 
+  it.effect("accepts a multibyte prompt exactly at its UTF-8 byte limit", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const stdout = Stream.make("{\"type\":\"turn.completed\"}\n").pipe(Stream.encodeText)
+
+      yield* streamEvents({ cwd: "/workspace", maxPromptBytes: 4, prompt: "éé" }).pipe(
+        Stream.provide(fakeProcessLayer(calls, stdout)),
+        Stream.runDrain
+      )
+
+      expect(calls).toHaveLength(1)
+    }))
+
+  it.effect("rejects an oversized multibyte prompt before spawning", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const exit = yield* streamEvents({ cwd: "/workspace", maxPromptBytes: 3, prompt: "éé" }).pipe(
+        Stream.provide(fakeProcessLayer(calls, Stream.empty)),
+        Stream.runDrain,
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toHaveLength(0)
+    }))
+
   it.effect("rejects malformed JSONL through the typed error channel", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []

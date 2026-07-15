@@ -22,6 +22,8 @@ export interface CodexModelOptions {
   readonly timeout?: Duration.Input
   /** Maximum bytes accepted from Codex stdout. Defaults to 1 MiB. */
   readonly maxOutputBytes?: number
+  /** Maximum UTF-8 bytes accepted for one rendered prompt. Defaults to 1 MiB. */
+  readonly maxPromptBytes?: number
   /** Maximum bytes accepted from Codex stderr. Defaults to 64 KiB. */
   readonly maxStderrBytes?: number
 }
