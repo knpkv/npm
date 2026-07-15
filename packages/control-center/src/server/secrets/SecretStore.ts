@@ -63,7 +63,8 @@ export interface SecretLease {
 
 interface SecretStoreService {
   readonly create: (value: Uint8Array) => Effect.Effect<SecretRef, SecretStoreError>
-  readonly rotate: (ref: SecretRef, value: Uint8Array) => Effect.Effect<void, SecretStoreError>
+  /** Publish a replacement generation while retaining the old reference for active leases. */
+  readonly rotate: (ref: SecretRef, value: Uint8Array) => Effect.Effect<SecretRef, SecretStoreError>
   readonly remove: (ref: SecretRef) => Effect.Effect<void, SecretStoreError>
   readonly resolve: (
     ref: SecretRef
@@ -405,60 +406,52 @@ export const makeSecretStore: (
     return yield* secretStoreIoError("create temporary secret", "collision limit reached")
   })
 
-  const create = Effect.fn("SecretStore.create")(function*(value: Uint8Array) {
-    const bytes = yield* checkedValue(value)
-    return yield* Effect.gen(function*() {
-      for (let attempt = 0; attempt < PUBLICATION_ATTEMPTS; attempt += 1) {
-        const ref = yield* decodeRef("create secret reference", `secret_${yield* randomName("")}`)
-        const linked = yield* Effect.scoped(
-          Effect.uninterruptibleMask((restore) =>
-            Effect.gen(function*() {
-              const root = yield* pinRoot()
-              const temporary = yield* restore(writeTemporary(root, bytes))
-              const destination = path.join(root.path, ref)
-              const result = yield* fs.link(temporary, destination).pipe(Effect.result)
-              if (Result.isFailure(result)) return result
-              yield* root.sync
-              yield* fs.remove(temporary).pipe(
-                Effect.mapError((cause) => secretStoreIoError("remove temporary secret", cause))
-              )
-              yield* root.sync
-              yield* root.assertIdentity
-              return result
-            })
-          )
-        )
-        if (Result.isSuccess(linked)) return ref
-        if (linked.failure.reason._tag !== "AlreadyExists") {
-          return yield* secretStoreIoError("publish secret", linked.failure)
-        }
-      }
-      return yield* secretStoreIoError("publish secret", "reference collision limit reached")
-    }).pipe(Effect.ensuring(Effect.sync(() => bytes.fill(0))))
-  })
-
-  const rotate = Effect.fn("SecretStore.rotate")(function*(refInput: SecretRef, value: Uint8Array) {
-    const ref = yield* decodeRef("rotate secret", refInput)
-    const bytes = yield* checkedValue(value)
-    yield* Effect.gen(function*() {
-      yield* Effect.scoped(
+  const publishOwnedBytes = Effect.fn("SecretStore.publishOwnedBytes")(function*(bytes: Uint8Array) {
+    for (let attempt = 0; attempt < PUBLICATION_ATTEMPTS; attempt += 1) {
+      const ref = yield* decodeRef("create secret reference", `secret_${yield* randomName("")}`)
+      const linked = yield* Effect.scoped(
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function*() {
             const root = yield* pinRoot()
-            yield* openExisting(root, ref, "rotate secret")
             const temporary = yield* restore(writeTemporary(root, bytes))
-            yield* root.assertIdentity
-            yield* fs.rename(temporary, path.join(root.path, ref)).pipe(
-              Effect.mapError((cause) => secretStoreIoError("rotate secret", cause))
+            const destination = path.join(root.path, ref)
+            const result = yield* fs.link(temporary, destination).pipe(Effect.result)
+            if (Result.isFailure(result)) return result
+            yield* root.sync
+            yield* fs.remove(temporary).pipe(
+              Effect.mapError((cause) => secretStoreIoError("remove temporary secret", cause))
             )
             yield* root.sync
             yield* root.assertIdentity
+            return result
           })
         )
       )
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => bytes.fill(0)))
-    )
+      if (Result.isSuccess(linked)) return ref
+      if (linked.failure.reason._tag !== "AlreadyExists") {
+        return yield* secretStoreIoError("publish secret", linked.failure)
+      }
+    }
+    return yield* secretStoreIoError("publish secret", "reference collision limit reached")
+  })
+
+  const create = Effect.fn("SecretStore.create")(function*(value: Uint8Array) {
+    const bytes = yield* checkedValue(value)
+    return yield* publishOwnedBytes(bytes).pipe(Effect.ensuring(Effect.sync(() => bytes.fill(0))))
+  })
+
+  const rotate = Effect.fn("SecretStore.rotate")(function*(refInput: SecretRef, value: Uint8Array) {
+    const bytes = yield* checkedValue(value)
+    return yield* Effect.gen(function*() {
+      const ref = yield* decodeRef("rotate secret", refInput)
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const root = yield* pinRoot()
+          yield* openExisting(root, ref, "rotate secret")
+        })
+      )
+      return yield* publishOwnedBytes(bytes)
+    }).pipe(Effect.ensuring(Effect.sync(() => bytes.fill(0))))
   })
 
   const remove = Effect.fn("SecretStore.remove")(function*(refInput: SecretRef) {

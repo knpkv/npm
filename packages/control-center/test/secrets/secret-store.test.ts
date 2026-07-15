@@ -115,19 +115,74 @@ describe("SecretStore", () => {
       assert.strictEqual(yield* resolveString(store, ref), "owner-controlled-value")
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
-  it.effect("rotates one reference atomically and removes it", () =>
-    withSecretStore((store) =>
-      Effect.gen(function*() {
-        const ref = yield* store.create(encoder.encode("old-value"))
-
-        yield* store.rotate(ref, encoder.encode("new-value"))
-        assert.strictEqual(yield* resolveString(store, ref), "new-value")
-
-        yield* store.remove(ref)
-        const missing = yield* Effect.scoped(store.resolve(ref)).pipe(Effect.result)
-        assert.isTrue(Result.isFailure(missing))
-        if (Result.isFailure(missing)) assert.instanceOf(missing.failure, SecretNotFoundError)
+  it.effect("copies rotation bytes before validating the previous generation", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-rotate-copy-" })
+      const root = Schema.decodeSync(SecretRoot)(directory)
+      const validationStarted = yield* Deferred.make<void>()
+      const continueValidation = yield* Deferred.make<void>()
+      const gateValidation = yield* Ref.make(false)
+      const gatedFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (target, options) =>
+          target.includes("secret_")
+            ? Ref.get(gateValidation).pipe(
+              Effect.flatMap((gate) =>
+                gate
+                  ? Deferred.succeed(validationStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(continueValidation)),
+                    Effect.andThen(fs.open(target, options))
+                  )
+                  : fs.open(target, options)
+              )
+            )
+            : fs.open(target, options)
       })
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, gatedFileSystem)
+      )
+      const ref = yield* store.create(encoder.encode("previous-value"))
+      const callerBytes = encoder.encode("owner-controlled-replacement")
+      yield* Ref.set(gateValidation, true)
+      const rotateFiber = yield* store.rotate(ref, callerBytes).pipe(Effect.forkScoped)
+
+      yield* Deferred.await(validationStarted)
+      callerBytes.fill(0)
+      yield* Deferred.succeed(continueValidation, undefined)
+
+      const replacement = yield* Fiber.join(rotateFiber)
+      assert.strictEqual(yield* resolveString(store, ref), "previous-value")
+      assert.strictEqual(yield* resolveString(store, replacement), "owner-controlled-replacement")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("rotates by publishing a new reference while retaining the old generation", () =>
+    withSecretStore((store) =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const ref = yield* store.create(encoder.encode("old-value"))
+          const oldLease = yield* store.resolve(ref)
+          const sameValueReplacement = yield* store.rotate(ref, encoder.encode("old-value"))
+          const changedReplacement = yield* store.rotate(sameValueReplacement, encoder.encode("new-value"))
+
+          assert.notStrictEqual(sameValueReplacement, ref)
+          assert.notStrictEqual(changedReplacement, sameValueReplacement)
+          assert.strictEqual(
+            yield* oldLease.withBytes((bytes) => Effect.succeed(decoder.decode(bytes))),
+            "old-value"
+          )
+          assert.strictEqual(yield* resolveString(store, ref), "old-value")
+          assert.strictEqual(yield* resolveString(store, sameValueReplacement), "old-value")
+          assert.strictEqual(yield* resolveString(store, changedReplacement), "new-value")
+
+          yield* store.remove(ref)
+          yield* store.remove(sameValueReplacement)
+          yield* store.remove(changedReplacement)
+          const missing = yield* Effect.scoped(store.resolve(ref)).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(missing))
+          if (Result.isFailure(missing)) assert.instanceOf(missing.failure, SecretNotFoundError)
+        })
+      )
     ))
 
   it.effect("isolates references across resolve, rotate, and removal", () =>
@@ -137,11 +192,13 @@ describe("SecretStore", () => {
         const second = yield* store.create(encoder.encode("second-secret"))
 
         assert.notStrictEqual(first, second)
-        yield* store.rotate(first, encoder.encode("first-rotated"))
-        assert.strictEqual(yield* resolveString(store, first), "first-rotated")
+        const rotated = yield* store.rotate(first, encoder.encode("first-rotated"))
+        assert.strictEqual(yield* resolveString(store, first), "first-secret")
+        assert.strictEqual(yield* resolveString(store, rotated), "first-rotated")
         assert.strictEqual(yield* resolveString(store, second), "second-secret")
 
         yield* store.remove(first)
+        yield* store.remove(rotated)
         assert.strictEqual(yield* resolveString(store, second), "second-secret")
       })
     ))
@@ -361,26 +418,32 @@ describe("SecretStore", () => {
       assert.deepEqual(yield* fs.readDirectory(displaced), [])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
-  it.effect("keeps the previous value when atomic rotation publication fails", () =>
+  it.effect("keeps the previous generation when replacement publication fails", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-rotate-" })
       const root = Schema.decodeSync(SecretRoot)(directory)
+      const rejectPublication = yield* Ref.make(false)
       const faultingFileSystem = FileSystem.FileSystem.of({
         ...fs,
-        rename: (fromPath, toPath) =>
-          fromPath.includes(".incoming-")
-            ? Effect.fail(PlatformError.systemError({
-              _tag: "PermissionDenied",
-              module: "FileSystem",
-              method: "rename"
-            }))
-            : fs.rename(fromPath, toPath)
+        link: (fromPath, toPath) =>
+          Ref.get(rejectPublication).pipe(
+            Effect.flatMap((reject) =>
+              fromPath.includes(".incoming-") && reject
+                ? Effect.fail(PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "link"
+                }))
+                : fs.link(fromPath, toPath)
+            )
+          )
       })
       const store = yield* makeSecretStore({ secretRoot: root }).pipe(
         Effect.provideService(FileSystem.FileSystem, faultingFileSystem)
       )
       const ref = yield* store.create(encoder.encode("durable-old"))
+      yield* Ref.set(rejectPublication, true)
       const result = yield* store.rotate(ref, encoder.encode("never-published")).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(result))

@@ -140,7 +140,7 @@ Secure blob reads and publication require the host to expose opened files and di
 
 Use `authLayer(persistenceConfig)` from `@knpkv/control-center/server` for standalone composition. `TerminalRecovery` is a separate, terminal-only service: it derives the exact canonical `0700` directory from the configured database, requires an exact confirmation phrase, and proves that the running process owns the descriptor-pinned directory before it can issue an owner recovery code. Each successful recovery creates a durable audit event. Recovery is deliberately absent from the HTTP-facing `Auth` service.
 
-Provider credentials belong in `SecretStore`, never normal SQL rows. The store returns opaque references, resolves bytes only inside a scoped zeroizing lease, and uses owner-only atomic files. It has the same `/proc/self/fd` or `/dev/fd` portability requirement and same-UID trust boundary as blob storage.
+Provider credentials belong in `SecretStore`, never normal SQL rows. The store returns opaque references, resolves bytes only inside a scoped zeroizing lease, and uses owner-only atomic files. Rotation is copy-on-write: it returns a new reference while retaining the old generation until its consumers drain and remove it. It has the same `/proc/self/fd` or `/dev/fd` portability requirement and same-UID trust boundary as blob storage.
 
 ## HTTP API
 
