@@ -89,13 +89,8 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
   return arguments_
 }
 
-export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*(
-  options: RunOptions,
-  method: string,
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
-): Effect.fn.Return<ClaudeResult, ReturnType<typeof transportToAiError>> {
-  const promptInput = Stream.make(options.prompt).pipe(Stream.encodeText)
-  const command = ChildProcess.make(options.executable, makeArguments(options), {
+const makeCommand = (options: RunOptions) =>
+  ChildProcess.make(options.executable, makeArguments(options), {
     cwd: options.cwd,
     env: options.environment,
     extendEnv: false,
@@ -103,9 +98,16 @@ export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*
     killSignal: "SIGTERM",
     shell: false,
     stderr: "pipe",
-    stdin: { stream: promptInput, endOnDone: true },
+    stdin: { stream: Stream.make(options.prompt).pipe(Stream.encodeText), endOnDone: true },
     stdout: "pipe"
   })
+
+export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*(
+  options: RunOptions,
+  method: string,
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
+): Effect.fn.Return<ClaudeResult, ReturnType<typeof transportToAiError>> {
+  const command = makeCommand(options)
 
   const execution = Effect.gen(function*() {
     const handle = yield* spawner.spawn(command).pipe(

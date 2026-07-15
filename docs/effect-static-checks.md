@@ -34,8 +34,10 @@ Use ast-grep for syntactic patterns that are precise without type information:
 - Keep local agent subprocesses isolated: `ai-claude` and `ai-codex` must pass
   an explicit reviewed `env` record with `extendEnv: false`; provider-specific
   credentials are opt-in rather than inherited from the parent process. The
-  binding-aware local ESLint rule also rejects aliased calls, nested lookalike
-  properties, dynamic option objects, duplicate keys, and option spreads.
+  binding-aware local ESLint rule permits process construction only in the two
+  audited command-factory files. It rejects constructor aliases, indirect
+  calls, re-exports, dynamic imports, shadowed environment projections,
+  dynamic option objects, duplicate keys, and option spreads.
 - Use Schema JSON codecs at API spec generation boundaries: no raw
   `JSON.parse`/`JSON.stringify` in API-client regeneration scripts.
 - Keep API-client regeneration failures typed: no native `Error` construction or

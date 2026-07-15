@@ -40,33 +40,57 @@ const isNamedImportFrom = (context, identifier, sources, importedNames) => {
   )
 }
 
-const isChildProcessMakeCall = (context, expression) => {
-  if (expression.type !== "CallExpression") return false
-  const callee = expression.callee
-  if (callee.type === "Identifier") {
-    return isNamedImportFrom(context, callee, ["effect/unstable/process/ChildProcess"], ["make"])
+const resolvedVariable = (context, identifier) => {
+  let scope = context.sourceCode.getScope(identifier)
+  while (scope !== null) {
+    const variable = scope.set.get(identifier.name)
+    if (variable !== undefined) return variable
+    scope = scope.upper
   }
+  return undefined
+}
+
+const enclosingFunction = (node) => {
+  let current = node.parent
+  while (current !== undefined) {
+    if (
+      current.type === "ArrowFunctionExpression" ||
+      current.type === "FunctionExpression" ||
+      current.type === "FunctionDeclaration"
+    ) {
+      return current
+    }
+    current = current.parent
+  }
+  return undefined
+}
+
+const isReviewedEnvironmentProjection = (context, expression, call) => {
   if (
-    callee.type !== "MemberExpression" ||
-    staticPropertyName(callee.property) !== "make" ||
-    callee.object.type !== "Identifier"
+    expression.type !== "MemberExpression" ||
+    expression.computed ||
+    expression.object.type !== "Identifier" ||
+    expression.object.name !== "options" ||
+    staticPropertyName(expression.property) !== "environment"
   ) {
     return false
   }
+  const factory = enclosingFunction(call)
+  if (
+    factory === undefined ||
+    factory.parent?.type !== "VariableDeclarator" ||
+    factory.parent.id.type !== "Identifier" ||
+    factory.parent.id.name !== "makeCommand"
+  ) {
+    return false
+  }
+  const parameter = factory.params.find((candidate) => candidate.type === "Identifier" && candidate.name === "options")
   return (
-    isNamespaceImportFrom(context, callee.object, ["effect/unstable/process/ChildProcess"]) ||
-    isNamedImportFrom(context, callee.object, ["effect/unstable/process"], ["ChildProcess"])
+    parameter !== undefined && resolvedVariable(context, expression.object)?.identifiers.includes(parameter) === true
   )
 }
 
-const isReviewedEnvironmentProjection = (expression) =>
-  expression.type === "MemberExpression" &&
-  !expression.computed &&
-  expression.object.type === "Identifier" &&
-  expression.object.name === "options" &&
-  staticPropertyName(expression.property) === "environment"
-
-const hasIsolatedChildEnvironment = (options) => {
+const hasIsolatedChildEnvironment = (context, options, call) => {
   if (options?.type !== "ObjectExpression") return false
   if (options.properties.some((property) => property.type === "SpreadElement")) return false
   const environment = options.properties.filter(
@@ -78,10 +102,60 @@ const hasIsolatedChildEnvironment = (options) => {
   return (
     environment.length === 1 &&
     inheritance.length === 1 &&
-    isReviewedEnvironmentProjection(environment[0].value) &&
+    isReviewedEnvironmentProjection(context, environment[0].value, call) &&
     inheritance[0].value.type === "Literal" &&
     inheritance[0].value.value === false
   )
+}
+
+const CHILD_PROCESS_MODULE = "effect/unstable/process/ChildProcess"
+const CHILD_PROCESS_BARREL = "effect/unstable/process"
+const AGENT_COMMAND_SEAMS = new Map([
+  ["packages/ai-claude/src/runner.ts", { importKind: "named", localName: "ChildProcess" }],
+  ["packages/ai-codex/src/internal/process.ts", { importKind: "namespace", localName: "ChildProcess" }]
+])
+
+const commandSeamFor = (context) => {
+  const filename = context.filename.replaceAll("\\", "/")
+  for (const [suffix, seam] of AGENT_COMMAND_SEAMS) {
+    if (filename.endsWith(suffix)) return seam
+  }
+  return undefined
+}
+
+const isSensitiveChildProcessSpecifier = (declaration, specifier) => {
+  if (declaration.importKind === "type" || specifier.importKind === "type") return false
+  if (declaration.source.value === CHILD_PROCESS_MODULE) return true
+  if (declaration.source.value !== CHILD_PROCESS_BARREL) return false
+  return (
+    specifier.type === "ImportNamespaceSpecifier" ||
+    (specifier.type === "ImportSpecifier" && staticPropertyName(specifier.imported) === "ChildProcess")
+  )
+}
+
+const isApprovedChildProcessSpecifier = (declaration, specifier, seam) => {
+  if (seam === undefined || specifier.local.name !== seam.localName) return false
+  if (seam.importKind === "namespace") {
+    return declaration.source.value === CHILD_PROCESS_MODULE && specifier.type === "ImportNamespaceSpecifier"
+  }
+  return (
+    declaration.source.value === CHILD_PROCESS_BARREL &&
+    specifier.type === "ImportSpecifier" &&
+    staticPropertyName(specifier.imported) === "ChildProcess"
+  )
+}
+
+const directChildProcessMakeCall = (identifier) => {
+  const member = identifier.parent
+  if (
+    member?.type !== "MemberExpression" ||
+    member.object !== identifier ||
+    staticPropertyName(member.property) !== "make"
+  ) {
+    return undefined
+  }
+  const call = member.parent
+  return call?.type === "CallExpression" && call.callee === member ? call : undefined
 }
 
 const isEffectModule = (context, expression) => {
@@ -409,12 +483,49 @@ module.exports = {
       }
     },
     create(context) {
+      const approvedBindings = []
+      const seam = commandSeamFor(context)
+      const report = (node) => context.report({ node, messageId: "unsafeEnvironment" })
+
       return {
-        CallExpression(node) {
-          if (!isChildProcessMakeCall(context, node)) return
-          const options = node.arguments.at(-1)
-          if (hasIsolatedChildEnvironment(options)) return
-          context.report({ node, messageId: "unsafeEnvironment" })
+        ImportDeclaration(node) {
+          if (node.source.value !== CHILD_PROCESS_MODULE && node.source.value !== CHILD_PROCESS_BARREL) return
+          const variables = context.sourceCode.getDeclaredVariables(node)
+          for (const specifier of node.specifiers) {
+            if (!isSensitiveChildProcessSpecifier(node, specifier)) continue
+            if (!isApprovedChildProcessSpecifier(node, specifier, seam)) {
+              report(specifier)
+              continue
+            }
+            const binding = variables.find((variable) => variable.name === specifier.local.name)
+            if (binding !== undefined) approvedBindings.push(binding)
+          }
+        },
+        ExportAllDeclaration(node) {
+          if (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL) report(node)
+        },
+        ExportNamedDeclaration(node) {
+          if (node.source?.value === CHILD_PROCESS_MODULE || node.source?.value === CHILD_PROCESS_BARREL) report(node)
+        },
+        ImportExpression(node) {
+          if (
+            node.source.type === "Literal" &&
+            (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL)
+          ) {
+            report(node)
+          }
+        },
+        "Program:exit"() {
+          for (const binding of approvedBindings) {
+            for (const reference of binding.references) {
+              const call = directChildProcessMakeCall(reference.identifier)
+              if (call === undefined) {
+                report(reference.identifier)
+                continue
+              }
+              if (!hasIsolatedChildEnvironment(context, call.arguments.at(-1), call)) report(call)
+            }
+          }
         }
       }
     }

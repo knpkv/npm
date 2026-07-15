@@ -25,7 +25,10 @@ const assertRuleDiagnostics = async ({ code, expected, filePath, ruleId }) => {
   if (result === undefined) throw new Error(`ESLint returned no result for ${filePath}`)
   const diagnostics = result.messages.filter((message) => message.ruleId === ruleId)
   if (diagnostics.length !== expected) {
-    throw new Error(`${ruleId} reported ${diagnostics.length} diagnostics instead of ${expected} for ${filePath}`)
+    const locations = diagnostics.map((message) => `${message.line}:${message.column}`).join(", ")
+    throw new Error(
+      `${ruleId} reported ${diagnostics.length} diagnostics instead of ${expected} for ${filePath} (${locations})`
+    )
   }
 }
 
@@ -77,6 +80,7 @@ await assertRuleDiagnostics({
     import * as Process from "effect/unstable/process/ChildProcess"
     import { ChildProcess as AliasedProcess } from "effect/unstable/process"
     import { make as makeProcess } from "effect/unstable/process/ChildProcess"
+    import * as BarrelProcess from "effect/unstable/process"
     Process.make("codex", ["exec"], {
       metadata: { env: options.environment, extendEnv: false },
       stdout: "pipe"
@@ -87,28 +91,73 @@ await assertRuleDiagnostics({
       ...unsafeOptions
     })
     makeProcess("codex", ["exec"], dynamicOptions)
+    BarrelProcess.ChildProcess.make("codex", ["exec"], dynamicOptions)
+    const makeIndirectly = Process.make
+    makeIndirectly("codex", ["exec"], dynamicOptions)
+    Process.make.call(undefined, "codex", ["exec"], dynamicOptions)
+    function shadowed(options) {
+      return Process.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+    export { ChildProcess } from "effect/unstable/process"
+    const dynamicallyLoaded = import("effect/unstable/process/ChildProcess")
   `,
-  expected: 3,
+  expected: 6,
   filePath: "packages/ai-codex/src/eslint-agent-environment-invalid.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
 await assertRuleDiagnostics({
   code: `
-    import * as Process from "effect/unstable/process/ChildProcess"
-    import { ChildProcess as AliasedProcess } from "effect/unstable/process"
-    Process.make("codex", ["exec"], {
-      env: options.environment,
-      extendEnv: false,
-      stdout: "pipe"
-    })
-    AliasedProcess.make("claude", ["--print"], {
-      extendEnv: false,
-      env: options.environment
-    })
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      ChildProcess.make("codex", ["exec"], {
+        metadata: { env: options.environment, extendEnv: false }
+      })
+      const makeIndirectly = ChildProcess.make
+      makeIndirectly("codex", ["exec"], dynamicOptions)
+      ChildProcess.make.call(undefined, "codex", ["exec"], dynamicOptions)
+    }
+    function shadowed(options) {
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 4,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false,
+        stdout: "pipe"
+      })
   `,
   expected: 0,
-  filePath: "packages/ai-claude/src/eslint-agent-environment-valid.ts",
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+    const makeCommand = (options) =>
+      ChildProcess.make("claude", ["--print"], {
+        extendEnv: false,
+        env: options.environment
+      })
+  `,
+  expected: 0,
+  filePath: "packages/ai-claude/src/runner.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
