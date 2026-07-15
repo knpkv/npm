@@ -20,7 +20,8 @@ complete.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
   and rejected after a referenced claim is superseded. Claim reads are batched.
 - The checkpoint passes repository formatting, linting, static Effect checks, builds, package
-  checks, packing validation, and 2,003 tests on the available Node 22 environment.
+  checks, and packing validation. The complete Control Center suite passes on Node 24 with 97 test
+  files and 875 tests; PR-wide verification remains authoritative for the integrated workspace.
 
 ## Critical unfinished work
 
@@ -71,12 +72,14 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   adapters generate evidence references.
 - Current authority corruption tests are intentionally forensic and rebuild unconstrained tables
   only inside isolated temporary databases.
-- Full-suite runs occasionally expose existing timing-sensitive `live-events` tests and transient
-  SQLite WAL/SHM expectations. Focused retries passed; the tests should be made deterministic rather
-  than given larger timeouts blindly.
-- The available runtime is Node 22 while affected packages declare Node 24 or newer. CI and final
-  smoke tests must run on Node 24.
-- No draft PR has been opened and nothing has been pushed from this checkpoint.
+- The 512/513-event live-stream boundary fixtures now prepare their journal in one outer database
+  transaction and retain Vitest's normal timeout. Transient SQLite WAL/SHM expectations outside
+  that fixture still warrant care in future persistence tests.
+- The interactive shell exposes Node 24, but its installed `pnpm` launcher is backed by Node 22.
+  Direct local validation therefore invokes test tools with Node 24; PR CI remains the authoritative
+  Node 24 workspace check.
+- Draft PR #126 is open from `feature/control-center`. Keep it in draft while the critical D03 work
+  above remains unfinished and real provider mutations remain disabled.
 
 ## Worktree ownership warning
 
@@ -86,7 +89,7 @@ their owner decides how to land them.
 
 ## Recommended next session
 
-Start with one bounded commit implementing only the happy-path atomic `begin` transaction using
-the existing private readers. Then add fail-closed branches as small test-backed commits. Run an
-independent exact-commit review after each commit; turn every review finding into a regression test,
-static rule, or repository instruction before proceeding.
+Start with one bounded commit implementing execution outcome persistence, beginning with
+`recordBlocked` and `recordDispatch`, then add the remaining outcome/reconciliation branches as
+small test-backed commits. Run an independent exact-commit review after each commit; turn every
+review finding into a regression test, static rule, or repository instruction before proceeding.
