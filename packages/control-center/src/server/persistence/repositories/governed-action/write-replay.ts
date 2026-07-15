@@ -3,11 +3,16 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import {
+  governedActionAuthorizationMatchesTransition,
+  governedActionAuthorizationMismatches
+} from "../../../../domain/governedAction/index.js"
+import {
   digestGovernedActionTransition,
   verifyGovernedActionTransition
 } from "../../../governance/governedActionDigests.js"
-import type { GovernedActionQuarantineRecordKind } from "./codec.js"
+import { decodeGovernedActionAuthorizationRow, type GovernedActionQuarantineRecordKind } from "./codec.js"
 import type { GovernedActionCommitInput, GovernedActionCommitResult } from "./contract.js"
+import { GovernedActionAuthorizationRow } from "./rows.js"
 import {
   causeColumns,
   CauseJson,
@@ -40,8 +45,15 @@ export const GovernedActionReplayRow = Schema.Struct({
   auditPayloadDigest: Schema.NullOr(Schema.String),
   auditPayloadJson: Schema.NullOr(Schema.String),
   auditOccurredAt: Schema.NullOr(Schema.String),
+  authorizationWorkspaceId: Schema.NullOr(Schema.String),
+  authorizationActionId: Schema.NullOr(Schema.String),
+  authorizationId: Schema.NullOr(Schema.String),
+  authorizationSessionId: Schema.NullOr(Schema.String),
+  authorizationEnvelopeDigest: Schema.NullOr(Schema.String),
   authorizationDigest: Schema.NullOr(Schema.String),
   authorizationJson: Schema.NullOr(Schema.String),
+  authorizationAuthorizedAt: Schema.NullOr(Schema.String),
+  authorizationExpiresAt: Schema.NullOr(Schema.String),
   evaluationDigest: Schema.NullOr(Schema.String),
   evaluationJson: Schema.NullOr(Schema.String),
   attemptDigest: Schema.NullOr(Schema.String),
@@ -176,14 +188,58 @@ export const makeGovernedActionReplay = (cryptoService: Crypto.Crypto) => {
           return yield* inputError("changed-command-retry")
         }
         break
-      case "authorization":
-        if (row.authorizationDigest === null || row.authorizationJson === null) {
+      case "authorization": {
+        if (
+          row.authorizationWorkspaceId === null ||
+          row.authorizationActionId === null ||
+          row.authorizationId === null ||
+          row.authorizationSessionId === null ||
+          row.authorizationEnvelopeDigest === null ||
+          row.authorizationDigest === null ||
+          row.authorizationJson === null ||
+          row.authorizationAuthorizedAt === null ||
+          row.authorizationExpiresAt === null
+        ) {
           return yield* companionMissing("governed-action-authorization")
+        }
+        const authorizationRaw = {
+          workspaceId: row.authorizationWorkspaceId,
+          actionId: row.authorizationActionId,
+          authorizationId: row.authorizationId,
+          sessionId: row.authorizationSessionId,
+          envelopeDigest: row.authorizationEnvelopeDigest,
+          authorizationDigest: row.authorizationDigest,
+          authorizationJson: row.authorizationJson,
+          authorizedAt: row.authorizationAuthorizedAt,
+          expiresAt: row.authorizationExpiresAt
+        }
+        const authorizationRow = yield* Schema.decodeUnknownEffect(
+          GovernedActionAuthorizationRow
+        )(authorizationRaw).pipe(
+          Effect.mapError(() => companionMissing("governed-action-authorization"))
+        )
+        const authorization = yield* decodeGovernedActionAuthorizationRow(authorizationRow).pipe(
+          Effect.provideService(Crypto.Crypto, cryptoService)
+        )
+        if (
+          governedActionAuthorizationMismatches({
+              envelope: input.envelope,
+              authorization
+            }).length > 0 ||
+          !governedActionAuthorizationMatchesTransition(authorization, transition)
+        ) {
+          return yield* persistedError(
+            input,
+            "governed-action-authorization",
+            authorization.authorizationId,
+            "governed-action-companion-invalid"
+          )
         }
         if (row.authorizationDigest !== companion.digest || row.authorizationJson !== companion.json) {
           return yield* inputError("changed-command-retry")
         }
         break
+      }
       case "policyDenial":
         if (row.linkedPolicyEvaluationDigest === null) {
           return yield* inputError("changed-command-retry")

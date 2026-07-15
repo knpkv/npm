@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import type { Role } from "../actors.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
 import { GovernedActionAttemptV1, GovernedActionAuthorizationV1, GovernedActionEnvelopeV1 } from "./model.js"
+import type { GovernedActionTransitionV1 } from "./stateMachine.js"
 
 /** Closed reasons why durable authorization or dispatch intent does not match its action. */
 export const GovernedActionAuthorityMismatch = Schema.Literals([
@@ -73,17 +74,24 @@ export const GovernedActionAuthorityBindingInput = Schema.Struct({
 /** Decoded aggregate authority inputs checked immediately before dispatch. */
 export type GovernedActionAuthorityBindingInput = typeof GovernedActionAuthorityBindingInput.Type
 
+/** Immutable authorization inputs that can be verified before a dispatch attempt exists. */
+export const GovernedActionAuthorizationBindingInput = Schema.Struct({
+  envelope: GovernedActionEnvelopeV1,
+  authorization: GovernedActionAuthorizationV1
+})
+
+/** Decoded authorization-only binding inputs. */
+export type GovernedActionAuthorizationBindingInput = typeof GovernedActionAuthorizationBindingInput.Type
+
 /** Explicit V1 permission implication: workspace owner or an exact scoped role. */
 export const governedActionPermissionGrants = (sessionPermission: Role, requiredPermission: Role): boolean =>
   sessionPermission === "workspace-owner" || sessionPermission === requiredPermission
 
-/** Return every fail-closed mismatch between an envelope, human grant, and dispatch intent. */
-export const governedActionAuthorityMismatches = ({
-  attempt,
+/** Return every fail-closed mismatch between an envelope and its human grant. */
+export const governedActionAuthorizationMismatches = ({
   authorization,
-  envelope,
-  evaluatedAt
-}: GovernedActionAuthorityBindingInput): ReadonlyArray<GovernedActionAuthorityMismatch> => {
+  envelope
+}: GovernedActionAuthorizationBindingInput): ReadonlyArray<GovernedActionAuthorityMismatch> => {
   const mismatches: Array<GovernedActionAuthorityMismatch> = []
   const addMismatch = (condition: boolean, mismatch: GovernedActionAuthorityMismatch): void => {
     if (condition) mismatches.push(mismatch)
@@ -139,6 +147,39 @@ export const governedActionAuthorityMismatches = ({
       DateTime.Order(authorization.expiresAt, envelope.proposalExpiresAt) > 0,
     "authorization-outside-proposal-window"
   )
+
+  return mismatches
+}
+
+/** Whether a human grant is attributable to its exact immutable authorize transition. */
+export const governedActionAuthorizationMatchesTransition = (
+  authorization: GovernedActionAuthorizationV1,
+  transition: GovernedActionTransitionV1
+): boolean =>
+  transition.command._tag === "authorize" &&
+  transition.command.authorizationId === authorization.authorizationId &&
+  transition.actionId === authorization.actionId &&
+  transition.workspaceId === authorization.workspaceId &&
+  transition.actionEnvelopeDigest === authorization.actionEnvelopeDigest &&
+  DateTime.Order(transition.occurredAt, authorization.authorizedAt) === 0 &&
+  transition.cause._tag === "human" &&
+  transition.cause.actor.personId === authorization.actor.personId &&
+  transition.cause.sessionId === authorization.sessionId
+
+/** Return every fail-closed mismatch between an envelope, human grant, and dispatch intent. */
+export const governedActionAuthorityMismatches = ({
+  attempt,
+  authorization,
+  envelope,
+  evaluatedAt
+}: GovernedActionAuthorityBindingInput): ReadonlyArray<GovernedActionAuthorityMismatch> => {
+  const mismatches: Array<GovernedActionAuthorityMismatch> = [
+    ...governedActionAuthorizationMismatches({ authorization, envelope })
+  ]
+  const addMismatch = (condition: boolean, mismatch: GovernedActionAuthorityMismatch): void => {
+    if (condition) mismatches.push(mismatch)
+  }
+
   addMismatch(
     DateTime.Order(evaluatedAt, authorization.expiresAt) >= 0 ||
       DateTime.Order(evaluatedAt, envelope.proposalExpiresAt) >= 0,

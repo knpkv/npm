@@ -5,7 +5,9 @@ import * as Schema from "effect/Schema"
 
 import {
   advanceGovernedActionLifecycle,
-  governedActionAuthorityMismatches
+  governedActionAuthorityMismatches,
+  governedActionAuthorizationMatchesTransition,
+  governedActionAuthorizationMismatches
 } from "../../../../domain/governedAction/index.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
@@ -38,12 +40,13 @@ const MAXIMUM_GOVERNED_ACTION_TRANSITIONS = 1_000
 const malformed = (
   request: GovernedActionReadInput,
   recordKind: GovernedActionQuarantineRecordKind,
-  diagnosticCode: GovernedActionQuarantineReasonCode
+  diagnosticCode: GovernedActionQuarantineReasonCode,
+  recordKey: string = request.actionId
 ) =>
   governedActionRecordError({
     workspaceId: request.workspaceId,
     recordKind,
-    recordKey: request.actionId,
+    recordKey,
     diagnosticCode
   })
 
@@ -71,8 +74,9 @@ const failMalformed = (
   request: GovernedActionReadInput,
   recordKind: GovernedActionQuarantineRecordKind,
   diagnosticCode: GovernedActionQuarantineReasonCode,
-  row: unknown
-) => Effect.fail(malformed(request, recordKind, diagnosticCode)).pipe(captureMalformedGovernedActionRow(row))
+  row: unknown,
+  recordKey?: string
+) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
 
 /** Build verified governed-action aggregate reads over one transaction-local SQL client. */
 export const makeGovernedActionRead = Effect.gen(function*() {
@@ -370,16 +374,13 @@ export const makeGovernedActionRead = Effect.gen(function*() {
         )
       )
     const authorizationMatchesEnvelope = authorization === null ||
-      (authorization.pluginConnectionId === root.envelope.pluginConnectionId &&
-        authorization.pluginConnectionRevision === root.envelope.pluginConnectionRevision &&
-        authorization.pluginConnectionAuthorityDigest === root.envelope.pluginConnectionAuthorityDigest &&
-        authorization.idempotencyKey === root.envelope.idempotencyKey &&
-        authorization.payloadDigest === root.envelope.proposal.payloadDigest &&
-        authorization.evidenceSetDigest === root.envelope.evidenceSetDigest &&
-        authorization.policyDigest === root.envelope.policy.policyDigest &&
-        authorization.expectedRevision === root.envelope.proposal.request.expectedRevision &&
-        authorization.capabilityVersion === root.envelope.capability.version &&
-        authorization.requiredPermission === root.envelope.policy.requiredPermission)
+      governedActionAuthorizationMismatches({
+          envelope: root.envelope,
+          authorization
+        }).length === 0
+    const authorizationMatchesTransition = authorization === null ||
+      (authorizeTransition !== undefined &&
+        governedActionAuthorizationMatchesTransition(authorization, authorizeTransition))
     const policyMatchesEnvelope = policyEvaluation === null ||
       (Equal.equals(policyEvaluation.policy, root.envelope.policy) &&
         policyEvaluation.payloadDigest === root.envelope.proposal.payloadDigest &&
@@ -406,15 +407,22 @@ export const makeGovernedActionRead = Effect.gen(function*() {
           }).length === 0)
     if (
       !authorizationMatchesEnvelope ||
+      !authorizationMatchesTransition ||
+      (authorization === null) !== (authorizeTransition === undefined)
+    ) {
+      return yield* failMalformed(
+        request,
+        "governed-action-authorization",
+        "governed-action-companion-invalid",
+        authorizationRow ?? rootRow,
+        authorization?.authorizationId
+      )
+    }
+    if (
       !policyMatchesEnvelope ||
       !attemptMatchesEnvelope ||
       !policyHasOwningTransition ||
       !dispatchAuthorityMatches ||
-      (authorization === null) !== (authorizeTransition === undefined) ||
-      (authorization !== null &&
-        (authorizeTransition?.command._tag !== "authorize" ||
-          authorizeTransition.command.authorizationId !== authorization.authorizationId ||
-          authorization.actionEnvelopeDigest !== root.envelope.envelopeDigest)) ||
       (attempt === null) !== (startTransition === undefined) ||
       (attempt !== null &&
         (startTransition?.command._tag !== "start" ||

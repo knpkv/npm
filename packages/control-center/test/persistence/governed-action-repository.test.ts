@@ -827,6 +827,101 @@ describe("governed action writer", () => {
       })
     })))
 
+  it.effect("quarantines invalid stored authorization before start on read and exact replay", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const quarantine = yield* QuarantineRepository
+      const { sql } = yield* Database
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      const proposal = makeProposalInput(envelope)
+      yield* repository.commit(proposal)
+      const authorization = makeAuthorization(envelope)
+      const authorizationInput = makeAuthorizationInput(proposal, authorization)
+      yield* repository.commit(authorizationInput)
+
+      assert.deepStrictEqual(
+        (yield* repository.read({
+          workspaceId: envelope.workspaceId,
+          actionId: envelope.actionId
+        })).authorization,
+        authorization
+      )
+      assert.strictEqual((yield* repository.commit(authorizationInput))._tag, "replayed")
+
+      const insufficientAuthorization = decodeAuthorization({
+        ...Schema.encodeSync(GovernedActionAuthorizationV1)(authorization),
+        sessionPermission: "issue-owner"
+      })
+      const insufficientDigest = yield* digestGovernedActionAuthorization(insufficientAuthorization)
+      const insufficientJson = Schema.encodeSync(authorizationJson)(insufficientAuthorization)
+      yield* sql`DROP TRIGGER governed_action_authorizations_no_update`
+      yield* sql`UPDATE governed_action_authorizations
+        SET authorization_digest = ${insufficientDigest}, authorization_json = ${insufficientJson}
+        WHERE workspace_id = ${envelope.workspaceId}
+          AND action_id = ${envelope.actionId}
+          AND authorization_id = ${AUTHORIZATION_ID}`
+
+      const readResult = yield* repository.read({
+        workspaceId: envelope.workspaceId,
+        actionId: envelope.actionId
+      }).pipe(Effect.result)
+      const replayResult = yield* repository.commit(authorizationInput).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(readResult))
+      assert.isTrue(Result.isFailure(replayResult))
+      if (Result.isFailure(readResult)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(readResult.failure))
+      }
+      if (Result.isFailure(replayResult)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(replayResult.failure))
+        assert.isFalse(Schema.is(GovernedActionInputError)(replayResult.failure))
+      }
+      const quarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(quarantined, 2)
+      assert.isTrue(quarantined.every(
+        ({ diagnosticCode, recordKey, recordKind }) =>
+          recordKind === "governed-action-authorization" &&
+          recordKey === AUTHORIZATION_ID &&
+          diagnosticCode === "governed-action-companion-invalid"
+      ))
+
+      const mistimedAuthorization = decodeAuthorization({
+        ...Schema.encodeSync(GovernedActionAuthorizationV1)(authorization),
+        authorizedAt: "2026-07-15T10:00:30.000Z"
+      })
+      const mistimedDigest = yield* digestGovernedActionAuthorization(mistimedAuthorization)
+      const mistimedJson = Schema.encodeSync(authorizationJson)(mistimedAuthorization)
+      yield* sql`UPDATE governed_action_authorizations
+        SET authorization_digest = ${mistimedDigest}, authorization_json = ${mistimedJson},
+          authorized_at = '2026-07-15T10:00:30.000Z'
+        WHERE workspace_id = ${envelope.workspaceId}
+          AND action_id = ${envelope.actionId}
+          AND authorization_id = ${AUTHORIZATION_ID}`
+
+      const mistimedRead = yield* repository.read({
+        workspaceId: envelope.workspaceId,
+        actionId: envelope.actionId
+      }).pipe(Effect.result)
+      const mistimedReplay = yield* repository.commit(authorizationInput).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(mistimedRead))
+      assert.isTrue(Result.isFailure(mistimedReplay))
+      if (Result.isFailure(mistimedRead)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(mistimedRead.failure))
+      }
+      if (Result.isFailure(mistimedReplay)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(mistimedReplay.failure))
+        assert.isFalse(Schema.is(GovernedActionInputError)(mistimedReplay.failure))
+      }
+      const allQuarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(allQuarantined, 4)
+      assert.isTrue(allQuarantined.every(
+        ({ diagnosticCode, recordKey, recordKind }) =>
+          recordKind === "governed-action-authorization" &&
+          recordKey === AUTHORIZATION_ID &&
+          diagnosticCode === "governed-action-companion-invalid"
+      ))
+    })))
+
   it.effect("quarantines invalid stored authorization before replaying an exact dispatch", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityRoots()
