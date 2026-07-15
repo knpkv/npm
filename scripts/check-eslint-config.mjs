@@ -130,6 +130,76 @@ await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     const makeCommand = (options) => {
+      options.environment = unsafeEnvironment
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false,
+        [inheritanceKey]: true
+      })
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false,
+        [environmentKey]: unsafeEnvironment
+      })
+    }
+  `,
+  expected: 2,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const wrapper = () => {
+      const makeCommand = (options) =>
+        ChildProcess.make("codex", ["exec"], {
+          env: options.environment,
+          extendEnv: false
+        })
+      return makeCommand
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      options = unsafeOptions
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
       ChildProcess.make("codex", ["exec"], {
         metadata: { env: options.environment, extendEnv: false }
       })
@@ -176,6 +246,17 @@ await assertRuleDiagnostics({
   `,
   expected: 0,
   filePath: "packages/ai-claude/src/runner.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    export type { Command } from "effect/unstable/process/ChildProcess"
+    export type * from "effect/unstable/process/ChildProcess"
+    export { ChildProcessSpawner } from "effect/unstable/process"
+  `,
+  expected: 0,
+  filePath: "packages/ai-codex/src/type-exports.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 

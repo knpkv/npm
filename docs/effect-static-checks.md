@@ -35,9 +35,11 @@ Use ast-grep for syntactic patterns that are precise without type information:
   an explicit reviewed `env` record with `extendEnv: false`; provider-specific
   credentials are opt-in rather than inherited from the parent process. The
   binding-aware local ESLint rule permits process construction only in the two
-  audited command-factory files. It rejects constructor aliases, indirect
-  calls, re-exports, dynamic imports, shadowed environment projections,
-  dynamic option objects, duplicate keys, and option spreads.
+  audited command-factory files, each with one top-level constant factory and
+  an unmodified options parameter. It rejects constructor aliases, indirect
+  calls, value re-exports, computed module loading, shadowed environment
+  projections, dynamic or computed option keys, duplicate keys, and option
+  spreads. Type-only exports remain valid.
 - Use Schema JSON codecs at API spec generation boundaries: no raw
   `JSON.parse`/`JSON.stringify` in API-client regeneration scripts.
 - Keep API-client regeneration failures typed: no native `Error` construction or

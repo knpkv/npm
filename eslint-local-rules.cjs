@@ -65,6 +65,16 @@ const enclosingFunction = (node) => {
   return undefined
 }
 
+const isReadOnlyMemberReference = (reference) => {
+  if (reference.isWrite()) return false
+  const member = reference.identifier.parent
+  if (member?.type !== "MemberExpression" || member.object !== reference.identifier) return false
+  const usage = member.parent
+  if (usage?.type === "AssignmentExpression" && usage.left === member) return false
+  if (usage?.type === "UpdateExpression" && usage.argument === member) return false
+  return !(usage?.type === "UnaryExpression" && usage.operator === "delete" && usage.argument === member)
+}
+
 const isReviewedEnvironmentProjection = (context, expression, call) => {
   if (
     expression.type !== "MemberExpression" ||
@@ -80,19 +90,35 @@ const isReviewedEnvironmentProjection = (context, expression, call) => {
     factory === undefined ||
     factory.parent?.type !== "VariableDeclarator" ||
     factory.parent.id.type !== "Identifier" ||
-    factory.parent.id.name !== "makeCommand"
+    factory.parent.id.name !== "makeCommand" ||
+    factory.parent.parent?.type !== "VariableDeclaration" ||
+    factory.parent.parent.kind !== "const" ||
+    factory.parent.parent.parent?.type !== "Program"
   ) {
     return false
   }
   const parameter = factory.params.find((candidate) => candidate.type === "Identifier" && candidate.name === "options")
+  const binding = resolvedVariable(context, expression.object)
   return (
-    parameter !== undefined && resolvedVariable(context, expression.object)?.identifiers.includes(parameter) === true
+    parameter !== undefined &&
+    binding?.identifiers.includes(parameter) === true &&
+    binding.references.every(isReadOnlyMemberReference)
   )
 }
 
 const hasIsolatedChildEnvironment = (context, options, call) => {
   if (options?.type !== "ObjectExpression") return false
   if (options.properties.some((property) => property.type === "SpreadElement")) return false
+  if (
+    options.properties.some(
+      (property) =>
+        property.type === "Property" &&
+        property.computed &&
+        !(property.key.type === "Literal" && typeof property.key.value === "string")
+    )
+  ) {
+    return false
+  }
   const environment = options.properties.filter(
     (property) => property.type === "Property" && staticPropertyName(property.key) === "env"
   )
@@ -128,6 +154,22 @@ const staticImportExpressionSource = (source) => {
     return source.quasis[0]?.value.cooked
   }
   return undefined
+}
+
+const isTypeOnlyExport = (declaration, specifier) =>
+  declaration.exportKind === "type" || specifier?.exportKind === "type"
+
+const isSensitiveChildProcessExport = (declaration) => {
+  if (isTypeOnlyExport(declaration)) return false
+  if (declaration.source?.value === CHILD_PROCESS_MODULE) {
+    return declaration.specifiers.some((specifier) => !isTypeOnlyExport(declaration, specifier))
+  }
+  if (declaration.source?.value !== CHILD_PROCESS_BARREL) return false
+  return declaration.specifiers.some(
+    (specifier) =>
+      !isTypeOnlyExport(declaration, specifier) &&
+      (specifier.type === "ExportNamespaceSpecifier" || staticPropertyName(specifier.local) === "ChildProcess")
+  )
 }
 
 const isSensitiveChildProcessSpecifier = (declaration, specifier) => {
@@ -509,10 +551,15 @@ module.exports = {
           }
         },
         ExportAllDeclaration(node) {
-          if (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL) report(node)
+          if (
+            node.exportKind !== "type" &&
+            (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL)
+          ) {
+            report(node)
+          }
         },
         ExportNamedDeclaration(node) {
-          if (node.source?.value === CHILD_PROCESS_MODULE || node.source?.value === CHILD_PROCESS_BARREL) report(node)
+          if (isSensitiveChildProcessExport(node)) report(node)
         },
         ImportExpression(node) {
           const source = staticImportExpressionSource(node.source)
