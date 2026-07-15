@@ -150,6 +150,64 @@ describe("model", () => {
       }
     }))
 
+  it.effect("uses the isolated environment for streamed model turns", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.streamText({ prompt: "Say hello" }).pipe(
+        Stream.provide(model({
+          cwd: "/workspace",
+          environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
+        })),
+        Stream.provide(fakeProcessLayer(calls, { stdout: successTranscript("hello") })),
+        Stream.provide(NodeFileSystem.layer),
+        Stream.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
+            CODEX_API_KEY: "codex-api-key",
+            HOME: "/home/reviewer",
+            PATH: "/reviewed/bin"
+          }
+        }))),
+        Stream.runDrain
+      )
+
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.options.extendEnv).toBe(false)
+        expect(command.options.env).toEqual({
+          CODEX_API_KEY: "codex-api-key",
+          CUSTOM_PROVIDER_KEY: "custom-provider-key",
+          HOME: "/home/reviewer",
+          PATH: "/reviewed/bin"
+        })
+        expect(command.options.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+      }
+    }))
+
+  it.effect("maps environment provider failures before spawning", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const failingProvider = ConfigProvider.make(() =>
+        Effect.fail(
+          new ConfigProvider.SourceError({ message: "environment unavailable" })
+        )
+      )
+      const error = yield* LanguageModel.generateText({ prompt: "Say hello" }).pipe(
+        Effect.provide(model({ cwd: "/workspace" })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("unused") })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(ConfigProvider.layer(failingProvider)),
+        Effect.flip
+      )
+
+      expect(error.reason).toMatchObject({
+        _tag: "InternalProviderError",
+        metadata: { "codex-cli": { phase: "configuration" } }
+      })
+      expect(calls).toHaveLength(0)
+    }))
+
   it.effect("rejects file prompt parts before spawning Codex", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Predicate } from "effect"
+import { CodexFailureCause } from "../src/internal/errors.js"
 import { decodeTranscript } from "../src/internal/protocol.js"
 
 describe("Codex JSONL protocol", () => {
@@ -89,6 +90,24 @@ describe("Codex JSONL protocol", () => {
       expect(Exit.isFailure(exit)).toBe(true)
     }))
 
+  it.effect("categorizes a duplicate terminal event as a typed protocol failure", () =>
+    Effect.gen(function*() {
+      const error = yield* decodeTranscript([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Final" }
+        }),
+        JSON.stringify({ type: "turn.completed" }),
+        JSON.stringify({ type: "turn.completed" })
+      ].join("\n")).pipe(Effect.flip)
+
+      expect(error.phase).toBe("protocol")
+      expect(Predicate.isTagged(error.cause, "CodexFailureCause")).toBe(true)
+      if (Predicate.isTagged(error.cause, "CodexFailureCause")) {
+        expect(error.cause).toEqual(new CodexFailureCause({ reason: "event-after-turn-completed" }))
+      }
+    }))
+
   it.effect("rejects impossible output token partitions", () =>
     Effect.gen(function*() {
       const exit = yield* decodeTranscript([
@@ -141,6 +160,55 @@ describe("Codex JSONL protocol", () => {
 
       expect(turn.usage.inputTokens).toEqual({ cacheRead: 0, cacheWrite: undefined, total: 0, uncached: 0 })
       expect(turn.usage.outputTokens).toEqual({ reasoning: 7, text: 0, total: 7 })
+    }))
+
+  it.effect("rejects unsafe token count encodings through the protocol channel", () =>
+    Effect.gen(function*() {
+      const invalidCounts = [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]
+      for (const outputTokens of invalidCounts) {
+        const error = yield* decodeTranscript([
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "Ready" }
+          }),
+          JSON.stringify({
+            type: "turn.completed",
+            usage: { output_tokens: outputTokens }
+          })
+        ].join("\n")).pipe(Effect.flip)
+
+        expect(error.phase).toBe("protocol")
+      }
+    }))
+
+  it.effect("rejects usage subcounts without their totals", () =>
+    Effect.gen(function*() {
+      const fixtures = [
+        {
+          reason: "invalid-input-usage",
+          usage: { cached_input_tokens: 1 }
+        },
+        {
+          reason: "invalid-output-usage",
+          usage: { reasoning_output_tokens: 1 }
+        }
+      ]
+
+      for (const fixture of fixtures) {
+        const error = yield* decodeTranscript([
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "Ready" }
+          }),
+          JSON.stringify({ type: "turn.completed", usage: fixture.usage })
+        ].join("\n")).pipe(Effect.flip)
+
+        expect(error.phase).toBe("protocol")
+        expect(Predicate.isTagged(error.cause, "CodexFailureCause")).toBe(true)
+        if (Predicate.isTagged(error.cause, "CodexFailureCause")) {
+          expect(error.cause).toEqual(new CodexFailureCause({ reason: fixture.reason }))
+        }
+      }
     }))
 
   it.effect("rejects malformed events through the typed error channel", () =>
