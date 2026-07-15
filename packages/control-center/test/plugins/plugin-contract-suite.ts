@@ -27,6 +27,10 @@ import {
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
+import {
+  PluginRuntimeAuthority,
+  PluginRuntimeAuthorityToken
+} from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { PluginConnectionMapLive, PluginRuntimeMap } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -318,8 +322,16 @@ export const runPluginContractSuite = (name: string, harness: PluginContractHarn
         const scopeA = scope(WORKSPACE_A)
         const equalScopeA = scope(WORKSPACE_A)
         const scopeB = scope(WORKSPACE_B)
+        const authorityA = PluginRuntimeAuthorityToken.make(`runtime:${WORKSPACE_A}:${CONNECTION_ID}`)
         const registry = Layer.succeed(PluginRuntimeRegistry, {
-          layer: (key) => (key.workspaceId === WORKSPACE_A ? runtimeA.layer : runtimeB.layer)
+          layer: (key) =>
+            Layer.merge(
+              key.workspaceId === WORKSPACE_A ? runtimeA.layer : runtimeB.layer,
+              Layer.succeed(
+                PluginRuntimeAuthority,
+                PluginRuntimeAuthorityToken.make(`runtime:${key.workspaceId}:${key.pluginConnectionId}`)
+              )
+            )
         })
         const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
         const projections = Layer.merge(PluginConnectionMapLive, AuthorizedPluginExecutorMap.layer).pipe(
@@ -331,12 +343,22 @@ export const runPluginContractSuite = (name: string, harness: PluginContractHarn
           const executors = yield* AuthorizedPluginExecutorMap
           const contextA = yield* Effect.scoped(connections.contextEffect(scopeA))
           const equalContextA = yield* Effect.scoped(connections.contextEffect(equalScopeA))
-          yield* Effect.scoped(executors.contextEffect(equalScopeA))
+          const executorLease = yield* Effect.scoped(
+            executors.contextEffectForAuthority(equalScopeA, authorityA)
+          )
+          const unavailable = yield* Effect.scoped(
+            executors.contextEffectForAuthority(
+              equalScopeA,
+              PluginRuntimeAuthorityToken.make("runtime:obsolete-generation")
+            )
+          ).pipe(Effect.flip)
           const contextB = yield* Effect.scoped(connections.contextEffect(scopeB))
 
           assert.strictEqual(Context.get(contextA, PluginConnection), Context.get(equalContextA, PluginConnection))
           assert.notStrictEqual(Context.get(contextA, PluginConnection), Context.get(contextB, PluginConnection))
           assert.isTrue(Option.isNone(Context.getOption(contextA, AuthorizedPluginExecutor)))
+          assert.strictEqual(executorLease.runtimeAuthorityToken, authorityA)
+          assert.strictEqual(unavailable._tag, "PluginRuntimeAuthorityUnavailable")
 
           const beforeA = yield* runtimeA.snapshot
           const beforeB = yield* runtimeB.snapshot

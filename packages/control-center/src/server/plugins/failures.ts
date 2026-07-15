@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema"
 
+import { PluginActionReconciliationKey } from "../../domain/plugins/actions.js"
 import { PluginCapabilityId } from "../../domain/plugins/descriptor.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
@@ -12,11 +13,6 @@ const SafeDiagnosticCode = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
   Schema.isMaxLength(100)
-)
-const SafeOpaqueKey = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(512)
 )
 
 /** Provider credentials are missing, expired, or rejected. */
@@ -86,7 +82,7 @@ export class PluginConfigurationFailure extends Schema.TaggedErrorClass<PluginCo
 /** Provider mutation may have occurred and must be reconciled, never retried blindly. */
 export class PluginUnknownOutcomeFailure extends Schema.TaggedErrorClass<PluginUnknownOutcomeFailure>()(
   "PluginUnknownOutcomeFailure",
-  { operation: SafeOperation, reconciliationKey: SafeOpaqueKey }
+  { operation: SafeOperation, reconciliationKey: PluginActionReconciliationKey }
 ) {}
 
 /** Closed typed failure taxonomy shared by every plugin adapter. */

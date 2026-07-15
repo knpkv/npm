@@ -169,9 +169,9 @@ export const PluginActionCancellationResultV1 = Schema.Union([
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
-/** Request to reconcile an ambiguous provider mutation without replaying it. */
+/** Request to reconcile without replay; null locates the mutation by its durable idempotency key. */
 export const PluginActionReconciliationRequestV1 = Schema.Struct({
-  reconciliationKey: PluginActionReconciliationKey,
+  reconciliationKey: Schema.NullOr(PluginActionReconciliationKey),
   idempotencyKey: boundedOpaque("PluginReconciliationIdempotencyKey", 512),
   payloadDigest: PluginActionPayloadDigest
 })

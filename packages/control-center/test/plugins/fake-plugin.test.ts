@@ -199,6 +199,11 @@ const reconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliatio
   idempotencyKey: "action-1",
   payloadDigest: "0".repeat(64)
 })
+const idempotencyReconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+  reconciliationKey: null,
+  idempotencyKey: "action-1",
+  payloadDigest: "0".repeat(64)
+})
 const cancellationRequest = Schema.decodeUnknownSync(PluginActionCancellationRequestV1)({
   idempotencyKey: "action-1",
   providerOperationId: "provider-operation-1",
@@ -610,6 +615,27 @@ describe("FakePlugin", () => {
       assert.strictEqual(result.pending._tag, "pending")
       assert.strictEqual(result.succeeded._tag, "succeeded")
       assert.strictEqual(snapshot.providerMutations, 1)
+    }))
+
+  it.effect("reconciles a stranded durable start by idempotency identity without dispatch", () =>
+    Effect.gen(function*() {
+      const reconciliationKey = fakeReconciliationScriptKey(null, "action-1")
+      const runtime = yield* makeFakePluginRuntime(
+        baseScenario({
+          reconcile: {
+            [reconciliationKey]: [success({ _tag: "pending", checkedAt: OBSERVED_AT })]
+          }
+        })
+      )
+      const result = yield* Effect.gen(function*() {
+        const executor = yield* AuthorizedPluginExecutor
+        return yield* executor.reconcile(idempotencyReconciliationRequest)
+      }).pipe(Effect.provide(runtime.layer), Effect.scoped)
+      const snapshot = yield* runtime.probe.snapshot
+
+      assert.strictEqual(result._tag, "pending")
+      assert.strictEqual(snapshot.providerMutations, 0)
+      assert.deepStrictEqual(snapshot.calls.map(({ operation }) => operation), ["reconcile"])
     }))
 
   it.effect("rejects internal execution when action execution was not negotiated", () =>

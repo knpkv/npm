@@ -160,7 +160,12 @@ const isWithin = (sourcePath: string, directory: string): boolean =>
 const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
   sourcePath === "src/server/plugins/PluginDefinition" ||
   isWithin(sourcePath, "src/server/plugins/internal") ||
-  isWithin(sourcePath, "src/server/governance")
+  sourcePath === "src/server/governance/internal/GovernedActionExecutionEngine" ||
+  sourcePath === "src/server/governance/internal/GovernedActionExecutionStore"
+
+const mayImportGovernedExecutionInternals = (sourcePath: string): boolean =>
+  isWithin(sourcePath, "src/server/governance/internal") ||
+  sourcePath === "src/server/runtime/GovernedActionExecutionStartup"
 
 const reasonForImport = (sourcePath: string, importPath: string): string | undefined => {
   const normalizedSource = sourcePath.replaceAll("\\", "/").replace(SCRIPT_EXTENSION, "")
@@ -226,6 +231,13 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     !mayImportPluginExecutionInternals(normalizedSource)
   ) {
     return "only internal plugin composition and the governed engine can import live plugin execution services"
+  }
+  if (
+    target !== undefined &&
+    isWithin(target, "src/server/governance/internal") &&
+    !mayImportGovernedExecutionInternals(normalizedSource)
+  ) {
+    return "only governed execution internals and private worker startup can import the execution engine"
   }
   if (isClient && target !== undefined && isWithin(target, "src/server")) {
     return "client code cannot import server code"

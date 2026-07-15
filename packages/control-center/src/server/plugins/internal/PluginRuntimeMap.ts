@@ -9,6 +9,7 @@ import { PluginConnection } from "../PluginConnection.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
 import { PluginConnectionMap } from "../PluginConnectionMap.js"
 import type { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
+import type { PluginRuntimeAuthority } from "./PluginRuntimeAuthority.js"
 import { PluginRuntimeRegistry } from "./PluginRuntimeRegistry.js"
 
 /** Value-equality cache key preventing connection-ID aliasing across workspaces. */
@@ -19,8 +20,11 @@ export const pluginRuntimeKey = (scope: PluginRuntimeScope): PluginRuntimeKey =>
 
 const lookupPluginRuntime = (
   scope: PluginRuntimeKey
-): Layer.Layer<PluginConnection | AuthorizedPluginExecutor, PluginFailure, PluginRuntimeRegistry> =>
-  Layer.unwrap(Effect.map(PluginRuntimeRegistry, (registry) => registry.layer(scope)))
+): Layer.Layer<
+  PluginConnection | AuthorizedPluginExecutor | PluginRuntimeAuthority,
+  PluginFailure,
+  PluginRuntimeRegistry
+> => Layer.unwrap(Effect.map(PluginRuntimeRegistry, (registry) => registry.layer(scope)))
 
 /** Shared scoped runtime cache used by the separately projected public and internal facades. */
 export class PluginRuntimeMap extends LayerMap.Service<PluginRuntimeMap>()(

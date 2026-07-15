@@ -89,8 +89,30 @@ describe("Control Center source boundaries", () => {
     ).toEqual([])
     expect(
       inspectSourceBoundaries(
-        "src/server/governance/GovernedActionEngine.ts",
+        "src/server/governance/internal/GovernedActionExecutionEngine.ts",
+        "import { AuthorizedPluginExecutor } from \"../../plugins/internal/AuthorizedPluginExecutor.js\""
+      )
+    ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/governance/SomeHelper.ts",
         "import { AuthorizedPluginExecutor } from \"../plugins/internal/AuthorizedPluginExecutor.js\""
+      )
+    ).toHaveLength(1)
+  })
+
+  it("keeps the governed execution engine behind private worker startup", () => {
+    const engineImport = "../governance/internal/GovernedActionExecutionEngine.js"
+    expect(
+      inspectSourceBoundaries("src/server/api/Handlers.ts", `import ${JSON.stringify(engineImport)}`)
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries("src/server/application/releaseAgent.ts", `import ${JSON.stringify(engineImport)}`)
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/runtime/GovernedActionExecutionStartup.ts",
+        `import ${JSON.stringify(engineImport)}`
       )
     ).toEqual([])
   })

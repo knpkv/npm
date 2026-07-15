@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Fiber, Random, Ref, Result, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
+import { PluginActionReconciliationKey } from "../../src/domain/plugins/actions.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -29,7 +30,10 @@ const nonRetryableFailures: ReadonlyArray<PluginFailure> = [
     diagnosticCode: "invalid-provider-payload"
   }),
   new PluginConflictFailure({ operation: "write", diagnosticCode: "revision-conflict" }),
-  new PluginUnknownOutcomeFailure({ operation: "write", reconciliationKey: "operation-1" })
+  new PluginUnknownOutcomeFailure({
+    operation: "write",
+    reconciliationKey: PluginActionReconciliationKey.make("operation-1")
+  })
 ]
 
 describe("plugin retry policy", () => {

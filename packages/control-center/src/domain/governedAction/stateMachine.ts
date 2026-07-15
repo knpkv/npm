@@ -97,7 +97,9 @@ export const GovernedActionUnknownOutcome = Schema.TaggedUnion({
     observedAt: UtcTimestamp,
     safeSummary: SafeReason,
     reason: Schema.Literals([
+      "dispatch-deadline-exceeded",
       "interrupted-after-intent",
+      "provider-defect-after-intent",
       "malformed-provider-result",
       "receipt-persistence-failed",
       "missing-reconciliation-locator"

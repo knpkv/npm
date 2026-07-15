@@ -37,5 +37,7 @@ export const fakeSyncScriptKey = (streamKey: string, checkpoint: string | null):
   `${streamKey}:${checkpoint ?? "initial"}`
 
 /** Stable lookup key for ambiguous-outcome reconciliation scripts. */
-export const fakeReconciliationScriptKey = (reconciliationKey: string, idempotencyKey: string): string =>
-  `${reconciliationKey}:${idempotencyKey}`
+export const fakeReconciliationScriptKey = (
+  reconciliationKey: string | null,
+  idempotencyKey: string
+): string => `${reconciliationKey ?? "idempotency"}:${idempotencyKey}`

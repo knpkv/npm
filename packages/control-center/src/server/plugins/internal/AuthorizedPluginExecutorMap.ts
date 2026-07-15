@@ -1,18 +1,36 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 
 import type { PluginFailure } from "../failures.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
 import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
+import { PluginRuntimeAuthority, type PluginRuntimeAuthorityToken } from "./PluginRuntimeAuthority.js"
 import { pluginRuntimeKey, PluginRuntimeMap } from "./PluginRuntimeMap.js"
+
+/** Executor and exact runtime generation held under one shared scoped lease. */
+export interface AuthorizedPluginExecutorLease {
+  readonly context: Context.Context<AuthorizedPluginExecutor>
+  readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
+}
+
+/** The runtime generation that may have mutated provider state is no longer available. */
+export class PluginRuntimeAuthorityUnavailable extends Schema.TaggedErrorClass<PluginRuntimeAuthorityUnavailable>()(
+  "PluginRuntimeAuthorityUnavailable",
+  {}
+) {}
 
 /** Internal projection of a cached runtime's vendor-write capability. */
 export interface AuthorizedPluginExecutorMapV1 {
   readonly contextEffect: (
     scope: PluginRuntimeScope
-  ) => Effect.Effect<Context.Context<AuthorizedPluginExecutor>, PluginFailure, Scope.Scope>
+  ) => Effect.Effect<AuthorizedPluginExecutorLease, PluginFailure, Scope.Scope>
+  readonly contextEffectForAuthority: (
+    scope: PluginRuntimeScope,
+    runtimeAuthorityToken: PluginRuntimeAuthorityToken
+  ) => Effect.Effect<AuthorizedPluginExecutorLease, PluginFailure | PluginRuntimeAuthorityUnavailable, Scope.Scope>
   readonly invalidate: (scope: PluginRuntimeScope) => Effect.Effect<void>
 }
 
@@ -23,13 +41,21 @@ export class AuthorizedPluginExecutorMap extends Context.Service<
 >()("@knpkv/control-center/internal/AuthorizedPluginExecutorMap") {
   static readonly layer = Layer.effect(
     AuthorizedPluginExecutorMap,
-    Effect.map(PluginRuntimeMap, (runtimeMap) => ({
-      contextEffect: (scope: PluginRuntimeScope) =>
-        Effect.map(
-          runtimeMap.contextEffect(pluginRuntimeKey(scope)),
-          (context) => Context.make(AuthorizedPluginExecutor, Context.get(context, AuthorizedPluginExecutor))
-        ),
-      invalidate: (scope: PluginRuntimeScope) => runtimeMap.invalidate(pluginRuntimeKey(scope))
-    }))
+    Effect.map(PluginRuntimeMap, (runtimeMap) => {
+      const contextEffect = (scope: PluginRuntimeScope) =>
+        Effect.map(runtimeMap.contextEffect(pluginRuntimeKey(scope)), (context) => ({
+          context: Context.make(AuthorizedPluginExecutor, Context.get(context, AuthorizedPluginExecutor)),
+          runtimeAuthorityToken: Context.get(context, PluginRuntimeAuthority)
+        }))
+      return {
+        contextEffect,
+        contextEffectForAuthority: (scope, runtimeAuthorityToken) =>
+          Effect.flatMap(contextEffect(scope), (lease) =>
+            lease.runtimeAuthorityToken === runtimeAuthorityToken
+              ? Effect.succeed(lease)
+              : Effect.fail(new PluginRuntimeAuthorityUnavailable())),
+        invalidate: (scope: PluginRuntimeScope) => runtimeMap.invalidate(pluginRuntimeKey(scope))
+      }
+    })
   )
 }
