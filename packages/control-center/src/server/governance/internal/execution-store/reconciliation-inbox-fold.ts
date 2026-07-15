@@ -15,35 +15,36 @@ import { makeGovernedActionTransactionWrite } from "../../../persistence/reposit
 import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import type { GovernedActionExecutionReference } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
+import { governedActionReconciliationKey } from "./reconciliation-locator.js"
 import {
-  DispatchInboxOutcome,
-  dispatchInboxOutcomeCommand,
-  dispatchInboxOutcomeKind,
-  dispatchInboxOutcomeObservedAt,
-  DispatchResultKind,
-  encodeDispatchInboxOutcome
-} from "./dispatch-outcome.js"
-import { GovernedActionPermitTokenDigest } from "./tokens.js"
+  encodeReconciliationInboxOutcome,
+  ReconciliationInboxOutcome,
+  reconciliationInboxOutcomeCommand,
+  reconciliationInboxOutcomeKind,
+  reconciliationInboxOutcomeObservedAt,
+  ReconciliationResultKind
+} from "./reconciliation-outcome.js"
+import { GovernedActionRecoveryTokenDigest } from "./tokens.js"
 
-type DispatchInboxFoldOperation = "inspect" | "record-dispatch" | "record-unknown"
+type ReconciliationFoldOperation = "inspect" | "record-reconciliation" | "record-recovery-unavailable"
 
-interface ExpectedDispatchInboxOutcome {
+interface ExpectedReconciliationInboxOutcome {
   readonly actionId: GovernedActionId
   readonly commandDigest: typeof GovernedActionCommandDigest.Type
   readonly outcomeDigest: string
   readonly outcomeId: string
   readonly outcomeJson: string
-  readonly permitTokenDigest: GovernedActionPermitTokenDigest
-  readonly resultKind: typeof DispatchResultKind.Type
+  readonly recoveryTokenDigest: GovernedActionRecoveryTokenDigest
+  readonly resultKind: typeof ReconciliationResultKind.Type
   readonly workspaceId: WorkspaceId
 }
 
-const DispatchInboxRow = Schema.Struct({
+const ReconciliationInboxRow = Schema.Struct({
   workspaceId: WorkspaceId,
   actionId: GovernedActionId,
   outcomeId: Schema.String,
-  permitTokenDigest: GovernedActionPermitTokenDigest,
-  resultKind: DispatchResultKind,
+  recoveryTokenDigest: GovernedActionRecoveryTokenDigest,
+  resultKind: ReconciliationResultKind,
   outcomeJson: Schema.String,
   outcomeDigest: Schema.String.check(
     Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
@@ -51,16 +52,17 @@ const DispatchInboxRow = Schema.Struct({
   expectedCommandDigest: GovernedActionCommandDigest,
   observedAt: UtcTimestamp,
   receivedAt: UtcTimestamp,
-  foldTransitionId: Schema.NullOr(GovernedActionTransitionId)
+  foldTransitionId: Schema.NullOr(GovernedActionTransitionId),
+  foldCommandDigest: Schema.NullOr(GovernedActionCommandDigest)
 })
 
 const storeError = (
-  operation: DispatchInboxFoldOperation,
+  operation: ReconciliationFoldOperation,
   reason: GovernedActionExecutionStoreError["reason"]
 ): GovernedActionExecutionStoreError => new GovernedActionExecutionStoreError({ operation, reason })
 
 const mapStoreFailure = (
-  operation: DispatchInboxFoldOperation,
+  operation: ReconciliationFoldOperation,
   failure: unknown
 ): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
@@ -74,73 +76,86 @@ const mapStoreFailure = (
 }
 
 const expectedMatches = (
-  row: typeof DispatchInboxRow.Type,
-  expected: ExpectedDispatchInboxOutcome
+  row: typeof ReconciliationInboxRow.Type,
+  expected: ExpectedReconciliationInboxOutcome
 ): boolean =>
   row.workspaceId === expected.workspaceId &&
   row.actionId === expected.actionId &&
   row.outcomeId === expected.outcomeId &&
-  row.permitTokenDigest === expected.permitTokenDigest &&
+  row.recoveryTokenDigest === expected.recoveryTokenDigest &&
   row.resultKind === expected.resultKind &&
   row.outcomeJson === expected.outcomeJson &&
   row.outcomeDigest === expected.outcomeDigest &&
   row.expectedCommandDigest === expected.commandDigest
 
-/** Own canonical verification and lifecycle folding for both immediate and restart inbox paths. */
-export const makeGovernedActionExecutionDispatchInboxFolder = Effect.gen(function*() {
+const isRecoverableState = (state: string): boolean =>
+  state === "started" ||
+  state === "cancel-requested" ||
+  state === "unknown" ||
+  state === "cancel-requested-unknown"
+
+/** Own canonical verification and lifecycle folding for immediate and restarted reconciliation paths. */
+export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(function*() {
   const { sql } = yield* Database
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
   const writer = yield* makeGovernedActionTransactionWrite
 
-  const decodeRows = Effect.fn("GovernedActionExecutionDispatchInboxFolder.decodeRows")(function*(
+  const decodeRows = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.decodeRows")(function*(
     rows: ReadonlyArray<unknown>,
-    operation: DispatchInboxFoldOperation
+    operation: ReconciliationFoldOperation
   ) {
-    return yield* Schema.decodeUnknownEffect(Schema.Array(DispatchInboxRow))(rows).pipe(
+    return yield* Schema.decodeUnknownEffect(Schema.Array(ReconciliationInboxRow))(rows).pipe(
       Effect.mapError(() => storeError(operation, "invalid-record"))
     )
   })
 
-  const foldRow = Effect.fn("GovernedActionExecutionDispatchInboxFolder.foldRow")(function*(
-    row: typeof DispatchInboxRow.Type,
-    operation: DispatchInboxFoldOperation
+  const foldRow = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldRow")(function*(
+    row: typeof ReconciliationInboxRow.Type,
+    operation: ReconciliationFoldOperation
   ) {
     const mapFailure = (failure: unknown): GovernedActionExecutionStoreError => mapStoreFailure(operation, failure)
     const outcome = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(DispatchInboxOutcome)
+      Schema.fromJsonString(ReconciliationInboxOutcome)
     )(row.outcomeJson).pipe(Effect.mapError(() => storeError(operation, "invalid-record")))
-    const command = dispatchInboxOutcomeCommand(outcome)
-    const encoded = yield* encodeDispatchInboxOutcome(outcome).pipe(
+    const encoded = yield* encodeReconciliationInboxOutcome(outcome).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
+    )
+    if (
+      row.resultKind !== reconciliationInboxOutcomeKind(outcome) ||
+      row.outcomeJson !== encoded.outcomeJson ||
+      row.outcomeDigest !== encoded.outcomeDigest ||
+      DateTime.Order(row.observedAt, reconciliationInboxOutcomeObservedAt(outcome, row.receivedAt)) !== 0
+    ) return yield* storeError(operation, "invalid-record")
+
+    const record = yield* transaction.read({ workspaceId: row.workspaceId, actionId: row.actionId })
+    if (row.foldTransitionId !== null) {
+      if (row.foldCommandDigest !== row.expectedCommandDigest) {
+        return yield* storeError(operation, "invalid-record")
+      }
+      return record.head.state
+    }
+    if (!isRecoverableState(record.head.state)) return yield* storeError(operation, "conflict")
+    const command = reconciliationInboxOutcomeCommand(
+      outcome,
+      governedActionReconciliationKey(record),
+      row.observedAt
     )
     const commandDigest = yield* digestGovernedActionTransitionCommand(command).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
     )
-    if (
-      row.resultKind !== dispatchInboxOutcomeKind(outcome) ||
-      row.outcomeJson !== encoded.outcomeJson ||
-      row.outcomeDigest !== encoded.outcomeDigest ||
-      row.expectedCommandDigest !== commandDigest ||
-      DateTime.Order(row.observedAt, dispatchInboxOutcomeObservedAt(outcome)) !== 0
-    ) return yield* storeError(operation, "invalid-record")
+    if (commandDigest !== row.expectedCommandDigest) return yield* storeError(operation, "invalid-record")
 
-    const record = yield* transaction.read({ workspaceId: row.workspaceId, actionId: row.actionId })
-    if (row.foldTransitionId !== null) return record.head.state
-    if (record.head.state !== "started" && record.head.state !== "cancel-requested") {
-      return yield* storeError(operation, "conflict")
-    }
     const foldedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
     if (DateTime.Order(foldedAt, row.receivedAt) < 0) return yield* storeError(operation, "conflict")
-
     const commit = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionCommitInput))({
       envelope: record.envelope,
       expectedHeadTransitionId: record.headTransition.transitionId,
       transitionId: yield* cryptoService.randomUUIDv7,
-      commandId: `execution:dispatch:${row.permitTokenDigest}`,
+      commandId: `execution:reconciliation:${row.recoveryTokenDigest}`,
       command,
       cause: { _tag: "system", component: "governed-action-execution" },
       occurredAt: foldedAt,
@@ -159,32 +174,39 @@ export const makeGovernedActionExecutionDispatchInboxFolder = Effect.gen(functio
     return committed.transition.toState
   })
 
-  const foldExpected = Effect.fn("GovernedActionExecutionDispatchInboxFolder.foldExpected")(function*(
-    operation: Exclude<DispatchInboxFoldOperation, "inspect">,
-    expected: ExpectedDispatchInboxOutcome
+  const selectColumns = sql`SELECT
+    outcome.workspace_id AS workspaceId,
+    outcome.action_id AS actionId,
+    outcome.outcome_id AS outcomeId,
+    outcome.recovery_claim_token_digest AS recoveryTokenDigest,
+    outcome.result_kind AS resultKind,
+    outcome.outcome_json AS outcomeJson,
+    outcome.outcome_digest AS outcomeDigest,
+    outcome.expected_command_digest AS expectedCommandDigest,
+    outcome.observed_at AS observedAt,
+    outcome.received_at AS receivedAt,
+    fold.transition_id AS foldTransitionId,
+    transition_record.command_digest AS foldCommandDigest
+  FROM governed_action_provider_outcomes outcome
+  LEFT JOIN governed_action_provider_outcome_folds fold
+    ON fold.workspace_id = outcome.workspace_id
+    AND fold.action_id = outcome.action_id
+    AND fold.outcome_id = outcome.outcome_id
+  LEFT JOIN governed_action_transitions transition_record
+    ON transition_record.workspace_id = fold.workspace_id
+    AND transition_record.action_id = fold.action_id
+    AND transition_record.transition_id = fold.transition_id`
+
+  const foldExpected = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldExpected")(function*(
+    operation: Exclude<ReconciliationFoldOperation, "inspect">,
+    expected: ExpectedReconciliationInboxOutcome
   ) {
     return yield* transaction.transact(
       `governed-action.execution-fold-${operation}`,
       Effect.gen(function*() {
-        const rows = yield* sql`SELECT
-          outcome.workspace_id AS workspaceId,
-          outcome.action_id AS actionId,
-          outcome.outcome_id AS outcomeId,
-          outcome.permit_token_digest AS permitTokenDigest,
-          outcome.result_kind AS resultKind,
-          outcome.outcome_json AS outcomeJson,
-          outcome.outcome_digest AS outcomeDigest,
-          outcome.expected_command_digest AS expectedCommandDigest,
-          outcome.observed_at AS observedAt,
-          outcome.received_at AS receivedAt,
-          fold.transition_id AS foldTransitionId
-        FROM governed_action_provider_outcomes outcome
-        LEFT JOIN governed_action_provider_outcome_folds fold
-          ON fold.workspace_id = outcome.workspace_id
-          AND fold.action_id = outcome.action_id
-          AND fold.outcome_id = outcome.outcome_id
-        WHERE outcome.permit_token_digest = ${expected.permitTokenDigest}
-        LIMIT 2`
+        const rows = yield* sql`${selectColumns}
+          WHERE outcome.recovery_claim_token_digest = ${expected.recoveryTokenDigest}
+          LIMIT 2`
         const decoded = yield* decodeRows(rows, operation)
         const row = decoded[0]
         if (decoded.length !== 1 || row === undefined || !expectedMatches(row, expected)) {
@@ -197,35 +219,19 @@ export const makeGovernedActionExecutionDispatchInboxFolder = Effect.gen(functio
     ).pipe(Effect.mapError((failure) => mapStoreFailure(operation, failure)))
   })
 
-  const foldPending = Effect.fn("GovernedActionExecutionDispatchInboxFolder.foldPending")(function*(
+  const foldPending = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldPending")(function*(
     reference: GovernedActionExecutionReference
   ) {
     return yield* transaction.transact(
-      "governed-action.execution-fold-pending-dispatch",
+      "governed-action.execution-fold-pending-reconciliation",
       Effect.gen(function*() {
-        const rows = yield* sql`SELECT
-          outcome.workspace_id AS workspaceId,
-          outcome.action_id AS actionId,
-          outcome.outcome_id AS outcomeId,
-          outcome.permit_token_digest AS permitTokenDigest,
-          outcome.result_kind AS resultKind,
-          outcome.outcome_json AS outcomeJson,
-          outcome.outcome_digest AS outcomeDigest,
-          outcome.expected_command_digest AS expectedCommandDigest,
-          outcome.observed_at AS observedAt,
-          outcome.received_at AS receivedAt,
-          fold.transition_id AS foldTransitionId
-        FROM governed_action_provider_outcomes outcome
-        LEFT JOIN governed_action_provider_outcome_folds fold
-          ON fold.workspace_id = outcome.workspace_id
-          AND fold.action_id = outcome.action_id
-          AND fold.outcome_id = outcome.outcome_id
-        WHERE outcome.workspace_id = ${reference.workspaceId}
-          AND outcome.action_id = ${reference.actionId}
-          AND outcome.source_kind = 'dispatch'
-          AND fold.outcome_id IS NULL
-        ORDER BY outcome.received_at, outcome.outcome_id
-        LIMIT 2`
+        const rows = yield* sql`${selectColumns}
+          WHERE outcome.workspace_id = ${reference.workspaceId}
+            AND outcome.action_id = ${reference.actionId}
+            AND outcome.source_kind = 'reconciliation'
+            AND fold.outcome_id IS NULL
+          ORDER BY outcome.received_at, outcome.outcome_id
+          LIMIT 2`
         const decoded = yield* decodeRows(rows, "inspect")
         if (decoded.length === 0) return null
         const row = decoded[0]

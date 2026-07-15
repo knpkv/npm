@@ -71,6 +71,7 @@ export interface GovernedActionRecoveryPreparation {
   readonly _tag: "reconcile"
   readonly recoveryToken: GovernedActionRecoveryToken
   readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
+  readonly reconciliationDeadline: UtcTimestamp
   readonly scope: PluginRuntimeScope
   readonly request: PluginActionReconciliationRequestV1
 }

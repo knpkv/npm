@@ -218,7 +218,10 @@ export const canonicalizeGovernedActionJson = (value: Schema.Json): string => {
   }
 }
 
-const digestCanonicalJson = Effect.fn("GovernedActionDigests.digestCanonicalJson")(function*(value: Schema.Json) {
+/** Hash canonical JSON with the governed-action SHA-256 representation. */
+export const digestCanonicalGovernedActionJson = Effect.fn(
+  "GovernedActionDigests.digestCanonicalJson"
+)(function*(value: Schema.Json) {
   const cryptoService = yield* Crypto.Crypto
   const canonicalJson = canonicalizeGovernedActionJson(value)
   const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(canonicalJson))).pipe(
@@ -265,7 +268,7 @@ export const encodeGovernedActionDispatchOutcome = Effect.fn(
   )
   const json = yield* decodeJson(encoded)
   return {
-    outcomeDigest: yield* digestCanonicalJson(json),
+    outcomeDigest: yield* digestCanonicalGovernedActionJson(json),
     outcomeJson: canonicalizeGovernedActionJson(json)
   }
 })
@@ -283,7 +286,7 @@ export const encodeGovernedActionUnknownOutcome = Effect.fn(
   )
   const json = yield* decodeJson(encoded)
   return {
-    outcomeDigest: yield* digestCanonicalJson(json),
+    outcomeDigest: yield* digestCanonicalGovernedActionJson(json),
     outcomeJson: canonicalizeGovernedActionJson(json)
   }
 })
@@ -292,7 +295,7 @@ export const encodeGovernedActionUnknownOutcome = Effect.fn(
 export const digestGovernedActionPayload = Effect.fn("GovernedActionDigests.payload")(function*(
   payload: typeof PluginPayloadJson.Type
 ) {
-  const digest = yield* digestCanonicalJson(payload)
+  const digest = yield* digestCanonicalGovernedActionJson(payload)
   return PluginActionPayloadDigest.make(digest)
 })
 
@@ -303,7 +306,7 @@ export const digestGovernedActionTransitionCommand = Effect.fn("GovernedActionDi
   const encoded = yield* encodeCommand(command).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionCommandDigest.make(`sha256:${digest}`)
 })
 
@@ -347,7 +350,7 @@ export const digestGovernedActionEvidenceSet = Effect.fn("GovernedActionDigests.
   const encoded = yield* encodeEvidence(evidence).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionEvidenceSetDigest.make(`sha256:${digest}`)
 })
 
@@ -355,7 +358,7 @@ export const digestGovernedActionEvidenceSet = Effect.fn("GovernedActionDigests.
 export const digestGovernedActionPolicyDefinition = Effect.fn(
   "GovernedActionDigests.policyDefinition"
 )(function*(definition: Schema.Json) {
-  const digest = yield* digestCanonicalJson(definition)
+  const digest = yield* digestCanonicalGovernedActionJson(definition)
   return GovernedActionPolicyDigest.make(`sha256:${digest}`)
 })
 
@@ -366,7 +369,7 @@ export const digestGovernedActionPolicyEvaluation = Effect.fn(
   const encoded = yield* encodePolicyEvaluation(evaluation).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionPolicyEvaluationDigest.make(`sha256:${digest}`)
 })
 
@@ -377,7 +380,7 @@ export const digestGovernedActionAuthorization = Effect.fn(
   const encoded = yield* encodeAuthorization(authorization).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionAuthorizationDigest.make(`sha256:${digest}`)
 })
 
@@ -388,7 +391,7 @@ export const digestGovernedActionAttempt = Effect.fn(
   const encoded = yield* encodeAttempt(attempt).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionAttemptDigest.make(`sha256:${digest}`)
 })
 
@@ -399,7 +402,7 @@ export const digestGovernedActionTransition = Effect.fn(
   const encoded = yield* encodeTransition(transition).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionTransitionDigest.make(`sha256:${digest}`)
 })
 
@@ -474,7 +477,7 @@ export const digestGovernedActionEnvelope = Effect.fn("GovernedActionDigests.env
   const encoded = yield* encodeEnvelope(material).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
-  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  const digest = yield* digestCanonicalGovernedActionJson(yield* decodeJson(encoded))
   return GovernedActionEnvelopeDigest.make(`sha256:${digest}`)
 })
 

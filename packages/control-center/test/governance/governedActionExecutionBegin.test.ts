@@ -4,6 +4,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
@@ -19,11 +20,17 @@ import {
   PluginConnectionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { PluginActionDispatchResultV1, ReadyPluginActionPreflightV1 } from "../../src/domain/plugins/actions.js"
+import {
+  PluginActionDispatchResultV1,
+  PluginActionReconciliationResultV1,
+  ReadyPluginActionPreflightV1
+} from "../../src/domain/plugins/actions.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionBegin } from "../../src/server/governance/internal/execution-store/begin.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
 import { makeGovernedActionExecutionRecordDispatch } from "../../src/server/governance/internal/execution-store/record-dispatch.js"
+import { makeGovernedActionExecutionRecordReconciliation } from "../../src/server/governance/internal/execution-store/record-reconciliation.js"
+import { makeGovernedActionExecutionRecordRecoveryUnavailable } from "../../src/server/governance/internal/execution-store/record-recovery-unavailable.js"
 import { makeGovernedActionExecutionRecordUnknown } from "../../src/server/governance/internal/execution-store/record-unknown.js"
 import { issueGovernedActionPermitToken } from "../../src/server/governance/internal/execution-store/tokens.js"
 import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
@@ -284,6 +291,32 @@ const requestCancellation = Effect.fn(
     auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
   })
   yield* actions.commit(input)
+})
+
+const claimStartedRecovery = Effect.fn(
+  "GovernedActionExecutionBeginTest.claimStartedRecovery"
+)(function*() {
+  const permitted = yield* beginAuthorizedDispatch()
+  const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
+  yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
+  const inspect = yield* makeGovernedActionExecutionInspect
+  const recovery = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+  assert.strictEqual(recovery._tag, "reconcile")
+  if (recovery._tag !== "reconcile") return yield* Effect.die("expected recovery claim")
+  return recovery
+})
+
+const makeMalformedSecondUuidCrypto = Effect.fn(
+  "GovernedActionExecutionBeginTest.makeMalformedSecondUuidCrypto"
+)(function*() {
+  const cryptoService = yield* Crypto.Crypto
+  const uuidCalls = yield* Ref.make(0)
+  return Crypto.Crypto.of({
+    ...cryptoService,
+    randomUUIDv7: Ref.getAndUpdate(uuidCalls, (count) => count + 1).pipe(
+      Effect.flatMap((call) => call === 0 ? cryptoService.randomUUIDv7 : Effect.succeed("not-a-uuid"))
+    )
+  })
 })
 
 describe("governed action execution begin", () => {
@@ -675,6 +708,44 @@ describe("governed action dispatch outcomes", () => {
       assert.deepStrictEqual(recovered[0], { folds: 1, outcomes: 1, transitions: 5 })
     })))
 
+  it.effect("classifies malformed immediate fold identifiers as conflict without losing the inbox receipt", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const receivedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const malformedCrypto = yield* makeMalformedSecondUuidCrypto()
+      const dispatch = yield* makeGovernedActionExecutionRecordDispatch.pipe(
+        Effect.provideService(Crypto.Crypto, malformedCrypto)
+      )
+      const result = yield* dispatch.recordDispatch({
+        permitToken: permitted.permitToken,
+        observedAt: receivedAt,
+        result: Schema.decodeUnknownSync(PluginActionDispatchResultV1)({
+          _tag: "confirmed",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "provider-operation-malformed-fold",
+            safeSummary: "Provider completed before malformed local fold data",
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        })
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.operation, "record-dispatch")
+        assert.strictEqual(result.failure.reason, "conflict")
+      }
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(counts[0], { folds: 0, outcomes: 1 })
+    })))
+
   const cancellationCases: ReadonlyArray<{
     readonly expectedState: GovernedActionState
     readonly input: unknown
@@ -921,5 +992,325 @@ describe("governed action local unknown outcomes", () => {
         (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
         (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
       assert.deepStrictEqual(rows[0], { folds: 1, outcomes: 1 })
+    })))
+})
+
+describe("governed action recovery claims", () => {
+  it.effect("issues one expiring idempotency claim and renews only after expiry", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const first = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(first._tag, "reconcile")
+      if (first._tag !== "reconcile") return yield* Effect.die("expected recovery claim")
+      assert.strictEqual(first.runtimeAuthorityToken, currentRuntime.runtimeAuthorityToken)
+      assert.deepStrictEqual(first.scope, {
+        workspaceId: WORKSPACE,
+        pluginConnectionId: CONNECTION
+      })
+      assert.isNull(first.request.reconciliationKey)
+      assert.strictEqual(first.request.idempotencyKey, "governed-action:PAY-42:done:1")
+      assert.strictEqual(
+        first.request.payloadDigest,
+        "9d105db92a91bedd5843dfa620216110041d07e2c6f4300e32a549e7aebadfd8"
+      )
+      assert.strictEqual(
+        DateTime.toEpochMillis(first.reconciliationDeadline),
+        DateTime.toEpochMillis(recoveryEligibleAt) + 60_000
+      )
+
+      assert.deepStrictEqual(yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "started"
+      })
+      yield* TestClock.setTime(DateTime.toEpochMillis(first.reconciliationDeadline))
+      const second = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(second._tag, "reconcile")
+      if (second._tag !== "reconcile") return yield* Effect.die("expected renewed recovery claim")
+
+      const { sql } = yield* Database
+      const claims = yield* sql<{
+        readonly claimSequence: number
+        readonly leaseExpiresAt: string
+      }>`SELECT claim_sequence AS claimSequence, lease_expires_at AS leaseExpiresAt
+        FROM governed_action_recovery_claims ORDER BY claim_sequence`
+      assert.deepStrictEqual(claims, [
+        {
+          claimSequence: 1,
+          leaseExpiresAt: DateTime.formatIso(first.reconciliationDeadline)
+        },
+        {
+          claimSequence: 2,
+          leaseExpiresAt: DateTime.formatIso(second.reconciliationDeadline)
+        }
+      ])
+    })))
+
+  it.effect("recovers accepted work through its provider reconciliation key", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const receivedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const dispatch = yield* makeGovernedActionExecutionRecordDispatch
+      yield* dispatch.recordDispatch({
+        permitToken: permitted.permitToken,
+        observedAt: receivedAt,
+        result: Schema.decodeUnknownSync(PluginActionDispatchResultV1)({
+          _tag: "confirmed",
+          receipt: {
+            status: "accepted",
+            providerOperationId: "provider-operation-for-recovery",
+            reconciliationKey: "provider-reconciliation-key",
+            safeSummary: "Provider accepted the mutation",
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        })
+      })
+
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })))
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const recovery = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(recovery._tag, "reconcile")
+      if (recovery._tag !== "reconcile") return yield* Effect.die("expected provider-key recovery")
+      assert.strictEqual(recovery.request.reconciliationKey, "provider-reconciliation-key")
+    })))
+})
+
+describe("governed action reconciliation outcomes", () => {
+  const cases: ReadonlyArray<{
+    readonly expectedState: GovernedActionState
+    readonly makeInput: (observedAt: string) => unknown
+    readonly name: string
+  }> = [
+    {
+      name: "pending",
+      expectedState: "started",
+      makeInput: (observedAt) => ({ _tag: "pending", checkedAt: observedAt })
+    },
+    {
+      name: "succeeded",
+      expectedState: "succeeded",
+      makeInput: (observedAt) => ({
+        _tag: "succeeded",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: "reconciled-operation-succeeded",
+          safeSummary: "Reconciliation confirmed provider completion",
+          observedAt
+        }
+      })
+    },
+    {
+      name: "failed",
+      expectedState: "failed",
+      makeInput: (observedAt) => ({
+        _tag: "failed",
+        receipt: {
+          status: "failed",
+          providerOperationId: "reconciled-operation-failed",
+          safeSummary: "Reconciliation confirmed provider failure",
+          observedAt
+        }
+      })
+    },
+    {
+      name: "cancelled",
+      expectedState: "cancelled",
+      makeInput: (observedAt) => ({
+        _tag: "cancelled",
+        receipt: {
+          status: "cancelled",
+          providerOperationId: "reconciled-operation-cancelled",
+          safeSummary: "Reconciliation confirmed provider cancellation",
+          observedAt
+        }
+      })
+    }
+  ]
+
+  for (const fixture of cases) {
+    it.effect(`persists and folds a ${fixture.name} reconciliation result exactly once`, () =>
+      withBegin(Effect.gen(function*() {
+        const recovery = yield* claimStartedRecovery()
+        const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+        yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+        const result = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)(
+          fixture.makeInput(DateTime.formatIso(receivedAt))
+        )
+        const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+
+        assert.strictEqual(
+          yield* recorder.recordReconciliation({
+            recoveryToken: recovery.recoveryToken,
+            result,
+            observedAt: receivedAt
+          }),
+          fixture.expectedState
+        )
+        assert.strictEqual(
+          yield* recorder.recordReconciliation({
+            recoveryToken: recovery.recoveryToken,
+            result,
+            observedAt: receivedAt
+          }),
+          fixture.expectedState
+        )
+        const { sql } = yield* Database
+        const counts = yield* sql<{
+          readonly folds: number
+          readonly outcomes: number
+          readonly resultKind: string
+        }>`SELECT
+          (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+          (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes,
+          result_kind AS resultKind
+        FROM governed_action_provider_outcomes`
+        assert.deepStrictEqual(counts[0], {
+          folds: 1,
+          outcomes: 1,
+          resultKind: fixture.name
+        })
+      })))
+  }
+
+  it.effect("persists runtime-generation unavailability as non-terminal evidence", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
+
+      assert.strictEqual(
+        yield* recorder.recordRecoveryUnavailable({
+          recoveryToken: recovery.recoveryToken,
+          observedAt,
+          reason: "runtime-generation-unavailable"
+        }),
+        "started"
+      )
+      const { sql } = yield* Database
+      const rows = yield* sql<{
+        readonly outcomeJson: string
+        readonly resultKind: string
+        readonly sourceKind: string
+      }>`SELECT
+        outcome_json AS outcomeJson,
+        result_kind AS resultKind,
+        source_kind AS sourceKind
+      FROM governed_action_provider_outcomes`
+      assert.lengthOf(rows, 1)
+      assert.deepInclude(rows[0], {
+        resultKind: "recovery-unavailable",
+        sourceKind: "reconciliation"
+      })
+      const decodeUnavailable = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+        _tag: Schema.String,
+        reason: Schema.String,
+        schemaVersion: Schema.Number
+      })))
+      assert.deepStrictEqual(decodeUnavailable(rows[0]?.outcomeJson ?? "{}"), {
+        _tag: "recovery-unavailable",
+        reason: "runtime-generation-unavailable",
+        schemaVersion: 1
+      })
+    })))
+
+  it.effect("rejects a changed replay for the same recovery claim", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const pending = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+        _tag: "pending",
+        checkedAt: DateTime.formatIso(receivedAt)
+      })
+      yield* recorder.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        result: pending,
+        observedAt: receivedAt
+      })
+      const changed = yield* recorder.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "succeeded",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "changed-reconciliation-replay",
+            safeSummary: "Changed replay must not replace durable evidence",
+            observedAt: DateTime.formatIso(receivedAt)
+          }
+        }),
+        observedAt: receivedAt
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changed))
+      if (Result.isFailure(changed)) assert.strictEqual(changed.failure.reason, "conflict")
+    })))
+
+  it.effect("rejects an outcome received at the claim deadline", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      yield* TestClock.setTime(DateTime.toEpochMillis(recovery.reconciliationDeadline))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const expired = yield* recorder.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "pending",
+          checkedAt: DateTime.formatIso(recovery.reconciliationDeadline)
+        }),
+        observedAt: recovery.reconciliationDeadline
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(expired))
+      if (Result.isFailure(expired)) assert.strictEqual(expired.failure.reason, "conflict")
+      const { sql } = yield* Database
+      const outcomes = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM governed_action_provider_outcomes`
+      assert.strictEqual(outcomes[0]?.count, 0)
+    })))
+
+  it.effect("folds a crash-stranded reconciliation result from persisted data after restart", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const { sql } = yield* Database
+      yield* sql`CREATE TRIGGER governed_action_test_fail_reconciliation_fold
+        BEFORE INSERT ON governed_action_provider_outcome_folds
+        BEGIN
+          SELECT RAISE(ABORT, 'injected reconciliation fold failure');
+        END`
+      const beforeRestart = yield* makeGovernedActionExecutionRecordReconciliation
+      const failed = yield* beforeRestart.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        observedAt,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "succeeded",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "reconciliation-before-restart",
+            safeSummary: "Provider completion persisted before process restart",
+            observedAt: DateTime.formatIso(observedAt)
+          }
+        })
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failed))
+      if (Result.isFailure(failed)) assert.strictEqual(failed.failure.reason, "persistence-unavailable")
+      yield* sql`DROP TRIGGER governed_action_test_fail_reconciliation_fold`
+      const afterRestart = yield* makeGovernedActionExecutionInspect
+      assert.deepStrictEqual(yield* afterRestart.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "succeeded"
+      })
+      const counts = yield* sql<{
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(counts[0], { folds: 1, outcomes: 1 })
     })))
 })

@@ -54,7 +54,7 @@ export const dispatchInboxOutcomeObservedAt = (
     ? outcome.observedAt
     : outcome.receipt.observedAt
 
-/** Reconstruct the exact lifecycle command represented by one immediate provider result. */
+/** Reconstruct the exact lifecycle command represented by one dispatch-side inbox outcome. */
 export const dispatchInboxOutcomeCommand = (
   result: DispatchInboxOutcome
 ): GovernedActionTransitionCommand => {

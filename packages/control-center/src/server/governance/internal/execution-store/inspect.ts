@@ -16,7 +16,9 @@ import type {
   GovernedActionExecutionReference
 } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
-import { makeGovernedActionExecutionPendingDispatchFolder } from "./pending-dispatch.js"
+import { makeGovernedActionExecutionDispatchInboxFolder } from "./dispatch-inbox-fold.js"
+import { makeGovernedActionExecutionReconciliationInboxFolder } from "./reconciliation-inbox-fold.js"
+import { makeGovernedActionExecutionRecoveryClaim } from "./recovery-claim.js"
 import { issueGovernedActionPreparationToken } from "./tokens.js"
 
 const PREPARATION_LIFETIME_SECONDS = 30
@@ -53,7 +55,9 @@ export const makeGovernedActionExecutionInspect = Effect.gen(function*() {
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
-  const pendingDispatch = yield* makeGovernedActionExecutionPendingDispatchFolder
+  const pendingDispatch = yield* makeGovernedActionExecutionDispatchInboxFolder
+  const recovery = yield* makeGovernedActionExecutionRecoveryClaim
+  const pendingReconciliation = yield* makeGovernedActionExecutionReconciliationInboxFolder
 
   const inspect = Effect.fn("GovernedActionExecutionInspect.inspect")(function*(
     reference: GovernedActionExecutionReference
@@ -62,15 +66,21 @@ export const makeGovernedActionExecutionInspect = Effect.gen(function*() {
     if (foldedPending !== null) {
       return { _tag: "inactive", state: foldedPending } satisfies GovernedActionExecutionPlan
     }
+    const foldedReconciliation = yield* pendingReconciliation.foldPending(reference)
+    if (foldedReconciliation !== null) {
+      return { _tag: "inactive", state: foldedReconciliation } satisfies GovernedActionExecutionPlan
+    }
     return yield* transaction.transact(
       "governed-action.execution-inspect",
       Effect.gen(function*() {
         const record = yield* transaction.read(reference)
+        const observedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
+        const recoveryPlan = yield* recovery.claim(record, observedAt)
+        if (recoveryPlan !== null) return recoveryPlan
         if (record.head.state !== "authorized" || record.authorization === null) {
           return inactive(record)
         }
 
-        const observedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
         // The verified aggregate proves authorization expiry cannot outlive proposal authority.
         const authorityExpiresAt = record.authorization.expiresAt
         if (DateTime.Order(observedAt, authorityExpiresAt) >= 0) return inactive(record)

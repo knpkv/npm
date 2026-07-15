@@ -15,8 +15,12 @@ complete.
   start intent and lease atomically, and returns a one-use permit only after commit.
 - Execution `begin` now receives the exact inspected workspace/connection scope, and the engine
   rejects cross-wired permits before calling a provider.
-- Governed `recordBlocked`, `recordDispatch`, and `recordUnknown` outcomes now persist through
-  cancellation-safe append-before-fold boundaries, including persisted-only restart folding.
+- Governed `recordBlocked` atomically commits preflight denial and consumes its preparation without
+  calling a provider. `recordDispatch` and `recordUnknown` persist through cancellation-safe
+  append-before-fold boundaries, including persisted-only restart folding.
+- Expired execution leases now issue one expiring recovery claim at a time. Reconciliation pending,
+  succeeded, failed, cancelled, and runtime-generation-unavailable outcomes use the same canonical
+  append-before-fold model, exact replay checks, and persisted-only restart recovery.
 - Private strict readers load current session, target, projection, and evidence authority without
   falling back to older valid records.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
@@ -27,16 +31,15 @@ complete.
 
 ## Critical unfinished work
 
-1. **Finish recovery outcome persistence.** Implement `recordRecoveryUnavailable` and
-   `recordReconciliation` with durable provider inbox semantics and cancellation-safe folding.
-2. **Complete the begin/recovery failure matrix.** The real-database happy path and one-use replay
-   are covered. Still add concurrent duplicate begin, lease-write rollback,
+1. **Complete the begin/recovery failure matrix.** The real-database happy path, one-use replay,
+   reconciliation deadline, changed recovery replay, and reconciliation restart fold are covered.
+   Still add concurrent duplicate begin, lease-write rollback,
    runtime rotation, expired preparation/authorization/session, stale preflight, missing
-   `action.reconcile`, reconciliation crash boundaries, and restart reconciliation.
-3. **Wire the execution store layer into the server composition** without exposing its internal
+   `action.reconcile`, and the full cancellation-versus-reconciliation race matrix.
+2. **Wire the execution store layer into the server composition** without exposing its internal
    capability through browser, agent, or plugin APIs.
 
-Until these three items are complete, D03 remains incomplete and real provider mutations must stay
+Until these two items are complete, D03 remains incomplete and real provider mutations must stay
 disabled.
 
 ## Remaining roadmap
@@ -79,6 +82,10 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The interactive shell exposes Node 24, but its installed `pnpm` launcher is backed by Node 22.
   Direct local validation therefore invokes test tools with Node 24; PR CI remains the authoritative
   Node 24 workspace check.
+- `governedActionExecutionBegin.test.ts` now holds the end-to-end persistence fixtures for begin,
+  dispatch, unknown, recovery claims, and reconciliation. Split the shared fixture and outcome
+  matrices into focused files after D03 is wired; keeping one database harness avoided duplicating
+  security-sensitive setup during this checkpoint.
 - Draft PR #126 is open from `feature/control-center`. Keep it in draft while the critical D03 work
   above remains unfinished and real provider mutations remain disabled.
 
@@ -90,6 +97,6 @@ their owner decides how to land them.
 
 ## Recommended next session
 
-Continue with one bounded commit implementing recovery claim acquisition and reconciliation
-outcomes. Run an independent exact-commit review after each commit; turn every review finding into
-a regression test, static rule, or repository instruction before proceeding.
+Continue with the private execution-store/engine server composition, then close the highest-value
+begin/recovery failure cases. Run an independent exact-commit review after each commit; turn every
+review finding into a regression test, static rule, or repository instruction before proceeding.

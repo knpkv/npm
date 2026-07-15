@@ -34,6 +34,14 @@ class GovernedActionDispatchDeadlineExceeded extends Schema.TaggedErrorClass<Gov
   {}
 ) {}
 
+/** The recovery claim expired before the provider reconciliation completed. */
+class GovernedActionReconciliationDeadlineExceeded
+  extends Schema.TaggedErrorClass<GovernedActionReconciliationDeadlineExceeded>()(
+    "GovernedActionReconciliationDeadlineExceeded",
+    {}
+  )
+{}
+
 /** Stable result of advancing one action without exposing an execution capability. */
 export type GovernedActionExecutionResult =
   | { readonly _tag: "inactive"; readonly state: GovernedActionState }
@@ -201,7 +209,15 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
       (lease) =>
         Effect.gen(function*() {
           const executor = Context.get(lease.context, AuthorizedPluginExecutor)
-          const result = yield* executor.reconcile(recovery.request)
+          const remainingMillis = DateTime.toEpochMillis(recovery.reconciliationDeadline) -
+            DateTime.toEpochMillis(yield* DateTime.now)
+          if (remainingMillis <= 0) return yield* new GovernedActionReconciliationDeadlineExceeded()
+          const result = yield* executor.reconcile(recovery.request).pipe(
+            Effect.timeoutOrElse({
+              duration: remainingMillis,
+              orElse: () => Effect.fail(new GovernedActionReconciliationDeadlineExceeded())
+            })
+          )
           const observedAt = yield* DateTime.now
           const state = yield* store.recordReconciliation({
             recoveryToken: recovery.recoveryToken,

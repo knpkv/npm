@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { migration0013GovernedActionExecution } from "../../src/server/persistence/migrations/0013_governed_action_execution.js"
 import { migration0014GovernedActionActiveLease } from "../../src/server/persistence/migrations/0014_governed_action_active_lease.js"
 import { migration0017GovernedActionPendingOutcome } from "../../src/server/persistence/migrations/0017_governed_action_pending_outcome.js"
+import { migration0018GovernedActionAllPendingOutcomes } from "../../src/server/persistence/migrations/0018_governed_action_all_pending_outcomes.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
 const WORKSPACE_ID = "01890f6f-6d6a-7cc0-98d2-330000000001"
@@ -421,6 +422,76 @@ describe("governed action execution migration", () => {
         ) VALUES (
           ${WORKSPACE_ID}, ${ACTION_ID}, 1, ${FIRST_CLAIM_DIGEST},
           '2026-07-15T10:03:00.000Z', '2026-07-15T10:04:00.000Z'
+        )`
+      }).pipe(
+        Effect.provide(LibsqlClient.layer({
+          transformResultNames: snakeToCamel,
+          url: config.databaseUrl
+        })),
+        Effect.scoped
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("gives an unpaired reconciliation receipt ownership before another recovery claim", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-governed-all-pending-outcomes-")
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* createParentSchema(sql)
+        yield* migration0017GovernedActionPendingOutcome.pipe(
+          Effect.provideService(SqlClient.SqlClient, sql)
+        )
+        yield* migration0018GovernedActionAllPendingOutcomes.pipe(
+          Effect.provideService(SqlClient.SqlClient, sql)
+        )
+        yield* seedStartedAction(sql)
+        yield* insertLease(sql, "2026-07-15T10:01:30.000Z")
+        yield* sql`INSERT INTO governed_action_recovery_claims (
+          workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 1, ${FIRST_CLAIM_DIGEST},
+          '2026-07-15T10:03:00.000Z', '2026-07-15T10:04:00.000Z'
+        )`
+        yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'pending-reconciliation-before-recovery',
+          'reconciliation', NULL, ${FIRST_CLAIM_DIGEST}, 'pending', 1, '{}',
+          ${OUTCOME_DIGEST}, ${COMMAND_DIGEST},
+          '2026-07-15T10:03:30.000Z', '2026-07-15T10:03:31.000Z'
+        )`
+
+        const fenced = yield* sql`INSERT INTO governed_action_recovery_claims (
+          workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 2, ${SECOND_CLAIM_DIGEST},
+          '2026-07-15T10:04:00.000Z', '2026-07-15T10:05:00.000Z'
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(fenced))
+
+        yield* sql`INSERT INTO governed_action_transitions (
+          workspace_id, action_id, transition_id, to_state, command_tag, attempt_id,
+          command_digest, occurred_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, ${OUTCOME_TRANSITION_ID},
+          'started', 'reconciliationPending', NULL, ${COMMAND_DIGEST}, '2026-07-15T10:03:31.000Z'
+        )`
+        yield* sql`UPDATE governed_actions
+          SET state = 'started', head_transition_id = ${OUTCOME_TRANSITION_ID}
+          WHERE workspace_id = ${WORKSPACE_ID} AND action_id = ${ACTION_ID}`
+        yield* sql`INSERT INTO governed_action_provider_outcome_folds (
+          workspace_id, action_id, outcome_id, transition_id, folded_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'pending-reconciliation-before-recovery',
+          ${OUTCOME_TRANSITION_ID}, '2026-07-15T10:03:31.000Z'
+        )`
+        yield* sql`INSERT INTO governed_action_recovery_claims (
+          workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 2, ${SECOND_CLAIM_DIGEST},
+          '2026-07-15T10:04:00.000Z', '2026-07-15T10:05:00.000Z'
         )`
       }).pipe(
         Effect.provide(LibsqlClient.layer({

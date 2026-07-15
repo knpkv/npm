@@ -57,6 +57,9 @@ const preparationToken = Schema.decodeUnknownSync(GovernedActionPreparationToken
 const permitToken = Schema.decodeUnknownSync(GovernedActionPermitToken)("2".repeat(64))
 const recoveryToken = Schema.decodeUnknownSync(GovernedActionRecoveryToken)("3".repeat(64))
 const observedAt = Schema.decodeUnknownSync(Schema.DateTimeUtcFromString)(OBSERVED_AT)
+const reconciliationDeadline = Schema.decodeUnknownSync(Schema.DateTimeUtcFromString)(
+  "2026-07-15T10:01:00.000Z"
+)
 
 const authorizedRequest = Schema.decodeUnknownSync(AuthorizedPluginActionV1)({
   proposal: {
@@ -312,6 +315,7 @@ describe("governed action execution engine", () => {
           _tag: "reconcile",
           recoveryToken,
           runtimeAuthorityToken,
+          reconciliationDeadline,
           scope: { workspaceId, pluginConnectionId: connectionId },
           request: reconciliationRequest
         }
@@ -324,6 +328,26 @@ describe("governed action execution engine", () => {
       ])
     }))
 
+  it.effect("does not call reconciliation after the durable recovery deadline", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(reconciliationDeadline))
+      const expired = yield* makeHarness({
+        plan: {
+          _tag: "reconcile",
+          recoveryToken,
+          runtimeAuthorityToken,
+          reconciliationDeadline,
+          scope: { workspaceId, pluginConnectionId: connectionId },
+          request: reconciliationRequest
+        }
+      })
+
+      const exit = yield* run(expired.layer).pipe(Effect.exit)
+
+      assert.isTrue(Exit.isFailure(exit))
+      assert.deepStrictEqual(yield* Ref.get(expired.events), ["inspect"])
+    }))
+
   it.effect("does not reconcile against a rotated runtime generation", () =>
     Effect.gen(function*() {
       const recovery = yield* makeHarness({
@@ -332,6 +356,7 @@ describe("governed action execution engine", () => {
           _tag: "reconcile",
           recoveryToken,
           runtimeAuthorityToken,
+          reconciliationDeadline,
           scope: { workspaceId, pluginConnectionId: connectionId },
           request: reconciliationRequest
         }
