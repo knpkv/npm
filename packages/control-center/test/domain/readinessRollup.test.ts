@@ -34,14 +34,13 @@ const environmentAssessment = (
   const evidenceId = index === 0
     ? "01890f6f-6d6a-7cc0-98d2-000000000311"
     : "01890f6f-6d6a-7cc0-98d2-000000000312"
-  const evidence = (state: string) =>
-    state === "not-started" ? [] : [{
-      evidenceId,
-      source: { _tag: "plugin", pluginConnectionId, health: "healthy" },
-      freshness: "current",
-      validity: "valid",
-      reevaluateAt: index === 0 ? "2026-07-15T10:15:00.000Z" : "2026-07-15T10:30:00.000Z"
-    }]
+  const evidence = (_state: string) => [{
+    evidenceId,
+    source: { _tag: "plugin", pluginConnectionId, health: "healthy" },
+    freshness: "current",
+    validity: "valid",
+    reevaluateAt: index === 0 ? "2026-07-15T10:15:00.000Z" : "2026-07-15T10:30:00.000Z"
+  }]
   const raw = {
     assessmentId,
     previousAssessmentId: null,
@@ -80,6 +79,59 @@ const environmentAssessment = (
     ]
   }
   return assessEnvironmentReadiness(Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)(raw))
+}
+
+const denseEvidence = (index: 0 | 1, offset: number, count: number) =>
+  Array.from({ length: count }, (_, item) => ({
+    evidenceId: `01890f6f-6d6a-7cc0-98d2-${((index + 1) * 10_000 + offset + item).toString(16).padStart(12, "0")}`,
+    source: { _tag: "plugin", pluginConnectionId, health: "healthy" },
+    freshness: "current",
+    validity: "valid",
+    reevaluateAt: null
+  }))
+
+const denseEnvironmentAssessment = (index: 0 | 1, checkEvidence: 127 | 128) => {
+  const environmentId = index === 0 ? firstEnvironmentId : secondEnvironmentId
+  const assessmentId = index === 0 ? firstAssessmentId : secondAssessmentId
+  return assessEnvironmentReadiness(
+    Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)({
+      assessmentId,
+      previousAssessmentId: null,
+      candidate: {
+        workspaceId,
+        releaseRevision: 4,
+        artifactRevision: "git:release-4",
+        digest: `sha256:${index === 0 ? "d".repeat(64) : "e".repeat(64)}`,
+        scope: { _tag: "environment", releaseId, environmentId }
+      },
+      rule: { ruleId: "delivery-v1", version: 1, digest: ruleDigest },
+      derivationVersion: 1,
+      evaluatedAt: "2026-07-15T10:00:00.000Z",
+      complete: true,
+      definitions: [
+        { factId: "build.main", kind: "execution", requirement: "required" },
+        { factId: "check.main", kind: "check", requirement: "required" },
+        { factId: "deploy.target", kind: "deployment", requirement: "advisory" }
+      ],
+      observations: [
+        {
+          factId: "build.main",
+          state: { _tag: "execution", status: "succeeded", progress: null },
+          evidence: denseEvidence(index, 0, 128)
+        },
+        {
+          factId: "check.main",
+          state: { _tag: "check", status: "passed" },
+          evidence: denseEvidence(index, 1_000, checkEvidence)
+        },
+        {
+          factId: "deploy.target",
+          state: { _tag: "deployment", status: "not-started", progress: null },
+          evidence: denseEvidence(index, 2_000, 1)
+        }
+      ]
+    })
+  )
 }
 
 const rawRollup = (
@@ -202,6 +254,15 @@ describe("release readiness roll-up", () => {
     assert.throws(() =>
       Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
         ...raw,
+        environments: [
+          encodedFirst,
+          { ...encodedSecond, rule: { ...encodedSecond.rule, ruleId: "other-rule" } }
+        ]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
         candidate: { ...raw.candidate, releaseRevision: 5 }
       })
     )
@@ -210,6 +271,69 @@ describe("release readiness roll-up", () => {
         ...raw,
         evaluatedAt: "2026-07-15T09:59:59.999Z"
       })
+    )
+  })
+
+  it("rejects contradictory release assessments at the trusted boundary", () => {
+    const ready = Schema.encodeSync(ReleaseReadinessAssessment)(
+      rollup(environmentAssessment(0), environmentAssessment(1))
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        verdict: "shipped"
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        evidenceIds: ready.evidenceIds.slice(1)
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        environments: ready.environments.slice().reverse()
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        stages: {
+          ...ready.stages,
+          build: { ...ready.stages.build, state: "held" }
+        },
+        verdict: "held"
+      })
+    )
+
+    const blocked = Schema.encodeSync(ReleaseReadinessAssessment)(
+      rollup(environmentAssessment(0, "failed"), environmentAssessment(1))
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...blocked,
+        blockers: []
+      })
+    )
+  })
+
+  it("aligns release roll-up bounds with the maximum aggregate evidence output", () => {
+    const first = denseEnvironmentAssessment(0, 127)
+    const second = denseEnvironmentAssessment(1, 127)
+    const maximum = Schema.decodeUnknownSync(ReleaseReadinessRollupInput)(rawRollup(first, second))
+    const assessment = rollUpReleaseReadiness(maximum)
+
+    assert.lengthOf(assessment.evidenceIds, 512)
+    assert.doesNotThrow(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)(
+        Schema.encodeSync(ReleaseReadinessAssessment)(assessment)
+      )
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)(
+        rawRollup(first, denseEnvironmentAssessment(1, 128))
+      )
     )
   })
 })

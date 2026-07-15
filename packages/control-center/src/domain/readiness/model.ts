@@ -10,6 +10,20 @@ import {
   WorkspaceId
 } from "../identifiers.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
+import {
+  compareReadinessText,
+  deriveEnvironmentReadinessVerdict,
+  deriveReadinessFindings,
+  deriveReadinessNextEvaluationAt,
+  deriveReadinessSourceSummaries,
+  deriveReadinessStages,
+  deriveReleaseReadinessStages,
+  deriveReleaseReadinessVerdict,
+  readinessFactResult,
+  readinessFindingKey,
+  readinessStagesAreEqual,
+  sortedReadinessUnique
+} from "./policy.js"
 
 const boundedIdentifier = (maximumLength: number, identifier: string) =>
   Schema.String.check(
@@ -19,6 +33,20 @@ const boundedIdentifier = (maximumLength: number, identifier: string) =>
   ).annotate({ identifier })
 
 const unique = <Value>(values: ReadonlyArray<Value>): boolean => new Set(values).size === values.length
+
+const sameOrderedStrings = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>
+): boolean => left.length === right.length && left.every((value, index) => value === right[index])
+
+const isCanonicalStrings = (values: ReadonlyArray<string>): boolean =>
+  sameOrderedStrings(values, sortedReadinessUnique(values))
+
+/** Maximum exact evidence dependencies in one environment or release assessment. */
+export const MAX_READINESS_EVIDENCE_REFERENCES = 512
+
+/** Maximum blockers, warnings, or gaps retained in one assessment. */
+export const MAX_READINESS_FINDINGS = 1_025
 
 /** Stable identity of one V1 readiness fact, independent of display copy. */
 export const ReadinessFactId = boundedIdentifier(200, "ReadinessFactId").pipe(
@@ -235,8 +263,7 @@ export const ReadinessEvidenceReference = Schema.Struct({
 /** Decoded readiness-evidence dependency. */
 export type ReadinessEvidenceReference = typeof ReadinessEvidenceReference.Type
 
-const stateRequiresEvidence = (state: ReadinessFactState): boolean =>
-  state.status !== "missing" && state.status !== "not-started"
+const stateRequiresEvidence = (state: ReadinessFactState): boolean => state.status !== "missing"
 
 /** One normalized observation for a policy-defined fact. */
 export const ReadinessFactObservation = Schema.Struct({
@@ -324,7 +351,20 @@ export const ReadinessFactEvaluation = Schema.Struct({
   observation: Schema.NullOr(ReadinessFactObservation),
   result: ReadinessFactResult,
   evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(128))
-})
+}).check(
+  Schema.makeFilter(({ definition, evidenceIds, observation, result }) =>
+    observation === null
+      ? evidenceIds.length === 0 && result === readinessFactResult(definition, observation)
+      : observation.factId === definition.factId &&
+        observation.state._tag === definition.kind &&
+        sameOrderedStrings(
+          evidenceIds,
+          sortedReadinessUnique(observation.evidence.map(({ evidenceId }) => evidenceId))
+        ) &&
+        result === readinessFactResult(definition, observation), {
+    expected: "readiness fact evaluation to match its definition, observation, evidence, and result"
+  })
+)
 
 /** Decoded readiness-fact evaluation. */
 export type ReadinessFactEvaluation = typeof ReadinessFactEvaluation.Type
@@ -400,6 +440,14 @@ export const EnvironmentReadinessEvaluationInput = Schema.Struct({
   Schema.makeFilter(({ observations }) => unique(observations.map(({ factId }) => factId)), {
     expected: "readiness fact observations to have unique identities"
   }),
+  Schema.makeFilter(
+    ({ observations }) =>
+      observations.reduce((total, observation) => total + observation.evidence.length, 0) <=
+        MAX_READINESS_EVIDENCE_REFERENCES,
+    {
+      expected: "environment readiness input to fit its bounded assessment evidence set"
+    }
+  ),
   Schema.makeFilter(({ definitions, observations }) => {
     const definitionsById = new Map(definitions.map((definition) => [definition.factId, definition]))
     return observations.every((observation) => definitionsById.get(observation.factId)?.kind === observation.state._tag)
@@ -421,11 +469,61 @@ export const EnvironmentReadinessEvaluationInput = Schema.Struct({
   Schema.makeFilter(({ definitions }) => {
     const deployments = definitions.filter(({ kind }) => kind === "deployment")
     return deployments.length === 1 && deployments[0]?.requirement === "advisory"
-  }, { expected: "environment readiness policy to define exactly one advisory deployment fact" })
+  }, { expected: "environment readiness policy to define exactly one advisory deployment fact" }),
+  Schema.makeFilter(({ observations }) => observations.some(({ state }) => state._tag === "deployment"), {
+    expected: "environment readiness input to include an evidence-bound deployment observation"
+  })
 )
 
 /** Decoded environment-readiness input. */
 export type EnvironmentReadinessEvaluationInput = typeof EnvironmentReadinessEvaluationInput.Type
+
+const factEvidenceIds = (facts: ReadonlyArray<ReadinessFactEvaluation>): Array<EvidenceId> =>
+  sortedReadinessUnique(facts.flatMap(({ evidenceIds }) => evidenceIds))
+
+const factsOfKinds = (
+  facts: ReadonlyArray<ReadinessFactEvaluation>,
+  kinds: ReadonlyArray<ReadinessFactKind>
+): ReadonlyArray<ReadinessFactEvaluation> => facts.filter(({ definition }) => kinds.includes(definition.kind))
+
+const stageMatchesFacts = (
+  stage: ReadinessStages["build"] | ReadinessStages["verify"] | ReadinessStages["production"],
+  facts: ReadonlyArray<ReadinessFactEvaluation>
+): boolean =>
+  sameOrderedStrings(
+    stage.factIds,
+    sortedReadinessUnique(facts.map(({ definition }) => definition.factId))
+  ) && sameOrderedStrings(stage.evidenceIds, factEvidenceIds(facts))
+
+const canonicalAssessmentCollections = (assessment: {
+  readonly blockers: ReadonlyArray<ReadinessFinding>
+  readonly evidenceIds: ReadonlyArray<EvidenceId>
+  readonly gaps: ReadonlyArray<ReadinessFinding>
+  readonly sourceFreshness: ReadonlyArray<ReadinessSourceSummary>
+  readonly stages: ReadinessStages
+  readonly warnings: ReadonlyArray<ReadinessFinding>
+}): boolean => {
+  const evidence = new Set(assessment.evidenceIds)
+  const findings = [assessment.blockers, assessment.warnings, assessment.gaps]
+  return isCanonicalStrings(assessment.evidenceIds) &&
+    findings.every((items) =>
+      sameOrderedStrings(items.map(readinessFindingKey), items.map(readinessFindingKey).sort(compareReadinessText)) &&
+      unique(items.map(readinessFindingKey)) &&
+      items.every(({ evidenceIds }) =>
+        isCanonicalStrings(evidenceIds) && evidenceIds.every((evidenceId) => evidence.has(evidenceId))
+      )
+    ) &&
+    isCanonicalStrings(assessment.stages.build.factIds) &&
+    isCanonicalStrings(assessment.stages.build.evidenceIds) &&
+    isCanonicalStrings(assessment.stages.verify.factIds) &&
+    isCanonicalStrings(assessment.stages.verify.evidenceIds) &&
+    isCanonicalStrings(assessment.stages.production.factIds) &&
+    isCanonicalStrings(assessment.stages.production.evidenceIds) &&
+    isCanonicalStrings(assessment.sourceFreshness.map(({ pluginConnectionId }) => pluginConnectionId)) &&
+    assessment.sourceFreshness.every(({ evidenceIds }) =>
+      isCanonicalStrings(evidenceIds) && evidenceIds.every((evidenceId) => evidence.has(evidenceId))
+    )
+}
 
 const AssessmentBase = {
   assessmentId: ReadinessAssessmentId,
@@ -437,11 +535,11 @@ const AssessmentBase = {
   nextEvaluationAt: Schema.NullOr(UtcTimestamp),
   verdict: ReadinessVerdict,
   stages: ReadinessStages,
-  blockers: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(512)),
-  warnings: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(512)),
-  gaps: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(512)),
+  blockers: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
+  warnings: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
+  gaps: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
   sourceFreshness: Schema.Array(ReadinessSourceSummary).check(Schema.isMaxLength(512)),
-  evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(2_048))
+  evidenceIds: Schema.Array(EvidenceId).check(Schema.isMaxLength(MAX_READINESS_EVIDENCE_REFERENCES))
 }
 
 /** Immutable environment assessment retaining exact facts and evidence. */
@@ -449,10 +547,84 @@ export const EnvironmentReadinessAssessment = Schema.Struct({
   ...AssessmentBase,
   _tag: Schema.Literal("environment"),
   candidate: EnvironmentReadinessCandidateIdentity,
+  inputComplete: Schema.Boolean,
   facts: Schema.Array(ReadinessFactEvaluation).check(Schema.isMaxLength(512)),
   requiredFactIds: Schema.Array(ReadinessFactId).check(Schema.isMaxLength(512)),
   verifiedFactIds: Schema.Array(ReadinessFactId).check(Schema.isMaxLength(512))
-})
+}).check(
+  Schema.makeFilter(
+    ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
+    {
+      expected: "a readiness assessment not to supersede itself"
+    }
+  ),
+  Schema.makeFilter(({ facts }) => isCanonicalStrings(facts.map(({ definition }) => definition.factId)), {
+    expected: "environment readiness facts to have canonical unique identities"
+  }),
+  Schema.makeFilter(({ facts, requiredFactIds }) =>
+    sameOrderedStrings(
+      requiredFactIds,
+      sortedReadinessUnique(
+        facts
+          .filter(({ definition }) => definition.requirement === "required")
+          .map(({ definition }) => definition.factId)
+      )
+    ), { expected: "environment readiness required facts to match retained evaluations" }),
+  Schema.makeFilter(({ facts, verifiedFactIds }) =>
+    sameOrderedStrings(
+      verifiedFactIds,
+      sortedReadinessUnique(
+        facts
+          .filter(({ result }) => result === "verified")
+          .map(({ definition }) => definition.factId)
+      )
+    ), { expected: "environment readiness verified facts to match retained evaluations" }),
+  Schema.makeFilter(({ blockers, facts, gaps, inputComplete, warnings }) => {
+    const expected = deriveReadinessFindings(facts, inputComplete)
+    return sameOrderedStrings(blockers.map(readinessFindingKey), expected.blockers.map(readinessFindingKey)) &&
+      sameOrderedStrings(warnings.map(readinessFindingKey), expected.warnings.map(readinessFindingKey)) &&
+      sameOrderedStrings(gaps.map(readinessFindingKey), expected.gaps.map(readinessFindingKey))
+  }, { expected: "environment readiness findings to match retained fact evaluations" }),
+  Schema.makeFilter(({ evidenceIds, facts }) =>
+    sameOrderedStrings(
+      evidenceIds,
+      factEvidenceIds(facts)
+    ), { expected: "environment readiness evidence to match retained fact dependencies" }),
+  Schema.makeFilter(({ facts, stages }) => {
+    const build = factsOfKinds(facts, ["execution"])
+    const verify = factsOfKinds(facts, ["relationship", "approval", "check", "documentation"])
+    const production = factsOfKinds(facts, ["deployment"])
+    return stageMatchesFacts(stages.build, build) &&
+      stageMatchesFacts(stages.verify, verify) &&
+      stageMatchesFacts(stages.production, production)
+  }, { expected: "environment readiness stages to retain their exact fact and evidence dependencies" }),
+  Schema.makeFilter(({ facts, stages }) => readinessStagesAreEqual(stages, deriveReadinessStages(facts)), {
+    expected: "environment readiness stage states to match retained fact evaluations"
+  }),
+  Schema.makeFilter(({ facts, sourceFreshness }) => {
+    const expected = deriveReadinessSourceSummaries(facts)
+    return sourceFreshness.length === expected.length && sourceFreshness.every((summary, index) => {
+      const item = expected[index]
+      return item !== undefined &&
+        summary.pluginConnectionId === item.pluginConnectionId &&
+        summary.freshness === item.freshness &&
+        summary.health === item.health &&
+        sameOrderedStrings(summary.evidenceIds, item.evidenceIds)
+    })
+  }, { expected: "environment readiness source summaries to match retained evidence" }),
+  Schema.makeFilter(({ facts, nextEvaluationAt }) => {
+    const expected = deriveReadinessNextEvaluationAt(facts)
+    return expected === null || nextEvaluationAt === null
+      ? expected === nextEvaluationAt
+      : DateTime.Order(expected, nextEvaluationAt) === 0
+  }, { expected: "environment readiness reevaluation time to match retained evidence" }),
+  Schema.makeFilter(canonicalAssessmentCollections, {
+    expected: "environment readiness collections to be canonical and evidence-bound"
+  }),
+  Schema.makeFilter((assessment) => assessment.verdict === deriveEnvironmentReadinessVerdict(assessment), {
+    expected: "environment readiness verdict to agree with retained facts, findings, and stages"
+  })
+)
 
 /** Decoded immutable environment assessment. */
 export type EnvironmentReadinessAssessment = typeof EnvironmentReadinessAssessment.Type
@@ -472,7 +644,42 @@ export const ReleaseReadinessAssessment = Schema.Struct({
   _tag: Schema.Literal("release"),
   candidate: ReleaseReadinessCandidateIdentity,
   environments: Schema.NonEmptyArray(EnvironmentReadinessSummary).check(Schema.isMaxLength(512))
-})
+}).check(
+  Schema.makeFilter(
+    ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
+    {
+      expected: "a release readiness assessment not to supersede itself"
+    }
+  ),
+  Schema.makeFilter(({ environments }) => isCanonicalStrings(environments.map(({ environmentId }) => environmentId)), {
+    expected: "release readiness environments to have canonical unique identities"
+  }),
+  Schema.makeFilter(
+    ({ environments, stages }) => readinessStagesAreEqual(stages, deriveReleaseReadinessStages(environments)),
+    { expected: "release readiness stages to match retained environment summaries" }
+  ),
+  Schema.makeFilter(({ environments, evidenceIds }) =>
+    sameOrderedStrings(
+      evidenceIds,
+      sortedReadinessUnique(environments.flatMap(({ stages }) => [
+        ...stages.build.evidenceIds,
+        ...stages.verify.evidenceIds,
+        ...stages.production.evidenceIds
+      ]))
+    ), { expected: "release readiness evidence to match retained environment summaries" }),
+  Schema.makeFilter(canonicalAssessmentCollections, {
+    expected: "release readiness collections to be canonical and evidence-bound"
+  }),
+  Schema.makeFilter(
+    ({ blockers, environments }) => environments.some(({ verdict }) => verdict === "blocked") === (blockers.length > 0),
+    {
+      expected: "release readiness blockers to agree with blocked environments"
+    }
+  ),
+  Schema.makeFilter(({ environments, verdict }) => verdict === deriveReleaseReadinessVerdict(environments), {
+    expected: "release readiness verdict to agree with its environment summaries"
+  })
+)
 
 /** Decoded immutable release readiness assessment. */
 export type ReleaseReadinessAssessment = typeof ReleaseReadinessAssessment.Type
@@ -512,11 +719,53 @@ export const ReleaseReadinessRollupInput = Schema.Struct({
   Schema.makeFilter(
     ({ environments }) =>
       environments.every((assessment) =>
+        assessment.rule.ruleId === environments[0]?.rule.ruleId &&
         assessment.rule.version === environments[0]?.rule.version &&
         assessment.rule.digest === environments[0]?.rule.digest &&
         assessment.derivationVersion === environments[0]?.derivationVersion
       ),
     { expected: "release readiness roll-up children to use one rule and derivation version" }
+  ),
+  Schema.makeFilter(
+    ({ environments }) =>
+      sortedReadinessUnique(environments.flatMap(({ evidenceIds }) => evidenceIds)).length <=
+        MAX_READINESS_EVIDENCE_REFERENCES,
+    {
+      expected: "release readiness roll-up evidence to fit its bounded assessment"
+    }
+  ),
+  Schema.makeFilter(({ environments }) =>
+    ["build", "verify", "production"].every((stage) => {
+      if (stage === "build") {
+        return sortedReadinessUnique(environments.flatMap(({ stages }) => stages.build.factIds)).length <= 512
+      }
+      if (stage === "verify") {
+        return sortedReadinessUnique(environments.flatMap(({ stages }) => stages.verify.factIds)).length <= 512
+      }
+      return sortedReadinessUnique(environments.flatMap(({ stages }) => stages.production.factIds)).length <= 512
+    }), { expected: "release readiness roll-up facts to fit its bounded stages" }),
+  Schema.makeFilter(
+    ({ environments }) =>
+      environments.reduce((total, assessment) => total + assessment.blockers.length, 0) <=
+        MAX_READINESS_FINDINGS &&
+      environments.reduce((total, assessment) => total + assessment.warnings.length, 0) <=
+        MAX_READINESS_FINDINGS &&
+      environments.reduce((total, assessment) => total + assessment.gaps.length, 0) <=
+        MAX_READINESS_FINDINGS,
+    {
+      expected: "release readiness roll-up findings to fit its bounded assessment"
+    }
+  ),
+  Schema.makeFilter(
+    ({ environments }) =>
+      sortedReadinessUnique(
+        environments.flatMap(({ sourceFreshness }) =>
+          sourceFreshness.map(({ pluginConnectionId }) => pluginConnectionId)
+        )
+      ).length <= 512,
+    {
+      expected: "release readiness roll-up sources to fit its bounded assessment"
+    }
   ),
   Schema.makeFilter(
     ({ environments, evaluatedAt }) =>
