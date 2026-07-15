@@ -513,12 +513,37 @@ export const migration0008DeliveryGraph = Effect.gen(function*() {
     END`
   yield* sql`CREATE TRIGGER evidence_items_freshness_connection
     BEFORE INSERT ON evidence_items
-    WHEN NEW.origin_kind = 'plugin' AND NEW.plugin_connection_id IS NOT COALESCE(
-      json_extract(NEW.freshness_json, '$.provenance.sourceRevision.pluginConnectionId'),
-      json_extract(NEW.freshness_json, '$.provenance.pluginConnectionId')
+    WHEN NEW.origin_kind = 'plugin' AND NOT EXISTS (
+      SELECT 1
+      FROM entities entity
+      INNER JOIN entity_revisions revision
+        ON revision.workspace_id = entity.workspace_id
+       AND revision.entity_id = entity.entity_id
+      WHERE entity.workspace_id = NEW.workspace_id
+        AND entity.entity_id = NEW.source_entity_id
+        AND revision.revision = NEW.source_entity_revision
+        AND json_extract(NEW.freshness_json, '$.provenance._tag') IN ('provider', 'cache')
+        AND entity.plugin_connection_id =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.pluginConnectionId')
+        AND entity.provider_id =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.providerId')
+        AND entity.vendor_immutable_id =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.vendorImmutableId')
+        AND revision.source_revision =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.revision')
+        AND revision.source_url IS
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.sourceUrl')
+        AND revision.first_observed_at =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.firstObservedAt')
+        AND revision.last_observed_at =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.lastObservedAt')
+        AND revision.synchronized_at =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.synchronizedAt')
+        AND revision.normalization_schema_version =
+          json_extract(NEW.freshness_json, '$.provenance.sourceRevision.normalizationSchemaVersion')
     )
     BEGIN
-      SELECT RAISE(ABORT, 'plugin evidence attribution must match its freshness connection');
+      SELECT RAISE(ABORT, 'plugin evidence attribution must match its exact freshness source revision');
     END`
   yield* sql`CREATE TRIGGER relationship_revisions_plugin_source_owner
     BEFORE INSERT ON relationship_revisions
@@ -559,6 +584,31 @@ export const migration0008DeliveryGraph = Effect.gen(function*() {
     BEGIN
       SELECT RAISE(ABORT, 'entity projection revisions must be chronological');
     END`
+  yield* sql`CREATE TRIGGER entity_projection_revisions_source_monotonic
+    BEFORE INSERT ON entity_projection_revisions
+    WHEN NEW.supersedes_projection_revision IS NOT NULL AND
+      NEW.source_entity_revision < (
+        SELECT source_entity_revision
+        FROM entity_projection_revisions
+        WHERE workspace_id = NEW.workspace_id
+          AND entity_id = NEW.entity_id
+          AND projection_revision = NEW.supersedes_projection_revision
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'entity projection source revisions must not regress');
+    END`
+  yield* sql`CREATE TRIGGER evidence_claims_after_evidence
+    BEFORE INSERT ON evidence_claims
+    WHEN NOT EXISTS (
+      SELECT 1
+      FROM evidence_items
+      WHERE workspace_id = NEW.workspace_id
+        AND evidence_id = NEW.evidence_id
+        AND recorded_at <= NEW.recorded_at
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'evidence claims must not predate their evidence');
+    END`
   yield* sql`CREATE TRIGGER evidence_claims_chronological
     BEFORE INSERT ON evidence_claims
     WHEN NEW.supersedes_claim_id IS NOT NULL AND NEW.recorded_at < (
@@ -594,6 +644,22 @@ export const migration0008DeliveryGraph = Effect.gen(function*() {
     )
     BEGIN
       SELECT RAISE(ABORT, 'relationship revisions must be chronological');
+    END`
+  yield* sql`CREATE TRIGGER relationship_revision_evidence_causal
+    BEFORE INSERT ON relationship_revision_evidence
+    WHEN NOT EXISTS (
+      SELECT 1
+      FROM relationship_revisions relationship
+      INNER JOIN evidence_claims claim
+        ON claim.workspace_id = relationship.workspace_id
+       AND claim.evidence_claim_id = NEW.evidence_claim_id
+      WHERE relationship.workspace_id = NEW.workspace_id
+        AND relationship.relationship_id = NEW.relationship_id
+        AND relationship.revision = NEW.relationship_revision
+        AND claim.recorded_at <= relationship.recorded_at
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'relationships must not predate their evidence claims');
     END`
 
   yield* sql`CREATE TRIGGER entity_projection_revisions_no_update

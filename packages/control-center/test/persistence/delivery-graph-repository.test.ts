@@ -14,7 +14,6 @@ import {
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   PersistedRecordError,
-  PersistenceOperationError,
   RecordNotFoundError,
   RevisionConflictError
 } from "../../src/server/persistence/errors.js"
@@ -22,6 +21,7 @@ import {
   DeliveryGraphInputError,
   DeliveryGraphRepository
 } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
+import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 
 const WORKSPACE_A = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-100000000001")
 const WORKSPACE_B = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-100000000002")
@@ -71,6 +71,33 @@ const otherPluginFreshness = {
   ...unavailableFreshness,
   provenance: { _tag: "none", pluginConnectionId: OTHER_PLUGIN_ID }
 }
+const pluginFreshnessFor = (input: {
+  readonly entityRevision?: number
+  readonly providerId?: "jira" | "confluence"
+  readonly pluginConnectionId?: typeof PLUGIN_ID | typeof OTHER_PLUGIN_ID
+  readonly revision?: string
+  readonly vendorImmutableId: string
+}) => ({
+  _tag: "current",
+  pluginHealth: { _tag: "healthy", checkedAt: CREATED_AT },
+  provenance: {
+    _tag: "provider",
+    sourceRevision: {
+      providerId: input.providerId ?? "jira",
+      pluginConnectionId: input.pluginConnectionId ?? PLUGIN_ID,
+      vendorImmutableId: input.vendorImmutableId,
+      revision: input.revision ?? `source-${input.entityRevision ?? 1}`,
+      sourceUrl: null,
+      firstObservedAt: CREATED_AT,
+      lastObservedAt: CREATED_AT,
+      synchronizedAt: CREATED_AT,
+      normalizationSchemaVersion: 1
+    }
+  },
+  sourceObservedAt: CREATED_AT,
+  staleAfterSeconds: 300,
+  synchronizedAt: CREATED_AT
+})
 
 const testConfig = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
@@ -84,12 +111,13 @@ const testConfig = Effect.gen(function*() {
 })
 
 const withRepository = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, DeliveryGraphRepository | Database>
+  use: Effect.Effect<Success, Failure, DeliveryGraphRepository | Database | QuarantineRepository>
 ) =>
   Effect.gen(function*() {
     const config = yield* testConfig
     const database = databaseLayer(config)
-    const repository = DeliveryGraphRepository.layer.pipe(Layer.provideMerge(database))
+    const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+    const repository = DeliveryGraphRepository.layer.pipe(Layer.provideMerge(foundation))
     return yield* use.pipe(Effect.provide(repository))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -581,7 +609,11 @@ describe("DeliveryGraphRepository", () => {
         })
       )
       const repositoryContext = yield* Layer.build(
-        DeliveryGraphRepository.layer.pipe(Layer.provide(observedDatabase))
+        DeliveryGraphRepository.layer.pipe(
+          Layer.provide(
+            QuarantineRepository.layer.pipe(Layer.provideMerge(observedDatabase))
+          )
+        )
       )
       const repository = Context.get(repositoryContext, DeliveryGraphRepository)
 
@@ -815,6 +847,43 @@ describe("DeliveryGraphRepository", () => {
           assert.instanceOf(mismatchedFreshness.failure, DeliveryGraphInputError)
         }
 
+        const wrongSourceRevision = yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [{
+            ...initialBatch.evidenceItems[0],
+            evidenceId: SECOND_EVIDENCE_ID,
+            attribution: {
+              _tag: "plugin",
+              pluginConnectionId: PLUGIN_ID,
+              sourceEntityId: ISSUE_ID,
+              sourceEntityRevision: 1
+            },
+            freshness: pluginFreshnessFor({ vendorImmutableId: "pipeline-legacy" })
+          }],
+          evidenceClaims: [],
+          relationships: []
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(wrongSourceRevision))
+
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [{
+            ...initialBatch.evidenceItems[0],
+            evidenceId: SECOND_EVIDENCE_ID,
+            attribution: {
+              _tag: "plugin",
+              pluginConnectionId: PLUGIN_ID,
+              sourceEntityId: ISSUE_ID,
+              sourceEntityRevision: 1
+            },
+            freshness: pluginFreshnessFor({ vendorImmutableId: "PAY-42" })
+          }],
+          evidenceClaims: [],
+          relationships: []
+        })
+
         yield* repository.write(WORKSPACE_A, initialBatch)
         const wrongRelationshipOwner = yield* repository.write(WORKSPACE_A, {
           entityProjections: [],
@@ -962,6 +1031,78 @@ describe("DeliveryGraphRepository", () => {
           assert.strictEqual(second.value.projection.sourceEntityRevision, 2)
         }
 
+        const regressedProjection = yield* repository.write(WORKSPACE_A, {
+          entityProjections: [{
+            projection: {
+              ...initialIssueProjection.projection,
+              projectionRevision: 3,
+              sourceEntityRevision: 1,
+              supersedesProjectionRevision: 2,
+              title: "Regressed source projection"
+            },
+            recordedAt: UPDATED_AT
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(regressedProjection))
+
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [{
+            projection: {
+              ...initialIssueProjection.projection,
+              projectionRevision: 3,
+              sourceEntityRevision: 2,
+              supersedesProjectionRevision: 2,
+              title: "Reprojected from the same source revision"
+            },
+            recordedAt: UPDATED_AT
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        })
+        yield* database.sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+          source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ISSUE_ID}, 3, 'source-3', 1, NULL,
+          ${CREATED_AT}, ${UPDATED_AT}, ${UPDATED_AT}, ${UPDATED_AT}
+        )`
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [{
+            projection: {
+              ...initialIssueProjection.projection,
+              projectionRevision: 4,
+              sourceEntityRevision: 3,
+              supersedesProjectionRevision: 3,
+              title: "Advanced source projection"
+            },
+            recordedAt: UPDATED_AT
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        })
+        const projectionRows = yield* database.sql<{
+          readonly projectionRevision: number
+          readonly sourceEntityRevision: number
+        }>`SELECT projection_revision AS projectionRevision,
+              source_entity_revision AS sourceEntityRevision
+          FROM entity_projection_revisions
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}
+          ORDER BY projection_revision`
+        assert.deepStrictEqual(projectionRows, [
+          { projectionRevision: 1, sourceEntityRevision: 1 },
+          { projectionRevision: 2, sourceEntityRevision: 2 },
+          { projectionRevision: 3, sourceEntityRevision: 2 },
+          { projectionRevision: 4, sourceEntityRevision: 3 }
+        ])
+
         const backdatedClaim = yield* repository.write(WORKSPACE_A, {
           entityProjections: [],
           nodes: [],
@@ -976,7 +1117,8 @@ describe("DeliveryGraphRepository", () => {
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(backdatedClaim))
         if (Result.isFailure(backdatedClaim)) {
-          assert.instanceOf(backdatedClaim.failure, PersistenceOperationError)
+          assert.instanceOf(backdatedClaim.failure, PersistedRecordError)
+          assert.strictEqual(backdatedClaim.failure.diagnosticCode, "evidence-claim-precedes-evidence")
         }
 
         const backdatedRelationship = yield* repository.write(WORKSPACE_A, {
@@ -994,21 +1136,95 @@ describe("DeliveryGraphRepository", () => {
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(backdatedRelationship))
         if (Result.isFailure(backdatedRelationship)) {
-          assert.instanceOf(backdatedRelationship.failure, PersistenceOperationError)
+          assert.instanceOf(backdatedRelationship.failure, PersistedRecordError)
+          assert.strictEqual(
+            backdatedRelationship.failure.diagnosticCode,
+            "relationship-precedes-evidence-claim"
+          )
         }
       })
     ))
 
-  it.effect("detects a persisted claim digest mismatch with a fixed diagnostic", () =>
+  it.effect("rejects evidence and relationship records that invert causal time", () =>
     withRepository(
       Effect.gen(function*() {
         yield* insertFoundation
         const repository = yield* DeliveryGraphRepository
         const database = yield* Database
+        const beforeEvidence = "2026-07-15T09:59:59.999Z"
+
+        const claimBeforeEvidence = yield* repository.write(WORKSPACE_A, {
+          ...initialBatch,
+          evidenceClaims: [{
+            ...initialBatch.evidenceClaims[0],
+            recordedAt: beforeEvidence
+          }],
+          relationships: []
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(claimBeforeEvidence))
+        const rolledBackRows = yield* database.sql<{ readonly count: number }>`SELECT
+            (SELECT COUNT(*) FROM entity_projection_revisions WHERE workspace_id = ${WORKSPACE_A}) +
+            (SELECT COUNT(*) FROM delivery_nodes WHERE workspace_id = ${WORKSPACE_A}) +
+            (SELECT COUNT(*) FROM evidence_items WHERE workspace_id = ${WORKSPACE_A}) +
+            (SELECT COUNT(*) FROM evidence_claims WHERE workspace_id = ${WORKSPACE_A}) AS count`
+        assert.deepStrictEqual(rolledBackRows, [{ count: 0 }])
+
+        const relationshipBeforeClaim = yield* repository.write(WORKSPACE_A, {
+          ...initialBatch,
+          relationships: [{
+            ...initialBatch.relationships[0],
+            lifecycle: { _tag: "verified", effectiveAt: beforeEvidence },
+            recordedAt: beforeEvidence
+          }]
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(relationshipBeforeClaim))
+
         yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [{
+            ...initialBatch.evidenceClaims[0],
+            evidenceClaimId: SUCCESSOR_CLAIM_ID,
+            recordedAt: UPDATED_AT,
+            supersedesEvidenceClaimId: CLAIM_ID
+          }],
+          relationships: [{
+            ...initialBatch.relationships[0],
+            revision: 2,
+            supersedesRevision: 1,
+            lifecycle: { _tag: "governed", effectiveAt: UPDATED_AT },
+            evidenceClaimIds: [SUCCESSOR_CLAIM_ID],
+            recordedAt: UPDATED_AT
+          }]
+        })
+        const causalRows = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM relationship_revision_evidence
+          WHERE workspace_id = ${WORKSPACE_A} AND relationship_id = ${RELATIONSHIP_ID}`
+        assert.deepStrictEqual(causalRows, [{ count: 2 }])
+      })
+    ))
+
+  it.effect("durably quarantines a persisted claim digest mismatch with redacted diagnostics", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        const quarantine = yield* QuarantineRepository
+        yield* repository.write(WORKSPACE_A, initialBatch)
+
+        yield* repository.read(WORKSPACE_A, {
+          _tag: "evidence",
+          evidenceId: EVIDENCE_ID
+        })
+        assert.isEmpty(yield* quarantine.list(WORKSPACE_A))
+
+        const secretCanary = "never-return-raw-claim-payload"
         yield* database.sql`DROP TRIGGER evidence_claims_no_update`
         yield* database.sql`UPDATE evidence_claims
-          SET value_json = '{"_tag":"flag","value":false}'
+          SET value_json = ${`{"_tag":"text","value":"${secretCanary}"}`}
           WHERE workspace_id = ${WORKSPACE_A} AND evidence_claim_id = ${CLAIM_ID}`
 
         const corrupted = yield* repository.read(WORKSPACE_A, {
@@ -1020,6 +1236,23 @@ describe("DeliveryGraphRepository", () => {
           assert.instanceOf(corrupted.failure, PersistedRecordError)
           assert.strictEqual(corrupted.failure.diagnosticCode, "delivery-graph-digest-mismatch")
         }
+
+        yield* repository.read(WORKSPACE_A, {
+          _tag: "evidence",
+          evidenceId: EVIDENCE_ID
+        }).pipe(Effect.result)
+        const records = yield* quarantine.list(WORKSPACE_A)
+        assert.lengthOf(records, 1)
+        assert.deepInclude(records[0], {
+          recordKind: "evidence-claim",
+          recordKey: CLAIM_ID,
+          schemaVersion: 1,
+          diagnosticCode: "delivery-graph-digest-mismatch",
+          diagnosticSummary: "Stored delivery graph record digest does not match its content.",
+          occurrenceCount: 2
+        })
+        assert.match(records[0]?.payloadDigest ?? "", /^[0-9a-f]{64}$/u)
+        assert.notInclude(JSON.stringify(records), secretCanary)
       })
     ))
 })

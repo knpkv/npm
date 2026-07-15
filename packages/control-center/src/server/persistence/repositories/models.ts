@@ -155,8 +155,14 @@ export type ContentBlobMetadata = typeof ContentBlobMetadata.Type
 /** Persisted record categories whose malformed snapshots may be quarantined. */
 export const QuarantineRecordKind = Schema.Literals([
   "content-metadata",
+  "delivery-node",
+  "delivery-relationship",
   "domain-event",
+  "entity-projection",
   "entity-revision",
+  "evidence-claim",
+  "evidence-freshness",
+  "evidence-item",
   "person-avatar",
   "person-identity",
   "person",
@@ -178,9 +184,16 @@ export type QuarantineRecordKind = typeof QuarantineRecordKind.Type
 /** Bounded diagnostic code that never contains persisted payload data. */
 export const QuarantineReasonCode = Schema.Literals([
   "content-metadata-schema-invalid",
+  "delivery-graph-digest-mismatch",
+  "delivery-node-schema-invalid",
+  "delivery-relationship-schema-invalid",
   "domain-event-payload-digest-mismatch",
   "domain-event-schema-invalid",
+  "entity-projection-schema-invalid",
   "entity-revision-schema-invalid",
+  "evidence-claim-schema-invalid",
+  "evidence-freshness-schema-invalid",
+  "evidence-item-schema-invalid",
   "person-identity-schema-invalid",
   "person-schema-invalid",
   "plugin-connection-schema-invalid",
@@ -211,9 +224,16 @@ export type QuarantineReasonCode = typeof QuarantineReasonCode.Type
 /** Fixed diagnostics prevent malformed payload content entering quarantine text. */
 export const QuarantineDiagnosticSummary = Schema.Literals([
   "Stored content metadata failed schema validation.",
+  "Stored delivery graph record digest does not match its content.",
+  "Stored delivery node failed schema validation.",
+  "Stored delivery relationship failed schema validation.",
   "Stored domain event payload digest does not match its content.",
   "Stored domain event failed schema validation.",
+  "Stored entity projection failed schema validation.",
   "Stored entity revision failed schema validation.",
+  "Stored evidence claim failed schema validation.",
+  "Stored evidence freshness failed schema validation.",
+  "Stored evidence item failed schema validation.",
   "Stored person avatar failed schema validation.",
   "Stored person identity failed schema validation.",
   "Stored person record failed schema validation.",

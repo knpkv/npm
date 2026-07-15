@@ -443,12 +443,10 @@ export const EvidenceItem = Schema.Struct({
     ({ attribution, freshness }) => {
       if (attribution._tag !== "plugin") return true
 
-      const freshnessPluginConnectionId = freshness.provenance._tag === "none"
-        ? freshness.provenance.pluginConnectionId
-        : freshness.provenance.sourceRevision.pluginConnectionId
-      return attribution.pluginConnectionId === freshnessPluginConnectionId
+      return freshness.provenance._tag !== "none" &&
+        attribution.pluginConnectionId === freshness.provenance.sourceRevision.pluginConnectionId
     },
-    { expected: "plugin evidence attribution to match its freshness source connection" }
+    { expected: "plugin evidence attribution to carry its exact freshness source revision" }
   ),
   Schema.makeFilter(
     ({ observedAt, recordedAt }) => DateTime.Order(observedAt, recordedAt) <= 0,

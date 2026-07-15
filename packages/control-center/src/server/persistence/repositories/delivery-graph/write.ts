@@ -62,6 +62,52 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
     return entity
   })
 
+  const ensurePluginEvidenceSourceRevision = Effect.fn(
+    "DeliveryGraphRepository.ensurePluginEvidenceSourceRevision"
+  )(function*(evidence: EvidenceItem) {
+    if (evidence.attribution._tag !== "plugin") return
+    const provenance = evidence.freshness.provenance
+    if (provenance._tag === "none") {
+      return yield* graphRecordError(
+        evidence.workspaceId,
+        "evidence-item",
+        evidence.evidenceId,
+        "evidence-plugin-source-revision-mismatch"
+      )
+    }
+    const sourceRevision = provenance.sourceRevision
+    const sourceUrl = sourceRevision.sourceUrl === null ? null : sourceRevision.sourceUrl.toString()
+    const firstObservedAt = encodeTimestamp(sourceRevision.firstObservedAt)
+    const lastObservedAt = encodeTimestamp(sourceRevision.lastObservedAt)
+    const synchronizedAt = encodeTimestamp(sourceRevision.synchronizedAt)
+    const rows = yield* sql`SELECT 1 AS matches
+      FROM entities entity
+      INNER JOIN entity_revisions revision
+        ON revision.workspace_id = entity.workspace_id
+       AND revision.entity_id = entity.entity_id
+      WHERE entity.workspace_id = ${evidence.workspaceId}
+        AND entity.entity_id = ${evidence.attribution.sourceEntityId}
+        AND revision.revision = ${evidence.attribution.sourceEntityRevision}
+        AND entity.plugin_connection_id = ${sourceRevision.pluginConnectionId}
+        AND entity.provider_id = ${sourceRevision.providerId}
+        AND entity.vendor_immutable_id = ${sourceRevision.vendorImmutableId}
+        AND revision.source_revision = ${sourceRevision.revision}
+        AND revision.source_url IS ${sourceUrl}
+        AND revision.first_observed_at = ${firstObservedAt}
+        AND revision.last_observed_at = ${lastObservedAt}
+        AND revision.synchronized_at = ${synchronizedAt}
+        AND revision.normalization_schema_version = ${sourceRevision.normalizationSchemaVersion}`
+    const matches = yield* decodeRows(Schema.Struct({ matches: Schema.Literal(1) }), rows)
+    if (matches.length !== 1) {
+      return yield* graphRecordError(
+        evidence.workspaceId,
+        "evidence-item",
+        evidence.evidenceId,
+        "evidence-plugin-source-revision-mismatch"
+      )
+    }
+  })
+
   const ensureWorkspace = Effect.fn("DeliveryGraphRepository.ensureWorkspace")(function*(
     workspaceId: WorkspaceId,
     batch: DeliveryGraphWriteBatch
@@ -92,14 +138,22 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
       )
     }
     const recordedAtText = encodeTimestamp(recordedAt)
-    const previousRows = yield* sql`SELECT MAX(projection_revision) AS revision
+    const previousRows = yield* sql`SELECT
+        projection_revision AS revision,
+        source_entity_revision AS sourceEntityRevision
       FROM entity_projection_revisions
       WHERE workspace_id = ${projection.workspaceId}
-        AND entity_id = ${projection.entityId}`
+        AND entity_id = ${projection.entityId}
+      ORDER BY projection_revision DESC
+      LIMIT 1`
     const decodedPrevious = yield* Schema.decodeUnknownEffect(
-      Schema.Array(Schema.Struct({ revision: Schema.NullOr(Schema.Number) }))
+      Schema.Array(Schema.Struct({
+        revision: Schema.Number,
+        sourceEntityRevision: Schema.Number
+      }))
     )(previousRows)
-    const actualRevision = decodedPrevious[0]?.revision ?? null
+    const previous = decodedPrevious[0]
+    const actualRevision = previous?.revision ?? null
     const expectedRevision = projection.projectionRevision - 1
     if (actualRevision !== (expectedRevision === 0 ? null : expectedRevision)) {
       return yield* new RevisionConflictError({
@@ -109,6 +163,17 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
         expectedRevision,
         actualRevision
       })
+    }
+    if (
+      previous !== undefined &&
+      projection.sourceEntityRevision < previous.sourceEntityRevision
+    ) {
+      return yield* graphRecordError(
+        projection.workspaceId,
+        "entity-projection",
+        projection.entityId,
+        "entity-projection-source-revision-regression"
+      )
     }
     const extensionJson = yield* Schema.encodeEffect(projectionJson)(projection.details).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "delivery-graph.encode-projection" }))
@@ -184,6 +249,7 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
         )
       }
     }
+    yield* ensurePluginEvidenceSourceRevision(evidence)
     const evidencePayload = yield* Schema.encodeEffect(evidenceJson)(evidence).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "delivery-graph.encode-evidence" }))
     )
@@ -228,6 +294,23 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
 
   const insertClaim = Effect.fn("DeliveryGraphRepository.insertClaim")(function*(claim: EvidenceClaim) {
     const recordedAt = encodeTimestamp(claim.recordedAt)
+    const causalEvidenceRows = yield* sql`SELECT 1 AS matches
+      FROM evidence_items
+      WHERE workspace_id = ${claim.workspaceId}
+        AND evidence_id = ${claim.evidenceId}
+        AND recorded_at <= ${recordedAt}`
+    const causalEvidence = yield* decodeRows(
+      Schema.Struct({ matches: Schema.Literal(1) }),
+      causalEvidenceRows
+    )
+    if (causalEvidence.length !== 1) {
+      return yield* graphRecordError(
+        claim.workspaceId,
+        "evidence-claim",
+        claim.evidenceClaimId,
+        "evidence-claim-precedes-evidence"
+      )
+    }
     if (claim.supersedesEvidenceClaimId !== null) {
       const predecessorRows = yield* sql`SELECT
           subject_node_id AS subjectNodeId,
@@ -345,6 +428,31 @@ export const makeDeliveryGraphWriter = Effect.gen(function*() {
     const environmentId = relationship.scope?._tag === "environment"
       ? relationship.scope.environmentId
       : null
+
+    yield* Effect.forEach(
+      relationship.evidenceClaimIds,
+      (evidenceClaimId) =>
+        Effect.gen(function*() {
+          const causalClaimRows = yield* sql`SELECT 1 AS matches
+            FROM evidence_claims
+            WHERE workspace_id = ${relationship.workspaceId}
+              AND evidence_claim_id = ${evidenceClaimId}
+              AND recorded_at <= ${recordedAt}`
+          const causalClaims = yield* decodeRows(
+            Schema.Struct({ matches: Schema.Literal(1) }),
+            causalClaimRows
+          )
+          if (causalClaims.length !== 1) {
+            return yield* graphRecordError(
+              relationship.workspaceId,
+              "delivery-relationship",
+              relationship.relationshipId,
+              "relationship-precedes-evidence-claim"
+            )
+          }
+        }),
+      { discard: true }
+    )
 
     if (relationship.revision === 1) {
       yield* sql`INSERT INTO relationship_heads (

@@ -8,6 +8,7 @@ import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
 import { makeDeliveryGraphDecoders } from "./decode.js"
+import { captureMalformedDeliveryGraphRow } from "./quarantine.js"
 import { ClaimRow, decodeRows, EvidenceRow, graphRecordError, NodeRow, ProjectionRow, RelationshipRow } from "./rows.js"
 
 export const makeDeliveryGraphReader = Effect.gen(function*() {
@@ -60,7 +61,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           entityId,
           "entity-projection-schema-invalid"
         )
-      )
+      ),
+      captureMalformedDeliveryGraphRow(rows)
     )
     const row = decoded[0]
     if (row === undefined) {
@@ -70,7 +72,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: revision === null ? entityId : `${entityId}:${revision}`
       })
     }
-    return yield* decodeProjectionRow(row)
+    return yield* decodeProjectionRow(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const loadNode = Effect.fn("DeliveryGraphRepository.loadNode")(function*(
@@ -93,7 +95,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           nodeId,
           "delivery-node-schema-invalid"
         )
-      )
+      ),
+      captureMalformedDeliveryGraphRow(rows)
     )
     const row = decoded[0]
     if (row === undefined) {
@@ -103,7 +106,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: nodeId
       })
     }
-    return yield* decodeNodeRow(row)
+    return yield* decodeNodeRow(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const loadEvidence = Effect.fn("DeliveryGraphRepository.loadEvidence")(function*(
@@ -131,7 +134,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           evidenceId,
           "evidence-item-schema-invalid"
         )
-      )
+      ),
+      captureMalformedDeliveryGraphRow(rows)
     )
     const row = decoded[0]
     if (row === undefined) {
@@ -141,7 +145,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: evidenceId
       })
     }
-    return yield* decodeEvidenceRow(row)
+    return yield* decodeEvidenceRow(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const loadClaim = Effect.fn("DeliveryGraphRepository.loadClaim")(function*(
@@ -163,7 +167,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           evidenceClaimId,
           "evidence-claim-schema-invalid"
         )
-      )
+      ),
+      captureMalformedDeliveryGraphRow(rows)
     )
     const row = decoded[0]
     if (row === undefined) {
@@ -173,7 +178,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: evidenceClaimId
       })
     }
-    return yield* decodeClaimRow(row)
+    return yield* decodeClaimRow(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const listClaimsForEvidence = Effect.fn("DeliveryGraphRepository.listClaimsForEvidence")(function*(
@@ -235,7 +240,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           relationshipId,
           "delivery-relationship-schema-invalid"
         )
-      )
+      ),
+      captureMalformedDeliveryGraphRow(rows)
     )
     const row = decoded[0]
     if (row === undefined) {
@@ -255,7 +261,10 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       Schema.Struct({ evidenceClaimId: EvidenceClaimId }),
       evidenceRows
     )).map(({ evidenceClaimId }) => evidenceClaimId)
-    return yield* decodeRelationshipRow({ ...row, evidenceClaimIds })
+    const persistedRow = { ...row, evidenceClaimIds }
+    return yield* decodeRelationshipRow(persistedRow).pipe(
+      captureMalformedDeliveryGraphRow(persistedRow)
+    )
   })
 
   const readDecoded = Effect.fn("DeliveryGraphRepository.readDecoded")(function*(

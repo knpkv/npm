@@ -276,7 +276,7 @@ export const persistenceLayerFromDatabase = (
           Layer.provide(foundation)
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
-        const deliveryGraph = DeliveryGraphRepository.layer
+        const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
         const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))

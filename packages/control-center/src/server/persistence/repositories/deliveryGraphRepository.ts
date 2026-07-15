@@ -1,15 +1,22 @@
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import type { WorkspaceId } from "../../../domain/identifiers.js"
 import { Database } from "../Database.js"
 import { DeliveryGraphInputError, DeliveryGraphQuery, DeliveryGraphWriteBatch } from "./delivery-graph/contract.js"
+import { deliveryGraphQuarantineDiagnostic } from "./delivery-graph/quarantine.js"
 import { makeDeliveryGraphReader } from "./delivery-graph/read.js"
 import { makeDeliveryGraphWriter } from "./delivery-graph/write.js"
 import { mapPersistenceOperation } from "./internal.js"
+import { makePersistedRowQuarantine } from "./persistedRowQuarantine.js"
+import { QuarantineRepository } from "./quarantineRepository.js"
 
 export {
   DeliveryGraphInputError,
@@ -21,6 +28,9 @@ export {
 
 const makeDeliveryGraphRepository = Effect.gen(function*() {
   const database = yield* Database
+  const cryptoService = yield* Crypto.Crypto
+  const quarantine = yield* QuarantineRepository
+  const quarantineRow = makePersistedRowQuarantine(cryptoService, quarantine)
   const writer = yield* makeDeliveryGraphWriter
   const reader = yield* makeDeliveryGraphReader
 
@@ -52,9 +62,23 @@ const makeDeliveryGraphRepository = Effect.gen(function*() {
       input: unknown
     ) {
       const query = yield* decodeQuery(input)
-      return yield* database.transaction(reader.readDecoded(workspaceId, query)).pipe(
-        mapPersistenceOperation("delivery-graph.read")
-      )
+      const result = yield* database.transaction(
+        reader.readDecoded(workspaceId, query).pipe(Effect.result)
+      ).pipe(mapPersistenceOperation("delivery-graph.read"))
+      if (Result.isSuccess(result)) return result.success
+      if (!Predicate.isTagged("MalformedDeliveryGraphRecord")(result.failure)) return yield* result.failure
+
+      const diagnostic = deliveryGraphQuarantineDiagnostic(result.failure.error)
+      if (diagnostic !== null) {
+        yield* quarantineRow({
+          workspaceId,
+          ...diagnostic,
+          recordKey: result.failure.error.recordKey,
+          observedAt: yield* DateTime.now,
+          row: result.failure.row
+        })
+      }
+      return yield* result.failure.error
     })
   }
 })

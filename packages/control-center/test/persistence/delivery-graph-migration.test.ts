@@ -341,6 +341,23 @@ describe("delivery graph migration", () => {
           _tag: "unavailable",
           provenance: { _tag: "none", pluginConnectionId: PLUGIN_A_OTHER }
         })
+        const exactSourceFreshness = JSON.stringify({
+          _tag: "current",
+          provenance: {
+            _tag: "provider",
+            sourceRevision: {
+              providerId: "jira",
+              pluginConnectionId: PLUGIN_A,
+              vendorImmutableId: "ISSUE-A",
+              revision: "revision-a",
+              sourceUrl: null,
+              firstObservedAt: RECORDED_AT,
+              lastObservedAt: RECORDED_AT,
+              synchronizedAt: RECORDED_AT,
+              normalizationSchemaVersion: 1
+            }
+          }
+        })
         const wrongOwnerEvidence = yield* sql`INSERT INTO evidence_items (
           workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
           plugin_connection_id, source_entity_id, source_entity_revision,
@@ -371,6 +388,36 @@ describe("delivery graph migration", () => {
         )`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(mismatchedFreshness))
 
+        const wrongObjectSameConnection = yield* sql`INSERT INTO evidence_items (
+          workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
+          plugin_connection_id, source_entity_id, source_entity_revision,
+          person_id, agent_id, system_component, verifier_kind,
+          verifier_person_id, verifier_agent_id, verifier_component,
+          observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
+          retention_class, retain_until, legal_hold
+        ) VALUES (
+          ${WORKSPACE_A}, 'wrong-object-same-connection', 1, ${"a".repeat(64)}, 'plugin',
+          ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
+          NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
+          ${exactSourceFreshness.replace("ISSUE-A", "ISSUE-OTHER")}, ${"b".repeat(64)},
+          'evidence', NULL, 0
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(wrongObjectSameConnection))
+
+        yield* sql`INSERT INTO evidence_items (
+          workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
+          plugin_connection_id, source_entity_id, source_entity_revision,
+          person_id, agent_id, system_component, verifier_kind,
+          verifier_person_id, verifier_agent_id, verifier_component,
+          observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
+          retention_class, retain_until, legal_hold
+        ) VALUES (
+          ${WORKSPACE_A}, 'exact-source-evidence', 1, ${"c".repeat(64)}, 'plugin',
+          ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
+          NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
+          ${exactSourceFreshness}, ${"d".repeat(64)}, 'evidence', NULL, 0
+        )`
+
         const wrongOwnerRelationship = yield* sql`INSERT INTO relationship_revisions (
           workspace_id, relationship_id, revision, supersedes_revision,
           schema_version, kind, source_node_id, source_node_kind,
@@ -399,6 +446,124 @@ describe("delivery graph migration", () => {
           AND relationship_id = ${RELATIONSHIP_A}
           AND revision = 1`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(wrongOwnerRelationship))
+      })
+    ))
+
+  it.effect("enforces monotonic projection sources and causal evidence time", () =>
+    withDatabase(
+      Effect.gen(function*() {
+        const { sql } = yield* Database
+        yield* seedFoundations
+        yield* seedGraph
+        const later = "2026-07-15T10:05:00.000Z"
+
+        yield* sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision,
+          normalization_schema_version, source_url, first_observed_at,
+          last_observed_at, synchronized_at, created_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ENTITY_A}, 2, 'revision-a-2', 1, NULL,
+          ${RECORDED_AT}, ${later}, ${later}, ${later}
+        )`
+        yield* sql`INSERT INTO entity_projection_revisions (
+          workspace_id, entity_id, projection_revision, source_entity_revision,
+          supersedes_projection_revision, projection_schema_version, entity_state,
+          display_key, title, extension_json, extension_digest, recorded_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ENTITY_A}, 2, 2, 1, 1, 'present', 'ISSUE-A',
+          'Issue A revision 2', '{"_tag":"issue"}', ${"4".repeat(64)}, ${later}
+        )`
+        const regressedProjection = yield* sql`INSERT INTO entity_projection_revisions (
+          workspace_id, entity_id, projection_revision, source_entity_revision,
+          supersedes_projection_revision, projection_schema_version, entity_state,
+          display_key, title, extension_json, extension_digest, recorded_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ENTITY_A}, 3, 1, 2, 1, 'present', 'ISSUE-A',
+          'Regressed projection', '{"_tag":"issue"}', ${"5".repeat(64)}, ${later}
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(regressedProjection))
+        yield* sql`INSERT INTO entity_projection_revisions (
+          workspace_id, entity_id, projection_revision, source_entity_revision,
+          supersedes_projection_revision, projection_schema_version, entity_state,
+          display_key, title, extension_json, extension_digest, recorded_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ENTITY_A}, 3, 2, 2, 1, 'present', 'ISSUE-A',
+          'Same-source reprojection', '{"_tag":"issue"}', ${"6".repeat(64)}, ${later}
+        )`
+
+        yield* sql`INSERT INTO evidence_items (
+          workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
+          plugin_connection_id, source_entity_id, source_entity_revision,
+          person_id, agent_id, system_component, verifier_kind,
+          verifier_person_id, verifier_agent_id, verifier_component,
+          observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
+          retention_class, retain_until, legal_hold
+        ) VALUES (
+          ${WORKSPACE_A}, 'future-evidence', 1, ${"7".repeat(64)}, 'system',
+          NULL, NULL, NULL, NULL, NULL, 'fixture', 'system',
+          NULL, NULL, 'fixture', ${later}, ${later}, NULL,
+          '{"_tag":"unavailable"}', ${"8".repeat(64)}, 'evidence', NULL, 0
+        )`
+        const claimBeforeEvidence = yield* sql`INSERT INTO evidence_claims (
+          workspace_id, evidence_claim_id, evidence_id, subject_node_id,
+          predicate, value_schema_version, value_json, value_digest,
+          supersedes_claim_id, recorded_at
+        ) VALUES (
+          ${WORKSPACE_A}, 'claim-before-evidence', 'future-evidence', ${MISSING_NODE_A},
+          'relationship-observed', 1, '{"_tag":"flag","value":true}',
+          ${"9".repeat(64)}, NULL, ${RECORDED_AT}
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(claimBeforeEvidence))
+
+        yield* sql`INSERT INTO evidence_claims (
+          workspace_id, evidence_claim_id, evidence_id, subject_node_id,
+          predicate, value_schema_version, value_json, value_digest,
+          supersedes_claim_id, recorded_at
+        ) VALUES (
+          ${WORKSPACE_A}, 'future-claim', 'future-evidence', ${MISSING_NODE_A},
+          'relationship-observed', 1, '{"_tag":"flag","value":true}',
+          ${"0".repeat(64)}, NULL, ${later}
+        )`
+        const relationshipId = "causally-inverted-relationship"
+        yield* sql`INSERT INTO relationship_heads (
+          workspace_id, relationship_id, current_revision, edge_digest,
+          created_at, updated_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${relationshipId}, 1, ${"3".repeat(64)},
+          ${RECORDED_AT}, ${RECORDED_AT}
+        )`
+        yield* sql`INSERT INTO relationship_revisions (
+          workspace_id, relationship_id, revision, supersedes_revision,
+          schema_version, kind, source_node_id, source_node_kind,
+          target_node_id, target_node_kind, lifecycle, lifecycle_reason,
+          release_id, environment_id, confidence_kind, confidence_score,
+          confidence_rationale, provenance_kind, provenance_plugin_connection_id,
+          provenance_source_entity_id, provenance_source_entity_revision,
+          provenance_person_id, provenance_agent_id, provenance_rule_id,
+          provenance_rule_version, provenance_rationale, recorded_by_kind,
+          recorded_by_person_id, recorded_by_agent_id, recorded_by_component,
+          effective_at, recorded_at, revision_digest
+        ) SELECT
+          workspace_id, ${relationshipId}, 1, NULL,
+          schema_version, kind, source_node_id, source_node_kind,
+          target_node_id, target_node_kind, lifecycle, lifecycle_reason,
+          release_id, environment_id, confidence_kind, confidence_score,
+          confidence_rationale, provenance_kind, provenance_plugin_connection_id,
+          provenance_source_entity_id, provenance_source_entity_revision,
+          provenance_person_id, provenance_agent_id, provenance_rule_id,
+          provenance_rule_version, provenance_rationale, recorded_by_kind,
+          recorded_by_person_id, recorded_by_agent_id, recorded_by_component,
+          effective_at, recorded_at, ${"2".repeat(64)}
+        FROM relationship_revisions
+        WHERE workspace_id = ${WORKSPACE_A}
+          AND relationship_id = ${RELATIONSHIP_A}
+          AND revision = 1`
+        const relationshipBeforeClaim = yield* sql`INSERT INTO relationship_revision_evidence (
+          workspace_id, relationship_id, relationship_revision, evidence_claim_id
+        ) VALUES (
+          ${WORKSPACE_A}, ${relationshipId}, 1, 'future-claim'
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(relationshipBeforeClaim))
       })
     ))
 
