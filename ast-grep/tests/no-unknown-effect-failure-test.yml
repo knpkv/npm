@@ -1,0 +1,27 @@
+id: no-unknown-effect-failure
+valid:
+  - |
+    const load = Effect.fn("Feature.load")(function*(input: unknown) {
+      return yield* decode(input)
+    })
+  - |
+    const load = Effect.fn("Feature.load")(function*(
+      input: unknown
+    ): Effect.fn.Return<Item, DecodeError | NotFoundError, never> {
+      return yield* decode(input)
+    })
+  - |
+    const load = (input: unknown): Effect.Effect<Item, DecodeError> => decode(input)
+invalid:
+  - |
+    const load = Effect.fn("Feature.load")(function*(
+      input: unknown
+    ): Effect.fn.Return<Item, unknown, never> {
+      return yield* decode(input)
+    })
+  - |
+    const publish = Effect.fn("Feature.publish")(function*(
+      item: Item
+    ): Effect.fn.Return<void, unknown, Database> {
+      yield* save(item)
+    })

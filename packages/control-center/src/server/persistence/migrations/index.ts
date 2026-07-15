@@ -10,6 +10,7 @@ import { migration0008DeliveryGraph } from "./0008_delivery_graph.js"
 import { migration0009Readiness } from "./0009_readiness.js"
 import { migration0010ReadinessHeadHistory } from "./0010_readiness_head_history.js"
 import { migration0011GovernedActions } from "./0011_governed_actions.js"
+import { migration0012GovernedActionDenialPolicyOwnership } from "./0012_governed_action_denial_policy_ownership.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -26,7 +27,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 8, name: "delivery_graph" },
   { id: 9, name: "readiness" },
   { id: 10, name: "readiness_head_history" },
-  { id: 11, name: "governed_actions" }
+  { id: 11, name: "governed_actions" },
+  { id: 12, name: "governed_action_denial_policy_ownership" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -41,5 +43,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0008_delivery_graph": migration0008DeliveryGraph,
   "0009_readiness": migration0009Readiness,
   "0010_readiness_head_history": migration0010ReadinessHeadHistory,
-  "0011_governed_actions": migration0011GovernedActions
+  "0011_governed_actions": migration0011GovernedActions,
+  "0012_governed_action_denial_policy_ownership": migration0012GovernedActionDenialPolicyOwnership
 })

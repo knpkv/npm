@@ -56,6 +56,18 @@ export const GovernedActionPolicyEvaluationDigest = sha256Digest("GovernedAction
 /** Decoded fresh-policy evaluation digest. */
 export type GovernedActionPolicyEvaluationDigest = typeof GovernedActionPolicyEvaluationDigest.Type
 
+/** Digest of every immutable field in one human action authorization. */
+export const GovernedActionAuthorizationDigest = sha256Digest("GovernedActionAuthorizationDigest")
+
+/** Decoded governed-action authorization digest. */
+export type GovernedActionAuthorizationDigest = typeof GovernedActionAuthorizationDigest.Type
+
+/** Digest of every immutable field in one durable dispatch attempt. */
+export const GovernedActionAttemptDigest = sha256Digest("GovernedActionAttemptDigest")
+
+/** Decoded governed-action attempt digest. */
+export type GovernedActionAttemptDigest = typeof GovernedActionAttemptDigest.Type
+
 /** Digest of the exact versioned policy snapshot used for authorization. */
 export const GovernedActionPolicyDigest = sha256Digest("GovernedActionPolicyDigest")
 

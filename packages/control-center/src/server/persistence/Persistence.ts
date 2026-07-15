@@ -32,6 +32,9 @@ import {
   type DomainEventRepositoryService,
   EntityRepository,
   type EntityRepositoryService,
+  type GovernedActionInputError,
+  GovernedActionRepository,
+  type GovernedActionRepositoryService,
   PeopleRepository,
   type PeopleRepositoryService,
   PluginConfigurationRepository,
@@ -56,6 +59,7 @@ export type PersistenceOperationFailure =
   | BlobStoreError
   | ContentMetadataMismatchError
   | DeliveryGraphInputError
+  | GovernedActionInputError
   | PersistedRecordError
   | PersistenceOperationError
   | QuarantineWriteError
@@ -77,6 +81,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "BlobUnexpectedEofError",
   "ContentMetadataMismatchError",
   "DeliveryGraphInputError",
+  "GovernedActionInputError",
   "PersistedRecordError",
   "PersistenceOperationError",
   "QuarantineWriteError",
@@ -126,6 +131,7 @@ const makePersistence = Effect.gen(function*() {
   const content = yield* ContentStore
   const deliveryGraph = yield* DeliveryGraphRepository
   const events = yield* DomainEventRepository
+  const governedActions = yield* GovernedActionRepository
   const entities = yield* EntityRepository
   const people = yield* PeopleRepository
   const pluginConnections = yield* PluginConnectionRepository
@@ -179,6 +185,12 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("domain-event.prune", events.prune(...args)),
       streamState: (...args: Parameters<DomainEventRepositoryService["streamState"]>) =>
         publicOperation("domain-event.stream-state", events.streamState(...args))
+    },
+    governedActions: {
+      commit: (...args: Parameters<GovernedActionRepositoryService["commit"]>) =>
+        publicOperation("governed-action.commit", governedActions.commit(...args)),
+      read: (...args: Parameters<GovernedActionRepositoryService["read"]>) =>
+        publicOperation("governed-action.read", governedActions.read(...args))
     },
     people: {
       createPerson: (...args: Parameters<PeopleRepositoryService["createPerson"]>) =>
@@ -304,6 +316,7 @@ export const persistenceLayerFromDatabase = (
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
         const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
         const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
+        const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
         const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
@@ -321,6 +334,7 @@ export const persistenceLayerFromDatabase = (
           deliveryGraph,
           entities,
           events,
+          governedActions,
           people,
           pluginConnections,
           pluginConfigurations,

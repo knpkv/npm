@@ -4,6 +4,12 @@ import * as Encoding from "effect/Encoding"
 import * as Schema from "effect/Schema"
 
 import {
+  GovernedActionAttemptDigest,
+  GovernedActionAttemptV1,
+  type GovernedActionAttemptV1 as GovernedActionAttempt,
+  GovernedActionAuthorizationDigest,
+  GovernedActionAuthorizationV1,
+  type GovernedActionAuthorizationV1 as GovernedActionAuthorization,
   GovernedActionEnvelopeDigest,
   GovernedActionEnvelopeMaterialV1,
   type GovernedActionEnvelopeMaterialV1 as GovernedActionEnvelopeMaterial,
@@ -19,7 +25,9 @@ import {
   GovernedActionCommandDigest,
   GovernedActionTransitionCommand,
   type GovernedActionTransitionCommand as GovernedActionCommand,
+  GovernedActionTransitionDigest,
   type GovernedActionTransitionMaterialV1 as GovernedActionTransitionMaterial,
+  GovernedActionTransitionV1,
   type GovernedActionTransitionV1 as GovernedActionTransition
 } from "../../domain/governedAction/stateMachine.js"
 import { PluginActionPayloadDigest } from "../../domain/plugins/actions.js"
@@ -41,7 +49,11 @@ export class GovernedActionBindingMismatch extends Schema.TaggedErrorClass<Gover
       "payload-digest-mismatch",
       "evidence-set-digest-mismatch",
       "envelope-digest-mismatch",
-      "command-digest-mismatch"
+      "command-digest-mismatch",
+      "policy-evaluation-digest-mismatch",
+      "authorization-digest-mismatch",
+      "attempt-digest-mismatch",
+      "transition-digest-mismatch"
     ]),
     expectedDigest: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80)),
     actualDigest: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(80))
@@ -79,6 +91,101 @@ class VerifiedTransition {
 
 /** Nominal server-only proof that a transition command digest was verified. */
 export type VerifiedGovernedActionTransition = VerifiedTransition
+
+class VerifiedPolicyEvaluation {
+  readonly #evaluation: GovernedActionPolicyEvaluation
+  readonly #digest: GovernedActionPolicyEvaluationDigest
+
+  constructor(
+    evaluation: GovernedActionPolicyEvaluation,
+    digest: GovernedActionPolicyEvaluationDigest
+  ) {
+    this.#evaluation = evaluation
+    this.#digest = digest
+  }
+
+  /** Structurally valid policy evaluation whose complete canonical digest was verified. */
+  get evaluation(): GovernedActionPolicyEvaluation {
+    return this.#evaluation
+  }
+
+  /** Recomputed canonical digest that matched the persisted policy-evaluation digest. */
+  get digest(): GovernedActionPolicyEvaluationDigest {
+    return this.#digest
+  }
+}
+
+/** Nominal server-only proof that a complete policy-evaluation digest was verified. */
+export type VerifiedGovernedActionPolicyEvaluation = VerifiedPolicyEvaluation
+
+class VerifiedAuthorization {
+  readonly #authorization: GovernedActionAuthorization
+  readonly #digest: GovernedActionAuthorizationDigest
+
+  constructor(authorization: GovernedActionAuthorization, digest: GovernedActionAuthorizationDigest) {
+    this.#authorization = authorization
+    this.#digest = digest
+  }
+
+  /** Structurally valid authorization whose complete canonical digest was verified. */
+  get authorization(): GovernedActionAuthorization {
+    return this.#authorization
+  }
+
+  /** Recomputed canonical digest that matched the persisted authorization digest. */
+  get digest(): GovernedActionAuthorizationDigest {
+    return this.#digest
+  }
+}
+
+/** Nominal server-only proof that a complete authorization digest was verified. */
+export type VerifiedGovernedActionAuthorization = VerifiedAuthorization
+
+class VerifiedAttempt {
+  readonly #attempt: GovernedActionAttempt
+  readonly #digest: GovernedActionAttemptDigest
+
+  constructor(attempt: GovernedActionAttempt, digest: GovernedActionAttemptDigest) {
+    this.#attempt = attempt
+    this.#digest = digest
+  }
+
+  /** Structurally valid dispatch attempt whose complete canonical digest was verified. */
+  get attempt(): GovernedActionAttempt {
+    return this.#attempt
+  }
+
+  /** Recomputed canonical digest that matched the persisted attempt digest. */
+  get digest(): GovernedActionAttemptDigest {
+    return this.#digest
+  }
+}
+
+/** Nominal server-only proof that a complete dispatch-attempt digest was verified. */
+export type VerifiedGovernedActionAttempt = VerifiedAttempt
+
+class VerifiedTransitionRecord {
+  readonly #transition: GovernedActionTransition
+  readonly #digest: GovernedActionTransitionDigest
+
+  constructor(transition: GovernedActionTransition, digest: GovernedActionTransitionDigest) {
+    this.#transition = transition
+    this.#digest = digest
+  }
+
+  /** Structurally valid transition whose command and complete canonical digest were verified. */
+  get transition(): GovernedActionTransition {
+    return this.#transition
+  }
+
+  /** Recomputed canonical digest that matched the persisted transition digest. */
+  get digest(): GovernedActionTransitionDigest {
+    return this.#digest
+  }
+}
+
+/** Nominal server-only proof that a complete transition record and its command were verified. */
+export type VerifiedGovernedActionTransitionRecord = VerifiedTransitionRecord
 
 const compareText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
@@ -120,6 +227,9 @@ const encodeCommand = Schema.encodeEffect(GovernedActionTransitionCommand)
 const encodeEvidence = Schema.encodeEffect(GovernedActionEvidenceSet)
 const encodeEnvelope = Schema.encodeEffect(GovernedActionEnvelopeMaterialV1)
 const encodePolicyEvaluation = Schema.encodeEffect(GovernedActionPolicyEvaluationV1)
+const encodeAuthorization = Schema.encodeEffect(GovernedActionAuthorizationV1)
+const encodeAttempt = Schema.encodeEffect(GovernedActionAttemptV1)
+const encodeTransition = Schema.encodeEffect(GovernedActionTransitionV1)
 
 const decodeJson = Effect.fn("GovernedActionDigests.decodeJson")(function*(value: unknown) {
   return yield* Schema.decodeUnknownEffect(Schema.Json)(value).pipe(
@@ -199,6 +309,103 @@ export const digestGovernedActionPolicyEvaluation = Effect.fn(
   )
   const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
   return GovernedActionPolicyEvaluationDigest.make(`sha256:${digest}`)
+})
+
+/** Hash the complete immutable human authorization retained by the ledger. */
+export const digestGovernedActionAuthorization = Effect.fn(
+  "GovernedActionDigests.authorization"
+)(function*(authorization: GovernedActionAuthorization) {
+  const encoded = yield* encodeAuthorization(authorization).pipe(
+    Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
+  )
+  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  return GovernedActionAuthorizationDigest.make(`sha256:${digest}`)
+})
+
+/** Hash the complete immutable durable dispatch intent retained by the ledger. */
+export const digestGovernedActionAttempt = Effect.fn(
+  "GovernedActionDigests.attempt"
+)(function*(attempt: GovernedActionAttempt) {
+  const encoded = yield* encodeAttempt(attempt).pipe(
+    Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
+  )
+  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  return GovernedActionAttemptDigest.make(`sha256:${digest}`)
+})
+
+/** Hash a complete immutable transition for audit-event binding. */
+export const digestGovernedActionTransition = Effect.fn(
+  "GovernedActionDigests.transition"
+)(function*(transition: GovernedActionTransition) {
+  const encoded = yield* encodeTransition(transition).pipe(
+    Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
+  )
+  const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
+  return GovernedActionTransitionDigest.make(`sha256:${digest}`)
+})
+
+/** Verify the persisted digest of a complete immutable policy evaluation. */
+export const verifyGovernedActionPolicyEvaluation = Effect.fn(
+  "GovernedActionDigests.verifyPolicyEvaluation"
+)(function*(
+  evaluation: GovernedActionPolicyEvaluation,
+  expectedDigest: GovernedActionPolicyEvaluationDigest
+) {
+  const actualDigest = yield* digestGovernedActionPolicyEvaluation(evaluation)
+  if (actualDigest !== expectedDigest) {
+    return yield* new GovernedActionBindingMismatch({
+      reason: "policy-evaluation-digest-mismatch",
+      expectedDigest,
+      actualDigest
+    })
+  }
+  return new VerifiedPolicyEvaluation(evaluation, actualDigest)
+})
+
+/** Verify the persisted digest of a complete immutable human authorization. */
+export const verifyGovernedActionAuthorization = Effect.fn(
+  "GovernedActionDigests.verifyAuthorization"
+)(function*(authorization: GovernedActionAuthorization, expectedDigest: GovernedActionAuthorizationDigest) {
+  const actualDigest = yield* digestGovernedActionAuthorization(authorization)
+  if (actualDigest !== expectedDigest) {
+    return yield* new GovernedActionBindingMismatch({
+      reason: "authorization-digest-mismatch",
+      expectedDigest,
+      actualDigest
+    })
+  }
+  return new VerifiedAuthorization(authorization, actualDigest)
+})
+
+/** Verify the persisted digest of a complete immutable dispatch attempt. */
+export const verifyGovernedActionAttempt = Effect.fn(
+  "GovernedActionDigests.verifyAttempt"
+)(function*(attempt: GovernedActionAttempt, expectedDigest: GovernedActionAttemptDigest) {
+  const actualDigest = yield* digestGovernedActionAttempt(attempt)
+  if (actualDigest !== expectedDigest) {
+    return yield* new GovernedActionBindingMismatch({
+      reason: "attempt-digest-mismatch",
+      expectedDigest,
+      actualDigest
+    })
+  }
+  return new VerifiedAttempt(attempt, actualDigest)
+})
+
+/** Verify both the embedded command digest and persisted digest of a complete transition. */
+export const verifyGovernedActionTransitionDigest = Effect.fn(
+  "GovernedActionDigests.verifyTransitionDigest"
+)(function*(transition: GovernedActionTransition, expectedDigest: GovernedActionTransitionDigest) {
+  yield* verifyGovernedActionTransitionCommandDigest(transition.command, transition.commandDigest)
+  const actualDigest = yield* digestGovernedActionTransition(transition)
+  if (actualDigest !== expectedDigest) {
+    return yield* new GovernedActionBindingMismatch({
+      reason: "transition-digest-mismatch",
+      expectedDigest,
+      actualDigest
+    })
+  }
+  return new VerifiedTransitionRecord(transition, actualDigest)
 })
 
 /** Hash every digest-free field in a complete immutable V1 action envelope. */

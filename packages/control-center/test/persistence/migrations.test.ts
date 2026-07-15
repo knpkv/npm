@@ -28,6 +28,10 @@ import { migration0004PluginRuntime } from "../../src/server/persistence/migrati
 import { migration0005PluginConfiguration } from "../../src/server/persistence/migrations/0005_plugin_configuration.js"
 import { migration0006PluginSyncPageEvidence } from "../../src/server/persistence/migrations/0006_plugin_sync_page_evidence.js"
 import { migration0007DomainEvents } from "../../src/server/persistence/migrations/0007_domain_events.js"
+import { migration0008DeliveryGraph } from "../../src/server/persistence/migrations/0008_delivery_graph.js"
+import { migration0009Readiness } from "../../src/server/persistence/migrations/0009_readiness.js"
+import { migration0010ReadinessHeadHistory } from "../../src/server/persistence/migrations/0010_readiness_head_history.js"
+import { migration0011GovernedActions } from "../../src/server/persistence/migrations/0011_governed_actions.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
@@ -52,6 +56,7 @@ const expectedTables = [
   "evidence_items",
   "governed_action_attempts",
   "governed_action_authorizations",
+  "governed_action_denial_policy_evaluations",
   "governed_action_policy_evaluations",
   "governed_action_transitions",
   "governed_actions",
@@ -229,6 +234,20 @@ const versionSevenLoader = LibsqlMigrator.fromRecord({
   "0007_domain_events": migration0007DomainEvents
 })
 
+const versionElevenLoader = LibsqlMigrator.fromRecord({
+  "0001_core_heads": migration0001Core,
+  "0002_integrity_blobs": migration0002Integrity,
+  "0003_auth": migration0003Auth,
+  "0004_plugin_runtime": migration0004PluginRuntime,
+  "0005_plugin_configuration": migration0005PluginConfiguration,
+  "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence,
+  "0007_domain_events": migration0007DomainEvents,
+  "0008_delivery_graph": migration0008DeliveryGraph,
+  "0009_readiness": migration0009Readiness,
+  "0010_readiness_head_history": migration0010ReadinessHeadHistory,
+  "0011_governed_actions": migration0011GovernedActions
+})
+
 const readMigrationLedger = Effect.fn("ControlCenterMigrationsTest.readMigrationLedger")(function*(
   config: PersistenceConfig
 ) {
@@ -374,6 +393,136 @@ describe("Control Center migrations", () => {
           name
         }))
       )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("upgrades version 11 without trusting ambiguous denial evidence ownership", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000201"
+      const connectionId = "01890f6f-6d6a-7cc0-98d2-000000000202"
+      const entityId = "01890f6f-6d6a-7cc0-98d2-000000000203"
+      const sessionId = "01890f6f-6d6a-7cc0-98d2-000000000204"
+      const personId = "01890f6f-6d6a-7cc0-98d2-000000000205"
+      const actionId = "01890f6f-6d6a-7cc0-98d2-000000000206"
+      const proposalTransitionId = "01890f6f-6d6a-7cc0-98d2-000000000207"
+      const denialTransitionId = "01890f6f-6d6a-7cc0-98d2-000000000208"
+      const policyDigest = `sha256:${"b".repeat(64)}`
+      const envelopeDigest = `sha256:${"a".repeat(64)}`
+      const lineageJson = "{\"_tag\":\"none\"}"
+
+      const beforeUpgrade = yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* LibsqlMigrator.run({ loader: versionElevenLoader, table: MIGRATION_LEDGER_TABLE })
+        yield* sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (${workspaceId}, 'Version Eleven', 1,
+          '2026-07-15T09:00:00.000Z', '2026-07-15T10:00:00.000Z')`
+        yield* sql`INSERT INTO plugin_connections (
+          workspace_id, plugin_connection_id, provider_id, display_name,
+          revision, is_enabled, created_at, updated_at
+        ) VALUES (${workspaceId}, ${connectionId}, 'jira', 'Version Eleven Jira',
+          1, 1, '2026-07-15T09:00:00.000Z', '2026-07-15T10:00:00.000Z')`
+        yield* sql`INSERT INTO entities (
+          workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
+          entity_type, current_revision, created_at, updated_at
+        ) VALUES (${workspaceId}, ${entityId}, ${connectionId}, 'jira', 'V11-42',
+          'issue', 1, '2026-07-15T09:00:00.000Z', '2026-07-15T10:00:00.000Z')`
+        yield* sql`INSERT INTO sessions (
+          workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id, agent_id,
+          permission, created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked_at
+        ) VALUES (${workspaceId}, ${sessionId}, ${"1".repeat(64)}, ${"2".repeat(64)},
+          'human', ${personId}, NULL, 'workspace-owner', '2026-07-15T09:00:00.000Z',
+          '2026-07-15T09:30:00.000Z', '2026-07-15T11:00:00.000Z',
+          '2026-08-15T10:00:00.000Z', NULL)`
+        yield* sql`INSERT INTO governed_actions (
+          workspace_id, action_id, plugin_connection_id, provider_id, target_entity_id,
+          idempotency_key, envelope_digest, envelope_json, state, lineage_json,
+          lineage_kind, provider_operation_id, reconciliation_key, terminal_status,
+          head_transition_id, head_sequence, created_at, updated_at
+        ) VALUES (${workspaceId}, ${actionId}, ${connectionId}, 'jira', ${entityId},
+          'v11:deny', ${envelopeDigest}, '{}', NULL, NULL, NULL, NULL, NULL, NULL,
+          NULL, NULL, '2026-07-15T10:00:00.000Z', '2026-07-15T10:00:00.000Z')`
+        yield* sql`INSERT INTO governed_action_policy_evaluations (
+          workspace_id, action_id, evaluation_digest, evaluation_json, decision, evaluated_at
+        ) VALUES (${workspaceId}, ${actionId}, ${policyDigest}, '{}', 'denied',
+          '2026-07-15T10:00:30.000Z')`
+        yield* sql`INSERT INTO governed_action_transitions (
+          workspace_id, action_id, transition_id, previous_transition_id, sequence,
+          command_id, command_tag, authorization_id, attempt_id, outcome_source_kind,
+          command_provider_operation_id, command_reconciliation_key, command_terminal_status,
+          command_unknown_kind, command_digest, transition_digest, envelope_digest,
+          from_state, to_state, result_lineage_json, result_lineage_kind,
+          result_provider_operation_id, result_reconciliation_key, result_terminal_status,
+          cause_kind, cause_actor_id, cause_session_id, cause_job_id, cause_system_component,
+          causation_id, correlation_id, transition_json, occurred_at
+        ) VALUES (${workspaceId}, ${actionId}, ${proposalTransitionId}, NULL, 1,
+          'v11:propose', 'propose', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+          ${`sha256:${"c".repeat(64)}`}, ${`sha256:${"d".repeat(64)}`}, ${envelopeDigest},
+          NULL, 'proposed', ${lineageJson}, 'none', NULL, NULL, NULL,
+          'human', ${personId}, ${sessionId}, NULL, NULL, NULL, NULL, '{}',
+          '2026-07-15T10:00:00.000Z')`
+        yield* sql`INSERT INTO audit_events (
+          workspace_id, action_id, transition_id, audit_event_id, event_kind,
+          cause_kind, actor_id, session_id, job_id, system_component, causation_id,
+          correlation_id, payload_digest, payload_json, occurred_at
+        ) VALUES (${workspaceId}, ${actionId}, ${proposalTransitionId},
+          '01890f6f-6d6a-7cc0-98d2-000000000209', 'proposed', 'human', ${personId},
+          ${sessionId}, NULL, NULL, NULL, NULL, ${`sha256:${"d".repeat(64)}`}, '{}',
+          '2026-07-15T10:00:00.000Z')`
+        yield* sql`UPDATE governed_actions SET state = 'proposed', lineage_json = ${lineageJson},
+          lineage_kind = 'none', head_transition_id = ${proposalTransitionId}, head_sequence = 1
+          WHERE workspace_id = ${workspaceId} AND action_id = ${actionId}`
+        yield* sql`INSERT INTO governed_action_transitions (
+          workspace_id, action_id, transition_id, previous_transition_id, sequence,
+          command_id, command_tag, authorization_id, attempt_id, outcome_source_kind,
+          command_provider_operation_id, command_reconciliation_key, command_terminal_status,
+          command_unknown_kind, command_digest, transition_digest, envelope_digest,
+          from_state, to_state, result_lineage_json, result_lineage_kind,
+          result_provider_operation_id, result_reconciliation_key, result_terminal_status,
+          cause_kind, cause_actor_id, cause_session_id, cause_job_id, cause_system_component,
+          causation_id, correlation_id, transition_json, occurred_at
+        ) VALUES (${workspaceId}, ${actionId}, ${denialTransitionId}, ${proposalTransitionId}, 2,
+          'v11:deny', 'deny', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+          ${`sha256:${"e".repeat(64)}`}, ${`sha256:${"f".repeat(64)}`}, ${envelopeDigest},
+          'proposed', 'denied', ${lineageJson}, 'none', NULL, NULL, NULL,
+          'system', NULL, NULL, NULL, 'governed-action-engine', NULL, NULL, '{}',
+          '2026-07-15T10:01:00.000Z')`
+        const oldColumns = yield* sql<{ readonly name: string }>`SELECT name
+          FROM pragma_table_info('governed_action_transitions') ORDER BY cid`
+        const ownershipTables = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM sqlite_master WHERE type = 'table'
+            AND name = 'governed_action_denial_policy_evaluations'`
+        const ledger = yield* sql<{ readonly migrationId: number }>`SELECT migration_id AS migrationId
+          FROM ${sql(MIGRATION_LEDGER_TABLE)} ORDER BY migration_id`
+        return { ledger, oldColumns, ownershipTables }
+      }).pipe(
+        Effect.provide(LibsqlClient.layer({ transformResultNames: snakeToCamel, url: config.databaseUrl })),
+        Effect.scoped
+      )
+
+      assert.strictEqual(beforeUpgrade.ledger.at(-1)?.migrationId, 11)
+      assert.isFalse(beforeUpgrade.oldColumns.some(({ name }) => name === "policy_evaluation_digest"))
+      assert.deepStrictEqual(beforeUpgrade.ownershipTables, [{ count: 0 }])
+
+      const afterUpgrade = yield* Effect.gen(function*() {
+        const database = yield* Database
+        const ownership = yield* database.sql<{
+          readonly policyEvaluationDigest: string
+          readonly transitionId: string
+        }>`SELECT transition_id AS transitionId,
+          policy_evaluation_digest AS policyEvaluationDigest
+          FROM governed_action_denial_policy_evaluations
+          WHERE workspace_id = ${workspaceId} AND action_id = ${actionId}`
+        const transitionCount = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM governed_action_transitions WHERE workspace_id = ${workspaceId} AND action_id = ${actionId}`
+        const ledger = yield* database.sql<{ readonly migrationId: number }>`SELECT migration_id AS migrationId
+          FROM ${database.sql(MIGRATION_LEDGER_TABLE)} ORDER BY migration_id`
+        return { ledger, ownership, transitionCount }
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, 12)
+      assert.deepStrictEqual(afterUpgrade.ownership, [])
+      assert.deepStrictEqual(afterUpgrade.transitionCount, [{ count: 2 }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades version 7 without rewriting existing durable rows", () =>

@@ -63,6 +63,14 @@ export const GovernedActionCommandDigest = Schema.String.check(
 /** Decoded governed-action command digest. */
 export type GovernedActionCommandDigest = typeof GovernedActionCommandDigest.Type
 
+/** Digest of every immutable field in one governed-action transition. */
+export const GovernedActionTransitionDigest = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
+).pipe(Schema.brand("GovernedActionTransitionDigest"))
+
+/** Decoded governed-action transition digest. */
+export type GovernedActionTransitionDigest = typeof GovernedActionTransitionDigest.Type
+
 /** Closed reason why authorization or preflight failed without calling a provider. */
 export const GovernedActionDenialReason = Schema.Literals([
   "revision-changed",

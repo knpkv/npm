@@ -5,9 +5,12 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import {
+  GovernedActionAttemptV1,
+  GovernedActionAuthorizationV1,
   GovernedActionEnvelopeMaterialV1,
   GovernedActionEnvelopeV1,
   GovernedActionEvidenceReference,
+  GovernedActionPolicyEvaluationV1,
   GovernedActionTransitionCommand,
   GovernedActionTransitionMaterialV1,
   GovernedActionTransitionV1
@@ -15,15 +18,23 @@ import {
 import { PluginPayloadJson } from "../../src/domain/plugins/bounds.js"
 import {
   canonicalizeGovernedActionJson,
+  digestGovernedActionAttempt,
+  digestGovernedActionAuthorization,
   digestGovernedActionEnvelope,
   digestGovernedActionEvidenceSet,
   digestGovernedActionPayload,
+  digestGovernedActionPolicyEvaluation,
+  digestGovernedActionTransition,
   digestGovernedActionTransitionCommand,
   makeGovernedActionEnvelope,
   makeGovernedActionTransition,
+  verifyGovernedActionAttempt,
+  verifyGovernedActionAuthorization,
   verifyGovernedActionEnvelope,
+  verifyGovernedActionPolicyEvaluation,
   verifyGovernedActionTransition,
-  verifyGovernedActionTransitionCommandDigest
+  verifyGovernedActionTransitionCommandDigest,
+  verifyGovernedActionTransitionDigest
 } from "../../src/server/governance/governedActionDigests.js"
 
 const proposedAt = "2026-07-15T10:00:00.000Z"
@@ -33,6 +44,9 @@ const evidenceClaimId = "01890f00-0000-7000-8000-000000000202"
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEvidence = Schema.decodeUnknownSync(GovernedActionEvidenceReference)
 const decodeEnvelope = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
+const decodePolicyEvaluation = Schema.decodeUnknownSync(GovernedActionPolicyEvaluationV1)
+const decodeAuthorization = Schema.decodeUnknownSync(GovernedActionAuthorizationV1)
+const decodeAttempt = Schema.decodeUnknownSync(GovernedActionAttemptV1)
 
 const evidenceRaw = {
   workspaceId: "01890f00-0000-7000-8000-000000000204",
@@ -93,6 +107,67 @@ const envelopeRaw = (payloadDigest: string, evidenceSetDigest: string) => ({
   causationId: null,
   correlationId: "action:test-1"
 })
+
+const policyEvaluationRaw = {
+  schemaVersion: 1,
+  actionId: "01890f00-0000-7000-8000-000000000203",
+  workspaceId: "01890f00-0000-7000-8000-000000000204",
+  policy: {
+    policyId: "jira.transition",
+    policyVersion: 1,
+    policyDigest: `sha256:${"c".repeat(64)}`,
+    requiredPermission: "issue-owner"
+  },
+  payloadDigest: "1".repeat(64),
+  evidenceSetDigest: `sha256:${"2".repeat(64)}`,
+  expectedRevision: "7",
+  decision: "allowed",
+  evaluatedAt: proposedAt
+}
+
+const authorizationRaw = {
+  schemaVersion: 1,
+  authorizationId: "01890f00-0000-7000-8000-000000000212",
+  actionId: "01890f00-0000-7000-8000-000000000203",
+  workspaceId: "01890f00-0000-7000-8000-000000000204",
+  pluginConnectionId: "01890f00-0000-7000-8000-000000000205",
+  pluginConnectionRevision: 7,
+  pluginConnectionAuthorityDigest: `sha256:${"a".repeat(64)}`,
+  actionEnvelopeDigest: `sha256:${"f".repeat(64)}`,
+  idempotencyKey: "governed-action:PAY-42:done:7",
+  payloadDigest: "1".repeat(64),
+  evidenceSetDigest: `sha256:${"2".repeat(64)}`,
+  policyDigest: `sha256:${"c".repeat(64)}`,
+  expectedRevision: "7",
+  capabilityVersion: 1,
+  actor: { _tag: "human", personId: "01890f00-0000-7000-8000-000000000207" },
+  sessionId: "01890f00-0000-7000-8000-000000000208",
+  sessionPermission: "issue-owner",
+  sessionExpiresAt: "2026-07-15T10:20:00.000Z",
+  requiredPermission: "issue-owner",
+  authorizedAt: "2026-07-15T10:01:00.000Z",
+  expiresAt: "2026-07-15T10:05:00.000Z"
+}
+
+const attemptRaw = {
+  schemaVersion: 1,
+  attemptId: "01890f00-0000-7000-8000-000000000213",
+  authorizationId: "01890f00-0000-7000-8000-000000000212",
+  actionId: "01890f00-0000-7000-8000-000000000203",
+  workspaceId: "01890f00-0000-7000-8000-000000000204",
+  pluginConnectionId: "01890f00-0000-7000-8000-000000000205",
+  idempotencyKey: "governed-action:PAY-42:done:7",
+  attemptNumber: 1,
+  actionEnvelopeDigest: `sha256:${"f".repeat(64)}`,
+  expectedRevision: "7",
+  policyEvaluationDigest: `sha256:${"3".repeat(64)}`,
+  preflight: {
+    _tag: "ready",
+    checkedRevision: "7",
+    checkedAt: "2026-07-15T10:01:00.000Z"
+  },
+  startedAt: "2026-07-15T10:02:00.000Z"
+}
 
 describe("governed action canonical digests", () => {
   it("canonicalizes nested object order while preserving array semantics", () => {
@@ -162,7 +237,88 @@ describe("governed action canonical digests", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer)))
 
-  it.effect("constructs and verifies transitions against the exact canonical command", () =>
+  it.effect("verifies complete policy evaluations and rejects changed decisions", () =>
+    Effect.gen(function*() {
+      const evaluation = decodePolicyEvaluation(policyEvaluationRaw)
+      const digest = yield* digestGovernedActionPolicyEvaluation(evaluation)
+      const verified = yield* verifyGovernedActionPolicyEvaluation(evaluation, digest)
+      const changed = decodePolicyEvaluation({ ...policyEvaluationRaw, decision: "denied" })
+      const rejected = yield* Effect.result(verifyGovernedActionPolicyEvaluation(changed, digest))
+
+      assert.deepStrictEqual(verified.evaluation, evaluation)
+      assert.strictEqual(verified.digest, digest)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "GovernedActionBindingMismatch")
+        if (rejected.failure._tag === "GovernedActionBindingMismatch") {
+          assert.strictEqual(rejected.failure.reason, "policy-evaluation-digest-mismatch")
+        }
+      }
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("canonicalizes complete authorizations and rejects changed authority", () =>
+    Effect.gen(function*() {
+      const authorization = decodeAuthorization(authorizationRaw)
+      const permuted = decodeAuthorization({
+        expiresAt: authorizationRaw.expiresAt,
+        authorizedAt: authorizationRaw.authorizedAt,
+        requiredPermission: authorizationRaw.requiredPermission,
+        sessionExpiresAt: authorizationRaw.sessionExpiresAt,
+        sessionPermission: authorizationRaw.sessionPermission,
+        sessionId: authorizationRaw.sessionId,
+        actor: { personId: authorizationRaw.actor.personId, _tag: "human" },
+        capabilityVersion: authorizationRaw.capabilityVersion,
+        expectedRevision: authorizationRaw.expectedRevision,
+        policyDigest: authorizationRaw.policyDigest,
+        evidenceSetDigest: authorizationRaw.evidenceSetDigest,
+        payloadDigest: authorizationRaw.payloadDigest,
+        idempotencyKey: authorizationRaw.idempotencyKey,
+        actionEnvelopeDigest: authorizationRaw.actionEnvelopeDigest,
+        pluginConnectionAuthorityDigest: authorizationRaw.pluginConnectionAuthorityDigest,
+        pluginConnectionRevision: authorizationRaw.pluginConnectionRevision,
+        pluginConnectionId: authorizationRaw.pluginConnectionId,
+        workspaceId: authorizationRaw.workspaceId,
+        actionId: authorizationRaw.actionId,
+        authorizationId: authorizationRaw.authorizationId,
+        schemaVersion: authorizationRaw.schemaVersion
+      })
+      const digest = yield* digestGovernedActionAuthorization(authorization)
+      const verified = yield* verifyGovernedActionAuthorization(authorization, digest)
+      const changed = decodeAuthorization({ ...authorizationRaw, pluginConnectionRevision: 8 })
+      const rejected = yield* Effect.result(verifyGovernedActionAuthorization(changed, digest))
+
+      assert.strictEqual(yield* digestGovernedActionAuthorization(permuted), digest)
+      assert.deepStrictEqual(verified.authorization, authorization)
+      assert.strictEqual(verified.digest, digest)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "GovernedActionBindingMismatch")
+        if (rejected.failure._tag === "GovernedActionBindingMismatch") {
+          assert.strictEqual(rejected.failure.reason, "authorization-digest-mismatch")
+        }
+      }
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("verifies complete attempts and rejects changed dispatch intent", () =>
+    Effect.gen(function*() {
+      const attempt = decodeAttempt(attemptRaw)
+      const digest = yield* digestGovernedActionAttempt(attempt)
+      const verified = yield* verifyGovernedActionAttempt(attempt, digest)
+      const changed = decodeAttempt({ ...attemptRaw, idempotencyKey: "governed-action:PAY-42:done:8" })
+      const rejected = yield* Effect.result(verifyGovernedActionAttempt(changed, digest))
+
+      assert.deepStrictEqual(verified.attempt, attempt)
+      assert.strictEqual(verified.digest, digest)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "GovernedActionBindingMismatch")
+        if (rejected.failure._tag === "GovernedActionBindingMismatch") {
+          assert.strictEqual(rejected.failure.reason, "attempt-digest-mismatch")
+        }
+      }
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("constructs and verifies complete transitions against command and record digests", () =>
     Effect.gen(function*() {
       const decodeMaterial = Schema.decodeUnknownSync(GovernedActionTransitionMaterialV1)
       const material = decodeMaterial({
@@ -192,8 +348,12 @@ describe("governed action canonical digests", () => {
       })
       const verified = yield* makeGovernedActionTransition(material)
       const transition = verified.transition
+      const transitionDigest = yield* digestGovernedActionTransition(transition)
+      const verifiedRecord = yield* verifyGovernedActionTransitionDigest(transition, transitionDigest)
 
       assert.deepStrictEqual((yield* verifyGovernedActionTransition(transition)).transition, transition)
+      assert.deepStrictEqual(verifiedRecord.transition, transition)
+      assert.strictEqual(verifiedRecord.digest, transitionDigest)
 
       const encoded = Schema.encodeSync(GovernedActionTransitionV1)(transition)
       const changedCommand = Schema.decodeUnknownSync(GovernedActionTransitionV1)({
@@ -204,7 +364,31 @@ describe("governed action canonical digests", () => {
           safeSummary: "Changed command under an existing identity"
         }
       })
-      assert.isTrue(Result.isFailure(yield* Effect.result(verifyGovernedActionTransition(changedCommand))))
+      const changedRecord = Schema.decodeUnknownSync(GovernedActionTransitionV1)({
+        ...encoded,
+        occurredAt: "2026-07-15T10:01:00.000Z"
+      })
+      const commandRejected = yield* Effect.result(
+        verifyGovernedActionTransitionDigest(changedCommand, transitionDigest)
+      )
+      const recordRejected = yield* Effect.result(
+        verifyGovernedActionTransitionDigest(changedRecord, transitionDigest)
+      )
+
+      assert.isTrue(Result.isFailure(commandRejected))
+      if (Result.isFailure(commandRejected)) {
+        assert.strictEqual(commandRejected.failure._tag, "GovernedActionBindingMismatch")
+        if (commandRejected.failure._tag === "GovernedActionBindingMismatch") {
+          assert.strictEqual(commandRejected.failure.reason, "command-digest-mismatch")
+        }
+      }
+      assert.isTrue(Result.isFailure(recordRejected))
+      if (Result.isFailure(recordRejected)) {
+        assert.strictEqual(recordRejected.failure._tag, "GovernedActionBindingMismatch")
+        if (recordRejected.failure._tag === "GovernedActionBindingMismatch") {
+          assert.strictEqual(recordRejected.failure.reason, "transition-digest-mismatch")
+        }
+      }
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("rejects noncanonical, duplicate, and oversized evidence sets before hashing", () =>
