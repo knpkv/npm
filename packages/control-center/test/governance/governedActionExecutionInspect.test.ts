@@ -9,8 +9,10 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
+import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
+import { makeGovernedActionExecutionPreparationReader } from "../../src/server/governance/internal/execution-store/preparation.js"
 import { digestGovernedActionPreparationToken } from "../../src/server/governance/internal/execution-store/tokens.js"
 import { GovernedActionExecutionReference } from "../../src/server/governance/internal/GovernedActionExecutionStore.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
@@ -24,6 +26,8 @@ import {
   seedGovernedAction,
   WORKSPACE_ID
 } from "./fixtures/authorizedGovernedAction.js"
+
+const OTHER_WORKSPACE_ID = Schema.decodeUnknownSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-440000000010")
 
 interface PreparationRow {
   readonly actionId: string
@@ -120,6 +124,30 @@ describe("governed action execution inspection", () => {
         yield* digestGovernedActionPreparationToken(plan.preparationToken)
       )
       assert.notInclude(JSON.stringify(rows), Redacted.value(plan.preparationToken))
+    })))
+
+  it.effect("does not resolve a preparation capability outside its workspace", () =>
+    withInspector(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      yield* seedGovernedAction()
+      const inspector = yield* makeGovernedActionExecutionInspect
+      const plan = yield* inspector.inspect(reference)
+      assert.strictEqual(plan._tag, "dispatch")
+      if (plan._tag !== "dispatch") return
+      const reader = yield* makeGovernedActionExecutionPreparationReader
+      const tokenDigest = yield* digestGovernedActionPreparationToken(plan.preparationToken)
+
+      const result = yield* reader.read({
+        workspaceId: OTHER_WORKSPACE_ID,
+        preparationTokenDigest: tokenDigest
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "RecordNotFoundError")
+        if (result.failure._tag !== "RecordNotFoundError") return
+        assert.strictEqual(result.failure.workspaceId, OTHER_WORKSPACE_ID)
+      }
     })))
 
   it.effect("keeps proposed and expired actions inactive without issuing a capability", () =>

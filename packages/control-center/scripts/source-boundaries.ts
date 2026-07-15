@@ -161,7 +161,8 @@ const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
   sourcePath === "src/server/plugins/PluginDefinition" ||
   isWithin(sourcePath, "src/server/plugins/internal") ||
   sourcePath === "src/server/governance/internal/GovernedActionExecutionEngine" ||
-  sourcePath === "src/server/governance/internal/GovernedActionExecutionStore"
+  sourcePath === "src/server/governance/internal/GovernedActionExecutionStore" ||
+  isWithin(sourcePath, "src/server/governance/internal/execution-store")
 
 const mayImportGovernedExecutionInternals = (sourcePath: string): boolean =>
   isWithin(sourcePath, "src/server/governance/internal") ||

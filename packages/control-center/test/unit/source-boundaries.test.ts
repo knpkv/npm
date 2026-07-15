@@ -95,6 +95,12 @@ describe("Control Center source boundaries", () => {
     ).toEqual([])
     expect(
       inspectSourceBoundaries(
+        "src/server/governance/internal/execution-store/begin.ts",
+        "import { PluginRuntimeAuthoritySource } from \"../../../plugins/internal/PluginRuntimeAuthoritySource.js\""
+      )
+    ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
         "src/server/governance/SomeHelper.ts",
         "import { AuthorizedPluginExecutor } from \"../plugins/internal/AuthorizedPluginExecutor.js\""
       )

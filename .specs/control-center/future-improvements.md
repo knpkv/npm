@@ -10,6 +10,9 @@ complete.
   revalidated before and after transaction callbacks.
 - Runtime generations are retained so an `A → B → A` rotation cannot revive an old token.
 - Governed execution inspection issues only short-lived preparation capabilities.
+- Governed execution `begin` now consumes an exact workspace-scoped preparation inside the
+  runtime-authority transaction, revalidates current session/target/evidence/policy, appends the
+  start intent and lease atomically, and returns a one-use permit only after commit.
 - Execution `begin` now receives the exact inspected workspace/connection scope, and the engine
   rejects cross-wired permits before calling a provider.
 - Private strict readers load current session, target, projection, and evidence authority without
@@ -21,20 +24,17 @@ complete.
 
 ## Critical unfinished work
 
-1. **Finish `GovernedActionExecutionStore.begin`.** It still needs one transaction that consumes
-   the preparation token, reloads the verified aggregate, calls the strict session/target/evidence
-   readers, evaluates current policy, verifies runtime authority, appends `started`, inserts the
-   recovery lease, and returns a one-use permit only after commit.
-2. **Finish execution outcome persistence.** Implement `recordBlocked`, `recordDispatch`,
+1. **Finish execution outcome persistence.** Implement `recordBlocked`, `recordDispatch`,
    `recordUnknown`, `recordRecoveryUnavailable`, and `recordReconciliation` with durable provider
    inbox semantics and cancellation-safe folding.
-3. **Add begin/recovery integration tests.** Cover concurrent duplicate begin, lease-write rollback,
+2. **Complete the begin/recovery failure matrix.** The real-database happy path and one-use replay
+   are covered. Still add concurrent duplicate begin, lease-write rollback,
    runtime rotation, expired preparation/authorization/session, stale preflight, missing
    `action.reconcile`, crash boundaries, unknown outcome, and restart reconciliation.
-4. **Wire the execution store layer into the server composition** without exposing its internal
+3. **Wire the execution store layer into the server composition** without exposing its internal
    capability through browser, agent, or plugin APIs.
 
-Until these four items are complete, D03 remains incomplete and real provider mutations must stay
+Until these three items are complete, D03 remains incomplete and real provider mutations must stay
 disabled.
 
 ## Remaining roadmap
@@ -59,6 +59,10 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 - `current-evidence.ts` uses the existing SQL adapter directly. It is intentionally isolated behind
   a private reader so it can later move to `effect-qb` without changing governed-execution callers.
+- `begin.ts` deliberately maps the canonical runtime-authority token into the governed connection
+  authority digest because both represent the same non-secret configured runtime generation. This
+  should become one shared nominal domain type when the proposal API is implemented, avoiding the
+  explicit schema-brand conversion at the execution boundary.
 - Local `effect-qb` `0.20.0` requires Effect `4.0.0-beta.98`, while this workspace and vendored
   Effect source use `beta.97`. Do not add it until the workspace, lockfile, and vendored subtree are
   aligned deliberately. Migrations, views, and triggers should remain explicit SQL.
