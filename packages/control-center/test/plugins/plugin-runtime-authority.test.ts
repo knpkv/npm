@@ -203,6 +203,15 @@ describe("plugin runtime authority", () => {
           )
       )
       assert.strictEqual(currentGeneration, 1)
+      const negotiated = yield* authority.transactCurrent(
+        { scope: input.scope, runtimeAuthorityToken: first.runtimeAuthorityToken },
+        (current) => Effect.succeed(current.negotiated)
+      )
+      assert.strictEqual(negotiated.descriptor.pluginId, "dev.knpkv.jira")
+      assert.deepStrictEqual(negotiated.capabilities, [{
+        capabilityId: "sync.incremental",
+        version: 1
+      }])
 
       const updatedConnection = yield* connections.updateMetadata(WORKSPACE_ID, CONNECTION_ID, {
         displayName: connection.displayName,

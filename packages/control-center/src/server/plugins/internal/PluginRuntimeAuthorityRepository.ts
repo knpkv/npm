@@ -384,11 +384,12 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
       "plugin-runtime-authority-current-invalid"
     )
     const configuration = configurationFromRow(row)
+    const descriptor = decodeDescriptorJson(row.descriptorJson)
     if (
       configuration === null ||
       row.historyGeneration !== row.generation ||
       row.historyAuthorityToken !== row.runtimeAuthorityToken ||
-      Result.isFailure(decodeDescriptorJson(row.descriptorJson)) ||
+      Result.isFailure(descriptor) ||
       (yield* digestSourceText(row.descriptorJson)) !== row.descriptorDigest ||
       (
         configuration._tag === "present" &&
@@ -417,6 +418,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
         },
         accountDigest: row.accountDigest,
         activatedAt: row.activatedAt,
+        negotiated: descriptor.success,
         schemaVersion: row.schemaVersion,
         generation: row.generation,
         runtimeAuthorityToken: row.runtimeAuthorityToken

@@ -2,6 +2,7 @@ import * as Context from "effect/Context"
 import * as Schema from "effect/Schema"
 
 import { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
+import { NegotiatedPluginDescriptorV1 } from "../../../domain/plugins/descriptor.js"
 import { ProviderId } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
@@ -60,6 +61,7 @@ export type PublishPluginRuntimeAuthority = typeof PublishPluginRuntimeAuthority
 /** Exact current runtime generation safe to bind to an executor lease. */
 export const CurrentPluginRuntimeAuthority = Schema.Struct({
   ...PublishPluginRuntimeAuthority.fields,
+  negotiated: NegotiatedPluginDescriptorV1,
   schemaVersion: Schema.Literal(1),
   generation: Schema.Int.check(Schema.isGreaterThan(0)),
   runtimeAuthorityToken: PluginRuntimeAuthorityToken
