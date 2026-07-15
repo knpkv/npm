@@ -20,6 +20,7 @@ import { PairingCode } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
+  GovernedActionId,
   PersonId,
   PluginConnectionId,
   ReleaseId,
@@ -34,15 +35,21 @@ import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/per
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import { makeFakePluginRuntime } from "../../src/server/plugins/fake/FakePluginDefinition.js"
 import { type FakePluginScenario, fakeSyncScriptKey } from "../../src/server/plugins/fake/FakePluginScenario.js"
+import {
+  PluginRuntimeAuthority,
+  PluginRuntimeAuthorityToken
+} from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
+import { GovernedActionExecutionStartup } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
+const MISSING_ACTION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000079")
 const OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000072")
 const PLUGIN_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000073")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000074")
@@ -204,7 +211,9 @@ describe("Control Center closed runtime", () => {
         }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
+      const governedExecution = Context.get(runtime, GovernedActionExecutionStartup)
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
+      assert.deepStrictEqual(governedExecution, { _tag: "disabled" })
       if (bootstrapState._tag !== "pairing-issued") return
 
       const httpClient = yield* HttpClient.HttpClient
@@ -291,6 +300,8 @@ describe("Control Center closed runtime", () => {
         }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
       )
       const pluginConnections = yield* makeFakeConnectionMap
+      const governedRuntime = yield* makeFakePluginRuntime(fakeScenario)
+      const runtimeAuthority = PluginRuntimeAuthorityToken.make(`sha256:${"a".repeat(64)}`)
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,
@@ -304,13 +315,34 @@ describe("Control Center closed runtime", () => {
         releaseSynchronization: {
           input: { workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID, streamKey: "releases" },
           pluginConnections
+        },
+        governedActionExecution: {
+          pluginRuntimes: {
+            layer: () =>
+              Layer.merge(
+                governedRuntime.layer,
+                Layer.succeed(PluginRuntimeAuthority, runtimeAuthority)
+              )
+          }
         }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
+      const governedExecution = Context.get(runtime, GovernedActionExecutionStartup)
       const synchronizationState = Context.get(runtime, ReleaseSynchronizationStartup)
       const runtimePersistence = Context.get(runtime, Persistence)
       const persistedRuntime = yield* runtimePersistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
+      assert.strictEqual(governedExecution._tag, "ready")
+      if (governedExecution._tag === "ready") {
+        const missing = yield* governedExecution.advance({
+          workspaceId: WORKSPACE_ID,
+          actionId: MISSING_ACTION_ID
+        }).pipe(Effect.flip)
+        assert.strictEqual(missing._tag, "GovernedActionExecutionStoreError")
+        if (missing._tag === "GovernedActionExecutionStoreError") {
+          assert.strictEqual(missing.reason, "not-found")
+        }
+      }
       assert.strictEqual(persistedRuntime.health._tag, "healthy")
       assert.deepStrictEqual(synchronizationState, {
         _tag: "completed",

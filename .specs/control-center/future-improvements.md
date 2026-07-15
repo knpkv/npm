@@ -20,16 +20,20 @@ complete.
   append-before-fold boundaries, including persisted-only restart folding.
 - Expired execution leases now issue one recovery claim at a time, with the provider deadline
   strictly inside the claim lease so durable receipt persistence retains a bounded margin.
-  Reconciliation pending, succeeded, failed, cancelled, and timestamped
-  runtime-generation-unavailable outcomes share one canonical fold engine, exact replay checks, and
-  persisted-only restart recovery with dispatch outcomes.
+  Reconciliation pending, succeeded, failed, cancelled, and observation-bound
+  runtime-generation-unavailable outcomes share one canonical fold engine, exact replay checks,
+  backward-compatible durable schemas, and persisted-only restart recovery with dispatch outcomes.
+- The live execution store and engine are wired through one private server startup seam. Normal
+  startup remains explicitly disabled until an internal plugin-runtime registry is configured;
+  source boundaries prevent browser, API, agent, and public runtime barrels from importing the
+  resulting `advance` capability.
 - Private strict readers load current session, target, projection, and evidence authority without
   falling back to older valid records.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
   and rejected after a referenced claim is superseded. Claim reads are batched.
 - The checkpoint passes repository formatting, linting, static Effect checks, builds, package
   checks, and packing validation. The complete Control Center suite passes on Node 24 with 97 test
-  files and 875 tests; PR-wide verification remains authoritative for the integrated workspace.
+  files and 913 tests; PR-wide verification remains authoritative for the integrated workspace.
 
 ## Critical unfinished work
 
@@ -38,11 +42,8 @@ complete.
    Still add concurrent duplicate begin, lease-write rollback,
    runtime rotation, expired preparation/authorization/session, stale preflight, missing
    `action.reconcile`, and the full cancellation-versus-reconciliation race matrix.
-2. **Wire the execution store layer into the server composition** without exposing its internal
-   capability through browser, agent, or plugin APIs.
-
-Until these two items are complete, D03 remains incomplete and real provider mutations must stay
-disabled.
+Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
+stay disabled.
 
 ## Remaining roadmap
 
@@ -99,6 +100,7 @@ their owner decides how to land them.
 
 ## Recommended next session
 
-Continue with the private execution-store/engine server composition, then close the highest-value
-begin/recovery failure cases. Run an independent exact-commit review after each commit; turn every
-review finding into a regression test, static rule, or repository instruction before proceeding.
+Close the highest-value begin/recovery failure cases, starting with concurrent duplicate begin,
+lease-write rollback, and runtime rotation. Run an independent exact-commit review after each
+commit; turn every review finding into a regression test, static rule, or repository instruction
+before proceeding.

@@ -162,6 +162,7 @@ const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
   isWithin(sourcePath, "src/server/plugins/internal") ||
   sourcePath === "src/server/governance/internal/GovernedActionExecutionEngine" ||
   sourcePath === "src/server/governance/internal/GovernedActionExecutionStore" ||
+  sourcePath === "src/server/runtime/GovernedActionExecutionStartup" ||
   isWithin(sourcePath, "src/server/governance/internal/execution-store")
 
 const mayImportGovernedExecutionInternals = (sourcePath: string): boolean =>
@@ -225,6 +226,12 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     normalizedSource !== "src/server/persistence/object-store/BlobStore"
   ) {
     return BLOB_STORE_REASON
+  }
+  if (
+    target === "src/server/runtime/GovernedActionExecutionStartup" &&
+    normalizedSource !== "src/server/runtime/ControlCenterServer"
+  ) {
+    return "only server composition can import the private governed execution startup"
   }
   if (
     target !== undefined &&

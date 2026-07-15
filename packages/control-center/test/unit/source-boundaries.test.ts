@@ -121,6 +121,16 @@ describe("Control Center source boundaries", () => {
         `import ${JSON.stringify(engineImport)}`
       )
     ).toEqual([])
+    const startupImport = "./GovernedActionExecutionStartup.js"
+    expect(
+      inspectSourceBoundaries("src/server/runtime/index.ts", `export * from ${JSON.stringify(startupImport)}`)
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/runtime/ControlCenterServer.ts",
+        `import ${JSON.stringify(startupImport)}`
+      )
+    ).toEqual([])
   })
 
   it("reserves the quiescent backup helper for the database migration barrier owner", () => {

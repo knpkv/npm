@@ -39,6 +39,11 @@ import {
   type ControlCenterBootstrapOptions
 } from "./Bootstrap.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
+import {
+  type GovernedActionExecutionStartupError,
+  governedActionExecutionStartupLayer,
+  type GovernedActionExecutionStartupOptions
+} from "./GovernedActionExecutionStartup.js"
 import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
 import {
   type ReleaseSynchronizationStartupError,
@@ -58,6 +63,7 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly bootstrap?: ControlCenterBootstrapOptions | null
   readonly releaseSynchronization?: ReleaseSynchronizationStartupOptions | null
   readonly releaseAgent?: ReleaseAgentRuntimeOptions | null
+  readonly governedActionExecution?: GovernedActionExecutionStartupOptions | null
   readonly applicationServices?: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
@@ -70,6 +76,7 @@ export type ControlCenterServerError<ApplicationError = never> =
   | ApplicationError
   | ControlCenterBootstrapError
   | DirectTlsServerError
+  | GovernedActionExecutionStartupError
   | PersistenceLayerError
   | ReleaseSynchronizationStartupError
   | SecretStoreError
@@ -113,6 +120,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provideMerge(DomainEventWakeups.layer)
   )
+  const governedActionExecution = governedActionExecutionStartupLayer(
+    options.governedActionExecution ?? null
+  ).pipe(Layer.provide(database))
   const runtimeServices = Layer.mergeAll(
     apiBindConfiguration,
     RequestLimitPolicy.defaultLayer,
@@ -129,6 +139,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     staticApplicationLayer,
     requestUrlBoundaryLayer,
     requestBoundaryLayer,
+    governedActionExecution,
     releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
       Layer.provideMerge(controlCenterBootstrapLayer(options.bootstrap ?? null))
     )
