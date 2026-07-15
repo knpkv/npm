@@ -2176,49 +2176,65 @@ packages:
     engines: {node: '>=8.0.0'}
 
   '@opentui/core-darwin-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-sDRSD1BY0O8M5krohikseLRu1nLxhtlx5vcdBwvujDmbxP1R2+mAbXxp8/N+z80Pg2rGehkM2aOqexWQnqqTug==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [arm64]
     os: [darwin]
 
   '@opentui/core-darwin-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-5C9sISk7gpVxWc5lGcm6kQ5dn3pgDiHCCeAbg4JSAR7BRRb8ParlVwkXehjSpCLotxjnQe/uuzGcqNlLXdnAhQ==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [x64]
     os: [darwin]
 
   '@opentui/core-linux-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-na2vSbKtgf3M2IQdgEb8j723r/A3Z0agQ+TdmTmj2MhGNJWQ1z9+L9igEjWgo4Lccrq7k0bI7pVN0OtZ7VyrdA==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [arm64]
     os: [linux]
 
   '@opentui/core-linux-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-LwXNEJZeQ6m44l4/YfHx+ZLvGENdAU1PG0qSpdSZjQs5ahXOREofd71JUah1FaJSRaffVrmvevvZQubllKpQhQ==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [x64]
     os: [linux]
 
   '@opentui/core-win32-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-CQcY3QV5eMQ4lpwyyfWCVyhLRsj72LJIJgR2eAN6Wu8p5nQC0skDX+pIFxd3rPICWumsZte4Z+uze7Qk9S2+0A==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [arm64]
     os: [win32]
 
   '@opentui/core-win32-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-pbrfcTQsjlBtbRdF5G/SSN2V6nBv4V46Kdt/1018kF4XDU3FiXB6jRpwKit8L59r7uAk7tS9e4Na6E0F2fZCag==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     cpu: [x64]
     os: [win32]
 
   '@opentui/core@https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-Csyb9l8o5t38v8xsUItO5hBijlVlQ3nM97JNI9mxfI886zyvGviRd14IuDN6r+XnONoDNhXyElRFDHGGI4SjjQ==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     peerDependencies:
       web-tree-sitter: 0.25.10
 
   '@opentui/react@https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution: {tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e}
+    resolution:
+      integrity: sha512-ilsM8JOg52QUuuaEW5Crnr38HER7rqMzVQ2+1H485Cmbvfx4pFrhuvgEV+cHV6eGnFXE2PTtIn5464t8GqveUg==
+      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
     version: 0.1.74
     peerDependencies:
       react: '>=19.0.0'

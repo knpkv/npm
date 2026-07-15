@@ -2,3 +2,34 @@ packages:
   - scratchpad
   - scripts
   - packages/*
+
+patchedDependencies:
+  "@changesets/assemble-release-plan": patches/@changesets__assemble-release-plan.patch
+  distilled-aws@0.1.1: patches/distilled-aws@0.1.1.patch
+
+catalog:
+  vitest: ^4.1.10
+
+allowBuilds:
+  "@ast-grep/cli": true
+  esbuild: false
+  msgpackr-extract: false
+  unrs-resolver: false
+
+overrides:
+  distilled-aws>fast-xml-parser: ^5.3.4
+  vitest: "catalog:"
+  "@effect/vitest": 4.0.0-beta.97
+  "@effect/platform-bun": 4.0.0-beta.97
+  "@effect/platform-node": 4.0.0-beta.97
+  "@atlaskit/react-ufo": 7.1.0
+  effect: 4.0.0-beta.97
+  happy-dom@<20.8.9: 20.8.9
+  markdown-it@<=14.1.1: 14.2.0
+  file-type@>=13.0.0 <21.3.1: 21.3.3
+  uuid@<11.1.1: 11.1.1
+  read-yaml-file@<2.1.0: 2.1.0
+  js-yaml@<=4.1.1: 4.2.0
+  yaml@>=2.0.0 <2.8.3: 2.8.3
+  linkify-it@<=5.0.0: 5.0.1
+  diff@>=6.0.0 <8.0.3: 8.0.3
