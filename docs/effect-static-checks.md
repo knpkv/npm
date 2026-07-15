@@ -31,6 +31,9 @@ Use ast-grep for syntactic patterns that are precise without type information:
 - Use Effect platform services at runtime boundaries: no raw `fs`, raw process
   access, raw `fetch`, raw crypto, or raw timer APIs in package/source Effect
   code.
+- Keep local agent subprocesses isolated: `ai-claude` and `ai-codex` must pass
+  an explicit reviewed `env` record with `extendEnv: false`; provider-specific
+  credentials are opt-in rather than inherited from the parent process.
 - Use Schema JSON codecs at API spec generation boundaries: no raw
   `JSON.parse`/`JSON.stringify` in API-client regeneration scripts.
 - Keep API-client regeneration failures typed: no native `Error` construction or

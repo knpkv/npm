@@ -136,6 +136,7 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
     const stdout = yield* runCodex({
       args: makeArguments(options, schemaFile),
       cwd: options.cwd,
+      environment: options.environment,
       executable: options.executable,
       maxOutputBytes: options.maxOutputBytes,
       maxStderrBytes: options.maxStderrBytes,

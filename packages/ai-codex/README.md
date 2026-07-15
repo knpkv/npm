@@ -17,6 +17,10 @@ const program = LanguageModel.generateText({
 access, a two-minute timeout, 1 MiB of stdout, and 64 KiB of stderr. Every turn
 uses an ephemeral `codex exec --json` process, sends the prompt over stdin, and
 cleans up its process and temporary structured-output schema when interrupted.
+The child does not inherit the parent environment: only reviewed Codex,
+authentication, state-location, certificate, path, and temporary-directory
+variables are forwarded. Use the explicit `environment` option for a custom
+provider key named by Codex `env_key` configuration.
 
 Structured output uses Codex's `--output-schema` support:
 

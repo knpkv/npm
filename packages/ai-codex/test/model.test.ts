@@ -1,6 +1,6 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -103,6 +103,50 @@ describe("model", () => {
       const command = calls[0]
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(command.args).toContain("--output-schema")
+      }
+    }))
+
+  it.effect("forwards only the reviewed Codex child environment", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Say hello" }).pipe(
+        Effect.provide(model({
+          cwd: "/workspace",
+          environment: { CUSTOM_PROVIDER_KEY: "custom-provider-key" }
+        })),
+        Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("hello") })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            AWS_SECRET_ACCESS_KEY: "aws-secret-canary",
+            CODEX_ACCESS_TOKEN: "codex-access-token",
+            CODEX_API_KEY: "codex-api-key",
+            CODEX_HOME: "/home/reviewer/.codex",
+            CODEX_THREAD_ID: "session-canary",
+            HOME: "/home/reviewer",
+            PATH: "/reviewed/bin",
+            SENTRY_AUTH_TOKEN: "vendor-canary",
+            XDG_CONFIG_HOME: "/home/reviewer/.config"
+          }
+        })))
+      )
+
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.options.extendEnv).toBe(false)
+        expect(command.options.env).toEqual({
+          CODEX_ACCESS_TOKEN: "codex-access-token",
+          CODEX_API_KEY: "codex-api-key",
+          CODEX_HOME: "/home/reviewer/.codex",
+          CUSTOM_PROVIDER_KEY: "custom-provider-key",
+          HOME: "/home/reviewer",
+          PATH: "/reviewed/bin",
+          XDG_CONFIG_HOME: "/home/reviewer/.config"
+        })
+        expect(command.options.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+        expect(command.options.env).not.toHaveProperty("CODEX_THREAD_ID")
+        expect(command.options.env).not.toHaveProperty("SENTRY_AUTH_TOKEN")
       }
     }))
 

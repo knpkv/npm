@@ -13,6 +13,7 @@ interface ByteAccumulator {
 interface RunCodexOptions {
   readonly args: ReadonlyArray<string>
   readonly cwd: string
+  readonly environment: Readonly<Record<string, string>>
   readonly executable: string
   readonly maxOutputBytes: number
   readonly maxStderrBytes: number
@@ -71,6 +72,8 @@ const isCodexTransportError = Schema.is(CodexTransportError)
 const makeCommand = (options: RunCodexOptions) =>
   ChildProcess.make(options.executable, options.args, {
     cwd: options.cwd,
+    env: options.environment,
+    extendEnv: false,
     forceKillAfter: "2 seconds",
     killSignal: "SIGTERM",
     shell: false,

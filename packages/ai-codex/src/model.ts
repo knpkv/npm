@@ -14,6 +14,8 @@ export interface CodexModelOptions {
   readonly executable?: string
   /** Optional Codex model override. */
   readonly model?: string
+  /** Explicit extra variables for custom Codex providers. Parent variables are not inherited. */
+  readonly environment?: Readonly<Record<string, string>>
   /** Filesystem access granted to Codex. Defaults to `read-only`. */
   readonly access?: "read-only" | "workspace-write"
   /** Maximum duration of one Codex turn. Defaults to two minutes. */

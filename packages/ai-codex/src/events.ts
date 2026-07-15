@@ -47,6 +47,7 @@ export const streamEvents = (
     return streamCodexLines({
       args: makeArguments(normalized, undefined),
       cwd: normalized.cwd,
+      environment: normalized.environment,
       executable: normalized.executable,
       maxOutputBytes: normalized.maxOutputBytes,
       maxStderrBytes: normalized.maxStderrBytes,

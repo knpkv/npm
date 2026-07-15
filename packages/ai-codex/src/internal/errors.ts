@@ -42,6 +42,21 @@ export const invalidOutput = (method: string, description: string): AiError.AiEr
     reason: new AiError.InvalidOutputError({ description })
   })
 
+export const configurationFailure = (method: string, cause: unknown): AiError.AiError =>
+  AiError.make({
+    method,
+    module: "CodexLanguageModel",
+    reason: new AiError.InternalProviderError({
+      description: "Unable to read the reviewed Codex CLI environment",
+      metadata: {
+        "codex-cli": {
+          cause: Predicate.isError(cause) ? cause.name : "typed-cause",
+          phase: "configuration"
+        }
+      }
+    })
+  })
+
 export const transportToAiError = (method: string, error: CodexTransportError): AiError.AiError =>
   AiError.make({
     method,

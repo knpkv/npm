@@ -1,0 +1,33 @@
+id: require-isolated-agent-child-environment
+valid:
+  - |
+    ChildProcess.make("codex", ["exec"], {
+      env: reviewedEnvironment,
+      extendEnv: false,
+      stdout: "pipe"
+    })
+  - |
+    ChildProcess.make("claude", {
+      extendEnv: false,
+      env: environment
+    })
+invalid:
+  - |
+    ChildProcess.make("codex", ["exec"], {
+      stdout: "pipe"
+    })
+  - |
+    ChildProcess.make("claude", ["--print"], {
+      env: environment,
+      stdout: "pipe"
+    })
+  - |
+    ChildProcess.make("codex", ["exec"], {
+      extendEnv: false,
+      stdout: "pipe"
+    })
+  - |
+    ChildProcess.make("claude", ["--print"], {
+      env: environment,
+      extendEnv: true
+    })

@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: require-isolated-agent-child-environment
+language: tsx
+severity: error
+message: "Pass an explicit reviewed environment to local agent child processes"
+
+rule:
+  all:
+    - pattern: ChildProcess.make($$$ARGS)
+    - any:
+        - not:
+            has:
+              pattern:
+                context: |
+                  const $_ = { env: $ENV }
+                selector: pair
+              stopBy: end
+        - not:
+            has:
+              pattern:
+                context: |
+                  const $_ = { extendEnv: false }
+                selector: pair
+              stopBy: end
+
+files:
+  - "packages/ai-claude/src/**/*.ts"
+  - "packages/ai-codex/src/**/*.ts"
+
+note: |
+  Agent wrappers can execute repository-controlled content. Never inherit the
+  full parent environment into those child processes. Supply a reviewed env
+  record and set `extendEnv: false`; add provider-specific keys explicitly.

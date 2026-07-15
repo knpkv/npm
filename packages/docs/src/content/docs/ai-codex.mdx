@@ -20,6 +20,7 @@ model({
   cwd,
   executable?,
   model?,
+  environment?,
   access?,
   timeout?,
   maxOutputBytes?,
@@ -32,12 +33,19 @@ model({
 | `cwd`            | Yes      | Working directory used for the Codex process.                           |
 | `executable`     | No       | Codex executable name or path. Defaults to `codex`.                     |
 | `model`          | No       | Codex model override. Otherwise the CLI chooses its configured default. |
+| `environment`    | No       | Explicit extra child variables for custom provider `env_key` values.    |
 | `access`         | No       | `read-only` or `workspace-write`. Defaults to `read-only`.              |
 | `timeout`        | No       | Maximum lifetime of one local process.                                  |
 | `maxOutputBytes` | No       | Maximum accepted stdout before the request fails.                       |
 | `maxStderrBytes` | No       | Maximum retained stderr used for a bounded failure description.         |
 
 Keep `access: "read-only"` for review, explanation, and planning. Opt into `workspace-write` only when the calling workflow is prepared to validate changes made under `cwd`.
+
+The child process never inherits the full parent environment. The adapter
+forwards only reviewed Codex authentication, state-location, certificate,
+executable-path, diagnostic, and temporary-directory variables. Add a custom
+provider credential through `environment` only when the corresponding Codex
+provider configuration names it with `env_key`.
 
 ## Generate Text
 
