@@ -416,6 +416,36 @@ describe("release readiness roll-up", () => {
         )
       })
     )
+    const emptyStages = {
+      build: { state: "succeeded", factIds: [], evidenceIds: [], progress: null },
+      verify: { state: "passed", factIds: [], evidenceIds: [], progress: null },
+      production: { state: "not-started", factIds: [], evidenceIds: [], progress: null }
+    }
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        nextEvaluationAt: null,
+        stages: emptyStages,
+        environments: ready.environments.map((environment) => ({
+          ...environment,
+          inputComplete: true,
+          facts: [],
+          nextEvaluationAt: null,
+          verdict: "ready",
+          stages: emptyStages,
+          blockers: [],
+          warnings: [],
+          gaps: [],
+          sourceFreshness: [],
+          evidenceIds: []
+        })),
+        blockers: [],
+        warnings: [],
+        gaps: [],
+        sourceFreshness: [],
+        evidenceIds: []
+      })
+    )
 
     const blocked = Schema.encodeSync(ReleaseReadinessAssessment)(
       rollup(environmentAssessment(0, "failed"), environmentAssessment(1))

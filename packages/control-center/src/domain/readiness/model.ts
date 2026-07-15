@@ -24,6 +24,7 @@ import {
   deriveReleaseReadinessVerdict,
   readinessFactResult,
   readinessFindingKey,
+  readinessPolicyShapeIsV1,
   readinessStagesAreEqual,
   sortedReadinessUnique
 } from "./policy.js"
@@ -463,26 +464,8 @@ export const EnvironmentReadinessEvaluationInput = Schema.Struct({
     const definitionsById = new Map(definitions.map((definition) => [definition.factId, definition]))
     return observations.every((observation) => definitionsById.get(observation.factId)?.kind === observation.state._tag)
   }, { expected: "readiness observations to match one policy fact of the same kind" }),
-  Schema.makeFilter(
-    ({ definitions }) =>
-      definitions.some(({ kind, requirement }) => kind === "execution" && requirement === "required"),
-    {
-      expected: "environment readiness policy to require at least one build execution"
-    }
-  ),
-  Schema.makeFilter(
-    ({ definitions }) =>
-      definitions.some(({ kind, requirement }) =>
-        requirement === "required" && ["relationship", "approval", "check", "documentation"].includes(kind)
-      ),
-    { expected: "environment readiness policy to require at least one verification fact" }
-  ),
-  Schema.makeFilter(({ definitions }) => {
-    const deployments = definitions.filter(({ kind }) => kind === "deployment")
-    return deployments.length === 1 && deployments[0]?.requirement === "advisory"
-  }, { expected: "environment readiness policy to define exactly one advisory deployment fact" }),
-  Schema.makeFilter(({ observations }) => observations.some(({ state }) => state._tag === "deployment"), {
-    expected: "environment readiness input to include an evidence-bound deployment observation"
+  Schema.makeFilter(({ definitions, observations }) => readinessPolicyShapeIsV1(definitions, observations), {
+    expected: "environment readiness input to contain the complete V1 policy shape"
   })
 )
 
@@ -572,6 +555,14 @@ export const EnvironmentReadinessAssessment = Schema.Struct({
   Schema.makeFilter(({ facts }) => isCanonicalStrings(facts.map(({ definition }) => definition.factId)), {
     expected: "environment readiness facts to have canonical unique identities"
   }),
+  Schema.makeFilter(
+    ({ facts }) =>
+      readinessPolicyShapeIsV1(
+        facts.map(({ definition }) => definition),
+        facts.flatMap(({ observation }) => observation === null ? [] : [observation])
+      ),
+    { expected: "environment readiness assessment to retain the complete V1 policy shape" }
+  ),
   Schema.makeFilter(({ facts, requiredFactIds }) =>
     sameOrderedStrings(
       requiredFactIds,
@@ -659,6 +650,14 @@ export const EnvironmentReadinessSummary = Schema.Struct({
   Schema.makeFilter(({ facts }) => isCanonicalStrings(facts.map(({ definition }) => definition.factId)), {
     expected: "an environment readiness summary to have canonical unique facts"
   }),
+  Schema.makeFilter(
+    ({ facts }) =>
+      readinessPolicyShapeIsV1(
+        facts.map(({ definition }) => definition),
+        facts.flatMap(({ observation }) => observation === null ? [] : [observation])
+      ),
+    { expected: "an environment readiness summary to retain the complete V1 policy shape" }
+  ),
   Schema.makeFilter(({ blockers, facts, gaps, inputComplete, warnings }) => {
     const expected = deriveReadinessFindings(facts, inputComplete)
     return sameOrderedStrings(blockers.map(readinessFindingKey), expected.blockers.map(readinessFindingKey)) &&

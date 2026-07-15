@@ -506,6 +506,27 @@ describe("environment readiness evaluation", () => {
         nextEvaluationAt: null
       })
     )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(EnvironmentReadinessAssessment)({
+        ...ready,
+        inputComplete: true,
+        facts: [],
+        requiredFactIds: [],
+        verifiedFactIds: [],
+        nextEvaluationAt: null,
+        stages: {
+          build: { state: "succeeded", factIds: [], evidenceIds: [], progress: null },
+          verify: { state: "passed", factIds: [], evidenceIds: [], progress: null },
+          production: { state: "not-started", factIds: [], evidenceIds: [], progress: null }
+        },
+        blockers: [],
+        warnings: [],
+        gaps: [],
+        sourceFreshness: [],
+        evidenceIds: [],
+        verdict: "ready"
+      })
+    )
 
     const held = Schema.encodeSync(EnvironmentReadinessAssessment)(assess({ relationship: "missing" }))
     assert.throws(() =>
