@@ -35,11 +35,15 @@ const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-1000000
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-10000000000f")
 const EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000009")
 const SECOND_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-10000000000a")
+const THIRD_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000010")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-10000000000c")
 const CLAIM_ID = "01890f6f-6d6a-7cc0-98d2-10000000000b"
 const SUCCESSOR_CLAIM_ID = "01890f6f-6d6a-7cc0-98d2-10000000000d"
 const CREATED_AT = "2026-07-15T10:00:00.000Z"
 const UPDATED_AT = "2026-07-15T10:05:00.000Z"
+const SOURCE_FIRST_AT = "2026-07-15T09:55:00.000Z"
+const SOURCE_LAST_AT = "2026-07-15T09:58:00.000Z"
+const SOURCE_URL = "https://jira.example/browse/PAY-42"
 const SIX_ISSUE_IDS = Array.from(
   { length: 6 },
   (_, index) => `01890f6f-6d6a-7cc0-98d2-20000000000${index + 1}`
@@ -72,32 +76,39 @@ const otherPluginFreshness = {
   provenance: { _tag: "none", pluginConnectionId: OTHER_PLUGIN_ID }
 }
 const pluginFreshnessFor = (input: {
-  readonly entityRevision?: number
+  readonly cached?: boolean
+  readonly firstObservedAt?: string
+  readonly lastObservedAt?: string
+  readonly normalizationSchemaVersion?: number
   readonly providerId?: "jira" | "confluence"
   readonly pluginConnectionId?: typeof PLUGIN_ID | typeof OTHER_PLUGIN_ID
   readonly revision?: string
+  readonly sourceUrl?: string | null
+  readonly synchronizedAt?: string
   readonly vendorImmutableId: string
-}) => ({
-  _tag: "current",
-  pluginHealth: { _tag: "healthy", checkedAt: CREATED_AT },
-  provenance: {
-    _tag: "provider",
-    sourceRevision: {
-      providerId: input.providerId ?? "jira",
-      pluginConnectionId: input.pluginConnectionId ?? PLUGIN_ID,
-      vendorImmutableId: input.vendorImmutableId,
-      revision: input.revision ?? `source-${input.entityRevision ?? 1}`,
-      sourceUrl: null,
-      firstObservedAt: CREATED_AT,
-      lastObservedAt: CREATED_AT,
-      synchronizedAt: CREATED_AT,
-      normalizationSchemaVersion: 1
-    }
-  },
-  sourceObservedAt: CREATED_AT,
-  staleAfterSeconds: 300,
-  synchronizedAt: CREATED_AT
-})
+}) => {
+  const sourceRevision = {
+    providerId: input.providerId ?? "jira",
+    pluginConnectionId: input.pluginConnectionId ?? PLUGIN_ID,
+    vendorImmutableId: input.vendorImmutableId,
+    revision: input.revision ?? "source-1",
+    sourceUrl: input.sourceUrl === undefined ? SOURCE_URL : input.sourceUrl,
+    firstObservedAt: input.firstObservedAt ?? SOURCE_FIRST_AT,
+    lastObservedAt: input.lastObservedAt ?? SOURCE_LAST_AT,
+    synchronizedAt: input.synchronizedAt ?? CREATED_AT,
+    normalizationSchemaVersion: input.normalizationSchemaVersion ?? 1
+  }
+  return {
+    _tag: "current",
+    pluginHealth: { _tag: "healthy", checkedAt: CREATED_AT },
+    provenance: input.cached
+      ? { _tag: "cache", cachedAt: CREATED_AT, sourceRevision }
+      : { _tag: "provider", sourceRevision },
+    sourceObservedAt: sourceRevision.lastObservedAt,
+    staleAfterSeconds: 300,
+    synchronizedAt: CREATED_AT
+  }
+}
 
 const testConfig = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
@@ -168,8 +179,9 @@ const insertFoundation = Effect.gen(function*() {
       workspace_id, entity_id, revision, source_revision, normalization_schema_version,
       source_url, first_observed_at, last_observed_at, synchronized_at, created_at
     ) VALUES (
-      ${WORKSPACE_A}, ${entityId}, 1, 'source-1', 1, NULL,
-      ${CREATED_AT}, ${CREATED_AT}, ${CREATED_AT}, ${CREATED_AT}
+      ${WORKSPACE_A}, ${entityId}, 1, 'source-1', 1,
+      ${entityId === ISSUE_ID ? SOURCE_URL : "https://jira.example/pipelines/legacy"},
+      ${SOURCE_FIRST_AT}, ${SOURCE_LAST_AT}, ${CREATED_AT}, ${CREATED_AT}
     )`,
     { discard: true }
   )
@@ -847,24 +859,95 @@ describe("DeliveryGraphRepository", () => {
           assert.instanceOf(mismatchedFreshness.failure, DeliveryGraphInputError)
         }
 
-        const wrongSourceRevision = yield* repository.write(WORKSPACE_A, {
-          entityProjections: [],
-          nodes: [],
-          evidenceItems: [{
-            ...initialBatch.evidenceItems[0],
-            evidenceId: SECOND_EVIDENCE_ID,
-            attribution: {
-              _tag: "plugin",
-              pluginConnectionId: PLUGIN_ID,
-              sourceEntityId: ISSUE_ID,
-              sourceEntityRevision: 1
-            },
-            freshness: pluginFreshnessFor({ vendorImmutableId: "pipeline-legacy" })
-          }],
-          evidenceClaims: [],
-          relationships: []
-        }).pipe(Effect.result)
-        assert.isTrue(Result.isFailure(wrongSourceRevision))
+        const invalidSourceRevisions = [
+          {
+            field: "providerId",
+            freshness: pluginFreshnessFor({
+              providerId: "confluence",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "pluginConnectionId",
+            freshness: pluginFreshnessFor({
+              pluginConnectionId: OTHER_PLUGIN_ID,
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "vendorImmutableId",
+            freshness: pluginFreshnessFor({
+              vendorImmutableId: "pipeline-legacy"
+            })
+          },
+          {
+            field: "revision",
+            freshness: pluginFreshnessFor({
+              revision: "source-other",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "sourceUrl",
+            freshness: pluginFreshnessFor({
+              sourceUrl: "https://jira.example/browse/PAY-99",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "firstObservedAt",
+            freshness: pluginFreshnessFor({
+              firstObservedAt: "2026-07-15T09:54:00.000Z",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "lastObservedAt",
+            freshness: pluginFreshnessFor({
+              lastObservedAt: "2026-07-15T09:57:00.000Z",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "synchronizedAt",
+            freshness: pluginFreshnessFor({
+              synchronizedAt: "2026-07-15T09:59:00.000Z",
+              vendorImmutableId: "PAY-42"
+            })
+          },
+          {
+            field: "normalizationSchemaVersion",
+            freshness: pluginFreshnessFor({
+              normalizationSchemaVersion: 2,
+              vendorImmutableId: "PAY-42"
+            })
+          }
+        ]
+        yield* Effect.forEach(
+          invalidSourceRevisions,
+          ({ field, freshness }) =>
+            Effect.gen(function*() {
+              const mismatch = yield* repository.write(WORKSPACE_A, {
+                entityProjections: [],
+                nodes: [],
+                evidenceItems: [{
+                  ...initialBatch.evidenceItems[0],
+                  evidenceId: SECOND_EVIDENCE_ID,
+                  attribution: {
+                    _tag: "plugin",
+                    pluginConnectionId: PLUGIN_ID,
+                    sourceEntityId: ISSUE_ID,
+                    sourceEntityRevision: 1
+                  },
+                  freshness
+                }],
+                evidenceClaims: [],
+                relationships: []
+              }).pipe(Effect.result)
+              assert.isTrue(Result.isFailure(mismatch), `${field} mismatch must fail`)
+            }),
+          { discard: true }
+        )
 
         yield* repository.write(WORKSPACE_A, {
           entityProjections: [],
@@ -879,6 +962,23 @@ describe("DeliveryGraphRepository", () => {
               sourceEntityRevision: 1
             },
             freshness: pluginFreshnessFor({ vendorImmutableId: "PAY-42" })
+          }],
+          evidenceClaims: [],
+          relationships: []
+        })
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [{
+            ...initialBatch.evidenceItems[0],
+            evidenceId: THIRD_EVIDENCE_ID,
+            attribution: {
+              _tag: "plugin",
+              pluginConnectionId: PLUGIN_ID,
+              sourceEntityId: ISSUE_ID,
+              sourceEntityRevision: 1
+            },
+            freshness: pluginFreshnessFor({ cached: true, vendorImmutableId: "PAY-42" })
           }],
           evidenceClaims: [],
           relationships: []

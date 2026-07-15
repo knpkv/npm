@@ -21,6 +21,9 @@ const EVIDENCE_A = "01890f6f-6d6a-7cc0-98d2-00000000010c"
 const CLAIM_A = "01890f6f-6d6a-7cc0-98d2-00000000010d"
 const RELATIONSHIP_A = "01890f6f-6d6a-7cc0-98d2-00000000010e"
 const RECORDED_AT = "2026-07-15T10:00:00.000Z"
+const SOURCE_FIRST_AT = "2026-07-15T09:55:00.000Z"
+const SOURCE_LAST_AT = "2026-07-15T09:58:00.000Z"
+const SOURCE_URL = "https://jira.example/issues/ISSUE-A"
 
 const testConfig = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
@@ -74,8 +77,8 @@ const seedFoundations = Effect.gen(function*() {
     normalization_schema_version, source_url, first_observed_at,
     last_observed_at, synchronized_at, created_at
   ) VALUES
-    (${WORKSPACE_A}, ${ENTITY_A}, 1, 'revision-a', 1, NULL, ${RECORDED_AT}, ${RECORDED_AT}, ${RECORDED_AT}, ${RECORDED_AT}),
-    (${WORKSPACE_B}, ${ENTITY_B}, 1, 'revision-b', 1, NULL, ${RECORDED_AT}, ${RECORDED_AT}, ${RECORDED_AT}, ${RECORDED_AT})`
+    (${WORKSPACE_A}, ${ENTITY_A}, 1, 'revision-a', 1, ${SOURCE_URL}, ${SOURCE_FIRST_AT}, ${SOURCE_LAST_AT}, ${RECORDED_AT}, ${RECORDED_AT}),
+    (${WORKSPACE_B}, ${ENTITY_B}, 1, 'revision-b', 1, 'https://jira.example/issues/ISSUE-B', ${SOURCE_FIRST_AT}, ${SOURCE_LAST_AT}, ${RECORDED_AT}, ${RECORDED_AT})`
 })
 
 const seedGraph = Effect.gen(function*() {
@@ -341,23 +344,24 @@ describe("delivery graph migration", () => {
           _tag: "unavailable",
           provenance: { _tag: "none", pluginConnectionId: PLUGIN_A_OTHER }
         })
-        const exactSourceFreshness = JSON.stringify({
-          _tag: "current",
-          provenance: {
-            _tag: "provider",
-            sourceRevision: {
-              providerId: "jira",
-              pluginConnectionId: PLUGIN_A,
-              vendorImmutableId: "ISSUE-A",
-              revision: "revision-a",
-              sourceUrl: null,
-              firstObservedAt: RECORDED_AT,
-              lastObservedAt: RECORDED_AT,
-              synchronizedAt: RECORDED_AT,
-              normalizationSchemaVersion: 1
-            }
-          }
-        })
+        const exactSourceRevision = {
+          providerId: "jira",
+          pluginConnectionId: PLUGIN_A,
+          vendorImmutableId: "ISSUE-A",
+          revision: "revision-a",
+          sourceUrl: SOURCE_URL,
+          firstObservedAt: SOURCE_FIRST_AT,
+          lastObservedAt: SOURCE_LAST_AT,
+          synchronizedAt: RECORDED_AT,
+          normalizationSchemaVersion: 1
+        }
+        const freshnessJson = (sourceRevision: typeof exactSourceRevision, cached: boolean) =>
+          JSON.stringify({
+            _tag: "current",
+            provenance: cached
+              ? { _tag: "cache", cachedAt: RECORDED_AT, sourceRevision }
+              : { _tag: "provider", sourceRevision }
+          })
         const wrongOwnerEvidence = yield* sql`INSERT INTO evidence_items (
           workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
           plugin_connection_id, source_entity_id, source_entity_revision,
@@ -388,21 +392,61 @@ describe("delivery graph migration", () => {
         )`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(mismatchedFreshness))
 
-        const wrongObjectSameConnection = yield* sql`INSERT INTO evidence_items (
-          workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
-          plugin_connection_id, source_entity_id, source_entity_revision,
-          person_id, agent_id, system_component, verifier_kind,
-          verifier_person_id, verifier_agent_id, verifier_component,
-          observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
-          retention_class, retain_until, legal_hold
-        ) VALUES (
-          ${WORKSPACE_A}, 'wrong-object-same-connection', 1, ${"a".repeat(64)}, 'plugin',
-          ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
-          NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
-          ${exactSourceFreshness.replace("ISSUE-A", "ISSUE-OTHER")}, ${"b".repeat(64)},
-          'evidence', NULL, 0
-        )`.pipe(Effect.result)
-        assert.isTrue(Result.isFailure(wrongObjectSameConnection))
+        const invalidSourceRevisions = [
+          { field: "providerId", value: { ...exactSourceRevision, providerId: "confluence" } },
+          {
+            field: "pluginConnectionId",
+            value: { ...exactSourceRevision, pluginConnectionId: PLUGIN_A_OTHER }
+          },
+          {
+            field: "vendorImmutableId",
+            value: { ...exactSourceRevision, vendorImmutableId: "ISSUE-OTHER" }
+          },
+          { field: "revision", value: { ...exactSourceRevision, revision: "revision-other" } },
+          {
+            field: "sourceUrl",
+            value: { ...exactSourceRevision, sourceUrl: "https://jira.example/issues/ISSUE-OTHER" }
+          },
+          {
+            field: "firstObservedAt",
+            value: { ...exactSourceRevision, firstObservedAt: "2026-07-15T09:54:00.000Z" }
+          },
+          {
+            field: "lastObservedAt",
+            value: { ...exactSourceRevision, lastObservedAt: "2026-07-15T09:57:00.000Z" }
+          },
+          {
+            field: "synchronizedAt",
+            value: { ...exactSourceRevision, synchronizedAt: "2026-07-15T09:59:00.000Z" }
+          },
+          {
+            field: "normalizationSchemaVersion",
+            value: { ...exactSourceRevision, normalizationSchemaVersion: 2 }
+          }
+        ]
+        yield* Effect.forEach(
+          invalidSourceRevisions,
+          ({ field, value }, index) =>
+            Effect.gen(function*() {
+              const mismatch = yield* sql`INSERT INTO evidence_items (
+                workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
+                plugin_connection_id, source_entity_id, source_entity_revision,
+                person_id, agent_id, system_component, verifier_kind,
+                verifier_person_id, verifier_agent_id, verifier_component,
+                observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
+                retention_class, retain_until, legal_hold
+              ) VALUES (
+                ${WORKSPACE_A}, ${`source-field-mismatch-${index}`}, 1,
+                ${index.toString(16).padStart(64, "0")}, 'plugin',
+                ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
+                NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
+                ${freshnessJson(value, index % 2 === 1)}, ${"b".repeat(64)},
+                'evidence', NULL, 0
+              )`.pipe(Effect.result)
+              assert.isTrue(Result.isFailure(mismatch), `${field} mismatch must fail`)
+            }),
+          { discard: true }
+        )
 
         yield* sql`INSERT INTO evidence_items (
           workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
@@ -415,7 +459,20 @@ describe("delivery graph migration", () => {
           ${WORKSPACE_A}, 'exact-source-evidence', 1, ${"c".repeat(64)}, 'plugin',
           ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
           NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
-          ${exactSourceFreshness}, ${"d".repeat(64)}, 'evidence', NULL, 0
+          ${freshnessJson(exactSourceRevision, false)}, ${"d".repeat(64)}, 'evidence', NULL, 0
+        )`
+        yield* sql`INSERT INTO evidence_items (
+          workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
+          plugin_connection_id, source_entity_id, source_entity_revision,
+          person_id, agent_id, system_component, verifier_kind,
+          verifier_person_id, verifier_agent_id, verifier_component,
+          observed_at, recorded_at, valid_until, freshness_json, freshness_digest,
+          retention_class, retain_until, legal_hold
+        ) VALUES (
+          ${WORKSPACE_A}, 'exact-cached-source-evidence', 1, ${"4".repeat(64)}, 'plugin',
+          ${PLUGIN_A}, ${ENTITY_A}, 1, NULL, NULL, NULL, 'system',
+          NULL, NULL, 'fixture', ${RECORDED_AT}, ${RECORDED_AT}, NULL,
+          ${freshnessJson(exactSourceRevision, true)}, ${"f".repeat(64)}, 'evidence', NULL, 0
         )`
 
         const wrongOwnerRelationship = yield* sql`INSERT INTO relationship_revisions (
