@@ -14,6 +14,7 @@ import { migration0012GovernedActionDenialPolicyOwnership } from "./0012_governe
 import { migration0013GovernedActionExecution } from "./0013_governed_action_execution.js"
 import { migration0014GovernedActionActiveLease } from "./0014_governed_action_active_lease.js"
 import { migration0015GovernedActionIdempotencyRecovery } from "./0015_governed_action_idempotency_recovery.js"
+import { migration0016PluginRuntimeAuthority } from "./0016_plugin_runtime_authority.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -34,7 +35,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 12, name: "governed_action_denial_policy_ownership" },
   { id: 13, name: "governed_action_execution" },
   { id: 14, name: "governed_action_active_lease" },
-  { id: 15, name: "governed_action_idempotency_recovery" }
+  { id: 15, name: "governed_action_idempotency_recovery" },
+  { id: 16, name: "plugin_runtime_authority" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -53,5 +55,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0012_governed_action_denial_policy_ownership": migration0012GovernedActionDenialPolicyOwnership,
   "0013_governed_action_execution": migration0013GovernedActionExecution,
   "0014_governed_action_active_lease": migration0014GovernedActionActiveLease,
-  "0015_governed_action_idempotency_recovery": migration0015GovernedActionIdempotencyRecovery
+  "0015_governed_action_idempotency_recovery": migration0015GovernedActionIdempotencyRecovery,
+  "0016_plugin_runtime_authority": migration0016PluginRuntimeAuthority
 })

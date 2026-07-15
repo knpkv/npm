@@ -899,7 +899,7 @@ describe("governed action writer", () => {
         created_at, dispatch_deadline, lease_expires_at, recovery_eligible_at
       ) VALUES (
         ${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID}, ${START_TRANSITION_ID},
-        ${"a".repeat(64)}, 'runtime-generation-a', 1,
+        ${"a".repeat(64)}, ${`sha256:${"a".repeat(64)}`}, 1,
         '2026-07-15T10:02:00.000Z', '2026-07-15T10:02:10.000Z',
         '2026-07-15T10:02:20.000Z', '2026-07-15T10:02:30.000Z'
       )`

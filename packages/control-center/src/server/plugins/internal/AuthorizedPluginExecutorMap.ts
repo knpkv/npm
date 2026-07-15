@@ -1,26 +1,25 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 
 import type { PluginFailure } from "../failures.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
 import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
-import { PluginRuntimeAuthority, type PluginRuntimeAuthorityToken } from "./PluginRuntimeAuthority.js"
+import {
+  PluginRuntimeAuthority,
+  type PluginRuntimeAuthorityToken,
+  PluginRuntimeAuthorityUnavailable
+} from "./PluginRuntimeAuthority.js"
 import { pluginRuntimeKey, PluginRuntimeMap } from "./PluginRuntimeMap.js"
+
+export { PluginRuntimeAuthorityUnavailable } from "./PluginRuntimeAuthority.js"
 
 /** Executor and exact runtime generation held under one shared scoped lease. */
 export interface AuthorizedPluginExecutorLease {
   readonly context: Context.Context<AuthorizedPluginExecutor>
   readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
 }
-
-/** The runtime generation that may have mutated provider state is no longer available. */
-export class PluginRuntimeAuthorityUnavailable extends Schema.TaggedErrorClass<PluginRuntimeAuthorityUnavailable>()(
-  "PluginRuntimeAuthorityUnavailable",
-  {}
-) {}
 
 /** Internal projection of a cached runtime's vendor-write capability. */
 export interface AuthorizedPluginExecutorMapV1 {

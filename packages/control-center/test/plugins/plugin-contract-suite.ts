@@ -322,14 +322,15 @@ export const runPluginContractSuite = (name: string, harness: PluginContractHarn
         const scopeA = scope(WORKSPACE_A)
         const equalScopeA = scope(WORKSPACE_A)
         const scopeB = scope(WORKSPACE_B)
-        const authorityA = PluginRuntimeAuthorityToken.make(`runtime:${WORKSPACE_A}:${CONNECTION_ID}`)
+        const authorityA = PluginRuntimeAuthorityToken.make(`sha256:${"a".repeat(64)}`)
+        const authorityB = PluginRuntimeAuthorityToken.make(`sha256:${"b".repeat(64)}`)
         const registry = Layer.succeed(PluginRuntimeRegistry, {
           layer: (key) =>
             Layer.merge(
               key.workspaceId === WORKSPACE_A ? runtimeA.layer : runtimeB.layer,
               Layer.succeed(
                 PluginRuntimeAuthority,
-                PluginRuntimeAuthorityToken.make(`runtime:${key.workspaceId}:${key.pluginConnectionId}`)
+                key.workspaceId === WORKSPACE_A ? authorityA : authorityB
               )
             )
         })
@@ -349,7 +350,7 @@ export const runPluginContractSuite = (name: string, harness: PluginContractHarn
           const unavailable = yield* Effect.scoped(
             executors.contextEffectForAuthority(
               equalScopeA,
-              PluginRuntimeAuthorityToken.make("runtime:obsolete-generation")
+              PluginRuntimeAuthorityToken.make(`sha256:${"c".repeat(64)}`)
             )
           ).pipe(Effect.flip)
           const contextB = yield* Effect.scoped(connections.contextEffect(scopeB))
