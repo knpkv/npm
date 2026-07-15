@@ -111,3 +111,33 @@ export const JobId = canonicalUuid7("JobId")
 
 /** Decoded asynchronous job identifier. */
 export type JobId = typeof JobId.Type
+
+/** Canonical identifier of an authenticated browser session. */
+export const SessionId = canonicalUuid7("SessionId")
+
+/** Decoded authenticated browser-session identifier. */
+export type SessionId = typeof SessionId.Type
+
+/** Canonical identifier of one governed provider action. */
+export const GovernedActionId = canonicalUuid7("GovernedActionId")
+
+/** Decoded governed-action identifier. */
+export type GovernedActionId = typeof GovernedActionId.Type
+
+/** Canonical identifier of one immutable governed-action transition. */
+export const GovernedActionTransitionId = canonicalUuid7("GovernedActionTransitionId")
+
+/** Decoded governed-action transition identifier. */
+export type GovernedActionTransitionId = typeof GovernedActionTransitionId.Type
+
+/** Canonical identifier of one immutable human action authorization. */
+export const GovernedActionAuthorizationId = canonicalUuid7("GovernedActionAuthorizationId")
+
+/** Decoded governed-action authorization identifier. */
+export type GovernedActionAuthorizationId = typeof GovernedActionAuthorizationId.Type
+
+/** Canonical identifier of one governed-action execution attempt. */
+export const GovernedActionAttemptId = canonicalUuid7("GovernedActionAttemptId")
+
+/** Decoded governed-action attempt identifier. */
+export type GovernedActionAttemptId = typeof GovernedActionAttemptId.Type

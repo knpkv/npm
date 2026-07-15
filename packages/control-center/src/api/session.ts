@@ -9,7 +9,7 @@ import {
 } from "effect/unstable/httpapi"
 
 import { Actor, Role } from "../domain/actors.js"
-import { WorkspaceId } from "../domain/identifiers.js"
+import { SessionId, WorkspaceId } from "../domain/identifiers.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ConflictApiError,
@@ -20,16 +20,9 @@ import {
   UnauthorizedApiError
 } from "./errors.js"
 
-const CANONICAL_LOWERCASE_UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 const LOWERCASE_SECRET_PATTERN = /^[0-9a-f]{64}$/u
 
-/** Canonical identifier of one authenticated browser session. */
-export const SessionId = Schema.String.check(
-  Schema.isPattern(CANONICAL_LOWERCASE_UUID_V7_PATTERN, { expected: "a canonical lowercase UUID v7" })
-).pipe(Schema.brand("SessionId"))
-
-/** Decoded browser-session identifier. */
-export type SessionId = typeof SessionId.Type
+export { SessionId } from "../domain/identifiers.js"
 
 /** Single-use pairing credential accepted only by the public pairing endpoint. */
 export const PairingCode = Schema.String.check(

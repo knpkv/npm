@@ -12,6 +12,7 @@ import {
   PluginActionCancellationResultV1,
   PluginActionDispatchResultV1,
   PluginDescriptorV1,
+  PluginProviderReceiptV1,
   PluginSyncPageV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/index.js"
@@ -246,7 +247,7 @@ describe("plugin domain contract", () => {
     }
     const accepted = Schema.decodeUnknownResult(PluginActionCancellationResultV1)({
       _tag: "completed",
-      receipt: { ...receipt, status: "accepted" }
+      receipt: { ...receipt, status: "accepted", reconciliationKey: "opaque+token==" }
     })
     const cancelled = Schema.decodeUnknownResult(PluginActionCancellationResultV1)({
       _tag: "completed",
@@ -260,6 +261,25 @@ describe("plugin domain contract", () => {
     assert.isTrue(Result.isFailure(accepted))
     assert.isTrue(Result.isFailure(cancelled))
     assert.isTrue(Result.isSuccess(succeeded))
+  })
+
+  it("requires accepted asynchronous work to carry a reconciliation locator", () => {
+    const receipt = {
+      providerOperationId: "provider-operation-1",
+      status: "accepted",
+      safeSummary: "Provider accepted asynchronous work",
+      observedAt
+    }
+
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(PluginProviderReceiptV1)(receipt)))
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PluginProviderReceiptV1)({
+          ...receipt,
+          reconciliationKey: "opaque+token=="
+        })
+      )
+    )
   })
 
   it("rejects unsafe diff paths and malformed or oversized base64 content", () => {

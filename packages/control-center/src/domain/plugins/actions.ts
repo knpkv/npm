@@ -20,6 +20,18 @@ export const PluginActionPayloadDigest = Schema.String.check(
 /** Decoded canonical payload digest. */
 export type PluginActionPayloadDigest = typeof PluginActionPayloadDigest.Type
 
+/** Opaque provider locator used to reconcile a mutation without replaying it. */
+export const PluginActionReconciliationKey = boundedOpaque("PluginActionReconciliationKey", 512)
+
+/** Decoded provider reconciliation locator. */
+export type PluginActionReconciliationKey = typeof PluginActionReconciliationKey.Type
+
+/** Opaque provider identity of one accepted or completed mutation. */
+export const PluginProviderOperationId = boundedOpaque("PluginProviderOperationId", 512)
+
+/** Decoded provider mutation identity. */
+export type PluginProviderOperationId = typeof PluginProviderOperationId.Type
+
 /** Request for a provider-neutral action proposal; it cannot authorize execution. */
 export const ProposePluginActionRequestV1 = Schema.Struct({
   actionKind: boundedOpaque("PluginActionKind", 100),
@@ -65,19 +77,39 @@ export const AuthorizedPluginActionV1 = Schema.Struct({
   })
 )
 
-/** Provider receipt safe to persist and display without raw response data. */
-export const PluginProviderReceiptV1 = Schema.Struct({
-  providerOperationId: boundedOpaque("PluginProviderOperationId", 512),
-  status: Schema.Literals(["accepted", "succeeded", "failed", "cancelled"]),
+const providerReceiptFields = {
+  providerOperationId: PluginProviderOperationId,
   safeSummary: SafeSummary,
   observedAt: UtcTimestamp
+}
+
+/** Accepted provider work that remains unresolved and can be reconciled safely. */
+export const PluginAcceptedProviderReceiptV1 = Schema.Struct({
+  ...providerReceiptFields,
+  status: Schema.Literal("accepted"),
+  reconciliationKey: PluginActionReconciliationKey
 })
 
-const ReadyPreflight = Schema.TaggedStruct("ready", {
+/** Terminal provider receipt safe to persist and display without raw response data. */
+export const PluginTerminalProviderReceiptV1 = Schema.Struct({
+  ...providerReceiptFields,
+  status: Schema.Literals(["succeeded", "failed", "cancelled"])
+})
+
+/** Provider receipt that never represents accepted asynchronous work as terminal. */
+export const PluginProviderReceiptV1 = Schema.Union([
+  PluginAcceptedProviderReceiptV1,
+  PluginTerminalProviderReceiptV1
+])
+
+/** Provider preflight that confirms the exact revision is ready for dispatch. */
+export const ReadyPluginActionPreflightV1 = Schema.TaggedStruct("ready", {
   checkedRevision: Revision,
   checkedAt: UtcTimestamp
 })
-const BlockedPreflight = Schema.TaggedStruct("blocked", {
+
+/** Provider preflight that blocks dispatch with bounded safe reasons. */
+export const BlockedPluginActionPreflightV1 = Schema.TaggedStruct("blocked", {
   reasons: Schema.Array(SafeSummary).check(
     Schema.isNonEmpty(),
     Schema.makeFilter((reasons) => reasons.length <= 50, {
@@ -88,7 +120,10 @@ const BlockedPreflight = Schema.TaggedStruct("blocked", {
 })
 
 /** Result of the final provider preflight before dispatch. */
-export const PluginActionPreflightV1 = Schema.Union([ReadyPreflight, BlockedPreflight]).pipe(
+export const PluginActionPreflightV1 = Schema.Union([
+  ReadyPluginActionPreflightV1,
+  BlockedPluginActionPreflightV1
+]).pipe(
   Schema.toTaggedUnion("_tag")
 )
 
@@ -96,7 +131,7 @@ const ConfirmedDispatch = Schema.TaggedStruct("confirmed", {
   receipt: PluginProviderReceiptV1
 })
 const UnknownDispatch = Schema.TaggedStruct("unknown", {
-  reconciliationKey: boundedOpaque("PluginActionReconciliationKey", 512),
+  reconciliationKey: PluginActionReconciliationKey,
   safeSummary: SafeSummary,
   observedAt: UtcTimestamp
 })
@@ -109,8 +144,8 @@ export const PluginActionDispatchResultV1 = Schema.Union([ConfirmedDispatch, Unk
 /** Request to cancel an action after its durable lifecycle permits cancellation. */
 export const PluginActionCancellationRequestV1 = Schema.Struct({
   idempotencyKey: boundedOpaque("PluginCancellationIdempotencyKey", 512),
-  providerOperationId: Schema.NullOr(boundedOpaque("PluginCancellationProviderOperationId", 512)),
-  reconciliationKey: Schema.NullOr(boundedOpaque("PluginCancellationReconciliationKey", 512))
+  providerOperationId: Schema.NullOr(PluginProviderOperationId),
+  reconciliationKey: Schema.NullOr(PluginActionReconciliationKey)
 }).check(
   Schema.makeFilter(
     ({ providerOperationId, reconciliationKey }) => (providerOperationId === null) !== (reconciliationKey === null),
@@ -129,14 +164,14 @@ export const PluginActionCancellationResultV1 = Schema.Union([
     })
   ),
   Schema.TaggedStruct("unknown", {
-    reconciliationKey: boundedOpaque("PluginCancellationUnknownKey", 512),
+    reconciliationKey: PluginActionReconciliationKey,
     observedAt: UtcTimestamp
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Request to reconcile an ambiguous provider mutation without replaying it. */
 export const PluginActionReconciliationRequestV1 = Schema.Struct({
-  reconciliationKey: boundedOpaque("PluginReconciliationRequestKey", 512),
+  reconciliationKey: PluginActionReconciliationKey,
   idempotencyKey: boundedOpaque("PluginReconciliationIdempotencyKey", 512),
   payloadDigest: PluginActionPayloadDigest
 })
@@ -158,7 +193,11 @@ export const PluginActionReconciliationResultV1 = Schema.Union([
 export type ProposePluginActionRequestV1 = typeof ProposePluginActionRequestV1.Type
 export type PluginActionProposalV1 = typeof PluginActionProposalV1.Type
 export type AuthorizedPluginActionV1 = typeof AuthorizedPluginActionV1.Type
+export type PluginAcceptedProviderReceiptV1 = typeof PluginAcceptedProviderReceiptV1.Type
+export type PluginTerminalProviderReceiptV1 = typeof PluginTerminalProviderReceiptV1.Type
 export type PluginProviderReceiptV1 = typeof PluginProviderReceiptV1.Type
+export type ReadyPluginActionPreflightV1 = typeof ReadyPluginActionPreflightV1.Type
+export type BlockedPluginActionPreflightV1 = typeof BlockedPluginActionPreflightV1.Type
 export type PluginActionPreflightV1 = typeof PluginActionPreflightV1.Type
 export type PluginActionDispatchResultV1 = typeof PluginActionDispatchResultV1.Type
 export type PluginActionCancellationRequestV1 = typeof PluginActionCancellationRequestV1.Type

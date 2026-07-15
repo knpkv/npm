@@ -2,7 +2,7 @@ import { Schema, SchemaTransformation } from "effect"
 import type * as Redacted from "effect/Redacted"
 
 import { Actor, Role } from "../../domain/actors.js"
-import { WorkspaceId } from "../../domain/identifiers.js"
+import { SessionId, WorkspaceId } from "../../domain/identifiers.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 const CANONICAL_LOWERCASE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -21,13 +21,10 @@ const canonicalUuid7 = <const Brand extends string>(brand: Brand) =>
     Schema.brand(brand)
   )
 
-/** Canonical identifier of an authenticated browser session. */
-export const SessionId = canonicalUuid7("SessionId")
-
 /** Canonical identifier of a single-use pairing credential. */
 export const PairingCodeId = canonicalUuid7("PairingCodeId")
 
-export type SessionId = typeof SessionId.Type
+export { SessionId } from "../../domain/identifiers.js"
 export type PairingCodeId = typeof PairingCodeId.Type
 
 /** Origin of a one-time pairing code. */
