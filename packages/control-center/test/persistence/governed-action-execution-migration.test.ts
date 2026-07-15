@@ -5,6 +5,7 @@ import { Effect, Result } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
 import { migration0013GovernedActionExecution } from "../../src/server/persistence/migrations/0013_governed_action_execution.js"
+import { migration0014GovernedActionActiveLease } from "../../src/server/persistence/migrations/0014_governed_action_active_lease.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
 const WORKSPACE_ID = "01890f6f-6d6a-7cc0-98d2-330000000001"
@@ -59,6 +60,48 @@ const createParentSchema = (sql: SqlClient.SqlClient) =>
     yield* migration0013GovernedActionExecution.pipe(
       Effect.provideService(SqlClient.SqlClient, sql)
     )
+    yield* migration0014GovernedActionActiveLease.pipe(
+      Effect.provideService(SqlClient.SqlClient, sql)
+    )
+  })
+
+const seedStartedAction = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function*() {
+    yield* sql`INSERT INTO governed_action_transitions (
+      workspace_id, action_id, transition_id, to_state, command_tag, attempt_id,
+      outcome_source_kind, command_digest, occurred_at
+    ) VALUES (
+      ${WORKSPACE_ID}, ${ACTION_ID}, ${AUTHORIZED_TRANSITION_ID},
+      'authorized', 'authorize', NULL, NULL, ${WRONG_COMMAND_DIGEST},
+      '2026-07-15T10:00:00.000Z'
+    )`
+    yield* sql`INSERT INTO governed_actions (
+      workspace_id, action_id, envelope_digest, state, head_transition_id
+    ) VALUES (
+      ${WORKSPACE_ID}, ${ACTION_ID}, ${ENVELOPE_DIGEST},
+      'authorized', ${AUTHORIZED_TRANSITION_ID}
+    )`
+    yield* sql`INSERT INTO governed_action_execution_preparations (
+      preparation_token_digest, workspace_id, action_id, expected_head_transition_id,
+      expected_envelope_digest, created_at, expires_at
+    ) VALUES (
+      ${PREPARATION_DIGEST}, ${WORKSPACE_ID}, ${ACTION_ID}, ${AUTHORIZED_TRANSITION_ID},
+      ${ENVELOPE_DIGEST}, '2026-07-15T10:00:00.000Z', '2026-07-15T10:01:00.000Z'
+    )`
+    yield* sql`INSERT INTO governed_action_attempts (
+      workspace_id, action_id, attempt_id
+    ) VALUES (${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID})`
+    yield* sql`INSERT INTO governed_action_transitions (
+      workspace_id, action_id, transition_id, to_state, command_tag, attempt_id,
+      outcome_source_kind, command_digest, occurred_at
+    ) VALUES (
+      ${WORKSPACE_ID}, ${ACTION_ID}, ${START_TRANSITION_ID},
+      'started', 'start', ${ATTEMPT_ID}, NULL, ${WRONG_COMMAND_DIGEST},
+      '2026-07-15T10:01:00.000Z'
+    )`
+    yield* sql`UPDATE governed_actions
+      SET state = 'started', head_transition_id = ${START_TRANSITION_ID}
+      WHERE workspace_id = ${WORKSPACE_ID} AND action_id = ${ACTION_ID}`
   })
 
 const insertLease = (sql: SqlClient.SqlClient, dispatchDeadline: string) =>
@@ -81,42 +124,7 @@ describe("governed action execution migration", () => {
       yield* Effect.gen(function*() {
         const sql = yield* SqlClient.SqlClient
         yield* createParentSchema(sql)
-        yield* sql`INSERT INTO governed_action_transitions (
-          workspace_id, action_id, transition_id, to_state, command_tag, attempt_id,
-          outcome_source_kind, command_digest, occurred_at
-        ) VALUES (
-          ${WORKSPACE_ID}, ${ACTION_ID}, ${AUTHORIZED_TRANSITION_ID},
-          'authorized', 'authorize', NULL, NULL, ${WRONG_COMMAND_DIGEST},
-          '2026-07-15T10:00:00.000Z'
-        )`
-        yield* sql`INSERT INTO governed_actions (
-          workspace_id, action_id, envelope_digest, state, head_transition_id
-        ) VALUES (
-          ${WORKSPACE_ID}, ${ACTION_ID}, ${ENVELOPE_DIGEST},
-          'authorized', ${AUTHORIZED_TRANSITION_ID}
-        )`
-        yield* sql`INSERT INTO governed_action_execution_preparations (
-          preparation_token_digest, workspace_id, action_id, expected_head_transition_id,
-          expected_envelope_digest, created_at, expires_at
-        ) VALUES (
-          ${PREPARATION_DIGEST}, ${WORKSPACE_ID}, ${ACTION_ID}, ${AUTHORIZED_TRANSITION_ID},
-          ${ENVELOPE_DIGEST}, '2026-07-15T10:00:00.000Z', '2026-07-15T10:01:00.000Z'
-        )`
-
-        yield* sql`INSERT INTO governed_action_attempts (
-          workspace_id, action_id, attempt_id
-        ) VALUES (${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID})`
-        yield* sql`INSERT INTO governed_action_transitions (
-          workspace_id, action_id, transition_id, to_state, command_tag, attempt_id,
-          outcome_source_kind, command_digest, occurred_at
-        ) VALUES (
-          ${WORKSPACE_ID}, ${ACTION_ID}, ${START_TRANSITION_ID},
-          'started', 'start', ${ATTEMPT_ID}, NULL, ${WRONG_COMMAND_DIGEST},
-          '2026-07-15T10:01:00.000Z'
-        )`
-        yield* sql`UPDATE governed_actions
-          SET state = 'started', head_transition_id = ${START_TRANSITION_ID}
-          WHERE workspace_id = ${WORKSPACE_ID} AND action_id = ${ACTION_ID}`
+        yield* seedStartedAction(sql)
 
         const invalidDeadline = yield* insertLease(
           sql,
@@ -124,6 +132,37 @@ describe("governed action execution migration", () => {
         ).pipe(Effect.result)
         assert.isTrue(Result.isFailure(invalidDeadline))
         yield* insertLease(sql, "2026-07-15T10:01:30.000Z")
+
+        const lateDispatchObservation = yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'late-dispatch-observation', 'dispatch', ${PERMIT_DIGEST},
+          NULL, 'succeeded', 1, '{}', ${"4".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:01:30.000Z', '2026-07-15T10:01:31.000Z'
+        )`.pipe(Effect.result)
+        const lateDispatchReceipt = yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'late-dispatch-receipt', 'dispatch', ${PERMIT_DIGEST},
+          NULL, 'manual-unknown', 1, '{}', ${"5".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:01:31.000Z', '2026-07-15T10:02:00.000Z'
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(lateDispatchObservation))
+        assert.isTrue(Result.isFailure(lateDispatchReceipt))
+
+        yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'dispatch-outcome-1', 'dispatch', ${PERMIT_DIGEST},
+          NULL, 'succeeded', 1, '{}', ${OUTCOME_DIGEST}, ${COMMAND_DIGEST},
+          '2026-07-15T10:01:20.000Z', '2026-07-15T10:01:21.000Z'
+        )`
 
         const earlyRecovery = yield* sql`INSERT INTO governed_action_recovery_claims (
           workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
@@ -145,16 +184,6 @@ describe("governed action execution migration", () => {
           '2026-07-15T10:03:30.000Z', '2026-07-15T10:05:00.000Z'
         )`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(overlappingRecovery))
-
-        yield* sql`INSERT INTO governed_action_provider_outcomes (
-          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
-          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
-          outcome_digest, expected_command_digest, observed_at, received_at
-        ) VALUES (
-          ${WORKSPACE_ID}, ${ACTION_ID}, 'dispatch-outcome-1', 'dispatch', ${PERMIT_DIGEST},
-          NULL, 'succeeded', 1, '{}', ${OUTCOME_DIGEST}, ${COMMAND_DIGEST},
-          '2026-07-15T10:01:20.000Z', '2026-07-15T10:01:21.000Z'
-        )`
         const conflictingReplay = yield* sql`INSERT INTO governed_action_provider_outcomes (
           workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
           recovery_claim_token_digest, result_kind, schema_version, outcome_json,
@@ -229,15 +258,108 @@ describe("governed action execution migration", () => {
         assert.isTrue(Result.isFailure(mutatedFold))
 
         yield* sql`UPDATE governed_actions
+          SET state = 'started', head_transition_id = ${START_TRANSITION_ID}
+          WHERE workspace_id = ${WORKSPACE_ID} AND action_id = ${ACTION_ID}`
+        yield* sql`INSERT INTO governed_action_recovery_claims (
+          workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 2, ${SECOND_CLAIM_DIGEST},
+          '2026-07-15T10:04:00.000Z', '2026-07-15T10:05:00.000Z'
+        )`
+        const staleRecoveryReceipt = yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'stale-recovery-outcome', 'reconciliation', NULL,
+          ${FIRST_CLAIM_DIGEST}, 'pending', 1, '{}', ${"6".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:04:00.000Z', '2026-07-15T10:04:01.000Z'
+        )`.pipe(Effect.result)
+        yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'current-recovery-outcome', 'reconciliation', NULL,
+          ${SECOND_CLAIM_DIGEST}, 'pending', 1, '{}', ${"7".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:04:01.000Z', '2026-07-15T10:04:02.000Z'
+        )`
+        assert.isTrue(Result.isFailure(staleRecoveryReceipt))
+
+        yield* sql`UPDATE governed_actions
           SET state = 'succeeded'
           WHERE workspace_id = ${WORKSPACE_ID} AND action_id = ${ACTION_ID}`
         const terminalRecovery = yield* sql`INSERT INTO governed_action_recovery_claims (
           workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
         ) VALUES (
-          ${WORKSPACE_ID}, ${ACTION_ID}, 2, ${SECOND_CLAIM_DIGEST},
-          '2026-07-15T10:04:00.000Z', '2026-07-15T10:05:00.000Z'
+          ${WORKSPACE_ID}, ${ACTION_ID}, 3, ${"8".repeat(64)},
+          '2026-07-15T10:05:00.000Z', '2026-07-15T10:06:00.000Z'
         )`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(terminalRecovery))
+      }).pipe(
+        Effect.provide(LibsqlClient.layer({
+          transformResultNames: snakeToCamel,
+          url: config.databaseUrl
+        })),
+        Effect.scoped
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("accepts a local unknown marker after the provider deadline but before lease expiry", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-governed-manual-unknown-")
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* createParentSchema(sql)
+        yield* seedStartedAction(sql)
+        yield* insertLease(sql, "2026-07-15T10:01:30.000Z")
+
+        yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'manual-unknown-after-deadline', 'dispatch', ${PERMIT_DIGEST},
+          NULL, 'manual-unknown', 1, '{}', ${"9".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:01:31.000Z', '2026-07-15T10:01:59.000Z'
+        )`
+        const outcomes = yield* sql<{ readonly outcomeId: string }>`SELECT outcome_id AS outcomeId
+          FROM governed_action_provider_outcomes`
+        assert.deepStrictEqual(outcomes, [{ outcomeId: "manual-unknown-after-deadline" }])
+      }).pipe(
+        Effect.provide(LibsqlClient.layer({
+          transformResultNames: snakeToCamel,
+          url: config.databaseUrl
+        })),
+        Effect.scoped
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects an otherwise valid dispatch outcome after recovery takes ownership", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-governed-recovery-takeover-")
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* createParentSchema(sql)
+        yield* seedStartedAction(sql)
+        yield* insertLease(sql, "2026-07-15T10:01:30.000Z")
+        yield* sql`INSERT INTO governed_action_recovery_claims (
+          workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 1, ${FIRST_CLAIM_DIGEST},
+          '2026-07-15T10:03:00.000Z', '2026-07-15T10:04:00.000Z'
+        )`
+
+        const staleDispatch = yield* sql`INSERT INTO governed_action_provider_outcomes (
+          workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+          recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+          outcome_digest, expected_command_digest, observed_at, received_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${ACTION_ID}, 'dispatch-after-recovery', 'dispatch', ${PERMIT_DIGEST},
+          NULL, 'succeeded', 1, '{}', ${"a".repeat(64)}, ${COMMAND_DIGEST},
+          '2026-07-15T10:01:20.000Z', '2026-07-15T10:01:21.000Z'
+        )`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(staleDispatch))
       }).pipe(
         Effect.provide(LibsqlClient.layer({
           transformResultNames: snakeToCamel,

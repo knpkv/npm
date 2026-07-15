@@ -32,6 +32,8 @@ import { migration0008DeliveryGraph } from "../../src/server/persistence/migrati
 import { migration0009Readiness } from "../../src/server/persistence/migrations/0009_readiness.js"
 import { migration0010ReadinessHeadHistory } from "../../src/server/persistence/migrations/0010_readiness_head_history.js"
 import { migration0011GovernedActions } from "../../src/server/persistence/migrations/0011_governed_actions.js"
+import { migration0012GovernedActionDenialPolicyOwnership } from "../../src/server/persistence/migrations/0012_governed_action_denial_policy_ownership.js"
+import { migration0013GovernedActionExecution } from "../../src/server/persistence/migrations/0013_governed_action_execution.js"
 import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../../src/server/persistence/migrations/index.js"
 import { blobPath } from "../../src/server/persistence/object-store/BlobPath.js"
 import { makeBlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
@@ -253,6 +255,22 @@ const versionElevenLoader = LibsqlMigrator.fromRecord({
   "0011_governed_actions": migration0011GovernedActions
 })
 
+const versionThirteenLoader = LibsqlMigrator.fromRecord({
+  "0001_core_heads": migration0001Core,
+  "0002_integrity_blobs": migration0002Integrity,
+  "0003_auth": migration0003Auth,
+  "0004_plugin_runtime": migration0004PluginRuntime,
+  "0005_plugin_configuration": migration0005PluginConfiguration,
+  "0006_plugin_sync_page_evidence": migration0006PluginSyncPageEvidence,
+  "0007_domain_events": migration0007DomainEvents,
+  "0008_delivery_graph": migration0008DeliveryGraph,
+  "0009_readiness": migration0009Readiness,
+  "0010_readiness_head_history": migration0010ReadinessHeadHistory,
+  "0011_governed_actions": migration0011GovernedActions,
+  "0012_governed_action_denial_policy_ownership": migration0012GovernedActionDenialPolicyOwnership,
+  "0013_governed_action_execution": migration0013GovernedActionExecution
+})
+
 const readMigrationLedger = Effect.fn("ControlCenterMigrationsTest.readMigrationLedger")(function*(
   config: PersistenceConfig
 ) {
@@ -398,6 +416,50 @@ describe("Control Center migrations", () => {
           name
         }))
       )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("upgrades version 13 with the active-lease fence without rewriting durable rows", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig
+      const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000301"
+      const beforeUpgrade = yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* LibsqlMigrator.run({ loader: versionThirteenLoader, table: MIGRATION_LEDGER_TABLE })
+        yield* sql`INSERT INTO workspaces (
+          workspace_id, display_name, revision, created_at, updated_at
+        ) VALUES (
+          ${workspaceId}, 'Version Thirteen', 1,
+          '2026-07-15T09:00:00.000Z', '2026-07-15T09:00:00.000Z'
+        )`
+        const triggers = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'governed_action_provider_outcome_active_lease'`
+        const ledger = yield* sql<{ readonly migrationId: number }>`SELECT migration_id AS migrationId
+          FROM ${sql(MIGRATION_LEDGER_TABLE)} ORDER BY migration_id`
+        return { ledger, triggers }
+      }).pipe(
+        Effect.provide(LibsqlClient.layer({ transformResultNames: snakeToCamel, url: config.databaseUrl })),
+        Effect.scoped
+      )
+
+      assert.strictEqual(beforeUpgrade.ledger.at(-1)?.migrationId, 13)
+      assert.deepStrictEqual(beforeUpgrade.triggers, [{ count: 0 }])
+
+      const afterUpgrade = yield* Effect.gen(function*() {
+        const database = yield* Database
+        const workspaces = yield* database.sql<{ readonly displayName: string }>`SELECT
+          display_name AS displayName FROM workspaces WHERE workspace_id = ${workspaceId}`
+        const triggers = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'governed_action_provider_outcome_active_lease'`
+        const ledger = yield* database.sql<{ readonly migrationId: number }>`SELECT migration_id AS migrationId
+          FROM ${database.sql(MIGRATION_LEDGER_TABLE)} ORDER BY migration_id`
+        return { ledger, triggers, workspaces }
+      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
+
+      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, 14)
+      assert.deepStrictEqual(afterUpgrade.triggers, [{ count: 1 }])
+      assert.deepStrictEqual(afterUpgrade.workspaces, [{ displayName: "Version Thirteen" }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("upgrades version 11 without trusting ambiguous denial evidence ownership", () =>
