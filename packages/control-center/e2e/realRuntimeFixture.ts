@@ -31,6 +31,7 @@ import {
   type ReleaseSynchronizationInput,
   synchronizeFakeReleaseFromMap
 } from "../src/server/application/releaseSynchronization.js"
+import { Auth } from "../src/server/auth/Auth.js"
 import { Persistence, persistenceLayer } from "../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../src/server/persistence/PersistenceConfig.js"
 import { DomainEventDedupeKey } from "../src/server/persistence/repositories/domainEventModels.js"
@@ -228,6 +229,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
     )
     serverRuntime = typedServerRuntime
     const context = await typedServerRuntime.context()
+    const auth = Context.get(context, Auth)
     const bootstrap = Context.get(context, ControlCenterBootstrap)
     const startup = Context.get(context, ReleaseSynchronizationStartup)
     if (bootstrap._tag !== "pairing-issued") throw new Error("real runtime did not issue its first pairing code")
@@ -238,6 +240,9 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
     ) {
       throw new Error("real runtime did not finish its startup release synchronization")
     }
+    const ownerSessionToken = (
+      await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode))
+    ).sessionToken
 
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
@@ -365,8 +370,14 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
       lifecycleEvidence: () => ({ ...lifecycleEvidence }),
       origin: allocated.origin,
       pairThroughUi: async (page) => {
+        const pairing = await typedServerRuntime.runPromise(
+          auth.issuePairingCode(ownerSessionToken, {
+            actor: { _tag: "human", personId: REAL_OWNER_ID },
+            permission: "workspace-owner"
+          })
+        )
         await page.goto(`${allocated.origin}/pair`)
-        await page.getByLabel("Pairing code").fill(Redacted.value(bootstrap.pairingCode))
+        await page.getByLabel("Pairing code").fill(Redacted.value(pairing.pairingCode))
         await page.getByRole("button", { name: "Pair browser" }).click()
       },
       synchronizeUpdate: async () => {
