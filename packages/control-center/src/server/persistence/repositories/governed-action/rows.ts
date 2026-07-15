@@ -30,6 +30,7 @@ import {
 } from "../../../../domain/identifiers.js"
 import { PluginActionReconciliationKey, PluginProviderOperationId } from "../../../../domain/plugins/actions.js"
 import { ProviderId } from "../../../../domain/sourceRevision.js"
+import { PersistedGovernedActionReconciliationLocator } from "../../governedActionReconciliationLocator.js"
 import { GovernedActionAuditEventId } from "./contract.js"
 
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
@@ -139,7 +140,7 @@ export const GovernedActionTransitionRow = Schema.Struct({
   policyEvaluationDigest: Schema.NullOr(GovernedActionPolicyEvaluationDigest),
   outcomeSourceKind: Schema.NullOr(Schema.Literals(["direct", "providerOperation", "reconciliation"])),
   commandProviderOperationId: Schema.NullOr(PluginProviderOperationId),
-  commandReconciliationKey: Schema.NullOr(PluginActionReconciliationKey),
+  commandReconciliationKey: Schema.NullOr(PersistedGovernedActionReconciliationLocator),
   commandTerminalStatus: Schema.NullOr(GovernedActionTerminalStatus),
   commandUnknownKind: Schema.NullOr(Schema.Literals(["reconcilable", "manual"])),
   commandDigest: GovernedActionCommandDigest,

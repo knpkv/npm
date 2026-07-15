@@ -126,6 +126,15 @@ const acceptedReceiptMatches = (
     lineage.receipt.providerOperationId === command.receipt.providerOperationId &&
     lineage.receipt.reconciliationKey === command.receipt.reconciliationKey)
 
+/** Null is the action envelope's immutable idempotency identity, never a missing provider key. */
+const reconciliationLocatorMatches = (
+  lineage: GovernedActionProviderLineage,
+  reconciliationKey: PluginActionReconciliationKey | null
+): boolean =>
+  reconciliationKey === null
+    ? lineage._tag === "none" || lineage._tag === "manual"
+    : reconciliationKeyFromLineage(lineage) === reconciliationKey
+
 const terminalSourceMatches = (
   lineage: GovernedActionProviderLineage,
   command: Extract<
@@ -134,7 +143,6 @@ const terminalSourceMatches = (
   >
 ): boolean => {
   const providerOperationId = providerOperationIdFromLineage(lineage)
-  const reconciliationKey = reconciliationKeyFromLineage(lineage)
   switch (command.source._tag) {
     case "direct":
       return lineage._tag === "none"
@@ -143,8 +151,7 @@ const terminalSourceMatches = (
         command.source.providerOperationId === providerOperationId &&
         command.receipt.providerOperationId === providerOperationId
     case "reconciliation":
-      return reconciliationKey !== null &&
-        command.source.reconciliationKey === reconciliationKey &&
+      return reconciliationLocatorMatches(lineage, command.source.reconciliationKey) &&
         (providerOperationId === null || command.receipt.providerOperationId === providerOperationId)
   }
 }
@@ -152,7 +159,7 @@ const terminalSourceMatches = (
 const reconciliationPendingMatches = (
   lineage: GovernedActionProviderLineage,
   command: Extract<GovernedActionTransitionCommand, { readonly _tag: "reconciliationPending" }>
-): boolean => reconciliationKeyFromLineage(lineage) === command.reconciliationKey
+): boolean => reconciliationLocatorMatches(lineage, command.reconciliationKey)
 
 /**
  * Advance a durable lifecycle head while retaining and matching opaque provider identity.

@@ -22,10 +22,12 @@ import {
   digestGovernedActionEvidenceSet,
   digestGovernedActionPayload,
   digestGovernedActionPolicyEvaluation,
+  digestGovernedActionTransitionCommand,
   makeGovernedActionEnvelope
 } from "../../src/server/governance/governedActionDigests.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistedRecordError } from "../../src/server/persistence/errors.js"
+import { PERSISTED_IDEMPOTENCY_RECONCILIATION_LOCATOR } from "../../src/server/persistence/governedActionReconciliationLocator.js"
 import {
   GovernedActionCommitCompanion,
   GovernedActionCommitInput,
@@ -57,6 +59,10 @@ const AUTHORIZATION_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000012"
 const START_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000013"
 const AUTHORIZATION_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000014"
 const START_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000015"
+const RECONCILIATION_PENDING_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000016"
+const RECONCILIATION_PENDING_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000017"
+const RECONCILIATION_SUCCEEDED_TRANSITION_ID = "01890f6f-6d6a-7cc0-98d2-330000000018"
+const RECONCILIATION_SUCCEEDED_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-330000000019"
 const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
@@ -824,6 +830,120 @@ describe("governed action writer", () => {
         attempts: 1,
         authorizations: 1,
         evaluations: 1
+      })
+    })))
+
+  it.effect("round-trips reconciliation by immutable idempotency identity", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      const proposal = makeProposalInput(envelope)
+      yield* repository.commit(proposal)
+      const authorizationInput = makeAuthorizationInput(proposal, makeAuthorization(envelope))
+      yield* repository.commit(authorizationInput)
+      const startInput = makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
+      yield* repository.commit(startInput)
+
+      const pendingInput = decodeCommit({
+        ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
+        expectedHeadTransitionId: START_TRANSITION_ID,
+        transitionId: RECONCILIATION_PENDING_TRANSITION_ID,
+        commandId: "command:PAY-42:reconciliation-pending:idempotency",
+        command: {
+          _tag: "reconciliationPending",
+          checkedAt: "2026-07-15T10:03:00.000Z",
+          reconciliationKey: null
+        },
+        cause: { _tag: "system", component: "governed-action-recovery" },
+        occurredAt: "2026-07-15T10:03:00.000Z",
+        companion: { _tag: "none" },
+        auditEventId: RECONCILIATION_PENDING_AUDIT_ID
+      })
+      const { sql } = yield* Database
+      yield* sql`INSERT INTO governed_action_execution_leases (
+        workspace_id, action_id, attempt_id, start_transition_id,
+        permit_token_digest, runtime_authority_token, recovery_capability_version,
+        created_at, dispatch_deadline, lease_expires_at, recovery_eligible_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID}, ${START_TRANSITION_ID},
+        ${"a".repeat(64)}, 'runtime-generation-a', 1,
+        '2026-07-15T10:02:00.000Z', '2026-07-15T10:02:10.000Z',
+        '2026-07-15T10:02:20.000Z', '2026-07-15T10:02:30.000Z'
+      )`
+      yield* sql`INSERT INTO governed_action_recovery_claims (
+        workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, 1, ${"b".repeat(64)},
+        '2026-07-15T10:02:30.000Z', '2026-07-15T10:05:00.000Z'
+      )`
+      yield* sql`INSERT INTO governed_action_provider_outcomes (
+        workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+        recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+        outcome_digest, expected_command_digest, observed_at, received_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, 'runtime-unavailable-1', 'reconciliation', NULL,
+        ${"b".repeat(64)}, 'recovery-unavailable', 1, '{}', ${"c".repeat(64)},
+        ${yield* digestGovernedActionTransitionCommand(pendingInput.command)},
+        '2026-07-15T10:02:40.000Z', '2026-07-15T10:02:41.000Z'
+      )`
+      yield* repository.commit(pendingInput)
+      yield* sql`INSERT INTO governed_action_provider_outcome_folds (
+        workspace_id, action_id, outcome_id, transition_id, folded_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, 'runtime-unavailable-1',
+        ${RECONCILIATION_PENDING_TRANSITION_ID}, '2026-07-15T10:03:00.000Z'
+      )`
+
+      const succeededInput = decodeCommit({
+        ...Schema.encodeSync(GovernedActionCommitInput)(pendingInput),
+        expectedHeadTransitionId: RECONCILIATION_PENDING_TRANSITION_ID,
+        transitionId: RECONCILIATION_SUCCEEDED_TRANSITION_ID,
+        commandId: "command:PAY-42:reconciliation-succeeded:idempotency",
+        command: {
+          _tag: "recordSucceeded",
+          receipt: {
+            providerOperationId: "provider-operation-idempotency-1",
+            status: "succeeded",
+            safeSummary: "Provider mutation succeeded",
+            observedAt: "2026-07-15T10:04:00.000Z"
+          },
+          source: { _tag: "reconciliation", reconciliationKey: null }
+        },
+        cause: { _tag: "system", component: "governed-action-recovery" },
+        occurredAt: "2026-07-15T10:04:00.000Z",
+        companion: { _tag: "none" },
+        auditEventId: RECONCILIATION_SUCCEEDED_AUDIT_ID
+      })
+      yield* repository.commit(succeededInput)
+
+      const physical = yield* sql<{ readonly commandReconciliationKey: string | null }>`SELECT
+        command_reconciliation_key AS commandReconciliationKey
+        FROM governed_action_transitions
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND transition_id = ${RECONCILIATION_PENDING_TRANSITION_ID}`
+      const record = yield* repository.read({ workspaceId: WORKSPACE_ID, actionId: ACTION_ID })
+      const pending = record.history.find(
+        ({ transitionId }) => transitionId === RECONCILIATION_PENDING_TRANSITION_ID
+      )
+      const succeeded = record.history.find(
+        ({ transitionId }) => transitionId === RECONCILIATION_SUCCEEDED_TRANSITION_ID
+      )
+
+      assert.strictEqual(
+        physical[0]?.commandReconciliationKey,
+        PERSISTED_IDEMPOTENCY_RECONCILIATION_LOCATOR
+      )
+      assert.deepStrictEqual(pending?.command, pendingInput.command)
+      assert.deepStrictEqual(succeeded?.command, succeededInput.command)
+      assert.deepStrictEqual(record.head, {
+        state: "succeeded",
+        lineage: {
+          _tag: "terminal",
+          receipt: succeededInput.command._tag === "recordSucceeded"
+            ? succeededInput.command.receipt
+            : assert.fail("Expected succeeded command")
+        }
       })
     })))
 

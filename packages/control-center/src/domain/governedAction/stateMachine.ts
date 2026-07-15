@@ -120,11 +120,11 @@ const CancelledReceipt = PluginTerminalProviderReceiptV1.check(
   Schema.makeFilter(({ status }) => status === "cancelled", { expected: "a cancelled provider receipt" })
 )
 
-/** Whether a terminal receipt came directly from dispatch or from keyed reconciliation. */
+/** Whether a terminal receipt came from dispatch or reconciliation by provider/idempotency identity. */
 export const GovernedActionOutcomeSource = Schema.TaggedUnion({
   direct: {},
   providerOperation: { providerOperationId: PluginProviderOperationId },
-  reconciliation: { reconciliationKey: PluginActionReconciliationKey }
+  reconciliation: { reconciliationKey: Schema.NullOr(PluginActionReconciliationKey) }
 })
 
 /** Decoded terminal provider-outcome source. */
@@ -149,7 +149,10 @@ export const GovernedActionTransitionCommand = Schema.TaggedUnion({
   recordFailed: { receipt: FailedReceipt, source: GovernedActionOutcomeSource },
   recordUnknown: { outcome: GovernedActionUnknownOutcome },
   recordCancelled: { receipt: CancelledReceipt, source: GovernedActionOutcomeSource },
-  reconciliationPending: { checkedAt: UtcTimestamp, reconciliationKey: PluginActionReconciliationKey }
+  reconciliationPending: {
+    checkedAt: UtcTimestamp,
+    reconciliationKey: Schema.NullOr(PluginActionReconciliationKey)
+  }
 })
 
 /** Decoded governed-action lifecycle command. */

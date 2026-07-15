@@ -43,6 +43,10 @@ import {
   verifyGovernedActionTransition
 } from "../../../governance/governedActionDigests.js"
 import { PersistedRecordError, PersistenceOperationError } from "../../errors.js"
+import {
+  encodePersistedGovernedActionReconciliationLocator,
+  type PersistedGovernedActionReconciliationLocator
+} from "../../governedActionReconciliationLocator.js"
 import type { QuarantineReasonCode, QuarantineRecordKind } from "../models.js"
 import type {
   GovernedActionAttemptRow,
@@ -143,7 +147,7 @@ export interface GovernedActionCommandProjection {
   readonly attemptId: GovernedActionAttemptId | null
   readonly outcomeSourceKind: "direct" | "providerOperation" | "reconciliation" | null
   readonly commandProviderOperationId: PluginProviderOperationId | null
-  readonly commandReconciliationKey: PluginActionReconciliationKey | null
+  readonly commandReconciliationKey: PersistedGovernedActionReconciliationLocator | null
   readonly commandTerminalStatus: "succeeded" | "failed" | "cancelled" | null
   readonly commandUnknownKind: "reconcilable" | "manual" | null
 }
@@ -258,7 +262,7 @@ export const projectGovernedActionCommand = (
         outcomeSourceKind: command.source._tag,
         commandProviderOperationId: command.receipt.providerOperationId,
         commandReconciliationKey: command.source._tag === "reconciliation"
-          ? command.source.reconciliationKey
+          ? encodePersistedGovernedActionReconciliationLocator(command.source.reconciliationKey)
           : null,
         commandTerminalStatus: command.receipt.status
       }
@@ -273,7 +277,9 @@ export const projectGovernedActionCommand = (
     case "reconciliationPending":
       return {
         ...emptyCommandProjection(command._tag),
-        commandReconciliationKey: command.reconciliationKey
+        commandReconciliationKey: encodePersistedGovernedActionReconciliationLocator(
+          command.reconciliationKey
+        )
       }
     case "propose":
     case "deny":
@@ -476,7 +482,7 @@ export const decodeGovernedActionRow = Effect.fn("GovernedActionCodec.decodeActi
   const lineage = yield* decodeLineageJson(row.lineageJson).pipe(
     Effect.mapError(() => malformed("governed-action-head-mismatch"))
   )
-  const lifecycle = yield* Schema.decodeUnknownEffect(GovernedActionLifecycleHeadV1)({
+  const lifecycle = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionLifecycleHeadV1))({
     state: row.state,
     lineage
   }).pipe(
@@ -652,7 +658,7 @@ export const decodeGovernedActionTransitionRow = Effect.fn(
   const lineage = yield* decodeLineageJson(row.resultLineageJson).pipe(
     Effect.mapError(() => malformed("governed-action-chain-invalid"))
   )
-  const resultHead = yield* Schema.decodeUnknownEffect(GovernedActionLifecycleHeadV1)({
+  const resultHead = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionLifecycleHeadV1))({
     state: transition.toState,
     lineage
   }).pipe(

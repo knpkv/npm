@@ -61,6 +61,7 @@ const expectedTables = [
   "governed_action_denial_policy_evaluations",
   "governed_action_execution_leases",
   "governed_action_execution_preparations",
+  "governed_action_legacy_recovery_unavailable_outcomes",
   "governed_action_policy_evaluations",
   "governed_action_provider_outcome_folds",
   "governed_action_provider_outcomes",
@@ -418,7 +419,7 @@ describe("Control Center migrations", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("upgrades version 13 with the active-lease fence without rewriting durable rows", () =>
+  it.effect("upgrades version 13 through the latest execution fences without rewriting durable rows", () =>
     Effect.gen(function*() {
       const config = yield* testConfig
       const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000301"
@@ -454,11 +455,20 @@ describe("Control Center migrations", () => {
           WHERE type = 'trigger' AND name = 'governed_action_provider_outcome_active_lease'`
         const ledger = yield* database.sql<{ readonly migrationId: number }>`SELECT migration_id AS migrationId
           FROM ${database.sql(MIGRATION_LEDGER_TABLE)} ORDER BY migration_id`
-        return { ledger, triggers, workspaces }
+        const idempotencyTriggers = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM sqlite_master
+          WHERE type = 'trigger'
+            AND name = 'governed_action_transition_reserved_reconciliation_locator'`
+        const foreignKeyViolations = yield* database.sql`PRAGMA foreign_key_check`
+        const integrity = yield* database.sql<{ readonly integrityCheck: string }>`PRAGMA integrity_check`
+        return { foreignKeyViolations, idempotencyTriggers, integrity, ledger, triggers, workspaces }
       }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
 
-      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, 14)
+      assert.strictEqual(afterUpgrade.ledger.at(-1)?.migrationId, EXPECTED_MIGRATIONS.at(-1)?.id)
       assert.deepStrictEqual(afterUpgrade.triggers, [{ count: 1 }])
+      assert.deepStrictEqual(afterUpgrade.idempotencyTriggers, [{ count: 1 }])
+      assert.deepStrictEqual(afterUpgrade.foreignKeyViolations, [])
+      assert.deepStrictEqual(afterUpgrade.integrity, [{ integrityCheck: "ok" }])
       assert.deepStrictEqual(afterUpgrade.workspaces, [{ displayName: "Version Thirteen" }])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 

@@ -275,4 +275,26 @@ describe("governed action state machine", () => {
     assert.isNull(reduceGovernedActionState("unknown", directSuccess))
     assert.strictEqual(reduceGovernedActionState("started", directSuccess), "succeeded")
   })
+
+  it("represents recovery by immutable idempotency identity with a null provider locator", () => {
+    const pending = decodeCommand({
+      _tag: "reconciliationPending",
+      checkedAt: observedAt,
+      reconciliationKey: null
+    })
+    const succeeded = decodeCommand({
+      _tag: "recordSucceeded",
+      receipt: { ...receipt, status: "succeeded" },
+      source: { _tag: "reconciliation", reconciliationKey: null }
+    })
+
+    assert.strictEqual(reduceGovernedActionState("started", pending), "started")
+    assert.strictEqual(reduceGovernedActionState("unknown", pending), "unknown")
+    assert.strictEqual(reduceGovernedActionState("cancel-requested", pending), "cancel-requested")
+    assert.strictEqual(
+      reduceGovernedActionState("cancel-requested-unknown", pending),
+      "cancel-requested-unknown"
+    )
+    assert.strictEqual(reduceGovernedActionState("unknown", succeeded), "succeeded")
+  })
 })

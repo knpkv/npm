@@ -157,7 +157,10 @@ const makeGovernedActionWriter = Effect.gen(function*() {
     const transitionId = yield* Schema.decodeUnknownEffect(
       GovernedActionTransitionV1.fields.transitionId
     )(row.headTransitionId).pipe(Effect.mapError(malformedHead))
-    const lifecycle = yield* Schema.decodeUnknownEffect(GovernedActionLifecycleHeadV1)({ state, lineage }).pipe(
+    const lifecycle = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionLifecycleHeadV1))({
+      state,
+      lineage
+    }).pipe(
       Effect.mapError(malformedHead)
     )
     const normalizedLineage = lineageColumns(lifecycle.lineage)
