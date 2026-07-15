@@ -181,6 +181,6 @@ When writing Effect code:
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
 
-When testing a lazy authority-bearing runtime composition, a missing-record assertion is not
-provider coverage. The composition suite must also seed an authorized action, cross the runtime
+Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
+not provider coverage. The composition suite must also seed an authorized action, cross the runtime
 registry and executor projection, and assert the exact provider-call count and durable result.

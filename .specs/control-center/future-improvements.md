@@ -42,8 +42,8 @@ complete.
    Still add concurrent duplicate begin, lease-write rollback,
    runtime rotation, expired preparation/authorization/session, stale preflight, missing
    `action.reconcile`, and the full cancellation-versus-reconciliation race matrix.
-Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
-stay disabled.
+   Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
+   stay disabled.
 
 ## Remaining roadmap
 
