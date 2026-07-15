@@ -5,26 +5,20 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
-import { GovernedActionCommandDigest, GovernedActionCommandId } from "../../../../domain/governedAction/index.js"
-import {
-  DomainEventId,
-  GovernedActionId,
-  GovernedActionTransitionId,
-  WorkspaceId
-} from "../../../../domain/identifiers.js"
+import { GovernedActionCommandDigest } from "../../../../domain/governedAction/index.js"
+import { GovernedActionId, GovernedActionTransitionId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
-import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
-import { makeGovernedActionTransactionWrite } from "../../../persistence/repositories/governed-action/write.js"
 import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
+import { makeGovernedActionExecutionDispatchInboxFolder } from "./dispatch-inbox-fold.js"
 import {
   type DispatchInboxOutcome,
-  dispatchResultCommand,
+  dispatchInboxOutcomeCommand,
+  dispatchInboxOutcomeKind,
+  dispatchInboxOutcomeObservedAt,
   DispatchResultKind,
-  dispatchResultKind,
-  dispatchResultObservedAt,
   encodeDispatchInboxOutcome
 } from "./dispatch-outcome.js"
 import {
@@ -107,7 +101,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
-  const writer = yield* makeGovernedActionTransactionWrite
+  const folder = yield* makeGovernedActionExecutionDispatchInboxFolder
 
   const readLease = Effect.fn("GovernedActionExecutionDispatchInbox.readLease")(function*(
     permitTokenDigest: GovernedActionPermitTokenDigest,
@@ -171,7 +165,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
     )
-    const command = dispatchResultCommand(input.outcome)
+    const command = dispatchInboxOutcomeCommand(input.outcome)
     const encoded = yield* encodeDispatchInboxOutcome(input.outcome).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
@@ -180,8 +174,8 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
     )
-    const resultKind = dispatchResultKind(input.outcome)
-    const outcomeObservedAt = dispatchResultObservedAt(input.outcome)
+    const resultKind = dispatchInboxOutcomeKind(input.outcome)
+    const outcomeObservedAt = dispatchInboxOutcomeObservedAt(input.outcome)
 
     const persisted = yield* transaction.transact(
       `governed-action.execution-persist-${input.operation}`,
@@ -233,58 +227,16 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       })
     ).pipe(Effect.mapError(mapFailure))
 
-    return yield* transaction.transact(
-      `governed-action.execution-fold-${input.operation}`,
-      Effect.gen(function*() {
-        const existing = yield* readExisting(permitTokenDigest, input.operation)
-        if (
-          existing === undefined ||
-          existing.outcomeId !== persisted.outcomeId ||
-          !outcomeMatches(existing, {
-            workspaceId: persisted.lease.workspaceId,
-            actionId: persisted.lease.actionId,
-            resultKind,
-            outcomeJson: encoded.outcomeJson,
-            outcomeDigest: encoded.outcomeDigest,
-            commandDigest
-          })
-        ) return yield* storeError(input.operation, "invalid-record")
-
-        const record = yield* transaction.read({
-          workspaceId: persisted.lease.workspaceId,
-          actionId: persisted.lease.actionId
-        })
-        if (existing.foldTransitionId !== null) return record.head.state
-        if (record.head.state !== "started" && record.head.state !== "cancel-requested") {
-          return yield* storeError(input.operation, "conflict")
-        }
-
-        const foldedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
-        const transitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)
-        const auditEventId = DomainEventId.make(yield* cryptoService.randomUUIDv7)
-        const commit = yield* Schema.decodeUnknownEffect(Schema.toType(GovernedActionCommitInput))({
-          envelope: record.envelope,
-          expectedHeadTransitionId: record.headTransition.transitionId,
-          transitionId,
-          commandId: GovernedActionCommandId.make(`execution:dispatch:${permitTokenDigest}`),
-          command,
-          cause: { _tag: "system", component: "governed-action-execution" },
-          occurredAt: foldedAt,
-          causationId: record.envelope.causationId,
-          correlationId: record.envelope.correlationId,
-          companion: { _tag: "none" },
-          auditEventId
-        })
-        const committed = yield* writer.commit(commit)
-        yield* sql`INSERT INTO governed_action_provider_outcome_folds (
-          workspace_id, action_id, outcome_id, transition_id, folded_at
-        ) VALUES (
-          ${persisted.lease.workspaceId}, ${persisted.lease.actionId}, ${persisted.outcomeId},
-          ${committed.transition.transitionId}, ${DateTime.formatIso(foldedAt)}
-        )`
-        return committed.transition.toState
-      })
-    ).pipe(Effect.mapError(mapFailure))
+    return yield* folder.foldExpected(input.operation, {
+      workspaceId: persisted.lease.workspaceId,
+      actionId: persisted.lease.actionId,
+      outcomeId: persisted.outcomeId,
+      permitTokenDigest,
+      resultKind,
+      outcomeJson: encoded.outcomeJson,
+      outcomeDigest: encoded.outcomeDigest,
+      commandDigest
+    })
   })
 
   return { recordOutcome }

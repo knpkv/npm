@@ -15,6 +15,8 @@ complete.
   start intent and lease atomically, and returns a one-use permit only after commit.
 - Execution `begin` now receives the exact inspected workspace/connection scope, and the engine
   rejects cross-wired permits before calling a provider.
+- Governed `recordBlocked`, `recordDispatch`, and `recordUnknown` outcomes now persist through
+  cancellation-safe append-before-fold boundaries, including persisted-only restart folding.
 - Private strict readers load current session, target, projection, and evidence authority without
   falling back to older valid records.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
@@ -25,13 +27,12 @@ complete.
 
 ## Critical unfinished work
 
-1. **Finish execution outcome persistence.** Implement `recordBlocked`, `recordDispatch`,
-   `recordUnknown`, `recordRecoveryUnavailable`, and `recordReconciliation` with durable provider
-   inbox semantics and cancellation-safe folding.
+1. **Finish recovery outcome persistence.** Implement `recordRecoveryUnavailable` and
+   `recordReconciliation` with durable provider inbox semantics and cancellation-safe folding.
 2. **Complete the begin/recovery failure matrix.** The real-database happy path and one-use replay
    are covered. Still add concurrent duplicate begin, lease-write rollback,
    runtime rotation, expired preparation/authorization/session, stale preflight, missing
-   `action.reconcile`, crash boundaries, unknown outcome, and restart reconciliation.
+   `action.reconcile`, reconciliation crash boundaries, and restart reconciliation.
 3. **Wire the execution store layer into the server composition** without exposing its internal
    capability through browser, agent, or plugin APIs.
 
@@ -89,7 +90,6 @@ their owner decides how to land them.
 
 ## Recommended next session
 
-Start with one bounded commit implementing execution outcome persistence, beginning with
-`recordBlocked` and `recordDispatch`, then add the remaining outcome/reconciliation branches as
-small test-backed commits. Run an independent exact-commit review after each commit; turn every
-review finding into a regression test, static rule, or repository instruction before proceeding.
+Continue with one bounded commit implementing recovery claim acquisition and reconciliation
+outcomes. Run an independent exact-commit review after each commit; turn every review finding into
+a regression test, static rule, or repository instruction before proceeding.

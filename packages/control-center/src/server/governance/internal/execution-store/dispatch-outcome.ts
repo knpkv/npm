@@ -34,8 +34,8 @@ const isLocalUnknown = (
   outcome: DispatchInboxOutcome
 ): outcome is typeof GovernedActionUnknownOutcome.Type => outcome._tag === "reconcilable" || outcome._tag === "manual"
 
-/** Project one provider result to its immutable inbox kind. */
-export const dispatchResultKind = (
+/** Project one provider or locally synthesized dispatch-side outcome to its immutable inbox kind. */
+export const dispatchInboxOutcomeKind = (
   outcome: DispatchInboxOutcome
 ): typeof DispatchResultKind.Type =>
   isLocalUnknown(outcome)
@@ -44,8 +44,8 @@ export const dispatchResultKind = (
     ? "unknown"
     : outcome.receipt.status
 
-/** Provider-owned observation time retained separately from host receipt time. */
-export const dispatchResultObservedAt = (
+/** Source observation time retained separately from the trusted host receipt time. */
+export const dispatchInboxOutcomeObservedAt = (
   outcome: DispatchInboxOutcome
 ): typeof UtcTimestamp.Type =>
   isLocalUnknown(outcome)
@@ -55,7 +55,7 @@ export const dispatchResultObservedAt = (
     : outcome.receipt.observedAt
 
 /** Reconstruct the exact lifecycle command represented by one immediate provider result. */
-export const dispatchResultCommand = (
+export const dispatchInboxOutcomeCommand = (
   result: DispatchInboxOutcome
 ): GovernedActionTransitionCommand => {
   if (isLocalUnknown(result)) return { _tag: "recordUnknown", outcome: result }
