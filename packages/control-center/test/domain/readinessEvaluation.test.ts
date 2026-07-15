@@ -4,7 +4,8 @@ import { Schema } from "effect"
 import {
   assessEnvironmentReadiness,
   EnvironmentReadinessAssessment,
-  EnvironmentReadinessEvaluationInput
+  EnvironmentReadinessEvaluationInput,
+  READINESS_DERIVATION_VERSION_V1
 } from "../../src/domain/readiness/index.js"
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000201"
@@ -421,6 +422,33 @@ describe("environment readiness evaluation", () => {
             : definition
         )
       })
+    )
+  })
+
+  it("binds the V1 evaluator to its version and a distinct predecessor", () => {
+    const raw = rawInput()
+    assert.throws(() =>
+      Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)({
+        ...raw,
+        previousAssessmentId: raw.assessmentId
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)({
+        ...raw,
+        derivationVersion: 2
+      })
+    )
+
+    const input = Schema.decodeUnknownSync(EnvironmentReadinessEvaluationInput)({
+      ...raw,
+      previousAssessmentId: "01890f6f-6d6a-7cc0-98d2-000000000220",
+      derivationVersion: READINESS_DERIVATION_VERSION_V1
+    })
+    assert.doesNotThrow(() =>
+      Schema.decodeUnknownSync(EnvironmentReadinessAssessment)(
+        Schema.encodeSync(EnvironmentReadinessAssessment)(assessEnvironmentReadiness(input))
+      )
     )
   })
 

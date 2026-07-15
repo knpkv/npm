@@ -17,6 +17,9 @@ import {
   deriveReadinessNextEvaluationAt,
   deriveReadinessSourceSummaries,
   deriveReadinessStages,
+  deriveReleaseReadinessFindings,
+  deriveReleaseReadinessNextEvaluationAt,
+  deriveReleaseReadinessSourceSummaries,
   deriveReleaseReadinessStages,
   deriveReleaseReadinessVerdict,
   readinessFactResult,
@@ -434,6 +437,14 @@ export const EnvironmentReadinessEvaluationInput = Schema.Struct({
   definitions: Schema.Array(ReadinessFactDefinition).check(Schema.isMaxLength(512)),
   observations: Schema.Array(ReadinessFactObservation).check(Schema.isMaxLength(512))
 }).check(
+  Schema.makeFilter(
+    ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
+    { expected: "an environment readiness input not to supersede itself" }
+  ),
+  Schema.makeFilter(
+    ({ derivationVersion }) => derivationVersion === READINESS_DERIVATION_VERSION_V1,
+    { expected: "the V1 environment evaluator to use derivation version 1" }
+  ),
   Schema.makeFilter(({ definitions }) => unique(definitions.map(({ factId }) => factId)), {
     expected: "readiness fact definitions to have unique identities"
   }),
@@ -634,8 +645,13 @@ export const EnvironmentReadinessSummary = Schema.Struct({
   assessmentId: ReadinessAssessmentId,
   environmentId: EnvironmentId,
   candidateDigest: ReadinessCandidateDigest,
+  nextEvaluationAt: Schema.NullOr(UtcTimestamp),
   verdict: ReadinessVerdict,
-  stages: ReadinessStages
+  stages: ReadinessStages,
+  blockers: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
+  warnings: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
+  gaps: Schema.Array(ReadinessFinding).check(Schema.isMaxLength(MAX_READINESS_FINDINGS)),
+  sourceFreshness: Schema.Array(ReadinessSourceSummary).check(Schema.isMaxLength(512))
 })
 
 /** Immutable release assessment rolled up from current target environments. */
@@ -658,6 +674,29 @@ export const ReleaseReadinessAssessment = Schema.Struct({
     ({ environments, stages }) => readinessStagesAreEqual(stages, deriveReleaseReadinessStages(environments)),
     { expected: "release readiness stages to match retained environment summaries" }
   ),
+  Schema.makeFilter(({ blockers, environments, gaps, warnings }) => {
+    const expected = deriveReleaseReadinessFindings(environments)
+    return sameOrderedStrings(blockers.map(readinessFindingKey), expected.blockers.map(readinessFindingKey)) &&
+      sameOrderedStrings(warnings.map(readinessFindingKey), expected.warnings.map(readinessFindingKey)) &&
+      sameOrderedStrings(gaps.map(readinessFindingKey), expected.gaps.map(readinessFindingKey))
+  }, { expected: "release readiness findings to match retained environment summaries" }),
+  Schema.makeFilter(({ environments, sourceFreshness }) => {
+    const expected = deriveReleaseReadinessSourceSummaries(environments)
+    return sourceFreshness.length === expected.length && sourceFreshness.every((summary, index) => {
+      const item = expected[index]
+      return item !== undefined &&
+        summary.pluginConnectionId === item.pluginConnectionId &&
+        summary.freshness === item.freshness &&
+        summary.health === item.health &&
+        sameOrderedStrings(summary.evidenceIds, item.evidenceIds)
+    })
+  }, { expected: "release readiness sources to match retained environment summaries" }),
+  Schema.makeFilter(({ environments, nextEvaluationAt }) => {
+    const expected = deriveReleaseReadinessNextEvaluationAt(environments)
+    return expected === null || nextEvaluationAt === null
+      ? expected === nextEvaluationAt
+      : DateTime.Order(expected, nextEvaluationAt) === 0
+  }, { expected: "release readiness reevaluation time to match retained environment summaries" }),
   Schema.makeFilter(({ environments, evidenceIds }) =>
     sameOrderedStrings(
       evidenceIds,
@@ -670,12 +709,6 @@ export const ReleaseReadinessAssessment = Schema.Struct({
   Schema.makeFilter(canonicalAssessmentCollections, {
     expected: "release readiness collections to be canonical and evidence-bound"
   }),
-  Schema.makeFilter(
-    ({ blockers, environments }) => environments.some(({ verdict }) => verdict === "blocked") === (blockers.length > 0),
-    {
-      expected: "release readiness blockers to agree with blocked environments"
-    }
-  ),
   Schema.makeFilter(({ environments, verdict }) => verdict === deriveReleaseReadinessVerdict(environments), {
     expected: "release readiness verdict to agree with its environment summaries"
   })
@@ -701,6 +734,10 @@ export const ReleaseReadinessRollupInput = Schema.Struct({
   evaluatedAt: UtcTimestamp,
   environments: Schema.NonEmptyArray(EnvironmentReadinessAssessment).check(Schema.isMaxLength(512))
 }).check(
+  Schema.makeFilter(
+    ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
+    { expected: "a release readiness roll-up input not to supersede itself" }
+  ),
   Schema.makeFilter(({ environments }) => unique(environments.map(({ candidate }) => candidate.scope.environmentId)), {
     expected: "release readiness roll-up environment identities to be unique"
   }),

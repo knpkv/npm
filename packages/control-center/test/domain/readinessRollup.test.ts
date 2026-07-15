@@ -19,6 +19,7 @@ const environmentIds = [firstEnvironmentId, secondEnvironmentId]
 const firstAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000306"
 const secondAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000307"
 const releaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000308"
+const previousReleaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-000000000309"
 const ruleDigest = `sha256:${"c".repeat(64)}`
 
 type BuildState = "succeeded" | "running" | "failed"
@@ -274,6 +275,28 @@ describe("release readiness roll-up", () => {
     )
   })
 
+  it("requires a distinct roll-up predecessor and produces a valid linked assessment", () => {
+    const first = environmentAssessment(0)
+    const second = environmentAssessment(1)
+    const raw = rawRollup(first, second)
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+        ...raw,
+        previousAssessmentId: raw.assessmentId
+      })
+    )
+
+    const input = Schema.decodeUnknownSync(ReleaseReadinessRollupInput)({
+      ...raw,
+      previousAssessmentId: previousReleaseAssessmentId
+    })
+    assert.doesNotThrow(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)(
+        Schema.encodeSync(ReleaseReadinessAssessment)(rollUpReleaseReadiness(input))
+      )
+    )
+  })
+
   it("rejects contradictory release assessments at the trusted boundary", () => {
     const ready = Schema.encodeSync(ReleaseReadinessAssessment)(
       rollup(environmentAssessment(0), environmentAssessment(1))
@@ -304,6 +327,41 @@ describe("release readiness roll-up", () => {
           build: { ...ready.stages.build, state: "held" }
         },
         verdict: "held"
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        sourceFreshness: ready.sourceFreshness.map((source) => ({
+          ...source,
+          health: "disabled"
+        }))
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        nextEvaluationAt: null
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        warnings: [{
+          code: "plugin-degraded",
+          subject: { _tag: "source", pluginConnectionId },
+          evidenceIds: ready.evidenceIds.slice(0, 1)
+        }]
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
+        gaps: [{
+          code: "source-stale",
+          subject: { _tag: "source", pluginConnectionId },
+          evidenceIds: ready.evidenceIds.slice(0, 1)
+        }]
       })
     )
 

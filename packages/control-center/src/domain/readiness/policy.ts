@@ -504,10 +504,63 @@ export const deriveEnvironmentReadinessVerdict = (input: {
 }
 
 type ReleaseEnvironmentReadiness = {
+  readonly blockers: ReadonlyArray<ReadinessFinding>
   readonly environmentId: string
+  readonly gaps: ReadonlyArray<ReadinessFinding>
+  readonly nextEvaluationAt: UtcTimestamp | null
+  readonly sourceFreshness: ReadonlyArray<ReadinessSourceSummary>
   readonly stages: ReadinessStages
   readonly verdict: ReadinessVerdict
+  readonly warnings: ReadonlyArray<ReadinessFinding>
 }
+
+/** Exact merged findings implied by retained environment summaries. */
+export const deriveReleaseReadinessFindings = (
+  environments: ReadonlyArray<ReleaseEnvironmentReadiness>
+): {
+  readonly blockers: Array<ReadinessFinding>
+  readonly warnings: Array<ReadinessFinding>
+  readonly gaps: Array<ReadinessFinding>
+} => ({
+  blockers: normalizedFindings(environments.flatMap(({ blockers }) => blockers)),
+  warnings: normalizedFindings(environments.flatMap(({ warnings }) => warnings)),
+  gaps: normalizedFindings(environments.flatMap(({ gaps }) => gaps))
+})
+
+/** Exact worst-state source summaries implied by retained environments. */
+export const deriveReleaseReadinessSourceSummaries = (
+  environments: ReadonlyArray<ReleaseEnvironmentReadiness>
+): Array<ReadinessSourceSummary> => {
+  const grouped = new Map<PluginConnectionId, Array<ReadinessSourceSummary>>()
+  for (const summary of environments.flatMap(({ sourceFreshness }) => sourceFreshness)) {
+    const current = grouped.get(summary.pluginConnectionId) ?? []
+    current.push(summary)
+    grouped.set(summary.pluginConnectionId, current)
+  }
+  return Array.from(grouped.entries())
+    .map(([pluginConnectionId, summaries]): ReadinessSourceSummary => ({
+      pluginConnectionId,
+      freshness: summaries.reduce<ReadinessSourceSummary["freshness"]>(
+        (worst, summary) => freshnessRank[summary.freshness] > freshnessRank[worst] ? summary.freshness : worst,
+        "current"
+      ),
+      health: summaries.reduce<ReadinessSourceSummary["health"]>(
+        (worst, summary) => healthRank[summary.health] > healthRank[worst] ? summary.health : worst,
+        "healthy"
+      ),
+      evidenceIds: sortedReadinessUnique(summaries.flatMap(({ evidenceIds }) => evidenceIds))
+    }))
+    .sort((left, right) => compareReadinessText(left.pluginConnectionId, right.pluginConnectionId))
+}
+
+/** Earliest child freshness boundary implied by retained environments. */
+export const deriveReleaseReadinessNextEvaluationAt = (
+  environments: ReadonlyArray<ReleaseEnvironmentReadiness>
+): UtcTimestamp | null =>
+  environments.reduce<UtcTimestamp | null>((earliest, { nextEvaluationAt }) => {
+    if (nextEvaluationAt === null) return earliest
+    return earliest === null || DateTime.Order(nextEvaluationAt, earliest) < 0 ? nextEvaluationAt : earliest
+  }, null)
 
 const firstReleaseProgress = (
   environments: ReadonlyArray<ReleaseEnvironmentReadiness>,
