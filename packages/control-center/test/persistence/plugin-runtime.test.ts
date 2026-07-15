@@ -703,7 +703,9 @@ describe("plugin runtime persistence", () => {
       const runtime = yield* PluginRuntimeRepository
       const quarantine = yield* QuarantineRepository
       yield* setup
-      yield* database.sql`UPDATE plugin_runtime_state SET descriptor_json = '{}'`
+      yield* database.sql`UPDATE plugin_runtime_state SET
+        descriptor_generation = descriptor_generation + 1,
+        descriptor_json = '{}'`
       const corruptDescriptor = yield* runtime.getRuntime(WORKSPACE_ID, PLUGIN_ID).pipe(Effect.result)
       assert.isTrue(Result.isFailure(corruptDescriptor))
       if (Result.isFailure(corruptDescriptor)) assert.instanceOf(corruptDescriptor.failure, PersistedRecordError)

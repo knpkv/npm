@@ -175,7 +175,8 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
   ) {
     const rows = yield* sql<Record<string, unknown>>`SELECT
       workspace_id AS workspaceId, plugin_connection_id AS pluginConnectionId,
-      provider_id AS providerId, revision, descriptor_schema_version AS descriptorSchemaVersion,
+      provider_id AS providerId, revision, descriptor_generation AS descriptorGeneration,
+      descriptor_schema_version AS descriptorSchemaVersion,
       descriptor_json AS descriptorJson, descriptor_digest AS descriptorDigest,
       accepted_at AS acceptedAt, health_state AS healthState, failure_class AS failureClass,
       safe_message AS safeMessage, checked_at AS checkedAt, retry_at AS retryAt,
@@ -283,6 +284,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
         } else {
           yield* sql`UPDATE plugin_runtime_state SET
             revision = revision + 1,
+            descriptor_generation = descriptor_generation + 1,
             provider_id = ${decoded.success.providerId},
             descriptor_schema_version = ${decoded.success.schemaVersion},
             descriptor_json = ${decoded.success.descriptorJson},

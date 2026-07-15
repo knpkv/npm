@@ -40,6 +40,7 @@ const SourceRow = Schema.Struct({
   pluginConnectionId: CurrentPluginRuntimeAuthority.fields.scope.fields.pluginConnectionId,
   providerId: CurrentPluginRuntimeAuthority.fields.expected.fields.providerId,
   connectionRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  descriptorGeneration: Schema.Int.check(Schema.isGreaterThan(0)),
   isEnabled: Schema.Literals([0, 1]),
   connectionUpdatedAt: UtcTimestamp,
   descriptorJson: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(65_536)),
@@ -60,6 +61,7 @@ const HeadRow = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   generation: Schema.Int.check(Schema.isGreaterThan(0)),
   connectionRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  descriptorGeneration: Schema.Int.check(Schema.isGreaterThan(0)),
   configurationRevision: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   configurationDigest: Schema.NullOr(PluginRuntimeSourceDigest),
   descriptorDigest: PluginRuntimeSourceDigest,
@@ -146,6 +148,7 @@ const sameSourceMaterial = (
   head.pluginConnectionId === source.pluginConnectionId &&
   head.providerId === source.providerId &&
   head.connectionRevision === source.connectionRevision &&
+  head.descriptorGeneration === source.descriptorGeneration &&
   head.descriptorDigest === source.descriptorDigest &&
   head.accountDigest === input.accountDigest &&
   sameConfiguration(
@@ -183,6 +186,7 @@ export const digestPluginRuntimeAuthority = Effect.fn("PluginRuntimeAuthority.di
     input.scope.pluginConnectionId,
     input.expected.providerId,
     input.expected.connectionRevision,
+    input.expected.descriptorGeneration,
     configuration,
     input.expected.descriptorDigest,
     input.accountDigest
@@ -221,6 +225,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
       connection.plugin_connection_id AS pluginConnectionId,
       connection.provider_id AS providerId,
       connection.revision AS connectionRevision,
+      runtime.descriptor_generation AS descriptorGeneration,
       connection.is_enabled AS isEnabled,
       connection.updated_at AS connectionUpdatedAt,
       runtime.descriptor_json AS descriptorJson,
@@ -287,6 +292,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
       DateTime.Order(input.activatedAt, latestSourceTime) < 0 ||
       input.expected.providerId !== source.providerId ||
       input.expected.connectionRevision !== source.connectionRevision ||
+      input.expected.descriptorGeneration !== source.descriptorGeneration ||
       input.expected.descriptorDigest !== source.descriptorDigest ||
       !sameConfiguration(input.expected.configuration, configuration)
     ) {
@@ -305,6 +311,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
       authority_schema_version AS schemaVersion,
       generation,
       connection_revision AS connectionRevision,
+      descriptor_generation AS descriptorGeneration,
       configuration_revision AS configurationRevision,
       configuration_digest AS configurationDigest,
       descriptor_digest AS descriptorDigest,
@@ -335,6 +342,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
       authority.authority_schema_version AS schemaVersion,
       authority.generation,
       authority.connection_revision AS connectionRevision,
+      authority.descriptor_generation AS descriptorGeneration,
       authority.configuration_revision AS configurationRevision,
       authority.configuration_digest AS configurationDigest,
       authority.descriptor_digest AS descriptorDigest,
@@ -403,6 +411,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
         expected: {
           providerId: row.providerId,
           connectionRevision: row.connectionRevision,
+          descriptorGeneration: row.descriptorGeneration,
           configuration,
           descriptorDigest: row.descriptorDigest
         },
@@ -468,12 +477,14 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
         const changed = previous === null
           ? yield* sql<{ readonly generation: number }>`INSERT INTO plugin_runtime_authority_heads (
             workspace_id, plugin_connection_id, provider_id, authority_schema_version,
-            generation, connection_revision, configuration_revision, configuration_digest,
+            generation, connection_revision, descriptor_generation,
+            configuration_revision, configuration_digest,
             descriptor_digest, account_digest, authority_digest, activated_at
           ) VALUES (
             ${input.scope.workspaceId}, ${input.scope.pluginConnectionId},
             ${input.expected.providerId}, 1, ${generation},
-            ${input.expected.connectionRevision}, ${configurationRevision},
+            ${input.expected.connectionRevision}, ${input.expected.descriptorGeneration},
+            ${configurationRevision},
             ${configurationDigest}, ${input.expected.descriptorDigest},
             ${input.accountDigest}, ${runtimeAuthorityToken}, ${activatedAt}
           ) ON CONFLICT(workspace_id, plugin_connection_id) DO NOTHING
@@ -481,6 +492,7 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
           : yield* sql<{ readonly generation: number }>`UPDATE plugin_runtime_authority_heads SET
             generation = ${generation},
             connection_revision = ${input.expected.connectionRevision},
+            descriptor_generation = ${input.expected.descriptorGeneration},
             configuration_revision = ${configurationRevision},
             configuration_digest = ${configurationDigest},
             descriptor_digest = ${input.expected.descriptorDigest},
@@ -516,10 +528,12 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
     ) => Effect.Effect<Success, Failure, Requirements>
   ) =>
     database.transaction(
-      Effect.flatMap(
-        loadCurrent(input.scope, input.runtimeAuthorityToken),
-        use
-      )
+      Effect.gen(function*() {
+        const current = yield* loadCurrent(input.scope, input.runtimeAuthorityToken)
+        const result = yield* use(current)
+        yield* loadCurrent(input.scope, input.runtimeAuthorityToken)
+        return result
+      })
     ).pipe(mapPersistenceOperation("plugin-runtime-authority.transact-current"))
 
   return { publish, transactCurrent }

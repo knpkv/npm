@@ -15,6 +15,7 @@ const currentSourcePredicate = (authority: "NEW" | "authority") => `
       AND connection.is_enabled = 1
       AND connection.revision = ${authority}.connection_revision
       AND connection.updated_at <= ${authority}.activated_at
+      AND runtime.descriptor_generation = ${authority}.descriptor_generation
       AND runtime.descriptor_digest = ${authority}.descriptor_digest
       AND runtime.accepted_at <= ${authority}.activated_at
       AND (
@@ -47,6 +48,27 @@ const currentSourcePredicate = (authority: "NEW" | "authority") => `
 export const migration0016PluginRuntimeAuthority = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
+  yield* sql`ALTER TABLE plugin_runtime_state ADD COLUMN descriptor_generation
+    INTEGER NOT NULL DEFAULT 1 CHECK(descriptor_generation >= 1)`
+
+  yield* sql`CREATE TRIGGER plugin_runtime_descriptor_generation_exact_update
+    BEFORE UPDATE ON plugin_runtime_state
+    WHEN NEW.descriptor_generation < OLD.descriptor_generation
+      OR NEW.descriptor_generation > OLD.descriptor_generation + 1
+      OR (
+        (
+          NEW.provider_id <> OLD.provider_id
+          OR NEW.descriptor_schema_version <> OLD.descriptor_schema_version
+          OR NEW.descriptor_json <> OLD.descriptor_json
+          OR NEW.descriptor_digest <> OLD.descriptor_digest
+          OR NEW.accepted_at <> OLD.accepted_at
+        )
+        AND NEW.descriptor_generation <> OLD.descriptor_generation + 1
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'plugin runtime descriptor generation must advance exactly');
+    END`
+
   yield* sql`CREATE TABLE plugin_runtime_authority_heads (
     workspace_id TEXT NOT NULL,
     plugin_connection_id TEXT NOT NULL,
@@ -54,6 +76,7 @@ export const migration0016PluginRuntimeAuthority = Effect.gen(function*() {
     authority_schema_version INTEGER NOT NULL CHECK(authority_schema_version = 1),
     generation INTEGER NOT NULL CHECK(generation >= 1),
     connection_revision INTEGER NOT NULL CHECK(connection_revision >= 1),
+    descriptor_generation INTEGER NOT NULL CHECK(descriptor_generation >= 1),
     configuration_revision INTEGER,
     configuration_digest TEXT,
     descriptor_digest TEXT NOT NULL CHECK(

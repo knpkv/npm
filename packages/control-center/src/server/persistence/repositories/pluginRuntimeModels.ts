@@ -43,6 +43,7 @@ export const PluginRuntimeRecord = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,
   revision: Schema.Int.check(Schema.isGreaterThan(0)),
+  descriptorGeneration: Schema.Int.check(Schema.isGreaterThan(0)),
   descriptorSchemaVersion: Schema.Int.check(Schema.isGreaterThan(0)),
   descriptorJson: jsonText(65_536),
   descriptorDigest: ContentBlobDigest,

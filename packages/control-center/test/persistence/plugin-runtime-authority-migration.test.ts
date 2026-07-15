@@ -34,6 +34,7 @@ interface AuthorityHeadInput {
   readonly configurationRevision: number | null
   readonly connectionRevision: number
   readonly descriptorDigest: string
+  readonly descriptorGeneration: number
   readonly generation: number
   readonly providerId: string
   readonly schemaVersion: number
@@ -47,6 +48,7 @@ const defaultHead: AuthorityHeadInput = {
   configurationRevision: null,
   connectionRevision: 1,
   descriptorDigest: DESCRIPTOR_DIGEST,
+  descriptorGeneration: 1,
   generation: 1,
   providerId: PROVIDER_ID,
   schemaVersion: 1
@@ -70,6 +72,8 @@ const createParentSchema = (sql: SqlClient.SqlClient) =>
       plugin_connection_id TEXT NOT NULL,
       provider_id TEXT NOT NULL,
       revision INTEGER NOT NULL,
+      descriptor_schema_version INTEGER NOT NULL,
+      descriptor_json TEXT NOT NULL,
       descriptor_digest TEXT NOT NULL,
       accepted_at TEXT NOT NULL,
       health_state TEXT NOT NULL,
@@ -98,10 +102,11 @@ const seedCurrentSources = (sql: SqlClient.SqlClient) =>
     )`
     yield* sql`INSERT INTO plugin_runtime_state (
       workspace_id, plugin_connection_id, provider_id, revision,
-      descriptor_digest, accepted_at, health_state
+      descriptor_schema_version, descriptor_json, descriptor_digest,
+      accepted_at, health_state
     ) VALUES (
       ${WORKSPACE_ID}, ${CONNECTION_ID}, ${PROVIDER_ID}, 1,
-      ${DESCRIPTOR_DIGEST}, ${RUNTIME_ACCEPTED_AT}, 'healthy'
+      1, '{}', ${DESCRIPTOR_DIGEST}, ${RUNTIME_ACCEPTED_AT}, 'healthy'
     )`
   })
 
@@ -113,11 +118,12 @@ const insertHead = (
   return sql`INSERT INTO plugin_runtime_authority_heads (
     workspace_id, plugin_connection_id, provider_id, authority_schema_version,
     generation, connection_revision, configuration_revision, configuration_digest,
-    descriptor_digest, account_digest, authority_digest, activated_at
+    descriptor_generation, descriptor_digest, account_digest, authority_digest, activated_at
   ) VALUES (
     ${WORKSPACE_ID}, ${CONNECTION_ID}, ${input.providerId}, ${input.schemaVersion},
     ${input.generation}, ${input.connectionRevision}, ${input.configurationRevision},
-    ${input.configurationDigest}, ${input.descriptorDigest}, ${input.accountDigest},
+    ${input.configurationDigest}, ${input.descriptorGeneration},
+    ${input.descriptorDigest}, ${input.accountDigest},
     ${input.authorityDigest}, ${input.activatedAt}
   )`
 }
@@ -180,6 +186,7 @@ describe("plugin runtime authority migration", () => {
 
       const skippedInitialGeneration = yield* insertHead(sql, { generation: 2 }).pipe(Effect.result)
       const wrongConnectionRevision = yield* insertHead(sql, { connectionRevision: 2 }).pipe(Effect.result)
+      const wrongDescriptorGeneration = yield* insertHead(sql, { descriptorGeneration: 2 }).pipe(Effect.result)
       const wrongDescriptor = yield* insertHead(sql, { descriptorDigest: NEXT_DESCRIPTOR_DIGEST }).pipe(Effect.result)
       const malformedAuthority = yield* insertHead(sql, { authorityDigest: "not-a-digest" }).pipe(Effect.result)
       const malformedActivation = yield* insertHead(sql, { activatedAt: "z" }).pipe(Effect.result)
@@ -211,6 +218,7 @@ describe("plugin runtime authority migration", () => {
         const result of [
           skippedInitialGeneration,
           wrongConnectionRevision,
+          wrongDescriptorGeneration,
           wrongDescriptor,
           malformedAuthority,
           malformedActivation,
@@ -279,7 +287,8 @@ describe("plugin runtime authority migration", () => {
         authority_digest = ${THIRD_AUTHORITY_DIGEST}`
 
       yield* sql`UPDATE plugin_runtime_state
-        SET descriptor_digest = ${NEXT_DESCRIPTOR_DIGEST}`
+        SET descriptor_generation = descriptor_generation + 1,
+          descriptor_digest = ${NEXT_DESCRIPTOR_DIGEST}`
       const currentWhileDescriptorIsStale = yield* sql`SELECT *
         FROM current_plugin_runtime_authority_heads`
       assert.isEmpty(currentWhileDescriptorIsStale)
@@ -287,6 +296,7 @@ describe("plugin runtime authority migration", () => {
         SET generation = 4, authority_digest = ${FOURTH_AUTHORITY_DIGEST}`.pipe(Effect.result)
       yield* sql`UPDATE plugin_runtime_authority_heads SET
         generation = 4,
+        descriptor_generation = 2,
         descriptor_digest = ${NEXT_DESCRIPTOR_DIGEST},
         authority_digest = ${FOURTH_AUTHORITY_DIGEST}`
 
@@ -322,5 +332,30 @@ describe("plugin runtime authority migration", () => {
         { authority_digest: THIRD_AUTHORITY_DIGEST, generation: 3 },
         { authority_digest: FOURTH_AUTHORITY_DIGEST, generation: 4 }
       ])
+    })))
+
+  it.effect("keeps obsolete authority stale when descriptor bytes cycle back", () =>
+    withFixture(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* createParentSchema(sql)
+      yield* seedCurrentSources(sql)
+      yield* migration0016PluginRuntimeAuthority
+      yield* insertHead(sql)
+
+      const changedWithoutGeneration = yield* sql`UPDATE plugin_runtime_state
+        SET descriptor_digest = ${NEXT_DESCRIPTOR_DIGEST}`.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changedWithoutGeneration))
+
+      yield* sql`UPDATE plugin_runtime_state SET
+        descriptor_generation = 2,
+        descriptor_digest = ${NEXT_DESCRIPTOR_DIGEST},
+        accepted_at = ${RUNTIME_ACCEPTED_AT}`
+      assert.isEmpty(yield* sql`SELECT * FROM current_plugin_runtime_authority_heads`)
+
+      yield* sql`UPDATE plugin_runtime_state SET
+        descriptor_generation = 3,
+        descriptor_digest = ${DESCRIPTOR_DIGEST},
+        accepted_at = ${RUNTIME_ACCEPTED_AT}`
+      assert.isEmpty(yield* sql`SELECT * FROM current_plugin_runtime_authority_heads`)
     })))
 })

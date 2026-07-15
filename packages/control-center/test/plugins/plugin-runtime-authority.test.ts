@@ -127,12 +127,14 @@ const absentInput = (
   descriptorDigest: string,
   accountDigest = ACCOUNT_A,
   connectionRevision = 1,
-  activatedAt = T1
+  activatedAt = T1,
+  descriptorGeneration = 1
 ): PublishPluginRuntimeAuthority => ({
   scope: { workspaceId: WORKSPACE_ID, pluginConnectionId: CONNECTION_ID },
   expected: {
     providerId: "jira",
     connectionRevision,
+    descriptorGeneration,
     configuration: { _tag: "absent" },
     descriptorDigest: PluginRuntimeSourceDigest.make(descriptorDigest)
   },
@@ -148,6 +150,7 @@ describe("plugin runtime authority", () => {
         expected: {
           providerId: "jira",
           connectionRevision: 1,
+          descriptorGeneration: 1,
           configuration: { _tag: "absent" },
           descriptorDigest: PluginRuntimeSourceDigest.make("a".repeat(64))
         },
@@ -159,7 +162,7 @@ describe("plugin runtime authority", () => {
 
       assert.strictEqual(
         first,
-        "sha256:44e9457b817754142bcf0d2154d67570fb2f12fd972e05b093725f07b9541df4"
+        "sha256:74f5bfe2ed71e29b95b69996987bc7a58df761eb624b1b6322178fd2d922f5f2"
       )
       assert.strictEqual(repeated, first)
       assert.notStrictEqual(next, first)
@@ -279,6 +282,7 @@ describe("plugin runtime authority", () => {
         expected: {
           providerId: "jira",
           connectionRevision: 1,
+          descriptorGeneration: runtimeRecord.descriptorGeneration,
           configuration: {
             _tag: "present",
             revision: configuration.revision,
@@ -312,5 +316,91 @@ describe("plugin runtime authority", () => {
       ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(forged))
       if (Result.isFailure(forged)) assert.instanceOf(forged.failure, PersistedRecordError)
+    })))
+
+  it.effect("rejects an obsolete runtime when descriptor bytes cycle back", () =>
+    withAuthority(Effect.gen(function*() {
+      const authority = yield* PluginRuntimeAuthoritySource
+      const runtime = yield* PluginRuntimeRepository
+      const { runtimeRecord } = yield* setup
+      const original = absentInput(
+        runtimeRecord.descriptorDigest,
+        ACCOUNT_A,
+        1,
+        T1,
+        runtimeRecord.descriptorGeneration
+      )
+      const first = yield* authority.publish(original)
+
+      const changed = yield* runtime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CONNECTION_ID,
+        "jira",
+        descriptor(1),
+        runtimeRecord.revision,
+        T2
+      )
+      const cycled = yield* runtime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CONNECTION_ID,
+        "jira",
+        descriptor(),
+        changed.revision,
+        T0
+      )
+      assert.strictEqual(cycled.descriptorDigest, runtimeRecord.descriptorDigest)
+      assert.strictEqual(cycled.descriptorGeneration, 3)
+
+      const callbackInvoked = yield* Ref.make(false)
+      const obsolete = yield* authority.transactCurrent(
+        { scope: original.scope, runtimeAuthorityToken: first.runtimeAuthorityToken },
+        () => Ref.set(callbackInvoked, true)
+      ).pipe(Effect.result)
+      const stalePublication = yield* authority.publish(original).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(obsolete))
+      assert.isTrue(Result.isFailure(stalePublication))
+      assert.isFalse(yield* Ref.get(callbackInvoked))
+    })))
+
+  it.effect("revalidates authority after transactional intent and rolls self-invalidation back", () =>
+    withAuthority(Effect.gen(function*() {
+      const authority = yield* PluginRuntimeAuthoritySource
+      const database = yield* Database
+      const { runtimeRecord } = yield* setup
+      const input = absentInput(
+        runtimeRecord.descriptorDigest,
+        ACCOUNT_A,
+        1,
+        T1,
+        runtimeRecord.descriptorGeneration
+      )
+      const current = yield* authority.publish(input)
+      yield* database.sql`CREATE TABLE runtime_authority_transaction_sentinel (
+        value TEXT PRIMARY KEY
+      )`
+
+      yield* authority.transactCurrent(
+        { scope: input.scope, runtimeAuthorityToken: current.runtimeAuthorityToken },
+        () => database.sql`INSERT INTO runtime_authority_transaction_sentinel (value) VALUES ('valid')`
+      )
+      const invalidated = yield* authority.transactCurrent(
+        { scope: input.scope, runtimeAuthorityToken: current.runtimeAuthorityToken },
+        () =>
+          database.sql`UPDATE plugin_connections SET
+            revision = revision + 1, updated_at = ${T2}`.pipe(
+            Effect.andThen(
+              database.sql`INSERT INTO runtime_authority_transaction_sentinel (value) VALUES ('rolled-back')`
+            )
+          )
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(invalidated))
+      const connectionRows = yield* database.sql<{ readonly revision: number }>`SELECT revision
+        FROM plugin_connections`
+      const sentinelRows = yield* database.sql<{ readonly value: string }>`SELECT value
+        FROM runtime_authority_transaction_sentinel ORDER BY value`
+      assert.deepStrictEqual(connectionRows, [{ revision: 1 }])
+      assert.deepStrictEqual(sentinelRows, [{ value: "valid" }])
     })))
 })

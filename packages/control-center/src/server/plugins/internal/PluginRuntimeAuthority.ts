@@ -39,6 +39,7 @@ export type PluginRuntimeAuthorityConfiguration = typeof PluginRuntimeAuthorityC
 export const PluginRuntimeAuthorityExpectedSource = Schema.Struct({
   providerId: ProviderId,
   connectionRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  descriptorGeneration: Schema.Int.check(Schema.isGreaterThan(0)),
   configuration: PluginRuntimeAuthorityConfiguration,
   descriptorDigest: PluginRuntimeSourceDigest
 })
