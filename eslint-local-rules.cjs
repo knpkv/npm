@@ -101,24 +101,27 @@ const isReviewedEnvironmentProjection = (context, expression, call) => {
   }
   const parameter = factory.params.find((candidate) => candidate.type === "Identifier" && candidate.name === "options")
   const binding = resolvedVariable(context, expression.object)
+  const environmentReferences = binding?.references.filter((reference) => {
+    const member = reference.identifier.parent
+    return (
+      member?.type === "MemberExpression" &&
+      member.object === reference.identifier &&
+      staticPropertyName(member.property) === "environment"
+    )
+  })
   return (
     parameter !== undefined &&
     binding?.identifiers.includes(parameter) === true &&
-    binding.references.every(isReadOnlyMemberReference)
+    binding.references.every(isReadOnlyMemberReference) &&
+    environmentReferences?.length === 1 &&
+    environmentReferences[0]?.identifier.parent === expression
   )
 }
 
 const hasIsolatedChildEnvironment = (context, options, call) => {
   if (options?.type !== "ObjectExpression") return false
   if (options.properties.some((property) => property.type === "SpreadElement")) return false
-  if (
-    options.properties.some(
-      (property) =>
-        property.type === "Property" &&
-        property.computed &&
-        !(property.key.type === "Literal" && typeof property.key.value === "string")
-    )
-  ) {
+  if (options.properties.some((property) => property.type === "Property" && property.computed)) {
     return false
   }
   const environment = options.properties.filter(
@@ -590,6 +593,7 @@ module.exports = {
         "Program:exit"() {
           for (const binding of approvedBindings) {
             for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
               const call = directChildProcessMakeCall(reference.identifier)
               if (call === undefined) {
                 report(reference.identifier)

@@ -140,6 +140,7 @@ const aiClaudeEslint = new ESLint({
 await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    export type { ChildProcess }
     const makeCommand = (options) =>
       ChildProcess.make("codex", ["exec"], {
         env: options.environment,
@@ -149,6 +150,55 @@ await assertRuleDiagnostics({
   eslintInstance: aiCodexEslint,
   expected: 0,
   filePath: "src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      options.environment.SECRET = "leak"
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      Object.assign(options.environment, unsafeEnvironment)
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      const environment = options.environment
+      Object.assign(environment, unsafeEnvironment)
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
