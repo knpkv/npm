@@ -77,7 +77,7 @@ interface RootHead {
   readonly updatedAt: typeof UtcTimestamp.Type
 }
 
-const makeGovernedActionWriter = Effect.gen(function*() {
+const makeGovernedActionTransactionWriter = Effect.gen(function*() {
   const database = yield* Database
   const cryptoService = yield* Crypto.Crypto
   const sql = database.sql
@@ -320,7 +320,7 @@ const makeGovernedActionWriter = Effect.gen(function*() {
     const causeJson = yield* encodeJson("governed-action.encode-cause", CauseJson, input.cause)
     const occurredAt = yield* encodeTimestamp("governed-action.encode-occurred-at", input.occurredAt)
     const preparedCompanion = yield* prepareCompanion(cryptoService)(input.companion)
-    return yield* database.transaction(Effect.gen(function*() {
+    return yield* Effect.gen(function*() {
       // Exact replay must remain the first SQL statement and precede head validation.
       const replayRaw = yield* sql`SELECT
         transition_record.transition_id AS transitionId,
@@ -546,7 +546,28 @@ const makeGovernedActionWriter = Effect.gen(function*() {
       if (changed !== 1) return yield* inputError("stale-head")
       const result: GovernedActionCommitResult = { _tag: "committed", transition }
       return result
-    })).pipe(mapPersistenceOperation("governed-action.commit"))
+    })
+  })
+
+  return { commit }
+})
+
+/**
+ * Private governed-action writer that participates in the caller's current transaction.
+ *
+ * It never opens a transaction. Execution coordination uses this seam to commit a lifecycle
+ * transition and its lease atomically; ordinary repository callers use `makeGovernedActionWrite`.
+ */
+export const makeGovernedActionTransactionWrite = makeGovernedActionTransactionWriter
+
+const makeGovernedActionWriter = Effect.gen(function*() {
+  const database = yield* Database
+  const writer = yield* makeGovernedActionTransactionWrite
+
+  const commit = Effect.fn("GovernedActionWriter.commit")(function*(input: GovernedActionCommitInput) {
+    return yield* database.transaction(writer.commit(input)).pipe(
+      mapPersistenceOperation("governed-action.commit")
+    )
   })
 
   return { commit }

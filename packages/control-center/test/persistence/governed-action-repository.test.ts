@@ -33,7 +33,10 @@ import {
   GovernedActionCommitInput,
   GovernedActionInputError
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
-import { makeGovernedActionWrite } from "../../src/server/persistence/repositories/governed-action/write.js"
+import {
+  makeGovernedActionTransactionWrite,
+  makeGovernedActionWrite
+} from "../../src/server/persistence/repositories/governed-action/write.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
@@ -402,6 +405,35 @@ const assertInputError = (result: Result.Result<unknown, unknown>, reason: Gover
 }
 
 describe("governed action writer", () => {
+  it.effect("lets the caller roll back a transaction-local lifecycle commit", () =>
+    withWriter(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const database = yield* Database
+      const writer = yield* makeGovernedActionTransactionWrite
+      const proposal = makeProposalInput(yield* makeEnvelope(ACTION_ID))
+
+      const result = yield* database.transaction(
+        writer.commit(proposal).pipe(
+          Effect.andThen(Effect.gen(function*() {
+            assert.deepStrictEqual(yield* readLedgerCounts(), {
+              actions: 1,
+              audits: 1,
+              transitions: 1
+            })
+            return yield* Effect.fail("rollback")
+          }))
+        )
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure, "rollback")
+      assert.deepStrictEqual(yield* readLedgerCounts(), {
+        actions: 0,
+        audits: 0,
+        transitions: 0
+      })
+    })))
+
   it.effect("commits a proposal once and replays the exact command without duplicate ledger rows", () =>
     withWriter(Effect.gen(function*() {
       yield* seedAuthorityRoots()
