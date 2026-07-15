@@ -118,6 +118,80 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { createRequire as makeRequire } from "module"
+    const require = makeRequire(import.meta.url)
+    const ChildProcess = require("effect/unstable/process/ChildProcess")
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/commonjs-import-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    export { createRequire } from "node:module"
+    export * from "module"
+  `,
+  expected: 2,
+  filePath: "packages/ai-codex/src/commonjs-export-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const nodeModule = import("node:module")
+    const legacyModule = import("module")
+  `,
+  expected: 2,
+  filePath: "packages/ai-codex/src/commonjs-dynamic-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { builtinModules as nodeBuiltins } from "node:module"
+    import { builtinModules as legacyBuiltins } from "module"
+    export { builtinModules } from "node:module"
+    import type { Module as NodeModule } from "node:module"
+    export type { Module as LegacyModule } from "module"
+    export type * from "node:module"
+    type ModuleNamespace = typeof import("node:module")
+  `,
+  expected: 0,
+  filePath: "packages/ai-codex/src/commonjs-safe.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const Process = await import("node:process")
+    const Module = Process.getBuiltinModule("module")
+    const require = Module.createRequire(import.meta.url)
+    const ChildProcess = require("effect/unstable/process/ChildProcess")
+    const runtime = process
+    runtime.getBuiltinModule("module")
+  `,
+  expected: 2,
+  filePath: "packages/ai-codex/src/raw-process-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import type { Process } from "node:process"
+    export type { Process as LegacyProcess } from "process"
+    export type * from "node:process"
+    const process = { getBuiltinModule: () => undefined }
+    process.getBuiltinModule()
+    type ProcessNamespace = typeof import("node:process")
+  `,
+  expected: 0,
+  filePath: "packages/ai-codex/src/raw-process-safe.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     const makeCommand = (options) =>
       ChildProcess.make("codex", ["exec"], {

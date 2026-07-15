@@ -142,6 +142,8 @@ const hasIsolatedChildEnvironment = (context, options, call) => {
 const CHILD_PROCESS_MODULE = "effect/unstable/process/ChildProcess"
 const CHILD_PROCESS_BARREL = "effect/unstable/process"
 const COMMONJS_LOADER_MODULES = new Set(["module", "node:module"])
+const COMMONJS_LOADER_EXPORTS = new Set(["Module", "createRequire"])
+const PROCESS_MODULES = new Set(["node:process", "process"])
 const AGENT_COMMAND_SEAMS = new Map([
   [path.resolve(__dirname, "packages/ai-claude/src/runner.ts"), { importKind: "named", localName: "ChildProcess" }],
   [
@@ -176,6 +178,16 @@ const isSensitiveChildProcessExport = (declaration) => {
   )
 }
 
+const isSensitiveCommonJsExport = (declaration) => {
+  if (!COMMONJS_LOADER_MODULES.has(declaration.source?.value) || isTypeOnlyExport(declaration)) return false
+  return declaration.specifiers.some(
+    (specifier) =>
+      !isTypeOnlyExport(declaration, specifier) &&
+      (specifier.type === "ExportNamespaceSpecifier" ||
+        COMMONJS_LOADER_EXPORTS.has(staticPropertyName(specifier.local)))
+  )
+}
+
 const isSensitiveChildProcessSpecifier = (declaration, specifier) => {
   if (declaration.importKind === "type" || specifier.importKind === "type") return false
   if (declaration.source.value === CHILD_PROCESS_MODULE) return true
@@ -184,6 +196,12 @@ const isSensitiveChildProcessSpecifier = (declaration, specifier) => {
     specifier.type === "ImportNamespaceSpecifier" ||
     (specifier.type === "ImportSpecifier" && staticPropertyName(specifier.imported) === "ChildProcess")
   )
+}
+
+const isSensitiveCommonJsSpecifier = (declaration, specifier) => {
+  if (declaration.importKind === "type" || specifier.importKind === "type") return false
+  if (specifier.type === "ImportDefaultSpecifier" || specifier.type === "ImportNamespaceSpecifier") return true
+  return specifier.type === "ImportSpecifier" && COMMONJS_LOADER_EXPORTS.has(staticPropertyName(specifier.imported))
 }
 
 const isApprovedChildProcessSpecifier = (declaration, specifier, seam) => {
@@ -531,6 +549,10 @@ module.exports = {
       },
       schema: [],
       messages: {
+        commonJsLoaderForbidden:
+          "Do not load CommonJS module constructors in agent source; use static audited imports instead.",
+        rawProcessForbidden:
+          "Do not access the raw Node process in agent source; use Effect runtime services and reviewed configuration.",
         unsafeEnvironment:
           "Pass a direct options object with env: options.environment and extendEnv: false; do not spread or inherit child environment options."
       }
@@ -538,13 +560,21 @@ module.exports = {
     create(context) {
       const approvedBindings = []
       const seam = commandSeamFor(context)
-      const report = (node) => context.report({ node, messageId: "unsafeEnvironment" })
+      const report = (node, messageId = "unsafeEnvironment") => context.report({ node, messageId })
 
       return {
         ImportDeclaration(node) {
+          if (PROCESS_MODULES.has(node.source.value)) {
+            for (const specifier of node.specifiers) {
+              if (node.importKind !== "type" && specifier.importKind !== "type") {
+                report(specifier, "rawProcessForbidden")
+              }
+            }
+            return
+          }
           if (COMMONJS_LOADER_MODULES.has(node.source.value)) {
             for (const specifier of node.specifiers) {
-              if (node.importKind !== "type" && specifier.importKind !== "type") report(specifier)
+              if (isSensitiveCommonJsSpecifier(node, specifier)) report(specifier, "commonJsLoaderForbidden")
             }
             return
           }
@@ -561,36 +591,28 @@ module.exports = {
           }
         },
         ExportAllDeclaration(node) {
-          if (
-            node.exportKind !== "type" &&
-            (node.source.value === CHILD_PROCESS_MODULE ||
-              node.source.value === CHILD_PROCESS_BARREL ||
-              COMMONJS_LOADER_MODULES.has(node.source.value))
-          ) {
-            report(node)
-          }
+          if (node.exportKind === "type") return
+          if (PROCESS_MODULES.has(node.source.value)) return report(node, "rawProcessForbidden")
+          if (COMMONJS_LOADER_MODULES.has(node.source.value)) return report(node, "commonJsLoaderForbidden")
+          if (node.source.value === CHILD_PROCESS_MODULE || node.source.value === CHILD_PROCESS_BARREL) report(node)
         },
         ExportNamedDeclaration(node) {
-          if (
-            isSensitiveChildProcessExport(node) ||
-            (COMMONJS_LOADER_MODULES.has(node.source?.value) &&
-              node.specifiers.some((specifier) => !isTypeOnlyExport(node, specifier)))
-          ) {
-            report(node)
+          if (PROCESS_MODULES.has(node.source?.value)) {
+            if (node.specifiers.some((specifier) => !isTypeOnlyExport(node, specifier))) {
+              return report(node, "rawProcessForbidden")
+            }
           }
+          if (isSensitiveCommonJsExport(node)) return report(node, "commonJsLoaderForbidden")
+          if (isSensitiveChildProcessExport(node)) report(node)
         },
         ImportExpression(node) {
           const source = staticImportExpressionSource(node.source)
-          if (
-            source === undefined ||
-            source === CHILD_PROCESS_MODULE ||
-            source === CHILD_PROCESS_BARREL ||
-            COMMONJS_LOADER_MODULES.has(source)
-          ) {
-            report(node)
-          }
+          if (source === undefined) return report(node)
+          if (PROCESS_MODULES.has(source)) return report(node, "rawProcessForbidden")
+          if (COMMONJS_LOADER_MODULES.has(source)) return report(node, "commonJsLoaderForbidden")
+          if (source === CHILD_PROCESS_MODULE || source === CHILD_PROCESS_BARREL) report(node)
         },
-        "Program:exit"() {
+        "Program:exit"(node) {
           for (const binding of approvedBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
@@ -600,6 +622,11 @@ module.exports = {
                 continue
               }
               if (!hasIsolatedChildEnvironment(context, call.arguments.at(-1), call)) report(call)
+            }
+          }
+          for (const reference of context.sourceCode.getScope(node).through) {
+            if (reference.identifier.name === "process" && (!reference.isTypeReference || reference.isValueReference)) {
+              report(reference.identifier, "rawProcessForbidden")
             }
           }
         }
