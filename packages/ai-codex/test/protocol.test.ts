@@ -62,6 +62,87 @@ describe("Codex JSONL protocol", () => {
       expect(Exit.isFailure(exit)).toBe(true)
     }))
 
+  it.effect("rejects an agent message without a successful terminal event", () =>
+    Effect.gen(function*() {
+      const exit = yield* decodeTranscript(JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "Partial" }
+      })).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }))
+
+  it.effect("rejects events emitted after successful turn completion", () =>
+    Effect.gen(function*() {
+      const exit = yield* decodeTranscript([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Final" }
+        }),
+        JSON.stringify({ type: "turn.completed" }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Too late" }
+        })
+      ].join("\n")).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }))
+
+  it.effect("rejects impossible output token partitions", () =>
+    Effect.gen(function*() {
+      const exit = yield* decodeTranscript([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Ready" }
+        }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: { output_tokens: 12, reasoning_output_tokens: 13 }
+        })
+      ].join("\n")).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }))
+
+  it.effect("rejects impossible cached input token partitions", () =>
+    Effect.gen(function*() {
+      const exit = yield* decodeTranscript([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Ready" }
+        }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: { cached_input_tokens: 8, input_tokens: 7 }
+        })
+      ].join("\n")).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+    }))
+
+  it.effect("accepts zero and fully reasoning token partitions", () =>
+    Effect.gen(function*() {
+      const turn = yield* decodeTranscript([
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "Ready" }
+        }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: {
+            cached_input_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 7,
+            reasoning_output_tokens: 7
+          }
+        })
+      ].join("\n"))
+
+      expect(turn.usage.inputTokens).toEqual({ cacheRead: 0, cacheWrite: undefined, total: 0, uncached: 0 })
+      expect(turn.usage.outputTokens).toEqual({ reasoning: 7, text: 0, total: 7 })
+    }))
+
   it.effect("rejects malformed events through the typed error channel", () =>
     Effect.gen(function*() {
       const exit = yield* decodeTranscript("not-json").pipe(Effect.exit)

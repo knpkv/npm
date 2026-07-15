@@ -2,11 +2,13 @@ import { Effect, Schema } from "effect"
 import type * as Response from "effect/unstable/ai/Response"
 import { CodexFailureCause, CodexTransportError, sanitizeDiagnostic } from "./errors.js"
 
+const TokenCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
 const CodexUsage = Schema.Struct({
-  cached_input_tokens: Schema.optional(Schema.Number),
-  input_tokens: Schema.optional(Schema.Number),
-  output_tokens: Schema.optional(Schema.Number),
-  reasoning_output_tokens: Schema.optional(Schema.Number)
+  cached_input_tokens: Schema.optional(TokenCount),
+  input_tokens: Schema.optional(TokenCount),
+  output_tokens: Schema.optional(TokenCount),
+  reasoning_output_tokens: Schema.optional(TokenCount)
 })
 
 const CodexItem = Schema.Struct({
@@ -52,12 +54,18 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
     ))
 
   let threadId: string | undefined
-  let usage: CodexEvent["usage"]
+  let completed = false
   let message: string | undefined
+  let usage: CodexEvent["usage"]
 
   for (const event of events) {
+    if (completed) {
+      return yield* protocolError(
+        "Codex emitted an event after turn completion",
+        new CodexFailureCause({ reason: "event-after-turn-completed" })
+      )
+    }
     if (event.type === "thread.started") threadId = event.thread_id
-    if (event.type === "turn.completed") usage = event.usage
     if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text !== undefined) {
       message = event.item.text
     }
@@ -65,12 +73,42 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
       const diagnostic = event.error?.message ?? event.message ?? "Codex turn failed"
       return yield* protocolError(diagnostic, new CodexFailureCause({ reason: "failed-turn" }))
     }
+    if (event.type === "turn.completed") {
+      completed = true
+      usage = event.usage
+    }
+  }
+
+  if (!completed) {
+    return yield* protocolError(
+      "Codex stream ended before turn completion",
+      new CodexFailureCause({ reason: "missing-turn-completed" })
+    )
   }
 
   if (message === undefined) {
     return yield* protocolError(
       "Codex completed without an agent message",
       new CodexFailureCause({ reason: "missing-agent-message" })
+    )
+  }
+
+  if (
+    usage?.cached_input_tokens !== undefined &&
+    (usage.input_tokens === undefined || usage.cached_input_tokens > usage.input_tokens)
+  ) {
+    return yield* protocolError(
+      "Codex reported cached input tokens greater than total input tokens",
+      new CodexFailureCause({ reason: "invalid-input-usage" })
+    )
+  }
+  if (
+    usage?.reasoning_output_tokens !== undefined &&
+    (usage.output_tokens === undefined || usage.reasoning_output_tokens > usage.output_tokens)
+  ) {
+    return yield* protocolError(
+      "Codex reported reasoning output tokens greater than total output tokens",
+      new CodexFailureCause({ reason: "invalid-output-usage" })
     )
   }
 
@@ -84,13 +122,13 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
         total: usage?.input_tokens,
         uncached: usage?.input_tokens === undefined
           ? undefined
-          : Math.max(0, usage.input_tokens - (usage.cached_input_tokens ?? 0))
+          : usage.input_tokens - (usage.cached_input_tokens ?? 0)
       },
       outputTokens: {
         reasoning: usage?.reasoning_output_tokens,
         text: usage?.output_tokens === undefined
           ? undefined
-          : Math.max(0, usage.output_tokens - (usage.reasoning_output_tokens ?? 0)),
+          : usage.output_tokens - (usage.reasoning_output_tokens ?? 0),
         total: usage?.output_tokens
       }
     }
