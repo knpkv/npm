@@ -44,9 +44,13 @@ import type { AuthorizedPluginExecutorV1 } from "../../src/server/plugins/Plugin
 const WORKSPACE_ID = "01890f00-0000-7000-8000-000000000501"
 const ACTION_ID = "01890f00-0000-7000-8000-000000000502"
 const CONNECTION_ID = "01890f00-0000-7000-8000-000000000503"
+const SECONDARY_WORKSPACE_ID = "01890f00-0000-7000-8000-000000000504"
+const SECONDARY_CONNECTION_ID = "01890f00-0000-7000-8000-000000000505"
 const OBSERVED_AT = "2026-07-15T10:00:00.000Z"
 const workspaceId = Schema.decodeUnknownSync(WorkspaceId)(WORKSPACE_ID)
 const connectionId = Schema.decodeUnknownSync(PluginConnectionId)(CONNECTION_ID)
+const secondaryWorkspaceId = Schema.decodeUnknownSync(WorkspaceId)(SECONDARY_WORKSPACE_ID)
+const secondaryConnectionId = Schema.decodeUnknownSync(PluginConnectionId)(SECONDARY_CONNECTION_ID)
 const runtimeAuthorityToken = PluginRuntimeAuthorityToken.make(`sha256:${"a".repeat(64)}`)
 const rotatedRuntimeAuthorityToken = PluginRuntimeAuthorityToken.make(`sha256:${"b".repeat(64)}`)
 const preparationToken = Schema.decodeUnknownSync(GovernedActionPreparationToken)("1".repeat(64))
@@ -139,6 +143,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
 }) {
   const events = yield* Ref.make<ReadonlyArray<string>>([])
   const unknowns = yield* Ref.make<ReadonlyArray<GovernedActionUnknownOutcome>>([])
+  const beginInputs = yield* Ref.make<ReadonlyArray<Parameters<GovernedActionExecutionStoreV1["begin"]>[0]>>([])
   const beginEntered = yield* Deferred.make<void>()
   const releaseBegin = yield* Deferred.make<void>()
   const executeEntered = yield* Deferred.make<void>()
@@ -149,8 +154,9 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
 
   const store: GovernedActionExecutionStoreV1 = {
     inspect: () => record("inspect").pipe(Effect.as(plan)),
-    begin: () =>
-      record("begin").pipe(
+    begin: (input) =>
+      Ref.update(beginInputs, (current) => [...current, input]).pipe(
+        Effect.andThen(record("begin")),
         Effect.andThen(Deferred.succeed(beginEntered, undefined)),
         Effect.andThen(options?.pauseBegin === true ? Deferred.await(releaseBegin) : Effect.void),
         Effect.as(begin)
@@ -202,6 +208,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   return {
     events,
     unknowns,
+    beginInputs,
     beginEntered,
     releaseBegin,
     executeEntered,
@@ -228,6 +235,44 @@ describe("governed action execution engine", () => {
         "execute",
         "record-dispatch"
       ])
+    }))
+
+  it.effect("passes the inspected runtime scope to the atomic begin boundary", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const secondaryPlan: GovernedActionExecutionPlan = {
+        ...dispatchPlan,
+        scope: {
+          workspaceId: secondaryWorkspaceId,
+          pluginConnectionId: secondaryConnectionId
+        }
+      }
+      const harness = yield* makeHarness({
+        plan: secondaryPlan,
+        begin: { ...permitted, scope: secondaryPlan.scope }
+      })
+
+      assert.deepStrictEqual(yield* run(harness.layer), { _tag: "advanced", state: "succeeded" })
+      const [beginInput] = yield* Ref.get(harness.beginInputs)
+      assert.deepStrictEqual(beginInput?.scope, secondaryPlan.scope)
+    }))
+
+  it.effect("rejects a permit bound to a different runtime scope before dispatch", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const secondaryPlan: GovernedActionExecutionPlan = {
+        ...dispatchPlan,
+        scope: {
+          workspaceId: secondaryWorkspaceId,
+          pluginConnectionId: secondaryConnectionId
+        }
+      }
+      const mismatch = yield* makeHarness({ plan: secondaryPlan })
+
+      const exit = yield* run(mismatch.layer).pipe(Effect.exit)
+
+      assert.isTrue(Exit.isFailure(exit))
+      assert.notInclude(yield* Ref.get(mismatch.events), "execute")
     }))
 
   it.effect("does not call the provider when preflight blocks or begin grants no permit", () =>

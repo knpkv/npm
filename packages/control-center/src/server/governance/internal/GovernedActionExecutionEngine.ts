@@ -128,10 +128,15 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
         const begun = yield* store.begin({
           preparationToken: preparation.preparationToken,
           preflight,
-          runtimeAuthorityToken: lease.runtimeAuthorityToken
+          runtimeAuthorityToken: lease.runtimeAuthorityToken,
+          scope: preparation.scope
         })
         if (begun._tag === "inactive") return begun satisfies GovernedActionExecutionResult
-        if (begun.runtimeAuthorityToken !== lease.runtimeAuthorityToken) {
+        if (
+          begun.runtimeAuthorityToken !== lease.runtimeAuthorityToken ||
+          begun.scope.workspaceId !== preparation.scope.workspaceId ||
+          begun.scope.pluginConnectionId !== preparation.scope.pluginConnectionId
+        ) {
           return yield* new GovernedActionExecutionInputError()
         }
         const deadlineMillis = DateTime.toEpochMillis(begun.dispatchDeadline)
