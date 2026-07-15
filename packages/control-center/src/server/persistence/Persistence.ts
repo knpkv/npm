@@ -41,6 +41,9 @@ import {
   PluginRuntimeRepository,
   type PluginRuntimeRepositoryService,
   QuarantineRepository,
+  type ReadinessInputError,
+  ReadinessRepository,
+  type ReadinessRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
   WorkspaceRepository,
@@ -56,6 +59,7 @@ export type PersistenceOperationFailure =
   | PersistedRecordError
   | PersistenceOperationError
   | QuarantineWriteError
+  | ReadinessInputError
   | RecordAlreadyExistsError
   | RecordNotFoundError
   | ReproducibleContentUnavailableError
@@ -76,6 +80,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "PersistedRecordError",
   "PersistenceOperationError",
   "QuarantineWriteError",
+  "ReadinessInputError",
   "RecordAlreadyExistsError",
   "RecordNotFoundError",
   "ReproducibleContentUnavailableError",
@@ -126,6 +131,7 @@ const makePersistence = Effect.gen(function*() {
   const pluginConnections = yield* PluginConnectionRepository
   const pluginConfigurations = yield* PluginConfigurationRepository
   const pluginRuntime = yield* PluginRuntimeRepository
+  const readiness = yield* ReadinessRepository
   const releases = yield* ReleaseRepository
   const workspaces = yield* WorkspaceRepository
 
@@ -229,6 +235,26 @@ const makePersistence = Effect.gen(function*() {
       recordHealth: (...args: Parameters<PluginRuntimeRepositoryService["recordHealth"]>) =>
         publicOperation("plugin-runtime.record-health", pluginRuntime.recordHealth(...args))
     },
+    readiness: {
+      claimInvalidation: (...args: Parameters<ReadinessRepositoryService["claimInvalidation"]>) =>
+        publicOperation("readiness.claim-invalidation", readiness.claimInvalidation(...args)),
+      commitEnvironment: (...args: Parameters<ReadinessRepositoryService["commitEnvironment"]>) =>
+        publicOperation("readiness.commit-environment", readiness.commitEnvironment(...args)),
+      commitRelease: (...args: Parameters<ReadinessRepositoryService["commitRelease"]>) =>
+        publicOperation("readiness.commit-release", readiness.commitRelease(...args)),
+      enqueueAffected: (...args: Parameters<ReadinessRepositoryService["enqueueAffected"]>) =>
+        publicOperation("readiness.enqueue-affected", readiness.enqueueAffected(...args)),
+      enqueueDue: (...args: Parameters<ReadinessRepositoryService["enqueueDue"]>) =>
+        publicOperation("readiness.enqueue-due", readiness.enqueueDue(...args)),
+      enqueueInvalidation: (...args: Parameters<ReadinessRepositoryService["enqueueInvalidation"]>) =>
+        publicOperation("readiness.enqueue-invalidation", readiness.enqueueInvalidation(...args)),
+      readCurrent: (...args: Parameters<ReadinessRepositoryService["readCurrent"]>) =>
+        publicOperation("readiness.read-current", readiness.readCurrent(...args)),
+      readHistory: (...args: Parameters<ReadinessRepositoryService["readHistory"]>) =>
+        publicOperation("readiness.read-history", readiness.readHistory(...args)),
+      registerRule: (...args: Parameters<ReadinessRepositoryService["registerRule"]>) =>
+        publicOperation("readiness.register-rule", readiness.registerRule(...args))
+    },
     releases: {
       append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>
         publicOperation("release.append", releases.append(...args)),
@@ -282,6 +308,7 @@ export const persistenceLayerFromDatabase = (
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
         const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
         const pluginRuntime = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
+        const readiness = ReadinessRepository.layer.pipe(Layer.provide(foundation))
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
@@ -298,6 +325,7 @@ export const persistenceLayerFromDatabase = (
           pluginConnections,
           pluginConfigurations,
           pluginRuntime,
+          readiness,
           release,
           content,
           workspaces

@@ -1,4 +1,8 @@
-import type { ReleaseReadinessAssessment, ReleaseReadinessRollupInput } from "./model.js"
+import type {
+  EnvironmentReadinessAssessment,
+  ReleaseReadinessAssessment,
+  ReleaseReadinessRollupInput
+} from "./model.js"
 import {
   compareReadinessText,
   deriveReleaseReadinessFindings,
@@ -8,6 +12,25 @@ import {
   deriveReleaseReadinessVerdict,
   sortedReadinessUnique
 } from "./policy.js"
+
+/** Exact compact projection retained when an environment is rolled into a release. */
+export const summarizeEnvironmentReadiness = (
+  assessment: EnvironmentReadinessAssessment
+): ReleaseReadinessAssessment["environments"][number] => ({
+  assessmentId: assessment.assessmentId,
+  environmentId: assessment.candidate.scope.environmentId,
+  candidateDigest: assessment.candidate.digest,
+  inputComplete: assessment.inputComplete,
+  facts: assessment.facts,
+  nextEvaluationAt: assessment.nextEvaluationAt,
+  verdict: assessment.verdict,
+  stages: assessment.stages,
+  blockers: assessment.blockers,
+  warnings: assessment.warnings,
+  gaps: assessment.gaps,
+  sourceFreshness: assessment.sourceFreshness,
+  evidenceIds: assessment.evidenceIds
+})
 
 /** Pure deterministic roll-up of current target-environment assessments. */
 export const rollUpReleaseReadiness = (
@@ -29,36 +52,8 @@ export const rollUpReleaseReadiness = (
       ? assessment
       : earliest, input.environments[0])
   const environmentSummaries: ReleaseReadinessAssessment["environments"] = [
-    {
-      assessmentId: first.assessmentId,
-      environmentId: first.candidate.scope.environmentId,
-      candidateDigest: first.candidate.digest,
-      inputComplete: first.inputComplete,
-      facts: first.facts,
-      nextEvaluationAt: first.nextEvaluationAt,
-      verdict: first.verdict,
-      stages: first.stages,
-      blockers: first.blockers,
-      warnings: first.warnings,
-      gaps: first.gaps,
-      sourceFreshness: first.sourceFreshness,
-      evidenceIds: first.evidenceIds
-    },
-    ...environments.filter((assessment) => assessment !== first).map((assessment) => ({
-      assessmentId: assessment.assessmentId,
-      environmentId: assessment.candidate.scope.environmentId,
-      candidateDigest: assessment.candidate.digest,
-      inputComplete: assessment.inputComplete,
-      facts: assessment.facts,
-      nextEvaluationAt: assessment.nextEvaluationAt,
-      verdict: assessment.verdict,
-      stages: assessment.stages,
-      blockers: assessment.blockers,
-      warnings: assessment.warnings,
-      gaps: assessment.gaps,
-      sourceFreshness: assessment.sourceFreshness,
-      evidenceIds: assessment.evidenceIds
-    }))
+    summarizeEnvironmentReadiness(first),
+    ...environments.filter((assessment) => assessment !== first).map(summarizeEnvironmentReadiness)
   ]
   const findings = deriveReleaseReadinessFindings(environmentSummaries)
 

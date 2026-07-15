@@ -95,6 +95,23 @@ const insertAssessment = Effect.fn("ReadinessMigrationTest.insertAssessment")(fu
   )`
 })
 
+const insertHeadHistory = Effect.fn("ReadinessMigrationTest.insertHeadHistory")(function*(input: {
+  readonly assessmentId: string
+  readonly committedAt: string
+  readonly environmentId?: string
+  readonly headRevision: number
+  readonly scopeKind: "environment" | "release"
+}) {
+  const database = yield* Database
+  yield* database.sql`INSERT INTO readiness_head_history (
+    workspace_id, scope_kind, release_id, environment_key,
+    head_revision, assessment_id, committed_at
+  ) VALUES (
+    ${workspaceId}, ${input.scopeKind}, ${releaseId}, ${input.environmentId ?? ""},
+    ${input.headRevision}, ${input.assessmentId}, ${input.committedAt}
+  )`
+})
+
 describe("readiness migration invariants", () => {
   it.effect("retains immutable audit history and permits only exact head advancement", () =>
     Effect.gen(function*() {
@@ -136,6 +153,13 @@ describe("readiness migration invariants", () => {
         yield* sql`INSERT INTO readiness_assessment_sources (
           workspace_id, assessment_id, plugin_connection_id
         ) VALUES (${workspaceId}, ${firstAssessmentId}, ${pluginConnectionId})`
+        yield* insertHeadHistory({
+          assessmentId: firstAssessmentId,
+          committedAt: recordedAt,
+          environmentId,
+          headRevision: 1,
+          scopeKind: "environment"
+        })
         yield* sql`INSERT INTO readiness_environment_heads (
           workspace_id, release_id, environment_id, head_revision, assessment_id,
           candidate_digest, rule_id, rule_version, rule_digest, derivation_version,
@@ -180,6 +204,13 @@ describe("readiness migration invariants", () => {
             AND environment_id = ${environmentId}`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(skippedRevision))
 
+        yield* insertHeadHistory({
+          assessmentId: secondAssessmentId,
+          committedAt: "2026-07-15T10:05:00.000Z",
+          environmentId,
+          headRevision: 2,
+          scopeKind: "environment"
+        })
         yield* sql`UPDATE readiness_environment_heads
           SET head_revision = 2, assessment_id = ${secondAssessmentId},
             candidate_digest = ${secondCandidateDigest}, updated_at = '2026-07-15T10:05:00.000Z'
@@ -240,6 +271,13 @@ describe("readiness migration invariants", () => {
           evaluatedAt: "2026-07-15T10:05:00.000Z",
           previousAssessmentId: firstAssessmentId
         })
+        yield* insertHeadHistory({
+          assessmentId: firstAssessmentId,
+          committedAt: recordedAt,
+          environmentId,
+          headRevision: 1,
+          scopeKind: "environment"
+        })
         yield* sql`INSERT INTO readiness_environment_heads (
           workspace_id, release_id, environment_id, head_revision, assessment_id,
           candidate_digest, rule_id, rule_version, rule_digest, derivation_version,
@@ -249,6 +287,13 @@ describe("readiness migration invariants", () => {
           ${firstCandidateDigest}, 'delivery-v1', 1, ${ruleDigest}, 1,
           ${recordedAt}, ${recordedAt}
         )`
+        yield* insertHeadHistory({
+          assessmentId: secondAssessmentId,
+          committedAt: "2026-07-15T10:05:00.000Z",
+          environmentId,
+          headRevision: 2,
+          scopeKind: "environment"
+        })
         yield* sql`UPDATE readiness_environment_heads
           SET head_revision = 2, assessment_id = ${secondAssessmentId},
             candidate_digest = ${secondCandidateDigest}, updated_at = '2026-07-15T10:05:00.000Z'
@@ -263,6 +308,13 @@ describe("readiness migration invariants", () => {
           environment: true,
           environmentId: otherEnvironmentId,
           evaluatedAt: "2026-07-15T10:05:00.000Z"
+        })
+        yield* insertHeadHistory({
+          assessmentId: otherEnvironmentAssessmentId,
+          committedAt: "2026-07-15T10:05:00.000Z",
+          environmentId: otherEnvironmentId,
+          headRevision: 1,
+          scopeKind: "environment"
         })
         yield* sql`INSERT INTO readiness_environment_heads (
           workspace_id, release_id, environment_id, head_revision, assessment_id,
@@ -369,6 +421,12 @@ describe("readiness migration invariants", () => {
           'delivery-v1', 1, ${ruleDigest}, 1, ${recordedAt}, '2026-07-15T10:10:00.000Z'
         )`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(invalidInitialReleaseRevision))
+        yield* insertHeadHistory({
+          assessmentId: currentReleaseAssessmentId,
+          committedAt: "2026-07-15T10:10:00.000Z",
+          headRevision: 1,
+          scopeKind: "release"
+        })
         yield* sql`INSERT INTO readiness_release_heads (
           workspace_id, release_id, head_revision, assessment_id, candidate_digest,
           rule_id, rule_version, rule_digest, derivation_version, created_at, updated_at
@@ -403,6 +461,12 @@ describe("readiness migration invariants", () => {
           ${workspaceId}, ${endedOmittedReleaseAssessmentId}, ${environmentId},
           ${secondAssessmentId}, ${secondCandidateDigest}
         )`
+        yield* insertHeadHistory({
+          assessmentId: endedOmittedReleaseAssessmentId,
+          committedAt: "2026-07-15T10:12:00.000Z",
+          headRevision: 2,
+          scopeKind: "release"
+        })
         yield* sql`UPDATE readiness_release_heads
           SET head_revision = 2, assessment_id = ${endedOmittedReleaseAssessmentId},
             candidate_digest = ${`sha256:${"f".repeat(64)}`}, updated_at = '2026-07-15T10:12:00.000Z'
@@ -447,6 +511,13 @@ describe("readiness migration invariants", () => {
           environment: true,
           evaluatedAt: "2026-07-15T10:05:00.000Z",
           releaseRevision: 2
+        })
+        yield* insertHeadHistory({
+          assessmentId: currentRevisionAssessmentId,
+          committedAt: "2026-07-15T10:05:00.000Z",
+          environmentId,
+          headRevision: 1,
+          scopeKind: "environment"
         })
         yield* sql`INSERT INTO readiness_environment_heads (
           workspace_id, release_id, environment_id, head_revision, assessment_id,

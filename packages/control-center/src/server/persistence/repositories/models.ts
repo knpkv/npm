@@ -12,10 +12,9 @@ const boundedName = (identifier: string) =>
   Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)).annotate({ identifier })
 
 /** Positive optimistic-concurrency revision stored with mutable records. */
-export const RecordRevision = Schema.Number.check(
-  Schema.isInt(),
-  Schema.isGreaterThan(0)
-).pipe(Schema.brand("RecordRevision"))
+export const RecordRevision = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)).pipe(
+  Schema.brand("RecordRevision")
+)
 
 /** Decoded optimistic-concurrency revision. */
 export type RecordRevision = typeof RecordRevision.Type
@@ -172,6 +171,10 @@ export const QuarantineRecordKind = Schema.Literals([
   "plugin-sync-page",
   "release-head",
   "release-revision",
+  "readiness-assessment",
+  "readiness-environment-head",
+  "readiness-release-head",
+  "readiness-rule",
   "role-assignment",
   "session",
   "pairing-code",
@@ -208,6 +211,17 @@ export const QuarantineReasonCode = Schema.Literals([
   "plugin-sync-page-schema-invalid",
   "release-head-schema-invalid",
   "release-revision-envelope-invalid",
+  "readiness-assessment-digest-mismatch",
+  "readiness-assessment-identity-mismatch",
+  "readiness-assessment-materialization-mismatch",
+  "readiness-assessment-schema-invalid",
+  "readiness-candidate-digest-mismatch",
+  "readiness-environment-head-schema-invalid",
+  "readiness-head-assessment-mismatch",
+  "readiness-release-head-schema-invalid",
+  "readiness-rule-digest-mismatch",
+  "readiness-rule-identity-mismatch",
+  "readiness-rule-schema-invalid",
   "role-assignment-schema-invalid",
   "session-schema-invalid",
   "pairing-code-schema-invalid",
@@ -249,6 +263,17 @@ export const QuarantineDiagnosticSummary = Schema.Literals([
   "Plugin sync page failed schema validation.",
   "Stored release head failed schema validation.",
   "Stored release revision envelope failed schema validation.",
+  "Stored readiness assessment digest does not match its content.",
+  "Stored readiness assessment identity does not match its repository key.",
+  "Stored readiness assessment materialization does not match its canonical content.",
+  "Stored readiness assessment failed schema validation.",
+  "Stored readiness candidate digest does not match its canonical material.",
+  "Stored environment readiness head failed schema validation.",
+  "Stored readiness head does not match its referenced assessment.",
+  "Stored release readiness head failed schema validation.",
+  "Stored readiness rule digest does not match its canonical material.",
+  "Stored readiness rule identity does not match its repository key.",
+  "Stored readiness rule failed schema validation.",
   "Stored release snapshot exceeds its authoritative head.",
   "Stored release snapshot digest does not match its content.",
   "Stored release snapshot does not satisfy the current release schema.",

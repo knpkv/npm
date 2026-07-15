@@ -67,6 +67,7 @@ const expectedTables = [
   "readiness_environment_heads",
   "readiness_environment_queue",
   "readiness_evaluation_schedules",
+  "readiness_head_history",
   "readiness_release_children",
   "readiness_release_heads",
   "readiness_release_queue",
