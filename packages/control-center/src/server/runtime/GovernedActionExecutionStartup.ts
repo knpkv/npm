@@ -72,3 +72,11 @@ export const governedActionExecutionStartupLayer = (
   options === null
     ? Layer.succeed(GovernedActionExecutionStartup, { _tag: "disabled" })
     : readyLayer(options)
+
+/** Acquire the private worker for server lifetime without returning its capability. */
+export const governedActionExecutionServerLayer = (
+  options: GovernedActionExecutionStartupOptions | null
+) =>
+  Layer.effectDiscard(GovernedActionExecutionStartup).pipe(
+    Layer.provide(governedActionExecutionStartupLayer(options))
+  )

@@ -40,8 +40,8 @@ import {
 } from "./Bootstrap.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
 import {
+  governedActionExecutionServerLayer,
   type GovernedActionExecutionStartupError,
-  governedActionExecutionStartupLayer,
   type GovernedActionExecutionStartupOptions
 } from "./GovernedActionExecutionStartup.js"
 import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
@@ -120,7 +120,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provideMerge(DomainEventWakeups.layer)
   )
-  const governedActionExecution = governedActionExecutionStartupLayer(
+  const governedActionExecution = governedActionExecutionServerLayer(
     options.governedActionExecution ?? null
   ).pipe(Layer.provide(database))
   const runtimeServices = Layer.mergeAll(

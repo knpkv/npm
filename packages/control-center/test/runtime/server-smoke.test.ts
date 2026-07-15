@@ -5,6 +5,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
@@ -29,6 +30,7 @@ import {
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -43,7 +45,10 @@ import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
-import { GovernedActionExecutionStartup } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
+import {
+  GovernedActionExecutionStartup,
+  governedActionExecutionStartupLayer
+} from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
@@ -58,6 +63,10 @@ const ENVIRONMENT_ID = EnvironmentId.make("01890f6f-6d6a-7cc0-98d2-000000000076"
 const OWNER_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000077")
 const APPROVER_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000078")
 const RELEASE_STREAM = PluginStreamKey.make("releases")
+const PUBLIC_SERVER_EXCLUDES_EXECUTION_CAPABILITY: Extract<
+  Layer.Success<ReturnType<typeof makeControlCenterServer>>,
+  GovernedActionExecutionStartup
+> extends never ? true : false = true
 const FIXTURE_TIME_INPUT = "2024-07-14T09:02:00.000Z"
 const FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)(FIXTURE_TIME_INPUT)
 
@@ -211,9 +220,10 @@ describe("Control Center closed runtime", () => {
         }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
-      const governedExecution = Context.get(runtime, GovernedActionExecutionStartup)
+      const governedExecution = Context.getOption(runtime, GovernedActionExecutionStartup)
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
-      assert.deepStrictEqual(governedExecution, { _tag: "disabled" })
+      assert.isTrue(PUBLIC_SERVER_EXCLUDES_EXECUTION_CAPABILITY)
+      assert.isTrue(Option.isNone(governedExecution))
       if (bootstrapState._tag !== "pairing-issued") return
 
       const httpClient = yield* HttpClient.HttpClient
@@ -327,14 +337,27 @@ describe("Control Center closed runtime", () => {
         }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
-      const governedExecution = Context.get(runtime, GovernedActionExecutionStartup)
+      const governedExecution = Context.getOption(runtime, GovernedActionExecutionStartup)
       const synchronizationState = Context.get(runtime, ReleaseSynchronizationStartup)
       const runtimePersistence = Context.get(runtime, Persistence)
       const persistedRuntime = yield* runtimePersistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
-      assert.strictEqual(governedExecution._tag, "ready")
-      if (governedExecution._tag === "ready") {
-        const missing = yield* governedExecution.advance({
+      assert.isTrue(Option.isNone(governedExecution))
+      const internalWorker = yield* Layer.build(
+        governedActionExecutionStartupLayer({
+          pluginRuntimes: {
+            layer: () =>
+              Layer.merge(
+                governedRuntime.layer,
+                Layer.succeed(PluginRuntimeAuthority, runtimeAuthority)
+              )
+          }
+        }).pipe(Layer.provide(databaseLayer(persistenceConfig)))
+      )
+      const privateExecution = Context.get(internalWorker, GovernedActionExecutionStartup)
+      assert.strictEqual(privateExecution._tag, "ready")
+      if (privateExecution._tag === "ready") {
+        const missing = yield* privateExecution.advance({
           workspaceId: WORKSPACE_ID,
           actionId: MISSING_ACTION_ID
         }).pipe(Effect.flip)

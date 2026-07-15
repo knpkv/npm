@@ -26,7 +26,7 @@ complete.
 - The live execution store and engine are wired through one private server startup seam. Normal
   startup remains explicitly disabled until an internal plugin-runtime registry is configured;
   source boundaries prevent browser, API, agent, and public runtime barrels from importing the
-  resulting `advance` capability.
+  worker, and public server layers acquire then discard its `advance` capability.
 - Private strict readers load current session, target, projection, and evidence authority without
   falling back to older valid records.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
@@ -89,8 +89,12 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   dispatch, unknown, recovery claims, and reconciliation. Split the shared fixture and outcome
   matrices into focused files after D03 is wired; keeping one database harness avoided duplicating
   security-sensitive setup during this checkpoint.
-- Draft PR #126 is open from `feature/control-center`. Keep it in draft while the critical D03 work
-  above remains unfinished and real provider mutations remain disabled.
+- The private startup smoke test proves the public server discards execution authority and that the
+  internal worker reaches the live store. It does not yet drive a seeded authorized action through
+  the lazy runtime registry and fake provider; add that full composition fixture before enabling a
+  production registry.
+- PR #126 is open from `feature/control-center` and currently marked ready for review. Keep real
+  provider mutations disabled while the critical D03 work above remains unfinished.
 
 ## Worktree ownership warning
 
