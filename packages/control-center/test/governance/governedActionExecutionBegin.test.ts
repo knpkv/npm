@@ -1215,10 +1215,12 @@ describe("governed action reconciliation outcomes", () => {
       if (Result.isFailure(changed)) assert.strictEqual(changed.failure.reason, "conflict")
       const { sql } = yield* Database
       const rows = yield* sql<{
+        readonly observedAt: string
         readonly outcomeJson: string
         readonly resultKind: string
         readonly sourceKind: string
       }>`SELECT
+        observed_at AS observedAt,
         outcome_json AS outcomeJson,
         result_kind AS resultKind,
         source_kind AS sourceKind
@@ -1230,16 +1232,56 @@ describe("governed action reconciliation outcomes", () => {
       })
       const decodeUnavailable = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
         _tag: Schema.String,
-        observedAt: Schema.String,
         reason: Schema.String,
         schemaVersion: Schema.Number
       })))
       assert.deepStrictEqual(decodeUnavailable(rows[0]?.outcomeJson ?? "{}"), {
         _tag: "recovery-unavailable",
-        observedAt: DateTime.formatIso(observedAt),
         reason: "runtime-generation-unavailable",
         schemaVersion: 1
       })
+      assert.strictEqual(rows[0]?.observedAt, DateTime.formatIso(observedAt))
+    })))
+
+  it.effect("folds a parent-format crash-stranded recovery-unavailable outcome after restart", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const { sql } = yield* Database
+      yield* sql`CREATE TRIGGER governed_action_test_fail_unavailable_fold
+        BEFORE INSERT ON governed_action_provider_outcome_folds
+        BEGIN
+          SELECT RAISE(ABORT, 'injected unavailable fold failure');
+        END`
+      const beforeRestart = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
+      const failed = yield* beforeRestart.recordRecoveryUnavailable({
+        recoveryToken: recovery.recoveryToken,
+        observedAt,
+        reason: "runtime-generation-unavailable"
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failed))
+      if (Result.isFailure(failed)) assert.strictEqual(failed.failure.reason, "persistence-unavailable")
+      const stranded = yield* sql<{ readonly outcomeJson: string }>`SELECT outcome_json AS outcomeJson
+        FROM governed_action_provider_outcomes`
+      const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+      assert.deepStrictEqual(decodeJson(stranded[0]?.outcomeJson ?? "{}"), {
+        _tag: "recovery-unavailable",
+        reason: "runtime-generation-unavailable",
+        schemaVersion: 1
+      })
+
+      yield* sql`DROP TRIGGER governed_action_test_fail_unavailable_fold`
+      const afterRestart = yield* makeGovernedActionExecutionInspect
+      assert.deepStrictEqual(yield* afterRestart.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "started"
+      })
+      const counts = yield* sql<{ readonly folds: number; readonly outcomes: number }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(counts[0], { folds: 1, outcomes: 1 })
     })))
 
   it.effect("rejects a changed replay for the same recovery claim", () =>

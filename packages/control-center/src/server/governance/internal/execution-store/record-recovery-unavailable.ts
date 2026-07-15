@@ -21,8 +21,7 @@ export const makeGovernedActionExecutionRecordRecoveryUnavailable = Effect.gen(f
     )({
       _tag: "recovery-unavailable",
       schemaVersion: 1,
-      reason: input.reason,
-      observedAt: input.observedAt
+      reason: input.reason
     }).pipe(
       Effect.mapError(invalidOutcome)
     )

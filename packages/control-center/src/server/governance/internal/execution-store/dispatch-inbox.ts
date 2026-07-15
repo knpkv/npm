@@ -236,6 +236,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       resultKind,
       outcomeJson: encoded.outcomeJson,
       outcomeDigest: encoded.outcomeDigest,
+      observedAt: outcomeObservedAt,
       commandDigest
     })
   })

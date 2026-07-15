@@ -61,6 +61,7 @@ interface ExpectedProviderOutcome {
   readonly outcomeDigest: string
   readonly outcomeId: string
   readonly outcomeJson: string
+  readonly observedAt: UtcTimestamp
   readonly resultKind: typeof ProviderOutcomeResultKind.Type
   readonly sourceKind: typeof ProviderOutcomeSourceKind.Type
   readonly sourceTokenDigest: GovernedActionPermitTokenDigest | GovernedActionRecoveryTokenDigest
@@ -118,7 +119,8 @@ const expectedMatches = (
   row.resultKind === expected.resultKind &&
   row.outcomeJson === expected.outcomeJson &&
   row.outcomeDigest === expected.outcomeDigest &&
-  row.expectedCommandDigest === expected.commandDigest
+  row.expectedCommandDigest === expected.commandDigest &&
+  DateTime.Order(row.observedAt, expected.observedAt) === 0
 
 const operationMatchesSource = (
   operation: Exclude<ProviderOutcomeFoldOperation, "inspect">,

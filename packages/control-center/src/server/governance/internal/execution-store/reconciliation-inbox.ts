@@ -55,7 +55,8 @@ const ExistingOutcomeRow = Schema.Struct({
   outcomeDigest: Schema.String.check(
     Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
   ),
-  expectedCommandDigest: GovernedActionCommandDigest
+  expectedCommandDigest: GovernedActionCommandDigest,
+  observedAt: UtcTimestamp
 })
 
 const storeError = (
@@ -82,6 +83,7 @@ const existingMatches = (
     readonly actionId: GovernedActionId
     readonly outcomeDigest: string
     readonly outcomeJson: string
+    readonly observedAt: UtcTimestamp
     readonly resultKind: typeof ReconciliationResultKind.Type
     readonly workspaceId: WorkspaceId
   }
@@ -90,7 +92,8 @@ const existingMatches = (
   existing.actionId === expected.actionId &&
   existing.resultKind === expected.resultKind &&
   existing.outcomeJson === expected.outcomeJson &&
-  existing.outcomeDigest === expected.outcomeDigest
+  existing.outcomeDigest === expected.outcomeDigest &&
+  DateTime.Order(existing.observedAt, expected.observedAt) === 0
 
 const isRecoverableState = (state: string): boolean =>
   state === "started" ||
@@ -143,7 +146,8 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
       result_kind AS resultKind,
       outcome_json AS outcomeJson,
       outcome_digest AS outcomeDigest,
-      expected_command_digest AS expectedCommandDigest
+      expected_command_digest AS expectedCommandDigest,
+      observed_at AS observedAt
     FROM governed_action_provider_outcomes
     WHERE recovery_claim_token_digest = ${recoveryTokenDigest}
     LIMIT 2`
@@ -183,7 +187,8 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
               actionId: claim.actionId,
               resultKind,
               outcomeJson: encoded.outcomeJson,
-              outcomeDigest: encoded.outcomeDigest
+              outcomeDigest: encoded.outcomeDigest,
+              observedAt: outcomeObservedAt
             })
           ) return yield* storeError(input.operation, "conflict")
           return {
@@ -241,6 +246,7 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
       resultKind,
       outcomeJson: encoded.outcomeJson,
       outcomeDigest: encoded.outcomeDigest,
+      observedAt: outcomeObservedAt,
       commandDigest: persisted.commandDigest
     })
   })

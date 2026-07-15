@@ -5,7 +5,7 @@ import * as Schema from "effect/Schema"
 import type { GovernedActionTransitionCommand } from "../../../../domain/governedAction/index.js"
 import type { PluginActionReconciliationKey } from "../../../../domain/plugins/actions.js"
 import { PluginActionReconciliationResultV1 } from "../../../../domain/plugins/actions.js"
-import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
+import type { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import {
   canonicalizeGovernedActionJson,
   digestCanonicalGovernedActionJson,
@@ -16,8 +16,7 @@ import {
 /** Versioned local evidence that the dispatch-owning runtime generation cannot be recovered. */
 export const GovernedActionRecoveryUnavailableOutcomeV1 = Schema.TaggedStruct("recovery-unavailable", {
   schemaVersion: Schema.Literal(1),
-  reason: Schema.Literal("runtime-generation-unavailable"),
-  observedAt: UtcTimestamp
+  reason: Schema.Literal("runtime-generation-unavailable")
 })
 
 /** Closed reconciliation-side artifacts accepted by the durable provider-outcome inbox. */
@@ -48,10 +47,10 @@ export const reconciliationInboxOutcomeKind = (
 /** Project the source observation retained separately from trusted host receipt time. */
 export const reconciliationInboxOutcomeObservedAt = (
   outcome: ReconciliationInboxOutcome,
-  _receivedAt: UtcTimestamp
+  receivedAt: UtcTimestamp
 ): UtcTimestamp =>
   outcome._tag === "recovery-unavailable"
-    ? outcome.observedAt
+    ? receivedAt
     : outcome._tag === "pending"
     ? outcome.checkedAt
     : outcome.receipt.observedAt
@@ -97,7 +96,7 @@ export const reconciliationInboxOutcomeCommand = (
   }
 }
 
-/** Canonically encode and hash either provider reconciliation output or timestamped local unavailable evidence. */
+/** Canonically encode and hash either provider reconciliation output or local unavailable evidence. */
 export const encodeReconciliationInboxOutcome = Effect.fn(
   "GovernedActionReconciliationOutcome.encodeInbox"
 )(function*(outcome: ReconciliationInboxOutcome): Effect.fn.Return<
