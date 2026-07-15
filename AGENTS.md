@@ -168,6 +168,11 @@ When writing Effect code:
 - In `HttpApiBuilder.group`, acquire stable application services in the group callback before registering handlers so the resulting layer closes its requirements. Resolve only genuinely request-scoped services, such as `CurrentSession`, inside the per-request handler.
 - Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
   keep failures in the typed error channel.
+- In `packages/control-center/src/server/governance/internal/execution-store`, durable provider
+  outcome decoding, canonical verification, replay-integrity checking, transition construction,
+  transaction ownership, and fold insertion must live in one shared private fold module. Dispatch
+  and reconciliation modules may supply source-specific outcome material, but must not duplicate
+  the fold state machine or persistence boundary.
 - Decode untrusted JSON/body data with Schema helpers before assigning it to a
   domain type.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,

@@ -9,46 +9,73 @@ import { GovernedActionCommandDigest } from "../../../../domain/governedAction/i
 import { GovernedActionId, GovernedActionTransitionId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
+import type { GovernedActionRecord } from "../../../persistence/repositories/governed-action/contract.js"
 import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { makeGovernedActionTransactionWrite } from "../../../persistence/repositories/governed-action/write.js"
 import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import type { GovernedActionExecutionReference } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
+import {
+  DispatchInboxOutcome,
+  dispatchInboxOutcomeCommand,
+  dispatchInboxOutcomeKind,
+  dispatchInboxOutcomeObservedAt,
+  encodeDispatchInboxOutcome
+} from "./dispatch-outcome.js"
 import { governedActionReconciliationKey } from "./reconciliation-locator.js"
 import {
   encodeReconciliationInboxOutcome,
   ReconciliationInboxOutcome,
   reconciliationInboxOutcomeCommand,
   reconciliationInboxOutcomeKind,
-  reconciliationInboxOutcomeObservedAt,
-  ReconciliationResultKind
+  reconciliationInboxOutcomeObservedAt
 } from "./reconciliation-outcome.js"
-import { GovernedActionRecoveryTokenDigest } from "./tokens.js"
+import type { GovernedActionPermitTokenDigest, GovernedActionRecoveryTokenDigest } from "./tokens.js"
 
-type ReconciliationFoldOperation = "inspect" | "record-reconciliation" | "record-recovery-unavailable"
+type ProviderOutcomeFoldOperation =
+  | "inspect"
+  | "record-dispatch"
+  | "record-recovery-unavailable"
+  | "record-reconciliation"
+  | "record-unknown"
 
-interface ExpectedReconciliationInboxOutcome {
+const ProviderOutcomeSourceKind = Schema.Literals(["dispatch", "reconciliation"])
+const ProviderOutcomeResultKind = Schema.Literals([
+  "accepted",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "unknown",
+  "manual-unknown",
+  "pending",
+  "recovery-unavailable"
+])
+const TokenDigest = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
+)
+
+interface ExpectedProviderOutcome {
   readonly actionId: GovernedActionId
   readonly commandDigest: typeof GovernedActionCommandDigest.Type
   readonly outcomeDigest: string
   readonly outcomeId: string
   readonly outcomeJson: string
-  readonly recoveryTokenDigest: GovernedActionRecoveryTokenDigest
-  readonly resultKind: typeof ReconciliationResultKind.Type
+  readonly resultKind: typeof ProviderOutcomeResultKind.Type
+  readonly sourceKind: typeof ProviderOutcomeSourceKind.Type
+  readonly sourceTokenDigest: GovernedActionPermitTokenDigest | GovernedActionRecoveryTokenDigest
   readonly workspaceId: WorkspaceId
 }
 
-const ReconciliationInboxRow = Schema.Struct({
+const ProviderOutcomeRow = Schema.Struct({
   workspaceId: WorkspaceId,
   actionId: GovernedActionId,
   outcomeId: Schema.String,
-  recoveryTokenDigest: GovernedActionRecoveryTokenDigest,
-  resultKind: ReconciliationResultKind,
+  sourceKind: ProviderOutcomeSourceKind,
+  sourceTokenDigest: TokenDigest,
+  resultKind: ProviderOutcomeResultKind,
   outcomeJson: Schema.String,
-  outcomeDigest: Schema.String.check(
-    Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
-  ),
+  outcomeDigest: TokenDigest,
   expectedCommandDigest: GovernedActionCommandDigest,
   observedAt: UtcTimestamp,
   receivedAt: UtcTimestamp,
@@ -56,13 +83,17 @@ const ReconciliationInboxRow = Schema.Struct({
   foldCommandDigest: Schema.NullOr(GovernedActionCommandDigest)
 })
 
+type DecodedProviderOutcome =
+  | { readonly _tag: "dispatch"; readonly outcome: DispatchInboxOutcome }
+  | { readonly _tag: "reconciliation"; readonly outcome: ReconciliationInboxOutcome }
+
 const storeError = (
-  operation: ReconciliationFoldOperation,
+  operation: ProviderOutcomeFoldOperation,
   reason: GovernedActionExecutionStoreError["reason"]
 ): GovernedActionExecutionStoreError => new GovernedActionExecutionStoreError({ operation, reason })
 
 const mapStoreFailure = (
-  operation: ReconciliationFoldOperation,
+  operation: ProviderOutcomeFoldOperation,
   failure: unknown
 ): GovernedActionExecutionStoreError => {
   if (Schema.is(GovernedActionExecutionStoreError)(failure)) return failure
@@ -70,52 +101,98 @@ const mapStoreFailure = (
   if (Predicate.isTagged("PersistedRecordError")(failure)) return storeError(operation, "invalid-record")
   if (
     Predicate.isTagged("GovernedActionInputError")(failure) ||
-    (operation !== "inspect" && Predicate.isTagged("SchemaError")(failure))
+    (operation !== "inspect" && Schema.isSchemaError(failure))
   ) return storeError(operation, "conflict")
   return storeError(operation, "persistence-unavailable")
 }
 
 const expectedMatches = (
-  row: typeof ReconciliationInboxRow.Type,
-  expected: ExpectedReconciliationInboxOutcome
+  row: typeof ProviderOutcomeRow.Type,
+  expected: ExpectedProviderOutcome
 ): boolean =>
   row.workspaceId === expected.workspaceId &&
   row.actionId === expected.actionId &&
   row.outcomeId === expected.outcomeId &&
-  row.recoveryTokenDigest === expected.recoveryTokenDigest &&
+  row.sourceKind === expected.sourceKind &&
+  row.sourceTokenDigest === expected.sourceTokenDigest &&
   row.resultKind === expected.resultKind &&
   row.outcomeJson === expected.outcomeJson &&
   row.outcomeDigest === expected.outcomeDigest &&
   row.expectedCommandDigest === expected.commandDigest
 
-const isRecoverableState = (state: string): boolean =>
-  state === "started" ||
-  state === "cancel-requested" ||
-  state === "unknown" ||
-  state === "cancel-requested-unknown"
+const operationMatchesSource = (
+  operation: Exclude<ProviderOutcomeFoldOperation, "inspect">,
+  sourceKind: typeof ProviderOutcomeSourceKind.Type
+): boolean =>
+  sourceKind === "dispatch"
+    ? operation === "record-dispatch" || operation === "record-unknown"
+    : operation === "record-reconciliation" || operation === "record-recovery-unavailable"
 
-/** Own canonical verification and lifecycle folding for immediate and restarted reconciliation paths. */
-export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(function*() {
+const isFoldableState = (
+  sourceKind: typeof ProviderOutcomeSourceKind.Type,
+  state: string
+): boolean =>
+  sourceKind === "dispatch"
+    ? state === "started" || state === "cancel-requested"
+    : state === "started" ||
+      state === "cancel-requested" ||
+      state === "unknown" ||
+      state === "cancel-requested-unknown"
+
+const outcomeCommand = (
+  decoded: DecodedProviderOutcome,
+  record: GovernedActionRecord,
+  observedAt: UtcTimestamp
+) =>
+  decoded._tag === "dispatch"
+    ? dispatchInboxOutcomeCommand(decoded.outcome)
+    : reconciliationInboxOutcomeCommand(
+      decoded.outcome,
+      governedActionReconciliationKey(record),
+      observedAt
+    )
+
+/** Own every canonical verification, replay check, transaction, and fold for provider outcomes. */
+export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(function*() {
   const { sql } = yield* Database
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
   const writer = yield* makeGovernedActionTransactionWrite
 
-  const decodeRows = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.decodeRows")(function*(
+  const decodeRows = Effect.fn("GovernedActionExecutionProviderOutcomeFolder.decodeRows")(function*(
     rows: ReadonlyArray<unknown>,
-    operation: ReconciliationFoldOperation
+    operation: ProviderOutcomeFoldOperation
   ) {
-    return yield* Schema.decodeUnknownEffect(Schema.Array(ReconciliationInboxRow))(rows).pipe(
+    return yield* Schema.decodeUnknownEffect(Schema.Array(ProviderOutcomeRow))(rows).pipe(
       Effect.mapError(() => storeError(operation, "invalid-record"))
     )
   })
 
-  const foldRow = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldRow")(function*(
-    row: typeof ReconciliationInboxRow.Type,
-    operation: ReconciliationFoldOperation
+  const decodeAndVerify = Effect.fn(
+    "GovernedActionExecutionProviderOutcomeFolder.decodeAndVerify"
+  )(function*(
+    row: typeof ProviderOutcomeRow.Type,
+    operation: ProviderOutcomeFoldOperation
   ) {
     const mapFailure = (failure: unknown): GovernedActionExecutionStoreError => mapStoreFailure(operation, failure)
+    if (row.sourceKind === "dispatch") {
+      const outcome = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(DispatchInboxOutcome)
+      )(row.outcomeJson).pipe(Effect.mapError(() => storeError(operation, "invalid-record")))
+      const encoded = yield* encodeDispatchInboxOutcome(outcome).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService),
+        Effect.mapError(mapFailure)
+      )
+      if (
+        row.resultKind !== dispatchInboxOutcomeKind(outcome) ||
+        row.outcomeJson !== encoded.outcomeJson ||
+        row.outcomeDigest !== encoded.outcomeDigest ||
+        DateTime.Order(row.observedAt, dispatchInboxOutcomeObservedAt(outcome)) !== 0
+      ) return yield* storeError(operation, "invalid-record")
+      return { _tag: "dispatch", outcome } satisfies DecodedProviderOutcome
+    }
+
     const outcome = yield* Schema.decodeUnknownEffect(
       Schema.fromJsonString(ReconciliationInboxOutcome)
     )(row.outcomeJson).pipe(Effect.mapError(() => storeError(operation, "invalid-record")))
@@ -129,7 +206,15 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
       row.outcomeDigest !== encoded.outcomeDigest ||
       DateTime.Order(row.observedAt, reconciliationInboxOutcomeObservedAt(outcome, row.receivedAt)) !== 0
     ) return yield* storeError(operation, "invalid-record")
+    return { _tag: "reconciliation", outcome } satisfies DecodedProviderOutcome
+  })
 
+  const foldRow = Effect.fn("GovernedActionExecutionProviderOutcomeFolder.foldRow")(function*(
+    row: typeof ProviderOutcomeRow.Type,
+    operation: ProviderOutcomeFoldOperation
+  ) {
+    const mapFailure = (failure: unknown): GovernedActionExecutionStoreError => mapStoreFailure(operation, failure)
+    const decoded = yield* decodeAndVerify(row, operation)
     const record = yield* transaction.read({ workspaceId: row.workspaceId, actionId: row.actionId })
     if (row.foldTransitionId !== null) {
       if (row.foldCommandDigest !== row.expectedCommandDigest) {
@@ -137,12 +222,10 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
       }
       return record.head.state
     }
-    if (!isRecoverableState(record.head.state)) return yield* storeError(operation, "conflict")
-    const command = reconciliationInboxOutcomeCommand(
-      outcome,
-      governedActionReconciliationKey(record),
-      row.observedAt
-    )
+    if (!isFoldableState(row.sourceKind, record.head.state)) {
+      return yield* storeError(operation, "conflict")
+    }
+    const command = outcomeCommand(decoded, record, row.observedAt)
     const commandDigest = yield* digestGovernedActionTransitionCommand(command).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
@@ -155,7 +238,7 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
       envelope: record.envelope,
       expectedHeadTransitionId: record.headTransition.transitionId,
       transitionId: yield* cryptoService.randomUUIDv7,
-      commandId: `execution:reconciliation:${row.recoveryTokenDigest}`,
+      commandId: `execution:${row.sourceKind}:${row.sourceTokenDigest}`,
       command,
       cause: { _tag: "system", component: "governed-action-execution" },
       occurredAt: foldedAt,
@@ -178,7 +261,11 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
     outcome.workspace_id AS workspaceId,
     outcome.action_id AS actionId,
     outcome.outcome_id AS outcomeId,
-    outcome.recovery_claim_token_digest AS recoveryTokenDigest,
+    outcome.source_kind AS sourceKind,
+    CASE outcome.source_kind
+      WHEN 'dispatch' THEN outcome.permit_token_digest
+      ELSE outcome.recovery_claim_token_digest
+    END AS sourceTokenDigest,
     outcome.result_kind AS resultKind,
     outcome.outcome_json AS outcomeJson,
     outcome.outcome_digest AS outcomeDigest,
@@ -197,15 +284,22 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
     AND transition_record.action_id = fold.action_id
     AND transition_record.transition_id = fold.transition_id`
 
-  const foldExpected = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldExpected")(function*(
-    operation: Exclude<ReconciliationFoldOperation, "inspect">,
-    expected: ExpectedReconciliationInboxOutcome
+  const foldExpected = Effect.fn("GovernedActionExecutionProviderOutcomeFolder.foldExpected")(function*(
+    operation: Exclude<ProviderOutcomeFoldOperation, "inspect">,
+    expected: ExpectedProviderOutcome
   ) {
+    if (!operationMatchesSource(operation, expected.sourceKind)) {
+      return yield* storeError(operation, "conflict")
+    }
     return yield* transaction.transact(
       `governed-action.execution-fold-${operation}`,
       Effect.gen(function*() {
         const rows = yield* sql`${selectColumns}
-          WHERE outcome.recovery_claim_token_digest = ${expected.recoveryTokenDigest}
+          WHERE outcome.source_kind = ${expected.sourceKind}
+            AND CASE outcome.source_kind
+              WHEN 'dispatch' THEN outcome.permit_token_digest
+              ELSE outcome.recovery_claim_token_digest
+            END = ${expected.sourceTokenDigest}
           LIMIT 2`
         const decoded = yield* decodeRows(rows, operation)
         const row = decoded[0]
@@ -219,16 +313,15 @@ export const makeGovernedActionExecutionReconciliationInboxFolder = Effect.gen(f
     ).pipe(Effect.mapError((failure) => mapStoreFailure(operation, failure)))
   })
 
-  const foldPending = Effect.fn("GovernedActionExecutionReconciliationInboxFolder.foldPending")(function*(
+  const foldPending = Effect.fn("GovernedActionExecutionProviderOutcomeFolder.foldPending")(function*(
     reference: GovernedActionExecutionReference
   ) {
     return yield* transaction.transact(
-      "governed-action.execution-fold-pending-reconciliation",
+      "governed-action.execution-fold-pending-provider-outcome",
       Effect.gen(function*() {
         const rows = yield* sql`${selectColumns}
           WHERE outcome.workspace_id = ${reference.workspaceId}
             AND outcome.action_id = ${reference.actionId}
-            AND outcome.source_kind = 'reconciliation'
             AND fold.outcome_id IS NULL
           ORDER BY outcome.received_at, outcome.outcome_id
           LIMIT 2`

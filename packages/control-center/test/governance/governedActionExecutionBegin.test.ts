@@ -1018,14 +1018,20 @@ describe("governed action recovery claims", () => {
       )
       assert.strictEqual(
         DateTime.toEpochMillis(first.reconciliationDeadline),
-        DateTime.toEpochMillis(recoveryEligibleAt) + 60_000
+        DateTime.toEpochMillis(recoveryEligibleAt) + 30_000
       )
+      const firstClaimExpiresAt = DateTime.add(first.reconciliationDeadline, { seconds: 30 })
 
       assert.deepStrictEqual(yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
         _tag: "inactive",
         state: "started"
       })
       yield* TestClock.setTime(DateTime.toEpochMillis(first.reconciliationDeadline))
+      assert.deepStrictEqual(yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "started"
+      })
+      yield* TestClock.setTime(DateTime.toEpochMillis(firstClaimExpiresAt))
       const second = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
       assert.strictEqual(second._tag, "reconcile")
       if (second._tag !== "reconcile") return yield* Effect.die("expected renewed recovery claim")
@@ -1039,11 +1045,11 @@ describe("governed action recovery claims", () => {
       assert.deepStrictEqual(claims, [
         {
           claimSequence: 1,
-          leaseExpiresAt: DateTime.formatIso(first.reconciliationDeadline)
+          leaseExpiresAt: DateTime.formatIso(firstClaimExpiresAt)
         },
         {
           claimSequence: 2,
-          leaseExpiresAt: DateTime.formatIso(second.reconciliationDeadline)
+          leaseExpiresAt: DateTime.formatIso(DateTime.add(second.reconciliationDeadline, { seconds: 30 }))
         }
       ])
     })))
@@ -1134,7 +1140,7 @@ describe("governed action reconciliation outcomes", () => {
     it.effect(`persists and folds a ${fixture.name} reconciliation result exactly once`, () =>
       withBegin(Effect.gen(function*() {
         const recovery = yield* claimStartedRecovery()
-        const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+        const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
         yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
         const result = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)(
           fixture.makeInput(DateTime.formatIso(receivedAt))
@@ -1175,10 +1181,10 @@ describe("governed action reconciliation outcomes", () => {
       })))
   }
 
-  it.effect("persists runtime-generation unavailability as non-terminal evidence", () =>
+  it.effect("persists runtime-generation unavailability exactly and rejects a changed observation replay", () =>
     withBegin(Effect.gen(function*() {
       const recovery = yield* claimStartedRecovery()
-      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
       yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
       const recorder = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
 
@@ -1190,6 +1196,23 @@ describe("governed action reconciliation outcomes", () => {
         }),
         "started"
       )
+      assert.strictEqual(
+        yield* recorder.recordRecoveryUnavailable({
+          recoveryToken: recovery.recoveryToken,
+          observedAt,
+          reason: "runtime-generation-unavailable"
+        }),
+        "started"
+      )
+      const changedObservedAt = DateTime.add(observedAt, { seconds: 1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(changedObservedAt))
+      const changed = yield* recorder.recordRecoveryUnavailable({
+        recoveryToken: recovery.recoveryToken,
+        observedAt: changedObservedAt,
+        reason: "runtime-generation-unavailable"
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changed))
+      if (Result.isFailure(changed)) assert.strictEqual(changed.failure.reason, "conflict")
       const { sql } = yield* Database
       const rows = yield* sql<{
         readonly outcomeJson: string
@@ -1207,11 +1230,13 @@ describe("governed action reconciliation outcomes", () => {
       })
       const decodeUnavailable = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
         _tag: Schema.String,
+        observedAt: Schema.String,
         reason: Schema.String,
         schemaVersion: Schema.Number
       })))
       assert.deepStrictEqual(decodeUnavailable(rows[0]?.outcomeJson ?? "{}"), {
         _tag: "recovery-unavailable",
+        observedAt: DateTime.formatIso(observedAt),
         reason: "runtime-generation-unavailable",
         schemaVersion: 1
       })
@@ -1220,7 +1245,7 @@ describe("governed action reconciliation outcomes", () => {
   it.effect("rejects a changed replay for the same recovery claim", () =>
     withBegin(Effect.gen(function*() {
       const recovery = yield* claimStartedRecovery()
-      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
       yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
       const recorder = yield* makeGovernedActionExecutionRecordReconciliation
       const pending = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
@@ -1249,18 +1274,37 @@ describe("governed action reconciliation outcomes", () => {
       if (Result.isFailure(changed)) assert.strictEqual(changed.failure.reason, "conflict")
     })))
 
-  it.effect("rejects an outcome received at the claim deadline", () =>
+  it.effect("accepts an outcome at the provider deadline while the claim persistence margin remains", () =>
     withBegin(Effect.gen(function*() {
       const recovery = yield* claimStartedRecovery()
       yield* TestClock.setTime(DateTime.toEpochMillis(recovery.reconciliationDeadline))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      assert.strictEqual(
+        yield* recorder.recordReconciliation({
+          recoveryToken: recovery.recoveryToken,
+          result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+            _tag: "pending",
+            checkedAt: DateTime.formatIso(recovery.reconciliationDeadline)
+          }),
+          observedAt: recovery.reconciliationDeadline
+        }),
+        "started"
+      )
+    })))
+
+  it.effect("rejects an outcome received at the claim lease expiry", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const claimExpiresAt = DateTime.add(recovery.reconciliationDeadline, { seconds: 30 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(claimExpiresAt))
       const recorder = yield* makeGovernedActionExecutionRecordReconciliation
       const expired = yield* recorder.recordReconciliation({
         recoveryToken: recovery.recoveryToken,
         result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
           _tag: "pending",
-          checkedAt: DateTime.formatIso(recovery.reconciliationDeadline)
+          checkedAt: DateTime.formatIso(claimExpiresAt)
         }),
-        observedAt: recovery.reconciliationDeadline
+        observedAt: claimExpiresAt
       }).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(expired))
@@ -1274,7 +1318,7 @@ describe("governed action reconciliation outcomes", () => {
   it.effect("folds a crash-stranded reconciliation result from persisted data after restart", () =>
     withBegin(Effect.gen(function*() {
       const recovery = yield* claimStartedRecovery()
-      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -59 })
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
       yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
       const { sql } = yield* Database
       yield* sql`CREATE TRIGGER governed_action_test_fail_reconciliation_fold

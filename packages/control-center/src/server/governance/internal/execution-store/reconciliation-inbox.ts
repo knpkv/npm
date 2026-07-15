@@ -12,7 +12,7 @@ import { Database } from "../../../persistence/Database.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
-import { makeGovernedActionExecutionReconciliationInboxFolder } from "./reconciliation-inbox-fold.js"
+import { makeGovernedActionExecutionProviderOutcomeFolder } from "./provider-outcome-fold.js"
 import { governedActionReconciliationKey } from "./reconciliation-locator.js"
 import {
   encodeReconciliationInboxOutcome,
@@ -104,7 +104,7 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
-  const folder = yield* makeGovernedActionExecutionReconciliationInboxFolder
+  const folder = yield* makeGovernedActionExecutionProviderOutcomeFolder
 
   const readClaim = Effect.fn("GovernedActionExecutionReconciliationInbox.readClaim")(function*(
     recoveryTokenDigest: GovernedActionRecoveryTokenDigest,
@@ -236,7 +236,8 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
       workspaceId: persisted.workspaceId,
       actionId: persisted.actionId,
       outcomeId: persisted.outcomeId,
-      recoveryTokenDigest,
+      sourceKind: "reconciliation",
+      sourceTokenDigest: recoveryTokenDigest,
       resultKind,
       outcomeJson: encoded.outcomeJson,
       outcomeDigest: encoded.outcomeDigest,

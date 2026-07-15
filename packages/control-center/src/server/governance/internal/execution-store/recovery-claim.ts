@@ -15,6 +15,7 @@ import { governedActionReconciliationKey } from "./reconciliation-locator.js"
 import { GovernedActionRecoveryTokenDigest, issueGovernedActionRecoveryToken } from "./tokens.js"
 
 const RECOVERY_CLAIM_SECONDS = 60
+const RECONCILIATION_DEADLINE_SECONDS = 30
 
 const RecoveryLeaseRow = Schema.Struct({
   runtimeAuthorityToken: PluginRuntimeAuthorityToken,
@@ -92,12 +93,13 @@ export const makeGovernedActionExecutionRecoveryClaim = Effect.gen(function*() {
       Effect.mapError(storeFailure)
     )
     const claimSequence = (latest?.claimSequence ?? 0) + 1
-    const reconciliationDeadline = DateTime.add(observedAt, { seconds: RECOVERY_CLAIM_SECONDS })
+    const reconciliationDeadline = DateTime.add(observedAt, { seconds: RECONCILIATION_DEADLINE_SECONDS })
+    const claimExpiresAt = DateTime.add(observedAt, { seconds: RECOVERY_CLAIM_SECONDS })
     yield* sql`INSERT INTO governed_action_recovery_claims (
       workspace_id, action_id, claim_sequence, claim_token_digest, claimed_at, lease_expires_at
     ) VALUES (
       ${record.envelope.workspaceId}, ${record.envelope.actionId}, ${claimSequence}, ${issued.digest},
-      ${DateTime.formatIso(observedAt)}, ${DateTime.formatIso(reconciliationDeadline)}
+      ${DateTime.formatIso(observedAt)}, ${DateTime.formatIso(claimExpiresAt)}
     )`
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionReconciliationRequestV1))({
       reconciliationKey: governedActionReconciliationKey(record),

@@ -18,7 +18,12 @@ export const makeGovernedActionExecutionRecordRecoveryUnavailable = Effect.gen(f
   )(function*(input) {
     const outcome = yield* Schema.decodeUnknownEffect(
       Schema.toType(GovernedActionRecoveryUnavailableOutcomeV1)
-    )({ _tag: "recovery-unavailable", schemaVersion: 1, reason: input.reason }).pipe(
+    )({
+      _tag: "recovery-unavailable",
+      schemaVersion: 1,
+      reason: input.reason,
+      observedAt: input.observedAt
+    }).pipe(
       Effect.mapError(invalidOutcome)
     )
     return yield* inbox.recordOutcome({

@@ -18,9 +18,11 @@ complete.
 - Governed `recordBlocked` atomically commits preflight denial and consumes its preparation without
   calling a provider. `recordDispatch` and `recordUnknown` persist through cancellation-safe
   append-before-fold boundaries, including persisted-only restart folding.
-- Expired execution leases now issue one expiring recovery claim at a time. Reconciliation pending,
-  succeeded, failed, cancelled, and runtime-generation-unavailable outcomes use the same canonical
-  append-before-fold model, exact replay checks, and persisted-only restart recovery.
+- Expired execution leases now issue one recovery claim at a time, with the provider deadline
+  strictly inside the claim lease so durable receipt persistence retains a bounded margin.
+  Reconciliation pending, succeeded, failed, cancelled, and timestamped
+  runtime-generation-unavailable outcomes share one canonical fold engine, exact replay checks, and
+  persisted-only restart recovery with dispatch outcomes.
 - Private strict readers load current session, target, projection, and evidence authority without
   falling back to older valid records.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,

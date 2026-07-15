@@ -12,7 +12,6 @@ import { Database } from "../../../persistence/Database.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
-import { makeGovernedActionExecutionDispatchInboxFolder } from "./dispatch-inbox-fold.js"
 import {
   type DispatchInboxOutcome,
   dispatchInboxOutcomeCommand,
@@ -21,6 +20,7 @@ import {
   DispatchResultKind,
   encodeDispatchInboxOutcome
 } from "./dispatch-outcome.js"
+import { makeGovernedActionExecutionProviderOutcomeFolder } from "./provider-outcome-fold.js"
 import {
   digestGovernedActionPermitToken,
   type GovernedActionPermitToken,
@@ -101,7 +101,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
-  const folder = yield* makeGovernedActionExecutionDispatchInboxFolder
+  const folder = yield* makeGovernedActionExecutionProviderOutcomeFolder
 
   const readLease = Effect.fn("GovernedActionExecutionDispatchInbox.readLease")(function*(
     permitTokenDigest: GovernedActionPermitTokenDigest,
@@ -231,7 +231,8 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       workspaceId: persisted.lease.workspaceId,
       actionId: persisted.lease.actionId,
       outcomeId: persisted.outcomeId,
-      permitTokenDigest,
+      sourceKind: "dispatch",
+      sourceTokenDigest: permitTokenDigest,
       resultKind,
       outcomeJson: encoded.outcomeJson,
       outcomeDigest: encoded.outcomeDigest,

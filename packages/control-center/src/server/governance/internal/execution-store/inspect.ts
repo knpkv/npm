@@ -16,8 +16,7 @@ import type {
   GovernedActionExecutionReference
 } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
-import { makeGovernedActionExecutionDispatchInboxFolder } from "./dispatch-inbox-fold.js"
-import { makeGovernedActionExecutionReconciliationInboxFolder } from "./reconciliation-inbox-fold.js"
+import { makeGovernedActionExecutionProviderOutcomeFolder } from "./provider-outcome-fold.js"
 import { makeGovernedActionExecutionRecoveryClaim } from "./recovery-claim.js"
 import { issueGovernedActionPreparationToken } from "./tokens.js"
 
@@ -55,20 +54,15 @@ export const makeGovernedActionExecutionInspect = Effect.gen(function*() {
   const clock = yield* Clock.Clock
   const cryptoService = yield* Crypto.Crypto
   const transaction = yield* makeGovernedActionTransaction
-  const pendingDispatch = yield* makeGovernedActionExecutionDispatchInboxFolder
+  const pendingOutcome = yield* makeGovernedActionExecutionProviderOutcomeFolder
   const recovery = yield* makeGovernedActionExecutionRecoveryClaim
-  const pendingReconciliation = yield* makeGovernedActionExecutionReconciliationInboxFolder
 
   const inspect = Effect.fn("GovernedActionExecutionInspect.inspect")(function*(
     reference: GovernedActionExecutionReference
   ) {
-    const foldedPending = yield* pendingDispatch.foldPending(reference)
+    const foldedPending = yield* pendingOutcome.foldPending(reference)
     if (foldedPending !== null) {
       return { _tag: "inactive", state: foldedPending } satisfies GovernedActionExecutionPlan
-    }
-    const foldedReconciliation = yield* pendingReconciliation.foldPending(reference)
-    if (foldedReconciliation !== null) {
-      return { _tag: "inactive", state: foldedReconciliation } satisfies GovernedActionExecutionPlan
     }
     return yield* transaction.transact(
       "governed-action.execution-inspect",
