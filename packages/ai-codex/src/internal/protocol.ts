@@ -5,7 +5,8 @@ import { CodexFailureCause, CodexTransportError, sanitizeDiagnostic } from "./er
 const CodexUsage = Schema.Struct({
   cached_input_tokens: Schema.optional(Schema.Number),
   input_tokens: Schema.optional(Schema.Number),
-  output_tokens: Schema.optional(Schema.Number)
+  output_tokens: Schema.optional(Schema.Number),
+  reasoning_output_tokens: Schema.optional(Schema.Number)
 })
 
 const CodexItem = Schema.Struct({
@@ -52,13 +53,13 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
 
   let threadId: string | undefined
   let usage: CodexEvent["usage"]
-  const messages: Array<string> = []
+  let message: string | undefined
 
   for (const event of events) {
     if (event.type === "thread.started") threadId = event.thread_id
     if (event.type === "turn.completed") usage = event.usage
     if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text !== undefined) {
-      messages.push(event.item.text)
+      message = event.item.text
     }
     if (event.type === "turn.failed" || event.type === "error") {
       const diagnostic = event.error?.message ?? event.message ?? "Codex turn failed"
@@ -66,7 +67,7 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
     }
   }
 
-  if (messages.length === 0) {
+  if (message === undefined) {
     return yield* protocolError(
       "Codex completed without an agent message",
       new CodexFailureCause({ reason: "missing-agent-message" })
@@ -74,7 +75,7 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
   }
 
   return {
-    text: messages.join("\n"),
+    text: message,
     threadId,
     usage: {
       inputTokens: {
@@ -86,8 +87,10 @@ export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(func
           : Math.max(0, usage.input_tokens - (usage.cached_input_tokens ?? 0))
       },
       outputTokens: {
-        reasoning: undefined,
-        text: usage?.output_tokens,
+        reasoning: usage?.reasoning_output_tokens,
+        text: usage?.output_tokens === undefined
+          ? undefined
+          : Math.max(0, usage.output_tokens - (usage.reasoning_output_tokens ?? 0)),
         total: usage?.output_tokens
       }
     }
