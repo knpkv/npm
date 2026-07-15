@@ -40,6 +40,50 @@ const isNamedImportFrom = (context, identifier, sources, importedNames) => {
   )
 }
 
+const isChildProcessMakeCall = (context, expression) => {
+  if (expression.type !== "CallExpression") return false
+  const callee = expression.callee
+  if (callee.type === "Identifier") {
+    return isNamedImportFrom(context, callee, ["effect/unstable/process/ChildProcess"], ["make"])
+  }
+  if (
+    callee.type !== "MemberExpression" ||
+    staticPropertyName(callee.property) !== "make" ||
+    callee.object.type !== "Identifier"
+  ) {
+    return false
+  }
+  return (
+    isNamespaceImportFrom(context, callee.object, ["effect/unstable/process/ChildProcess"]) ||
+    isNamedImportFrom(context, callee.object, ["effect/unstable/process"], ["ChildProcess"])
+  )
+}
+
+const isReviewedEnvironmentProjection = (expression) =>
+  expression.type === "MemberExpression" &&
+  !expression.computed &&
+  expression.object.type === "Identifier" &&
+  expression.object.name === "options" &&
+  staticPropertyName(expression.property) === "environment"
+
+const hasIsolatedChildEnvironment = (options) => {
+  if (options?.type !== "ObjectExpression") return false
+  if (options.properties.some((property) => property.type === "SpreadElement")) return false
+  const environment = options.properties.filter(
+    (property) => property.type === "Property" && staticPropertyName(property.key) === "env"
+  )
+  const inheritance = options.properties.filter(
+    (property) => property.type === "Property" && staticPropertyName(property.key) === "extendEnv"
+  )
+  return (
+    environment.length === 1 &&
+    inheritance.length === 1 &&
+    isReviewedEnvironmentProjection(environment[0].value) &&
+    inheritance[0].value.type === "Literal" &&
+    inheritance[0].value.value === false
+  )
+}
+
 const isEffectModule = (context, expression) => {
   if (expression.type === "Identifier") {
     return (
@@ -350,6 +394,31 @@ const isHttpHandleCallback = (node) => {
 }
 
 module.exports = {
+  "require-isolated-agent-child-environment": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require local agent child processes to use the reviewed environment projection",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unsafeEnvironment:
+          "Pass a direct options object with env: options.environment and extendEnv: false; do not spread or inherit child environment options."
+      }
+    },
+    create(context) {
+      return {
+        CallExpression(node) {
+          if (!isChildProcessMakeCall(context, node)) return
+          const options = node.arguments.at(-1)
+          if (hasIsolatedChildEnvironment(options)) return
+          context.report({ node, messageId: "unsafeEnvironment" })
+        }
+      }
+    }
+  },
   "no-conditional-only-result-tag-assertion": {
     meta: {
       type: "problem",

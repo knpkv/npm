@@ -155,6 +155,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/ai-claude/src/**/*.{ts,tsx}", "packages/ai-codex/src/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-isolated-agent-child-environment": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/api/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-number-from-string-in-control-center-api": "error"

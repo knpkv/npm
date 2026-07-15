@@ -74,6 +74,46 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import * as Process from "effect/unstable/process/ChildProcess"
+    import { ChildProcess as AliasedProcess } from "effect/unstable/process"
+    import { make as makeProcess } from "effect/unstable/process/ChildProcess"
+    Process.make("codex", ["exec"], {
+      metadata: { env: options.environment, extendEnv: false },
+      stdout: "pipe"
+    })
+    AliasedProcess.make("codex", ["exec"], {
+      env: options.environment,
+      extendEnv: false,
+      ...unsafeOptions
+    })
+    makeProcess("codex", ["exec"], dynamicOptions)
+  `,
+  expected: 3,
+  filePath: "packages/ai-codex/src/eslint-agent-environment-invalid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Process from "effect/unstable/process/ChildProcess"
+    import { ChildProcess as AliasedProcess } from "effect/unstable/process"
+    Process.make("codex", ["exec"], {
+      env: options.environment,
+      extendEnv: false,
+      stdout: "pipe"
+    })
+    AliasedProcess.make("claude", ["--print"], {
+      extendEnv: false,
+      env: options.environment
+    })
+  `,
+  expected: 0,
+  filePath: "packages/ai-claude/src/eslint-agent-environment-valid.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import { assert } from "@effect/vitest"
     import * as Result from "effect/Result"
     assert.isTrue(Result.isFailure(result))

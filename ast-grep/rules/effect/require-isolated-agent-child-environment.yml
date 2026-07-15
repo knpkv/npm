@@ -29,6 +29,6 @@ files:
   - "packages/ai-codex/src/**/*.ts"
 
 note: |
-  Agent wrappers can execute repository-controlled content. Never inherit the
-  full parent environment into those child processes. Supply a reviewed env
-  record and set `extendEnv: false`; add provider-specific keys explicitly.
+  This is the fast direct-shape check. The binding-aware local ESLint rule owns
+  the complete invariant, including import aliases, top-level property
+  placement, the reviewed `options.environment` seam, and spread rejection.
