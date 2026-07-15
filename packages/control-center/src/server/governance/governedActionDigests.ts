@@ -17,6 +17,7 @@ import {
   type GovernedActionEvidenceReference as GovernedActionEvidence,
   GovernedActionEvidenceSet,
   GovernedActionEvidenceSetDigest,
+  GovernedActionPolicyDigest,
   GovernedActionPolicyEvaluationDigest,
   GovernedActionPolicyEvaluationV1,
   type GovernedActionPolicyEvaluationV1 as GovernedActionPolicyEvaluation
@@ -298,6 +299,14 @@ export const digestGovernedActionEvidenceSet = Effect.fn("GovernedActionDigests.
   )
   const digest = yield* digestCanonicalJson(yield* decodeJson(encoded))
   return GovernedActionEvidenceSetDigest.make(`sha256:${digest}`)
+})
+
+/** Hash one canonical declarative policy definition independently of object insertion order. */
+export const digestGovernedActionPolicyDefinition = Effect.fn(
+  "GovernedActionDigests.policyDefinition"
+)(function*(definition: Schema.Json) {
+  const digest = yield* digestCanonicalJson(definition)
+  return GovernedActionPolicyDigest.make(`sha256:${digest}`)
 })
 
 /** Hash a fresh policy decision so the exact evaluation can be retained with dispatch intent. */

@@ -14,6 +14,7 @@ import {
   digestGovernedActionPayload,
   makeGovernedActionEnvelope
 } from "../../../src/server/governance/governedActionDigests.js"
+import { makeBuiltInGovernedActionPolicyDefinition } from "../../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database } from "../../../src/server/persistence/Database.js"
 import { GovernedActionCommitInput } from "../../../src/server/persistence/repositories/governed-action/contract.js"
 import { GovernedActionRepository } from "../../../src/server/persistence/repositories/governedActionRepository.js"
@@ -77,7 +78,9 @@ const seedAuthorityRoots = Effect.fn("AuthorizedGovernedActionFixture.seedRoots"
   )`
 })
 
-const makeEnvelope = Effect.fn("AuthorizedGovernedActionFixture.makeEnvelope")(function*() {
+export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
+  "AuthorizedGovernedActionFixture.makeEnvelope"
+)(function*() {
   const payload = decodePayload({ fields: { resolution: null, status: "Done" }, notify: true })
   const payloadDigest = yield* digestGovernedActionPayload(payload)
   const evidence = decodeEvidence({
@@ -92,6 +95,7 @@ const makeEnvelope = Effect.fn("AuthorizedGovernedActionFixture.makeEnvelope")(f
     validity: "valid"
   })
   const evidenceSetDigest = yield* digestGovernedActionEvidenceSet([evidence])
+  const policy = (yield* makeBuiltInGovernedActionPolicyDefinition()).binding
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
     actionId: ACTION_ID,
@@ -123,12 +127,7 @@ const makeEnvelope = Effect.fn("AuthorizedGovernedActionFixture.makeEnvelope")(f
     },
     evidence: [Schema.encodeSync(GovernedActionEvidenceReference)(evidence)],
     evidenceSetDigest,
-    policy: {
-      policyId: "jira.transition",
-      policyVersion: 1,
-      policyDigest: `sha256:${"c".repeat(64)}`,
-      requiredPermission: "workspace-owner"
-    },
+    policy,
     origin: {
       _tag: "human",
       actor: { _tag: "human", personId: PERSON_ID },
@@ -148,7 +147,7 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
 }) {
   yield* seedAuthorityRoots()
   const repository = yield* GovernedActionRepository
-  const envelope = yield* makeEnvelope()
+  const envelope = yield* makeAuthorizedGovernedActionEnvelope()
   const proposal = decodeCommit({
     envelope: Schema.encodeSync(GovernedActionEnvelopeV1)(envelope),
     expectedHeadTransitionId: null,
