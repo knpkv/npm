@@ -80,6 +80,8 @@ describe("model", () => {
         expect(command.args).toContain("--ephemeral")
         expect(command.args).not.toContain("--ignore-user-config")
         expect(command.args).toContain("read-only")
+        expect(command.args).not.toContain("--cd")
+        expect(command.options.cwd).toBe("/workspace")
         expect(command.options.detached).toBeUndefined()
         expect(command.options.shell).toBe(false)
       }

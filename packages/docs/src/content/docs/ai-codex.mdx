@@ -3,7 +3,7 @@ title: Codex Adapter
 description: Run Effect AI language-model programs through the local Codex CLI.
 ---
 
-`@knpkv/ai-codex` adapts an installed, authenticated Codex CLI to Effect AI's `LanguageModel` service. It starts a local child process for each request and exposes one public constructor: `model(options)`.
+`@knpkv/ai-codex` adapts an installed, authenticated Codex CLI to Effect AI's `LanguageModel` service. It starts a local child process for each request and exposes a high-level `model(options)` constructor plus an opt-in `streamEvents(options)` interface for native Codex JSONL events.
 
 ## Install
 
@@ -79,6 +79,30 @@ Schema support is limited to shapes that both Effect's JSON Schema conversion an
 ## Streaming
 
 `LanguageModel.streamText` is available, but Codex CLI events are coarse. The adapter can emit complete agent-message chunks rather than token-by-token deltas. Consumers must not depend on token boundaries or a particular chunk count.
+
+To observe every native Codex event, including tool calls, stream the CLI's raw
+JSONL records directly:
+
+```typescript
+import { NodeServices } from "@effect/platform-node"
+import { streamEvents } from "@knpkv/ai-codex"
+import { Effect, Stream } from "effect"
+
+const events = streamEvents({
+  cwd: "/workspace/project",
+  prompt: "Inspect package.json and summarize the available scripts."
+}).pipe(
+  Stream.tap((line) => Effect.logInfo(line)),
+  Stream.provide(NodeServices.layer)
+)
+```
+
+Each element is one validated, non-empty `codex exec --json` record returned
+unchanged as soon as it is written. Native event fields are deliberately not
+normalized: their shape is owned by the installed Codex CLI and may change
+between CLI versions. The same timeout, stdout/stderr bounds, cancellation,
+working-directory, model, and access options used by `model` apply to
+`streamEvents`; `prompt` is additionally required.
 
 ## Execution and Cancellation
 

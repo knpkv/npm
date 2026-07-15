@@ -4,4 +4,5 @@
  * @module
  */
 
+export { type CodexEventStreamOptions, streamEvents } from "./events.js"
 export { type CodexModelOptions, model } from "./model.js"

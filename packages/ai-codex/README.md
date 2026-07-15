@@ -1,6 +1,6 @@
 # @knpkv/ai-codex
 
-An Effect AI `LanguageModel` backed by an authenticated local Codex CLI.
+An Effect AI `LanguageModel` and raw event stream backed by an authenticated local Codex CLI.
 
 ```ts
 import { NodeServices } from "@effect/platform-node"
@@ -34,6 +34,25 @@ Effect AI toolkits, tool-history messages, and file prompt parts are rejected
 with a typed `AiError`; the CLI transport cannot preserve their Effect-level
 execution semantics. Diagnostics are bounded and common credential forms are
 redacted.
+
+For native Codex progress and tool-call events, use the opt-in raw JSONL stream:
+
+```ts
+import { NodeServices } from "@effect/platform-node"
+import { streamEvents } from "@knpkv/ai-codex"
+import { Stream } from "effect"
+
+const events = streamEvents({
+  cwd: ".",
+  prompt: "Inspect package.json and summarize the available scripts."
+}).pipe(Stream.provide(NodeServices.layer))
+```
+
+Each stream element is one validated, non-empty `codex exec --json` record,
+returned unchanged as soon as the CLI writes it. This low-level interface can
+include native `command_execution` and other tool events. Its event shapes are
+owned by the installed Codex CLI and are not normalized or versioned by this
+package.
 
 ## Real smoke test
 

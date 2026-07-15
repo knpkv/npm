@@ -1,4 +1,4 @@
-import { Cause, Effect, Predicate, Stream } from "effect"
+import { Effect, Fiber, Schema, Stream } from "effect"
 import type * as Duration from "effect/Duration"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -21,6 +21,13 @@ interface RunCodexOptions {
   readonly timeout: Duration.Input
 }
 
+const outputLimitError = (maximumBytes: number, streamName: "stderr" | "stdout"): CodexTransportError =>
+  new CodexTransportError({
+    cause: new CodexFailureCause({ reason: `${streamName}-limit-exceeded` }),
+    diagnostic: `${streamName} exceeded ${maximumBytes} bytes`,
+    phase: "process"
+  })
+
 const collectBounded = (
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   maximumBytes: number,
@@ -32,13 +39,7 @@ const collectBounded = (
     (accumulator, chunk) => {
       const bytes = accumulator.bytes + chunk.byteLength
       if (bytes > maximumBytes) {
-        return Effect.fail(
-          new CodexTransportError({
-            cause: new CodexFailureCause({ reason: `${streamName}-limit-exceeded` }),
-            diagnostic: `${streamName} exceeded ${maximumBytes} bytes`,
-            phase: "process"
-          })
-        )
+        return Effect.fail(outputLimitError(maximumBytes, streamName))
       }
       return Effect.succeed({
         bytes,
@@ -65,10 +66,10 @@ const transportError = (
     phase
   })
 
-export const runCodex = Effect.fn("CodexProcess.run")(function*(
-  options: RunCodexOptions
-): Effect.fn.Return<string, CodexTransportError> {
-  const command = ChildProcess.make(options.executable, options.args, {
+const isCodexTransportError = Schema.is(CodexTransportError)
+
+const makeCommand = (options: RunCodexOptions) =>
+  ChildProcess.make(options.executable, options.args, {
     cwd: options.cwd,
     forceKillAfter: "2 seconds",
     killSignal: "SIGTERM",
@@ -78,27 +79,35 @@ export const runCodex = Effect.fn("CodexProcess.run")(function*(
     stdout: "pipe"
   })
 
-  const execution = Effect.scoped(Effect.gen(function*() {
-    const handle = yield* options.spawner.spawn(command)
-    return yield* Effect.all({
-      exitCode: handle.exitCode,
-      stderr: collectBounded(handle.stderr, options.maxStderrBytes, "stderr"),
-      stdout: collectBounded(handle.stdout, options.maxOutputBytes, "stdout")
-    }, { concurrency: "unbounded" })
-  }))
-
-  const result = yield* execution.pipe(
-    Effect.timeout(options.timeout),
-    Effect.mapError((cause) =>
-      Predicate.isTagged(cause, "CodexTransportError")
-        ? cause
-        : transportError(
-          Cause.isTimeoutError(cause) ? "timeout" : "process",
-          Cause.isTimeoutError(cause) ? "Codex turn exceeded its timeout" : "Unable to execute Codex CLI",
-          cause
-        )
+const boundedStdout = (
+  stdout: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
+  maximumBytes: number
+): Stream.Stream<Uint8Array, PlatformError.PlatformError | CodexTransportError> =>
+  stdout.pipe(
+    Stream.mapAccumEffect(
+      () => 0,
+      (bytes, chunk) => {
+        const nextBytes = bytes + chunk.byteLength
+        if (nextBytes > maximumBytes) return Effect.fail(outputLimitError(maximumBytes, "stdout"))
+        const result: readonly [state: number, values: ReadonlyArray<Uint8Array>] = [nextBytes, [chunk]]
+        return Effect.succeed(result)
+      }
     )
   )
+
+const processError = (cause: unknown): CodexTransportError =>
+  isCodexTransportError(cause)
+    ? cause
+    : transportError("process", "Unable to execute Codex CLI", cause)
+
+const verifyCompletion = Effect.fn("CodexProcess.verifyCompletion")(function*(
+  exitCode: Effect.Effect<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>,
+  stderrFiber: Fiber.Fiber<string, PlatformError.PlatformError | CodexTransportError>
+) {
+  const result = yield* Effect.all({
+    exitCode,
+    stderr: Fiber.join(stderrFiber)
+  }, { concurrency: "unbounded" })
 
   if (result.exitCode !== 0) {
     return yield* transportError(
@@ -107,6 +116,49 @@ export const runCodex = Effect.fn("CodexProcess.run")(function*(
       new CodexFailureCause({ reason: `exit-${result.exitCode}` })
     )
   }
+})
 
-  return result.stdout
+export const streamCodexLines = (options: RunCodexOptions): Stream.Stream<string, CodexTransportError> =>
+  Stream.unwrap(Effect.gen(function*() {
+    const handle = yield* options.spawner.spawn(makeCommand(options)).pipe(
+      Effect.mapError(processError)
+    )
+    const stderrFiber = yield* collectBounded(handle.stderr, options.maxStderrBytes, "stderr").pipe(
+      Effect.mapError(processError),
+      Effect.forkScoped({ startImmediately: true })
+    )
+    const stderrFailure = Fiber.join(stderrFiber).pipe(
+      Effect.matchEffect({
+        onFailure: Effect.fail,
+        onSuccess: () => Effect.never
+      })
+    )
+
+    return boundedStdout(handle.stdout, options.maxOutputBytes).pipe(
+      Stream.decodeText(),
+      Stream.splitLines,
+      Stream.filter((line) => line.trim().length > 0),
+      Stream.interruptWhen(stderrFailure),
+      Stream.concat(Stream.fromEffectDrain(verifyCompletion(handle.exitCode, stderrFiber)))
+    )
+  })).pipe(
+    Stream.interruptWhen(
+      Effect.sleep(options.timeout).pipe(
+        Effect.andThen(Effect.fail(transportError(
+          "timeout",
+          "Codex turn exceeded its timeout",
+          new CodexFailureCause({ reason: "timeout" })
+        )))
+      )
+    ),
+    Stream.mapError(processError)
+  )
+
+export const runCodex = Effect.fn("CodexProcess.run")(function*(
+  options: RunCodexOptions
+): Effect.fn.Return<string, CodexTransportError> {
+  return yield* streamCodexLines(options).pipe(
+    Stream.intersperse("\n"),
+    Stream.mkString
+  )
 })

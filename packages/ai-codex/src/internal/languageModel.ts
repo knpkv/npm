@@ -1,57 +1,16 @@
 import { Effect, Predicate, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import type * as AiError from "effect/unstable/ai/AiError"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { CodexModelOptions } from "../model.js"
+import { makeArguments, normalizeOptions } from "./configuration.js"
 import { CodexTransportError, invalidRequest, transportToAiError } from "./errors.js"
 import { runCodex } from "./process.js"
 import { renderPrompt } from "./prompt.js"
 import { type CodexTurn, decodeTranscript } from "./protocol.js"
 
-const DEFAULT_EXECUTABLE = "codex"
-const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576
-const DEFAULT_MAX_STDERR_BYTES = 65_536
-const DEFAULT_TIMEOUT = "2 minutes"
 const encodeJsonString = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Json))
-
-interface NormalizedOptions {
-  readonly access: "read-only" | "workspace-write"
-  readonly cwd: string
-  readonly executable: string
-  readonly maxOutputBytes: number
-  readonly maxStderrBytes: number
-  readonly model: string | undefined
-  readonly timeout: NonNullable<CodexModelOptions["timeout"]>
-}
-
-const normalizeOptions = (
-  options: CodexModelOptions,
-  method: string
-): Effect.Effect<NormalizedOptions, AiError.AiError> =>
-  Effect.gen(function*() {
-    const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
-    const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES
-    if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
-      return yield* invalidRequest(method, "maxOutputBytes", "must be a positive safe integer")
-    }
-    if (!Number.isSafeInteger(maxStderrBytes) || maxStderrBytes <= 0) {
-      return yield* invalidRequest(method, "maxStderrBytes", "must be a positive safe integer")
-    }
-    if (options.cwd.trim().length === 0) {
-      return yield* invalidRequest(method, "cwd", "must not be empty")
-    }
-    return {
-      access: options.access ?? "read-only",
-      cwd: options.cwd,
-      executable: options.executable ?? DEFAULT_EXECUTABLE,
-      maxOutputBytes,
-      maxStderrBytes,
-      model: options.model,
-      timeout: options.timeout ?? DEFAULT_TIMEOUT
-    }
-  })
 
 const makeSchemaFile = Effect.fn("CodexLanguageModel.makeSchemaFile")(function*(
   fileSystem: FileSystem.FileSystem,
@@ -103,26 +62,6 @@ const makeSchemaFile = Effect.fn("CodexLanguageModel.makeSchemaFile")(function*(
   )
   return schemaFile
 })
-
-const makeArguments = (
-  options: NormalizedOptions,
-  schemaFile: string | undefined
-): ReadonlyArray<string> => {
-  const args = [
-    "exec",
-    "--json",
-    "--ephemeral",
-    "--sandbox",
-    options.access,
-    "--cd",
-    options.cwd,
-    "--skip-git-repo-check"
-  ]
-  if (options.model !== undefined) args.push("--model", options.model)
-  if (schemaFile !== undefined) args.push("--output-schema", schemaFile)
-  args.push("-")
-  return args
-}
 
 const makeMetadataPart = (turn: CodexTurn, modelId: string | undefined): Response.ResponseMetadataPartEncoded => ({
   id: turn.threadId,
