@@ -91,6 +91,24 @@ export const READINESS_RULE_VERSION_V1 = ReadinessRuleVersion.make(1)
 /** V1 evaluator implementation version. */
 export const READINESS_DERIVATION_VERSION_V1 = ReadinessDerivationVersion.make(1)
 
+/** Positive source revision of the release candidate. */
+export const ReadinessReleaseRevision = Schema.Int.check(Schema.isGreaterThan(0))
+
+/** Decoded release-candidate revision. */
+export type ReadinessReleaseRevision = typeof ReadinessReleaseRevision.Type
+
+/** Bounded immutable artifact revision, such as a commit or image digest. */
+export const ReadinessArtifactRevision = boundedIdentifier(512, "ReadinessArtifactRevision")
+
+/** Decoded artifact revision. */
+export type ReadinessArtifactRevision = typeof ReadinessArtifactRevision.Type
+
+/** Stable identity of a readiness rule set. */
+export const ReadinessRuleId = boundedIdentifier(200, "ReadinessRuleId")
+
+/** Decoded readiness-rule identity. */
+export type ReadinessRuleId = typeof ReadinessRuleId.Type
+
 /** Explicit release or target-environment scope of an assessment. */
 export const ReadinessScope = Schema.TaggedUnion({
   release: { releaseId: ReleaseId },
@@ -102,8 +120,8 @@ export type ReadinessScope = typeof ReadinessScope.Type
 
 const CandidateIdentityBase = {
   workspaceId: WorkspaceId,
-  releaseRevision: Schema.Int.check(Schema.isGreaterThan(0)),
-  artifactRevision: boundedIdentifier(512, "ReadinessArtifactRevision"),
+  releaseRevision: ReadinessReleaseRevision,
+  artifactRevision: ReadinessArtifactRevision,
   digest: ReadinessCandidateDigest
 }
 
@@ -133,7 +151,7 @@ export type ReadinessCandidateIdentity = typeof ReadinessCandidateIdentity.Type
 
 /** Stable rule-set identity and content digest retained with every assessment. */
 export const ReadinessRuleReference = Schema.Struct({
-  ruleId: boundedIdentifier(200, "ReadinessRuleId"),
+  ruleId: ReadinessRuleId,
   version: ReadinessRuleVersion,
   digest: ReadinessCandidateDigest
 })

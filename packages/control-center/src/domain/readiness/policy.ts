@@ -24,10 +24,9 @@ export const sortedReadinessUnique = <Value extends string>(
   values: ReadonlyArray<Value>
 ): Array<Value> => Array.from(new Set(values)).sort(compareReadinessText)
 
-/** Whether definitions and observations form a complete V1 delivery policy shape. */
-export const readinessPolicyShapeIsV1 = (
-  definitions: ReadonlyArray<ReadinessFactDefinition>,
-  observations: ReadonlyArray<ReadinessFactObservation>
+/** Whether definitions form the complete provider-neutral V1 delivery policy. */
+export const readinessDefinitionsShapeIsV1 = (
+  definitions: ReadonlyArray<ReadinessFactDefinition>
 ): boolean => {
   const deployments = definitions.filter(({ kind }) => kind === "deployment")
   return definitions.some(({ kind, requirement }) => kind === "execution" && requirement === "required") &&
@@ -35,9 +34,16 @@ export const readinessPolicyShapeIsV1 = (
       requirement === "required" && ["relationship", "approval", "check", "documentation"].includes(kind)
     ) &&
     deployments.length === 1 &&
-    deployments[0]?.requirement === "advisory" &&
-    observations.some(({ state }) => state._tag === "deployment")
+    deployments[0]?.requirement === "advisory"
 }
+
+/** Whether definitions and observations form a complete V1 delivery policy shape. */
+export const readinessPolicyShapeIsV1 = (
+  definitions: ReadonlyArray<ReadinessFactDefinition>,
+  observations: ReadonlyArray<ReadinessFactObservation>
+): boolean =>
+  readinessDefinitionsShapeIsV1(definitions) &&
+  observations.some(({ state }) => state._tag === "deployment")
 
 /** Whether one exact evidence dependency is current enough for a verdict. */
 export const readinessEvidenceIsCurrent = (evidence: ReadinessEvidenceReference): boolean =>

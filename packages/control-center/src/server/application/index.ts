@@ -9,6 +9,12 @@ export {
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
 export {
+  digestEnvironmentReadinessCandidate,
+  digestReadinessRule,
+  digestReleaseReadinessCandidate,
+  ReadinessDigestError
+} from "./readinessDigests.js"
+export {
   makeReleaseAgentTurns,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
