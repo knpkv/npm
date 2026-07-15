@@ -7,23 +7,21 @@ import * as Schema from "effect/Schema"
 
 import { GovernedActionCommandDigest, GovernedActionCommandId } from "../../../../domain/governedAction/index.js"
 import { DomainEventId, GovernedActionTransitionId } from "../../../../domain/identifiers.js"
-import { PluginActionDispatchResultV1 } from "../../../../domain/plugins/actions.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
 import { GovernedActionCommitInput } from "../../../persistence/repositories/governed-action/contract.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
 import { makeGovernedActionTransactionWrite } from "../../../persistence/repositories/governed-action/write.js"
-import {
-  digestGovernedActionTransitionCommand,
-  encodeGovernedActionDispatchOutcome
-} from "../../governedActionDigests.js"
+import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import type { GovernedActionExecutionReference } from "../GovernedActionExecutionStore.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
 import {
+  DispatchInboxOutcome,
   dispatchResultCommand,
   DispatchResultKind,
   dispatchResultKind,
-  dispatchResultObservedAt
+  dispatchResultObservedAt,
+  encodeDispatchInboxOutcome
 } from "./dispatch-outcome.js"
 import { GovernedActionPermitTokenDigest } from "./tokens.js"
 
@@ -97,10 +95,10 @@ export const makeGovernedActionExecutionPendingDispatchFolder = Effect.gen(funct
         if (pending.length !== 1 || row === undefined) return yield* invalidRecord()
 
         const result = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(PluginActionDispatchResultV1)
+          Schema.fromJsonString(DispatchInboxOutcome)
         )(row.outcomeJson).pipe(Effect.mapError(invalidRecord))
         const command = dispatchResultCommand(result)
-        const encoded = yield* encodeGovernedActionDispatchOutcome(result).pipe(
+        const encoded = yield* encodeDispatchInboxOutcome(result).pipe(
           Effect.provideService(Crypto.Crypto, cryptoService),
           Effect.mapError(storeFailure)
         )

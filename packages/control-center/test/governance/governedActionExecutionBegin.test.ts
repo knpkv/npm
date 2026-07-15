@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
 import type { GovernedActionState } from "../../src/domain/governedAction/index.js"
-import { GovernedActionCommandId } from "../../src/domain/governedAction/index.js"
+import { GovernedActionCommandId, GovernedActionUnknownOutcome } from "../../src/domain/governedAction/index.js"
 import {
   DomainEventId,
   EntityId,
@@ -24,6 +24,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionBegin } from "../../src/server/governance/internal/execution-store/begin.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
 import { makeGovernedActionExecutionRecordDispatch } from "../../src/server/governance/internal/execution-store/record-dispatch.js"
+import { makeGovernedActionExecutionRecordUnknown } from "../../src/server/governance/internal/execution-store/record-unknown.js"
 import { issueGovernedActionPermitToken } from "../../src/server/governance/internal/execution-store/tokens.js"
 import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
@@ -783,5 +784,142 @@ describe("governed action dispatch outcomes", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "not-found")
+    })))
+})
+
+describe("governed action local unknown outcomes", () => {
+  it.effect("records manual uncertainty after the dispatch deadline and replays it exactly", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const observedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:20.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordUnknown
+      const outcome = Schema.decodeUnknownSync(GovernedActionUnknownOutcome)({
+        _tag: "manual",
+        observedAt: "2026-07-15T10:02:20.000Z",
+        safeSummary: "Dispatch crossed the provider intent boundary",
+        reason: "interrupted-after-intent"
+      })
+
+      assert.strictEqual(
+        yield* recorder.recordUnknown({ permitToken: permitted.permitToken, outcome }),
+        "unknown"
+      )
+      assert.strictEqual(
+        yield* recorder.recordUnknown({ permitToken: permitted.permitToken, outcome }),
+        "unknown"
+      )
+
+      const changed = yield* recorder.recordUnknown({
+        permitToken: permitted.permitToken,
+        outcome: Schema.decodeUnknownSync(GovernedActionUnknownOutcome)({
+          _tag: "manual",
+          observedAt: "2026-07-15T10:02:20.000Z",
+          safeSummary: "A different report for the same permit",
+          reason: "interrupted-after-intent"
+        })
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changed))
+      if (Result.isFailure(changed)) assert.strictEqual(changed.failure.reason, "conflict")
+
+      const { sql } = yield* Database
+      const rows = yield* sql<{
+        readonly folds: number
+        readonly outcomes: number
+        readonly resultKind: string
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes,
+        outcome.result_kind AS resultKind
+      FROM governed_action_provider_outcomes outcome`
+      assert.deepStrictEqual(rows[0], { folds: 1, outcomes: 1, resultKind: "manual-unknown" })
+    })))
+
+  it.effect("keeps reconcilable uncertainty inside the provider dispatch window", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const receivedAt = DateTime.add(permitted.dispatchDeadline, { seconds: 1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordUnknown
+      const result = yield* recorder.recordUnknown({
+        permitToken: permitted.permitToken,
+        outcome: Schema.decodeUnknownSync(GovernedActionUnknownOutcome)({
+          _tag: "reconcilable",
+          reconciliationKey: "reconcile-at-deadline",
+          observedAt: DateTime.formatIso(permitted.dispatchDeadline),
+          safeSummary: "Provider result arrived at the closed deadline"
+        })
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "conflict")
+      const { sql } = yield* Database
+      const rows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM governed_action_provider_outcomes`
+      assert.strictEqual(rows[0]?.count, 0)
+    })))
+
+  it.effect("preserves cancellation intent when recording a local unknown", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const cancelledAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:01.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(cancelledAt))
+      yield* requestCancellation(cancelledAt)
+      const observedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordUnknown
+
+      assert.strictEqual(
+        yield* recorder.recordUnknown({
+          permitToken: permitted.permitToken,
+          outcome: Schema.decodeUnknownSync(GovernedActionUnknownOutcome)({
+            _tag: "reconcilable",
+            reconciliationKey: "reconcile-cancelled-local",
+            observedAt: "2026-07-15T10:02:02.000Z",
+            safeSummary: "Cancellation raced with provider intent"
+          })
+        }),
+        "cancel-requested-unknown"
+      )
+    })))
+
+  it.effect("folds a crash-stranded local unknown from persisted data after restart", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const observedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const { sql } = yield* Database
+      yield* sql`CREATE TRIGGER governed_action_test_fail_local_unknown_fold
+        BEFORE INSERT ON governed_action_provider_outcome_folds
+        BEGIN
+          SELECT RAISE(ABORT, 'injected local unknown fold failure');
+        END`
+      const beforeRestart = yield* makeGovernedActionExecutionRecordUnknown
+      const failed = yield* beforeRestart.recordUnknown({
+        permitToken: permitted.permitToken,
+        outcome: Schema.decodeUnknownSync(GovernedActionUnknownOutcome)({
+          _tag: "reconcilable",
+          reconciliationKey: "reconcile-local-restart",
+          observedAt: "2026-07-15T10:02:02.000Z",
+          safeSummary: "Outcome persisted before the process stopped"
+        })
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failed))
+      if (Result.isFailure(failed)) assert.strictEqual(failed.failure.reason, "persistence-unavailable")
+      yield* sql`DROP TRIGGER governed_action_test_fail_local_unknown_fold`
+
+      const afterRestart = yield* makeGovernedActionExecutionInspect
+      assert.deepStrictEqual(yield* afterRestart.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "unknown"
+      })
+      const rows = yield* sql<{
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(rows[0], { folds: 1, outcomes: 1 })
     })))
 })

@@ -29,7 +29,9 @@ import {
   GovernedActionTransitionDigest,
   type GovernedActionTransitionMaterialV1 as GovernedActionTransitionMaterial,
   GovernedActionTransitionV1,
-  type GovernedActionTransitionV1 as GovernedActionTransition
+  type GovernedActionTransitionV1 as GovernedActionTransition,
+  GovernedActionUnknownOutcome,
+  type GovernedActionUnknownOutcome as GovernedActionUnknown
 } from "../../domain/governedAction/stateMachine.js"
 import {
   PluginActionDispatchResultV1,
@@ -230,6 +232,7 @@ const digestCanonicalJson = Effect.fn("GovernedActionDigests.digestCanonicalJson
 
 const encodeCommand = Schema.encodeEffect(GovernedActionTransitionCommand)
 const encodeDispatchResult = Schema.encodeEffect(PluginActionDispatchResultV1)
+const encodeUnknownOutcome = Schema.encodeEffect(GovernedActionUnknownOutcome)
 const encodeEvidence = Schema.encodeEffect(GovernedActionEvidenceSet)
 const encodeEnvelope = Schema.encodeEffect(GovernedActionEnvelopeMaterialV1)
 const encodePolicyEvaluation = Schema.encodeEffect(GovernedActionPolicyEvaluationV1)
@@ -258,6 +261,24 @@ export const encodeGovernedActionDispatchOutcome = Effect.fn(
   Crypto.Crypto
 > {
   const encoded = yield* encodeDispatchResult(result).pipe(
+    Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
+  )
+  const json = yield* decodeJson(encoded)
+  return {
+    outcomeDigest: yield* digestCanonicalJson(json),
+    outcomeJson: canonicalizeGovernedActionJson(json)
+  }
+})
+
+/** Encode and hash one locally observed unknown result retained by the dispatch inbox. */
+export const encodeGovernedActionUnknownOutcome = Effect.fn(
+  "GovernedActionDigests.unknownOutcome"
+)(function*(outcome: GovernedActionUnknown): Effect.fn.Return<
+  EncodedGovernedActionDispatchOutcome,
+  GovernedActionDigestError,
+  Crypto.Crypto
+> {
+  const encoded = yield* encodeUnknownOutcome(outcome).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode" }))
   )
   const json = yield* decodeJson(encoded)

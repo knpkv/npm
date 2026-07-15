@@ -1,26 +1,64 @@
+import type * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import type { GovernedActionTransitionCommand } from "../../../../domain/governedAction/index.js"
-import type { PluginActionDispatchResultV1 } from "../../../../domain/plugins/actions.js"
+import {
+  type GovernedActionTransitionCommand,
+  GovernedActionUnknownOutcome
+} from "../../../../domain/governedAction/index.js"
+import { PluginActionDispatchResultV1 } from "../../../../domain/plugins/actions.js"
 import type { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
+import { encodeGovernedActionDispatchOutcome, encodeGovernedActionUnknownOutcome } from "../../governedActionDigests.js"
+import type { EncodedGovernedActionDispatchOutcome, GovernedActionDigestError } from "../../governedActionDigests.js"
+
+/** Closed dispatch-side artifacts that can enter the durable provider-outcome inbox. */
+export const DispatchInboxOutcome = Schema.Union([
+  PluginActionDispatchResultV1,
+  GovernedActionUnknownOutcome
+])
+
+/** Decoded dispatch-side inbox artifact. */
+export type DispatchInboxOutcome = typeof DispatchInboxOutcome.Type
 
 /** Closed persisted kinds for immediate dispatch results. */
-export const DispatchResultKind = Schema.Literals(["accepted", "succeeded", "failed", "cancelled", "unknown"])
+export const DispatchResultKind = Schema.Literals([
+  "accepted",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "unknown",
+  "manual-unknown"
+])
+
+const isLocalUnknown = (
+  outcome: DispatchInboxOutcome
+): outcome is typeof GovernedActionUnknownOutcome.Type => outcome._tag === "reconcilable" || outcome._tag === "manual"
 
 /** Project one provider result to its immutable inbox kind. */
 export const dispatchResultKind = (
-  result: PluginActionDispatchResultV1
-): typeof DispatchResultKind.Type => result._tag === "unknown" ? "unknown" : result.receipt.status
+  outcome: DispatchInboxOutcome
+): typeof DispatchResultKind.Type =>
+  isLocalUnknown(outcome)
+    ? outcome._tag === "manual" ? "manual-unknown" : "unknown"
+    : outcome._tag === "unknown"
+    ? "unknown"
+    : outcome.receipt.status
 
 /** Provider-owned observation time retained separately from host receipt time. */
 export const dispatchResultObservedAt = (
-  result: PluginActionDispatchResultV1
-): typeof UtcTimestamp.Type => result._tag === "unknown" ? result.observedAt : result.receipt.observedAt
+  outcome: DispatchInboxOutcome
+): typeof UtcTimestamp.Type =>
+  isLocalUnknown(outcome)
+    ? outcome.observedAt
+    : outcome._tag === "unknown"
+    ? outcome.observedAt
+    : outcome.receipt.observedAt
 
 /** Reconstruct the exact lifecycle command represented by one immediate provider result. */
 export const dispatchResultCommand = (
-  result: PluginActionDispatchResultV1
+  result: DispatchInboxOutcome
 ): GovernedActionTransitionCommand => {
+  if (isLocalUnknown(result)) return { _tag: "recordUnknown", outcome: result }
   if (result._tag === "unknown") {
     return {
       _tag: "recordUnknown",
@@ -43,3 +81,16 @@ export const dispatchResultCommand = (
       return { _tag: "recordCancelled", receipt: result.receipt, source: { _tag: "direct" } }
   }
 }
+
+/** Canonically encode either provider output or a local unknown marker. */
+export const encodeDispatchInboxOutcome = Effect.fn(
+  "GovernedActionDispatchOutcome.encodeInbox"
+)(function*(outcome: DispatchInboxOutcome): Effect.fn.Return<
+  EncodedGovernedActionDispatchOutcome,
+  GovernedActionDigestError,
+  Crypto.Crypto
+> {
+  return yield* isLocalUnknown(outcome)
+    ? encodeGovernedActionUnknownOutcome(outcome)
+    : encodeGovernedActionDispatchOutcome(outcome)
+})
