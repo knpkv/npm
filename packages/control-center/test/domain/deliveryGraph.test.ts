@@ -394,14 +394,14 @@ describe("delivery graph domain", () => {
     assert.deepStrictEqual(
       evidenceFreshnessAt(
         item.success,
-        Schema.decodeSync(UtcTimestamp)("2026-07-15T08:30:00.000Z")
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T08:29:59.999Z")
       ),
       { source: "current", validity: "valid" }
     )
     assert.deepStrictEqual(
       evidenceFreshnessAt(
         item.success,
-        Schema.decodeSync(UtcTimestamp)("2026-07-15T08:30:00.001Z")
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T08:30:00.000Z")
       ),
       { source: "stale", validity: "valid" }
     )

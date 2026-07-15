@@ -190,6 +190,21 @@ describe("governed action current evidence", () => {
       }
     })))
 
+  it.effect("treats currentUntil as an exclusive dispatch boundary", () =>
+    withReader(Effect.gen(function*() {
+      yield* seedEvidence()
+
+      assert.strictEqual(yield* readAt("2026-07-15T10:49:59.999Z"), evidence)
+      const result = yield* readAt(CURRENT_UNTIL).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "GovernedActionCurrentEvidenceRejected")
+        if (result.failure._tag !== "GovernedActionCurrentEvidenceRejected") return
+        assert.strictEqual(result.failure.reason, "evidence-not-current")
+      }
+    })))
+
   it.effect("rejects a referenced claim after an immutable successor appears", () =>
     withReader(Effect.gen(function*() {
       yield* seedEvidence()

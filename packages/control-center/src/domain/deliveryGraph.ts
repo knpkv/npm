@@ -499,7 +499,7 @@ const sourceFreshnessAt = (
   if (freshness._tag !== "current") return freshness._tag
 
   const ageMilliseconds = DateTime.toEpochMillis(at) - DateTime.toEpochMillis(freshness.sourceObservedAt)
-  return ageMilliseconds <= freshness.staleAfterSeconds * 1_000 ? "current" : "stale"
+  return ageMilliseconds < freshness.staleAfterSeconds * 1_000 ? "current" : "stale"
 }
 
 /** Determine source freshness and evidence validity at an injected instant. */
