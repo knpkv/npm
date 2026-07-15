@@ -39,6 +39,7 @@ import {
 } from "../../src/server/persistence/PersistenceConfig.js"
 
 const expectedTables = [
+  "audit_events",
   "content_blobs",
   "control_center_migrations",
   "delivery_nodes",
@@ -49,6 +50,11 @@ const expectedTables = [
   "entity_revisions",
   "evidence_claims",
   "evidence_items",
+  "governed_action_attempts",
+  "governed_action_authorizations",
+  "governed_action_policy_evaluations",
+  "governed_action_transitions",
+  "governed_actions",
   "pairing_codes",
   "person_identities",
   "persons",
