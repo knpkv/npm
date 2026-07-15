@@ -340,6 +340,21 @@ describe("plugin runtime authority", () => {
         runtimeRecord.revision,
         T2
       )
+      const database = yield* Database
+      const deletion = yield* database.sql`DELETE FROM plugin_runtime_state
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${CONNECTION_ID}`.pipe(Effect.result)
+      const recreation = yield* runtime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CONNECTION_ID,
+        "jira",
+        descriptor(),
+        0,
+        T0
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(deletion))
+      assert.isTrue(Result.isFailure(recreation))
+
       const cycled = yield* runtime.acceptPluginDescriptor(
         WORKSPACE_ID,
         CONNECTION_ID,

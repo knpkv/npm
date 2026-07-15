@@ -192,4 +192,16 @@ export const migration0016PluginRuntimeAuthority = Effect.gen(function*() {
     BEGIN
       SELECT RAISE(ABORT, 'plugin runtime authority generation cannot be deleted');
     END`
+
+  yield* sql`CREATE TRIGGER plugin_runtime_state_no_delete_after_authority
+    BEFORE DELETE ON plugin_runtime_state
+    WHEN EXISTS (
+      SELECT 1
+      FROM plugin_runtime_authority_generations authority
+      WHERE authority.workspace_id = OLD.workspace_id
+        AND authority.plugin_connection_id = OLD.plugin_connection_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'authorized plugin runtime state cannot be recreated');
+    END`
 })

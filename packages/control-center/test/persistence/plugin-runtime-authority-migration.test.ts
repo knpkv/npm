@@ -352,6 +352,10 @@ describe("plugin runtime authority migration", () => {
         accepted_at = ${RUNTIME_ACCEPTED_AT}`
       assert.isEmpty(yield* sql`SELECT * FROM current_plugin_runtime_authority_heads`)
 
+      const deletion = yield* sql`DELETE FROM plugin_runtime_state`.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(deletion))
+      assert.isEmpty(yield* sql`SELECT * FROM current_plugin_runtime_authority_heads`)
+
       yield* sql`UPDATE plugin_runtime_state SET
         descriptor_generation = 3,
         descriptor_digest = ${DESCRIPTOR_DIGEST},
