@@ -15,6 +15,11 @@ import type {
 import type { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import type { PluginRuntimeAuthorityToken } from "../../plugins/internal/PluginRuntimeAuthority.js"
 import type { PluginRuntimeScope } from "../../plugins/PluginConnectionMap.js"
+import type {
+  GovernedActionPermitToken,
+  GovernedActionPreparationToken,
+  GovernedActionRecoveryToken
+} from "./execution-store/tokens.js"
 
 /** Workspace-scoped action identity accepted by the sealed execution worker. */
 export const GovernedActionExecutionReference = Schema.Struct({
@@ -56,7 +61,7 @@ export interface GovernedActionInactiveExecution {
 /** Immutable preparation data only; it grants no provider execution authority. */
 export interface GovernedActionDispatchPreparation {
   readonly _tag: "dispatch"
-  readonly preparationToken: string
+  readonly preparationToken: GovernedActionPreparationToken
   readonly scope: PluginRuntimeScope
   readonly request: AuthorizedPluginActionV1
 }
@@ -64,7 +69,7 @@ export interface GovernedActionDispatchPreparation {
 /** Recovery plan for durable started/unknown work; reconciliation never replays the mutation. */
 export interface GovernedActionRecoveryPreparation {
   readonly _tag: "reconcile"
-  readonly recoveryToken: string
+  readonly recoveryToken: GovernedActionRecoveryToken
   readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
   readonly scope: PluginRuntimeScope
   readonly request: PluginActionReconciliationRequestV1
@@ -78,7 +83,7 @@ export type GovernedActionExecutionPlan =
 /** One-use permit returned only by an atomic live-authority verification plus start commit. */
 export interface GovernedActionDispatchPermit {
   readonly _tag: "permitted"
-  readonly permitToken: string
+  readonly permitToken: GovernedActionPermitToken
   readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
   readonly dispatchDeadline: UtcTimestamp
   readonly leaseExpiresAt: UtcTimestamp
@@ -112,31 +117,31 @@ export interface GovernedActionExecutionStoreV1 {
     reference: GovernedActionExecutionReference
   ) => Effect.Effect<GovernedActionExecutionPlan, GovernedActionExecutionStoreError>
   readonly begin: (input: {
-    readonly preparationToken: string
+    readonly preparationToken: GovernedActionPreparationToken
     readonly preflight: ReadyPluginActionPreflightV1
     readonly runtimeAuthorityToken: PluginRuntimeAuthorityToken
   }) => Effect.Effect<GovernedActionBeginResult, GovernedActionExecutionStoreError>
   readonly recordBlocked: (input: {
-    readonly preparationToken: string
+    readonly preparationToken: GovernedActionPreparationToken
     readonly preflight: BlockedPluginActionPreflightV1
     readonly observedAt: UtcTimestamp
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>
   readonly recordDispatch: (input: {
-    readonly permitToken: string
+    readonly permitToken: GovernedActionPermitToken
     readonly result: PluginActionDispatchResultV1
     readonly observedAt: UtcTimestamp
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>
   readonly recordUnknown: (input: {
-    readonly permitToken: string
+    readonly permitToken: GovernedActionPermitToken
     readonly outcome: GovernedActionUnknownOutcome
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>
   readonly recordRecoveryUnavailable: (input: {
-    readonly recoveryToken: string
+    readonly recoveryToken: GovernedActionRecoveryToken
     readonly observedAt: UtcTimestamp
     readonly reason: "runtime-generation-unavailable"
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>
   readonly recordReconciliation: (input: {
-    readonly recoveryToken: string
+    readonly recoveryToken: GovernedActionRecoveryToken
     readonly result: PluginActionReconciliationResultV1
     readonly observedAt: UtcTimestamp
   }) => Effect.Effect<GovernedActionState, GovernedActionExecutionStoreError>

@@ -21,6 +21,11 @@ import {
   PluginActionReconciliationRequestV1,
   PluginActionReconciliationResultV1
 } from "../../src/domain/plugins/actions.js"
+import {
+  GovernedActionPermitToken,
+  GovernedActionPreparationToken,
+  GovernedActionRecoveryToken
+} from "../../src/server/governance/internal/execution-store/tokens.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
 import {
   type GovernedActionBeginResult,
@@ -44,6 +49,9 @@ const workspaceId = Schema.decodeUnknownSync(WorkspaceId)(WORKSPACE_ID)
 const connectionId = Schema.decodeUnknownSync(PluginConnectionId)(CONNECTION_ID)
 const runtimeAuthorityToken = PluginRuntimeAuthorityToken.make("runtime-authority-1")
 const rotatedRuntimeAuthorityToken = PluginRuntimeAuthorityToken.make("runtime-authority-2")
+const preparationToken = Schema.decodeUnknownSync(GovernedActionPreparationToken)("1".repeat(64))
+const permitToken = Schema.decodeUnknownSync(GovernedActionPermitToken)("2".repeat(64))
+const recoveryToken = Schema.decodeUnknownSync(GovernedActionRecoveryToken)("3".repeat(64))
 const observedAt = Schema.decodeUnknownSync(Schema.DateTimeUtcFromString)(OBSERVED_AT)
 
 const authorizedRequest = Schema.decodeUnknownSync(AuthorizedPluginActionV1)({
@@ -104,14 +112,14 @@ const pendingReconciliation = Schema.decodeUnknownSync(PluginActionReconciliatio
 
 const dispatchPlan: GovernedActionExecutionPlan = {
   _tag: "dispatch",
-  preparationToken: "preparation-1",
+  preparationToken,
   scope: { workspaceId, pluginConnectionId: connectionId },
   request: authorizedRequest
 }
 
 const permitted: GovernedActionBeginResult = {
   _tag: "permitted",
-  permitToken: "permit-1",
+  permitToken,
   runtimeAuthorityToken,
   dispatchDeadline: Schema.decodeUnknownSync(Schema.DateTimeUtcFromString)("2026-07-15T10:00:30.000Z"),
   leaseExpiresAt: Schema.decodeUnknownSync(Schema.DateTimeUtcFromString)("2026-07-15T10:01:00.000Z"),
@@ -257,7 +265,7 @@ describe("governed action execution engine", () => {
       const recovery = yield* makeHarness({
         plan: {
           _tag: "reconcile",
-          recoveryToken: "recovery-1",
+          recoveryToken,
           runtimeAuthorityToken,
           scope: { workspaceId, pluginConnectionId: connectionId },
           request: reconciliationRequest
@@ -277,7 +285,7 @@ describe("governed action execution engine", () => {
         leaseRuntimeAuthorityToken: rotatedRuntimeAuthorityToken,
         plan: {
           _tag: "reconcile",
-          recoveryToken: "recovery-1",
+          recoveryToken,
           runtimeAuthorityToken,
           scope: { workspaceId, pluginConnectionId: connectionId },
           request: reconciliationRequest
