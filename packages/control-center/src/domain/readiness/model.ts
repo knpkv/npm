@@ -547,6 +547,10 @@ export const EnvironmentReadinessAssessment = Schema.Struct({
   verifiedFactIds: Schema.Array(ReadinessFactId).check(Schema.isMaxLength(512))
 }).check(
   Schema.makeFilter(
+    ({ derivationVersion }) => derivationVersion === READINESS_DERIVATION_VERSION_V1,
+    { expected: "an environment readiness assessment derived by V1" }
+  ),
+  Schema.makeFilter(
     ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
     {
       expected: "a readiness assessment not to supersede itself"
@@ -702,6 +706,10 @@ export const ReleaseReadinessAssessment = Schema.Struct({
   candidate: ReleaseReadinessCandidateIdentity,
   environments: Schema.NonEmptyArray(EnvironmentReadinessSummary).check(Schema.isMaxLength(512))
 }).check(
+  Schema.makeFilter(
+    ({ derivationVersion }) => derivationVersion === READINESS_DERIVATION_VERSION_V1,
+    { expected: "a release readiness assessment derived by V1" }
+  ),
   Schema.makeFilter(
     ({ assessmentId, previousAssessmentId }) => previousAssessmentId === null || previousAssessmentId !== assessmentId,
     {

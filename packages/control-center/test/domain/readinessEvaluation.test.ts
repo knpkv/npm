@@ -472,6 +472,12 @@ describe("environment readiness evaluation", () => {
     assert.throws(() =>
       Schema.decodeUnknownSync(EnvironmentReadinessAssessment)({
         ...ready,
+        derivationVersion: 2
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(EnvironmentReadinessAssessment)({
+        ...ready,
         requiredFactIds: ready.requiredFactIds.slice(1)
       })
     )

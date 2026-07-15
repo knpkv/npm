@@ -304,6 +304,12 @@ describe("release readiness roll-up", () => {
     assert.throws(() =>
       Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
         ...ready,
+        derivationVersion: 2
+      })
+    )
+    assert.throws(() =>
+      Schema.decodeUnknownSync(ReleaseReadinessAssessment)({
+        ...ready,
         verdict: "shipped"
       })
     )
