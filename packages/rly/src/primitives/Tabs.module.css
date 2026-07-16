@@ -1,0 +1,83 @@
+@layer rly.components {
+  .root {
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .list {
+    align-items: stretch;
+    background: var(--rly-color-surface-2);
+    border-radius: var(--rly-radius-field);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-2);
+    max-inline-size: 100%;
+    padding: var(--rly-space-4);
+  }
+
+  .trigger {
+    appearance: none;
+    background: var(--rly-color-surface-2);
+    border: var(--rly-space-0);
+    border-radius: var(--rly-radius-tag);
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    flex: 1 1 10rem;
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    padding: var(--rly-space-8) var(--rly-space-12);
+    position: relative;
+    text-align: center;
+  }
+
+  .trigger::after {
+    background: var(--rly-color-action-background);
+    block-size: var(--rly-space-2);
+    border-radius: var(--rly-radius-round);
+    content: "";
+    inset-block-end: var(--rly-space-2);
+    inset-inline: var(--rly-space-12);
+    opacity: 0;
+    position: absolute;
+  }
+
+  .trigger[data-state="active"] {
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+  }
+
+  .trigger[data-state="active"]::after {
+    opacity: 1;
+  }
+  .trigger:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+  }
+
+  .defaultSize .trigger {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    min-block-size: calc(var(--rly-space-40) + var(--rly-space-4));
+  }
+
+  .large .trigger {
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    min-block-size: var(--rly-space-48);
+    padding-inline: var(--rly-space-16);
+  }
+
+  .panel {
+    color: var(--rly-color-text-1);
+    min-inline-size: var(--rly-space-0);
+    padding-block-start: var(--rly-space-24);
+  }
+
+  @media (hover: hover) {
+    .trigger:not(:disabled, [data-state="active"]):hover {
+      background: var(--rly-color-surface-3);
+      color: var(--rly-color-text-1);
+    }
+  }
+}

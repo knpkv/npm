@@ -57,29 +57,42 @@ Effect.runPromise(
 )
 ```
 
+## Local AI Adapters
+
+These packages expose local coding-agent CLIs through Effect AI's `LanguageModel` service. Each package keeps one public constructor, `model(options)`, and leaves authentication with the installed CLI.
+
+| Package            | Public API       | Runtime                                              | Docs                          |
+| ------------------ | ---------------- | ---------------------------------------------------- | ----------------------------- |
+| `@knpkv/ai-codex`  | `model(options)` | Local `codex` process; read-only access by default.  | [Codex Adapter](/ai-codex/)   |
+| `@knpkv/ai-claude` | `model(options)` | Local `claude` process; read-only access by default. | [Claude Adapter](/ai-claude/) |
+
 ## Shared Libraries
 
-| Package                   | Purpose                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token/profile storage, profile-manager CLI, AST nodes, and Markdown serialization. |
-| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services.               |
-| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                                             |
+| Package                   | Purpose                                                                                                                               | Docs         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `@knpkv/rly`              | Release-oriented React presentation system for human and agent collaboration.                                                         | [rly](/rly/) |
+| `@knpkv/atlassian-common` | Branded ids, hashing, OAuth operations, XDG config/token/profile storage, profile-manager CLI, AST nodes, and Markdown serialization. | —            |
+| `@knpkv/codecommit-core`  | CodeCommit domain models, AWS client, config service, cache service, sandbox service, stats, and pull request services.               | —            |
+| `@knpkv/codecommit-web`   | Bun server and React SPA for CodeCommit review workflows.                                                                             | —            |
 
 ## Local State By Package
 
-| Package                             | Local state                                                                                              |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `@knpkv/atlassian-common` consumers | `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/auth.json`, `oauth.json`, and `profiles.json`. |
-| `@knpkv/confluence-to-markdown`     | `.confluence/config.json`, `.confluence/docs`, workspace Git metadata, and Confluence OAuth files.       |
-| `@knpkv/codecommit-core`            | `~/.codecommit/config.json` and `~/.codecommit/cache.db`.                                                |
-| `@knpkv/jira-clockify`              | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                           |
-| `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                      |
+| Package                             | Local state                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `@knpkv/atlassian-common` consumers | `${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/auth.json`, `oauth.json`, and `profiles.json`.     |
+| `@knpkv/confluence-to-markdown`     | `.confluence/config.json`, `.confluence/docs`, workspace Git metadata, and Confluence OAuth files.           |
+| `@knpkv/codecommit-core`            | `~/.codecommit/config.json` and `~/.codecommit/cache.db`.                                                    |
+| `@knpkv/jira-clockify`              | `~/.jcf/config.json`, `~/.jcf/clockify.json`, and timer state.                                               |
+| `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                          |
+| `@knpkv/ai-codex`                   | Uses the Codex CLI's existing local authentication and configuration; the adapter owns no credential store.  |
+| `@knpkv/ai-claude`                  | Uses the Claude CLI's existing local authentication and configuration; the adapter owns no credential store. |
 
 ## Documentation Surfaces
 
 | Surface                           | Audience               | Role                                                 |
 | --------------------------------- | ---------------------- | ---------------------------------------------------- |
 | `packages/docs`                   | Users and agents       | Canonical CLI-first documentation site.              |
+| [rly catalog](/rly/catalog/)      | Designers and builders | Interactive components, states, and accessibility.   |
 | Package READMEs                   | npm users              | Package-level quick start and API overview.          |
 | `docs/command-surface.md`         | Maintainers            | Design history for the resource-first command model. |
 | `packages/**/effect-explainer.md` | Maintainers and agents | Architecture notes for Effect-heavy modules.         |

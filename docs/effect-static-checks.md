@@ -7,8 +7,9 @@ style preferences into noisy CI failures.
 ## Commands
 
 - `pnpm lint` runs ESLint and ast-grep.
-- `pnpm lint:ast` runs ast-grep rules from `sgconfig.yml`, including the
-  Effect-specific rules in `ast-grep/rules/effect` and TypeScript-wide rules in
+- `pnpm lint:ast` first runs the rule cases in `ast-grep/tests`, then scans with
+  the rules from `sgconfig.yml`, including the Effect-specific rules in
+  `ast-grep/rules/effect` and TypeScript-wide rules in
   `ast-grep/rules/typescript`.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm skills:check` verifies product-local agent skills are synced from
@@ -24,9 +25,23 @@ Use ast-grep for syntactic patterns that are precise without type information:
   `new Error(...)` inside Effect generators.
 - Keep Effect composition inside Effect code: no `Effect.runPromise`,
   `Effect.runSync`, or `Effect.runFork` inside `Effect.gen`.
+- Do not silently discard `Effect.runPromise` rejections. The import-aware local
+  ESLint rule recognizes namespace aliases, named imports, empty handlers,
+  `void` returns, and rejection callbacks passed to either `catch` or `then`.
 - Use Effect platform services at runtime boundaries: no raw `fs`, raw process
   access, raw `fetch`, raw crypto, or raw timer APIs in package/source Effect
   code.
+- Keep local agent subprocesses isolated: `ai-claude` and `ai-codex` must pass
+  an explicit reviewed `env` record with `extendEnv: false`; provider-specific
+  credentials are opt-in rather than inherited from the parent process. The
+  binding-aware local ESLint rule permits process construction only in the two
+  audited command-factory files, each with one top-level constant factory and
+  an unmodified options parameter. It rejects constructor aliases, indirect
+  calls, value re-exports, computed module loading, CommonJS loader-capable
+  bindings, and raw Node process access. It also rejects shadowed environment
+  projections, dynamic or computed option keys, duplicate keys, and option
+  spreads. Type-only exports and safe non-loader Node module metadata remain
+  valid.
 - Use Schema JSON codecs at API spec generation boundaries: no raw
   `JSON.parse`/`JSON.stringify` in API-client regeneration scripts.
 - Keep API-client regeneration failures typed: no native `Error` construction or
@@ -39,6 +54,18 @@ Use ast-grep for syntactic patterns that are precise without type information:
   at boundary code or Effect services where available.
 - Keep service access readable: bind `const service = yield* Service` before
   calling service methods.
+- Give named Effect operations a stable trace identity with `Effect.fn`. The
+  Control Center ast-grep rule covers arrow functions, function expressions,
+  and function declarations that directly return `Effect.gen`, a piped
+  `Effect.gen`, or `Effect.suspend`.
+- Keep indefinite retry controllers iterative inside one `Effect.fn`. Direct
+  self-recursion keeps each parent tracing span open until the recursive tail
+  exits and can grow an unbounded active-span chain; a dedicated rule rejects
+  that shape, including explicitly typed declarations.
+- In Control Center HTTP groups, acquire stable application services once in
+  the `HttpApiBuilder.group` callback. The binding-aware local ESLint rule
+  rejects those services inside `.handle(...)` callbacks while allowing the
+  request-scoped `CurrentSession` service there.
 - Stay on Effect v4 APIs: use `Context.Service`, `Effect.catch`, and
   `Effect.gen({ self: this }, ...)` instead of stale v3 forms.
 - Preserve CLI failure semantics: when a CLI entrypoint formats command failures
@@ -56,6 +83,40 @@ Type assertions are banned. Do not use `value as Type`, `value as const`, double
 assertions such as `value as unknown as Type`, or any variant of `as` to
 override the checker. Model the value, narrow it, decode it, or use
 `satisfies`.
+
+Control Center public HTTP contracts must use purpose-built canonical wire
+schemas instead of `Schema.NumberFromString`, whose JavaScript coercion accepts
+ambiguous forms such as whitespace, signs, exponents, and hexadecimal. An
+import-aware local ESLint rule follows namespace and named imports from Effect,
+including computed access, destructuring, and re-exports, while allowing local
+schema modules that happen to use the same member name.
+
+Awaited cleanup immediately before rethrowing a caught failure must preserve
+both causes when cleanup can fail. The ast-grep rule rejects the unsafe direct
+`await cleanup(); throw originalFailure` shape; aggregate the setup and cleanup
+failures instead.
+
+Control Center path-containment checks must compare complete parent segments.
+The scoped ast-grep rule rejects `relative.startsWith("..")`, which incorrectly
+classifies a child named `..archive` as parent traversal. Match the exact `..`
+segment or `` `..${path.sep}` `` prefix and retain the absolute-path check.
+
+Reviewed Control Center server entrypoints require explicit exported return
+types. This check is deliberately scoped to `Auth.ts`, `TerminalRecovery.ts`,
+and `ControlCenterServer.ts`; expand the file list only after annotating and
+reviewing another boundary.
+
+Built package validation compiles negative consumers for internal
+auth/persistence layer factories, compiles a positive offline-backup consumer,
+and scans the emitted public declaration chain. This protects the package
+boundary against a source barrel accidentally exposing database implementation
+details or dropping the supported backup API.
+
+The `rly` registry check rejects project-owned `.d.ts` shims; framework and
+test globals belong in the relevant `tsconfig` `types` list. Its packed-package
+test walks the declaration symbols reachable from each public diff export and
+rejects types originating in `@pierre/diffs`, including package subpaths,
+without treating private renderer/worker declarations as public API.
 
 ## Agent Guidance
 

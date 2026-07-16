@@ -1,0 +1,118 @@
+{
+  "name": "@knpkv/rly",
+  "version": "0.0.0",
+  "description": "Release-oriented design system for human and agent collaboration",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/rly"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/dts/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/dts/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./diff": {
+      "types": "./dist/dts/diff/index.d.ts",
+      "import": "./dist/diff/index.js"
+    },
+    "./foundations": {
+      "types": "./dist/dts/foundations/index.d.ts",
+      "import": "./dist/foundations/index.js"
+    },
+    "./patterns": {
+      "types": "./dist/dts/patterns/index.d.ts",
+      "import": "./dist/patterns/index.js"
+    },
+    "./primitives": {
+      "types": "./dist/dts/primitives/index.d.ts",
+      "import": "./dist/primitives/index.js"
+    },
+    "./tokens": {
+      "types": "./dist/dts/tokens/index.d.ts",
+      "import": "./dist/tokens/index.js"
+    },
+    "./registry/components.json": "./registry/components.json",
+    "./registry/schema.json": "./registry/schema.json",
+    "./registry/search.json": "./registry/search.json",
+    "./registry/USAGE.md": "./registry/USAGE.md",
+    "./styles.css": "./dist/styles.css"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "registry",
+    "README.md"
+  ],
+  "sideEffects": [
+    "*.css",
+    "**/*.css"
+  ],
+  "scripts": {
+    "build": "pnpm codegen:check && pnpm validate:registry && rimraf dist && vite build && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
+    "check": "pnpm codegen:check && pnpm validate:registry && pnpm lint:colors && tsc -b tsconfig.json",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "codegen": "tsx scripts/generate-contract.ts write",
+    "codegen:check": "tsx scripts/generate-contract.ts check",
+    "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
+    "lint:colors": "tsx scripts/tokens/lint-colors.ts",
+    "prepack": "pnpm build",
+    "scaffold": "tsx scripts/scaffold-component.ts",
+    "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open --no-version-updates",
+    "storybook:build": "storybook build --output-dir storybook-static --disable-telemetry && pnpm validate:storybook",
+    "storybook:serve": "vite preview --outDir storybook-static --host 127.0.0.1 --port 6006 --strictPort",
+    "test": "vitest run",
+    "test:browser": "pnpm test:storybook && pnpm test:visual",
+    "test:pack": "tsx scripts/test-packed-package.ts",
+    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook",
+    "test:visual": "pnpm storybook:build && playwright test --config playwright.config.ts",
+    "validate:dist": "tsx scripts/validate-dist.ts",
+    "validate:registry": "tsx scripts/validate-registry.ts",
+    "validate:storybook": "tsx scripts/validate-storybook.ts",
+    "visual:classify": "tsx scripts/visual/classify-git-changes.ts"
+  },
+  "peerDependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@playwright/test": "1.61.1",
+    "@storybook/addon-a11y": "10.5.0",
+    "@storybook/addon-docs": "10.5.0",
+    "@storybook/addon-vitest": "10.5.0",
+    "@storybook/react-vite": "10.5.0",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/browser": "4.1.10",
+    "@vitest/browser-playwright": "4.1.10",
+    "ajv": "8.20.0",
+    "effect": "4.0.0-beta.97",
+    "happy-dom": "20.8.9",
+    "playwright": "1.61.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "rimraf": "^6.1.3",
+    "storybook": "10.5.0",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.2.9",
+    "@fontsource-variable/geist-mono": "5.2.8",
+    "@pierre/diffs": "1.2.12",
+    "lucide-react": "1.24.0",
+    "radix-ui": "1.6.2"
+  }
+}

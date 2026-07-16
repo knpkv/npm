@@ -1,0 +1,58 @@
+{
+  "name": "@knpkv/ai-claude",
+  "version": "0.0.0",
+  "description": "Effect AI language model backed by the local Claude CLI",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/ai-claude"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc && node scripts/validate-dist.mjs",
+    "check": "tsc --noEmit",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "test": "vitest run",
+    "test:exports": "pnpm build"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.97"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/vitest": "4.0.0-beta.97",
+    "@types/node": "latest",
+    "effect": "4.0.0-beta.97",
+    "rimraf": "^6.1.3",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "keywords": [
+    "effect",
+    "ai",
+    "claude",
+    "cli"
+  ]
+}

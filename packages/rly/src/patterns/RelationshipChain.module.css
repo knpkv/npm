@@ -1,0 +1,181 @@
+@layer rly.components {
+  .root {
+    container-type: inline-size;
+    display: grid;
+    gap: var(--rly-space-16);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .heading {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .empty {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: var(--rly-space-0);
+    padding-block-start: var(--rly-space-16);
+  }
+
+  .list {
+    display: grid;
+    gap: var(--rly-space-12);
+    list-style: none;
+    margin: var(--rly-space-0);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-0);
+  }
+
+  .item {
+    align-items: stretch;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    display: grid;
+    gap: var(--rly-space-12);
+    grid-template-columns: minmax(var(--rly-space-0), 1fr) 7rem minmax(var(--rly-space-0), 1fr);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-12);
+  }
+
+  .endpoint {
+    align-content: start;
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .endpointLink,
+  .identity,
+  .missingIdentity {
+    display: grid;
+    gap: var(--rly-space-2);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .endpointLink {
+    border-radius: var(--rly-radius-tag);
+    color: inherit;
+    outline-offset: var(--rly-space-2);
+    text-decoration-color: var(--rly-color-border-2);
+    text-underline-offset: var(--rly-space-2);
+  }
+
+  .endpointLink:hover {
+    text-decoration-color: currentcolor;
+  }
+
+  .endpointLink:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+  }
+
+  .title,
+  .missingLabel,
+  .kind {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    overflow-wrap: anywhere;
+  }
+
+  .reference,
+  .direction,
+  .evidence,
+  .fieldLabel {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    overflow-wrap: anywhere;
+  }
+
+  .missingEndpoint {
+    border: 1px dashed var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    padding: var(--rly-space-8);
+  }
+
+  .missingLabel {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-6);
+  }
+
+  .relationship {
+    align-content: center;
+    align-items: center;
+    border-inline: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-6);
+    justify-items: center;
+    min-inline-size: var(--rly-space-0);
+    padding-inline: var(--rly-space-8);
+    text-align: center;
+  }
+
+  .direction {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4);
+    justify-content: center;
+  }
+
+  .arrow {
+    color: var(--rly-color-text-1);
+    font-size: 1rem;
+  }
+
+  .actor {
+    display: grid;
+    gap: var(--rly-space-4);
+    justify-items: start;
+    min-inline-size: var(--rly-space-0);
+    text-align: start;
+  }
+
+  .fieldLabel {
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .evidence {
+    display: grid;
+    gap: var(--rly-space-4);
+    grid-column: 1 / -1;
+    grid-template-columns: 7rem minmax(var(--rly-space-0), 1fr);
+    margin: var(--rly-space-0);
+    padding-block-start: var(--rly-space-8);
+  }
+
+  @container (max-width: 30rem) {
+    .item {
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+
+    .relationship {
+      border-block: 1px solid var(--rly-color-border-1);
+      border-inline: 0;
+      justify-items: start;
+      padding-block: var(--rly-space-12);
+      padding-inline: var(--rly-space-0);
+      text-align: start;
+    }
+
+    .direction {
+      justify-content: flex-start;
+    }
+
+    .evidence {
+      grid-column: auto;
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+  }
+}

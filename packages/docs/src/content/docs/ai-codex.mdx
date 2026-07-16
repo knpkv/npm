@@ -1,0 +1,138 @@
+---
+title: Codex Adapter
+description: Run Effect AI language-model programs through the local Codex CLI.
+---
+
+`@knpkv/ai-codex` adapts an installed, authenticated Codex CLI to Effect AI's `LanguageModel` service. It starts a local child process for each request and exposes a high-level `model(options)` constructor plus an opt-in `streamEvents(options)` interface for native Codex JSONL events.
+
+## Install
+
+```bash
+pnpm add @knpkv/ai-codex effect @effect/platform-node
+```
+
+Install and authenticate the `codex` CLI separately. The package does not accept, copy, or persist Codex credentials.
+
+## Public API
+
+```typescript
+model({
+  cwd,
+  executable?,
+  model?,
+  environment?,
+  access?,
+  timeout?,
+  maxPromptBytes?,
+  maxOutputBytes?,
+  maxStderrBytes?
+})
+```
+
+| Option           | Required | Meaning                                                                 |
+| ---------------- | -------- | ----------------------------------------------------------------------- |
+| `cwd`            | Yes      | Working directory used for the Codex process.                           |
+| `executable`     | No       | Codex executable name or path. Defaults to `codex`.                     |
+| `model`          | No       | Codex model override. Otherwise the CLI chooses its configured default. |
+| `environment`    | No       | Explicit extra child variables for custom provider `env_key` values.    |
+| `access`         | No       | `read-only` or `workspace-write`. Defaults to `read-only`.              |
+| `timeout`        | No       | Maximum lifetime of one local process.                                  |
+| `maxPromptBytes` | No       | Maximum rendered prompt size in UTF-8 bytes. Defaults to 1 MiB.         |
+| `maxOutputBytes` | No       | Maximum accepted stdout before the request fails.                       |
+| `maxStderrBytes` | No       | Maximum retained stderr used for a bounded failure description.         |
+
+Keep `access: "read-only"` for review, explanation, and planning. Opt into `workspace-write` only when the calling workflow is prepared to validate changes made under `cwd`.
+
+The child process never inherits the full parent environment. The adapter
+forwards only reviewed Codex authentication, state-location, certificate,
+executable-path, diagnostic, and temporary-directory variables. Add a custom
+provider credential through `environment` only when the corresponding Codex
+provider configuration names it with `env_key`.
+
+## Generate Text
+
+```typescript
+import { NodeServices } from "@effect/platform-node"
+import { model } from "@knpkv/ai-codex"
+import { Effect } from "effect"
+import { LanguageModel } from "effect/unstable/ai"
+
+const program = LanguageModel.generateText({
+  prompt: "Review the current change and summarize the highest-risk issue."
+}).pipe(Effect.provide(model({ cwd: "/workspace/project" })), Effect.provide(NodeServices.layer))
+```
+
+The returned model can also provide `LanguageModel` to `Chat` and other Effect AI programs. Conversation history is rendered into each local CLI request; the package does not expose Codex session management.
+
+## Structured Output
+
+`LanguageModel.generateObject` is supported. The adapter converts the Effect `Schema` to JSON Schema, supplies it to Codex, and lets Effect decode the final value.
+
+```typescript
+import { Schema } from "effect"
+import { LanguageModel } from "effect/unstable/ai"
+
+const Review = Schema.Struct({
+  summary: Schema.String,
+  blocking: Schema.Boolean
+})
+
+const review = LanguageModel.generateObject({
+  objectName: "review",
+  prompt: "Review the current change.",
+  schema: Review
+})
+```
+
+Schema support is limited to shapes that both Effect's JSON Schema conversion and the installed Codex CLI can represent.
+
+## Streaming
+
+`LanguageModel.streamText` is available, but Codex CLI events are coarse. The adapter can emit complete agent-message chunks rather than token-by-token deltas. Consumers must not depend on token boundaries or a particular chunk count.
+
+To observe every native Codex event, including tool calls, stream the CLI's raw
+JSONL records directly:
+
+```typescript
+import { NodeServices } from "@effect/platform-node"
+import { streamEvents } from "@knpkv/ai-codex"
+import { Effect, Stream } from "effect"
+
+const events = streamEvents({
+  cwd: "/workspace/project",
+  prompt: "Inspect package.json and summarize the available scripts."
+}).pipe(
+  Stream.tap((line) => Effect.logInfo(line)),
+  Stream.provide(NodeServices.layer)
+)
+```
+
+Each element is one validated, non-empty `codex exec --json` record returned
+unchanged as soon as it is written. Native event fields are deliberately not
+normalized: their shape is owned by the installed Codex CLI and may change
+between CLI versions. The same timeout, stdout/stderr bounds, cancellation,
+working-directory, model, and access options used by `model` apply to
+`streamEvents`; `prompt` is additionally required.
+
+## Execution and Cancellation
+
+The adapter sends prompts through stdin so prompt text is not placed in the process argument list. It drains stdout and stderr concurrently, validates JSON events, and enforces the configured timeout and byte bounds. Interrupting the Effect closes the process scope and terminates the Codex process, including its process group where the runtime supports group supervision.
+
+Spawn failures, invalid events, non-zero exits, timeouts, and output-limit failures are returned as typed Effect AI errors. Retained stderr is bounded and must not be treated as a complete transcript.
+
+## Compatibility Limits
+
+- Effect AI toolkits are rejected before Codex starts. Native Codex tools cannot safely call arbitrary Effect handlers in the parent runtime.
+- File prompt parts are rejected. Put relevant text in the prompt or let Codex inspect files permitted by `cwd` and `access`.
+- The adapter does not promise compatibility with undocumented Codex CLI event fields.
+- Read-only access limits workspace mutation; it is not a substitute for isolating an untrusted repository or executable.
+
+## Real Codex Smoke Test
+
+The real smoke test uses the public adapter, the installed Codex binary, and local authentication:
+
+```bash
+pnpm --filter @knpkv/ai-codex test:smoke:real
+```
+
+This is an explicit integration test, not a mocked unit test. It can make a real model request and should be run only where Codex is authenticated. The ordinary test suite uses controlled process fixtures and does not require network access or credentials.

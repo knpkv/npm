@@ -26,8 +26,20 @@ export default defineConfig({
           ]
         },
         {
+          label: "Applications",
+          items: [{ label: "Control Center", link: "/control-center/" }]
+        },
+        {
+          label: "Local AI",
+          items: [
+            { label: "Codex Adapter", link: "/ai-codex/" },
+            { label: "Claude Adapter", link: "/ai-claude/" }
+          ]
+        },
+        {
           label: "Libraries",
           items: [
+            { label: "rly Design System", link: "/rly/" },
             { label: "Packages", link: "/packages/" },
             { label: "Agent Skills", link: "/agent-skills/" }
           ]

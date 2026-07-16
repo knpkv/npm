@@ -1,0 +1,24 @@
+id: no-unknown-effect-failure
+snapshots:
+  ? |
+    const load = Effect.fn("Feature.load")(function*(
+      input: unknown
+    ): Effect.fn.Return<Item, unknown, never> {
+      return yield* decode(input)
+    })
+  : labels:
+      - source: Effect.fn.Return<Item, unknown, never>
+        style: primary
+        start: 70
+        end: 108
+  ? |
+    const publish = Effect.fn("Feature.publish")(function*(
+      item: Item
+    ): Effect.fn.Return<void, unknown, Database> {
+      yield* save(item)
+    })
+  : labels:
+      - source: Effect.fn.Return<void, unknown, Database>
+        style: primary
+        start: 72
+        end: 113

@@ -1,0 +1,15 @@
+@font-face {
+  font-display: swap;
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2-variations");
+}

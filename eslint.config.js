@@ -53,6 +53,7 @@ export default tseslint.config(
     },
 
     rules: {
+      "local-rules/no-silent-run-promise-rejection": "error",
       "local-rules/no-opaque-instance-fields": "error",
       "no-fallthrough": "off",
       "no-irregular-whitespace": "off",
@@ -136,15 +137,57 @@ export default tseslint.config(
     }
   },
   {
-    files: ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"],
+    files: ["packages/*/src/**/*.{ts,tsx}", "packages/*/test/**/*.{ts,tsx}"],
     rules: {
       "no-console": "error"
     }
   },
   {
-    files: ["packages/*/src/**/*.ts"],
+    files: ["packages/*/test/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-conditional-only-result-tag-assertion": "error"
+    }
+  },
+  {
+    files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error"
+    }
+  },
+  {
+    files: ["packages/ai-claude/src/**/*.{ts,tsx}", "packages/ai-codex/src/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-isolated-agent-child-environment": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/src/api/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-number-from-string-in-control-center-api": "error"
+    }
+  },
+  {
+    files: [
+      "packages/control-center/src/server/auth/Auth.ts",
+      "packages/control-center/src/server/auth/TerminalRecovery.ts",
+      "packages/control-center/src/server/runtime/ControlCenterServer.ts"
+    ],
+    rules: {
+      "@typescript-eslint/explicit-module-boundary-types": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/src/server/api/Handlers.ts"],
+    rules: {
+      "local-rules/no-stable-service-yield-in-http-handler": "error"
+    }
+  },
+  {
+    // Prettier remains the repository formatter for JSX. ESLint still applies
+    // every semantic, import, safety, no-console, and no-any rule to TSX.
+    files: ["**/*.tsx"],
+    rules: {
+      "@effect/dprint": "off"
     }
   },
   {

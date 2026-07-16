@@ -1,0 +1,36 @@
+@layer rly.reset {
+  :where([data-rly-root], [data-rly-catalog]),
+  :where([data-rly-root], [data-rly-catalog]) *,
+  :where([data-rly-root], [data-rly-catalog]) *::before,
+  :where([data-rly-root], [data-rly-catalog]) *::after {
+    box-sizing: border-box;
+  }
+
+  :where([data-rly-root], [data-rly-catalog]) :where(button, input, select, textarea) {
+    color: inherit;
+    font: inherit;
+  }
+}
+
+@layer rly.base {
+  :where([data-rly-root], [data-rly-catalog]) {
+    background: var(--rly-color-canvas);
+    color: var(--rly-color-text-1);
+    font-family: var(--rly-font-ui);
+    font-size: var(--rly-type-body-size);
+    font-synthesis: none;
+    line-height: var(--rly-type-body-line-height);
+    min-height: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  :where([data-rly-root], [data-rly-catalog]) :where(code, kbd, pre, samp) {
+    font-family: var(--rly-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where([data-rly-root], [data-rly-catalog]) :focus-visible {
+    outline: 3px solid var(--rly-color-focus);
+    outline-offset: 2px;
+  }
+}

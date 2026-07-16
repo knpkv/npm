@@ -1,0 +1,861 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "name": "AgentContextButton",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentContextButton.tsx",
+        "story": "packages/rly/stories/patterns/AgentContextButton.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentContextButton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentContextButton.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentcontextbutton--contexts",
+      "storyIds": [
+        "patterns-agentcontextbutton--contexts"
+      ]
+    },
+    {
+      "name": "AgentDrawer",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentDrawer.tsx",
+        "story": "packages/rly/stories/patterns/AgentDrawer.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentDrawer.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentDrawer.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentdrawer--interaction",
+      "storyIds": [
+        "patterns-agentdrawer--interaction"
+      ]
+    },
+    {
+      "name": "AgentJob",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentJob.tsx",
+        "story": "packages/rly/stories/patterns/AgentJob.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentJob.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentJob.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentjob--states",
+      "storyIds": [
+        "patterns-agentjob--states"
+      ]
+    },
+    {
+      "name": "AgentProposal",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentProposal.tsx",
+        "story": "packages/rly/stories/patterns/AgentProposal.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentProposal.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentProposal.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentproposal--states",
+      "storyIds": [
+        "patterns-agentproposal--states"
+      ]
+    },
+    {
+      "name": "AgentThread",
+      "paths": {
+        "source": "packages/rly/src/patterns/AgentThread.tsx",
+        "story": "packages/rly/stories/patterns/AgentThread.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/AgentThread.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/AgentThread.test.tsx"
+        ]
+      },
+      "storyId": "patterns-agentthread--release-thread",
+      "storyIds": [
+        "patterns-agentthread--release-thread"
+      ]
+    },
+    {
+      "name": "Avatar",
+      "paths": {
+        "source": "packages/rly/src/primitives/Avatar.tsx",
+        "story": "packages/rly/stories/primitives/Avatar.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Avatar.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Avatar.test.tsx"
+        ]
+      },
+      "storyId": "primitives-avatar--gallery",
+      "storyIds": [
+        "primitives-avatar--gallery"
+      ]
+    },
+    {
+      "name": "Button",
+      "paths": {
+        "source": "packages/rly/src/primitives/Button.tsx",
+        "story": "packages/rly/stories/primitives/Button.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Button.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Button.test.tsx"
+        ]
+      },
+      "storyId": "primitives-button--states",
+      "storyIds": [
+        "primitives-button--states"
+      ]
+    },
+    {
+      "name": "CollaboratorGroup",
+      "paths": {
+        "source": "packages/rly/src/patterns/CollaboratorGroup.tsx",
+        "story": "packages/rly/stories/patterns/CollaboratorGroup.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/CollaboratorGroup.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/CollaboratorGroup.test.tsx"
+        ]
+      },
+      "storyId": "patterns-collaboratorgroup--entity-roles",
+      "storyIds": [
+        "patterns-collaboratorgroup--entity-roles"
+      ]
+    },
+    {
+      "name": "Dialog",
+      "paths": {
+        "source": "packages/rly/src/primitives/Dialog.tsx",
+        "story": "packages/rly/stories/primitives/Dialog.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Dialog.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Dialog.test.tsx"
+        ]
+      },
+      "storyId": "primitives-dialog--interaction",
+      "storyIds": [
+        "primitives-dialog--interaction",
+        "primitives-dialog--nested-isolation"
+      ]
+    },
+    {
+      "name": "DiffCodeTypes",
+      "paths": {
+        "source": "packages/rly/src/diff/types.ts",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
+    },
+    {
+      "name": "DiffCodeView",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffCodeView.tsx",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffCodeView.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench",
+        "diff-diffcodeview--stacked-wrapped"
+      ]
+    },
+    {
+      "name": "DiffFileTree",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffFileTree.tsx",
+        "story": "packages/rly/stories/diff/DiffFileTree.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffFileTree.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffFileTree.test.tsx"
+        ]
+      },
+      "storyId": "diff-difffiletree--file-states",
+      "storyIds": [
+        "diff-difffiletree--file-states"
+      ]
+    },
+    {
+      "name": "DiffFinding",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffFinding.tsx",
+        "story": "packages/rly/stories/diff/DiffFinding.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffFinding.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffFinding.test.tsx"
+        ]
+      },
+      "storyId": "diff-difffinding--human-and-agent",
+      "storyIds": [
+        "diff-difffinding--human-and-agent",
+        "diff-difffinding--stale-anchor"
+      ]
+    },
+    {
+      "name": "DiffHeader",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffHeader.tsx",
+        "story": "packages/rly/stories/diff/DiffHeader.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffHeader.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffHeader.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffheader--controlled-preferences",
+      "storyIds": [
+        "diff-diffheader--controlled-preferences"
+      ]
+    },
+    {
+      "name": "DiffThemes",
+      "paths": {
+        "source": "packages/rly/src/diff/themes.ts",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/DiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
+    },
+    {
+      "name": "DiffWorkbench",
+      "paths": {
+        "source": "packages/rly/src/diff/DiffWorkbench.tsx",
+        "story": "packages/rly/stories/diff/DiffWorkbench.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/DiffWorkbench.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/DiffWorkbench.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffworkbench--bird-eye-review",
+      "storyIds": [
+        "diff-diffworkbench--bird-eye-review"
+      ]
+    },
+    {
+      "name": "DiffWorkerProvider",
+      "paths": {
+        "source": "packages/rly/src/diff/worker-pool.tsx",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/worker-pool.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--worker-states",
+      "storyIds": [
+        "diff-diffcodeview--worker-states"
+      ]
+    },
+    {
+      "name": "Divider",
+      "paths": {
+        "source": "packages/rly/src/primitives/Divider.tsx",
+        "story": "packages/rly/stories/primitives/Divider.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Divider.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Divider.test.tsx"
+        ]
+      },
+      "storyId": "primitives-divider--gallery",
+      "storyIds": [
+        "primitives-divider--gallery"
+      ]
+    },
+    {
+      "name": "EntityShell",
+      "paths": {
+        "source": "packages/rly/src/patterns/EntityShell.tsx",
+        "story": "packages/rly/stories/patterns/EntityShell.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EntityShell.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EntityShell.test.tsx"
+        ]
+      },
+      "storyId": "patterns-entityshell--services",
+      "storyIds": [
+        "patterns-entityshell--services"
+      ]
+    },
+    {
+      "name": "EntityTable",
+      "paths": {
+        "source": "packages/rly/src/patterns/EntityTable.tsx",
+        "story": "packages/rly/stories/patterns/EntityTable.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EntityTable.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EntityTable.test.tsx"
+        ]
+      },
+      "storyId": "patterns-entitytable--states",
+      "storyIds": [
+        "patterns-entitytable--states"
+      ]
+    },
+    {
+      "name": "EvidenceStamp",
+      "paths": {
+        "source": "packages/rly/src/patterns/EvidenceStamp.tsx",
+        "story": "packages/rly/stories/patterns/EvidenceStamp.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/EvidenceStamp.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/EvidenceStamp.test.tsx"
+        ]
+      },
+      "storyId": "patterns-evidencestamp--compact-forced-colors",
+      "storyIds": [
+        "patterns-evidencestamp--compact-forced-colors"
+      ]
+    },
+    {
+      "name": "Field",
+      "paths": {
+        "source": "packages/rly/src/primitives/Field.tsx",
+        "story": "packages/rly/stories/primitives/Field.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Field.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Field.test.tsx"
+        ]
+      },
+      "storyId": "primitives-field--states",
+      "storyIds": [
+        "primitives-field--states"
+      ]
+    },
+    {
+      "name": "FreshnessStamp",
+      "paths": {
+        "source": "packages/rly/src/patterns/FreshnessStamp.tsx",
+        "story": "packages/rly/stories/patterns/FreshnessStamp.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/FreshnessStamp.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/FreshnessStamp.test.tsx"
+        ]
+      },
+      "storyId": "patterns-freshnessstamp--matrix",
+      "storyIds": [
+        "patterns-freshnessstamp--matrix"
+      ]
+    },
+    {
+      "name": "GlobalStyles",
+      "paths": {
+        "source": "packages/rly/src/foundations/GlobalStyles.tsx",
+        "story": "packages/rly/stories/foundations/GlobalStyles.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/GlobalStyles.test.tsx"
+        ]
+      },
+      "storyId": "foundations-globalstyles--scope",
+      "storyIds": [
+        "foundations-globalstyles--scope"
+      ]
+    },
+    {
+      "name": "GovernedActionReview",
+      "paths": {
+        "source": "packages/rly/src/patterns/GovernedActionReview.tsx",
+        "story": "packages/rly/stories/patterns/GovernedActionReview.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/GovernedActionReview.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/GovernedActionReview.test.tsx"
+        ]
+      },
+      "storyId": "patterns-governedactionreview--confirmation",
+      "storyIds": [
+        "patterns-governedactionreview--confirmation",
+        "patterns-governedactionreview--terminal-states"
+      ]
+    },
+    {
+      "name": "Icon",
+      "paths": {
+        "source": "packages/rly/src/foundations/Icon.tsx",
+        "story": "packages/rly/stories/foundations/Icon.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/Icon.test.tsx"
+        ]
+      },
+      "storyId": "foundations-icon--catalog",
+      "storyIds": [
+        "foundations-icon--catalog"
+      ]
+    },
+    {
+      "name": "IconButton",
+      "paths": {
+        "source": "packages/rly/src/primitives/IconButton.tsx",
+        "story": "packages/rly/stories/primitives/IconButton.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/IconButton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/IconButton.test.tsx"
+        ]
+      },
+      "storyId": "primitives-iconbutton--states",
+      "storyIds": [
+        "primitives-iconbutton--states"
+      ]
+    },
+    {
+      "name": "LinkProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/LinkProvider.tsx",
+        "story": "packages/rly/stories/foundations/LinkProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/LinkProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-linkprovider--framework-bridge",
+      "storyIds": [
+        "foundations-linkprovider--framework-bridge"
+      ]
+    },
+    {
+      "name": "PeopleStrip",
+      "paths": {
+        "source": "packages/rly/src/patterns/PeopleStrip.tsx",
+        "story": "packages/rly/stories/patterns/PeopleStrip.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/PeopleStrip.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/PeopleStrip.test.tsx"
+        ]
+      },
+      "storyId": "patterns-peoplestrip--overflow",
+      "storyIds": [
+        "patterns-peoplestrip--overflow"
+      ]
+    },
+    {
+      "name": "Person",
+      "paths": {
+        "source": "packages/rly/src/patterns/Person.tsx",
+        "story": "packages/rly/stories/patterns/Person.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Person.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Person.test.tsx"
+        ]
+      },
+      "storyId": "patterns-person--states",
+      "storyIds": [
+        "patterns-person--states"
+      ]
+    },
+    {
+      "name": "PortalProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/PortalProvider.tsx",
+        "story": "packages/rly/stories/foundations/PortalProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/PortalProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-portalprovider--custom-target",
+      "storyIds": [
+        "foundations-portalprovider--custom-target"
+      ]
+    },
+    {
+      "name": "RelationshipChain",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelationshipChain.tsx",
+        "story": "packages/rly/stories/patterns/RelationshipChain.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelationshipChain.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelationshipChain.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relationshipchain--cardinalities",
+      "storyIds": [
+        "patterns-relationshipchain--cardinalities"
+      ]
+    },
+    {
+      "name": "RelationshipTable",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelationshipTable.tsx",
+        "story": "packages/rly/stories/patterns/RelationshipTable.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelationshipTable.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelationshipTable.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relationshiptable--equivalence",
+      "storyIds": [
+        "patterns-relationshiptable--equivalence"
+      ]
+    },
+    {
+      "name": "ReleasePreview",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleasePreview.tsx",
+        "story": "packages/rly/stories/patterns/ReleasePreview.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleasePreview.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleasePreview.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releasepreview--interaction",
+      "storyIds": [
+        "patterns-releasepreview--interaction",
+        "patterns-releasepreview--compact-forced-colors"
+      ]
+    },
+    {
+      "name": "ReleaseRelay",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleaseRelay.tsx",
+        "story": "packages/rly/stories/patterns/ReleaseRelay.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleaseRelay.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleaseRelay.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releaserelay--catalog",
+      "storyIds": [
+        "patterns-releaserelay--catalog",
+        "patterns-releaserelay--geometry-forced-colors"
+      ]
+    },
+    {
+      "name": "ReleaseRow",
+      "paths": {
+        "source": "packages/rly/src/patterns/ReleaseRow.tsx",
+        "story": "packages/rly/stories/patterns/ReleaseRow.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ReleaseRow.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ReleaseRow.test.tsx"
+        ]
+      },
+      "storyId": "patterns-releaserow--six-states",
+      "storyIds": [
+        "patterns-releaserow--six-states",
+        "patterns-releaserow--unknown-unassigned"
+      ]
+    },
+    {
+      "name": "Select",
+      "paths": {
+        "source": "packages/rly/src/primitives/Select.tsx",
+        "story": "packages/rly/stories/primitives/Select.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Select.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Select.test.tsx"
+        ]
+      },
+      "storyId": "primitives-select--states",
+      "storyIds": [
+        "primitives-select--states"
+      ]
+    },
+    {
+      "name": "SemanticTokens",
+      "paths": {
+        "source": "packages/rly/src/tokens/semantic-tokens.ts",
+        "story": "packages/rly/stories/foundations/Tokens.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/tokens/token-contract.test.ts"
+        ]
+      },
+      "storyId": "foundations-tokens--overview",
+      "storyIds": [
+        "foundations-tokens--overview"
+      ]
+    },
+    {
+      "name": "ServiceMark",
+      "paths": {
+        "source": "packages/rly/src/patterns/ServiceMark.tsx",
+        "story": "packages/rly/stories/patterns/ServiceMark.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/ServiceMark.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/ServiceMark.test.tsx"
+        ]
+      },
+      "storyId": "patterns-servicemark--gallery",
+      "storyIds": [
+        "patterns-servicemark--gallery"
+      ]
+    },
+    {
+      "name": "Sheet",
+      "paths": {
+        "source": "packages/rly/src/primitives/Sheet.tsx",
+        "story": "packages/rly/stories/primitives/Sheet.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Sheet.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Sheet.test.tsx"
+        ]
+      },
+      "storyId": "primitives-sheet--interaction",
+      "storyIds": [
+        "primitives-sheet--interaction"
+      ]
+    },
+    {
+      "name": "Skeleton",
+      "paths": {
+        "source": "packages/rly/src/primitives/Skeleton.tsx",
+        "story": "packages/rly/stories/primitives/Skeleton.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Skeleton.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Skeleton.test.tsx"
+        ]
+      },
+      "storyId": "primitives-skeleton--gallery",
+      "storyIds": [
+        "primitives-skeleton--gallery"
+      ]
+    },
+    {
+      "name": "StageRail",
+      "paths": {
+        "source": "packages/rly/src/patterns/StageRail.tsx",
+        "story": "packages/rly/stories/patterns/StageRail.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/StageRail.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/StageRail.test.tsx"
+        ]
+      },
+      "storyId": "patterns-stagerail--states",
+      "storyIds": [
+        "patterns-stagerail--states"
+      ]
+    },
+    {
+      "name": "StateLabel",
+      "paths": {
+        "source": "packages/rly/src/primitives/StateLabel.tsx",
+        "story": "packages/rly/stories/primitives/StateLabel.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/StateLabel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/StateLabel.test.tsx"
+        ]
+      },
+      "storyId": "primitives-statelabel--gallery",
+      "storyIds": [
+        "primitives-statelabel--gallery"
+      ]
+    },
+    {
+      "name": "StatePanel",
+      "paths": {
+        "source": "packages/rly/src/primitives/StatePanel.tsx",
+        "story": "packages/rly/stories/primitives/StatePanel.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/StatePanel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/StatePanel.test.tsx"
+        ]
+      },
+      "storyId": "primitives-statepanel--gallery",
+      "storyIds": [
+        "primitives-statepanel--gallery"
+      ]
+    },
+    {
+      "name": "Surface",
+      "paths": {
+        "source": "packages/rly/src/primitives/Surface.tsx",
+        "story": "packages/rly/stories/primitives/Surface.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Surface.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Surface.test.tsx"
+        ]
+      },
+      "storyId": "primitives-surface--gallery",
+      "storyIds": [
+        "primitives-surface--gallery"
+      ]
+    },
+    {
+      "name": "Tabs",
+      "paths": {
+        "source": "packages/rly/src/primitives/Tabs.tsx",
+        "story": "packages/rly/stories/primitives/Tabs.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Tabs.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Tabs.test.tsx"
+        ]
+      },
+      "storyId": "primitives-tabs--interaction",
+      "storyIds": [
+        "primitives-tabs--interaction"
+      ]
+    },
+    {
+      "name": "Text",
+      "paths": {
+        "source": "packages/rly/src/primitives/Text.tsx",
+        "story": "packages/rly/stories/primitives/Text.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Text.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Text.test.tsx"
+        ]
+      },
+      "storyId": "primitives-text--gallery",
+      "storyIds": [
+        "primitives-text--gallery"
+      ]
+    },
+    {
+      "name": "ThemeProvider",
+      "paths": {
+        "source": "packages/rly/src/foundations/ThemeProvider.tsx",
+        "story": "packages/rly/stories/foundations/ThemeProvider.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/foundations/ThemeProvider.test.tsx"
+        ]
+      },
+      "storyId": "foundations-themeprovider--controlled",
+      "storyIds": [
+        "foundations-themeprovider--controlled"
+      ]
+    },
+    {
+      "name": "TimelineRow",
+      "paths": {
+        "source": "packages/rly/src/patterns/TimelineRow.tsx",
+        "story": "packages/rly/stories/patterns/TimelineRow.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/TimelineRow.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/TimelineRow.test.tsx"
+        ]
+      },
+      "storyId": "patterns-timelinerow--actor-kinds",
+      "storyIds": [
+        "patterns-timelinerow--actor-kinds"
+      ]
+    },
+    {
+      "name": "Verdict",
+      "paths": {
+        "source": "packages/rly/src/patterns/Verdict.tsx",
+        "story": "packages/rly/stories/patterns/Verdict.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Verdict.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Verdict.test.tsx"
+        ]
+      },
+      "storyId": "patterns-verdict--states",
+      "storyIds": [
+        "patterns-verdict--states"
+      ]
+    },
+    {
+      "name": "WorksetCard",
+      "paths": {
+        "source": "packages/rly/src/patterns/WorksetCard.tsx",
+        "story": "packages/rly/stories/patterns/WorksetCard.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/WorksetCard.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/WorksetCard.test.tsx"
+        ]
+      },
+      "storyId": "patterns-worksetcard--release-dimensions",
+      "storyIds": [
+        "patterns-worksetcard--release-dimensions"
+      ]
+    }
+  ]
+}

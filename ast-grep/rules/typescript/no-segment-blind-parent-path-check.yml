@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-segment-blind-parent-path-check
+language: tsx
+severity: error
+message: 'Do not classify paths with startsWith(".."); require either the exact parent segment or the platform separator.'
+
+rule:
+  any:
+    - pattern: $RELATIVE.startsWith("..")
+    - pattern: $RELATIVE.startsWith('..')
+    - pattern: $RELATIVE.startsWith(`..`)
+
+files:
+  - "packages/control-center/**/*.ts"
+  - "packages/control-center/**/*.tsx"
+
+note: |
+  A relative child named `..archive` starts with two dots but is still inside its
+  ancestor. Check `relative === ".." || relative.startsWith(`..${path.sep}`)`
+  when recognizing parent traversal, and keep the absolute-path check.

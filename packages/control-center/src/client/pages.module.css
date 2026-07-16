@@ -1,0 +1,78 @@
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sessionBadge,
+.sessionStatus {
+  display: inline-flex;
+  min-block-size: 3rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding-inline: 1.25rem;
+  border-radius: var(--rly-radius-control);
+}
+
+.sessionBadge {
+  border: 1px solid color-mix(in srgb, var(--rly-color-success-ink) 34%, var(--rly-color-border-1));
+  background: var(--rly-color-success-tint);
+  color: var(--rly-color-success-ink);
+}
+
+.linkButton {
+  display: inline-flex;
+  min-block-size: 3rem;
+  align-items: center;
+  padding-inline: 1.25rem;
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  text-decoration: none;
+}
+
+.page {
+  display: grid;
+  gap: 2rem;
+}
+
+.sectionHeading {
+  display: grid;
+  gap: 0.75rem;
+  max-inline-size: 46rem;
+}
+
+.empty {
+  max-inline-size: 42rem;
+}
+
+.pairCard {
+  inline-size: min(100%, 38rem);
+}
+
+.pairForm {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.agentCard {
+  display: grid;
+  gap: 0.75rem;
+  max-inline-size: 46rem;
+}
+
+.agentState {
+  max-inline-size: 46rem;
+}
+
+.textLink {
+  inline-size: fit-content;
+  margin-block-start: 0.5rem;
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  text-underline-offset: 0.25rem;
+}

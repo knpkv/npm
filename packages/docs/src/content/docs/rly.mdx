@@ -1,0 +1,148 @@
+---
+title: rly Design System
+description: Release-oriented presentation components for human and agent collaboration.
+---
+
+`@knpkv/rly` is the presentation system for release work: delivery evidence,
+relationships, collaborators, governed agents, and complete pull-request
+diffs. It owns visual and accessibility contracts, while applications keep
+routing, data, permissions, persistence, and actions.
+
+[Open the live component catalog →](/rly/catalog/)
+
+## Install
+
+Install rly with its React peer dependencies:
+
+```bash
+pnpm add @knpkv/rly react react-dom
+```
+
+Import the generated stylesheet once at the application boundary:
+
+```css
+@import "@knpkv/rly/styles.css";
+```
+
+## Exports
+
+Use the smallest entry that owns the component. The ordinary entries do not
+load the opt-in diff renderer or its worker graph.
+
+| Entry                                 | Use                                                         |
+| ------------------------------------- | ----------------------------------------------------------- |
+| `@knpkv/rly`                          | Convenient foundations, primitives, and patterns aggregate  |
+| `@knpkv/rly/foundations`              | Theme, links, portals, icons, and global style boundaries   |
+| `@knpkv/rly/primitives`               | Typography, surfaces, controls, state, and modal overlays   |
+| `@knpkv/rly/patterns`                 | Releases, relationships, collaborators, and governed agents |
+| `@knpkv/rly/diff`                     | Opt-in complete diff workbench and bounded worker provider  |
+| `@knpkv/rly/tokens`                   | Browser-safe semantic token names                           |
+| `@knpkv/rly/styles.css`               | Generated fonts, tokens, reset, and component styles        |
+| `@knpkv/rly/registry/components.json` | Static component and variant metadata                       |
+| `@knpkv/rly/registry/schema.json`     | Registry validation schema                                  |
+| `@knpkv/rly/registry/search.json`     | Deterministic component search index                        |
+| `@knpkv/rly/registry/USAGE.md`        | Agent and maintainer extraction guidance                    |
+
+## Tokens
+
+Token names are public; private palette values are not. This keeps consumers
+on semantic intent instead of coupling them to implementation colors.
+
+```tsx
+import { RLY_COLOR_TOKEN_NAMES, type RlyColorToken } from "@knpkv/rly/tokens"
+
+const firstSemanticColor: RlyColorToken = RLY_COLOR_TOKEN_NAMES[0]
+```
+
+Spacing, radius, typography, and motion follow the same named-token contract.
+Service accents communicate provenance only; readiness always keeps a visible
+word, icon, and geometry.
+
+## Themes
+
+`ThemeProvider` is controlled. The application owns preference storage and
+passes `light`, `dark`, or `system`; rly centrally handles forced colors and
+reduced motion.
+
+```tsx
+import { ThemeProvider } from "@knpkv/rly/foundations"
+
+export const Root = ({ children }: { children: React.ReactNode }) => (
+  <ThemeProvider theme="system">{children}</ThemeProvider>
+)
+```
+
+## Catalog
+
+The [component catalog](/rly/catalog/) is the visual source of truth for every
+component, meaningful state, theme, compact viewport, interaction, and
+accessibility example. Its static Storybook build is composed into this docs
+site at the stable `/rly/catalog/` path.
+
+To run the same bounded catalog locally:
+
+```bash
+pnpm --filter @knpkv/rly storybook
+```
+
+## Registry
+
+The published registry is static documentation and scaffolding metadata. It
+describes source files, styles, stories, tests, variants, and public entries so
+an agent can inspect and copy an intentional component slice. It is never
+loaded as data to execute React at runtime.
+
+```ts
+import components from "@knpkv/rly/registry/components.json" with { type: "json" }
+import schema from "@knpkv/rly/registry/schema.json" with { type: "json" }
+import search from "@knpkv/rly/registry/search.json" with { type: "json" }
+```
+
+Read `@knpkv/rly/registry/USAGE.md` before extracting a component. Validate
+`components.json` with `schema.json`, then use `search.json` to locate the
+smallest matching component and its declared variants.
+
+## Examples
+
+Start with the aggregate when composing an application shell:
+
+```tsx
+import { Button, Surface, ThemeProvider } from "@knpkv/rly"
+
+export const Approval = () => (
+  <ThemeProvider theme="dark">
+    <Surface padding="spacious" shape="grouped">
+      <Button size="principal" variant="primary">
+        Approve release
+      </Button>
+    </Surface>
+  </ThemeProvider>
+)
+```
+
+Use focused entries in libraries and performance-sensitive routes:
+
+```tsx
+import { Button } from "@knpkv/rly/primitives"
+import { ReleaseRelay, Verdict } from "@knpkv/rly/patterns"
+
+export const ReleaseIdentity = () => (
+  <>
+    <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" size="hero" symbolIndices={[6, 3, 7]} />
+    <Verdict reason="Every required check is current." tone="positive" verdict="Ready to ship." />
+    <Button variant="quiet">Open evidence</Button>
+  </>
+)
+```
+
+Only diff routes opt into the heavy renderer:
+
+```tsx
+import { DiffCodeView, DiffWorkerProvider, type RlyDiffCodeItem } from "@knpkv/rly/diff"
+
+export const CompleteDiff = ({ items }: { readonly items: ReadonlyArray<RlyDiffCodeItem> }) => (
+  <DiffWorkerProvider poolSize={2}>
+    <DiffCodeView initialItems={items} mode="split" />
+  </DiffWorkerProvider>
+)
+```

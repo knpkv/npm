@@ -1,0 +1,22 @@
+id: no-nondetached-agent-child-process
+valid:
+  - |
+    ChildProcess.make("claude", ["--print"], {
+      shell: false,
+      stdout: "pipe"
+    })
+  - |
+    ChildProcess.make("codex", {
+      detached: true,
+      stdout: "pipe"
+    })
+invalid:
+  - |
+    ChildProcess.make("claude", ["--print"], {
+      detached: false,
+      shell: false
+    })
+  - |
+    ChildProcess.make("codex", {
+      detached: false
+    })

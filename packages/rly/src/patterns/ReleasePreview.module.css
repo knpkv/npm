@@ -1,0 +1,201 @@
+@layer rly.components {
+  .body,
+  .summary,
+  .releaseMeta,
+  .personGroup,
+  .fact {
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .body,
+  .summary,
+  .releaseMeta,
+  .personGroup,
+  .fact {
+    display: grid;
+  }
+
+  .body {
+    gap: var(--rly-space-32);
+  }
+
+  .dialogSurface {
+    block-size: min(48rem, calc(100dvh - var(--rly-space-32)));
+    grid-template-rows: auto minmax(var(--rly-space-0), 1fr);
+    overflow: hidden;
+  }
+
+  .dialogSurface > :last-child,
+  .dialogFrame,
+  .dialogScroll {
+    min-block-size: var(--rly-space-0);
+  }
+
+  .dialogFrame {
+    block-size: 100%;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
+  }
+
+  .dialogScroll {
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-4);
+  }
+
+  .summary {
+    gap: var(--rly-space-32);
+  }
+
+  .identityRow {
+    align-items: start;
+    display: grid;
+    gap: var(--rly-space-24);
+    grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .releaseMeta {
+    gap: var(--rly-space-12);
+    justify-items: end;
+  }
+
+  .version {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-code-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    text-align: end;
+  }
+
+  .people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-20) var(--rly-space-32);
+  }
+
+  .personGroup {
+    gap: var(--rly-space-8);
+  }
+
+  .eyebrow,
+  .fact dt {
+    color: var(--rly-color-text-3);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: var(--rly-type-meta-tracking);
+    text-transform: uppercase;
+  }
+
+  .unassigned {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+  }
+
+  .facts {
+    border-block: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-20) var(--rly-space-24);
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    margin: var(--rly-space-0);
+    min-inline-size: var(--rly-space-0);
+    padding-block: var(--rly-space-20);
+  }
+
+  .fact {
+    gap: var(--rly-space-4);
+  }
+
+  .fact dd {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    letter-spacing: var(--rly-type-label-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .slot {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    min-inline-size: var(--rly-space-0);
+    padding-block-start: var(--rly-space-24);
+  }
+
+  .dialogFooter,
+  .sheetFooter {
+    background: var(--rly-color-surface-1);
+    border-block-start: 1px solid var(--rly-color-border-1);
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .dialogFooter {
+    padding-block-start: var(--rly-space-16);
+  }
+
+  .dialogClose {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  @media (max-height: 30rem) {
+    .dialogSurface {
+      block-size: calc(100dvh - var(--rly-space-16));
+      gap: var(--rly-space-8);
+      max-block-size: calc(100dvh - var(--rly-space-16));
+      padding: var(--rly-space-12);
+    }
+
+    .dialogSurface > header > :first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-wrap: nowrap;
+    }
+
+    .dialogFrame {
+      gap: var(--rly-space-8);
+    }
+
+    .dialogFooter {
+      padding-block-start: var(--rly-space-8);
+    }
+  }
+
+  @media (max-width: 40rem) {
+    .body,
+    .summary {
+      gap: var(--rly-space-20);
+    }
+
+    .identityRow {
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+
+    .releaseMeta {
+      justify-items: start;
+    }
+
+    .version {
+      text-align: start;
+    }
+
+    .facts {
+      grid-template-columns: minmax(var(--rly-space-0), 1fr);
+    }
+
+    .slot {
+      padding-block-start: var(--rly-space-20);
+    }
+
+    .fullViewButton {
+      inline-size: 100%;
+    }
+
+    .sheetFooter {
+      inline-size: 100%;
+    }
+  }
+}

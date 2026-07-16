@@ -4,9 +4,13 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "pnpm build:catalog && astro build && pnpm compose:catalog && pnpm validate:rly",
+    "build:catalog": "pnpm --filter @knpkv/rly storybook:build",
+    "compose:catalog": "node scripts/compose-rly-catalog.mjs",
     "preview": "astro preview",
-    "check": "astro check",
+    "check": "astro check && pnpm validate:rly:source",
+    "validate:rly": "node scripts/validate-rly-docs.mjs",
+    "validate:rly:source": "node scripts/validate-rly-docs.mjs --source-only",
     "clean": "rimraf dist .astro"
   },
   "dependencies": {

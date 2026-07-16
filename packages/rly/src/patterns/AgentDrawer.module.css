@@ -1,0 +1,111 @@
+@layer rly.components {
+  .drawer {
+    inline-size: min(92vw, 42rem);
+    max-inline-size: 42rem;
+  }
+
+  .body,
+  .slot,
+  .slotContent,
+  .identityCopy {
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .body,
+  .slot,
+  .identityCopy {
+    display: grid;
+  }
+
+  .body {
+    gap: var(--rly-space-32);
+  }
+
+  .slot {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    gap: var(--rly-space-12);
+    padding-block-start: var(--rly-space-24);
+  }
+
+  .contextSlot {
+    border-block-start: 0;
+    gap: var(--rly-space-20);
+    padding-block-start: var(--rly-space-0);
+  }
+
+  .identity {
+    align-items: center;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
+  }
+
+  .mark {
+    align-items: center;
+    background: var(--rly-color-agent);
+    block-size: var(--rly-space-48);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-surface-1);
+    display: inline-flex;
+    inline-size: var(--rly-space-48);
+    justify-content: center;
+  }
+
+  .glyph {
+    block-size: var(--rly-space-24);
+    inline-size: var(--rly-space-24);
+  }
+
+  .identityCopy {
+    gap: var(--rly-space-4);
+  }
+
+  .eyebrow,
+  .slotTitle {
+    color: var(--rly-color-text-3);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: var(--rly-type-meta-tracking);
+    text-transform: uppercase;
+  }
+
+  .contextSummary {
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .slotTitle {
+    margin: var(--rly-space-0);
+  }
+
+  .slotContent {
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 30rem) {
+    .drawer {
+      inline-size: 100vw;
+      max-inline-size: none;
+    }
+
+    .body {
+      gap: var(--rly-space-24);
+    }
+
+    .contextSummary {
+      font-size: var(--rly-type-card-title-size);
+      line-height: var(--rly-type-card-title-line-height);
+    }
+
+    .slot {
+      padding-block-start: var(--rly-space-20);
+    }
+
+    .contextSlot {
+      padding-block-start: var(--rly-space-0);
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unknown-effect-failure
+language: tsx
+severity: error
+message: "Do not erase an Effect failure channel to unknown; retain the bounded tagged error union"
+
+rule:
+  pattern:
+    context: type EffectResult = Effect.fn.Return<$VALUE, unknown, $REQUIREMENTS>
+    selector: generic_type
+
+files:
+  - "packages/**/src/**/*.ts"
+  - "packages/**/src/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  Unknown value inputs are valid at trust boundaries, but an Effect failure
+  annotation must retain its bounded tagged errors so services and public
+  firewalls cannot silently lose exhaustiveness.

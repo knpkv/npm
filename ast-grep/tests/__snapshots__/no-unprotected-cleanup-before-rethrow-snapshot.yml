@@ -1,0 +1,54 @@
+id: no-unprotected-cleanup-before-rethrow
+snapshots:
+  ? |
+    try {
+      await start()
+    } catch (failure) {
+      await cleanup()
+      recordFailure(failure)
+      throw failure
+    }
+  : labels:
+      - source: |-
+          catch (failure) {
+            await cleanup()
+            recordFailure(failure)
+            throw failure
+          }
+        style: primary
+        start: 24
+        end: 102
+  ? |
+    try {
+      await start()
+    } catch (failure) {
+      await cleanup()
+      throw failure
+    }
+  : labels:
+      - source: |-
+          catch (failure) {
+            await cleanup()
+            throw failure
+          }
+        style: primary
+        start: 24
+        end: 77
+  ? |
+    try {
+      await start()
+    } catch (failure) {
+      recordFailure(failure)
+      await cleanup()
+      throw failure
+    }
+  : labels:
+      - source: |-
+          catch (failure) {
+            recordFailure(failure)
+            await cleanup()
+            throw failure
+          }
+        style: primary
+        start: 24
+        end: 102

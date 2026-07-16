@@ -1,0 +1,37 @@
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+import { GovernedActionExecutionStore } from "../GovernedActionExecutionStore.js"
+import { makeGovernedActionExecutionBegin } from "./begin.js"
+import { makeGovernedActionExecutionInspect } from "./inspect.js"
+import { makeGovernedActionExecutionRecordBlocked } from "./record-blocked.js"
+import { makeGovernedActionExecutionRecordDispatch } from "./record-dispatch.js"
+import { makeGovernedActionExecutionRecordReconciliation } from "./record-reconciliation.js"
+import { makeGovernedActionExecutionRecordRecoveryUnavailable } from "./record-recovery-unavailable.js"
+import { makeGovernedActionExecutionRecordUnknown } from "./record-unknown.js"
+
+const makeGovernedActionExecutionStore = Effect.gen(function*() {
+  const inspect = yield* makeGovernedActionExecutionInspect
+  const begin = yield* makeGovernedActionExecutionBegin
+  const blocked = yield* makeGovernedActionExecutionRecordBlocked
+  const dispatch = yield* makeGovernedActionExecutionRecordDispatch
+  const unknown = yield* makeGovernedActionExecutionRecordUnknown
+  const unavailable = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
+  const reconciliation = yield* makeGovernedActionExecutionRecordReconciliation
+
+  return {
+    inspect: inspect.inspect,
+    begin: begin.begin,
+    recordBlocked: blocked.recordBlocked,
+    recordDispatch: dispatch.recordDispatch,
+    recordUnknown: unknown.recordUnknown,
+    recordRecoveryUnavailable: unavailable.recordRecoveryUnavailable,
+    recordReconciliation: reconciliation.recordReconciliation
+  }
+})
+
+/** Private live store; only governed worker startup may install this authority-bearing service. */
+export const governedActionExecutionStoreLayer = Layer.effect(
+  GovernedActionExecutionStore,
+  makeGovernedActionExecutionStore
+)

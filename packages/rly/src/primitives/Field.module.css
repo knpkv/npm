@@ -1,0 +1,83 @@
+@layer rly.components {
+  .root {
+    align-content: start;
+    color: var(--rly-color-text-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .label {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    gap: var(--rly-space-8);
+    letter-spacing: var(--rly-type-label-tracking);
+  }
+
+  .required,
+  .description,
+  .error {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    letter-spacing: var(--rly-type-meta-tracking);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .required,
+  .description {
+    color: var(--rly-color-text-2);
+  }
+
+  .error {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .controlSlot {
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .control {
+    appearance: none;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .control:is(textarea) {
+    min-block-size: var(--rly-space-96);
+    resize: vertical;
+  }
+
+  .compact .control {
+    min-block-size: var(--rly-space-40);
+    padding-block: var(--rly-space-6);
+  }
+
+  .defaultSize .control {
+    min-block-size: var(--rly-space-48);
+  }
+
+  .control:disabled,
+  .control[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.58;
+  }
+
+  .control[aria-invalid="true"] {
+    border-color: var(--rly-color-blocked-ink);
+  }
+}

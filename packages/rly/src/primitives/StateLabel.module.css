@@ -1,0 +1,41 @@
+@layer rly.components {
+  .root {
+    align-items: center;
+    border: 1px solid currentcolor;
+    border-radius: var(--rly-radius-tag);
+    display: inline-flex;
+    gap: var(--rly-space-6);
+    max-inline-size: 100%;
+    padding: var(--rly-space-4) var(--rly-space-8);
+    overflow-wrap: anywhere;
+  }
+
+  .neutral {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-2);
+  }
+  .positive {
+    background: var(--rly-color-success-tint);
+    color: var(--rly-color-success-ink);
+  }
+  .critical {
+    background: var(--rly-color-blocked-tint);
+    color: var(--rly-color-blocked-ink);
+  }
+  .caution {
+    background: var(--rly-color-held-tint);
+    color: var(--rly-color-held-ink);
+  }
+  .progress {
+    background: var(--rly-color-deploying-tint);
+    color: var(--rly-color-deploying-ink);
+  }
+  .compact {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .defaultSize {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+}

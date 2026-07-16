@@ -1,0 +1,31 @@
+{
+  ".": {
+    "types": "./dist/dts/index.d.ts",
+    "import": "./dist/index.js"
+  },
+  "./diff": {
+    "types": "./dist/dts/diff/index.d.ts",
+    "import": "./dist/diff/index.js"
+  },
+  "./foundations": {
+    "types": "./dist/dts/foundations/index.d.ts",
+    "import": "./dist/foundations/index.js"
+  },
+  "./patterns": {
+    "types": "./dist/dts/patterns/index.d.ts",
+    "import": "./dist/patterns/index.js"
+  },
+  "./primitives": {
+    "types": "./dist/dts/primitives/index.d.ts",
+    "import": "./dist/primitives/index.js"
+  },
+  "./tokens": {
+    "types": "./dist/dts/tokens/index.d.ts",
+    "import": "./dist/tokens/index.js"
+  },
+  "./registry/components.json": "./registry/components.json",
+  "./registry/schema.json": "./registry/schema.json",
+  "./registry/search.json": "./registry/search.json",
+  "./registry/USAGE.md": "./registry/USAGE.md",
+  "./styles.css": "./dist/styles.css"
+}

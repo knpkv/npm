@@ -85,6 +85,32 @@ This project adheres to a strict set of development standards to ensure code qua
 - **Comprehensive Tests**: All packages are expected to have comprehensive tests written with `@effect/vitest`.
 - **Test-Driven Development**: While not explicitly stated, the emphasis on testing suggests that TDD is a recommended practice.
 
+### Review Findings Become Guardrails
+
+Treat every confirmed review finding as both a defect to fix and a prevention opportunity. Before closing the finding, classify the most durable guardrail that would catch the same defect class earlier:
+
+1. Prefer an `ast-grep` rule for mechanically recognizable source patterns.
+2. Prefer an ESLint rule or configuration when scope-, binding-, control-flow-, or type-aware JavaScript/TypeScript semantics are required.
+3. Add a focused automated test when the invariant is behavioral or integration-level.
+4. Add a concise instruction to this file only when the invariant requires human or agent judgment.
+
+Ship the applicable guardrail with the fix and prove it catches the original failure shape. If no stable automated guardrail is possible, record why in the review resolution instead of adding a brittle one-off rule.
+
+Review agents must include a **Prevention** note with every finding. It should propose the concrete static-analysis matcher or lint rule when the defect is mechanically recognizable, otherwise name the behavioral test or repository instruction that should protect the invariant. A reviewer may recommend no new rule only with a short explanation of why the pattern cannot be detected reliably without excessive false positives.
+
+Make every **Prevention** note implementation-ready:
+
+- classify it as `ast-grep`, `ESLint`, `type-check`, `test`, `instruction`, or `none`;
+- name the existing rule or configuration to extend before proposing a new one;
+- identify the intended rule/configuration file and the source paths it should cover;
+- sketch the matcher or invariant precisely enough for the remediation agent to implement it;
+- name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
+- call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
+
+The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
+
+Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
+
 ### Versioning and Publishing
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
@@ -127,9 +153,11 @@ Use Effect Platform modules and `effect/unstable/process` for runtime access. Do
 
 ## Effect Static Checks
 
-Effect-specific agent guardrails live in `ast-grep/rules/effect` and run through
-`pnpm lint:ast`. See `docs/effect-static-checks.md` before adding, weakening, or
-working around these rules.
+Effect-specific agent guardrails span the syntactic rules in
+`ast-grep/rules/effect` and the scope- or binding-aware local rules in
+`eslint-local-rules.cjs`. Run `pnpm lint` as the complete gate; `pnpm lint:ast`
+covers only the ast-grep subset. See `docs/effect-static-checks.md` before
+adding, weakening, or working around these rules.
 
 When writing Effect code:
 
@@ -137,8 +165,14 @@ When writing Effect code:
   `Layer.succeed` layers.
 - Bind services before calling methods inside generators:
   `const service = yield* SomeService`.
+- In `HttpApiBuilder.group`, acquire stable application services in the group callback before registering handlers so the resulting layer closes its requirements. Resolve only genuinely request-scoped services, such as `CurrentSession`, inside the per-request handler.
 - Use tagged domain errors (`Data.TaggedError` or `Schema.TaggedErrorClass`) and
   keep failures in the typed error channel.
+- In `packages/control-center/src/server/governance/internal/execution-store`, durable provider
+  outcome decoding, canonical verification, replay-integrity checking, transition construction,
+  transaction ownership, and fold insertion must live in one shared private fold module. Dispatch
+  and reconciliation modules may supply source-specific outcome material, but must not duplicate
+  the fold state machine or persistence boundary.
 - Decode untrusted JSON/body data with Schema helpers before assigning it to a
   domain type.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
@@ -146,3 +180,7 @@ When writing Effect code:
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+
+Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
+not provider coverage. The composition suite must also seed an authorized action, cross the runtime
+registry and executor projection, and assert the exact provider-call count and durable result.

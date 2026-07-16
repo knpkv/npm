@@ -1,0 +1,118 @@
+id: use-effect-fn-for-named-effect-functions
+valid:
+  - |
+    const load = Effect.fn("Feature.load")(function*(id: Id) {
+      return yield* repository.load(id)
+    })
+  - |
+    handlers.handle("load", (id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    }))
+  - |
+    const pure = (value: number): number => value + 1
+  - |
+    const identity = <Value,>(value: Value): Value => value
+  - |
+    const load = Effect.fn("Feature.load")(function*<Value>(value: Value) {
+      return yield* Effect.succeed(value)
+    })
+  - |
+    const publish = Effect.fn("Feature.publish")(function*<Failure, Requirements>(value: string) {
+      return yield* Effect.uninterruptibleMask(() => Effect.succeed(value))
+    })
+  - |
+    Effect.uninterruptibleMask(() => Effect.succeed("anonymous callback"))
+invalid:
+  - |
+    const load = function loadItem<Value>(value: Value) {
+      return Effect.gen(function*() {
+        return value
+      })
+    }
+  - |
+    const retry = function<Value>(value: Value) {
+      return Effect.suspend(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+    }
+  - |
+    function load<Value>(value: Value): Effect.Effect<Value> {
+      return Effect.gen(function*() {
+        return value
+      }).pipe(Effect.provide(layer))
+    }
+  - |
+    function retry<Value>(value: Value): Effect.Effect<Value> {
+      return Effect.suspend(() => Effect.succeed(value))
+    }
+  - |
+    const publish = <Failure, Requirements>(value: string) =>
+      Effect.gen(function*() {
+        return value
+      })
+  - |
+    const claim = <Failure, Requirements>(
+      value: string
+    ): Effect.Effect<string, Failure, Requirements> =>
+      Effect.gen(function*() {
+        return value
+      }).pipe(Effect.provide(layer))
+  - |
+    const publish = <Failure, Requirements>(value: string) =>
+      Effect.uninterruptibleMask(() => Effect.succeed(value))
+  - |
+    const publish = function<Failure, Requirements>(value: string) {
+      return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+    }
+  - |
+    function publish<Failure, Requirements>(value: string): Effect.Effect<string> {
+      return Effect.uninterruptibleMask(() => Effect.succeed(value))
+    }
+  - |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  - |
+    const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  - |
+    const load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    }).pipe(Effect.provide(layer))
+  - |
+    const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())
+  - |
+    let load = (id: Id) => Effect.gen(function*() {
+      return yield* repository.load(id)
+    })
+  - |
+    const load = function loadItem(id: Id) {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      })
+    }
+  - |
+    function load(id: Id): Effect.Effect<Item> {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      })
+    }
+  - |
+    let load = function(id: Id) {
+      return Effect.suspend(() => repository.load(id))
+    }
+  - |
+    const load = function loadItem(id: Id) {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      }).pipe(Effect.provide(layer))
+    }
+  - |
+    function load(id: Id): Effect.Effect<Item> {
+      return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
+    }
+  - |
+    const load = function loadItem(id: Id): Effect.Effect<Item> {
+      return Effect.gen(function*() {
+        return yield* repository.load(id)
+      }).pipe(Effect.provide(layer))
+    }

@@ -15,12 +15,12 @@ const formatBytes = (bytes: number): string => {
 }
 
 function PathRow({
-  copyKey,
   copied,
+  copyKey,
+  detail,
   label,
   onCopy,
-  path,
-  detail
+  path
 }: {
   readonly label: string
   readonly path: string

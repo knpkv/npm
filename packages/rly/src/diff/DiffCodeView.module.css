@@ -1,0 +1,67 @@
+@layer rly.components {
+  .root {
+    --diffs-addition-color-override: var(--rly-color-success-ink);
+    --diffs-dark: var(--rly-color-text-1);
+    --diffs-dark-bg: var(--rly-color-surface-1);
+    --diffs-deletion-color-override: var(--rly-color-blocked-ink);
+    --diffs-fg-number-addition-override: var(--rly-color-text-1);
+    --diffs-fg-number-deletion-override: var(--rly-color-text-1);
+    --diffs-light: var(--rly-color-text-1);
+    --diffs-light-bg: var(--rly-color-surface-1);
+
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    color: var(--rly-color-text-1);
+    container-type: inline-size;
+    min-inline-size: var(--rly-space-0);
+    overflow: hidden;
+  }
+
+  .viewer {
+    block-size: min(70vh, 48rem);
+    font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+      var(--rly-type-code-font);
+    min-block-size: 20rem;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .viewer:focus-visible {
+    outline: var(--rly-space-2) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-space-2) * -1);
+  }
+
+  .annotation {
+    background: var(--rly-color-held-tint);
+    border-inline-start: var(--rly-space-2) solid var(--rly-color-held-ink);
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .empty,
+  .fallbackNotice {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+  }
+
+  .empty {
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-24);
+  }
+
+  .fallbackNotice {
+    border-block-end: 1px solid var(--rly-color-border-1);
+    margin: var(--rly-space-0);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  @media (forced-colors: active) {
+    .annotation,
+    .viewer:focus-visible {
+      forced-color-adjust: auto;
+    }
+  }
+}

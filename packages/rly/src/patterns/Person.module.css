@@ -1,0 +1,43 @@
+@layer rly.components {
+  .root {
+    align-items: center;
+    display: grid;
+    grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .compact {
+    gap: var(--rly-space-8);
+  }
+
+  .defaultSize {
+    gap: var(--rly-space-12);
+  }
+
+  .identity {
+    display: grid;
+    gap: var(--rly-space-2);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .name {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    overflow-wrap: anywhere;
+  }
+
+  .role {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    overflow-wrap: anywhere;
+  }
+
+  .compact .name,
+  .compact .role {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+}

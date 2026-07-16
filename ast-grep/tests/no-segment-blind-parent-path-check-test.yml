@@ -1,0 +1,13 @@
+id: no-segment-blind-parent-path-check
+valid:
+  - |
+    const isParent = relative === ".." || relative.startsWith(`..${path.sep}`)
+  - |
+    const isHiddenName = value.startsWith(".")
+invalid:
+  - |
+    const isOutside = relative.startsWith("..")
+  - |
+    const isOutside = relative.startsWith('..')
+  - |
+    const isOutside = relative.startsWith(`..`)

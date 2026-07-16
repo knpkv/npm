@@ -111,8 +111,8 @@ export function SettingsSandbox() {
 }
 
 function SandboxForm({
-  settings,
-  onChange
+  onChange,
+  settings
 }: {
   readonly settings: SandboxSettings
   readonly onChange: (patch: Partial<SandboxSettings>) => void
@@ -421,8 +421,8 @@ const EXTENSION_PRESETS: ReadonlyArray<{ label: string; id: string }> = [
 ]
 
 function ExtensionPresets({
-  settings,
-  onChange
+  onChange,
+  settings
 }: {
   readonly settings: SandboxSettings
   readonly onChange: (patch: Partial<SandboxSettings>) => void
@@ -504,8 +504,8 @@ const MOUNT_PRESETS: ReadonlyArray<{ label: string; mount: VolumeMount }> = [
 ]
 
 function CommandPresets({
-  settings,
-  onChange
+  onChange,
+  settings
 }: {
   readonly settings: SandboxSettings
   readonly onChange: (patch: Partial<SandboxSettings>) => void
@@ -536,8 +536,8 @@ function CommandPresets({
 }
 
 function MountPresets({
-  settings,
-  onChange
+  onChange,
+  settings
 }: {
   readonly settings: SandboxSettings
   readonly onChange: (patch: Partial<SandboxSettings>) => void

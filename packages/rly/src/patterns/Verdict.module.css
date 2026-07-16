@@ -1,0 +1,84 @@
+@layer rly.components {
+  .root {
+    display: grid;
+    gap: var(--rly-space-24);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .verdict {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
+      var(--rly-type-verdict-font);
+    letter-spacing: var(--rly-type-verdict-tracking);
+    margin: var(--rly-space-0);
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .caution {
+    --rly-verdict-tone-ink: var(--rly-color-held-ink);
+    --rly-verdict-tone-tint: var(--rly-color-held-tint);
+  }
+
+  .critical {
+    --rly-verdict-tone-ink: var(--rly-color-blocked-ink);
+    --rly-verdict-tone-tint: var(--rly-color-blocked-tint);
+  }
+
+  .neutral {
+    --rly-verdict-tone-ink: var(--rly-color-text-2);
+    --rly-verdict-tone-tint: var(--rly-color-surface-2);
+  }
+
+  .positive {
+    --rly-verdict-tone-ink: var(--rly-color-success-ink);
+    --rly-verdict-tone-tint: var(--rly-color-success-tint);
+  }
+
+  .progress {
+    --rly-verdict-tone-ink: var(--rly-color-deploying-ink);
+    --rly-verdict-tone-tint: var(--rly-color-deploying-tint);
+  }
+
+  .reasonPanel {
+    align-items: start;
+    background: var(--rly-verdict-tone-tint, var(--rly-color-surface-2));
+    border-end-end-radius: var(--rly-radius-control);
+    border-inline-start: var(--rly-space-4) solid var(--rly-verdict-tone-ink, var(--rly-color-text-2));
+    border-start-end-radius: var(--rly-radius-control);
+    display: grid;
+    gap: var(--rly-space-12);
+    grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
+    max-inline-size: 48rem;
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-16) var(--rly-space-20);
+  }
+
+  .icon {
+    color: var(--rly-verdict-tone-ink, var(--rly-color-text-2));
+    display: inline-flex;
+  }
+
+  .reason {
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: var(--rly-space-0);
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+
+  @media (max-width: 30rem) {
+    .root {
+      gap: var(--rly-space-16);
+    }
+
+    .reasonPanel {
+      padding: var(--rly-space-12);
+    }
+  }
+}

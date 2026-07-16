@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: require-isolated-agent-child-environment
+language: tsx
+severity: error
+message: "Pass an explicit reviewed environment to local agent child processes"
+
+rule:
+  all:
+    - pattern: ChildProcess.make($$$ARGS)
+    - any:
+        - not:
+            has:
+              pattern:
+                context: |
+                  const $_ = { env: $ENV }
+                selector: pair
+              stopBy: end
+        - not:
+            has:
+              pattern:
+                context: |
+                  const $_ = { extendEnv: false }
+                selector: pair
+              stopBy: end
+
+files:
+  - "packages/ai-claude/src/**/*.ts"
+  - "packages/ai-codex/src/**/*.ts"
+
+note: |
+  This is the fast direct-shape check. The binding-aware local ESLint rule owns
+  the complete invariant, including import aliases, top-level property
+  placement, the reviewed `options.environment` seam, and spread rejection.

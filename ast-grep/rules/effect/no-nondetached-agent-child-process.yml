@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-nondetached-agent-child-process
+language: tsx
+severity: error
+message: "Keep local agent processes under Effect process-group supervision"
+
+rule:
+  pattern:
+    context: |
+      const $_ = { detached: false }
+    selector: pair
+  inside:
+    pattern: ChildProcess.make($$$ARGS)
+    stopBy: end
+
+files:
+  - "packages/ai-claude/src/**/*.ts"
+  - "packages/ai-codex/src/**/*.ts"
+
+note: |
+  Effect's Node process spawner defaults to a detached process group on POSIX
+  so scope finalization can terminate the agent CLI and any descendants.
+  Omit `detached` (preferred) or set it to `true`; `detached: false` can leave
+  subprocesses behind after interruption or timeout.

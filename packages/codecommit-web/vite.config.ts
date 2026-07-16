@@ -2,9 +2,12 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import path from "path"
 import { defineConfig } from "vite"
+import { productionPrototypeBoundary } from "./src/tooling/production-prototype-boundary.js"
+
+const clientRoot = path.resolve(__dirname, "src/client")
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), productionPrototypeBoundary(clientRoot)],
   root: "src/client",
   build: {
     outDir: "../../dist/client",
