@@ -10,15 +10,23 @@ import {
   LedgerRevision
 } from "../domain/deliveryGraph.js"
 import { EnvironmentId, EvidenceId, RelationshipId, ReleaseId } from "../domain/identifiers.js"
+import {
+  RelationshipRepairDisposition,
+  RelationshipRepairProposal,
+  RelationshipRepairRationale
+} from "../domain/relationshipRepair.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
+  ConflictApiError,
   ForbiddenApiError,
+  InvalidRequestApiError,
   NotFoundApiError,
+  PayloadTooLargeApiError,
   RequestTimedOutApiError,
   ServiceUnavailableApiError,
   UnauthorizedApiError
 } from "./errors.js"
-import { SessionCookieAuth } from "./session.js"
+import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
 const MAXIMUM_RELEASE_SLICE_RECORDS = 500
@@ -109,6 +117,18 @@ export const RelationshipRepairProposalDraft = Schema.Struct({
 /** Decoded read-only relationship repair proposal draft. */
 export type RelationshipRepairProposalDraft = typeof RelationshipRepairProposalDraft.Type
 
+/** Idempotent intent for creating a durable proposal from one exact repair candidate. */
+export const CreateRelationshipRepairProposalRequest = Schema.Struct({
+  proposalId: RelationshipRepairProposal.fields.proposalId,
+  environmentId: RelationshipRepairProposal.fields.environmentId,
+  expectedRevision: RelationshipRepairProposal.fields.expectedRevision,
+  disposition: RelationshipRepairDisposition,
+  rationale: RelationshipRepairRationale
+}).annotate({ identifier: "CreateRelationshipRepairProposalRequest" })
+
+/** Decoded relationship-repair proposal creation request. */
+export type CreateRelationshipRepairProposalRequest = typeof CreateRelationshipRepairProposalRequest.Type
+
 const readErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -158,6 +178,24 @@ const repairProposalDraft = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const createRepairProposal = HttpApiEndpoint.post(
+  "createRepairProposal",
+  "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposals",
+  {
+    params: { releaseId: ReleaseId, relationshipId: RelationshipId },
+    payload: CreateRelationshipRepairProposalRequest,
+    success: RelationshipRepairProposal,
+    error: [
+      ...readErrors,
+      InvalidRequestApiError,
+      ConflictApiError,
+      PayloadTooLargeApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const relationshipHistory = HttpApiEndpoint.get(
   "relationshipHistory",
   "/api/v1/relationships/:relationshipId/history",
@@ -176,5 +214,13 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 
 /** Authenticated, workspace-safe delivery relationship and evidence inspection. */
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
-  .add(releaseSlice, repairCandidates, repairProposalDraft, relationship, relationshipHistory, evidence)
+  .add(
+    releaseSlice,
+    repairCandidates,
+    repairProposalDraft,
+    createRepairProposal,
+    relationship,
+    relationshipHistory,
+    evidence
+  )
 {}

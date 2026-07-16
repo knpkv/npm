@@ -7,7 +7,8 @@ import type {
   DeliveryGraphInspection,
   MediaReads,
   PluginAdministration,
-  PortfolioSnapshots
+  PortfolioSnapshots,
+  RelationshipRepairProposals
 } from "../api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
@@ -18,6 +19,7 @@ import {
   mediaReadsLayer,
   pluginAdministrationLayer,
   portfolioSnapshotsLayer,
+  relationshipRepairProposalsLayer,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer
@@ -63,6 +65,7 @@ type ControlCenterCoreApplicationServices =
   | MediaReads
   | PluginAdministration
   | PortfolioSnapshots
+  | RelationshipRepairProposals
 
 /** Runtime construction settings after security and persistence decoding. */
 export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
@@ -101,7 +104,8 @@ const liveApplicationServices: Layer.Layer<
   pluginAdministrationLayer,
   deliveryGraphInspectionLayer,
   portfolioSnapshotsLayer,
-  mediaReadsLayer
+  mediaReadsLayer,
+  relationshipRepairProposalsLayer
 )
 
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */

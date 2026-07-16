@@ -12,8 +12,10 @@ import {
   PersonId,
   PluginConnectionId,
   RelationshipId,
+  RelationshipRepairProposalId,
   ReleaseId,
   RoleAssignmentId,
+  SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
@@ -30,10 +32,12 @@ import {
   makeMediaReads,
   makePluginAdministration,
   makePortfolioSnapshots,
+  makeRelationshipRepairProposals,
   mapPersistenceReadError
 } from "../../src/server/application/index.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -45,6 +49,16 @@ const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
+const REPAIR_PROPOSAL_ID = Schema.decodeSync(RelationshipRepairProposalId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000079"
+)
+const OTHER_REPAIR_PROPOSAL_ID = Schema.decodeSync(RelationshipRepairProposalId)(
+  "01890f6f-6d6a-7cc0-98d2-00000000007a"
+)
+const OWNER_SESSION_ID = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-00000000007b")
+const OWNER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-00000000007c")
+const WATCHER_SESSION_ID = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-00000000007d")
+const WATCHER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-00000000007e")
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000078")
 const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
@@ -145,19 +159,22 @@ const currentRelease = Schema.decodeSync(Release)({
 })
 
 const withApplication = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, Persistence | SecretStore>
+  use: Effect.Effect<Success, Failure, Database | Persistence | SecretStore>
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-application-")
     const secretRoot = SecretRoot.make(`${config.blobRoot.slice(0, -"/blobs".length)}/secrets`)
-    const applicationDependencies = Layer.merge(
-      persistenceLayer(config),
+    const database = databaseLayer(config)
+    const applicationDependencies = Layer.mergeAll(
+      database,
+      persistenceLayerFromDatabase(config).pipe(Layer.provide(database)),
       SecretStore.layer({ secretRoot })
     )
     return yield* use.pipe(Effect.provide(applicationDependencies))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 const setup = Effect.gen(function*() {
+  const database = yield* Database
   const persistence = yield* Persistence
   yield* persistence.workspaces.create(WORKSPACE_ID, {
     displayName: WorkspaceName.make("Payments"),
@@ -167,6 +184,26 @@ const setup = Effect.gen(function*() {
     displayName: WorkspaceName.make("Other"),
     createdAt: T0
   })
+  yield* database.sql`INSERT INTO sessions (
+    workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id,
+    agent_id, permission, created_at, last_seen_at, idle_expires_at,
+    absolute_expires_at, revoked_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${OWNER_SESSION_ID}, ${"ab".repeat(32)}, ${"cd".repeat(32)},
+    'human', ${OWNER_PERSON_ID}, NULL, 'workspace-owner',
+    '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
+    '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL
+  )`
+  yield* database.sql`INSERT INTO sessions (
+    workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id,
+    agent_id, permission, created_at, last_seen_at, idle_expires_at,
+    absolute_expires_at, revoked_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${WATCHER_SESSION_ID}, ${"ef".repeat(32)}, ${"01".repeat(32)},
+    'human', ${WATCHER_PERSON_ID}, NULL, 'watcher',
+    '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
+    '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL
+  )`
   yield* persistence.pluginConnections.create(WORKSPACE_ID, {
     pluginConnectionId: PLUGIN_ID,
     providerId: "jira",
@@ -457,6 +494,106 @@ describe("application adapters", () => {
         revision: Schema.decodeSync(LedgerRevision)(2)
       })
       assert.strictEqual(current.precondition.expectedRevision, 2)
+
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+      const repairProposals = yield* makeRelationshipRepairProposals
+      const rejectedWatcher = yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: Schema.decodeSync(LedgerRevision)(2),
+          disposition: current.proposal.disposition,
+          rationale: current.proposal.rationale
+        },
+        actor: { _tag: "human", personId: WATCHER_PERSON_ID },
+        sessionId: WATCHER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedWatcher))
+      if (Result.isFailure(rejectedWatcher)) {
+        assert.instanceOf(rejectedWatcher.failure, ApplicationServiceUnavailable)
+      }
+      const absentAfterRejectedAuthority = yield* repairProposals.get({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(absentAfterRejectedAuthority))
+      if (Result.isFailure(absentAfterRejectedAuthority)) {
+        assert.instanceOf(absentAfterRejectedAuthority.failure, ApplicationResourceNotFound)
+      }
+
+      const created = yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: Schema.decodeSync(LedgerRevision)(2),
+          disposition: current.proposal.disposition,
+          rationale: current.proposal.rationale
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      assert.strictEqual(created.status, "pending")
+      assert.strictEqual(created.origin.sessionId, OWNER_SESSION_ID)
+      assert.deepStrictEqual(
+        yield* repairProposals.get({ workspaceId: WORKSPACE_ID, proposalId: REPAIR_PROPOSAL_ID }),
+        created
+      )
+
+      const replayed = yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: Schema.decodeSync(LedgerRevision)(2),
+          disposition: current.proposal.disposition,
+          rationale: current.proposal.rationale
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      assert.deepStrictEqual(replayed, created)
+
+      const competing = yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: OTHER_REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: Schema.decodeSync(LedgerRevision)(2),
+          disposition: "reject",
+          rationale: "Reject this candidate instead."
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(competing))
+      if (Result.isFailure(competing)) assert.instanceOf(competing.failure, ApplicationConflict)
+
+      const staleProposal = yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: OTHER_REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: RELATIONSHIP_REVISION,
+          disposition: "link",
+          rationale: "This revision is stale."
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(staleProposal))
+      if (Result.isFailure(staleProposal)) assert.instanceOf(staleProposal.failure, ApplicationConflict)
       assert.deepStrictEqual(
         yield* inspection.relationshipHistory({ workspaceId: WORKSPACE_ID, relationshipId: RELATIONSHIP_ID }),
         historyBefore

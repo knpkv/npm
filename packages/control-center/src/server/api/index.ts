@@ -8,7 +8,8 @@ export {
   LiveEvents,
   MediaReads,
   PluginAdministration,
-  PortfolioSnapshots
+  PortfolioSnapshots,
+  RelationshipRepairProposals
 } from "./ApplicationServices.js"
 export {
   controlCenterApiHandlersLayer,

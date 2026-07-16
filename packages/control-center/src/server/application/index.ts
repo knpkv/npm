@@ -15,6 +15,7 @@ export {
   digestReleaseReadinessCandidate,
   ReadinessDigestError
 } from "./readinessDigests.js"
+export { makeRelationshipRepairProposals, relationshipRepairProposalsLayer } from "./relationshipRepairProposals.js"
 export {
   makeReleaseAgentTurns,
   type ReleaseAgentRuntimeOptions,

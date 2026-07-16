@@ -64,9 +64,17 @@ required permission from those facts. A selected candidate can now be projected 
 proposal draft with its exact relationship revision preserved as a future stale-write precondition;
 neither read creates a durable proposal or ledger mutation.
 
+The D04 mutation MVP now accepts that draft through a CSRF-protected owner-only endpoint and
+persists one pending proposal against the exact workspace, release/environment scope, relationship,
+and current ledger revision. Client-supplied UUIDv7 proposal identities make exact retries
+idempotent, a partial unique index prevents competing pending proposals for the same revision, and
+database triggers bind the proposal to a current owner session and an eligible repair candidate.
+Creating a proposal still does not mutate the relationship ledger; review and apply remain separate
+governed transitions.
+
 ## Remaining roadmap
 
-- Complete D04 governed proposal persistence/review/apply, then D05–D09: six-state
+- Complete D04 proposal listing, review, and compare-and-swap apply, then D05–D09: six-state
   portfolio/work views, search/traces/shares, timeline and exports, graceful drain, and startup
   reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
@@ -94,7 +102,8 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   explicit schema-brand conversion at the execution boundary.
 - Local `effect-qb` `0.20.0` requires Effect `4.0.0-beta.98`, while this workspace and vendored
   Effect source use `beta.97`. Do not add it until the workspace, lockfile, and vendored subtree are
-  aligned deliberately. Migrations, views, and triggers should remain explicit SQL.
+  aligned deliberately. Migrations, views, triggers, and the isolated repair-proposal repository
+  should remain explicit SQL until then.
 - Evidence freshness treats `sourceObservedAt + staleAfterSeconds` as the canonical `currentUntil`.
   Add a boundary test and document the inclusive/exclusive millisecond convention before external
   adapters generate evidence references.
@@ -112,7 +121,8 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Add durable D04 repair proposal persistence behind an explicit mutation boundary, using the draft's
-expected relationship revision for compare-and-swap validation. Run one independent exact-commit review
-after each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings
-into static rules or repository instructions.
+Add the D04 review lifecycle and bounded proposal list/read endpoints, then implement an approved
+proposal apply transition that appends an immutable relationship revision only when the proposal's
+expected revision is still current. Run one independent exact-commit review after each deterministic
+milestone gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
+repository instructions.
