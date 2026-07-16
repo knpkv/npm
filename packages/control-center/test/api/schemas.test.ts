@@ -99,8 +99,8 @@ describe("public API schemas", () => {
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(RelationshipRepairProposalDraft)({
         candidate,
-        precondition: { relationshipId, expectedRevision: 2 },
-        proposal: { disposition: "link", rationale: "" }
+        precondition: { relationshipId, expectedRevision: 0 },
+        proposal: { disposition: "link", rationale: "No pull request is linked." }
       })
     ))
   })
