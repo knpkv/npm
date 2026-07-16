@@ -20,7 +20,13 @@ import {
   SessionMutationAuth
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
-import { EvidenceId, PluginConnectionId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
+import {
+  EvidenceId,
+  PluginConnectionId,
+  RelationshipId,
+  RelationshipRepairProposalId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
   Array.from(middlewares, ({ key }) => key)
@@ -89,6 +95,21 @@ describe("ControlCenterApi contract", () => {
       "413",
       "503"
     ])
+
+    const reviewRepairProposalPath = specification.paths["/api/v1/relationships/repair-proposals/{proposalId}/reviews"]
+    assert.isDefined(reviewRepairProposalPath)
+    assert.isDefined(reviewRepairProposalPath.post)
+    assert.deepStrictEqual(Object.keys(reviewRepairProposalPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "413",
+      "503"
+    ])
   })
 
   it("keeps the seven API groups and endpoint routes explicit", () => {
@@ -146,6 +167,9 @@ describe("ControlCenterApi contract", () => {
           "POST",
           "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposals"
         ],
+        ["listRepairProposals", "GET", "/api/v1/relationships/releases/:releaseId/repair-proposals"],
+        ["getRepairProposal", "GET", "/api/v1/relationships/repair-proposals/:proposalId"],
+        ["reviewRepairProposal", "POST", "/api/v1/relationships/repair-proposals/:proposalId/reviews"],
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
@@ -195,6 +219,9 @@ describe("ControlCenterApi contract", () => {
       repairCandidates: [SessionCookieAuth.key],
       repairProposalDraft: [SessionCookieAuth.key],
       createRepairProposal: [SessionCookieAuth.key, SessionMutationAuth.key],
+      listRepairProposals: [SessionCookieAuth.key],
+      getRepairProposal: [SessionCookieAuth.key],
+      reviewRepairProposal: [SessionCookieAuth.key, SessionMutationAuth.key],
       relationship: [SessionCookieAuth.key],
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
@@ -223,6 +250,7 @@ describe("ControlCenterApi contract", () => {
     const mediaId = Schema.decodeSync(OpaqueMediaId)(`media_${"ab".repeat(32)}`)
     const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000093")
     const relationshipId = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000094")
+    const proposalId = Schema.decodeSync(RelationshipRepairProposalId)("01890f6f-6d6a-7cc0-98d2-000000000096")
     const revision = Schema.decodeSync(LedgerRevision)(1)
     const evidenceId = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-000000000095")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
@@ -264,6 +292,18 @@ describe("ControlCenterApi contract", () => {
         params: { releaseId, relationshipId }
       }),
       "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates/01890f6f-6d6a-7cc0-98d2-000000000094/proposals"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.listRepairProposals({ params: { releaseId }, query: { status: "pending" } }),
+      "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-proposals?status=pending"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.getRepairProposal({ params: { proposalId } }),
+      "https://control.example/api/v1/relationships/repair-proposals/01890f6f-6d6a-7cc0-98d2-000000000096"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.reviewRepairProposal({ params: { proposalId } }),
+      "https://control.example/api/v1/relationships/repair-proposals/01890f6f-6d6a-7cc0-98d2-000000000096/reviews"
     )
     assert.strictEqual(
       urls.deliveryGraph.evidence({ params: { evidenceId } }),

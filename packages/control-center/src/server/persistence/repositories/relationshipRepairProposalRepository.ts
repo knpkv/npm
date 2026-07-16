@@ -13,6 +13,7 @@ import {
   PersonId,
   RelationshipId,
   RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
   ReleaseId,
   SessionId,
   WorkspaceId
@@ -21,7 +22,9 @@ import {
   RelationshipRepairDisposition,
   RelationshipRepairProposal,
   RelationshipRepairProposalOrigin,
-  RelationshipRepairRationale
+  RelationshipRepairRationale,
+  RelationshipRepairReview,
+  RelationshipRepairReviewDecision
 } from "../../../domain/relationshipRepair.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -35,13 +38,14 @@ import {
 import { mapPersistenceOperation, readChanges } from "./internal.js"
 
 const RECORD_KIND = "relationship-repair-proposal"
+const MAXIMUM_PROPOSAL_PAGE_SIZE = 128
 const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
 
 /** Raised when a relationship-repair persistence command fails boundary decoding. */
 export class RelationshipRepairProposalInputError extends Schema.TaggedErrorClass<
   RelationshipRepairProposalInputError
 >()("RelationshipRepairProposalInputError", {
-  operation: Schema.Literals(["create", "get"])
+  operation: Schema.Literals(["create", "get", "list", "review"])
 }) {}
 
 /** Caller intent for one durable pending relationship-repair proposal. */
@@ -67,10 +71,32 @@ export const ReadRelationshipRepairProposalInput = Schema.Struct({
   proposalId: RelationshipRepairProposalId
 })
 
+/** Bounded release/environment proposal query. */
+export const ListRelationshipRepairProposalsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId,
+  environmentId: Schema.NullOr(EnvironmentId),
+  status: Schema.NullOr(RelationshipRepairProposal.fields.status)
+})
+
+/** Idempotent reviewer decision over one pending proposal. */
+export const ReviewRelationshipRepairProposalInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  proposalId: RelationshipRepairProposalId,
+  reviewId: RelationshipRepairReviewId,
+  decision: RelationshipRepairReviewDecision,
+  rationale: RelationshipRepairRationale,
+  origin: RelationshipRepairProposalOrigin,
+  reviewedAt: UtcTimestamp
+})
+
+/** Decoded immutable relationship-repair review command. */
+export type ReviewRelationshipRepairProposalInput = typeof ReviewRelationshipRepairProposalInput.Type
+
 const ProposalRow = Schema.Struct({
   workspaceId: WorkspaceId,
   proposalId: RelationshipRepairProposalId,
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(2),
   releaseId: ReleaseId,
   environmentId: Schema.NullOr(EnvironmentId),
   relationshipId: RelationshipId,
@@ -81,26 +107,31 @@ const ProposalRow = Schema.Struct({
   personId: Schema.NullOr(PersonId),
   agentId: Schema.NullOr(AgentId),
   sessionId: SessionId,
-  status: Schema.Literal("pending"),
-  proposedAt: UtcTimestamp
-}).check(
-  Schema.makeFilter(
-    ({ actorKind, agentId, personId }) =>
-      actorKind === "human"
-        ? personId !== null && agentId === null
-        : agentId !== null && personId === null,
-    { expected: "proposal actor columns to match their discriminator" }
-  )
-)
+  status: RelationshipRepairProposal.fields.status,
+  proposedAt: UtcTimestamp,
+  reviewId: Schema.NullOr(RelationshipRepairReviewId),
+  reviewDecision: Schema.NullOr(RelationshipRepairReviewDecision),
+  reviewRationale: Schema.NullOr(RelationshipRepairRationale),
+  reviewerActorKind: Schema.NullOr(Schema.Literals(["human", "agent"])),
+  reviewerPersonId: Schema.NullOr(PersonId),
+  reviewerAgentId: Schema.NullOr(AgentId),
+  reviewerSessionId: Schema.NullOr(SessionId),
+  reviewedAt: Schema.NullOr(UtcTimestamp)
+})
 
 type ProposalRow = typeof ProposalRow.Type
+const ProposalRowIdentity = Schema.Struct({ proposalId: RelationshipRepairProposalId })
 
-const actorFromRow = (row: ProposalRow): Actor | undefined => {
-  if (row.actorKind === "human" && row.personId !== null) {
-    return Actor.make({ _tag: "human", personId: row.personId })
+const actorFromColumns = (input: {
+  readonly actorKind: "human" | "agent"
+  readonly personId: PersonId | null
+  readonly agentId: AgentId | null
+}): Actor | undefined => {
+  if (input.actorKind === "human" && input.personId !== null && input.agentId === null) {
+    return Actor.make({ _tag: "human", personId: input.personId })
   }
-  if (row.actorKind === "agent" && row.agentId !== null) {
-    return Actor.make({ _tag: "agent", agentId: row.agentId })
+  if (input.actorKind === "agent" && input.agentId !== null && input.personId === null) {
+    return Actor.make({ _tag: "agent", agentId: input.agentId })
   }
   return undefined
 }
@@ -111,7 +142,7 @@ const sameActor = (left: Actor, right: Actor): boolean =>
     ? left.personId === (right._tag === "human" ? right.personId : null)
     : left.agentId === (right._tag === "agent" ? right.agentId : null))
 
-const sameIntent = (
+const sameCreateIntent = (
   existing: RelationshipRepairProposal,
   requested: CreateRelationshipRepairProposalInput
 ): boolean =>
@@ -126,30 +157,53 @@ const sameIntent = (
   existing.origin.sessionId === requested.origin.sessionId &&
   sameActor(existing.origin.actor, requested.origin.actor)
 
+const sameReviewIntent = (
+  existing: RelationshipRepairReview,
+  requested: ReviewRelationshipRepairProposalInput
+): boolean =>
+  existing.reviewId === requested.reviewId &&
+  existing.decision === requested.decision &&
+  existing.rationale === requested.rationale &&
+  existing.origin.sessionId === requested.origin.sessionId &&
+  sameActor(existing.origin.actor, requested.origin.actor)
+
 const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
   const database = yield* Database
   const sql = database.sql
 
+  const selectColumns = sql`SELECT
+    proposal.workspace_id AS workspaceId,
+    proposal.proposal_id AS proposalId,
+    proposal.schema_version AS schemaVersion,
+    proposal.release_id AS releaseId,
+    proposal.environment_id AS environmentId,
+    proposal.relationship_id AS relationshipId,
+    proposal.expected_revision AS expectedRevision,
+    proposal.disposition,
+    proposal.rationale,
+    proposal.actor_kind AS actorKind,
+    proposal.person_id AS personId,
+    proposal.agent_id AS agentId,
+    proposal.session_id AS sessionId,
+    proposal.status,
+    proposal.proposed_at AS proposedAt,
+    review.review_id AS reviewId,
+    review.decision AS reviewDecision,
+    review.rationale AS reviewRationale,
+    review.actor_kind AS reviewerActorKind,
+    review.person_id AS reviewerPersonId,
+    review.agent_id AS reviewerAgentId,
+    review.session_id AS reviewerSessionId,
+    review.reviewed_at AS reviewedAt
+  FROM relationship_repair_proposals proposal
+  LEFT JOIN relationship_repair_reviews review
+    ON review.workspace_id = proposal.workspace_id
+    AND review.proposal_id = proposal.proposal_id`
+
   const findRows = (workspaceId: WorkspaceId, proposalId: RelationshipRepairProposalId) =>
-    sql<Record<string, unknown>>`SELECT
-      workspace_id AS workspaceId,
-      proposal_id AS proposalId,
-      schema_version AS schemaVersion,
-      release_id AS releaseId,
-      environment_id AS environmentId,
-      relationship_id AS relationshipId,
-      expected_revision AS expectedRevision,
-      disposition,
-      rationale,
-      actor_kind AS actorKind,
-      person_id AS personId,
-      agent_id AS agentId,
-      session_id AS sessionId,
-      status,
-      proposed_at AS proposedAt
-    FROM relationship_repair_proposals
-    WHERE workspace_id = ${workspaceId}
-      AND proposal_id = ${proposalId}`
+    sql<Record<string, unknown>>`${selectColumns}
+    WHERE proposal.workspace_id = ${workspaceId}
+      AND proposal.proposal_id = ${proposalId}`
 
   const decodeRow = Effect.fn("RelationshipRepairProposalRepository.decodeRow")(function*(
     workspaceId: WorkspaceId,
@@ -166,7 +220,7 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
       })
     }
     const row = decoded.success
-    const actor = actorFromRow(row)
+    const actor = actorFromColumns(row)
     if (actor === undefined) {
       return yield* new PersistedRecordError({
         workspaceId,
@@ -175,6 +229,55 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
         diagnosticCode: "relationship-repair-proposal-actor-invalid"
       })
     }
+
+    let review: RelationshipRepairReview | null = null
+    if (row.status === "pending") {
+      if (
+        row.reviewId !== null || row.reviewDecision !== null || row.reviewRationale !== null ||
+        row.reviewerActorKind !== null || row.reviewerPersonId !== null || row.reviewerAgentId !== null ||
+        row.reviewerSessionId !== null || row.reviewedAt !== null
+      ) {
+        return yield* new PersistedRecordError({
+          workspaceId,
+          recordKind: RECORD_KIND,
+          recordKey: proposalId,
+          diagnosticCode: "relationship-repair-pending-review-invalid"
+        })
+      }
+    } else {
+      if (
+        row.reviewId === null || row.reviewDecision !== row.status || row.reviewRationale === null ||
+        row.reviewerActorKind === null || row.reviewerSessionId === null || row.reviewedAt === null
+      ) {
+        return yield* new PersistedRecordError({
+          workspaceId,
+          recordKind: RECORD_KIND,
+          recordKey: proposalId,
+          diagnosticCode: "relationship-repair-final-review-invalid"
+        })
+      }
+      const reviewer = actorFromColumns({
+        actorKind: row.reviewerActorKind,
+        personId: row.reviewerPersonId,
+        agentId: row.reviewerAgentId
+      })
+      if (reviewer === undefined) {
+        return yield* new PersistedRecordError({
+          workspaceId,
+          recordKind: RECORD_KIND,
+          recordKey: proposalId,
+          diagnosticCode: "relationship-repair-reviewer-invalid"
+        })
+      }
+      review = RelationshipRepairReview.make({
+        reviewId: row.reviewId,
+        decision: row.reviewDecision,
+        rationale: row.reviewRationale,
+        origin: { actor: reviewer, sessionId: row.reviewerSessionId },
+        reviewedAt: row.reviewedAt
+      })
+    }
+
     return RelationshipRepairProposal.make({
       schemaVersion: row.schemaVersion,
       proposalId: row.proposalId,
@@ -187,7 +290,8 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
       rationale: row.rationale,
       origin: { actor, sessionId: row.sessionId },
       status: row.status,
-      proposedAt: row.proposedAt
+      proposedAt: row.proposedAt,
+      review
     })
   })
 
@@ -210,22 +314,25 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
     return yield* decodeRow(input.workspaceId, input.proposalId, rawRow)
   })
 
-  const decodeCreate = Effect.fn("RelationshipRepairProposalRepository.decodeCreate")(function*(input: unknown) {
-    return yield* Schema.decodeUnknownEffect(Schema.toType(CreateRelationshipRepairProposalInput))(input).pipe(
-      Effect.mapError(() => new RelationshipRepairProposalInputError({ operation: "create" }))
+  const decodeInput = <Decoded, Encoded>(
+    operation: "create" | "get" | "list" | "review",
+    schema: Schema.Codec<Decoded, Encoded>,
+    input: unknown
+  ) =>
+    Schema.decodeUnknownEffect(Schema.toType(schema))(input).pipe(
+      Effect.mapError(() => new RelationshipRepairProposalInputError({ operation }))
     )
-  })
 
   return {
     create: Effect.fn("RelationshipRepairProposalRepository.create")(function*(input: unknown) {
-      const request = yield* decodeCreate(input)
+      const request = yield* decodeInput("create", CreateRelationshipRepairProposalInput, input)
       const proposedAt = encodeTimestamp(request.proposedAt)
       return yield* database.transaction(Effect.gen(function*() {
         const existingRows = yield* findRows(request.workspaceId, request.proposalId)
         const existingRaw = existingRows[0]
         if (existingRaw !== undefined) {
           const existing = yield* decodeRow(request.workspaceId, request.proposalId, existingRaw)
-          if (sameIntent(existing, request)) return existing
+          if (sameCreateIntent(existing, request)) return existing
           return yield* new RecordAlreadyExistsError({
             workspaceId: request.workspaceId,
             recordKind: RECORD_KIND,
@@ -240,7 +347,7 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
           relationship_id, expected_revision, disposition, rationale, actor_kind,
           person_id, agent_id, session_id, status, proposed_at
         ) SELECT
-          ${request.workspaceId}, ${request.proposalId}, 1, ${request.releaseId}, ${request.environmentId},
+          ${request.workspaceId}, ${request.proposalId}, 2, ${request.releaseId}, ${request.environmentId},
           ${request.relationshipId}, ${request.expectedRevision}, ${request.disposition}, ${request.rationale},
           ${request.origin.actor._tag}, ${personId}, ${agentId}, ${request.origin.sessionId}, 'pending',
           ${proposedAt}
@@ -299,22 +406,97 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
       })).pipe(mapPersistenceOperation("relationship-repair-proposal.create"))
     }),
     get: Effect.fn("RelationshipRepairProposalRepository.get")(function*(input: unknown) {
-      const request = yield* Schema.decodeUnknownEffect(Schema.toType(ReadRelationshipRepairProposalInput))(input).pipe(
-        Effect.mapError(() => new RelationshipRepairProposalInputError({ operation: "get" }))
-      )
+      const request = yield* decodeInput("get", ReadRelationshipRepairProposalInput, input)
       return yield* getDecoded(request).pipe(mapPersistenceOperation("relationship-repair-proposal.get"))
+    }),
+    list: Effect.fn("RelationshipRepairProposalRepository.list")(function*(input: unknown) {
+      const request = yield* decodeInput("list", ListRelationshipRepairProposalsInput, input)
+      const rows = yield* sql<Record<string, unknown>>`${selectColumns}
+        WHERE proposal.workspace_id = ${request.workspaceId}
+          AND proposal.release_id = ${request.releaseId}
+          AND (
+            (${request.environmentId} IS NULL AND proposal.environment_id IS NULL) OR
+            proposal.environment_id = ${request.environmentId}
+          )
+          AND (${request.status} IS NULL OR proposal.status = ${request.status})
+        ORDER BY proposal.proposed_at DESC, proposal.proposal_id DESC
+        LIMIT ${MAXIMUM_PROPOSAL_PAGE_SIZE + 1}`.pipe(
+        mapPersistenceOperation("relationship-repair-proposal.list")
+      )
+      const proposals = yield* Effect.forEach(
+        rows.slice(0, MAXIMUM_PROPOSAL_PAGE_SIZE),
+        (row) =>
+          Effect.gen(function*() {
+            const identity = Schema.decodeUnknownResult(ProposalRowIdentity)(row)
+            if (Result.isFailure(identity)) {
+              return yield* new PersistedRecordError({
+                workspaceId: request.workspaceId,
+                recordKind: RECORD_KIND,
+                recordKey: request.releaseId,
+                diagnosticCode: "relationship-repair-proposal-identity-invalid"
+              })
+            }
+            return yield* decodeRow(request.workspaceId, identity.success.proposalId, row)
+          }),
+        { concurrency: 1 }
+      )
+      return { proposals, truncated: rows.length > MAXIMUM_PROPOSAL_PAGE_SIZE }
+    }),
+    review: Effect.fn("RelationshipRepairProposalRepository.review")(function*(input: unknown) {
+      const request = yield* decodeInput("review", ReviewRelationshipRepairProposalInput, input)
+      const reviewedAt = encodeTimestamp(request.reviewedAt)
+      return yield* database.transaction(Effect.gen(function*() {
+        const proposal = yield* getDecoded(request)
+        if (proposal.review !== null) {
+          if (sameReviewIntent(proposal.review, request)) return proposal
+          return yield* new RecordAlreadyExistsError({
+            workspaceId: request.workspaceId,
+            recordKind: "relationship-repair-review",
+            recordKey: request.reviewId
+          })
+        }
+        if (sameActor(proposal.origin.actor, request.origin.actor)) {
+          return yield* new RecordAlreadyExistsError({
+            workspaceId: request.workspaceId,
+            recordKind: "relationship-repair-review",
+            recordKey: request.reviewId
+          })
+        }
+
+        const reviewCollision = yield* sql`SELECT proposal_id
+          FROM relationship_repair_reviews
+          WHERE workspace_id = ${request.workspaceId}
+            AND review_id = ${request.reviewId}`
+        if (reviewCollision.length > 0) {
+          return yield* new RecordAlreadyExistsError({
+            workspaceId: request.workspaceId,
+            recordKind: "relationship-repair-review",
+            recordKey: request.reviewId
+          })
+        }
+
+        const personId = request.origin.actor._tag === "human" ? request.origin.actor.personId : null
+        const agentId = request.origin.actor._tag === "agent" ? request.origin.actor.agentId : null
+        yield* sql`INSERT INTO relationship_repair_reviews (
+          workspace_id, proposal_id, review_id, decision, rationale, actor_kind,
+          person_id, agent_id, session_id, reviewed_at
+        ) VALUES (
+          ${request.workspaceId}, ${request.proposalId}, ${request.reviewId}, ${request.decision},
+          ${request.rationale}, ${request.origin.actor._tag}, ${personId}, ${agentId},
+          ${request.origin.sessionId}, ${reviewedAt}
+        )`
+        return yield* getDecoded(request)
+      })).pipe(mapPersistenceOperation("relationship-repair-proposal.review"))
     })
   }
 })
 
 /** Workspace-scoped durable relationship-repair proposal persistence. */
-export interface RelationshipRepairProposalRepositoryService extends
-  Success<
-    typeof makeRelationshipRepairProposalRepository
-  >
+export interface RelationshipRepairProposalRepositoryService
+  extends Success<typeof makeRelationshipRepairProposalRepository>
 {}
 
-/** Server-only repository for idempotent pending relationship-repair proposals. */
+/** Server-only repository for relationship-repair proposals and immutable reviews. */
 export class RelationshipRepairProposalRepository extends Context.Service<
   RelationshipRepairProposalRepository,
   RelationshipRepairProposalRepositoryService

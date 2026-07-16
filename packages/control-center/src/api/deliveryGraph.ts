@@ -9,11 +9,19 @@ import {
   EvidenceItem,
   LedgerRevision
 } from "../domain/deliveryGraph.js"
-import { EnvironmentId, EvidenceId, RelationshipId, ReleaseId } from "../domain/identifiers.js"
+import {
+  EnvironmentId,
+  EvidenceId,
+  RelationshipId,
+  RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
+  ReleaseId
+} from "../domain/identifiers.js"
 import {
   RelationshipRepairDisposition,
   RelationshipRepairProposal,
-  RelationshipRepairRationale
+  RelationshipRepairRationale,
+  RelationshipRepairReviewDecision
 } from "../domain/relationshipRepair.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
@@ -32,6 +40,7 @@ import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 const MAXIMUM_RELEASE_SLICE_RECORDS = 500
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
+const MAXIMUM_REPAIR_PROPOSALS = 128
 
 const boundedArray = <T, E, RD, RE>(schema: Schema.Codec<T, E, RD, RE>, maximum: number) =>
   Schema.Array(schema).check(Schema.isMaxLength(maximum))
@@ -129,6 +138,28 @@ export const CreateRelationshipRepairProposalRequest = Schema.Struct({
 /** Decoded relationship-repair proposal creation request. */
 export type CreateRelationshipRepairProposalRequest = typeof CreateRelationshipRepairProposalRequest.Type
 
+/** Bounded newest-first proposal page for one release/environment scope. */
+export const RelationshipRepairProposalList = Schema.Struct({
+  releaseId: ReleaseId,
+  environmentId: Schema.NullOr(EnvironmentId),
+  status: Schema.NullOr(RelationshipRepairProposal.fields.status),
+  truncated: Schema.Boolean,
+  proposals: boundedArray(RelationshipRepairProposal, MAXIMUM_REPAIR_PROPOSALS)
+}).annotate({ identifier: "RelationshipRepairProposalList" })
+
+/** Decoded bounded relationship-repair proposal page. */
+export type RelationshipRepairProposalList = typeof RelationshipRepairProposalList.Type
+
+/** Idempotent immutable review command for one pending proposal. */
+export const ReviewRelationshipRepairProposalRequest = Schema.Struct({
+  reviewId: RelationshipRepairReviewId,
+  decision: RelationshipRepairReviewDecision,
+  rationale: RelationshipRepairRationale
+}).annotate({ identifier: "ReviewRelationshipRepairProposalRequest" })
+
+/** Decoded relationship-repair review request. */
+export type ReviewRelationshipRepairProposalRequest = typeof ReviewRelationshipRepairProposalRequest.Type
+
 const readErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -196,6 +227,48 @@ const createRepairProposal = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const listRepairProposals = HttpApiEndpoint.get(
+  "listRepairProposals",
+  "/api/v1/relationships/releases/:releaseId/repair-proposals",
+  {
+    params: { releaseId: ReleaseId },
+    query: {
+      environmentId: Schema.optionalKey(EnvironmentId),
+      status: Schema.optionalKey(RelationshipRepairProposal.fields.status)
+    },
+    success: RelationshipRepairProposalList,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
+
+const getRepairProposal = HttpApiEndpoint.get(
+  "getRepairProposal",
+  "/api/v1/relationships/repair-proposals/:proposalId",
+  {
+    params: { proposalId: RelationshipRepairProposalId },
+    success: RelationshipRepairProposal,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
+
+const reviewRepairProposal = HttpApiEndpoint.post(
+  "reviewRepairProposal",
+  "/api/v1/relationships/repair-proposals/:proposalId/reviews",
+  {
+    params: { proposalId: RelationshipRepairProposalId },
+    payload: ReviewRelationshipRepairProposalRequest,
+    success: RelationshipRepairProposal,
+    error: [
+      ...readErrors,
+      InvalidRequestApiError,
+      ConflictApiError,
+      PayloadTooLargeApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const relationshipHistory = HttpApiEndpoint.get(
   "relationshipHistory",
   "/api/v1/relationships/:relationshipId/history",
@@ -219,6 +292,9 @@ export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
     repairCandidates,
     repairProposalDraft,
     createRepairProposal,
+    listRepairProposals,
+    getRepairProposal,
+    reviewRepairProposal,
     relationship,
     relationshipHistory,
     evidence

@@ -28,6 +28,29 @@ export const makeRelationshipRepairProposals = Effect.gen(function*() {
     }),
     get: Effect.fn("RelationshipRepairProposals.get")(function*(input) {
       return yield* mapPersistenceRead(persistence.relationshipRepairProposals.get(input))
+    }),
+    list: Effect.fn("RelationshipRepairProposals.list")(function*(input) {
+      yield* mapPersistenceRead(persistence.releases.get(input.workspaceId, input.releaseId))
+      const page = yield* mapPersistenceRead(persistence.relationshipRepairProposals.list(input))
+      return {
+        releaseId: input.releaseId,
+        environmentId: input.environmentId,
+        status: input.status,
+        truncated: page.truncated,
+        proposals: page.proposals
+      }
+    }),
+    review: Effect.fn("RelationshipRepairProposals.review")(function*(input) {
+      const reviewedAt = yield* DateTime.now
+      return yield* persistence.relationshipRepairProposals.review({
+        workspaceId: input.workspaceId,
+        proposalId: input.proposalId,
+        reviewId: input.request.reviewId,
+        decision: input.request.decision,
+        rationale: input.request.rationale,
+        origin: { actor: input.actor, sessionId: input.sessionId },
+        reviewedAt
+      }).pipe(Effect.mapError(mapPersistenceWriteError))
     })
   })
 })

@@ -11,7 +11,9 @@ import type {
   RelationshipHistoryInspection,
   RelationshipRepairCandidates,
   RelationshipRepairProposalDraft,
-  ReleaseDeliveryGraphInspection
+  RelationshipRepairProposalList,
+  ReleaseDeliveryGraphInspection,
+  ReviewRelationshipRepairProposalRequest
 } from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
@@ -187,6 +189,25 @@ export class RelationshipRepairProposals extends Context.Service<RelationshipRep
   }) => Effect.Effect<
     RelationshipRepairProposal,
     ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly list: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly environmentId: EnvironmentId | null
+    readonly status: RelationshipRepairProposal["status"] | null
+  }) => Effect.Effect<
+    RelationshipRepairProposalList,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly review: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly proposalId: RelationshipRepairProposalId
+    readonly request: ReviewRelationshipRepairProposalRequest
+    readonly actor: Actor
+    readonly sessionId: SessionId
+  }) => Effect.Effect<
+    RelationshipRepairProposal,
+    ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/RelationshipRepairProposals") {}
 

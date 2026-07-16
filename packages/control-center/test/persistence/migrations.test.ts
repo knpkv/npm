@@ -96,6 +96,7 @@ const expectedTables = [
   "recovery_audit_events",
   "relationship_heads",
   "relationship_repair_proposals",
+  "relationship_repair_reviews",
   "relationship_revision_evidence",
   "relationship_revisions",
   "release_revisions",

@@ -6,6 +6,7 @@ import {
   EnvironmentId,
   RelationshipId,
   RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
   ReleaseId,
   SessionId,
   WorkspaceId
@@ -37,9 +38,27 @@ export const RelationshipRepairProposalOrigin = Schema.Struct({
 /** Decoded relationship-repair proposal origin. */
 export type RelationshipRepairProposalOrigin = typeof RelationshipRepairProposalOrigin.Type
 
-/** Durable pending proposal bound to one exact immutable relationship revision. */
+/** Final reviewer decision over one exact proposal. */
+export const RelationshipRepairReviewDecision = Schema.Literals(["approved", "rejected"])
+
+/** Decoded relationship-repair review decision. */
+export type RelationshipRepairReviewDecision = typeof RelationshipRepairReviewDecision.Type
+
+/** Immutable review evidence retained with a finalized proposal. */
+export const RelationshipRepairReview = Schema.Struct({
+  reviewId: RelationshipRepairReviewId,
+  decision: RelationshipRepairReviewDecision,
+  rationale: RelationshipRepairRationale,
+  origin: RelationshipRepairProposalOrigin,
+  reviewedAt: UtcTimestamp
+}).annotate({ identifier: "RelationshipRepairReview" })
+
+/** Decoded relationship-repair review. */
+export type RelationshipRepairReview = typeof RelationshipRepairReview.Type
+
+/** Durable proposal bound to one exact immutable relationship revision. */
 export const RelationshipRepairProposal = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(2),
   proposalId: RelationshipRepairProposalId,
   workspaceId: WorkspaceId,
   releaseId: ReleaseId,
@@ -49,8 +68,9 @@ export const RelationshipRepairProposal = Schema.Struct({
   disposition: RelationshipRepairDisposition,
   rationale: RelationshipRepairRationale,
   origin: RelationshipRepairProposalOrigin,
-  status: Schema.Literal("pending"),
-  proposedAt: UtcTimestamp
+  status: Schema.Literals(["pending", "approved", "rejected"]),
+  proposedAt: UtcTimestamp,
+  review: Schema.NullOr(RelationshipRepairReview)
 }).annotate({ identifier: "RelationshipRepairProposal" })
 
 /** Decoded durable relationship-repair proposal. */

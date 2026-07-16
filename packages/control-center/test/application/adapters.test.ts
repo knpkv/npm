@@ -13,6 +13,7 @@ import {
   PluginConnectionId,
   RelationshipId,
   RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
   ReleaseId,
   RoleAssignmentId,
   SessionId,
@@ -59,6 +60,14 @@ const OWNER_SESSION_ID = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-0
 const OWNER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-00000000007c")
 const WATCHER_SESSION_ID = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-00000000007d")
 const WATCHER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-00000000007e")
+const APPROVER_SESSION_ID = Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-000000000081")
+const APPROVER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000082")
+const REPAIR_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000083"
+)
+const OTHER_REPAIR_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000084"
+)
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000078")
 const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
@@ -191,6 +200,16 @@ const setup = Effect.gen(function*() {
   ) VALUES (
     ${WORKSPACE_ID}, ${OWNER_SESSION_ID}, ${"ab".repeat(32)}, ${"cd".repeat(32)},
     'human', ${OWNER_PERSON_ID}, NULL, 'workspace-owner',
+    '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
+    '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL
+  )`
+  yield* database.sql`INSERT INTO sessions (
+    workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id,
+    agent_id, permission, created_at, last_seen_at, idle_expires_at,
+    absolute_expires_at, revoked_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${APPROVER_SESSION_ID}, ${"12".repeat(32)}, ${"34".repeat(32)},
+    'human', ${APPROVER_PERSON_ID}, NULL, 'workspace-approver',
     '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
     '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL
   )`
@@ -539,6 +558,8 @@ describe("application adapters", () => {
         sessionId: OWNER_SESSION_ID
       })
       assert.strictEqual(created.status, "pending")
+      assert.strictEqual(created.schemaVersion, 2)
+      assert.isNull(created.review)
       assert.strictEqual(created.origin.sessionId, OWNER_SESSION_ID)
       assert.deepStrictEqual(
         yield* repairProposals.get({ workspaceId: WORKSPACE_ID, proposalId: REPAIR_PROPOSAL_ID }),
@@ -577,6 +598,81 @@ describe("application adapters", () => {
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(competing))
       if (Result.isFailure(competing)) assert.instanceOf(competing.failure, ApplicationConflict)
+
+      const pendingPage = yield* repairProposals.list({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        status: "pending"
+      })
+      assert.deepStrictEqual(pendingPage.proposals.map(({ proposalId }) => proposalId), [REPAIR_PROPOSAL_ID])
+
+      const selfReview = yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        request: {
+          reviewId: REPAIR_REVIEW_ID,
+          decision: "approved",
+          rationale: "The candidate evidence is sufficient."
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(selfReview))
+      if (Result.isFailure(selfReview)) assert.instanceOf(selfReview.failure, ApplicationConflict)
+
+      const approved = yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        request: {
+          reviewId: REPAIR_REVIEW_ID,
+          decision: "approved",
+          rationale: "The candidate evidence is sufficient."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      })
+      assert.strictEqual(approved.status, "approved")
+      assert.strictEqual(approved.review?.origin.sessionId, APPROVER_SESSION_ID)
+      assert.deepStrictEqual(
+        yield* repairProposals.get({ workspaceId: WORKSPACE_ID, proposalId: REPAIR_PROPOSAL_ID }),
+        approved
+      )
+
+      const replayedReview = yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        request: {
+          reviewId: REPAIR_REVIEW_ID,
+          decision: "approved",
+          rationale: "The candidate evidence is sufficient."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      })
+      assert.deepStrictEqual(replayedReview, approved)
+
+      const changedReview = yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        request: {
+          reviewId: OTHER_REPAIR_REVIEW_ID,
+          decision: "rejected",
+          rationale: "Use a different relationship."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changedReview))
+      if (Result.isFailure(changedReview)) assert.instanceOf(changedReview.failure, ApplicationConflict)
+
+      const approvedPage = yield* repairProposals.list({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        status: "approved"
+      })
+      assert.deepStrictEqual(approvedPage.proposals, [approved])
 
       const staleProposal = yield* repairProposals.create({
         workspaceId: WORKSPACE_ID,
