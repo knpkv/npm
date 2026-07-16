@@ -20,6 +20,14 @@ import {
 test.describe("repository-managed real runtime", () => {
   test("pairs, reconnects its live stream, applies a plugin update, and preserves full release routes", async ({ page, realRuntime }) => {
     test.setTimeout(30_000)
+    await page.addInitScript(`
+      window.__controlCenterStylePolicyViolations = [];
+      addEventListener("securitypolicyviolation", (event) => {
+        if (event.violatedDirective.startsWith("style-src")) {
+          window.__controlCenterStylePolicyViolations.push(event.violatedDirective);
+        }
+      });
+    `)
     let eventStreamRequests = 0
     await page.route(`${realRuntime.origin}/api/v1/events**`, async (route) => {
       eventStreamRequests += 1
@@ -30,7 +38,22 @@ test.describe("repository-managed real runtime", () => {
       await route.continue()
     })
 
-    await page.goto(`${realRuntime.origin}/services`)
+    const documentResponse = await page.goto(`${realRuntime.origin}/services`)
+    const contentSecurityPolicy = documentResponse?.headers()["content-security-policy"] ?? ""
+    expect(contentSecurityPolicy).toContain("script-src 'self'")
+    expect(contentSecurityPolicy).toContain("style-src 'self'")
+    expect(contentSecurityPolicy).toContain("style-src-attr 'unsafe-inline'")
+    expect(contentSecurityPolicy).not.toContain("script-src 'self' 'unsafe-inline'")
+    expect(
+      await page.evaluate<string>(`(() => {
+        const probe = document.createElement("div");
+        probe.style.inlineSize = "37px";
+        document.body.append(probe);
+        const inlineSize = getComputedStyle(probe).inlineSize;
+        probe.remove();
+        return inlineSize;
+      })()`)
+    ).toBe("37px")
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
     await expect(page.getByText("Health and configuration for every negotiated delivery plugin.")).toBeVisible()
 
@@ -68,6 +91,11 @@ test.describe("repository-managed real runtime", () => {
       await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
       await expect(page.getByText(UPDATED_RELEASE_VERSION, { exact: true })).toBeVisible()
     }
+    expect(
+      await page.evaluate<ReadonlyArray<string>>(
+        "window.__controlCenterStylePolicyViolations"
+      )
+    ).toEqual([])
   })
 
   test("measures warmed authenticated portfolio HTTP and a bounded 500-event SSE tail in one owned context", async ({

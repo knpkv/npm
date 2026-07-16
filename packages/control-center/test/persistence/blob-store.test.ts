@@ -106,6 +106,27 @@ describe("BlobDigest", () => {
 })
 
 describe("BlobStore", () => {
+  it.effect("rejects a symbolic-link root before mutating its target", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-blob-link-parent-" })
+      const outside = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-blob-link-target-" })
+      const linkedRoot = path.join(parent, "blobs")
+      yield* fs.chmod(outside, 0o755)
+      const modeBefore = (yield* fs.stat(outside)).mode & 0o777
+      yield* fs.symlink(outside, linkedRoot)
+
+      const result = yield* makeBlobStore({ blobRoot: Schema.decodeSync(BlobRoot)(linkedRoot) }).pipe(
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, BlobContainmentError)
+      assert.strictEqual((yield* fs.stat(outside)).mode & 0o777, modeBefore)
+      assert.deepEqual(yield* fs.readDirectory(outside), [])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
   it.effect("publishes synced owner-only bytes in the two-level content tree", () =>
     withBlobStore((store, root) =>
       Effect.gen(function*() {

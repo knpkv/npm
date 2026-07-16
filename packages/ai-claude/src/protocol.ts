@@ -1,11 +1,13 @@
 import { Effect, Schema } from "effect"
 import { invalidOutput } from "./errors.js"
 
+const TokenCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
 const ClaudeUsage = Schema.Struct({
-  input_tokens: Schema.optional(Schema.Number),
-  output_tokens: Schema.optional(Schema.Number),
-  cache_creation_input_tokens: Schema.optional(Schema.Number),
-  cache_read_input_tokens: Schema.optional(Schema.Number)
+  input_tokens: Schema.optional(TokenCount),
+  output_tokens: Schema.optional(TokenCount),
+  cache_creation_input_tokens: Schema.optional(TokenCount),
+  cache_read_input_tokens: Schema.optional(TokenCount)
 })
 
 const ClaudeResult = Schema.Struct({

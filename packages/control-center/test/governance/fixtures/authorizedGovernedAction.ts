@@ -8,6 +8,7 @@ import {
   GovernedActionEvidenceReference,
   GovernedActionTransitionCause
 } from "../../../src/domain/governedAction/index.js"
+import { EntityId, GraphNodeId, PluginConnectionId, WorkspaceId } from "../../../src/domain/identifiers.js"
 import { PluginPayloadJson } from "../../../src/domain/plugins/bounds.js"
 import {
   digestGovernedActionEvidenceSet,
@@ -16,6 +17,7 @@ import {
 } from "../../../src/server/governance/governedActionDigests.js"
 import { makeBuiltInGovernedActionPolicyDefinition } from "../../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database } from "../../../src/server/persistence/Database.js"
+import { DeliveryGraphRepository } from "../../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionCommitInput } from "../../../src/server/persistence/repositories/governed-action/contract.js"
 import { GovernedActionRepository } from "../../../src/server/persistence/repositories/governedActionRepository.js"
 
@@ -32,6 +34,7 @@ const PROPOSAL_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-44000000000a"
 const AUTHORIZATION_AUDIT_ID = "01890f6f-6d6a-7cc0-98d2-44000000000b"
 const EVIDENCE_ID = "01890f6f-6d6a-7cc0-98d2-44000000000c"
 const EVIDENCE_CLAIM_ID = "01890f6f-6d6a-7cc0-98d2-44000000000d"
+const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
@@ -48,7 +51,9 @@ const humanCause = decodeCause({
   sessionId: SESSION_ID
 })
 
-const seedAuthorityRoots = Effect.fn("AuthorizedGovernedActionFixture.seedRoots")(function*() {
+export const seedGovernedActionAuthorityRoots = Effect.fn(
+  "AuthorizedGovernedActionFixture.seedRoots"
+)(function*() {
   const { sql } = yield* Database
   yield* sql`INSERT INTO workspaces (
     workspace_id, display_name, revision, created_at, updated_at
@@ -78,9 +83,115 @@ const seedAuthorityRoots = Effect.fn("AuthorizedGovernedActionFixture.seedRoots"
   )`
 })
 
+/** Seed the current target revision and evidence required by the final dispatch authority check. */
+export const seedGovernedActionCurrentInputs = Effect.fn(
+  "AuthorizedGovernedActionFixture.seedCurrentInputs"
+)(function*() {
+  const workspaceId = Schema.decodeSync(WorkspaceId)(WORKSPACE_ID)
+  const connectionId = Schema.decodeSync(PluginConnectionId)(CONNECTION_ID)
+  const entityId = Schema.decodeSync(EntityId)(ENTITY_ID)
+  const nodeId = Schema.decodeSync(GraphNodeId)(NODE_ID)
+  const { sql } = yield* Database
+  yield* sql`INSERT INTO entity_revisions (
+    workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+    source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+  ) VALUES (
+    ${workspaceId}, ${entityId}, 1, '1', 1,
+    'https://jira.example/browse/PAY-42', '2026-07-15T09:45:00.000Z',
+    '2026-07-15T09:50:00.000Z', '2026-07-15T09:55:00.000Z', '2026-07-15T09:55:00.000Z'
+  )`
+  const graph = yield* DeliveryGraphRepository
+  yield* graph.write(workspaceId, {
+    entityProjections: [{
+      projection: {
+        workspaceId,
+        entityId,
+        projectionRevision: 1,
+        sourceEntityRevision: 1,
+        supersedesProjectionRevision: null,
+        projectionSchemaVersion: 1,
+        entityState: "present",
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "Ship guarded refunds",
+        details: {
+          _tag: "issue",
+          key: "PAY-42",
+          status: "In review",
+          priority: "High",
+          estimatePoints: 5
+        }
+      },
+      recordedAt: "2026-07-15T09:55:00.000Z"
+    }],
+    nodes: [{
+      workspaceId,
+      nodeId,
+      endpointKind: "issue",
+      resolution: {
+        _tag: "resolved",
+        target: { _tag: "entity", entityId, entityKind: "issue" }
+      },
+      createdAt: "2026-07-15T09:55:00.000Z"
+    }],
+    evidenceItems: [{
+      workspaceId,
+      evidenceId: EVIDENCE_ID,
+      schemaVersion: 1,
+      attribution: {
+        _tag: "plugin",
+        pluginConnectionId: connectionId,
+        sourceEntityId: entityId,
+        sourceEntityRevision: 1
+      },
+      verifier: { _tag: "system", component: "plugin-sync/v1" },
+      observedAt: "2026-07-15T09:50:00.000Z",
+      recordedAt: "2026-07-15T09:55:00.000Z",
+      validUntil: "2026-07-15T11:00:00.000Z",
+      freshness: {
+        _tag: "current",
+        pluginHealth: { _tag: "healthy", checkedAt: "2026-07-15T09:59:00.000Z" },
+        provenance: {
+          _tag: "provider",
+          sourceRevision: {
+            providerId: "jira",
+            pluginConnectionId: connectionId,
+            vendorImmutableId: "PAY-42",
+            revision: "1",
+            sourceUrl: "https://jira.example/browse/PAY-42",
+            firstObservedAt: "2026-07-15T09:45:00.000Z",
+            lastObservedAt: "2026-07-15T09:50:00.000Z",
+            synchronizedAt: "2026-07-15T09:55:00.000Z",
+            normalizationSchemaVersion: 1
+          }
+        },
+        sourceObservedAt: "2026-07-15T09:50:00.000Z",
+        staleAfterSeconds: 2_400,
+        synchronizedAt: "2026-07-15T09:55:00.000Z"
+      },
+      retention: {
+        classification: "evidence",
+        retainUntil: "2026-08-15T09:55:00.000Z",
+        legalHold: false
+      }
+    }],
+    evidenceClaims: [{
+      workspaceId,
+      evidenceClaimId: EVIDENCE_CLAIM_ID,
+      evidenceId: EVIDENCE_ID,
+      subjectNodeId: nodeId,
+      predicate: "status-observed",
+      value: { _tag: "state", value: "In review" },
+      recordedAt: "2026-07-15T09:56:00.000Z",
+      supersedesEvidenceClaimId: null
+    }],
+    relationships: []
+  })
+})
+
 export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   "AuthorizedGovernedActionFixture.makeEnvelope"
-)(function*() {
+)(function*(options?: { readonly pluginConnectionAuthorityDigest?: string | undefined }) {
   const payload = decodePayload({ fields: { resolution: null, status: "Done" }, notify: true })
   const payloadDigest = yield* digestGovernedActionPayload(payload)
   const evidence = decodeEvidence({
@@ -103,7 +214,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
-    pluginConnectionAuthorityDigest: `sha256:${"a".repeat(64)}`,
+    pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest ?? `sha256:${"a".repeat(64)}`,
     pluginId: "dev.knpkv.jira",
     pluginContractVersion: { major: 1, minor: 0, patch: 0 },
     pluginAdapterVersion: { major: 1, minor: 2, patch: 3 },
@@ -144,10 +255,14 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
 export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.seed")(function*(options?: {
   readonly authorizationExpiresAt?: string
   readonly authorized?: boolean
+  readonly pluginConnectionAuthorityDigest?: string
+  readonly seedAuthorityRoots?: boolean
 }) {
-  yield* seedAuthorityRoots()
+  if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots()
   const repository = yield* GovernedActionRepository
-  const envelope = yield* makeAuthorizedGovernedActionEnvelope()
+  const envelope = yield* makeAuthorizedGovernedActionEnvelope({
+    pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest
+  })
   const proposal = decodeCommit({
     envelope: Schema.encodeSync(GovernedActionEnvelopeV1)(envelope),
     expectedHeadTransitionId: null,

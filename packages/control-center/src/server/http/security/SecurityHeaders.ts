@@ -12,6 +12,7 @@ const BASE_CSP = [
   "form-action 'self'",
   "script-src 'self'",
   "style-src 'self'",
+  "style-src-attr 'unsafe-inline'",
   "img-src 'self'",
   "font-src 'self'",
   "connect-src 'self'",

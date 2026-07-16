@@ -172,14 +172,22 @@ export const makeBlobStore: (
     yield* syncDirectory(path.dirname(directory))
   }
 
+  const canonicalRoot = yield* fs.realPath(configuredRoot).pipe(
+    Effect.mapError((cause) => blobStoreIoError("resolve blob root", cause))
+  )
+
+  if (canonicalRoot !== configuredRoot) {
+    return yield* new BlobContainmentError({
+      operation: "initialize",
+      message: "blobRoot must be a canonical path"
+    })
+  }
+
   yield* fs.chmod(configuredRoot, DIRECTORY_MODE).pipe(
     Effect.mapError((cause) => blobStoreIoError("secure blob root", cause))
   )
   yield* syncDirectory(configuredRoot)
 
-  const canonicalRoot = yield* fs.realPath(configuredRoot).pipe(
-    Effect.mapError((cause) => blobStoreIoError("resolve blob root", cause))
-  )
   const rootInfo = yield* fs.stat(canonicalRoot).pipe(
     Effect.mapError((cause) => blobStoreIoError("inspect blob root", cause))
   )

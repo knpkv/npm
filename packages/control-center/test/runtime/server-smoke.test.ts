@@ -33,14 +33,21 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
+import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
+import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { PluginRuntimeRepository } from "../../src/server/persistence/repositories/pluginRuntimeRepository.js"
+import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { makeFakePluginRuntime } from "../../src/server/plugins/fake/FakePluginDefinition.js"
 import { type FakePluginScenario, fakeSyncScriptKey } from "../../src/server/plugins/fake/FakePluginScenario.js"
 import {
+  PluginRuntimeAccountDigest,
   PluginRuntimeAuthority,
-  PluginRuntimeAuthorityToken
+  PluginRuntimeSourceDigest
 } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
+import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { PluginRuntimeAuthoritySource } from "../../src/server/plugins/internal/PluginRuntimeAuthoritySource.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
@@ -52,6 +59,14 @@ import {
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
+import {
+  ACTION_ID as AUTHORIZED_ACTION_ID,
+  CONNECTION_ID as AUTHORIZED_CONNECTION_ID,
+  seedGovernedAction,
+  seedGovernedActionAuthorityRoots,
+  seedGovernedActionCurrentInputs,
+  WORKSPACE_ID as AUTHORIZED_WORKSPACE_ID
+} from "../governance/fixtures/authorizedGovernedAction.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
 const MISSING_ACTION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000079")
@@ -69,6 +84,12 @@ const PUBLIC_SERVER_EXCLUDES_EXECUTION_CAPABILITY: Extract<
 > extends never ? true : false = true
 const FIXTURE_TIME_INPUT = "2024-07-14T09:02:00.000Z"
 const FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)(FIXTURE_TIME_INPUT)
+const GOVERNED_SOURCE_TIME = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+const GOVERNED_AUTHORITY_TIME = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:01:00.000Z")
+const GOVERNED_FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+const AUTHORIZED_WORKSPACE = Schema.decodeSync(WorkspaceId)(AUTHORIZED_WORKSPACE_ID)
+const AUTHORIZED_CONNECTION = Schema.decodeSync(PluginConnectionId)(AUTHORIZED_CONNECTION_ID)
+const AUTHORIZED_ACTION = Schema.decodeSync(GovernedActionId)(AUTHORIZED_ACTION_ID)
 
 const fakeDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -78,6 +99,19 @@ const fakeDescriptor = {
   displayName: "Deterministic Jira",
   configurationFields: [],
   capabilities: [{ capabilityId: "sync.incremental", supportedVersions: [1], requirement: "required" }]
+}
+
+const governedDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.jira",
+  adapterVersion: { major: 1, minor: 2, patch: 3 },
+  displayName: "Governed Jira",
+  configurationFields: [],
+  capabilities: [
+    { capabilityId: "action.execute", supportedVersions: [1], requirement: "required" },
+    { capabilityId: "action.reconcile", supportedVersions: [1], requirement: "required" }
+  ]
 }
 
 const fakeReleasePage = {
@@ -148,6 +182,27 @@ const fakeScenario: FakePluginScenario = {
   reconcile: {}
 }
 
+const governedScenario: FakePluginScenario = {
+  ...fakeScenario,
+  descriptor: governedDescriptor,
+  preflight: {
+    _tag: "success",
+    value: { _tag: "ready", checkedRevision: "1", checkedAt: "2026-07-15T10:02:00.000Z" }
+  },
+  executeAuthorizedAction: {
+    _tag: "success",
+    value: {
+      _tag: "confirmed",
+      receipt: {
+        providerOperationId: "provider-operation-runtime-smoke",
+        status: "succeeded",
+        safeSummary: "Runtime smoke action completed",
+        observedAt: "2026-07-15T10:02:00.000Z"
+      }
+    }
+  }
+}
+
 const makeFakeConnectionMap = Effect.gen(function*() {
   const runtime = yield* makeFakePluginRuntime(fakeScenario)
   const runtimeContext = yield* Layer.build(runtime.layer)
@@ -189,6 +244,53 @@ const makeStaticFixture = Effect.gen(function*() {
     JSON.stringify({ "src/client/main.tsx": { file: "assets/app.js", isEntry: true } })
   )
   return root
+})
+
+const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuthorizedRuntimeAction")(function*(
+  persistenceConfig: PersistenceConfig
+) {
+  const database = databaseLayer(persistenceConfig)
+  const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+  const actions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+  const graph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+  const runtimes = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
+  const authorities = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities)
+
+  return yield* Effect.gen(function*() {
+    yield* seedGovernedActionAuthorityRoots()
+    const runtimeRepository = yield* PluginRuntimeRepository
+    const runtimeRecord = yield* runtimeRepository.acceptPluginDescriptor(
+      AUTHORIZED_WORKSPACE,
+      AUTHORIZED_CONNECTION,
+      "jira",
+      governedDescriptor,
+      0,
+      GOVERNED_SOURCE_TIME
+    )
+    const authoritySource = yield* PluginRuntimeAuthoritySource
+    const current = yield* authoritySource.publish({
+      scope: {
+        workspaceId: AUTHORIZED_WORKSPACE,
+        pluginConnectionId: AUTHORIZED_CONNECTION
+      },
+      expected: {
+        providerId: "jira",
+        connectionRevision: 1,
+        descriptorGeneration: runtimeRecord.descriptorGeneration,
+        configuration: { _tag: "absent" },
+        descriptorDigest: PluginRuntimeSourceDigest.make(runtimeRecord.descriptorDigest)
+      },
+      accountDigest: PluginRuntimeAccountDigest.make(`sha256:${"c".repeat(64)}`),
+      activatedAt: GOVERNED_AUTHORITY_TIME
+    })
+    yield* seedGovernedAction({
+      pluginConnectionAuthorityDigest: current.runtimeAuthorityToken,
+      seedAuthorityRoots: false
+    })
+    yield* seedGovernedActionCurrentInputs()
+    return current
+  }).pipe(Effect.provide(services))
 })
 
 describe("Control Center closed runtime", () => {
@@ -309,9 +411,9 @@ describe("Control Center closed runtime", () => {
           )
         }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
       )
+      const currentRuntimeAuthority = yield* seedAuthorizedRuntimeAction(persistenceConfig)
       const pluginConnections = yield* makeFakeConnectionMap
-      const governedRuntime = yield* makeFakePluginRuntime(fakeScenario)
-      const runtimeAuthority = PluginRuntimeAuthorityToken.make(`sha256:${"a".repeat(64)}`)
+      const governedRuntime = yield* makeFakePluginRuntime(governedScenario)
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,
@@ -331,7 +433,7 @@ describe("Control Center closed runtime", () => {
             layer: () =>
               Layer.merge(
                 governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, runtimeAuthority)
+                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
               )
           }
         }
@@ -349,7 +451,7 @@ describe("Control Center closed runtime", () => {
             layer: () =>
               Layer.merge(
                 governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, runtimeAuthority)
+                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
               )
           }
         }).pipe(Layer.provide(databaseLayer(persistenceConfig)))
@@ -365,6 +467,34 @@ describe("Control Center closed runtime", () => {
         if (missing._tag === "GovernedActionExecutionStoreError") {
           assert.strictEqual(missing.reason, "not-found")
         }
+        const beforeAuthorized = yield* governedRuntime.probe.snapshot
+        assert.strictEqual(beforeAuthorized.providerMutations, 0)
+        assert.lengthOf(
+          beforeAuthorized.calls.filter(({ operation }) => operation === "execute-authorized-action"),
+          0
+        )
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
+        assert.deepStrictEqual(
+          yield* privateExecution.advance({
+            workspaceId: AUTHORIZED_WORKSPACE,
+            actionId: AUTHORIZED_ACTION
+          }),
+          { _tag: "advanced", state: "succeeded" }
+        )
+        const persistedAction = yield* runtimePersistence.governedActions.read({
+          workspaceId: AUTHORIZED_WORKSPACE,
+          actionId: AUTHORIZED_ACTION
+        })
+        const afterAuthorized = yield* governedRuntime.probe.snapshot
+        assert.strictEqual(persistedAction.head.state, "succeeded")
+        assert.strictEqual(persistedAction.headTransition.command._tag, "recordSucceeded")
+        assert.strictEqual(afterAuthorized.providerMutations, 1)
+        assert.lengthOf(
+          afterAuthorized.calls.filter(({ operation }) => operation === "execute-authorized-action"),
+          1
+        )
+        yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       }
       assert.strictEqual(persistedRuntime.health._tag, "healthy")
       assert.deepStrictEqual(synchronizationState, {
