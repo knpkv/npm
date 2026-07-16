@@ -49,13 +49,20 @@ export const makeRelationshipRepairProposals = Effect.gen(function*() {
     }),
     list: Effect.fn("RelationshipRepairProposals.list")(function*(input) {
       yield* mapPersistenceRead(persistence.releases.get(input.workspaceId, input.releaseId))
-      const page = yield* mapPersistenceRead(persistence.relationshipRepairProposals.list(input))
+      const { applications, page } = yield* mapPersistenceRead(
+        persistence.transact(Effect.gen(function*() {
+          const page = yield* persistence.relationshipRepairProposals.list(input)
+          const applications = yield* persistence.relationshipRepairProposals.listApplications(input)
+          return { applications, page }
+        }))
+      )
       return {
         releaseId: input.releaseId,
         environmentId: input.environmentId,
         status: input.status,
         truncated: page.truncated,
-        proposals: page.proposals
+        proposals: page.proposals,
+        applications
       }
     }),
     review: Effect.fn("RelationshipRepairProposals.review")(function*(input) {

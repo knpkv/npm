@@ -24,8 +24,8 @@ import {
   type RelationshipRepairTransport
 } from "../../src/client/releases/relationshipRepairTransport.js"
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
-import type { RelationshipRepairApplication } from "../../src/domain/relationshipRepair.js"
-import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import { RelationshipRepairApplication, RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../src/domain/identifiers.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
@@ -82,7 +82,8 @@ const readyState = (
     environmentId: null,
     status: null,
     truncated: false,
-    proposals: [currentProposal]
+    proposals: [currentProposal],
+    applications: application === undefined ? [] : [application]
   },
   releaseId: release.id,
   sessionKey: session.sessionId
@@ -347,7 +348,8 @@ describe("RelationshipRepairPanel", () => {
         environmentId: null,
         status: null,
         truncated: false,
-        proposals: [proposal]
+        proposals: [proposal],
+        applications: []
       })
     )
     expect(host.textContent).toBe(release.id)
@@ -367,7 +369,8 @@ describe("RelationshipRepairPanel", () => {
         environmentId: null,
         status: null,
         truncated: false,
-        proposals: [proposalB]
+        proposals: [proposalB],
+        applications: []
       })
     )
     if (currentController === undefined) throw new Error("Expected controller B")
@@ -396,6 +399,47 @@ describe("RelationshipRepairPanel", () => {
   it("generates canonical browser review identifiers", () => {
     const reviewId = Effect.runSync(makeRelationshipRepairReviewId.pipe(Effect.provide(BrowserCrypto.layer)))
     expect(Schema.is(RelationshipRepairReviewId)(reviewId)).toBe(true)
+  })
+
+  it("hydrates durable application evidence when the decision ledger reloads", async () => {
+    const approved = RelationshipRepairProposal.make({
+      ...proposal,
+      status: "approved",
+      review: {
+        reviewId: reviewIdA,
+        decision: "approved",
+        rationale: "Evidence matches the exact release.",
+        origin: { actor: session.actor, sessionId: session.sessionId },
+        reviewedAt: session.lastSeenAt
+      }
+    })
+    const application = RelationshipRepairApplication.make({
+      proposalId: approved.proposalId,
+      relationshipId: approved.relationshipId,
+      appliedRevision: LedgerRevision.make(approved.expectedRevision + 1),
+      origin: { actor: session.actor, sessionId: session.sessionId },
+      appliedAt: session.lastSeenAt
+    })
+    const page = readyState(approved)
+    if (page._tag !== "ready") throw new Error("Expected ready page")
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.resolve({ ...page.page, applications: [application] })),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdB)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ControllerHarness releaseId={release.id} transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    if (currentController?.state._tag !== "ready") throw new Error("Expected hydrated controller")
+    expect(currentController.state.applications.get(approved.proposalId)).toEqual(application)
+    const markup = renderToStaticMarkup(view(currentController.state))
+    expect(markup).toContain(`Applied · r${application.appliedRevision}`)
+    expect(markup).not.toContain("Apply repair")
   })
 
   it("reuses a review identifier after a lost response and rotates it for a fresh review", async () => {

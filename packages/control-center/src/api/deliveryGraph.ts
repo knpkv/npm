@@ -145,7 +145,8 @@ export const RelationshipRepairProposalList = Schema.Struct({
   environmentId: Schema.NullOr(EnvironmentId),
   status: Schema.NullOr(RelationshipRepairProposal.fields.status),
   truncated: Schema.Boolean,
-  proposals: boundedArray(RelationshipRepairProposal, MAXIMUM_REPAIR_PROPOSALS)
+  proposals: boundedArray(RelationshipRepairProposal, MAXIMUM_REPAIR_PROPOSALS),
+  applications: boundedArray(RelationshipRepairApplication, MAXIMUM_REPAIR_PROPOSALS)
 }).annotate({ identifier: "RelationshipRepairProposalList" })
 
 /** Decoded bounded relationship-repair proposal page. */

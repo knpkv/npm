@@ -100,9 +100,15 @@ revision transition, then creates the governed proposal without mutating the rel
 UUIDv7 identities are retained across lost-response retries, while stale drafts and read/mutation
 failures remain explicit and retryable.
 
+The D04 ledger now also returns durable application evidence with each bounded proposal page. One
+transaction reads the proposal page and a workspace/release-scoped application query limited to
+that exact page, and the client hydrates its applied-revision and attribution state from the
+response. Applied decisions therefore survive route reloads without per-proposal network or
+database fan-out.
+
 ## Remaining roadmap
 
-- Complete durable application readback in the D04 repair UI, then D05–D09: six-state portfolio/work views,
+- D05–D09: six-state portfolio/work views,
   search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
@@ -145,12 +151,9 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
-- The release decision ledger retains newly returned application evidence only for the mounted
-  page. Add an authenticated application read endpoint before representing an approved proposal as
-  durably applied after reload.
 
 ## Recommended next session
 
-Add authenticated durable application readback to the relationship repair UI.
+Continue with the D05 six-state portfolio/work views.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

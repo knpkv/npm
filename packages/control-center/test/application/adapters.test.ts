@@ -77,11 +77,18 @@ const STALE_APPLY_PROPOSAL_ID = Schema.decodeSync(RelationshipRepairProposalId)(
 const STALE_APPLY_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
   "01890f6f-6d6a-7cc0-98d2-000000000087"
 )
+const APPLICATION_PAGE_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000088"
+)
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000078")
 const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
 const SNAPSHOT_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:10:00.000Z")
 const BACKDATED_APPLY_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:05:00.000Z")
+const APPLICATION_PAGE_FILLER_COUNT = 127
+const APPLICATION_PAGE_PROPOSED_AT_TEXT = "2026-07-14T10:20:00.000Z"
+const APPLICATION_PAGE_PROPOSED_AT = Schema.decodeSync(UtcTimestamp)(APPLICATION_PAGE_PROPOSED_AT_TEXT)
+const APPLICATION_PAGE_APPLIED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:21:00.000Z")
 
 const epochMillis = (timestamp: UtcTimestamp): number => DateTime.toEpochMillis(timestamp)
 
@@ -653,6 +660,7 @@ describe("application adapters", () => {
         status: "pending"
       })
       assert.deepStrictEqual(pendingPage.proposals.map(({ proposalId }) => proposalId), [REPAIR_PROPOSAL_ID])
+      assert.deepStrictEqual(pendingPage.applications, [])
 
       const pendingApplication = yield* repairProposals.apply({
         workspaceId: WORKSPACE_ID,
@@ -859,6 +867,232 @@ describe("application adapters", () => {
         _tag: "human",
         personId: OWNER_PERSON_ID
       })
+      const appliedPage = yield* repairProposals.list({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        status: "approved"
+      })
+      assert.deepStrictEqual(appliedPage.applications, [applied.application])
+
+      yield* persistence.pluginConnections.create(OTHER_WORKSPACE_ID, {
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        displayName: PluginConnectionDisplayName.make("Other Jira"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.people.createPerson(
+        OTHER_WORKSPACE_ID,
+        Schema.decodeSync(Person)({
+          personId: OWNER_PERSON_ID,
+          displayName: "Other Release Owner",
+          avatar: { _tag: "initials", text: "OO" },
+          isActive: true,
+          sourceIdentities: []
+        }),
+        T0
+      )
+      yield* persistence.people.createPerson(
+        OTHER_WORKSPACE_ID,
+        Schema.decodeSync(Person)({
+          personId: APPROVER_PERSON_ID,
+          displayName: "Other Release Approver",
+          avatar: { _tag: "initials", text: "OA" },
+          isActive: true,
+          sourceIdentities: []
+        }),
+        T0
+      )
+      yield* database.sql`INSERT INTO sessions (
+        workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id,
+        agent_id, permission, created_at, last_seen_at, idle_expires_at,
+        absolute_expires_at, revoked_at
+      ) VALUES
+        (${OTHER_WORKSPACE_ID}, ${OWNER_SESSION_ID}, ${"56".repeat(32)}, ${"78".repeat(32)},
+          'human', ${OWNER_PERSON_ID}, NULL, 'workspace-owner',
+          '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
+          '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL),
+        (${OTHER_WORKSPACE_ID}, ${APPROVER_SESSION_ID}, ${"9a".repeat(32)}, ${"bc".repeat(32)},
+          'human', ${APPROVER_PERSON_ID}, NULL, 'workspace-approver',
+          '2026-07-14T10:00:00.000Z', '2026-07-14T10:01:00.000Z',
+          '2026-07-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z', NULL)`
+      yield* persistence.releases.create(
+        OTHER_WORKSPACE_ID,
+        Schema.decodeSync(Release)({
+          ...Schema.encodeSync(Release)(release),
+          workspaceId: OTHER_WORKSPACE_ID
+        })
+      )
+      yield* persistence.deliveryGraph.write(OTHER_WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [
+          {
+            workspaceId: OTHER_WORKSPACE_ID,
+            nodeId: releaseNodeId,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: RELEASE_ID } },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          },
+          {
+            workspaceId: OTHER_WORKSPACE_ID,
+            nodeId: issueNodeId,
+            endpointKind: "issue",
+            resolution: {
+              _tag: "missing",
+              expectedKind: "entity",
+              expectedEntityKind: "issue",
+              missingKey: "other-release:missing-issue"
+            },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          }
+        ],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [{ ...firstRevision, workspaceId: OTHER_WORKSPACE_ID }]
+      })
+      yield* repairProposals.create({
+        workspaceId: OTHER_WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        request: {
+          proposalId: REPAIR_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: RELATIONSHIP_REVISION,
+          disposition: "verify",
+          rationale: "Verify the colliding workspace relationship."
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      yield* repairProposals.review({
+        workspaceId: OTHER_WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        request: {
+          reviewId: REPAIR_REVIEW_ID,
+          decision: "approved",
+          rationale: "The colliding workspace evidence is sufficient."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      })
+      const otherWorkspaceApplication = yield* repairProposals.apply({
+        workspaceId: OTHER_WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      const workspacePages = yield* Effect.all([
+        repairProposals.list({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          status: "approved"
+        }),
+        repairProposals.list({
+          workspaceId: OTHER_WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          status: "approved"
+        })
+      ], { concurrency: 1 })
+      assert.deepStrictEqual(workspacePages[0]?.applications, [applied.application])
+      assert.deepStrictEqual(workspacePages[1]?.applications, [otherWorkspaceApplication.application])
+
+      const isolatedApplicationPages = yield* Effect.all([
+        repairProposals.list({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          status: "pending"
+        }),
+        repairProposals.list({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          environmentId: ENVIRONMENT_ID,
+          status: null
+        }),
+        repairProposals.list({
+          workspaceId: WORKSPACE_ID,
+          releaseId: OTHER_RELEASE_ID,
+          environmentId: null,
+          status: null
+        })
+      ], { concurrency: 1 })
+      for (const page of isolatedApplicationPages) assert.deepStrictEqual(page.applications, [])
+      const applicationPageRelationships = fillerRelationships.slice(0, APPLICATION_PAGE_FILLER_COUNT).map(
+        (relationship) => ({
+          ...relationship,
+          revision: 2,
+          supersedesRevision: 1,
+          lifecycle: {
+            _tag: "missing",
+            effectiveAt: APPLICATION_PAGE_PROPOSED_AT_TEXT,
+            reason: "This relationship exists only to exercise the bounded proposal page."
+          },
+          recordedAt: APPLICATION_PAGE_PROPOSED_AT_TEXT
+        })
+      )
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: applicationPageRelationships
+      })
+      yield* Effect.forEach(
+        applicationPageRelationships,
+        (relationship, index) =>
+          persistence.relationshipRepairProposals.create({
+            workspaceId: WORKSPACE_ID,
+            proposalId: Schema.decodeSync(RelationshipRepairProposalId)(
+              `01890f6f-6d6a-7cc0-98d2-${String(520_000_000_000 + index).padStart(12, "0")}`
+            ),
+            releaseId: RELEASE_ID,
+            environmentId: null,
+            relationshipId: relationship.relationshipId,
+            expectedRevision: LedgerRevision.make(2),
+            disposition: "link",
+            rationale: "Link the bounded-page fixture relationship.",
+            origin: {
+              actor: { _tag: "human", personId: OWNER_PERSON_ID },
+              sessionId: OWNER_SESSION_ID
+            },
+            proposedAt: APPLICATION_PAGE_PROPOSED_AT
+          }),
+        { concurrency: 1, discard: true }
+      )
+      const inPageProposalId = Schema.decodeSync(RelationshipRepairProposalId)(
+        `01890f6f-6d6a-7cc0-98d2-${String(520_000_000_000 + APPLICATION_PAGE_FILLER_COUNT - 1).padStart(12, "0")}`
+      )
+      yield* TestClock.setTime(epochMillis(APPLICATION_PAGE_APPLIED_AT))
+      yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: inPageProposalId,
+        request: {
+          reviewId: APPLICATION_PAGE_REVIEW_ID,
+          decision: "approved",
+          rationale: "The in-page fixture relationship is ready."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      })
+      const inPageApplication = yield* repairProposals.apply({
+        workspaceId: WORKSPACE_ID,
+        proposalId: inPageProposalId,
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      const boundedPage = yield* repairProposals.list({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        status: null
+      })
+      assert.lengthOf(boundedPage.proposals, 128)
+      assert.isTrue(boundedPage.truncated)
+      assert.isFalse(boundedPage.proposals.some(({ proposalId }) => proposalId === REPAIR_PROPOSAL_ID))
+      assert.deepStrictEqual(boundedPage.applications, [inPageApplication.application])
       assert.deepStrictEqual(
         yield* database.sql`SELECT proposal_id AS proposalId, relationship_id AS relationshipId,
           applied_revision AS appliedRevision
