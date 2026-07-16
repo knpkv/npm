@@ -17,6 +17,7 @@ export {
 } from "./client.js"
 export { ControlCenterApi } from "./controlCenterApi.js"
 export {
+  CreateRelationshipRepairProposalRequest,
   DeliveryGraphApiGroup,
   EvidenceInspection,
   InspectedEntityProjection,

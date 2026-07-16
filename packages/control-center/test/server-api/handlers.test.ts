@@ -16,7 +16,9 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
-import { EventCursor, ReleaseId } from "../../src/domain/identifiers.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import { EventCursor, RelationshipId, RelationshipRepairProposalId, ReleaseId } from "../../src/domain/identifiers.js"
+import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
   DeliveryGraphInspection,
@@ -24,6 +26,7 @@ import {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
+  RelationshipRepairProposals,
   ReleaseAgentTurns
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
@@ -64,6 +67,13 @@ const snapshot = Schema.decodeSync(PortfolioSnapshot)({
   plugins: []
 })
 const inspectedReleaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000004")
+const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000005"
+)
+const repairProposalId = Schema.decodeSync(RelationshipRepairProposalId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000006"
+)
+const inspectedRelationshipRevision = Schema.decodeSync(LedgerRevision)(1)
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
 
@@ -105,6 +115,16 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
 })
+
+const relationshipRepairProposalsLayer = Layer.succeed(RelationshipRepairProposals, {
+  create: () => Effect.die("not used"),
+  get: () => Effect.die("not used")
+})
+
+const deliveryGraphApplicationLayer = Layer.merge(
+  deliveryGraphLayer,
+  relationshipRepairProposalsLayer
+)
 
 const agentLayer = Layer.succeed(ReleaseAgentTurns, {
   runTurn: () => Effect.die("not used")
@@ -149,7 +169,8 @@ const portfolioHandlersTestLayer = portfolioHandlersLayer.pipe(
 
 const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
   Layer.provide(sessionMiddlewareLayer),
-  Layer.provide(deliveryGraphLayer)
+  Layer.provide(mutationMiddlewareLayer),
+  Layer.provide(deliveryGraphApplicationLayer)
 )
 
 describe("Control Center API handlers", () => {
@@ -179,6 +200,111 @@ describe("Control Center API handlers", () => {
         deliveryGraphHandlersTestLayer
       ])
     ))
+
+  it.effect("creates a repair proposal with session-derived owner authority", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<
+        {
+          readonly workspaceId: string
+          readonly sessionId: string
+        } | null
+      >(null)
+      const proposal = RelationshipRepairProposal.make({
+        schemaVersion: 1,
+        proposalId: repairProposalId,
+        workspaceId: session.workspaceId,
+        releaseId: inspectedReleaseId,
+        environmentId: null,
+        relationshipId: inspectedRelationshipId,
+        expectedRevision: inspectedRelationshipRevision,
+        disposition: "verify",
+        rationale: "Verify the inferred link before release.",
+        origin: { actor: session.actor, sessionId: session.sessionId },
+        status: "pending",
+        proposedAt: session.lastSeenAt
+      })
+      const proposalApplicationLayer = Layer.merge(
+        deliveryGraphLayer,
+        Layer.succeed(RelationshipRepairProposals, {
+          create: (input) =>
+            Ref.set(received, {
+              workspaceId: input.workspaceId,
+              sessionId: input.sessionId
+            }).pipe(Effect.as(proposal)),
+          get: () => Effect.die("not used")
+        })
+      )
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(proposalApplicationLayer)
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.createRepairProposal({
+          params: { releaseId: inspectedReleaseId, relationshipId: inspectedRelationshipId },
+          payload: {
+            proposalId: repairProposalId,
+            environmentId: null,
+            expectedRevision: inspectedRelationshipRevision,
+            disposition: "verify",
+            rationale: "Verify the inferred link before release."
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.proposalId, repairProposalId)
+      assert.deepStrictEqual(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        sessionId: session.sessionId
+      })
+    }))
+
+  it.effect("rejects a watcher before repair proposal persistence", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const proposalApplicationLayer = Layer.merge(
+        deliveryGraphLayer,
+        Layer.succeed(RelationshipRepairProposals, {
+          create: () => Effect.die("watcher reached proposal persistence"),
+          get: () => Effect.die("not used")
+        })
+      )
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(proposalApplicationLayer)
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.createRepairProposal({
+          params: { releaseId: inspectedReleaseId, relationshipId: inspectedRelationshipId },
+          payload: {
+            proposalId: repairProposalId,
+            environmentId: null,
+            expectedRevision: inspectedRelationshipRevision,
+            disposition: "verify",
+            rationale: "Verify the inferred link before release."
+          }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
 
   it.effect("serves the bird's-eye snapshot through the generated in-memory client", () =>
     Effect.gen(function*() {
@@ -401,7 +527,7 @@ describe("Control Center API handlers", () => {
             Layer.succeed(Clock.Clock, instrumentedClock),
             Layer.succeed(LiveEvents, trackedLiveEvents),
             portfolioLayer,
-            deliveryGraphLayer,
+            deliveryGraphApplicationLayer,
             agentLayer,
             NodeHttpServer.layerHttpServices,
             NodeServices.layer
@@ -482,7 +608,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
-          deliveryGraphLayer,
+          deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -572,7 +698,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
-          deliveryGraphLayer,
+          deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -671,7 +797,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
-          deliveryGraphLayer,
+          deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -792,7 +918,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
-          deliveryGraphLayer,
+          deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer

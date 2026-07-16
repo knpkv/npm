@@ -95,6 +95,7 @@ const expectedTables = [
   "readiness_rule_snapshots",
   "recovery_audit_events",
   "relationship_heads",
+  "relationship_repair_proposals",
   "relationship_revision_evidence",
   "relationship_revisions",
   "release_revisions",

@@ -70,6 +70,12 @@ export const RelationshipId = canonicalUuid7("RelationshipId")
 /** Decoded delivery-graph relationship identifier. */
 export type RelationshipId = typeof RelationshipId.Type
 
+/** Canonical identifier of one governed relationship-repair proposal. */
+export const RelationshipRepairProposalId = canonicalUuid7("RelationshipRepairProposalId")
+
+/** Decoded relationship-repair proposal identifier. */
+export type RelationshipRepairProposalId = typeof RelationshipRepairProposalId.Type
+
 /** Canonical identifier of one immutable evidence claim. */
 export const EvidenceClaimId = canonicalUuid7("EvidenceClaimId")
 

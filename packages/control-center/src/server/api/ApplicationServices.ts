@@ -6,6 +6,7 @@ import type * as Stream from "effect/Stream"
 
 import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
 import type {
+  CreateRelationshipRepairProposalRequest,
   EvidenceInspection,
   RelationshipHistoryInspection,
   RelationshipRepairCandidates,
@@ -22,6 +23,7 @@ import type {
   PluginHealthResponse
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
+import type { Actor } from "../../domain/actors.js"
 import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
 import type {
   EnvironmentId,
@@ -29,9 +31,12 @@ import type {
   EvidenceId,
   PluginConnectionId,
   RelationshipId,
+  RelationshipRepairProposalId,
   ReleaseId,
+  SessionId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -162,6 +167,28 @@ export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspec
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/DeliveryGraphInspection") {}
+
+/** Authenticated mutation boundary for durable relationship-repair proposals. */
+export class RelationshipRepairProposals extends Context.Service<RelationshipRepairProposals, {
+  readonly create: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly relationshipId: RelationshipId
+    readonly request: CreateRelationshipRepairProposalRequest
+    readonly actor: Actor
+    readonly sessionId: SessionId
+  }) => Effect.Effect<
+    RelationshipRepairProposal,
+    ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly get: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly proposalId: RelationshipRepairProposalId
+  }) => Effect.Effect<
+    RelationshipRepairProposal,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+}>()("@knpkv/control-center/server/api/RelationshipRepairProposals") {}
 
 /**
  * Release-aware conversational boundary. Implementations own context projection,

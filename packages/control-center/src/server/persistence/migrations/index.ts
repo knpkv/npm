@@ -17,6 +17,7 @@ import { migration0015GovernedActionIdempotencyRecovery } from "./0015_governed_
 import { migration0016PluginRuntimeAuthority } from "./0016_plugin_runtime_authority.js"
 import { migration0017GovernedActionPendingOutcome } from "./0017_governed_action_pending_outcome.js"
 import { migration0018GovernedActionAllPendingOutcomes } from "./0018_governed_action_all_pending_outcomes.js"
+import { migration0019RelationshipRepairProposals } from "./0019_relationship_repair_proposals.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -40,7 +41,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 15, name: "governed_action_idempotency_recovery" },
   { id: 16, name: "plugin_runtime_authority" },
   { id: 17, name: "governed_action_pending_outcome" },
-  { id: 18, name: "governed_action_all_pending_outcomes" }
+  { id: 18, name: "governed_action_all_pending_outcomes" },
+  { id: 19, name: "relationship_repair_proposals" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -62,5 +64,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0015_governed_action_idempotency_recovery": migration0015GovernedActionIdempotencyRecovery,
   "0016_plugin_runtime_authority": migration0016PluginRuntimeAuthority,
   "0017_governed_action_pending_outcome": migration0017GovernedActionPendingOutcome,
-  "0018_governed_action_all_pending_outcomes": migration0018GovernedActionAllPendingOutcomes
+  "0018_governed_action_all_pending_outcomes": migration0018GovernedActionAllPendingOutcomes,
+  "0019_relationship_repair_proposals": migration0019RelationshipRepairProposals
 })

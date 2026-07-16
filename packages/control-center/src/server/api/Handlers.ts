@@ -21,6 +21,7 @@ import {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
+  RelationshipRepairProposals,
   ReleaseAgentTurns
 } from "./ApplicationServices.js"
 import {
@@ -229,6 +230,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const inspection = yield* DeliveryGraphInspection
+      const repairProposals = yield* RelationshipRepairProposals
       return handlers
         .handle("releaseSlice", ({ params, query }) =>
           Effect.gen(function*() {
@@ -264,6 +266,26 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
               relationshipId: params.relationshipId,
               revision: query.revision
             }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("createRepairProposal", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* repairProposals.create({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              relationshipId: params.relationshipId,
+              request: payload,
+              actor: session.actor,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))

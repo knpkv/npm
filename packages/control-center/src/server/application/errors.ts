@@ -20,9 +20,13 @@ export const mapPersistenceReadError = (
 export const mapPersistenceWriteError = (
   error: PersistenceOperationFailure
 ): ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable =>
-  error._tag === "RevisionConflictError"
+  error._tag === "RevisionConflictError" || error._tag === "RecordAlreadyExistsError"
     ? new ApplicationConflict()
-    : error._tag === "SecretReferenceScopeConflictError"
+    : error._tag === "SecretReferenceScopeConflictError" ||
+        error._tag === "DeliveryGraphInputError" ||
+        error._tag === "GovernedActionInputError" ||
+        error._tag === "ReadinessInputError" ||
+        error._tag === "RelationshipRepairProposalInputError"
     ? new ApplicationInvalidRequest()
     : mapPersistenceReadError(error)
 

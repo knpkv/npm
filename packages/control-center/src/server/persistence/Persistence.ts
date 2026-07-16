@@ -47,6 +47,9 @@ import {
   type ReadinessInputError,
   ReadinessRepository,
   type ReadinessRepositoryService,
+  type RelationshipRepairProposalInputError,
+  RelationshipRepairProposalRepository,
+  type RelationshipRepairProposalRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
   WorkspaceRepository,
@@ -64,6 +67,7 @@ export type PersistenceOperationFailure =
   | PersistenceOperationError
   | QuarantineWriteError
   | ReadinessInputError
+  | RelationshipRepairProposalInputError
   | RecordAlreadyExistsError
   | RecordNotFoundError
   | ReproducibleContentUnavailableError
@@ -86,6 +90,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "PersistenceOperationError",
   "QuarantineWriteError",
   "ReadinessInputError",
+  "RelationshipRepairProposalInputError",
   "RecordAlreadyExistsError",
   "RecordNotFoundError",
   "ReproducibleContentUnavailableError",
@@ -138,6 +143,7 @@ const makePersistence = Effect.gen(function*() {
   const pluginConfigurations = yield* PluginConfigurationRepository
   const pluginRuntime = yield* PluginRuntimeRepository
   const readiness = yield* ReadinessRepository
+  const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
   const workspaces = yield* WorkspaceRepository
 
@@ -267,6 +273,12 @@ const makePersistence = Effect.gen(function*() {
       registerRule: (...args: Parameters<ReadinessRepositoryService["registerRule"]>) =>
         publicOperation("readiness.register-rule", readiness.registerRule(...args))
     },
+    relationshipRepairProposals: {
+      create: (...args: Parameters<RelationshipRepairProposalRepositoryService["create"]>) =>
+        publicOperation("relationship-repair-proposal.create", relationshipRepairProposals.create(...args)),
+      get: (...args: Parameters<RelationshipRepairProposalRepositoryService["get"]>) =>
+        publicOperation("relationship-repair-proposal.get", relationshipRepairProposals.get(...args))
+    },
     releases: {
       append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>
         publicOperation("release.append", releases.append(...args)),
@@ -322,6 +334,7 @@ export const persistenceLayerFromDatabase = (
         const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
         const pluginRuntime = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
         const readiness = ReadinessRepository.layer.pipe(Layer.provide(foundation))
+        const relationshipRepairProposals = RelationshipRepairProposalRepository.layer
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
@@ -340,6 +353,7 @@ export const persistenceLayerFromDatabase = (
           pluginConfigurations,
           pluginRuntime,
           readiness,
+          relationshipRepairProposals,
           release,
           content,
           workspaces

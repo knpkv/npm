@@ -73,6 +73,22 @@ describe("ControlCenterApi contract", () => {
       "429",
       "503"
     ])
+
+    const createRepairProposalPath =
+      specification.paths["/api/v1/relationships/releases/{releaseId}/repair-candidates/{relationshipId}/proposals"]
+    assert.isDefined(createRepairProposalPath)
+    assert.isDefined(createRepairProposalPath.post)
+    assert.deepStrictEqual(Object.keys(createRepairProposalPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "413",
+      "503"
+    ])
   })
 
   it("keeps the seven API groups and endpoint routes explicit", () => {
@@ -125,6 +141,11 @@ describe("ControlCenterApi contract", () => {
           "GET",
           "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposal-draft"
         ],
+        [
+          "createRepairProposal",
+          "POST",
+          "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposals"
+        ],
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
@@ -173,6 +194,7 @@ describe("ControlCenterApi contract", () => {
       releaseSlice: [SessionCookieAuth.key],
       repairCandidates: [SessionCookieAuth.key],
       repairProposalDraft: [SessionCookieAuth.key],
+      createRepairProposal: [SessionCookieAuth.key, SessionMutationAuth.key],
       relationship: [SessionCookieAuth.key],
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
@@ -236,6 +258,12 @@ describe("ControlCenterApi contract", () => {
         query: { revision }
       }),
       "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates/01890f6f-6d6a-7cc0-98d2-000000000094/proposal-draft?revision=1"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.createRepairProposal({
+        params: { releaseId, relationshipId }
+      }),
+      "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates/01890f6f-6d6a-7cc0-98d2-000000000094/proposals"
     )
     assert.strictEqual(
       urls.deliveryGraph.evidence({ params: { evidenceId } }),
