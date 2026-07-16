@@ -4,19 +4,39 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
-import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
+import { MAXIMUM_RELEASE_SLICE_RECORDS, type ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
 import type { EnvironmentId, ReleaseId } from "../../domain/identifiers.js"
+import {
+  loadReleaseEnvironmentSlices,
+  MAXIMUM_RELEASE_ENVIRONMENT_REQUEST_CONCURRENCY
+} from "./loadReleaseEnvironmentSlices.js"
 
-const distinct = <Value>(values: ReadonlyArray<Value>, key: (value: Value) => string): ReadonlyArray<Value> => {
+export const MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS = MAXIMUM_RELEASE_SLICE_RECORDS
+
+interface BoundedDistinct<Value> {
+  readonly truncated: boolean
+  readonly values: ReadonlyArray<Value>
+}
+
+const boundedDistinct = <Source, Value>(
+  sources: ReadonlyArray<Source>,
+  values: (source: Source) => ReadonlyArray<Value>,
+  key: (value: Value) => string
+): BoundedDistinct<Value> => {
   const seen = new Set<string>()
   const unique: Array<Value> = []
-  for (const value of values) {
-    const identity = key(value)
-    if (seen.has(identity)) continue
-    seen.add(identity)
-    unique.push(value)
+  for (const source of sources) {
+    for (const value of values(source)) {
+      const identity = key(value)
+      if (seen.has(identity)) continue
+      if (unique.length === MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS) {
+        return { truncated: true, values: unique }
+      }
+      seen.add(identity)
+      unique.push(value)
+    }
   }
-  return unique
+  return { truncated: false, values: unique }
 }
 
 /** Combine release and environment slices without duplicating shared graph material. */
@@ -24,32 +44,41 @@ export const aggregateReleaseWorksetInspections = (
   releaseId: ReleaseId,
   inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
 ): ReleaseDeliveryGraphInspection => {
-  const nodes = distinct(inspections.flatMap(({ nodes }) => nodes), ({ nodeId }) => nodeId)
-  const entityProjections = distinct(
-    inspections.flatMap(({ entityProjections }) => entityProjections),
+  const nodes = boundedDistinct(inspections, ({ nodes }) => nodes, ({ nodeId }) => nodeId)
+  const entityProjections = boundedDistinct(
+    inspections,
+    ({ entityProjections }) => entityProjections,
     ({ projection }) => projection.entityId
   )
-  const relationships = distinct(
-    inspections.flatMap(({ relationships }) => relationships),
+  const relationships = boundedDistinct(
+    inspections,
+    ({ relationships }) => relationships,
     ({ relationshipId, revision }) => `${relationshipId}:${revision}`
   )
-  const evidenceClaims = distinct(
-    inspections.flatMap(({ evidenceClaims }) => evidenceClaims),
+  const evidenceClaims = boundedDistinct(
+    inspections,
+    ({ evidenceClaims }) => evidenceClaims,
     ({ evidenceClaimId }) => evidenceClaimId
   )
-  const evidenceItems = distinct(
-    inspections.flatMap(({ evidenceItems }) => evidenceItems),
+  const evidenceItems = boundedDistinct(
+    inspections,
+    ({ evidenceItems }) => evidenceItems,
     ({ evidenceId }) => evidenceId
   )
   return {
     releaseId,
     environmentId: null,
-    truncated: inspections.some(({ truncated }) => truncated),
-    nodes,
-    entityProjections,
-    relationships,
-    evidenceClaims,
-    evidenceItems
+    truncated: inspections.some(({ truncated }) => truncated) ||
+      nodes.truncated ||
+      entityProjections.truncated ||
+      relationships.truncated ||
+      evidenceClaims.truncated ||
+      evidenceItems.truncated,
+    nodes: nodes.values,
+    entityProjections: entityProjections.values,
+    relationships: relationships.values,
+    evidenceClaims: evidenceClaims.values,
+    evidenceItems: evidenceItems.values
   }
 }
 
@@ -61,7 +90,7 @@ export interface ReleaseWorksetTransport {
   ) => Promise<ReleaseDeliveryGraphInspection>
 }
 
-export const MAXIMUM_RELEASE_WORKSET_REQUEST_CONCURRENCY = 4
+export const MAXIMUM_RELEASE_WORKSET_REQUEST_CONCURRENCY = MAXIMUM_RELEASE_ENVIRONMENT_REQUEST_CONCURRENCY
 
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 
@@ -72,28 +101,10 @@ export const loadReleaseWorksetInspections = async (
   signal: AbortSignal,
   transport: ReleaseWorksetTransport
 ): Promise<ReadonlyArray<ReleaseDeliveryGraphInspection>> => {
-  const scopes: ReadonlyArray<EnvironmentId | null> = [null, ...environmentIds]
-  const completed: Array<{ readonly index: number; readonly inspection: ReleaseDeliveryGraphInspection }> = []
-  let nextIndex = 0
-  let isStopped = false
-  const loadNext = async (): Promise<void> => {
-    while (!isStopped && nextIndex < scopes.length) {
-      const index = nextIndex
-      nextIndex += 1
-      const environmentId = scopes[index]
-      if (environmentId === undefined) return
-      try {
-        const inspection = await transport.load(releaseId, environmentId, signal)
-        completed.push({ index, inspection })
-      } catch (failure) {
-        isStopped = true
-        throw failure
-      }
-    }
-  }
-  const workerCount = Math.min(MAXIMUM_RELEASE_WORKSET_REQUEST_CONCURRENCY, scopes.length)
-  await Promise.all(Array.from({ length: workerCount }, () => loadNext()))
-  return completed.sort((left, right) => left.index - right.index).map(({ inspection }) => inspection)
+  return loadReleaseEnvironmentSlices(
+    environmentIds,
+    (environmentId) => transport.load(releaseId, environmentId, signal)
+  )
 }
 
 export type ReleaseWorksetState =

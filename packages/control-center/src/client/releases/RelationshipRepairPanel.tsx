@@ -407,7 +407,12 @@ export const RelationshipRepairPanelContent = ({
   readonly transport?: RelationshipRepairTransport
 }): ReactElement => {
   const access = relationshipRepairSessionAccess(browserSessionState)
-  const controller = useRelationshipRepairProposals(release.id, access.session?.sessionId ?? null, transport)
+  const controller = useRelationshipRepairProposals(
+    release.id,
+    release.targetEnvironmentIds,
+    access.session?.sessionId ?? null,
+    transport
+  )
   if (access.session === null) return <LoadingPanel />
   return (
     <div className={styles.panelStack}>
@@ -422,7 +427,8 @@ export const RelationshipRepairPanelContent = ({
       />
       {access.mutationsEnabled ? (
         <RelationshipRepairCandidatePicker
-          key={`${release.id}:${sessionScopeKey(access.session)}`}
+          environmentIds={release.targetEnvironmentIds}
+          key={`${release.id}:${release.targetEnvironmentIds.join(":")}:${sessionScopeKey(access.session)}`}
           onCreated={controller.retry}
           releaseId={release.id}
           session={access.session}

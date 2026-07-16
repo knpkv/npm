@@ -1,8 +1,10 @@
 import type { RlyStage } from "@knpkv/rly/patterns"
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import { presentReleaseWorkset } from "../../src/client/releases/presentReleaseWorkset.js"
+import { EntityId, GraphNodeId, RelationshipId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const stages: ReadonlyArray<RlyStage> = [
@@ -88,5 +90,62 @@ describe("release workset presenter", () => {
 
     expect(workset.pullRequestGroups[0]?.linkedJiraKeys).toEqual(["OPS-428", "OPS-429", "OPS-430"])
     expect(workset.gaps).toEqual([expect.objectContaining({ label: "OPS-433 has no CodeCommit pull request" })])
+  })
+
+  it("shows only pages documented directly by the release as runbooks", () => {
+    const pageProjection = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.details._tag === "page"
+    )
+    const pageNode = releaseWorksetFixture.nodes.find(({ endpointKind }) => endpointKind === "page")
+    const issueNode = releaseWorksetFixture.nodes.find(({ endpointKind }) => endpointKind === "issue")
+    const documentedBy = releaseWorksetFixture.relationships.find(({ kind }) => kind === "documented-by")
+    if (
+      pageProjection === undefined || pageNode === undefined || issueNode === undefined || documentedBy === undefined
+    ) {
+      throw new Error("Expected page, issue, and documentation fixtures")
+    }
+    const issuePageEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000001")
+    const issuePageNodeId = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d4-000000000001")
+    const issueDocumentationId = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d5-000000000099")
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: [
+        ...releaseWorksetFixture.entityProjections,
+        {
+          ...pageProjection,
+          projection: {
+            ...pageProjection.projection,
+            entityId: issuePageEntityId,
+            displayKey: "PAY/SPEC-8",
+            title: "Payment issue specification"
+          }
+        }
+      ],
+      nodes: [
+        ...releaseWorksetFixture.nodes,
+        {
+          ...pageNode,
+          nodeId: issuePageNodeId,
+          resolution: {
+            _tag: "resolved",
+            target: { _tag: "entity", entityId: issuePageEntityId, entityKind: "page" }
+          }
+        }
+      ],
+      relationships: [
+        ...releaseWorksetFixture.relationships,
+        {
+          ...documentedBy,
+          relationshipId: issueDocumentationId,
+          sourceNodeId: issueNode.nodeId,
+          sourceNodeKind: "issue",
+          targetNodeId: issuePageNodeId
+        }
+      ]
+    }
+
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+
+    expect(workset.runbooks.map(({ reference }) => reference)).toEqual(["PAY/RUNBOOK-12"])
   })
 })

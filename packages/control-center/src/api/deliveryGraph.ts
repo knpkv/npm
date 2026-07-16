@@ -38,10 +38,10 @@ import {
 import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
-const MAXIMUM_RELEASE_SLICE_RECORDS = 500
+export const MAXIMUM_RELEASE_SLICE_RECORDS = 500
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
-const MAXIMUM_REPAIR_PROPOSALS = 128
+export const MAXIMUM_REPAIR_PROPOSALS = 128
 
 const boundedArray = <T, E, RD, RE>(schema: Schema.Codec<T, E, RD, RE>, maximum: number) =>
   Schema.Array(schema).check(Schema.isMaxLength(maximum))

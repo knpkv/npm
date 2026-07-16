@@ -12,7 +12,12 @@ import type {
   RelationshipRepairProposalList
 } from "../../api/deliveryGraph.js"
 import { CsrfToken } from "../../api/session.js"
-import type { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../domain/identifiers.js"
+import type {
+  EnvironmentId,
+  RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
+  ReleaseId
+} from "../../domain/identifiers.js"
 import { RelationshipRepairReviewId as RelationshipRepairReviewIdSchema } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal, RelationshipRepairReviewDecision } from "../../domain/relationshipRepair.js"
 
@@ -55,7 +60,11 @@ export interface RelationshipRepairTransport {
     proposalId: RelationshipRepairProposalId,
     signal: AbortSignal
   ) => Promise<ApplyRelationshipRepairProposalResponse>
-  readonly list: (releaseId: ReleaseId, signal: AbortSignal) => Promise<RelationshipRepairProposalList>
+  readonly list: (
+    releaseId: ReleaseId,
+    environmentId: EnvironmentId | null,
+    signal: AbortSignal
+  ) => Promise<RelationshipRepairProposalList>
   readonly makeReviewId: () => Promise<RelationshipRepairReviewId>
   readonly review: (
     proposalId: RelationshipRepairProposalId,
@@ -76,11 +85,14 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  list: (releaseId, signal) =>
+  list: (releaseId, environmentId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
-        return yield* client.deliveryGraph.listRepairProposals({ params: { releaseId }, query: {} })
+        return yield* client.deliveryGraph.listRepairProposals({
+          params: { releaseId },
+          query: environmentId === null ? {} : { environmentId }
+        })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),

@@ -1,11 +1,19 @@
+import * as DateTime from "effect/DateTime"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { RelationshipRepairProposalList } from "../../api/deliveryGraph.js"
-import type { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../domain/identifiers.js"
+import { MAXIMUM_REPAIR_PROPOSALS, type RelationshipRepairProposalList } from "../../api/deliveryGraph.js"
+import type {
+  EnvironmentId,
+  RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
+  ReleaseId
+} from "../../domain/identifiers.js"
 import type {
   RelationshipRepairApplication,
+  RelationshipRepairProposal,
   RelationshipRepairReviewDecision
 } from "../../domain/relationshipRepair.js"
+import { loadReleaseEnvironmentSlices } from "./loadReleaseEnvironmentSlices.js"
 import { browserRelationshipRepairTransport, type RelationshipRepairTransport } from "./relationshipRepairTransport.js"
 
 export type RelationshipRepairPanelState =
@@ -17,6 +25,7 @@ export type RelationshipRepairPanelState =
     readonly actionFailure: RelationshipRepairProposalId | null
     readonly applications: ReadonlyMap<RelationshipRepairProposalId, RelationshipRepairApplication>
     readonly busyProposalId: RelationshipRepairProposalId | null
+    readonly environmentScopeKey: string
     readonly page: RelationshipRepairProposalList
     readonly releaseId: ReleaseId
     readonly sessionKey: string
@@ -39,9 +48,43 @@ interface PendingReviewIntent {
   readonly reviewId: RelationshipRepairReviewId
 }
 
+const proposalOrder = (left: RelationshipRepairProposal, right: RelationshipRepairProposal): number => {
+  const proposedAtOrder = DateTime.Order(right.proposedAt, left.proposedAt)
+  return proposedAtOrder === 0 ? right.proposalId.localeCompare(left.proposalId) : proposedAtOrder
+}
+
+const aggregateProposalPages = (
+  releaseId: ReleaseId,
+  pages: ReadonlyArray<RelationshipRepairProposalList>
+): RelationshipRepairProposalList => {
+  const proposalsById = new Map<RelationshipRepairProposalId, RelationshipRepairProposal>()
+  const applicationsByProposalId = new Map<RelationshipRepairProposalId, RelationshipRepairApplication>()
+  for (const page of pages) {
+    for (const proposal of page.proposals) proposalsById.set(proposal.proposalId, proposal)
+    for (const application of page.applications) {
+      applicationsByProposalId.set(application.proposalId, application)
+    }
+  }
+  const orderedProposals = [...proposalsById.values()].sort(proposalOrder)
+  const proposals = orderedProposals.slice(0, MAXIMUM_REPAIR_PROPOSALS)
+  const applications = proposals.flatMap((proposal): ReadonlyArray<RelationshipRepairApplication> => {
+    const application = applicationsByProposalId.get(proposal.proposalId)
+    return application === undefined ? [] : [application]
+  })
+  return {
+    releaseId,
+    environmentId: null,
+    status: null,
+    truncated: pages.some(({ truncated }) => truncated) || orderedProposals.length > MAXIMUM_REPAIR_PROPOSALS,
+    proposals,
+    applications
+  }
+}
+
 /** Keep one release's proposal ledger current after explicit review and apply actions. */
 export const useRelationshipRepairProposals = (
   releaseId: ReleaseId,
+  environmentIds: ReadonlyArray<EnvironmentId>,
   sessionKey: string | null,
   transport: RelationshipRepairTransport = browserRelationshipRepairTransport
 ): RelationshipRepairProposalController => {
@@ -51,6 +94,7 @@ export const useRelationshipRepairProposals = (
   const busyProposal = useRef<RelationshipRepairProposalId | null>(null)
   const pendingReviews = useRef(new Map<RelationshipRepairProposalId, PendingReviewIntent>())
   const stateRef = useRef(state)
+  const environmentScopeKey = environmentIds.join(":")
 
   useEffect(() => {
     actionAbort.current?.abort()
@@ -63,14 +107,19 @@ export const useRelationshipRepairProposals = (
     }
     const abort = new AbortController()
     setState({ _tag: "loading" })
-    transport.list(releaseId, abort.signal).then(
-      (page) => {
+    loadReleaseEnvironmentSlices(
+      environmentIds,
+      (environmentId) => transport.list(releaseId, environmentId, abort.signal)
+    ).then(
+      (pages) => {
         if (!abort.signal.aborted) {
+          const page = aggregateProposalPages(releaseId, pages)
           setState({
             _tag: "ready",
             actionFailure: null,
             applications: new Map(page.applications.map((application) => [application.proposalId, application])),
             busyProposalId: null,
+            environmentScopeKey,
             page,
             releaseId,
             sessionKey
@@ -82,12 +131,14 @@ export const useRelationshipRepairProposals = (
       }
     )
     return () => abort.abort()
-  }, [releaseId, requestRevision, sessionKey, transport])
+  }, [environmentScopeKey, releaseId, requestRevision, sessionKey, transport])
 
   useEffect(() => () => actionAbort.current?.abort(), [])
 
   const currentState = state._tag === "ready" &&
-      (state.releaseId !== releaseId || state.sessionKey !== sessionKey)
+      (state.environmentScopeKey !== environmentScopeKey ||
+        state.releaseId !== releaseId ||
+        state.sessionKey !== sessionKey)
     ? { _tag: "loading" } satisfies RelationshipRepairPanelState
     : state
   stateRef.current = currentState

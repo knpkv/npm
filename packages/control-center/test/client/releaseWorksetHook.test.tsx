@@ -10,8 +10,16 @@ import { SessionSummary } from "../../src/api/session.js"
 import type { BrowserSessionState } from "../../src/client/BrowserSession.js"
 import { releaseWorksetSessionKey } from "../../src/client/releases/ReleaseWorkset.js"
 import type { EnvironmentId, ReleaseId } from "../../src/domain/identifiers.js"
-import { EnvironmentId as EnvironmentIdSchema, ReleaseId as ReleaseIdSchema } from "../../src/domain/identifiers.js"
 import {
+  EntityId,
+  EnvironmentId as EnvironmentIdSchema,
+  GraphNodeId,
+  RelationshipId,
+  ReleaseId as ReleaseIdSchema
+} from "../../src/domain/identifiers.js"
+import {
+  aggregateReleaseWorksetInspections,
+  MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS,
   type ReleaseWorksetState,
   type ReleaseWorksetTransport,
   useReleaseWorkset
@@ -210,6 +218,52 @@ describe("useReleaseWorkset", () => {
     const ready = [...observations].reverse().find(({ _tag }) => _tag === "ready")
     expect(ready?._tag === "ready" ? ready.inspection.relationships : []).toContainEqual(environmentRelationship)
     expect(ready?._tag === "ready" ? ready.inspection.nodes.length : 0).toBe(releaseWorksetFixture.nodes.length)
+    expect(ready?._tag === "ready" ? ready.inspection.truncated : true).toBe(false)
+  })
+
+  it("globally bounds disjoint records aggregated from many environment scopes", () => {
+    const sourceNode = releaseWorksetFixture.nodes[0]
+    const sourceProjection = releaseWorksetFixture.entityProjections[0]
+    const sourceRelationship = releaseWorksetFixture.relationships[0]
+    if (sourceNode === undefined || sourceProjection === undefined || sourceRelationship === undefined) {
+      throw new Error("Expected complete workset fixtures")
+    }
+    const recordId = (scopeIndex: number, recordIndex: number): string =>
+      String(scopeIndex * 20 + recordIndex + 1).padStart(12, "0")
+    const inspections: ReadonlyArray<ReleaseDeliveryGraphInspection> = Array.from({ length: 50 }, (_, scopeIndex) => ({
+      ...releaseWorksetFixture,
+      environmentId:
+        scopeIndex === 0
+          ? null
+          : Schema.decodeSync(EnvironmentIdSchema)(`01890f6f-6d6a-7cc0-98d6-${String(scopeIndex).padStart(12, "0")}`),
+      nodes: Array.from({ length: 20 }, (_, recordIndex) => ({
+        ...sourceNode,
+        nodeId: Schema.decodeSync(GraphNodeId)(`01890f6f-6d6a-7cc0-98d4-${recordId(scopeIndex, recordIndex)}`)
+      })),
+      entityProjections: Array.from({ length: 20 }, (_, recordIndex) => ({
+        ...sourceProjection,
+        projection: {
+          ...sourceProjection.projection,
+          entityId: Schema.decodeSync(EntityId)(`01890f6f-6d6a-7cc0-98d3-${recordId(scopeIndex, recordIndex)}`)
+        }
+      })),
+      relationships: Array.from({ length: 20 }, (_, recordIndex) => ({
+        ...sourceRelationship,
+        relationshipId: Schema.decodeSync(RelationshipId)(
+          `01890f6f-6d6a-7cc0-98d5-${recordId(scopeIndex, recordIndex)}`
+        )
+      })),
+      evidenceClaims: [],
+      evidenceItems: [],
+      truncated: false
+    }))
+
+    const inspection = aggregateReleaseWorksetInspections(WORKSET_RELEASE_ID, inspections)
+
+    expect(inspection.nodes).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
+    expect(inspection.entityProjections).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
+    expect(inspection.relationships).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
+    expect(inspection.truncated).toBe(true)
   })
 
   it("invalidates only an unauthorized matching session", async () => {

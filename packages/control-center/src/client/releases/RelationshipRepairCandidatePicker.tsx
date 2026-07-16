@@ -6,8 +6,10 @@ import type {
   RelationshipRepairCandidates,
   RelationshipRepairProposalDraft
 } from "../../api/deliveryGraph.js"
+import { MAXIMUM_RELEASE_SLICE_RECORDS } from "../../api/deliveryGraph.js"
 import type { SessionSummary } from "../../api/session.js"
-import type { RelationshipRepairProposalId, ReleaseId } from "../../domain/identifiers.js"
+import type { EnvironmentId, RelationshipRepairProposalId, ReleaseId } from "../../domain/identifiers.js"
+import { loadReleaseEnvironmentSlices } from "./loadReleaseEnvironmentSlices.js"
 import {
   browserRelationshipRepairCandidateTransport,
   type RelationshipRepairCandidateTransport
@@ -49,6 +51,26 @@ const titleCase = (value: string): string => value.replaceAll("-", " ")
 const candidateTitle = (candidate: RelationshipRepairCandidate): string =>
   `${titleCase(candidate.relationship.sourceNodeKind)} → ${titleCase(candidate.relationship.targetNodeKind)}`
 
+const aggregateCandidatePages = (
+  releaseId: ReleaseId,
+  pages: ReadonlyArray<RelationshipRepairCandidates>
+): RelationshipRepairCandidates => {
+  const seen = new Set<string>()
+  const candidates: Array<RelationshipRepairCandidate> = []
+  for (const candidate of pages.flatMap((page) => page.candidates)) {
+    const identity = `${candidate.relationship.relationshipId}:${candidate.relationship.revision}`
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    candidates.push(candidate)
+  }
+  return {
+    releaseId,
+    environmentId: null,
+    truncated: pages.some(({ truncated }) => truncated) || candidates.length > MAXIMUM_RELEASE_SLICE_RECORDS,
+    candidates: candidates.slice(0, MAXIMUM_RELEASE_SLICE_RECORDS)
+  }
+}
+
 const PickerResult = ({
   announce = false,
   children,
@@ -68,6 +90,7 @@ const PickerResult = ({
 }
 
 interface RelationshipRepairCandidatePickerProps {
+  readonly environmentIds: ReadonlyArray<EnvironmentId>
   readonly onCreated: () => void
   readonly releaseId: ReleaseId
   readonly session: SessionSummary
@@ -76,6 +99,7 @@ interface RelationshipRepairCandidatePickerProps {
 
 /** Discover one incomplete relationship, preview its immutable draft, then create a governed proposal. */
 export const RelationshipRepairCandidatePicker = ({
+  environmentIds,
   onCreated,
   releaseId,
   session,
@@ -85,13 +109,14 @@ export const RelationshipRepairCandidatePicker = ({
   const request = useRef<AbortController | null>(null)
   const actorId = session.actor._tag === "human" ? session.actor.personId : session.actor.agentId
   const authorityScope = `${session.sessionId}:${session.workspaceId}:${session.permission}:${session.actor._tag}:${actorId}`
+  const environmentScopeKey = environmentIds.join(":")
 
   useEffect(() => {
     request.current?.abort()
     request.current = null
     setState({ _tag: "idle" })
     return () => request.current?.abort()
-  }, [authorityScope, releaseId])
+  }, [authorityScope, environmentScopeKey, releaseId])
 
   if (session.permission !== "workspace-owner") return null
 
@@ -116,8 +141,11 @@ export const RelationshipRepairCandidatePicker = ({
   const discover = (): void => {
     setState({ _tag: "loading" })
     void run(
-      (signal) => transport.list(releaseId, signal),
-      (page) => setState({ _tag: "ready", page }),
+      (signal) =>
+        loadReleaseEnvironmentSlices(environmentIds, (environmentId) =>
+          transport.list(releaseId, environmentId, signal)
+        ),
+      (pages) => setState({ _tag: "ready", page: aggregateCandidatePages(releaseId, pages) }),
       () => setState({ _tag: "load-failed" })
     )
   }
@@ -126,7 +154,13 @@ export const RelationshipRepairCandidatePicker = ({
     setState({ _tag: "drafting", page })
     void run(
       (signal) =>
-        transport.draft(releaseId, candidate.relationship.relationshipId, candidate.relationship.revision, signal),
+        transport.draft(
+          releaseId,
+          candidate.impact.environmentId,
+          candidate.relationship.relationshipId,
+          candidate.relationship.revision,
+          signal
+        ),
       (draft) => setState({ _tag: "draft", draft, page }),
       () => setState({ _tag: "draft-failed", candidate, page })
     )
@@ -135,8 +169,12 @@ export const RelationshipRepairCandidatePicker = ({
   const refreshCandidate = (staleCandidate: RelationshipRepairCandidate): void => {
     setState({ _tag: "loading" })
     void run(
-      (signal) => transport.list(releaseId, signal),
-      (page) => {
+      (signal) =>
+        loadReleaseEnvironmentSlices(environmentIds, (environmentId) =>
+          transport.list(releaseId, environmentId, signal)
+        ),
+      (pages) => {
+        const page = aggregateCandidatePages(releaseId, pages)
         const candidate = page.candidates.find(
           (item) => item.relationship.relationshipId === staleCandidate.relationship.relationshipId
         )

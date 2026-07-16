@@ -111,7 +111,11 @@ export const ActiveWorkPage = (): ReactElement => {
             <Text as="h2" id="active-release-title" variant="page-title">
               {selected.serviceName}
             </Text>
-            <Link className={styles.fullLink} to={releaseFullPath(context.workspaceId, selected.id)}>
+            <Link
+              className={styles.fullLink}
+              state={location.state}
+              to={releaseFullPath(context.workspaceId, selected.id)}
+            >
               Open full release
             </Link>
           </div>

@@ -351,6 +351,26 @@ test("preserves a filtered overview origin through a preview verdict action", as
   await expect(page).toHaveURL(filteredOverviewPath)
 })
 
+test("preserves a filtered overview through Active work and the full release", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention`
+  await page.goto(filteredOverviewPath)
+  const blockedRow = page.locator(`[data-portfolio-release-id="${release.releaseId}"]`)
+  await blockedRow.getByRole("button", { name: /^Preview /u }).click()
+
+  await page.getByRole("link", { name: "Review blocker" }).click()
+  await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/work?release=${release.releaseId}`)
+  await expect
+    .poll(() => page.evaluate<string | undefined>("window.history.state?.usr?.origin?.search"))
+    .toBe("?status=attention")
+  await page.getByRole("link", { name: "Open full release" }).click()
+  await expect(page).toHaveURL(fullPath)
+  await expect
+    .poll(() => page.evaluate<string | undefined>("window.history.state?.usr?.origin?.search"))
+    .toBe("?status=attention")
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(filteredOverviewPath)
+})
+
 test("shows six Jira items as one release workset with PR and pipeline dimensions", async ({ page }) => {
   await page.goto(fullPath)
 
@@ -391,6 +411,10 @@ test("keeps the complete release context and persists its relationship-repair re
   await page.reload()
   await expect(page.getByText("Ready to apply")).toBeVisible()
   await expect(page.getByText("The implementation evidence is ready.")).toBeVisible()
+
+  await page.getByRole("link", { name: "Open full release" }).click()
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(overviewPath)
 })
 
 test("keeps the complete release workset readable on a compact viewport", async ({ page }) => {

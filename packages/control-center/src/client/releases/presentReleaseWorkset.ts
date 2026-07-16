@@ -123,6 +123,31 @@ const entityProjectionByNode = (
   )
 }
 
+const releaseRunbookEntityIds = (
+  inspection: ReleaseDeliveryGraphInspection,
+  projections: ReadonlyMap<GraphNodeId, DeliveryEntityProjection>
+): ReadonlySet<EntityId> => {
+  const nodes = new Map(inspection.nodes.map((node) => [node.nodeId, node]))
+  return new Set(
+    inspection.relationships.flatMap((relationship): ReadonlyArray<EntityId> => {
+      if (
+        relationship.kind !== "documented-by" ||
+        relationship.sourceNodeKind !== "release" ||
+        relationship.targetNodeKind !== "page" ||
+        !currentRelationship(relationship)
+      ) return []
+      const source = nodes.get(relationship.sourceNodeId)
+      const target = projections.get(relationship.targetNodeId)
+      return source?.resolution._tag === "resolved" &&
+          source.resolution.target._tag === "release" &&
+          source.resolution.target.releaseId === inspection.releaseId &&
+          target?.details._tag === "page"
+        ? [target.entityId]
+        : []
+    })
+  )
+}
+
 const gapLabel = (
   relationship: DeliveryRelationship,
   projections: ReadonlyMap<GraphNodeId, DeliveryEntityProjection>
@@ -145,6 +170,7 @@ export const presentReleaseWorkset = (
   stages: ReadonlyArray<RlyStage>
 ): ReleaseWorksetPresentation => {
   const projections = entityProjectionByNode(inspection)
+  const runbookEntityIds = releaseRunbookEntityIds(inspection, projections)
   const href = (projection: DeliveryEntityProjection): string =>
     objectHref(workspaceId, inspection.releaseId, projection.entityId)
   const issues = inspection.entityProjections
@@ -169,7 +195,10 @@ export const presentReleaseWorkset = (
   const pages = inspection.entityProjections
     .map(({ projection }) => projection)
     .filter((projection): projection is ProjectionWithDetails<"page"> =>
-      projection.entityType === "page" && projection.details._tag === "page" && projection.entityState === "present"
+      projection.entityType === "page" &&
+      projection.details._tag === "page" &&
+      projection.entityState === "present" &&
+      runbookEntityIds.has(projection.entityId)
     )
 
   return {
