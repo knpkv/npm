@@ -94,10 +94,15 @@ review/apply actions permitted by the current session. Review notes are required
 use browser-generated UUIDv7 values, mutations carry the session CSRF proof, and retry/failure/empty
 states remain explicit.
 
+The next D04 UI slice adds an owner-only, on-demand candidate path beneath that ledger. It discovers
+incomplete release relationships, previews the server-derived disposition, rationale, and exact
+revision transition, then creates the governed proposal without mutating the relationship. Proposal
+UUIDv7 identities are retained across lost-response retries, while stale drafts and read/mutation
+failures remain explicit and retryable.
+
 ## Remaining roadmap
 
-- Complete candidate-to-proposal creation and durable application readback in the D04 repair UI,
-  then D05–D09: six-state portfolio/work views,
+- Complete durable application readback in the D04 repair UI, then D05–D09: six-state portfolio/work views,
   search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
@@ -146,6 +151,6 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Add candidate-to-proposal creation and durable application readback to the relationship repair UI.
+Add authenticated durable application readback to the relationship repair UI.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

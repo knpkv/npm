@@ -34,7 +34,8 @@ const mutationProof = (): Effect.Effect<CsrfToken, MutationProofUnavailable> =>
     )
   )
 
-const makeMutationClient = Effect.gen(function*() {
+/** Generated client carrying the browser session's mutation proof. */
+export const makeRelationshipRepairMutationClient = Effect.gen(function*() {
   const csrfToken = yield* mutationProof()
   return yield* makeControlCenterApiClient({
     transformClient: (httpClient) =>
@@ -70,7 +71,7 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
   apply: (proposalId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const client = yield* makeMutationClient
+        const client = yield* makeRelationshipRepairMutationClient
         return yield* client.deliveryGraph.applyRepairProposal({ params: { proposalId } })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -87,7 +88,7 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
   review: (proposalId, reviewId, decision, rationale, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const client = yield* makeMutationClient
+        const client = yield* makeRelationshipRepairMutationClient
         return yield* client.deliveryGraph.reviewRepairProposal({
           params: { proposalId },
           payload: {

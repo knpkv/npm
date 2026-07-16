@@ -4,12 +4,14 @@
 .proposalHeader,
 .decision,
 .reviewForm,
-.loading {
+.loading,
+.panelStack {
   display: grid;
 }
 
 .root,
-.loading {
+.loading,
+.panelStack {
   gap: var(--rly-space-24);
 }
 
