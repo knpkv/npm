@@ -140,6 +140,7 @@ const releaseContextLabel = (release: PortfolioReleasePresentation): string =>
 
 export const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
+  const location = useLocation()
   const navigate = useNavigate()
   const prefersReducedMotion = usePrefersReducedReleaseMotion()
   return (
@@ -148,7 +149,10 @@ export const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioRele
       agentName="Relay"
       context={releaseContextLabel(release)}
       onClick={() =>
-        navigate(releaseAgentPath(context.workspaceId, release.id), { viewTransition: !prefersReducedMotion })
+        navigate(releaseAgentPath(context.workspaceId, release.id), {
+          state: location.state,
+          viewTransition: !prefersReducedMotion
+        })
       }
     />
   )

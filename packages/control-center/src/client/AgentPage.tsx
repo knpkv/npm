@@ -3,7 +3,7 @@ import { Button, Field, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useOutletContext, useParams, useSearchParams } from "react-router"
+import { Link, useLocation, useOutletContext, useParams, useSearchParams } from "react-router"
 
 import type { PortfolioReleaseSummary } from "../api/portfolio.js"
 import type { EventCursor, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
@@ -356,6 +356,7 @@ const ReleaseAgentRoom = ({
   readonly runTurn: ReleaseAgentTurn | undefined
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
+  const location = useLocation()
   const [prompt, setPrompt] = useState("")
   const [messages, setMessages] = useState<ReadonlyArray<LocalThreadMessage>>(() => readReleaseAgentThread(release.id))
   const [failure, setFailure] = useState<TurnFailure | null>(null)
@@ -449,7 +450,7 @@ const ReleaseAgentRoom = ({
 
   return (
     <article className={styles.room} data-release-agent-id={release.id}>
-      <Link className={styles.back} to={releaseFullPath(workspaceId, release.id)}>
+      <Link className={styles.back} state={location.state} to={releaseFullPath(workspaceId, release.id)}>
         Back to release
       </Link>
       <header className={styles.hero}>

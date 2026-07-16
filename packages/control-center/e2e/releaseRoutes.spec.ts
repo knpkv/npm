@@ -479,6 +479,25 @@ test("keeps one human-first Relay thread per canonical release", async ({ page }
   await expect(
     restoredMessages.getByText("Approval is current. Production deployment evidence is still missing.")
   ).toBeVisible()
+
+  await page.getByRole("link", { name: "Back to release" }).click()
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(overviewPath)
+})
+
+test("retains the filtered overview through Active work and the release agent", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention`
+  await page.goto(filteredOverviewPath)
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await page.getByRole("link", { name: "Review blocker" }).click()
+  await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/work?release=${release.releaseId}`)
+
+  await page.getByRole("button", { name: "Ask about this release" }).click()
+  await expect(page).toHaveURL(agentPath)
+  await page.getByRole("link", { name: "Back to release" }).click()
+  await expect(page).toHaveURL(fullPath)
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(filteredOverviewPath)
 })
 
 test("shares Relay, version, and verdict geometry across the sole orchestrated transition", async ({ page }) => {
