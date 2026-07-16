@@ -1,4 +1,5 @@
 import * as DateTime from "effect/DateTime"
+import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { MAXIMUM_REPAIR_PROPOSALS, type RelationshipRepairProposalList } from "../../api/deliveryGraph.js"
@@ -15,6 +16,9 @@ import type {
 } from "../../domain/relationshipRepair.js"
 import { loadReleaseEnvironmentSlices } from "./loadReleaseEnvironmentSlices.js"
 import { browserRelationshipRepairTransport, type RelationshipRepairTransport } from "./relationshipRepairTransport.js"
+
+const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
+const ignoreSessionExpired = (): void => undefined
 
 export type RelationshipRepairPanelState =
   | { readonly _tag: "idle" }
@@ -86,7 +90,8 @@ export const useRelationshipRepairProposals = (
   releaseId: ReleaseId,
   environmentIds: ReadonlyArray<EnvironmentId>,
   sessionKey: string | null,
-  transport: RelationshipRepairTransport = browserRelationshipRepairTransport
+  transport: RelationshipRepairTransport = browserRelationshipRepairTransport,
+  onSessionExpired: (sessionKey: string) => void = ignoreSessionExpired
 ): RelationshipRepairProposalController => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<RelationshipRepairPanelState>({ _tag: "idle" })
@@ -126,12 +131,15 @@ export const useRelationshipRepairProposals = (
           })
         }
       },
-      () => {
-        if (!abort.signal.aborted) setState({ _tag: "failed" })
+      (failure) => {
+        if (!abort.signal.aborted) {
+          if (isUnauthorizedFailure(failure)) onSessionExpired(sessionKey)
+          setState({ _tag: "failed" })
+        }
       }
     )
     return () => abort.abort()
-  }, [environmentScopeKey, releaseId, requestRevision, sessionKey, transport])
+  }, [environmentScopeKey, onSessionExpired, releaseId, requestRevision, sessionKey, transport])
 
   useEffect(() => () => actionAbort.current?.abort(), [])
 

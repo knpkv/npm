@@ -126,6 +126,7 @@ const view = (
 )
 
 let currentController: RelationshipRepairProposalController | undefined
+const ignoreSessionExpired = (): void => undefined
 
 const deferred = <Value,>() => {
   let resolveValue: ((value: Value) => void) | undefined
@@ -148,14 +149,20 @@ const deferred = <Value,>() => {
 }
 
 const ControllerHarness = ({
+  onSessionExpired = ignoreSessionExpired,
   releaseId,
   transport
 }: {
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly releaseId: ReleaseId
   readonly transport: RelationshipRepairTransport
 }): ReactElement => {
-  currentController = useRelationshipRepairProposals(releaseId, [], session.sessionId, transport)
-  return <span>{currentController.state._tag === "ready" ? currentController.state.page.releaseId : "loading"}</span>
+  currentController = useRelationshipRepairProposals(releaseId, [], session.sessionId, transport, onSessionExpired)
+  return (
+    <span>
+      {currentController.state._tag === "ready" ? currentController.state.page.releaseId : currentController.state._tag}
+    </span>
+  )
 }
 
 describe("RelationshipRepairPanel", () => {
@@ -377,6 +384,59 @@ describe("RelationshipRepairPanel", () => {
     expect(host.textContent).toContain(environmentProposal.rationale)
     expect(host.textContent).toContain("Verify")
     expect(host.textContent).toContain("Link")
+  })
+
+  it("invalidates only the expired session after an unauthorized proposal read", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.reject({ _tag: "UnauthorizedApiError" })),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <ControllerHarness onSessionExpired={onSessionExpired} releaseId={release.id} transport={transport} />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).toHaveBeenCalledOnce()
+    expect(onSessionExpired).toHaveBeenCalledWith(session.sessionId)
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("keeps service-unavailable proposal reads authenticated and retryable", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.reject({ _tag: "ServiceUnavailableApiError" })),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <RelationshipRepairPanelContent
+          browserSessionState={{ _tag: "authenticated", session }}
+          onSessionExpired={onSessionExpired}
+          release={release}
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(host.textContent).toContain("Release decisions unavailable")
+    expect(host.textContent).toContain("Try again")
   })
 
   it("closes a stale review form when refreshed server state is immutable", async () => {

@@ -18,6 +18,8 @@ import { type RelationshipRepairPanelState, useRelationshipRepairProposals } fro
 import type { RelationshipRepairTransport } from "./relationshipRepairTransport.js"
 import styles from "./RelationshipRepairPanel.module.css"
 
+const ignoreSessionExpired = (): void => undefined
+
 interface RelationshipRepairPanelViewProps {
   readonly mutationsEnabled: boolean
   readonly onApply: (proposalId: RelationshipRepairProposalId) => Promise<boolean>
@@ -399,10 +401,12 @@ export const relationshipRepairSessionAccess = (state: BrowserSessionState): Rel
 /** Render the repair ledger from an explicit browser-session state. */
 export const RelationshipRepairPanelContent = ({
   browserSessionState,
+  onSessionExpired = ignoreSessionExpired,
   release,
   transport
 }: {
   readonly browserSessionState: BrowserSessionState
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly release: PortfolioReleasePresentation
   readonly transport?: RelationshipRepairTransport
 }): ReactElement => {
@@ -411,7 +415,8 @@ export const RelationshipRepairPanelContent = ({
     release.id,
     release.targetEnvironmentIds,
     access.session?.sessionId ?? null,
-    transport
+    transport,
+    onSessionExpired
   )
   if (access.session === null) return <LoadingPanel />
   return (
@@ -445,5 +450,11 @@ export const RelationshipRepairPanel = ({
   readonly release: PortfolioReleasePresentation
 }): ReactElement => {
   const browserSession = useBrowserSession()
-  return <RelationshipRepairPanelContent browserSessionState={browserSession.state} release={release} />
+  return (
+    <RelationshipRepairPanelContent
+      browserSessionState={browserSession.state}
+      onSessionExpired={browserSession.invalidateSession}
+      release={release}
+    />
+  )
 }
