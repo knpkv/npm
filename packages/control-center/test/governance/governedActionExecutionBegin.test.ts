@@ -108,12 +108,7 @@ const encodedCurrentRuntime = Schema.encodeSync(CurrentPluginRuntimeAuthority)(c
 const runtimeWithoutReconciliation = Schema.decodeUnknownSync(CurrentPluginRuntimeAuthority)({
   ...encodedCurrentRuntime,
   negotiated: {
-    descriptor: {
-      ...encodedCurrentRuntime.negotiated.descriptor,
-      capabilities: encodedCurrentRuntime.negotiated.descriptor.capabilities.filter(
-        ({ capabilityId }) => capabilityId !== "action.reconcile"
-      )
-    },
+    descriptor: encodedCurrentRuntime.negotiated.descriptor,
     capabilities: encodedCurrentRuntime.negotiated.capabilities.filter(
       ({ capabilityId }) => capabilityId !== "action.reconcile"
     )
@@ -656,7 +651,7 @@ describe("governed action execution begin", () => {
         preparationToken: prepared.preparationToken,
         preflight: Schema.decodeUnknownSync(ReadyPluginActionPreflightV1)({
           _tag: "ready",
-          checkedRevision: "0",
+          checkedRevision: "1",
           checkedAt: "2026-07-15T10:01:59.999Z"
         }),
         runtimeAuthorityToken: currentRuntime.runtimeAuthorityToken,
