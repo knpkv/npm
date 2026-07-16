@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer, Ref, Result, Schema } from "effect"
 
+import { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import {
   EntityId,
   EvidenceId,
@@ -636,6 +637,17 @@ describe("DeliveryGraphRepository", () => {
     )
     assert.lengthOf(rootOverflow.relationships, 500)
     assert.isTrue(rootOverflow.truncated)
+
+    const rootBoundary = selectBoundedRelationshipClosure(
+      Array.from({ length: 500 }, (_, index) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: [`boundary-root-claim-${index}`]
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(rootBoundary.relationships, 500)
+    assert.isFalse(rootBoundary.truncated)
   })
 
   it.effect("bounds evidence claim inspection at the repository query", () =>
@@ -691,6 +703,8 @@ describe("DeliveryGraphRepository", () => {
         })
         assert.strictEqual(slice._tag, "releaseSlice")
         if (slice._tag === "releaseSlice") {
+          assert.isFalse(slice.value.truncated)
+          assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(slice.value))
           const implementsLinks = slice.value.relationships.filter(({ kind }) => kind === "implements")
           const pipelineLinks = slice.value.relationships.filter(({ kind }) => kind === "delivered-by")
           const missingLinks = implementsLinks.filter(({ lifecycle }) => lifecycle._tag === "missing")
@@ -707,6 +721,21 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(secondPullRequestLinks, 3)
           assert.lengthOf(slice.value.entityProjections, 9)
           assert.lengthOf(slice.value.evidenceClaims, 0)
+        }
+
+        const bounded = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSlice",
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          limit: 1
+        })
+        assert.strictEqual(bounded._tag, "releaseSlice")
+        if (bounded._tag === "releaseSlice") {
+          assert.isTrue(bounded.value.truncated)
+          assert.lengthOf(bounded.value.relationships, 1)
+          assert.isAtMost(bounded.value.nodes.length, 500)
+          assert.isAtMost(bounded.value.evidenceClaims.length, 500)
+          assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(bounded.value))
         }
       })
     ))
