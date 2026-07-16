@@ -53,6 +53,8 @@ interface BrowserTransitionNameCollision {
 const snapshot = releasePortfolioFixture
 const release = snapshot.releases[0]
 if (release === undefined) throw new Error("Expected one browser release fixture")
+const heldRelease = snapshot.releases[5]
+if (heldRelease === undefined) throw new Error("Expected one held browser release fixture")
 const proposalAuthor = release.collaborators[0]
 if (proposalAuthor === undefined) throw new Error("Expected one release proposal author")
 
@@ -77,6 +79,7 @@ const pairedSession = {
 const overviewPath = `/w/${snapshot.workspaceId}/overview`
 const previewPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}/preview`
 const fullPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}`
+const heldFullPath = `/w/${snapshot.workspaceId}/releases/${heldRelease.releaseId}`
 const agentPath = `${fullPath}/agent`
 const unknownReleaseId = "01890f6f-6d6a-7cc0-98d2-000000000098"
 
@@ -334,6 +337,18 @@ test("opens preview first, restores focus, then pushes the canonical full route"
   await page.keyboard.press("Escape")
   await expect(page).toHaveURL(overviewPath)
   await expect(previewButton).toBeFocused()
+})
+
+test("preserves a filtered overview origin through a preview verdict action", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention`
+  await page.goto(filteredOverviewPath)
+  const heldRow = page.locator(`[data-portfolio-release-id="${heldRelease.releaseId}"]`)
+  await heldRow.getByRole("button", { name: /^Preview /u }).click()
+
+  await page.getByRole("link", { name: "Repair missing links" }).click()
+  await expect(page).toHaveURL(`${heldFullPath}#release-work`)
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(filteredOverviewPath)
 })
 
 test("shows six Jira items as one release workset with PR and pipeline dimensions", async ({ page }) => {

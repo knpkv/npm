@@ -77,6 +77,7 @@ const ReleaseRouteLoading = ({ context }: { readonly context: WorkspaceReleaseOu
 
 export const ReleaseAction = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
+  const location = useLocation()
   const action = (() => {
     switch (release.readinessVerdict) {
       case "blocked":
@@ -106,7 +107,7 @@ export const ReleaseAction = ({ release }: { readonly release: PortfolioReleaseP
       Readiness evidence required
     </Button>
   ) : (
-    <Link className={styles.releaseAction} to={action.to}>
+    <Link className={styles.releaseAction} state={location.state} to={action.to}>
       {action.label}
     </Link>
   )

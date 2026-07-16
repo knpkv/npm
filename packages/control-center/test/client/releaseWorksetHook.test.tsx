@@ -36,6 +36,7 @@ const deferred = <Value,>() => {
 
 let mountedRoot: Root | undefined
 const observations: Array<ReleaseWorksetState> = []
+const ignoreSessionExpired = (): void => undefined
 
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
@@ -46,16 +47,18 @@ afterEach(async () => {
 
 const Harness = ({
   environmentIds = [],
+  onSessionExpired = ignoreSessionExpired,
   releaseId,
   sessionKey,
   transport
 }: {
   readonly environmentIds?: ReadonlyArray<EnvironmentId>
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly releaseId: ReleaseId
   readonly sessionKey: string
   readonly transport: ReleaseWorksetTransport
 }): ReactElement => {
-  const controller = useReleaseWorkset(releaseId, environmentIds, sessionKey, transport)
+  const controller = useReleaseWorkset(releaseId, environmentIds, sessionKey, onSessionExpired, transport)
   observations.push(controller.state)
   return (
     <span>{controller.state._tag === "ready" ? controller.state.inspection.releaseId : controller.state._tag}</span>
@@ -69,7 +72,13 @@ const SessionHarness = ({
   readonly state: BrowserSessionState
   readonly transport: ReleaseWorksetTransport
 }): ReactElement => {
-  const controller = useReleaseWorkset(WORKSET_RELEASE_ID, [], releaseWorksetSessionKey(state), transport)
+  const controller = useReleaseWorkset(
+    WORKSET_RELEASE_ID,
+    [],
+    releaseWorksetSessionKey(state),
+    ignoreSessionExpired,
+    transport
+  )
   return (
     <span>{controller.state._tag === "ready" ? controller.state.inspection.releaseId : controller.state._tag}</span>
   )
@@ -201,5 +210,104 @@ describe("useReleaseWorkset", () => {
     const ready = [...observations].reverse().find(({ _tag }) => _tag === "ready")
     expect(ready?._tag === "ready" ? ready.inspection.relationships : []).toContainEqual(environmentRelationship)
     expect(ready?._tag === "ready" ? ready.inspection.nodes.length : 0).toBe(releaseWorksetFixture.nodes.length)
+  })
+
+  it("invalidates only an unauthorized matching session", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      load: vi.fn(() => Promise.reject({ _tag: "UnauthorizedApiError" }))
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <Harness
+          onSessionExpired={onSessionExpired}
+          releaseId={WORKSET_RELEASE_ID}
+          sessionKey="expired-session"
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).toHaveBeenCalledOnce()
+    expect(onSessionExpired).toHaveBeenCalledWith("expired-session")
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("keeps non-authentication failures retryable without invalidating the session", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      load: vi.fn(() => Promise.reject({ _tag: "ServiceUnavailableApiError" }))
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <Harness
+          onSessionExpired={onSessionExpired}
+          releaseId={WORKSET_RELEASE_ID}
+          sessionKey="active-session"
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("bounds request fan-out while loading every target environment", async () => {
+    const environmentIds = Array.from({ length: 50 }, (_, index) =>
+      Schema.decodeSync(EnvironmentIdSchema)(`01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`)
+    )
+    let inFlight = 0
+    let peakInFlight = 0
+    let pending: Array<(inspection: ReleaseDeliveryGraphInspection) => void> = []
+    const transport = {
+      load: vi.fn(
+        (_releaseId: ReleaseId, _environmentId: EnvironmentId | null, _signal: AbortSignal) =>
+          new Promise<ReleaseDeliveryGraphInspection>((resolve) => {
+            inFlight += 1
+            peakInFlight = Math.max(peakInFlight, inFlight)
+            pending.push((inspection) => {
+              inFlight -= 1
+              resolve(inspection)
+            })
+          })
+      )
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <Harness
+          environmentIds={environmentIds}
+          releaseId={WORKSET_RELEASE_ID}
+          sessionKey="session-a"
+          transport={transport}
+        />
+      )
+    )
+    expect(transport.load).toHaveBeenCalledTimes(4)
+
+    while (transport.load.mock.calls.length < 51) {
+      const wave = pending
+      pending = []
+      await act(async () => wave.forEach((resolve) => resolve(releaseWorksetFixture)))
+    }
+    await act(async () => pending.forEach((resolve) => resolve(releaseWorksetFixture)))
+
+    expect(peakInFlight).toBe(4)
+    expect(transport.load).toHaveBeenCalledTimes(51)
+    expect(host.textContent).toBe(WORKSET_RELEASE_ID)
   })
 })

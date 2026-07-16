@@ -43,7 +43,12 @@ export const ReleaseWorkset = ({
   const browserSession = useBrowserSession()
   const location = useLocation()
   const sessionKey = releaseWorksetSessionKey(browserSession.state)
-  const controller = useReleaseWorkset(release.id, release.targetEnvironmentIds, sessionKey)
+  const controller = useReleaseWorkset(
+    release.id,
+    release.targetEnvironmentIds,
+    sessionKey,
+    browserSession.invalidateSession
+  )
   if (sessionKey === null || controller.state._tag === "idle" || controller.state._tag === "loading") {
     return <LoadingWorkset />
   }

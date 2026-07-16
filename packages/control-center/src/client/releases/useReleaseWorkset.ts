@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useState } from "react"
 
@@ -60,6 +61,41 @@ export interface ReleaseWorksetTransport {
   ) => Promise<ReleaseDeliveryGraphInspection>
 }
 
+export const MAXIMUM_RELEASE_WORKSET_REQUEST_CONCURRENCY = 4
+
+const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
+
+/** Load every release/environment slice without saturating browser or server connection pools. */
+export const loadReleaseWorksetInspections = async (
+  releaseId: ReleaseId,
+  environmentIds: ReadonlyArray<EnvironmentId>,
+  signal: AbortSignal,
+  transport: ReleaseWorksetTransport
+): Promise<ReadonlyArray<ReleaseDeliveryGraphInspection>> => {
+  const scopes: ReadonlyArray<EnvironmentId | null> = [null, ...environmentIds]
+  const completed: Array<{ readonly index: number; readonly inspection: ReleaseDeliveryGraphInspection }> = []
+  let nextIndex = 0
+  let isStopped = false
+  const loadNext = async (): Promise<void> => {
+    while (!isStopped && nextIndex < scopes.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const environmentId = scopes[index]
+      if (environmentId === undefined) return
+      try {
+        const inspection = await transport.load(releaseId, environmentId, signal)
+        completed.push({ index, inspection })
+      } catch (failure) {
+        isStopped = true
+        throw failure
+      }
+    }
+  }
+  const workerCount = Math.min(MAXIMUM_RELEASE_WORKSET_REQUEST_CONCURRENCY, scopes.length)
+  await Promise.all(Array.from({ length: workerCount }, () => loadNext()))
+  return completed.sort((left, right) => left.index - right.index).map(({ inspection }) => inspection)
+}
+
 export type ReleaseWorksetState =
   | { readonly _tag: "idle" }
   | {
@@ -102,6 +138,7 @@ export const useReleaseWorkset = (
   releaseId: ReleaseId,
   environmentIds: ReadonlyArray<EnvironmentId>,
   sessionKey: string | null,
+  onSessionExpired: (sessionKey: string) => void,
   transport: ReleaseWorksetTransport = browserReleaseWorksetTransport
 ): { readonly retry: () => void; readonly state: ReleaseWorksetState } => {
   const [requestRevision, setRequestRevision] = useState(0)
@@ -115,8 +152,7 @@ export const useReleaseWorkset = (
     }
     const abort = new AbortController()
     setState({ _tag: "loading", environmentScopeKey, releaseId, sessionKey })
-    const scopes: ReadonlyArray<EnvironmentId | null> = [null, ...environmentIds]
-    Promise.all(scopes.map((environmentId) => transport.load(releaseId, environmentId, abort.signal))).then(
+    loadReleaseWorksetInspections(releaseId, environmentIds, abort.signal, transport).then(
       (inspections) => {
         if (!abort.signal.aborted) {
           setState({
@@ -128,12 +164,15 @@ export const useReleaseWorkset = (
           })
         }
       },
-      () => {
-        if (!abort.signal.aborted) setState({ _tag: "failed", environmentScopeKey, releaseId, sessionKey })
+      (failure) => {
+        if (!abort.signal.aborted) {
+          if (isUnauthorizedFailure(failure)) onSessionExpired(sessionKey)
+          setState({ _tag: "failed", environmentScopeKey, releaseId, sessionKey })
+        }
       }
     )
     return () => abort.abort()
-  }, [environmentScopeKey, releaseId, requestRevision, sessionKey, transport])
+  }, [environmentScopeKey, onSessionExpired, releaseId, requestRevision, sessionKey, transport])
 
   const currentState: ReleaseWorksetState = sessionKey === null
     ? { _tag: "idle" }
