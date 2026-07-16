@@ -567,6 +567,105 @@ describe("live portfolio controller", () => {
       assert.strictEqual(closedStreams, 2)
     }))
 
+  it("resets reconnect backoff after acquiring a stream", () =>
+    Effect.gen(function*() {
+      let openings = 0
+      const reconnectAttempts: Array<number> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          openings += 1
+          if (openings === 1) return Effect.fail({ _tag: "TransportFailure" })
+          if (openings === 2) {
+            return Effect.succeed(
+              Stream.fromIterable<ControlCenterLiveEvent>([heartbeatEvent(10)]).pipe(
+                Stream.concat(Stream.fail({ _tag: "TransportFailure" }))
+              )
+            )
+          }
+          return Effect.succeed(Stream.never)
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => {
+          if (state._tag === "loaded" && state.connection._tag === "reconnecting") {
+            reconnectAttempts.push(state.connection.attempt)
+          }
+        },
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+
+      yield* TestClock.adjust(250)
+      assert.deepStrictEqual(reconnectAttempts, [1, 1])
+      yield* TestClock.adjust(250)
+      assert.strictEqual(openings, 3)
+      yield* Fiber.interrupt(fiber)
+    }))
+
+  it("keeps increasing backoff across consecutive stream acquisition failures", () =>
+    Effect.gen(function*() {
+      let openings = 0
+      const reconnectAttempts: Array<number> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          openings += 1
+          return openings <= 2
+            ? Effect.fail({ _tag: "TransportFailure" })
+            : Effect.succeed(Stream.never)
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => {
+          if (state._tag === "loaded" && state.connection._tag === "reconnecting") {
+            reconnectAttempts.push(state.connection.attempt)
+          }
+        },
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+
+      yield* TestClock.adjust(250)
+      assert.deepStrictEqual(reconnectAttempts, [1, 2])
+      yield* Fiber.interrupt(fiber)
+    }))
+
+  it("keeps increasing backoff when acquired streams fail before a valid event", () =>
+    Effect.gen(function*() {
+      let openings = 0
+      const reconnectAttempts: Array<number> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          openings += 1
+          return openings === 1
+            ? Effect.fail({ _tag: "TransportFailure" })
+            : Effect.succeed(Stream.fail({ _tag: "TransportFailure" }))
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => {
+          if (state._tag === "loaded" && state.connection._tag === "reconnecting") {
+            reconnectAttempts.push(state.connection.attempt)
+          }
+        },
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+
+      yield* TestClock.adjust(250)
+      yield* TestClock.adjust(500)
+      assert.deepStrictEqual(reconnectAttempts, [1, 2, 3])
+      yield* Fiber.interrupt(fiber)
+    }))
+
   it("keeps one reconnect span across repeated transient failures", () =>
     Effect.gen(function*() {
       let activeReconnectSpans = 0
