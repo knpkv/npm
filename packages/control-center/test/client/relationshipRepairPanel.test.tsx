@@ -54,6 +54,9 @@ const proposal = Schema.decodeUnknownSync(RelationshipRepairProposal)({
   review: null
 })
 
+const reviewIdA = Schema.decodeSync(RelationshipRepairReviewId)("01890f6f-6d6a-7cc0-98d2-000000000083")
+const reviewIdB = Schema.decodeSync(RelationshipRepairReviewId)("01890f6f-6d6a-7cc0-98d2-000000000085")
+
 const session = Schema.decodeUnknownSync(SessionSummary)({
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000092",
   workspaceId: snapshot.workspaceId,
@@ -295,6 +298,7 @@ describe("RelationshipRepairPanel", () => {
         const next = pages.shift()
         return next ?? Promise.reject(new Error("Unexpected list request"))
       }),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
       review: vi.fn(() => Promise.resolve(proposal))
     } satisfies RelationshipRepairTransport
     const host = document.createElement("div")
@@ -357,5 +361,47 @@ describe("RelationshipRepairPanel", () => {
   it("generates canonical browser review identifiers", () => {
     const reviewId = Effect.runSync(makeRelationshipRepairReviewId.pipe(Effect.provide(BrowserCrypto.layer)))
     expect(Schema.is(RelationshipRepairReviewId)(reviewId)).toBe(true)
+  })
+
+  it("reuses a review identifier after a lost response and rotates it for a fresh review", async () => {
+    const reviewCalls: Array<RelationshipRepairReviewId> = []
+    let reviewAttempt = 0
+    const initialState = readyState()
+    if (initialState._tag !== "ready") throw new Error("Expected ready state")
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.resolve(initialState.page)),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewAttempt < 2 ? reviewIdA : reviewIdB)),
+      review: vi.fn((_proposalId: RelationshipRepairProposalId, reviewId: RelationshipRepairReviewId) => {
+        reviewCalls.push(reviewId)
+        reviewAttempt += 1
+        return reviewAttempt === 1 ? Promise.reject(new Error("Response lost after commit")) : Promise.resolve(proposal)
+      })
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ControllerHarness releaseId={release.id} transport={transport} />))
+    await act(async () => Promise.resolve())
+    if (currentController === undefined) throw new Error("Expected repair controller")
+
+    let firstResult: boolean | undefined
+    await act(async () => {
+      firstResult = await currentController?.review(proposal.proposalId, "approved", "Same durable intent")
+    })
+    expect(firstResult).toBe(false)
+
+    let retryResult: boolean | undefined
+    await act(async () => {
+      retryResult = await currentController?.review(proposal.proposalId, "approved", "Same durable intent")
+    })
+    expect(retryResult).toBe(true)
+
+    await act(async () => {
+      await currentController?.review(proposal.proposalId, "rejected", "A fresh decision")
+    })
+    expect(reviewCalls).toEqual([reviewIdA, reviewIdA, reviewIdB])
+    expect(transport.makeReviewId).toHaveBeenCalledTimes(2)
   })
 })

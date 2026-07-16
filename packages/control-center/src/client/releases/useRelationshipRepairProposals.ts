@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { RelationshipRepairProposalList } from "../../api/deliveryGraph.js"
-import type { RelationshipRepairProposalId, ReleaseId } from "../../domain/identifiers.js"
+import type { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../domain/identifiers.js"
 import type {
   RelationshipRepairApplication,
   RelationshipRepairReviewDecision
@@ -33,6 +33,12 @@ export interface RelationshipRepairProposalController {
   readonly state: RelationshipRepairPanelState
 }
 
+interface PendingReviewIntent {
+  readonly decision: RelationshipRepairReviewDecision
+  readonly rationale: string
+  readonly reviewId: RelationshipRepairReviewId
+}
+
 /** Keep one release's proposal ledger current after explicit review and apply actions. */
 export const useRelationshipRepairProposals = (
   releaseId: ReleaseId,
@@ -43,12 +49,14 @@ export const useRelationshipRepairProposals = (
   const [state, setState] = useState<RelationshipRepairPanelState>({ _tag: "idle" })
   const actionAbort = useRef<AbortController | null>(null)
   const busyProposal = useRef<RelationshipRepairProposalId | null>(null)
+  const pendingReviews = useRef(new Map<RelationshipRepairProposalId, PendingReviewIntent>())
   const stateRef = useRef(state)
 
   useEffect(() => {
     actionAbort.current?.abort()
     actionAbort.current = null
     busyProposal.current = null
+    pendingReviews.current.clear()
     if (sessionKey === null) {
       setState({ _tag: "idle" })
       return
@@ -113,8 +121,14 @@ export const useRelationshipRepairProposals = (
     const abort = beginAction(proposalId)
     if (abort === null) return false
     try {
-      const proposal = await transport.review(proposalId, decision, rationale, abort.signal)
+      const pending = pendingReviews.current.get(proposalId)
+      const intent = pending?.decision === decision && pending.rationale === rationale
+        ? pending
+        : { decision, rationale, reviewId: await transport.makeReviewId() }
+      pendingReviews.current.set(proposalId, intent)
+      const proposal = await transport.review(proposalId, intent.reviewId, decision, rationale, abort.signal)
       if (!finishAction(abort) || abort.signal.aborted) return false
+      pendingReviews.current.delete(proposalId)
       setState((current) =>
         current._tag !== "ready" || abort.signal.aborted
           ? current

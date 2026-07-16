@@ -12,8 +12,8 @@ import type {
   RelationshipRepairProposalList
 } from "../../api/deliveryGraph.js"
 import { CsrfToken } from "../../api/session.js"
-import type { RelationshipRepairProposalId, ReleaseId } from "../../domain/identifiers.js"
-import { RelationshipRepairReviewId } from "../../domain/identifiers.js"
+import type { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../domain/identifiers.js"
+import { RelationshipRepairReviewId as RelationshipRepairReviewIdSchema } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal, RelationshipRepairReviewDecision } from "../../domain/relationshipRepair.js"
 
 class MutationProofUnavailable {
@@ -46,7 +46,7 @@ const makeMutationClient = Effect.gen(function*() {
 export const makeRelationshipRepairReviewId = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const uuid = yield* cryptoService.randomUUIDv7
-  return yield* Schema.decodeUnknownEffect(RelationshipRepairReviewId)(uuid)
+  return yield* Schema.decodeUnknownEffect(RelationshipRepairReviewIdSchema)(uuid)
 })
 
 export interface RelationshipRepairTransport {
@@ -55,8 +55,10 @@ export interface RelationshipRepairTransport {
     signal: AbortSignal
   ) => Promise<ApplyRelationshipRepairProposalResponse>
   readonly list: (releaseId: ReleaseId, signal: AbortSignal) => Promise<RelationshipRepairProposalList>
+  readonly makeReviewId: () => Promise<RelationshipRepairReviewId>
   readonly review: (
     proposalId: RelationshipRepairProposalId,
+    reviewId: RelationshipRepairReviewId,
     decision: RelationshipRepairReviewDecision,
     rationale: string,
     signal: AbortSignal
@@ -81,19 +83,20 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  review: (proposalId, decision, rationale, signal) =>
+  makeReviewId: () => Effect.runPromise(makeRelationshipRepairReviewId.pipe(Effect.provide(BrowserCrypto.layer))),
+  review: (proposalId, reviewId, decision, rationale, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeMutationClient
         return yield* client.deliveryGraph.reviewRepairProposal({
           params: { proposalId },
           payload: {
-            reviewId: yield* makeRelationshipRepairReviewId,
+            reviewId,
             decision,
             rationale
           }
         })
-      }).pipe(Effect.provide([BrowserCrypto.layer, FetchHttpClient.layer])),
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     )
 }
