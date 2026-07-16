@@ -1511,6 +1511,204 @@ describe("governed action reconciliation outcomes", () => {
       })))
   }
 
+  for (const fixture of cases) {
+    it.effect(`folds ${fixture.name} after cancellation without losing cancellation intent`, () =>
+      withBegin(Effect.gen(function*() {
+        const recovery = yield* claimStartedRecovery()
+        const cancellationAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -2 })
+        yield* TestClock.setTime(DateTime.toEpochMillis(cancellationAt))
+        yield* requestCancellation(cancellationAt)
+        const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+        yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+        const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+        const state = yield* recorder.recordReconciliation({
+          recoveryToken: recovery.recoveryToken,
+          result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)(
+            fixture.makeInput(DateTime.formatIso(receivedAt))
+          ),
+          observedAt: receivedAt
+        })
+
+        assert.strictEqual(
+          state,
+          fixture.name === "pending" ? "cancel-requested" : fixture.expectedState
+        )
+        const { sql } = yield* Database
+        const counts = yield* sql<{
+          readonly cancellationTransitions: number
+          readonly folds: number
+          readonly outcomes: number
+        }>`SELECT
+          (SELECT COUNT(*) FROM governed_action_transitions
+            WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+          (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+          (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+        assert.deepStrictEqual(counts[0], { cancellationTransitions: 1, folds: 1, outcomes: 1 })
+      })))
+
+    it.effect(`handles cancellation requested after a ${fixture.name} reconciliation result`, () =>
+      withBegin(Effect.gen(function*() {
+        const recovery = yield* claimStartedRecovery()
+        const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+        yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+        const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+        assert.strictEqual(
+          yield* recorder.recordReconciliation({
+            recoveryToken: recovery.recoveryToken,
+            result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)(
+              fixture.makeInput(DateTime.formatIso(receivedAt))
+            ),
+            observedAt: receivedAt
+          }),
+          fixture.expectedState
+        )
+
+        const cancellation = yield* requestCancellation(receivedAt).pipe(Effect.result)
+        if (fixture.name === "pending") {
+          assert.isTrue(Result.isSuccess(cancellation))
+        } else {
+          assert.isTrue(Result.isFailure(cancellation))
+          if (Result.isFailure(cancellation)) {
+            assert.strictEqual(cancellation.failure._tag, "GovernedActionInputError")
+            if (cancellation.failure._tag === "GovernedActionInputError") {
+              assert.strictEqual(cancellation.failure.reason, "illegal-transition")
+            }
+          }
+        }
+        const actions = yield* GovernedActionRepository
+        assert.strictEqual(
+          (yield* actions.read({ workspaceId: WORKSPACE, actionId: ACTION })).head.state,
+          fixture.name === "pending" ? "cancel-requested" : fixture.expectedState
+        )
+        const { sql } = yield* Database
+        const counts = yield* sql<{
+          readonly cancellationTransitions: number
+          readonly folds: number
+          readonly outcomes: number
+        }>`SELECT
+          (SELECT COUNT(*) FROM governed_action_transitions
+            WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+          (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+          (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+        assert.deepStrictEqual(counts[0], {
+          cancellationTransitions: fixture.name === "pending" ? 1 : 0,
+          folds: 1,
+          outcomes: 1
+        })
+      })))
+  }
+
+  it.effect("serializes concurrent cancellation and terminal reconciliation", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const result = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+        _tag: "succeeded",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: "concurrent-cancellation-reconciliation",
+          safeSummary: "Provider completion raced with cancellation",
+          observedAt: DateTime.formatIso(receivedAt)
+        }
+      })
+      const [, reconciliation] = yield* Effect.all([
+        requestCancellation(receivedAt).pipe(Effect.result),
+        recorder.recordReconciliation({
+          recoveryToken: recovery.recoveryToken,
+          result,
+          observedAt: receivedAt
+        }).pipe(Effect.result)
+      ], { concurrency: "unbounded" })
+
+      assert.isTrue(Result.isSuccess(reconciliation))
+      if (Result.isSuccess(reconciliation)) assert.strictEqual(reconciliation.success, "succeeded")
+      const actions = yield* GovernedActionRepository
+      assert.strictEqual(
+        (yield* actions.read({ workspaceId: WORKSPACE, actionId: ACTION })).head.state,
+        "succeeded"
+      )
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly cancellationTransitions: number
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_transitions
+          WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.include([0, 1], counts[0]?.cancellationTransitions)
+      assert.strictEqual(counts[0]?.folds, 1)
+      assert.strictEqual(counts[0]?.outcomes, 1)
+    })))
+
+  it.effect("preserves cancellation when runtime recovery becomes unavailable", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const cancellationAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -2 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(cancellationAt))
+      yield* requestCancellation(cancellationAt)
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
+
+      assert.strictEqual(
+        yield* recorder.recordRecoveryUnavailable({
+          recoveryToken: recovery.recoveryToken,
+          observedAt,
+          reason: "runtime-generation-unavailable"
+        }),
+        "cancel-requested"
+      )
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly cancellationTransitions: number
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_transitions
+          WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(counts[0], { cancellationTransitions: 1, folds: 1, outcomes: 1 })
+    })))
+
+  it.effect("allows cancellation after runtime recovery becomes unavailable", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
+
+      assert.strictEqual(
+        yield* recorder.recordRecoveryUnavailable({
+          recoveryToken: recovery.recoveryToken,
+          observedAt,
+          reason: "runtime-generation-unavailable"
+        }),
+        "started"
+      )
+      yield* requestCancellation(observedAt)
+      const actions = yield* GovernedActionRepository
+      assert.strictEqual(
+        (yield* actions.read({ workspaceId: WORKSPACE, actionId: ACTION })).head.state,
+        "cancel-requested"
+      )
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly cancellationTransitions: number
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_transitions
+          WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(counts[0], { cancellationTransitions: 1, folds: 1, outcomes: 1 })
+    })))
+
   it.effect("persists runtime-generation unavailability exactly and rejects a changed observation replay", () =>
     withBegin(Effect.gen(function*() {
       const recovery = yield* claimStartedRecovery()
@@ -1685,6 +1883,61 @@ describe("governed action reconciliation outcomes", () => {
       const outcomes = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
         FROM governed_action_provider_outcomes`
       assert.strictEqual(outcomes[0]?.count, 0)
+    })))
+
+  it.effect("folds a persisted terminal outcome after cancellation crosses the fold boundary", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const observedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const { sql } = yield* Database
+      yield* sql`CREATE TRIGGER governed_action_test_fail_cancel_race_fold
+        BEFORE INSERT ON governed_action_provider_outcome_folds
+        BEGIN
+          SELECT RAISE(ABORT, 'injected cancellation race fold failure');
+        END`
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const failed = yield* recorder.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        observedAt,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "succeeded",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "reconciliation-cancel-fold-boundary",
+            safeSummary: "Provider completion persisted before cancellation",
+            observedAt: DateTime.formatIso(observedAt)
+          }
+        })
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failed))
+      if (Result.isFailure(failed)) assert.strictEqual(failed.failure.reason, "persistence-unavailable")
+      const stranded = yield* sql<{
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(stranded[0], { folds: 0, outcomes: 1 })
+
+      yield* sql`DROP TRIGGER governed_action_test_fail_cancel_race_fold`
+      yield* requestCancellation(observedAt)
+      const inspect = yield* makeGovernedActionExecutionInspect
+      assert.deepStrictEqual(yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION }), {
+        _tag: "inactive",
+        state: "succeeded"
+      })
+      const recovered = yield* sql<{
+        readonly cancellationTransitions: number
+        readonly folds: number
+        readonly outcomes: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_transitions
+          WHERE command_tag = 'requestCancellation') AS cancellationTransitions,
+        (SELECT COUNT(*) FROM governed_action_provider_outcome_folds) AS folds,
+        (SELECT COUNT(*) FROM governed_action_provider_outcomes) AS outcomes`
+      assert.deepStrictEqual(recovered[0], { cancellationTransitions: 1, folds: 1, outcomes: 1 })
     })))
 
   it.effect("folds a crash-stranded reconciliation result from persisted data after restart", () =>
