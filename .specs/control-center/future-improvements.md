@@ -32,8 +32,8 @@ complete.
 - Referenced evidence items and claims are digest-checked, workspace-scoped, freshness-checked,
   and rejected after a referenced claim is superseded. Claim reads are batched.
 - The checkpoint passes repository formatting, linting, static Effect checks, builds, package
-  checks, and packing validation. The complete Control Center suite passes on Node 24 with 97 test
-  files and 913 tests; PR-wide verification remains authoritative for the integrated workspace.
+  checks, packing validation, browser tests, and exact-head automated review; PR-wide Node 24
+  verification remains authoritative for the integrated workspace.
 - R01–R16 are delivered as the publishable `@knpkv/rly` design system: generated contracts and
   tokens, light/dark themes, accessible primitives and overlays, release/relationship/people/agent
   patterns, the complete diff workbench, Storybook, visual checks, packed-consumer validation, and
@@ -49,10 +49,11 @@ complete.
 ## Critical unfinished work
 
 1. **Complete the begin/recovery failure matrix.** The real-database happy path, one-use replay,
-   reconciliation deadline, changed recovery replay, and reconciliation restart fold are covered.
-   Still add concurrent duplicate begin, lease-write rollback,
-   runtime rotation, expired preparation/authorization/session, stale preflight, missing
-   `action.reconcile`, and the full cancellation-versus-reconciliation race matrix.
+   concurrent duplicate begin, lease-write rollback, runtime rotation, reconciliation deadline,
+   changed recovery replay, and reconciliation restart fold are covered. Still add expired
+   preparation/session boundaries, stale preflight, missing `action.reconcile`, and the full
+   cancellation-versus-reconciliation race matrix. Authorization expiry already has an atomic
+   consumption regression.
    Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
    stay disabled.
 
@@ -101,23 +102,13 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   dispatch, unknown, recovery claims, and reconciliation. Split the shared fixture and outcome
   matrices into focused files after D03 is wired; keeping one database harness avoided duplicating
   security-sensitive setup during this checkpoint.
-- The private startup smoke test proves the public server discards execution authority and that the
-  internal worker reaches the live store. It does not yet drive a seeded authorized action through
-  the lazy runtime registry and fake provider; add that full composition fixture before enabling a
-  production registry.
-- PR #126 is open from `feature/control-center` and currently marked ready for review. Keep real
-  provider mutations disabled while the critical D03 work above remains unfinished.
-
-## Local-only worktree state
-
-`scratchpad/package.json` and its matching `pnpm-lock.yaml` importer changes are a local CLI smoke
-harness and remain intentionally outside the PR. The product packages include their own committed
-tests, documentation, and changesets. Generated Control Center data-root symlinks and SQLite files
-are ignored by the package-local `.gitignore`.
+- The private startup smoke executes an authorized fake-provider action while proving that the
+  public server discards execution authority. A production runtime registry remains intentionally
+  disabled until the remaining D03 failure matrix is complete.
 
 ## Recommended next session
 
-Close the highest-value begin/recovery failure cases, starting with concurrent duplicate begin,
-lease-write rollback, and runtime rotation. Run an independent exact-commit review after each
-commit; turn every review finding into a regression test, static rule, or repository instruction
-before proceeding.
+Close the next begin/recovery failure cases: expired preparation/session boundaries, stale
+preflight, missing `action.reconcile`, then the cancellation-versus-reconciliation race matrix.
+Run one independent exact-commit review after the deterministic milestone gate; turn recurring,
+high-impact, mechanically enforceable findings into static rules or repository instructions.
