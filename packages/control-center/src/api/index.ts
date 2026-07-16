@@ -23,6 +23,7 @@ export {
   RelationshipHistoryInspection,
   RelationshipRepairCandidate,
   RelationshipRepairCandidates,
+  RelationshipRepairProposalDraft,
   ReleaseDeliveryGraphInspection
 } from "./deliveryGraph.js"
 export {

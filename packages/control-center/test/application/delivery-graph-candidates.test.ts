@@ -2,8 +2,13 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 
 import { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import type { DeliveryRelationship } from "../../src/domain/deliveryGraph.js"
-import { deriveRelationshipRepairCandidates } from "../../src/server/application/deliveryGraphInspection.js"
+import { EnvironmentId } from "../../src/domain/identifiers.js"
+import {
+  deriveRelationshipRepairCandidates,
+  deriveRelationshipRepairProposalDraft
+} from "../../src/server/application/deliveryGraphInspection.js"
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-410000000001"
 const releaseId = "01890f6f-6d6a-7cc0-98d2-410000000002"
@@ -87,6 +92,35 @@ describe("relationship repair candidates", () => {
         { disposition: "link", explanation: "No pull request is linked.", permission: "workspace-owner" },
         { disposition: "verify", explanation: "The issue key matches.", permission: "workspace-owner" }
       ]
+    )
+
+    const candidate = result.candidates[0]
+    assert.isDefined(candidate)
+    const draft = deriveRelationshipRepairProposalDraft(
+      candidate,
+      candidate.relationship.revision
+    )
+    assert.deepStrictEqual(draft, {
+      candidate,
+      precondition: {
+        relationshipId: candidate.relationship.relationshipId,
+        expectedRevision: candidate.relationship.revision
+      },
+      proposal: {
+        disposition: "link",
+        rationale: "No pull request is linked."
+      }
+    })
+    assert.isUndefined(deriveRelationshipRepairProposalDraft(
+      candidate,
+      Schema.decodeSync(LedgerRevision)(2)
+    ))
+    assert.deepStrictEqual(
+      deriveRelationshipRepairCandidates({
+        ...slice,
+        environmentId: Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-410000000003")
+      }).candidates,
+      []
     )
   })
 })

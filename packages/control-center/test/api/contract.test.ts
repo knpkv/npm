@@ -19,6 +19,7 @@ import {
   SessionId,
   SessionMutationAuth
 } from "../../src/api/index.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import { EvidenceId, PluginConnectionId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
@@ -119,6 +120,11 @@ describe("ControlCenterApi contract", () => {
       [
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
         ["repairCandidates", "GET", "/api/v1/relationships/releases/:releaseId/repair-candidates"],
+        [
+          "repairProposalDraft",
+          "GET",
+          "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposal-draft"
+        ],
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
@@ -166,6 +172,7 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
       releaseSlice: [SessionCookieAuth.key],
       repairCandidates: [SessionCookieAuth.key],
+      repairProposalDraft: [SessionCookieAuth.key],
       relationship: [SessionCookieAuth.key],
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
@@ -194,6 +201,7 @@ describe("ControlCenterApi contract", () => {
     const mediaId = Schema.decodeSync(OpaqueMediaId)(`media_${"ab".repeat(32)}`)
     const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000093")
     const relationshipId = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000094")
+    const revision = Schema.decodeSync(LedgerRevision)(1)
     const evidenceId = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-000000000095")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
 
@@ -221,6 +229,13 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.deliveryGraph.repairCandidates({ params: { releaseId }, query: {} }),
       "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.repairProposalDraft({
+        params: { releaseId, relationshipId },
+        query: { revision }
+      }),
+      "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates/01890f6f-6d6a-7cc0-98d2-000000000094/proposal-draft?revision=1"
     )
     assert.strictEqual(
       urls.deliveryGraph.evidence({ params: { evidenceId } }),

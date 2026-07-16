@@ -9,6 +9,7 @@ import type {
   EvidenceInspection,
   RelationshipHistoryInspection,
   RelationshipRepairCandidates,
+  RelationshipRepairProposalDraft,
   ReleaseDeliveryGraphInspection
 } from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
@@ -126,6 +127,16 @@ export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspec
     readonly environmentId: EnvironmentId | null
   }) => Effect.Effect<
     RelationshipRepairCandidates,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly repairProposalDraft: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly environmentId: EnvironmentId | null
+    readonly relationshipId: RelationshipId
+    readonly revision: LedgerRevision
+  }) => Effect.Effect<
+    RelationshipRepairProposalDraft,
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
   readonly relationship: (input: {

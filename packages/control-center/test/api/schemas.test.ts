@@ -14,6 +14,7 @@ import {
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
+  RelationshipRepairProposalDraft,
   ReleaseAgentTurnRequest,
   ReleaseAgentTurnResponse,
   SessionListResponse
@@ -56,6 +57,54 @@ const encodedPlugin = {
 }
 
 describe("public API schemas", () => {
+  it("exports and decodes relationship repair proposal drafts", () => {
+    const relationshipId = "01890f6f-6d6a-7cc0-98d2-000000000061"
+    const candidate = {
+      relationship: {
+        workspaceId,
+        relationshipId,
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind: "implements",
+        sourceNodeId: "01890f6f-6d6a-7cc0-98d2-000000000062",
+        sourceNodeKind: "pull-request",
+        targetNodeId: "01890f6f-6d6a-7cc0-98d2-000000000063",
+        targetNodeKind: "issue",
+        scope: { _tag: "release", releaseId },
+        lifecycle: { _tag: "missing", effectiveAt: timestamp, reason: "No pull request is linked." },
+        confidence: { _tag: "unknown", rationale: "No provider relationship was observed." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "missing-pr-check",
+          ruleVersion: 1,
+          rationale: "Every release issue must have a pull request."
+        },
+        recordedBy: { _tag: "system", component: "schema-test" },
+        evidenceClaimIds: [],
+        recordedAt: timestamp
+      },
+      suggestedDisposition: "link",
+      explanation: "No pull request is linked.",
+      impact: { releaseId, environmentId: null },
+      requiredPermission: "workspace-owner"
+    }
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(RelationshipRepairProposalDraft)({
+        candidate,
+        precondition: { relationshipId, expectedRevision: 1 },
+        proposal: { disposition: "link", rationale: "No pull request is linked." }
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(RelationshipRepairProposalDraft)({
+        candidate,
+        precondition: { relationshipId, expectedRevision: 0 },
+        proposal: { disposition: "link", rationale: "No pull request is linked." }
+      })
+    ))
+  })
+
   it("accepts only fixed-size lowercase pairing credentials", () => {
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PairingCode)("ab".repeat(32))))
     assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(PairingCode)("AB".repeat(32))))

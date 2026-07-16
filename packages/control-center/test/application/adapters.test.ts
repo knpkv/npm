@@ -6,10 +6,12 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { OpaqueMediaId, OpaqueSecretReference, PluginConfigurationKey } from "../../src/api/index.js"
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   EnvironmentId,
   PersonId,
   PluginConnectionId,
+  RelationshipId,
   ReleaseId,
   RoleAssignmentId,
   WorkspaceId
@@ -42,6 +44,9 @@ const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2
 const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000074")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
+const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
+const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000078")
+const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
 const SNAPSHOT_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:10:00.000Z")
 
@@ -221,6 +226,18 @@ describe("application adapters", () => {
         candidates: []
       })
 
+      const missingDraft = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missingDraft))
+      if (Result.isFailure(missingDraft)) {
+        assert.instanceOf(missingDraft.failure, ApplicationResourceNotFound)
+      }
+
       const crossWorkspace = yield* inspection.releaseSlice({
         workspaceId: OTHER_WORKSPACE_ID,
         releaseId: RELEASE_ID,
@@ -230,6 +247,220 @@ describe("application adapters", () => {
       if (Result.isFailure(crossWorkspace)) {
         assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
       }
+    })))
+
+  it.effect("drafts only the exact current repair head within its workspace and release scope", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      yield* persistence.releases.create(
+        WORKSPACE_ID,
+        Schema.decodeSync(Release)({
+          ...Schema.encodeSync(Release)(release),
+          id: OTHER_RELEASE_ID,
+          relay: deriveReleaseRelay(OTHER_RELEASE_ID),
+          version: "2.19.0-rc.1"
+        })
+      )
+      const releaseNodeId = "01890f6f-6d6a-7cc0-98d2-600000000001"
+      const issueNodeId = "01890f6f-6d6a-7cc0-98d2-600000000002"
+      const firstRevision = {
+        workspaceId: WORKSPACE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind: "contains",
+        sourceNodeId: releaseNodeId,
+        sourceNodeKind: "release",
+        targetNodeId: issueNodeId,
+        targetNodeKind: "issue",
+        scope: { _tag: "release", releaseId: RELEASE_ID },
+        lifecycle: {
+          _tag: "missing",
+          effectiveAt: "2026-07-14T10:00:00.000Z",
+          reason: "The release issue is not linked."
+        },
+        confidence: { _tag: "unknown", rationale: "No source relationship was observed." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "missing-release-issue",
+          ruleVersion: 1,
+          rationale: "Every release issue must be linked."
+        },
+        recordedBy: { _tag: "system", component: "candidate-test" },
+        evidenceClaimIds: [],
+        recordedAt: "2026-07-14T10:00:00.000Z"
+      }
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [
+          {
+            workspaceId: WORKSPACE_ID,
+            nodeId: releaseNodeId,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: RELEASE_ID } },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          },
+          {
+            workspaceId: WORKSPACE_ID,
+            nodeId: issueNodeId,
+            endpointKind: "issue",
+            resolution: {
+              _tag: "missing",
+              expectedKind: "entity",
+              expectedEntityKind: "issue",
+              missingKey: "release:missing-issue"
+            },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          }
+        ],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [firstRevision]
+      })
+
+      const fillerNodes = Array.from({ length: 500 }, (_, index) => ({
+        workspaceId: WORKSPACE_ID,
+        nodeId: `01890f6f-6d6a-7cc0-98d2-${String(610_000_000_000 + index).padStart(12, "0")}`,
+        endpointKind: "issue",
+        resolution: {
+          _tag: "missing",
+          expectedKind: "entity",
+          expectedEntityKind: "issue",
+          missingKey: `release:filler-issue:${index}`
+        },
+        createdAt: "2026-07-14T10:00:30.000Z"
+      }))
+      const fillerRelationships = fillerNodes.map((node, index) => ({
+        workspaceId: WORKSPACE_ID,
+        relationshipId: `01890f6f-6d6a-7cc0-98d2-${String(510_000_000_000 + index).padStart(12, "0")}`,
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind: "contains",
+        sourceNodeId: releaseNodeId,
+        sourceNodeKind: "release",
+        targetNodeId: node.nodeId,
+        targetNodeKind: "issue",
+        scope: { _tag: "release", releaseId: RELEASE_ID },
+        lifecycle: { _tag: "governed", effectiveAt: "2026-07-14T10:00:30.000Z" },
+        confidence: { _tag: "unknown", rationale: "This filler does not carry evidence." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "release-filler",
+          ruleVersion: 1,
+          rationale: "A newer unrelated release relationship."
+        },
+        recordedBy: { _tag: "system", component: "candidate-test" },
+        evidenceClaimIds: [],
+        recordedAt: "2026-07-14T10:00:30.000Z"
+      }))
+      yield* Effect.forEach(
+        Array.from({ length: 5 }, (_, index) => fillerNodes.slice(index * 100, (index + 1) * 100)),
+        (nodes) =>
+          persistence.deliveryGraph.write(WORKSPACE_ID, {
+            entityProjections: [],
+            nodes,
+            evidenceItems: [],
+            evidenceClaims: [],
+            relationships: []
+          }),
+        { discard: true }
+      )
+      yield* Effect.forEach(
+        Array.from({ length: 5 }, (_, index) => fillerRelationships.slice(index * 100, (index + 1) * 100)),
+        (relationships) =>
+          persistence.deliveryGraph.write(WORKSPACE_ID, {
+            entityProjections: [],
+            nodes: [],
+            evidenceItems: [],
+            evidenceClaims: [],
+            relationships
+          }),
+        { discard: true }
+      )
+
+      const inspection = yield* makeDeliveryGraphInspection
+      const boundedCandidates = yield* inspection.repairCandidates({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null
+      })
+      assert.isTrue(boundedCandidates.truncated)
+      assert.isFalse(
+        boundedCandidates.candidates.some(({ relationship }) => relationship.relationshipId === RELATIONSHIP_ID)
+      )
+      const revisionOneDraft = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      })
+      assert.strictEqual(revisionOneDraft.precondition.expectedRevision, RELATIONSHIP_REVISION)
+
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [{
+          ...firstRevision,
+          revision: 2,
+          supersedesRevision: 1,
+          lifecycle: { _tag: "proposed", effectiveAt: "2026-07-14T10:01:00.000Z" },
+          recordedAt: "2026-07-14T10:01:00.000Z"
+        }]
+      })
+      const historyBefore = yield* inspection.relationshipHistory({
+        workspaceId: WORKSPACE_ID,
+        relationshipId: RELATIONSHIP_ID
+      })
+      const stale = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      }).pipe(Effect.result)
+      const wrongEnvironment = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: ENVIRONMENT_ID,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      }).pipe(Effect.result)
+      const crossWorkspace = yield* inspection.repairProposalDraft({
+        workspaceId: OTHER_WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      }).pipe(Effect.result)
+      const wrongRelease = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: OTHER_RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      }).pipe(Effect.result)
+      for (const result of [stale, wrongEnvironment, crossWorkspace, wrongRelease]) {
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationResourceNotFound)
+      }
+      const current = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      })
+      assert.strictEqual(current.precondition.expectedRevision, 2)
+      assert.deepStrictEqual(
+        yield* inspection.relationshipHistory({ workspaceId: WORKSPACE_ID, relationshipId: RELATIONSHIP_ID }),
+        historyBefore
+      )
     })))
 
   it.effect("projects plugin facts, validates descriptor fields, redacts secrets, and preserves CAS", () =>

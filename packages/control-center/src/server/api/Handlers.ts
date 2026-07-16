@@ -254,6 +254,20 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("repairProposalDraft", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* inspection.repairProposalDraft({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              environmentId: query.environmentId ?? null,
+              relationshipId: params.relationshipId,
+              revision: query.revision
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("relationship", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

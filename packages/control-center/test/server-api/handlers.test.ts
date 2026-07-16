@@ -100,6 +100,7 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
     requestedWorkspaceId === session.workspaceId && releaseId === inspectedReleaseId
       ? Effect.succeed({ releaseId, environmentId, truncated: false, candidates: [] })
       : Effect.die("repair candidate handler crossed its workspace or release boundary"),
+  repairProposalDraft: () => Effect.die("not used"),
   relationship: () => Effect.die("not used"),
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
