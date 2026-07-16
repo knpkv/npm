@@ -46,7 +46,15 @@ const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
 export class RelationshipRepairProposalInputError extends Schema.TaggedErrorClass<
   RelationshipRepairProposalInputError
 >()("RelationshipRepairProposalInputError", {
-  operation: Schema.Literals(["application", "create", "get", "list", "record-application", "review"])
+  operation: Schema.Literals([
+    "application",
+    "create",
+    "get",
+    "list",
+    "list-applications",
+    "record-application",
+    "review"
+  ])
 }) {}
 
 /** Caller intent for one durable pending relationship-repair proposal. */
@@ -79,6 +87,9 @@ export const ListRelationshipRepairProposalsInput = Schema.Struct({
   environmentId: Schema.NullOr(EnvironmentId),
   status: Schema.NullOr(RelationshipRepairProposal.fields.status)
 })
+
+/** Bounded release/environment application query matching the proposal page. */
+export const ListRelationshipRepairApplicationsInput = ListRelationshipRepairProposalsInput
 
 /** Idempotent reviewer decision over one pending proposal. */
 export const ReviewRelationshipRepairProposalInput = Schema.Struct({
@@ -393,7 +404,14 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
   })
 
   const decodeInput = <Decoded, Encoded>(
-    operation: "application" | "create" | "get" | "list" | "record-application" | "review",
+    operation:
+      | "application"
+      | "create"
+      | "get"
+      | "list"
+      | "list-applications"
+      | "record-application"
+      | "review",
     schema: Schema.Codec<Decoded, Encoded>,
     input: unknown
   ) =>
@@ -533,6 +551,55 @@ const makeRelationshipRepairProposalRepository = Effect.gen(function*() {
         { concurrency: 1 }
       )
       return { proposals, truncated: rows.length > MAXIMUM_PROPOSAL_PAGE_SIZE }
+    }),
+    listApplications: Effect.fn("RelationshipRepairProposalRepository.listApplications")(function*(input: unknown) {
+      const request = yield* decodeInput("list-applications", ListRelationshipRepairApplicationsInput, input)
+      const rows = yield* sql<Record<string, unknown>>`WITH proposal_page AS (
+        SELECT proposal_id
+        FROM relationship_repair_proposals
+        WHERE workspace_id = ${request.workspaceId}
+          AND release_id = ${request.releaseId}
+          AND (
+            (${request.environmentId} IS NULL AND environment_id IS NULL) OR
+            environment_id = ${request.environmentId}
+          )
+          AND (${request.status} IS NULL OR status = ${request.status})
+        ORDER BY proposed_at DESC, proposal_id DESC
+        LIMIT ${MAXIMUM_PROPOSAL_PAGE_SIZE}
+      )
+      SELECT
+        application.proposal_id AS proposalId,
+        application.relationship_id AS relationshipId,
+        application.applied_revision AS appliedRevision,
+        application.actor_kind AS actorKind,
+        application.person_id AS personId,
+        application.agent_id AS agentId,
+        application.session_id AS sessionId,
+        application.applied_at AS appliedAt
+      FROM relationship_repair_applications application
+      JOIN proposal_page page ON page.proposal_id = application.proposal_id
+      WHERE application.workspace_id = ${request.workspaceId}
+      ORDER BY application.applied_at DESC, application.proposal_id DESC`.pipe(
+        mapPersistenceOperation("relationship-repair-proposal.list-applications")
+      )
+      return yield* Effect.forEach(
+        rows,
+        (row) => {
+          const identity = Schema.decodeUnknownResult(ProposalRowIdentity)(row)
+          if (Result.isFailure(identity)) {
+            return Effect.fail(
+              new PersistedRecordError({
+                workspaceId: request.workspaceId,
+                recordKind: "relationship-repair-application",
+                recordKey: request.releaseId,
+                diagnosticCode: "relationship-repair-application-identity-invalid"
+              })
+            )
+          }
+          return decodeApplicationRow(request.workspaceId, identity.success.proposalId, row)
+        },
+        { concurrency: 1 }
+      )
     }),
     review: Effect.fn("RelationshipRepairProposalRepository.review")(function*(input: unknown) {
       const request = yield* decodeInput("review", ReviewRelationshipRepairProposalInput, input)

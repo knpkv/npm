@@ -69,7 +69,7 @@ export const useRelationshipRepairProposals = (
           setState({
             _tag: "ready",
             actionFailure: null,
-            applications: new Map(),
+            applications: new Map(page.applications.map((application) => [application.proposalId, application])),
             busyProposalId: null,
             page,
             releaseId,

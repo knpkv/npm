@@ -282,6 +282,11 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("relationship-repair-proposal.get", relationshipRepairProposals.get(...args)),
       list: (...args: Parameters<RelationshipRepairProposalRepositoryService["list"]>) =>
         publicOperation("relationship-repair-proposal.list", relationshipRepairProposals.list(...args)),
+      listApplications: (...args: Parameters<RelationshipRepairProposalRepositoryService["listApplications"]>) =>
+        publicOperation(
+          "relationship-repair-proposal.list-applications",
+          relationshipRepairProposals.listApplications(...args)
+        ),
       review: (...args: Parameters<RelationshipRepairProposalRepositoryService["review"]>) =>
         publicOperation("relationship-repair-proposal.review", relationshipRepairProposals.review(...args)),
       recordApplication: (...args: Parameters<RelationshipRepairProposalRepositoryService["recordApplication"]>) =>
