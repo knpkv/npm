@@ -1,4 +1,4 @@
-import { ReleaseRow, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
+import { ReleaseRow, StageRail, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import { Link, Navigate, useLocation, useViewTransitionState } from "react-router"
@@ -6,6 +6,14 @@ import { Link, Navigate, useLocation, useViewTransitionState } from "react-route
 import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { presentPortfolio, type PortfolioPresentation, type PortfolioReleasePresentation } from "./presentPortfolio.js"
+import {
+  filterPortfolioReleases,
+  type PortfolioFilter,
+  portfolioFilterFromSearch,
+  portfolioFilterLabel,
+  portfolioFilterOptions,
+  portfolioFilterSearch
+} from "./portfolioFilters.js"
 import {
   type PortfolioConnectionState,
   type PortfolioLoadFailure,
@@ -217,6 +225,7 @@ const ReleaseDossier = ({ onPreview, release, transitionNames }: ReleaseDossierP
       release={release.release}
       {...(transitionNames === undefined ? {} : { transitionNames })}
     />
+    <StageRail className={styles.stageRail} heading="Delivery" size="compact" stages={release.stages} />
     {release.source.warning === null ? null : (
       <StatePanel
         announce="polite"
@@ -228,6 +237,56 @@ const ReleaseDossier = ({ onPreview, release, transitionNames }: ReleaseDossierP
     )}
   </div>
 )
+
+const PortfolioFilters = ({
+  activeFilter,
+  portfolio
+}: {
+  readonly activeFilter: PortfolioFilter
+  readonly portfolio: PortfolioPresentation
+}): ReactElement => {
+  const location = useLocation()
+  return (
+    <nav aria-label="Release filters" className={styles.filters}>
+      {portfolioFilterOptions(portfolio.releases).map((option) => (
+        <Link
+          aria-current={option.id === activeFilter ? "page" : undefined}
+          className={styles.filter}
+          data-active={option.id === activeFilter ? "true" : "false"}
+          key={option.id}
+          to={{ pathname: location.pathname, search: portfolioFilterSearch(location.search, option.id) }}
+        >
+          <span>{option.label}</span>
+          <span
+            aria-label={`${String(option.count)} ${option.count === 1 ? "release" : "releases"}`}
+            className={styles.filterCount}
+          >
+            {option.count}
+          </span>
+        </Link>
+      ))}
+    </nav>
+  )
+}
+
+const EmptyFilter = ({ filter }: { readonly filter: PortfolioFilter }): ReactElement => {
+  const location = useLocation()
+  return (
+    <StatePanel
+      action={
+        <Link
+          className={styles.pairAction}
+          to={{ pathname: location.pathname, search: portfolioFilterSearch(location.search, "all") }}
+        >
+          Show all releases
+        </Link>
+      }
+      className={styles.statePanel}
+      description={`No releases currently match ${portfolioFilterLabel(filter)}. Live updates may change this view.`}
+      title="Nothing here right now"
+    />
+  )
+}
 
 const TransitioningReleaseDossier = ({
   onPreview,
@@ -258,20 +317,30 @@ const ReadyPortfolio = ({
   readonly previewPathForRelease?: (releaseId: PortfolioReleasePresentation["id"]) => string
 }): ReactElement => {
   if (portfolio.releases.length === 0) return <EmptyPortfolio />
+  const location = useLocation()
+  const activeFilter = portfolioFilterFromSearch(location.search)
+  const releases = filterPortfolioReleases(portfolio.releases, activeFilter)
   return (
-    <div className={styles.releaseList}>
-      {portfolio.releases.map((release) =>
-        previewPathForRelease === undefined ? (
-          <ReleaseDossier key={release.id} onPreview={() => onPreviewRelease(release.id)} release={release} />
-        ) : (
-          <TransitioningReleaseDossier
-            key={release.id}
-            onPreview={() => onPreviewRelease(release.id)}
-            originPath={releaseParentPath(portfolio.workspaceId)}
-            previewPath={previewPathForRelease(release.id)}
-            release={release}
-          />
-        )
+    <div className={styles.readyPortfolio}>
+      <PortfolioFilters activeFilter={activeFilter} portfolio={portfolio} />
+      {releases.length === 0 ? (
+        <EmptyFilter filter={activeFilter} />
+      ) : (
+        <div className={styles.releaseList}>
+          {releases.map((release) =>
+            previewPathForRelease === undefined ? (
+              <ReleaseDossier key={release.id} onPreview={() => onPreviewRelease(release.id)} release={release} />
+            ) : (
+              <TransitioningReleaseDossier
+                key={release.id}
+                onPreview={() => onPreviewRelease(release.id)}
+                originPath={releaseParentPath(portfolio.workspaceId)}
+                previewPath={previewPathForRelease(release.id)}
+                release={release}
+              />
+            )
+          )}
+        </div>
       )}
     </div>
   )

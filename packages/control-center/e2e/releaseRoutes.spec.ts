@@ -199,18 +199,40 @@ const transitionIdentity = (
 test("canonicalizes the root before any release activation renders", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveURL(overviewPath)
-  await expect(page.getByRole("button", { name: "Preview Copper Finch" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Preview Solar Grove" })).toBeVisible()
+})
+
+test("filters all six release states through keyboard-accessible persistent URLs", async ({ page }) => {
+  await page.goto(overviewPath)
+  await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(6)
+  await expect(page.getByRole("link", { name: /All 6 releases/u })).toHaveAttribute("aria-current", "page")
+
+  const attention = page.getByRole("link", { name: /Need attention 2 releases/u })
+  await attention.focus()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(`${overviewPath}?status=attention`)
+  await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(2)
+  await expect(page.locator("[data-rly-release-state=\"blocked\"]")).toBeVisible()
+  await expect(page.locator("[data-rly-release-state=\"held\"]")).toBeVisible()
+
+  await page.reload()
+  await expect(page).toHaveURL(`${overviewPath}?status=attention`)
+  await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(2)
+
+  await page.goBack()
+  await expect(page).toHaveURL(overviewPath)
+  await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(6)
 })
 
 test("opens preview first, restores focus, then pushes the canonical full route", async ({ page }) => {
   await page.goto(overviewPath)
-  const previewButton = page.getByRole("button", { name: "Preview Copper Finch" })
+  const previewButton = page.getByRole("button", { name: "Preview Solar Grove" })
   await expect(previewButton).toBeVisible()
 
   await previewButton.focus()
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(previewPath)
-  const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
+  const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
   await expect(dialog).toBeVisible()
   await expect(page.locator("[data-rly-release-preview-summary]")).toBeFocused()
   await expect(page.locator("[inert]")).not.toHaveCount(0)
@@ -221,7 +243,7 @@ test("opens preview first, restores focus, then pushes the canonical full route"
   await expect(previewButton).toBeFocused()
 
   await previewButton.click()
-  await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
   await expect(page).toHaveURL(fullPath)
   const fullHeading = page.getByRole("heading", { level: 1, name: "payments-api" })
   await expect(fullHeading).toBeVisible()
@@ -240,7 +262,7 @@ test("keeps one human-first Relay thread per canonical release", async ({ page }
   await page.goto(fullPath)
   await page.getByRole("button", { name: "Ask about this release" }).click()
   await expect(page).toHaveURL(agentPath)
-  await expect(page.getByRole("heading", { level: 1, name: "Ask Copper Finch." })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Ask Solar Grove." })).toBeVisible()
   await expect(page.getByText("Avery Bell")).toBeVisible()
   await expect(page.getByText("Mara Singh")).toBeVisible()
 
@@ -269,18 +291,18 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
     content: "[role=\"dialog\"][data-state=\"open\"] { animation-duration: 10s !important; }"
   })
 
-  await page.getByRole("button", { name: "Preview Copper Finch" }).click()
-  await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })).toBeVisible()
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
   await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
-  await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })).toHaveCSS(
+  await expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toHaveCSS(
     "animation-name",
     "none"
   )
   await expect(page.locator("[data-rly-dialog-overlay]")).toHaveCSS("animation-name", "none")
 
   // Bypass actionability waiting so transition two captures the immediate post-transition paint state.
-  await page.getByRole("button", { name: "Open Copper Finch full view" }).dispatchEvent("click")
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).dispatchEvent("click")
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 2")
   await page.waitForFunction(
@@ -321,8 +343,8 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
     `
   })
 
-  await page.getByRole("button", { name: "Preview Copper Finch" }).click()
-  const sheet = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  const sheet = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
   await expect(sheet).toBeVisible()
   await page.waitForFunction("window.__releaseTransitionSnapshots.length === 1")
   await page.waitForFunction("!document.documentElement.matches(':active-view-transition')")
@@ -349,7 +371,7 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
       { state: "resolved" }
     ]
   )
-  await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
+  await expect(page.getByRole("button", { name: "Open Solar Grove full view" })).toBeInViewport()
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 })
 
@@ -433,7 +455,7 @@ test("renders a compact full-screen sheet and returns direct loads to the semant
   await expect(page.getByText("No demo relationships are substituted.")).toBeVisible()
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 
-  await page.getByRole("button", { name: "Close Release preview: 2.18.0-rc.1 Copper Finch" }).click()
+  await page.getByRole("button", { name: "Close Release preview: 2.18.0-rc.1 Solar Grove" }).click()
   await expect(page).toHaveURL(overviewPath)
 })
 
@@ -443,15 +465,15 @@ test("uses the immediate reduced-motion path at a 200%-zoom-equivalent width", a
   await installTransitionProbe(page)
   await page.goto(overviewPath)
 
-  const previewButton = page.getByRole("button", { name: "Preview Copper Finch" })
+  const previewButton = page.getByRole("button", { name: "Preview Solar Grove" })
   await previewButton.focus()
   await page.keyboard.press("Enter")
   await expect(page.locator("[data-rly-release-preview-presentation=\"sheet\"]")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open Copper Finch full view" })).toBeInViewport()
+  await expect(page.getByRole("button", { name: "Open Solar Grove full view" })).toBeInViewport()
   expect(await page.evaluate("window.__releaseTransitionSnapshots.length")).toBe(0)
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 
-  await page.getByRole("button", { name: "Open Copper Finch full view" }).click()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeFocused()
   expect(await page.evaluate("window.__releaseTransitionSnapshots.length")).toBe(0)
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
@@ -468,10 +490,10 @@ test("keeps the decision rail and dossier usable in short desktop viewports", as
   for (const viewport of viewports) {
     await page.setViewportSize(viewport)
     await page.goto(previewPath)
-    const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Copper Finch" })
+    const dialog = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
     const footer = page.locator("[data-rly-release-preview-footer='dialog']")
     const dossier = page.locator("[data-rly-release-preview-scroll='dialog']")
-    const fullViewButton = page.getByRole("button", { name: "Open Copper Finch full view" })
+    const fullViewButton = page.getByRole("button", { name: "Open Solar Grove full view" })
     await expect(dialog).toBeVisible()
     await expect(page.locator("[data-rly-release-preview-presentation='dialog']")).toBeVisible()
     await expect(fullViewButton).toBeInViewport({ ratio: 1 })
@@ -567,13 +589,13 @@ test("keeps direct full routes stable across refresh and never substitutes an un
   await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
   await page.reload()
   await expect(page).toHaveURL(fullPath)
-  await expect(page.getByText("Copper Finch", { exact: true })).toBeVisible()
+  await expect(page.getByText("Solar Grove", { exact: true })).toBeVisible()
 
   const unknownReleasePath = `/w/${snapshot.workspaceId}/releases/${unknownReleaseId}`
   await page.goto(unknownReleasePath)
   await expect(page).toHaveURL(unknownReleasePath)
   await expect(page.getByText("Release not found")).toBeVisible()
-  await expect(page.getByText("Copper Finch")).toHaveCount(0)
+  await expect(page.getByText("Solar Grove")).toHaveCount(0)
 })
 
 test("renders only not-found content for unknown previews and wildcard workspace children", async ({ page }) => {
@@ -583,14 +605,14 @@ test("renders only not-found content for unknown previews and wildcard workspace
   await expect(page.getByText("Release not found")).toBeVisible()
   await expect(page.locator("[data-release-not-found]")).toBeFocused()
   await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(0)
-  await expect(page.getByText("Copper Finch")).toHaveCount(0)
+  await expect(page.getByText("Solar Grove")).toHaveCount(0)
 
   const wildcardPath = `/w/${snapshot.workspaceId}/not-a-page`
   await page.goto(wildcardPath)
   await expect(page).toHaveURL(wildcardPath)
   await expect(page.getByText("Page not found")).toBeVisible()
   await expect(page.locator("[data-portfolio-release-id]")).toHaveCount(0)
-  await expect(page.getByText("Copper Finch")).toHaveCount(0)
+  await expect(page.getByText("Solar Grove")).toHaveCount(0)
 })
 
 test("cleans up an open preview when a live snapshot removes its release", async ({ page }) => {
@@ -616,7 +638,7 @@ test("cleans up an open preview when a live snapshot removes its release", async
   })
 
   await page.goto(overviewPath)
-  await page.getByRole("button", { name: "Preview Copper Finch" }).click()
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
   publishInvalidation?.()
 
@@ -639,7 +661,7 @@ test("cleans up an open preview when its browser session expires", async ({ page
   })
 
   await page.goto(overviewPath)
-  await page.getByRole("button", { name: "Preview Copper Finch" }).click()
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
   expireSession?.()
 

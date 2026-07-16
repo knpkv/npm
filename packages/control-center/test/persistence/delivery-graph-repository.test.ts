@@ -792,6 +792,19 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(slice.value.evidenceClaims, 0)
         }
 
+        const summary = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSummary",
+          releaseId: RELEASE_ID
+        })
+        assert.strictEqual(summary._tag, "releaseSummary")
+        if (summary._tag === "releaseSummary") {
+          assert.deepStrictEqual(summary.value, {
+            issues: 6,
+            pipelineExecutions: 1,
+            pullRequests: 2
+          })
+        }
+
         const bounded = yield* repository.read(WORKSPACE_A, {
           _tag: "releaseSlice",
           releaseId: RELEASE_ID,

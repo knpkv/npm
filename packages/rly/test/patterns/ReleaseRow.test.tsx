@@ -113,6 +113,9 @@ describe("ReleaseRow", () => {
     expect(row.textContent).toContain("Mara Bell")
     expect(row.textContent).toContain("Dev Shah")
     expect(row.querySelectorAll("dl > div")).toHaveLength(release.facts.length)
+    expect(
+      [...row.querySelectorAll("[data-rly-release-fact]")].map((fact) => fact.getAttribute("data-rly-release-fact"))
+    ).toEqual(["commit", "target", "changes"])
     expect([...row.querySelectorAll("dt")].map((term) => term.textContent)).toEqual(["Commit", "Target", "Changes"])
     expect([...row.querySelectorAll("dd")].map((definition) => definition.textContent)).toEqual([
       "8fa21c7",

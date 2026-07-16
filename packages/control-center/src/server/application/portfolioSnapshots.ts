@@ -2,7 +2,13 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
-import type { PortfolioReleaseCollaborator, PortfolioReleaseRole, PortfolioSnapshot } from "../../api/portfolio.js"
+import type {
+  PortfolioReadinessSummary,
+  PortfolioRelationshipCounts,
+  PortfolioReleaseCollaborator,
+  PortfolioReleaseRole,
+  PortfolioSnapshot
+} from "../../api/portfolio.js"
 import { derivePersonInitials, type Role } from "../../domain/actors.js"
 import { evaluateFreshnessAt } from "../../domain/freshness.js"
 import type { Release } from "../../domain/release.js"
@@ -57,6 +63,44 @@ const releaseCollaborators = Effect.fn("PortfolioSnapshots.releaseCollaborators"
   }
 })
 
+const releaseReadiness = Effect.fn("PortfolioSnapshots.releaseReadiness")(function*(
+  persistence: PersistenceService,
+  release: Release
+) {
+  const current = yield* persistence.readiness.readCurrent({
+    _tag: "release",
+    workspaceId: release.workspaceId,
+    releaseId: release.id
+  }).pipe(Effect.mapError(() => unavailable()))
+  if (current.record === null) return null
+  const { assessment, authority } = current.record
+  return {
+    authority,
+    verdict: assessment.verdict,
+    stages: assessment.stages,
+    blockerCount: assessment.blockers.length,
+    warningCount: assessment.warnings.length,
+    gapCount: assessment.gaps.length,
+    primaryFinding: assessment.blockers[0] ?? assessment.gaps[0] ?? assessment.warnings[0] ?? null,
+    evaluatedAt: assessment.evaluatedAt
+  } satisfies PortfolioReadinessSummary
+})
+
+const releaseRelationships = Effect.fn("PortfolioSnapshots.releaseRelationships")(function*(
+  persistence: PersistenceService,
+  release: Release
+) {
+  const result = yield* persistence.deliveryGraph.read(release.workspaceId, {
+    _tag: "releaseSummary",
+    releaseId: release.id
+  }).pipe(Effect.mapError(() => unavailable()))
+  if (result._tag !== "releaseSummary") return yield* Effect.die("unexpected delivery graph result")
+  return {
+    ...result.value,
+    truncated: false
+  } satisfies PortfolioRelationshipCounts
+})
+
 /** Construct the bird's-eye projection from persisted facts only. */
 export const makePortfolioSnapshots = Effect.gen(function*() {
   const persistence = yield* Persistence
@@ -71,6 +115,8 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
         const releaseSummaries = yield* Effect.forEach(releases, ({ release }) =>
           Effect.gen(function*() {
             const collaboratorProjection = yield* releaseCollaborators(persistence, release)
+            const readiness = yield* releaseReadiness(persistence, release)
+            const relationships = yield* releaseRelationships(persistence, release)
             const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
               Effect.mapError(() => unavailable())
             )
@@ -84,6 +130,8 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               targetEnvironmentIds: release.targetEnvironmentIds,
               collaborators: collaboratorProjection.collaborators,
               collaboratorCount: collaboratorProjection.collaboratorCount,
+              readiness,
+              relationships,
               sourceRevisionCount: release.sourceRevisions.length,
               updatedAt: release.updatedAt
             }

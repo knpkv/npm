@@ -50,12 +50,10 @@ describe("portfolio presenter", () => {
     })
     expect(release.facts).toEqual([
       { id: "service", label: "Service", value: "payments-api" },
-      { id: "lifecycle", label: "Lifecycle", value: "Candidate" },
-      { id: "collaborators", label: "Collaborators", value: "2" },
-      { id: "targets", label: "Targets", value: "1" },
-      { id: "source-revisions", label: "Source revisions", value: "1" },
-      { id: "source", label: "Source", value: "Payments Jira" },
-      { id: "source-health", label: "Source health", value: "Healthy" }
+      { id: "issues", label: "Jira", value: "0" },
+      { id: "pull-requests", label: "PRs", value: "0" },
+      { id: "pipelines", label: "Pipelines", value: "0" },
+      { id: "gaps", label: "Gaps", value: "0" }
     ])
     expect(release.release).toMatchObject({
       owner: release.collaborators[0],

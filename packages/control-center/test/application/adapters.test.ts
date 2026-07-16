@@ -1385,7 +1385,7 @@ describe("application adapters", () => {
       assert.strictEqual(snapshot.releases[0]?.collaborators[49]?.displayName, "Person 49")
     })))
 
-  it.effect("returns a compact factual portfolio without deriving readiness", () =>
+  it.effect("returns a compact factual portfolio without inventing absent readiness or relationships", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
       yield* persistence.releases.create(WORKSPACE_ID, release)
@@ -1398,6 +1398,13 @@ describe("application adapters", () => {
       assert.strictEqual(snapshot.releases[0]?.freshness._tag, "missing")
       assert.deepStrictEqual(snapshot.releases[0]?.collaborators, [])
       assert.strictEqual(snapshot.releases[0]?.collaboratorCount, 0)
+      assert.isNull(snapshot.releases[0]?.readiness)
+      assert.deepStrictEqual(snapshot.releases[0]?.relationships, {
+        issues: 0,
+        pipelineExecutions: 0,
+        pullRequests: 0,
+        truncated: false
+      })
       assert.strictEqual(snapshot.releases[0]?.sourceRevisionCount, 0)
       assert.lengthOf(snapshot.plugins, 2)
     })))

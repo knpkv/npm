@@ -4,6 +4,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Freshness } from "../domain/freshness.js"
 import { EnvironmentId, EventCursor, PersonId, ReleaseId, WorkspaceId } from "../domain/identifiers.js"
 import { hasMaximumPluginJsonBytes } from "../domain/plugins/bounds.js"
+import { ReadinessFinding, ReadinessStages, ReadinessVerdict } from "../domain/readiness/model.js"
 import { ReleaseLifecycle, ReleaseServiceName, ReleaseVersion } from "../domain/release.js"
 import { ReleaseRelayProjection } from "../domain/releaseRelay.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
@@ -23,6 +24,32 @@ const MAXIMUM_COUNT = 1_000_000
 const MAXIMUM_RELEASE_COLLABORATORS = 50
 
 const BoundedCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(MAXIMUM_COUNT))
+
+/** Compact relationship totals for one release delivery graph. */
+export const PortfolioRelationshipCounts = Schema.Struct({
+  issues: BoundedCount,
+  pullRequests: BoundedCount,
+  pipelineExecutions: BoundedCount,
+  truncated: Schema.Boolean
+}).annotate({ identifier: "PortfolioRelationshipCounts" })
+
+/** Decoded compact relationship totals. */
+export type PortfolioRelationshipCounts = typeof PortfolioRelationshipCounts.Type
+
+/** Current server-owned readiness facts required by the bird's-eye portfolio. */
+export const PortfolioReadinessSummary = Schema.Struct({
+  authority: Schema.Literals(["authoritative", "pending"]),
+  verdict: ReadinessVerdict,
+  stages: ReadinessStages,
+  blockerCount: BoundedCount,
+  warningCount: BoundedCount,
+  gapCount: BoundedCount,
+  primaryFinding: Schema.NullOr(ReadinessFinding),
+  evaluatedAt: UtcTimestamp
+}).annotate({ identifier: "PortfolioReadinessSummary" })
+
+/** Decoded compact readiness projection. */
+export type PortfolioReadinessSummary = typeof PortfolioReadinessSummary.Type
 
 /** Release-scoped human responsibility shown in the compact portfolio. */
 export const PortfolioReleaseRole = Schema.Literals(["release-owner", "release-approver"])
@@ -68,6 +95,8 @@ export const PortfolioReleaseSummary = Schema.Struct({
   ),
   collaborators: BoundedReleaseCollaborators,
   collaboratorCount: BoundedCount,
+  readiness: Schema.NullOr(PortfolioReadinessSummary),
+  relationships: PortfolioRelationshipCounts,
   sourceRevisionCount: BoundedCount,
   updatedAt: UtcTimestamp
 }).annotate({ identifier: "PortfolioReleaseSummary" })
