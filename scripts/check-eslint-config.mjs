@@ -216,14 +216,79 @@ await assertRuleDiagnostics({
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     export type { ChildProcess }
     const makeCommand = (options) =>
-      ChildProcess.make("codex", ["exec"], {
-        env: options.environment,
+      Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
+        env: Object.freeze({ ...options.environment }),
         extendEnv: false
-      })
+      })))
   `,
   eslintInstance: aiCodexEslint,
   expected: 0,
   filePath: "src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      const command = Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
+        env: Object.freeze({ ...options.environment }),
+        extendEnv: false
+      })))
+      Object.assign(command.options, { extendEnv: true })
+      Object.assign(command.options.env, unsafeEnvironment)
+      return command
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      Object.assign(options["environ" + "ment"], unsafeEnvironment)
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) => {
+      Object.assign(options[environmentKey], unsafeEnvironment)
+      return ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false
+      })
+    }
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      ChildProcess.make("codex", ["exec"], {
+        env: options.environment,
+        extendEnv: false,
+        ["stdout"]: "pipe"
+      })
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
@@ -295,10 +360,10 @@ await assertRuleDiagnostics({
   code: `
     import { ChildProcess } from "effect/unstable/process"
     const makeCommand = (options) =>
-      ChildProcess.make("claude", ["--print"], {
-        env: options.environment,
+      Object.freeze(ChildProcess.make("claude", ["--print"], Object.freeze({
+        env: Object.freeze({ ...options.environment }),
         extendEnv: false
-      })
+      })))
   `,
   eslintInstance: aiClaudeEslint,
   expected: 0,
@@ -403,11 +468,11 @@ await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     const makeCommand = (options) =>
-      ChildProcess.make("codex", ["exec"], {
-        env: options.environment,
+      Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
+        env: Object.freeze({ ...options.environment } as typeof options.environment),
         extendEnv: false,
         stdout: "pipe"
-      })
+      })))
     const localHelper = import("./known-local-helper.js")
   `,
   expected: 0,
@@ -419,10 +484,10 @@ await assertRuleDiagnostics({
   code: `
     import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
     const makeCommand = (options) =>
-      ChildProcess.make("claude", ["--print"], {
+      Object.freeze(ChildProcess.make("claude", ["--print"], Object.freeze({
         extendEnv: false,
-        env: options.environment
-      })
+        env: Object.freeze({ ...options.environment })
+      })))
   `,
   expected: 0,
   filePath: "packages/ai-claude/src/runner.ts",

@@ -94,6 +94,8 @@ describe("model", () => {
       const command = calls[0]
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(Object.isFrozen(command)).toBe(true)
+        expect(Object.isFrozen(command.options)).toBe(true)
         expect(command.options.extendEnv).toBe(false)
         expect(command.options.env).toEqual({
           ANTHROPIC_API_KEY: "anthropic-api-key",
@@ -108,6 +110,13 @@ describe("model", () => {
         expect(command.options.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
         expect(command.options.env).not.toHaveProperty("CODEX_THREAD_ID")
         expect(command.options.env).not.toHaveProperty("SENTRY_AUTH_TOKEN")
+        const environment = command.options.env
+        expect(environment === undefined ? false : Object.isFrozen(environment)).toBe(true)
+        expect(() => Object.assign(command, { options: { extendEnv: true } })).toThrow()
+        expect(() => Object.assign(command.options, { extendEnv: true })).toThrow()
+        expect(() => Object.assign(environment ?? {}, { AWS_SECRET_ACCESS_KEY: "injected" })).toThrow()
+        expect(command.options.extendEnv).toBe(false)
+        expect(environment).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
       }
     }))
 

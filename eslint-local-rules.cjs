@@ -67,14 +67,56 @@ const enclosingFunction = (node) => {
   return undefined
 }
 
+const isPureTypeReference = (reference) => {
+  if (reference.isTypeReference && !reference.isValueReference) return true
+  let current = reference.identifier.parent
+  while (current !== undefined && current.type !== "Program") {
+    if (current.type === "TSTypeQuery") return true
+    current = current.parent
+  }
+  return false
+}
+
 const isReadOnlyMemberReference = (reference) => {
+  if (isPureTypeReference(reference)) return true
   if (reference.isWrite()) return false
   const member = reference.identifier.parent
   if (member?.type !== "MemberExpression" || member.object !== reference.identifier) return false
+  if (member.computed) return false
   const usage = member.parent
   if (usage?.type === "AssignmentExpression" && usage.left === member) return false
   if (usage?.type === "UpdateExpression" && usage.argument === member) return false
   return !(usage?.type === "UnaryExpression" && usage.operator === "delete" && usage.argument === member)
+}
+
+const frozenArgument = (context, expression) => {
+  if (
+    expression?.type !== "CallExpression" ||
+    expression.arguments.length !== 1 ||
+    expression.arguments[0].type === "SpreadElement" ||
+    expression.callee.type !== "MemberExpression" ||
+    expression.callee.computed ||
+    expression.callee.object.type !== "Identifier" ||
+    expression.callee.object.name !== "Object" ||
+    staticPropertyName(expression.callee.property) !== "freeze" ||
+    (resolvedVariable(context, expression.callee.object)?.defs.length ?? 0) > 0
+  ) {
+    return undefined
+  }
+  return expression.arguments[0]
+}
+
+const unwrapTypeExpression = (expression) => {
+  let current = expression
+  while (
+    current.type === "TSAsExpression" ||
+    current.type === "TSTypeAssertion" ||
+    current.type === "TSSatisfiesExpression" ||
+    current.type === "TSNonNullExpression"
+  ) {
+    current = current.expression
+  }
+  return current
 }
 
 const isReviewedEnvironmentProjection = (context, expression, call) => {
@@ -102,6 +144,7 @@ const isReviewedEnvironmentProjection = (context, expression, call) => {
   const parameter = factory.params.find((candidate) => candidate.type === "Identifier" && candidate.name === "options")
   const binding = resolvedVariable(context, expression.object)
   const environmentReferences = binding?.references.filter((reference) => {
+    if (isPureTypeReference(reference)) return false
     const member = reference.identifier.parent
     return (
       member?.type === "MemberExpression" &&
@@ -118,22 +161,39 @@ const isReviewedEnvironmentProjection = (context, expression, call) => {
   )
 }
 
+const isFrozenEnvironmentSnapshot = (context, expression, call) => {
+  const snapshot = frozenArgument(context, expression)
+  if (snapshot === undefined) return false
+  const object = unwrapTypeExpression(snapshot)
+  return (
+    object.type === "ObjectExpression" &&
+    object.properties.length === 1 &&
+    object.properties[0].type === "SpreadElement" &&
+    isReviewedEnvironmentProjection(context, object.properties[0].argument, call)
+  )
+}
+
 const hasIsolatedChildEnvironment = (context, options, call) => {
-  if (options?.type !== "ObjectExpression") return false
-  if (options.properties.some((property) => property.type === "SpreadElement")) return false
-  if (options.properties.some((property) => property.type === "Property" && property.computed)) {
+  const frozenOptions = frozenArgument(context, options)
+  if (frozenOptions?.type !== "ObjectExpression") return false
+  if (frozenOptions.properties.some((property) => property.type === "SpreadElement")) return false
+  if (frozenOptions.properties.some((property) => property.type === "Property" && property.computed)) {
     return false
   }
-  const environment = options.properties.filter(
+  const environment = frozenOptions.properties.filter(
     (property) => property.type === "Property" && staticPropertyName(property.key) === "env"
   )
-  const inheritance = options.properties.filter(
+  const inheritance = frozenOptions.properties.filter(
     (property) => property.type === "Property" && staticPropertyName(property.key) === "extendEnv"
   )
+  const factory = enclosingFunction(call)
   return (
+    factory?.type === "ArrowFunctionExpression" &&
+    factory.expression &&
+    frozenArgument(context, factory.body) === call &&
     environment.length === 1 &&
     inheritance.length === 1 &&
-    isReviewedEnvironmentProjection(context, environment[0].value, call) &&
+    isFrozenEnvironmentSnapshot(context, environment[0].value, call) &&
     inheritance[0].value.type === "Literal" &&
     inheritance[0].value.value === false
   )

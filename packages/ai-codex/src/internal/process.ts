@@ -70,17 +70,21 @@ const transportError = (
 const isCodexTransportError = Schema.is(CodexTransportError)
 
 const makeCommand = (options: RunCodexOptions) =>
-  ChildProcess.make(options.executable, options.args, {
-    cwd: options.cwd,
-    env: options.environment,
-    extendEnv: false,
-    forceKillAfter: "2 seconds",
-    killSignal: "SIGTERM",
-    shell: false,
-    stderr: "pipe",
-    stdin: Stream.make(options.prompt).pipe(Stream.encodeText),
-    stdout: "pipe"
-  })
+  Object.freeze(ChildProcess.make(
+    options.executable,
+    options.args,
+    Object.freeze({
+      cwd: options.cwd,
+      env: Object.freeze({ ...options.environment }),
+      extendEnv: false,
+      forceKillAfter: "2 seconds",
+      killSignal: "SIGTERM",
+      shell: false,
+      stderr: "pipe",
+      stdin: Stream.make(options.prompt).pipe(Stream.encodeText),
+      stdout: "pipe"
+    })
+  ))
 
 const boundedStdout = (
   stdout: Stream.Stream<Uint8Array, PlatformError.PlatformError>,

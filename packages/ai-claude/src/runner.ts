@@ -90,17 +90,21 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
 }
 
 const makeCommand = (options: RunOptions, arguments_: ReadonlyArray<string>) =>
-  ChildProcess.make(options.executable, arguments_, {
-    cwd: options.cwd,
-    env: options.environment,
-    extendEnv: false,
-    forceKillAfter: "3 seconds",
-    killSignal: "SIGTERM",
-    shell: false,
-    stderr: "pipe",
-    stdin: { stream: Stream.make(options.prompt).pipe(Stream.encodeText), endOnDone: true },
-    stdout: "pipe"
-  })
+  Object.freeze(ChildProcess.make(
+    options.executable,
+    arguments_,
+    Object.freeze({
+      cwd: options.cwd,
+      env: Object.freeze({ ...options.environment }),
+      extendEnv: false,
+      forceKillAfter: "3 seconds",
+      killSignal: "SIGTERM",
+      shell: false,
+      stderr: "pipe",
+      stdin: { stream: Stream.make(options.prompt).pipe(Stream.encodeText), endOnDone: true },
+      stdout: "pipe"
+    })
+  ))
 
 export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*(
   options: RunOptions,
