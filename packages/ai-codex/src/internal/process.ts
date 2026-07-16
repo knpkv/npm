@@ -72,7 +72,7 @@ const isCodexTransportError = Schema.is(CodexTransportError)
 const makeCommand = (options: RunCodexOptions) =>
   Object.freeze(ChildProcess.make(
     options.executable,
-    options.args,
+    Object.freeze([...options.args]),
     Object.freeze({
       cwd: options.cwd,
       env: Object.freeze({ ...options.environment }),
@@ -81,7 +81,10 @@ const makeCommand = (options: RunCodexOptions) =>
       killSignal: "SIGTERM",
       shell: false,
       stderr: "pipe",
-      stdin: Stream.make(options.prompt).pipe(Stream.encodeText),
+      stdin: Object.freeze({
+        stream: Stream.make(options.prompt).pipe(Stream.encodeText),
+        endOnDone: true
+      }),
       stdout: "pipe"
     })
   ))

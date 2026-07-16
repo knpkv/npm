@@ -92,7 +92,7 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
 const makeCommand = (options: RunOptions, arguments_: ReadonlyArray<string>) =>
   Object.freeze(ChildProcess.make(
     options.executable,
-    arguments_,
+    Object.freeze([...arguments_]),
     Object.freeze({
       cwd: options.cwd,
       env: Object.freeze({ ...options.environment }),
@@ -101,7 +101,10 @@ const makeCommand = (options: RunOptions, arguments_: ReadonlyArray<string>) =>
       killSignal: "SIGTERM",
       shell: false,
       stderr: "pipe",
-      stdin: { stream: Stream.make(options.prompt).pipe(Stream.encodeText), endOnDone: true },
+      stdin: Object.freeze({
+        stream: Stream.make(options.prompt).pipe(Stream.encodeText),
+        endOnDone: true
+      }),
       stdout: "pipe"
     })
   ))

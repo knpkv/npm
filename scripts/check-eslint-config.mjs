@@ -215,8 +215,8 @@ await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     export type { ChildProcess }
-    const makeCommand = (options) =>
-      Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
         extendEnv: false
       })))
@@ -224,6 +224,36 @@ await assertRuleDiagnostics({
   eslintInstance: aiCodexEslint,
   expected: 0,
   filePath: "src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("codex", arguments_, Object.freeze({
+        env: Object.freeze({ ...options.environment }),
+        extendEnv: false
+      })))
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { Stream } from "effect"
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
+        env: Object.freeze({ ...options.environment }),
+        extendEnv: false,
+        stdin: { stream: Stream.make(options.prompt).pipe(Stream.encodeText), endOnDone: true }
+      })))
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 
@@ -359,8 +389,8 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { ChildProcess } from "effect/unstable/process"
-    const makeCommand = (options) =>
-      Object.freeze(ChildProcess.make("claude", ["--print"], Object.freeze({
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("claude", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
         extendEnv: false
       })))
@@ -467,8 +497,8 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
-    const makeCommand = (options) =>
-      Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment } as typeof options.environment),
         extendEnv: false,
         stdout: "pipe"
@@ -483,8 +513,8 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-    const makeCommand = (options) =>
-      Object.freeze(ChildProcess.make("claude", ["--print"], Object.freeze({
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make("claude", Object.freeze([...arguments_]), Object.freeze({
         extendEnv: false,
         env: Object.freeze({ ...options.environment })
       })))

@@ -173,6 +173,100 @@ const isFrozenEnvironmentSnapshot = (context, expression, call) => {
   )
 }
 
+const isFrozenArgumentsSnapshot = (context, expression, call) => {
+  const snapshot = frozenArgument(context, expression)
+  if (
+    snapshot?.type !== "ArrayExpression" ||
+    snapshot.elements.length !== 1 ||
+    snapshot.elements[0]?.type !== "SpreadElement"
+  ) {
+    return false
+  }
+  const source = snapshot.elements[0].argument
+  const factory = enclosingFunction(call)
+  if (factory === undefined) return false
+  if (
+    source.type === "MemberExpression" &&
+    !source.computed &&
+    source.object.type === "Identifier" &&
+    source.object.name === "options" &&
+    staticPropertyName(source.property) === "args"
+  ) {
+    const parameter = factory.params.find(
+      (candidate) => candidate.type === "Identifier" && candidate.name === "options"
+    )
+    return resolvedVariable(context, source.object)?.identifiers.includes(parameter) === true
+  }
+  if (source.type !== "Identifier") return false
+  const parameter = factory.params.find(
+    (candidate) => candidate.type === "Identifier" && candidate.name === source.name
+  )
+  const binding = resolvedVariable(context, source)
+  return (
+    parameter !== undefined &&
+    binding?.identifiers.includes(parameter) === true &&
+    binding.references.length === 1 &&
+    binding.references[0]?.identifier === source
+  )
+}
+
+const isStreamMember = (context, expression, name) =>
+  expression.type === "MemberExpression" &&
+  !expression.computed &&
+  expression.object.type === "Identifier" &&
+  staticPropertyName(expression.property) === name &&
+  (isNamedImportFrom(context, expression.object, ["effect"], ["Stream"]) ||
+    isNamespaceImportFrom(context, expression.object, ["effect/Stream"]))
+
+const isReviewedStdinStream = (context, expression) => {
+  if (
+    expression.type !== "CallExpression" ||
+    expression.arguments.length !== 1 ||
+    !isStreamMember(context, expression.arguments[0], "encodeText") ||
+    expression.callee.type !== "MemberExpression" ||
+    expression.callee.computed ||
+    staticPropertyName(expression.callee.property) !== "pipe" ||
+    expression.callee.object.type !== "CallExpression" ||
+    expression.callee.object.arguments.length !== 1 ||
+    !isStreamMember(context, expression.callee.object.callee, "make")
+  ) {
+    return false
+  }
+  const prompt = expression.callee.object.arguments[0]
+  return (
+    prompt.type === "MemberExpression" &&
+    !prompt.computed &&
+    prompt.object.type === "Identifier" &&
+    prompt.object.name === "options" &&
+    staticPropertyName(prompt.property) === "prompt"
+  )
+}
+
+const isFrozenStdinSnapshot = (context, expression) => {
+  const snapshot = frozenArgument(context, expression)
+  if (
+    snapshot?.type !== "ObjectExpression" ||
+    snapshot.properties.some((property) => property.type === "SpreadElement") ||
+    snapshot.properties.some((property) => property.type === "Property" && property.computed)
+  ) {
+    return false
+  }
+  const streams = snapshot.properties.filter(
+    (property) => property.type === "Property" && staticPropertyName(property.key) === "stream"
+  )
+  const completions = snapshot.properties.filter(
+    (property) => property.type === "Property" && staticPropertyName(property.key) === "endOnDone"
+  )
+  return (
+    snapshot.properties.length === 2 &&
+    streams.length === 1 &&
+    completions.length === 1 &&
+    isReviewedStdinStream(context, streams[0].value) &&
+    completions[0].value.type === "Literal" &&
+    completions[0].value.value === true
+  )
+}
+
 const hasIsolatedChildEnvironment = (context, options, call) => {
   const frozenOptions = frozenArgument(context, options)
   if (frozenOptions?.type !== "ObjectExpression") return false
@@ -186,13 +280,20 @@ const hasIsolatedChildEnvironment = (context, options, call) => {
   const inheritance = frozenOptions.properties.filter(
     (property) => property.type === "Property" && staticPropertyName(property.key) === "extendEnv"
   )
+  const stdin = frozenOptions.properties.filter(
+    (property) => property.type === "Property" && staticPropertyName(property.key) === "stdin"
+  )
   const factory = enclosingFunction(call)
   return (
+    call.arguments.length === 3 &&
     factory?.type === "ArrowFunctionExpression" &&
     factory.expression &&
     frozenArgument(context, factory.body) === call &&
+    isFrozenArgumentsSnapshot(context, call.arguments[1], call) &&
     environment.length === 1 &&
     inheritance.length === 1 &&
+    stdin.length <= 1 &&
+    (stdin.length === 0 || isFrozenStdinSnapshot(context, stdin[0].value)) &&
     isFrozenEnvironmentSnapshot(context, environment[0].value, call) &&
     inheritance[0].value.type === "Literal" &&
     inheritance[0].value.value === false

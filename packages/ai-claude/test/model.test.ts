@@ -95,6 +95,7 @@ describe("model", () => {
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(Object.isFrozen(command)).toBe(true)
+        expect(Object.isFrozen(command.args)).toBe(true)
         expect(Object.isFrozen(command.options)).toBe(true)
         expect(command.options.extendEnv).toBe(false)
         expect(command.options.env).toEqual({
@@ -111,10 +112,20 @@ describe("model", () => {
         expect(command.options.env).not.toHaveProperty("CODEX_THREAD_ID")
         expect(command.options.env).not.toHaveProperty("SENTRY_AUTH_TOKEN")
         const environment = command.options.env
+        const originalArguments = [...command.args]
+        const stdin = command.options.stdin
         expect(environment === undefined ? false : Object.isFrozen(environment)).toBe(true)
         expect(() => Object.assign(command, { options: { extendEnv: true } })).toThrow()
+        expect(() => Object.assign(command.args, { 0: "--dangerously-skip-permissions" })).toThrow()
         expect(() => Object.assign(command.options, { extendEnv: true })).toThrow()
         expect(() => Object.assign(environment ?? {}, { AWS_SECRET_ACCESS_KEY: "injected" })).toThrow()
+        expect(typeof stdin === "object" && stdin !== null && Object.isFrozen(stdin)).toBe(true)
+        if (typeof stdin === "object" && stdin !== null && "endOnDone" in stdin) {
+          expect(stdin.endOnDone).toBe(true)
+          expect(() => Object.assign(stdin, { endOnDone: false })).toThrow()
+          expect(stdin.endOnDone).toBe(true)
+        }
+        expect(command.args).toEqual(originalArguments)
         expect(command.options.extendEnv).toBe(false)
         expect(environment).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
       }
