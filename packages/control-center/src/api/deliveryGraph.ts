@@ -67,6 +67,32 @@ export const EvidenceInspection = Schema.Struct({
 /** Decoded evidence inspection. */
 export type EvidenceInspection = typeof EvidenceInspection.Type
 
+/** Read-only repair suggestion derived from one current incomplete relationship. */
+export const RelationshipRepairCandidate = Schema.Struct({
+  relationship: DeliveryRelationship,
+  suggestedDisposition: Schema.Literals(["link", "verify", "reject"]),
+  explanation: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
+  impact: Schema.Struct({
+    releaseId: ReleaseId,
+    environmentId: Schema.NullOr(EnvironmentId)
+  }),
+  requiredPermission: Schema.Literal("workspace-owner")
+}).annotate({ identifier: "RelationshipRepairCandidate" })
+
+/** Decoded read-only relationship repair suggestion. */
+export type RelationshipRepairCandidate = typeof RelationshipRepairCandidate.Type
+
+/** Bounded candidate discovery result; discovery never mutates the relationship ledger. */
+export const RelationshipRepairCandidates = Schema.Struct({
+  releaseId: ReleaseId,
+  environmentId: Schema.NullOr(EnvironmentId),
+  truncated: Schema.Boolean,
+  candidates: boundedArray(RelationshipRepairCandidate, MAXIMUM_RELEASE_SLICE_RECORDS)
+}).annotate({ identifier: "RelationshipRepairCandidates" })
+
+/** Decoded relationship repair candidate discovery result. */
+export type RelationshipRepairCandidates = typeof RelationshipRepairCandidates.Type
+
 const readErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -91,6 +117,17 @@ const relationship = HttpApiEndpoint.get("relationship", "/api/v1/relationships/
   error: readErrors
 }).middleware(SessionCookieAuth)
 
+const repairCandidates = HttpApiEndpoint.get(
+  "repairCandidates",
+  "/api/v1/relationships/releases/:releaseId/repair-candidates",
+  {
+    params: { releaseId: ReleaseId },
+    query: { environmentId: Schema.optionalKey(EnvironmentId) },
+    success: RelationshipRepairCandidates,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
+
 const relationshipHistory = HttpApiEndpoint.get(
   "relationshipHistory",
   "/api/v1/relationships/:relationshipId/history",
@@ -109,5 +146,5 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 
 /** Authenticated, workspace-safe delivery relationship and evidence inspection. */
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
-  .add(releaseSlice, relationship, relationshipHistory, evidence)
+  .add(releaseSlice, repairCandidates, relationship, relationshipHistory, evidence)
 {}

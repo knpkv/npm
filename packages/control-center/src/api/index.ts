@@ -21,6 +21,8 @@ export {
   EvidenceInspection,
   InspectedEntityProjection,
   RelationshipHistoryInspection,
+  RelationshipRepairCandidate,
+  RelationshipRepairCandidates,
   ReleaseDeliveryGraphInspection
 } from "./deliveryGraph.js"
 export {

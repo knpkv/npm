@@ -59,6 +59,8 @@ The first D04 inspection slice exposes bounded, authenticated release graph, rel
 lifecycle history, and evidence reads. The application boundary derives workspace ownership from
 the session, rejects missing or cross-workspace releases, and returns only normalized ledger fields.
 Evidence claim reads are bounded in SQL rather than only at response encoding.
+Read-only repair candidate discovery now derives link/verify suggestions, explanations, impact, and
+required permission from those facts; it deliberately creates no proposal or ledger mutation.
 
 ## Remaining roadmap
 
@@ -108,7 +110,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Add D04 relationship candidate discovery and a non-mutating repair proposal with exact impact,
-permission, and confidence explanation. Run one independent exact-commit review after each
+Add a non-mutating D04 repair proposal draft for one selected candidate, preserving the candidate's
+relationship revision as a future stale-write guard. Run one independent exact-commit review after each
 deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings into
 static rules or repository instructions.
