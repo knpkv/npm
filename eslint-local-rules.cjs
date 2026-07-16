@@ -217,11 +217,12 @@ const isFrozenArgumentsSnapshot = (context, expression, call) => {
     (candidate) => candidate.type === "Identifier" && candidate.name === source.name
   )
   const binding = resolvedVariable(context, source)
+  const runtimeReferences = binding?.references.filter((reference) => !isPureTypeReference(reference))
   return (
     parameter !== undefined &&
     binding?.identifiers.includes(parameter) === true &&
-    binding.references.length === 1 &&
-    binding.references[0]?.identifier === source
+    runtimeReferences?.length === 1 &&
+    runtimeReferences[0]?.identifier === source
   )
 }
 

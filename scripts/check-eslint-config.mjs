@@ -421,7 +421,7 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { ChildProcess } from "effect/unstable/process"
-    const makeCommand = (options, arguments_) =>
+    const makeCommand = (options, arguments_): ChildProcess.Command & { readonly args: typeof arguments_ } =>
       Object.freeze(ChildProcess.make("claude", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
         extendEnv: false
@@ -430,6 +430,24 @@ await assertRuleDiagnostics({
   eslintInstance: aiClaudeEslint,
   expected: 0,
   filePath: "src/runner.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const makeCommand = (options, arguments_) =>
+      Object.freeze(ChildProcess.make(
+        (inspect(arguments_), "claude"),
+        Object.freeze([...arguments_]),
+        Object.freeze({
+          env: Object.freeze({ ...options.environment }),
+          extendEnv: false
+        })
+      ))
+  `,
+  expected: 1,
+  filePath: "packages/ai-claude/src/runner.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })
 

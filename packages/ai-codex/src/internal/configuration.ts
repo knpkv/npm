@@ -131,5 +131,5 @@ export const makeArguments = (
   if (options.model !== undefined) args.push("--model", options.model)
   if (schemaFile !== undefined) args.push("--output-schema", schemaFile)
   args.push("-")
-  return args
+  return Object.freeze(args)
 }
