@@ -248,6 +248,134 @@ describe("application adapters", () => {
       }
     })))
 
+  it.effect("drafts only the exact current repair head within its workspace and release scope", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      const releaseNodeId = "01890f6f-6d6a-7cc0-98d2-600000000001"
+      const issueNodeId = "01890f6f-6d6a-7cc0-98d2-600000000002"
+      const firstRevision = {
+        workspaceId: WORKSPACE_ID,
+        relationshipId: RELATIONSHIP_ID,
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind: "contains",
+        sourceNodeId: releaseNodeId,
+        sourceNodeKind: "release",
+        targetNodeId: issueNodeId,
+        targetNodeKind: "issue",
+        scope: { _tag: "release", releaseId: RELEASE_ID },
+        lifecycle: {
+          _tag: "missing",
+          effectiveAt: "2026-07-14T10:00:00.000Z",
+          reason: "The release issue is not linked."
+        },
+        confidence: { _tag: "unknown", rationale: "No source relationship was observed." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "missing-release-issue",
+          ruleVersion: 1,
+          rationale: "Every release issue must be linked."
+        },
+        recordedBy: { _tag: "system", component: "candidate-test" },
+        evidenceClaimIds: [],
+        recordedAt: "2026-07-14T10:00:00.000Z"
+      }
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [
+          {
+            workspaceId: WORKSPACE_ID,
+            nodeId: releaseNodeId,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: RELEASE_ID } },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          },
+          {
+            workspaceId: WORKSPACE_ID,
+            nodeId: issueNodeId,
+            endpointKind: "issue",
+            resolution: {
+              _tag: "missing",
+              expectedKind: "entity",
+              expectedEntityKind: "issue",
+              missingKey: "release:missing-issue"
+            },
+            createdAt: "2026-07-14T10:00:00.000Z"
+          }
+        ],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [firstRevision]
+      })
+
+      const inspection = yield* makeDeliveryGraphInspection
+      const revisionOneDraft = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      })
+      assert.strictEqual(revisionOneDraft.precondition.expectedRevision, RELATIONSHIP_REVISION)
+
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [{
+          ...firstRevision,
+          revision: 2,
+          supersedesRevision: 1,
+          lifecycle: { _tag: "proposed", effectiveAt: "2026-07-14T10:01:00.000Z" },
+          recordedAt: "2026-07-14T10:01:00.000Z"
+        }]
+      })
+      const historyBefore = yield* inspection.relationshipHistory({
+        workspaceId: WORKSPACE_ID,
+        relationshipId: RELATIONSHIP_ID
+      })
+      const stale = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      }).pipe(Effect.result)
+      const wrongEnvironment = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: ENVIRONMENT_ID,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      }).pipe(Effect.result)
+      const crossWorkspace = yield* inspection.repairProposalDraft({
+        workspaceId: OTHER_WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      }).pipe(Effect.result)
+      for (const result of [stale, wrongEnvironment, crossWorkspace]) {
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationResourceNotFound)
+      }
+      const current = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: Schema.decodeSync(LedgerRevision)(2)
+      })
+      assert.strictEqual(current.precondition.expectedRevision, 2)
+      assert.deepStrictEqual(
+        yield* inspection.relationshipHistory({ workspaceId: WORKSPACE_ID, relationshipId: RELATIONSHIP_ID }),
+        historyBefore
+      )
+    })))
+
   it.effect("projects plugin facts, validates descriptor fields, redacts secrets, and preserves CAS", () =>
     withApplication(Effect.gen(function*() {
       yield* setup
