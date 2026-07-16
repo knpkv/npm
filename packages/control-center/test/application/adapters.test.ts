@@ -68,10 +68,20 @@ const REPAIR_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
 const OTHER_REPAIR_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
   "01890f6f-6d6a-7cc0-98d2-000000000084"
 )
+const STALE_APPLY_RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000085"
+)
+const STALE_APPLY_PROPOSAL_ID = Schema.decodeSync(RelationshipRepairProposalId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000086"
+)
+const STALE_APPLY_REVIEW_ID = Schema.decodeSync(RelationshipRepairReviewId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000087"
+)
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000078")
 const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
 const SNAPSHOT_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:10:00.000Z")
+const BACKDATED_APPLY_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:05:00.000Z")
 
 const epochMillis = (timestamp: UtcTimestamp): number => DateTime.toEpochMillis(timestamp)
 
@@ -193,6 +203,28 @@ const setup = Effect.gen(function*() {
     displayName: WorkspaceName.make("Other"),
     createdAt: T0
   })
+  yield* persistence.people.createPerson(
+    WORKSPACE_ID,
+    Schema.decodeSync(Person)({
+      personId: OWNER_PERSON_ID,
+      displayName: "Release Owner",
+      avatar: { _tag: "initials", text: "RO" },
+      isActive: true,
+      sourceIdentities: []
+    }),
+    T0
+  )
+  yield* persistence.people.createPerson(
+    WORKSPACE_ID,
+    Schema.decodeSync(Person)({
+      personId: APPROVER_PERSON_ID,
+      displayName: "Release Approver",
+      avatar: { _tag: "initials", text: "RA" },
+      isActive: true,
+      sourceIdentities: []
+    }),
+    T0
+  )
   yield* database.sql`INSERT INTO sessions (
     workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id,
     agent_id, permission, created_at, last_seen_at, idle_expires_at,
@@ -308,6 +340,7 @@ describe("application adapters", () => {
   it.effect("drafts only the exact current repair head within its workspace and release scope", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
+      const database = yield* Database
       yield* persistence.releases.create(WORKSPACE_ID, release)
       yield* persistence.releases.create(
         WORKSPACE_ID,
@@ -320,6 +353,7 @@ describe("application adapters", () => {
       )
       const releaseNodeId = "01890f6f-6d6a-7cc0-98d2-600000000001"
       const issueNodeId = "01890f6f-6d6a-7cc0-98d2-600000000002"
+      const staleIssueNodeId = "01890f6f-6d6a-7cc0-98d2-600000000003"
       const firstRevision = {
         workspaceId: WORKSPACE_ID,
         relationshipId: RELATIONSHIP_ID,
@@ -348,6 +382,11 @@ describe("application adapters", () => {
         evidenceClaimIds: [],
         recordedAt: "2026-07-14T10:00:00.000Z"
       }
+      const staleFirstRevision = {
+        ...firstRevision,
+        relationshipId: STALE_APPLY_RELATIONSHIP_ID,
+        targetNodeId: staleIssueNodeId
+      }
       yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
         entityProjections: [],
         nodes: [
@@ -369,11 +408,23 @@ describe("application adapters", () => {
               missingKey: "release:missing-issue"
             },
             createdAt: "2026-07-14T10:00:00.000Z"
+          },
+          {
+            workspaceId: WORKSPACE_ID,
+            nodeId: staleIssueNodeId,
+            endpointKind: "issue",
+            resolution: {
+              _tag: "missing",
+              expectedKind: "entity",
+              expectedEntityKind: "issue",
+              missingKey: "release:stale-apply-issue"
+            },
+            createdAt: "2026-07-14T10:00:00.000Z"
           }
         ],
         evidenceItems: [],
         evidenceClaims: [],
-        relationships: [firstRevision]
+        relationships: [firstRevision, staleFirstRevision]
       })
 
       const fillerNodes = Array.from({ length: 500 }, (_, index) => ({
@@ -461,17 +512,13 @@ describe("application adapters", () => {
         nodes: [],
         evidenceItems: [],
         evidenceClaims: [],
-        relationships: [{
-          ...firstRevision,
+        relationships: [firstRevision, staleFirstRevision].map((relationship) => ({
+          ...relationship,
           revision: 2,
           supersedesRevision: 1,
           lifecycle: { _tag: "proposed", effectiveAt: "2026-07-14T10:01:00.000Z" },
           recordedAt: "2026-07-14T10:01:00.000Z"
-        }]
-      })
-      const historyBefore = yield* inspection.relationshipHistory({
-        workspaceId: WORKSPACE_ID,
-        relationshipId: RELATIONSHIP_ID
+        }))
       })
       const stale = yield* inspection.repairProposalDraft({
         workspaceId: WORKSPACE_ID,
@@ -607,6 +654,17 @@ describe("application adapters", () => {
       })
       assert.deepStrictEqual(pendingPage.proposals.map(({ proposalId }) => proposalId), [REPAIR_PROPOSAL_ID])
 
+      const pendingApplication = yield* repairProposals.apply({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(pendingApplication))
+      if (Result.isFailure(pendingApplication)) {
+        assert.instanceOf(pendingApplication.failure, ApplicationInvalidRequest)
+      }
+
       const selfReview = yield* repairProposals.review({
         workspaceId: WORKSPACE_ID,
         proposalId: REPAIR_PROPOSAL_ID,
@@ -674,6 +732,155 @@ describe("application adapters", () => {
       })
       assert.deepStrictEqual(approvedPage.proposals, [approved])
 
+      yield* repairProposals.create({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        relationshipId: STALE_APPLY_RELATIONSHIP_ID,
+        request: {
+          proposalId: STALE_APPLY_PROPOSAL_ID,
+          environmentId: null,
+          expectedRevision: Schema.decodeSync(LedgerRevision)(2),
+          disposition: "verify",
+          rationale: "Verify the second inferred link."
+        },
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      })
+      yield* repairProposals.review({
+        workspaceId: WORKSPACE_ID,
+        proposalId: STALE_APPLY_PROPOSAL_ID,
+        request: {
+          reviewId: STALE_APPLY_REVIEW_ID,
+          decision: "approved",
+          rationale: "The second link is ready."
+        },
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [{
+          ...staleFirstRevision,
+          revision: 3,
+          supersedesRevision: 2,
+          lifecycle: { _tag: "proposed", effectiveAt: "2026-07-14T10:10:00.000Z" },
+          recordedAt: "2026-07-14T10:10:00.000Z"
+        }]
+      })
+      const staleHistory = yield* inspection.relationshipHistory({
+        workspaceId: WORKSPACE_ID,
+        relationshipId: STALE_APPLY_RELATIONSHIP_ID
+      })
+      const staleApplication = yield* repairProposals.apply({
+        workspaceId: WORKSPACE_ID,
+        proposalId: STALE_APPLY_PROPOSAL_ID,
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(staleApplication))
+      if (Result.isFailure(staleApplication)) {
+        assert.instanceOf(staleApplication.failure, ApplicationConflict)
+      }
+      assert.isNull(
+        yield* persistence.relationshipRepairProposals.application({
+          workspaceId: WORKSPACE_ID,
+          proposalId: STALE_APPLY_PROPOSAL_ID
+        })
+      )
+      assert.deepStrictEqual(
+        yield* inspection.relationshipHistory({
+          workspaceId: WORKSPACE_ID,
+          relationshipId: STALE_APPLY_RELATIONSHIP_ID
+        }),
+        staleHistory
+      )
+
+      yield* TestClock.setTime(epochMillis(BACKDATED_APPLY_AT))
+      const backdatedApplication = yield* repairProposals.apply({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        actor: { _tag: "human", personId: OWNER_PERSON_ID },
+        sessionId: OWNER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(backdatedApplication))
+      if (Result.isFailure(backdatedApplication)) {
+        assert.instanceOf(backdatedApplication.failure, ApplicationServiceUnavailable)
+      }
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+
+      const unauthorizedApplication = yield* repairProposals.apply({
+        workspaceId: WORKSPACE_ID,
+        proposalId: REPAIR_PROPOSAL_ID,
+        actor: { _tag: "human", personId: APPROVER_PERSON_ID },
+        sessionId: APPROVER_SESSION_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(unauthorizedApplication))
+      if (Result.isFailure(unauthorizedApplication)) {
+        assert.instanceOf(unauthorizedApplication.failure, ApplicationServiceUnavailable)
+      }
+      assert.deepStrictEqual(
+        (yield* inspection.relationshipHistory({
+          workspaceId: WORKSPACE_ID,
+          relationshipId: RELATIONSHIP_ID
+        })).revisions.map(({ revision }) => revision),
+        [2, 1]
+      )
+      assert.isNull(
+        yield* persistence.relationshipRepairProposals.application({
+          workspaceId: WORKSPACE_ID,
+          proposalId: REPAIR_PROPOSAL_ID
+        })
+      )
+
+      const [applied, concurrentReplay] = yield* Effect.all([
+        repairProposals.apply({
+          workspaceId: WORKSPACE_ID,
+          proposalId: REPAIR_PROPOSAL_ID,
+          actor: { _tag: "human", personId: OWNER_PERSON_ID },
+          sessionId: OWNER_SESSION_ID
+        }),
+        repairProposals.apply({
+          workspaceId: WORKSPACE_ID,
+          proposalId: REPAIR_PROPOSAL_ID,
+          actor: { _tag: "human", personId: OWNER_PERSON_ID },
+          sessionId: OWNER_SESSION_ID
+        })
+      ], { concurrency: 2 })
+      assert.deepStrictEqual(concurrentReplay, applied)
+      assert.strictEqual(applied.application.appliedRevision, 3)
+      assert.strictEqual(applied.application.origin.sessionId, OWNER_SESSION_ID)
+      assert.strictEqual(applied.relationship.revision, 3)
+      assert.strictEqual(applied.relationship.supersedesRevision, 2)
+      assert.strictEqual(applied.relationship.lifecycle._tag, "verified")
+      assert.deepStrictEqual(applied.relationship.recordedBy, {
+        _tag: "human",
+        personId: OWNER_PERSON_ID
+      })
+      assert.deepStrictEqual(
+        yield* database.sql`SELECT proposal_id AS proposalId, relationship_id AS relationshipId,
+          applied_revision AS appliedRevision
+        FROM relationship_repair_applications
+        WHERE workspace_id = ${WORKSPACE_ID} AND proposal_id = ${REPAIR_PROPOSAL_ID}`,
+        [{
+          proposalId: REPAIR_PROPOSAL_ID,
+          relationshipId: RELATIONSHIP_ID,
+          appliedRevision: 3
+        }]
+      )
+      assert.isTrue(Result.isFailure(
+        yield* database.sql`UPDATE relationship_repair_applications
+          SET applied_revision = 2
+          WHERE workspace_id = ${WORKSPACE_ID} AND proposal_id = ${REPAIR_PROPOSAL_ID}`.pipe(Effect.result)
+      ))
+      const historyAfterApply = yield* inspection.relationshipHistory({
+        workspaceId: WORKSPACE_ID,
+        relationshipId: RELATIONSHIP_ID
+      })
+      assert.deepStrictEqual(historyAfterApply.revisions.map(({ revision }) => revision), [3, 2, 1])
+
       const staleProposal = yield* repairProposals.create({
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,
@@ -692,7 +899,7 @@ describe("application adapters", () => {
       if (Result.isFailure(staleProposal)) assert.instanceOf(staleProposal.failure, ApplicationConflict)
       assert.deepStrictEqual(
         yield* inspection.relationshipHistory({ workspaceId: WORKSPACE_ID, relationshipId: RELATIONSHIP_ID }),
-        historyBefore
+        historyAfterApply
       )
     })))
 

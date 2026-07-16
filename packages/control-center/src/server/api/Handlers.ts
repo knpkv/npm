@@ -336,6 +336,24 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("applyRepairProposal", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* repairProposals.apply({
+              workspaceId: session.workspaceId,
+              proposalId: params.proposalId,
+              actor: session.actor,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("relationship", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
