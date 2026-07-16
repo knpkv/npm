@@ -681,6 +681,75 @@ describe("DeliveryGraphRepository", () => {
       }
     })))
 
+  it.effect("bounds derived release closure before loading 502 disjoint nodes", () =>
+    withRepository(Effect.gen(function*() {
+      yield* insertFoundation
+      const repository = yield* DeliveryGraphRepository
+      const nodes = Array.from({ length: 502 }, (_, index) => ({
+        workspaceId: WORKSPACE_A,
+        nodeId: `01890f6f-6d6a-7cc0-98e0-${index.toString(16).padStart(12, "0")}`,
+        endpointKind: "issue",
+        resolution: {
+          _tag: "missing",
+          expectedKind: "entity",
+          expectedEntityKind: "issue",
+          missingKey: `overflow-issue-${index}`
+        },
+        createdAt: CREATED_AT
+      }))
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: nodes.slice(0, 500),
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: nodes.slice(500),
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: Array.from({ length: 251 }, (_, index) => ({
+          workspaceId: WORKSPACE_A,
+          relationshipId: `01890f6f-6d6a-7cc0-98e1-${index.toString(16).padStart(12, "0")}`,
+          relationshipSchemaVersion: 1,
+          revision: 1,
+          supersedesRevision: null,
+          kind: "depends-on",
+          sourceNodeId: nodes[index * 2]?.nodeId,
+          sourceNodeKind: "issue",
+          targetNodeId: nodes[index * 2 + 1]?.nodeId,
+          targetNodeKind: "issue",
+          scope: { _tag: "release", releaseId: RELEASE_ID },
+          lifecycle: { _tag: "proposed", effectiveAt: CREATED_AT },
+          confidence: { _tag: "unknown", rationale: "Generated closure overflow fixture." },
+          provenance: {
+            _tag: "rule",
+            ruleId: "closure-overflow-fixture",
+            ruleVersion: 1,
+            rationale: "Generated relationship exercises aggregate read bounds."
+          },
+          recordedBy: { _tag: "system", component: "delivery-graph-fixture" },
+          evidenceClaimIds: [],
+          recordedAt: CREATED_AT
+        }))
+      })
+
+      const slice = yield* repository.read(WORKSPACE_A, {
+        _tag: "releaseSlice",
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        limit: 500
+      })
+      assert.strictEqual(slice._tag, "releaseSlice")
+      if (slice._tag === "releaseSlice") {
+        assert.lengthOf(slice.value.relationships, 250)
+        assert.lengthOf(slice.value.nodes, 500)
+        assert.isTrue(slice.value.truncated)
+        assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(slice.value))
+      }
+    })))
+
   it.effect("persists the six-issue release fixture across PR and pipeline dimensions", () =>
     withRepository(
       Effect.gen(function*() {
