@@ -500,6 +500,42 @@ test("retains the filtered overview through Active work and the release agent", 
   await expect(page).toHaveURL(filteredOverviewPath)
 })
 
+test("rebinds a filtered overview origin when Active work changes release", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention`
+  await page.goto(filteredOverviewPath)
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await page.getByRole("link", { name: "Review blocker" }).click()
+
+  await page.getByRole("link", { name: new RegExp(heldRelease.relay.codename, "u") }).click()
+  await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
+  await page.getByRole("link", { name: "Open full release" }).click()
+  await expect(page).toHaveURL(heldFullPath)
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(filteredOverviewPath)
+})
+
+test("uses semantic fallback when direct Active work changes release", async ({ page }) => {
+  await page.goto(`/w/${snapshot.workspaceId}/work?release=${release.releaseId}`)
+  await page.getByRole("link", { name: new RegExp(heldRelease.relay.codename, "u") }).click()
+  await page.getByRole("link", { name: "Open full release" }).click()
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(overviewPath)
+})
+
+test("opens the selected Active work release from the shell agent control", async ({ page }) => {
+  await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
+  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await expect(page).toHaveURL(`${heldFullPath}/agent`)
+  await expect(page.getByRole("heading", { level: 1, name: `Ask ${heldRelease.relay.codename}.` })).toBeVisible()
+})
+
+test("keeps an invalid Active work agent context on the safe generic fallback", async ({ page }) => {
+  await page.goto(`/w/${snapshot.workspaceId}/work?release=invalid`)
+  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await expect(page).toHaveURL(/\/agent\?from=/u)
+  await expect(page.getByRole("heading", { level: 2, name: "Context unavailable" })).toBeVisible()
+})
+
 test("shares Relay, version, and verdict geometry across the sole orchestrated transition", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" })
   await installTransitionProbe(page)

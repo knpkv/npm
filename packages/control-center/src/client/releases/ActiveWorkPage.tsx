@@ -9,7 +9,12 @@ import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
 import { ReleaseAction, ReleaseAgentEntry, ReleaseEvidence } from "./ReleaseRoute.js"
 import { ReleaseWorkset } from "./ReleaseWorkset.js"
 import { releaseActiveWorkPath, releaseFullPath } from "./releasePaths.js"
-import { decodeReleaseRouteId } from "./releaseRoutes.js"
+import {
+  decodeReleaseRouteId,
+  makeReleaseRouteState,
+  resolveReleaseOrigin,
+  type ReleaseRouteState
+} from "./releaseRoutes.js"
 import styles from "./ActiveWorkPage.module.css"
 
 const selectedReleaseId = (search: string): ReturnType<typeof decodeReleaseRouteId> =>
@@ -18,10 +23,12 @@ const selectedReleaseId = (search: string): ReturnType<typeof decodeReleaseRoute
 const ReleaseSelector = ({
   releases,
   selected,
+  stateForRelease,
   workspaceId
 }: {
   readonly releases: ReadonlyArray<PortfolioReleasePresentation>
   readonly selected: PortfolioReleasePresentation
+  readonly stateForRelease: (release: PortfolioReleasePresentation) => ReleaseRouteState | undefined
   readonly workspaceId: WorkspaceReleaseOutletContext["workspaceId"]
 }): ReactElement => (
   <nav aria-label="Release decisions" className={styles.releaseSelector}>
@@ -31,6 +38,7 @@ const ReleaseSelector = ({
         className={styles.releaseChoice}
         data-active={release.id === selected.id ? "true" : "false"}
         key={release.id}
+        state={stateForRelease(release)}
         to={releaseActiveWorkPath(workspaceId, release.id)}
       >
         <span>{release.relay.codename}</span>
@@ -80,6 +88,9 @@ export const ActiveWorkPage = (): ReactElement => {
       />
     )
   }
+  const resolvedOrigin = resolveReleaseOrigin(location.state, context.workspaceId, selected.id)
+  const stateForRelease = (release: PortfolioReleasePresentation): ReleaseRouteState | undefined =>
+    resolvedOrigin.isStored ? makeReleaseRouteState(context.workspaceId, release.id, resolvedOrigin.origin) : undefined
 
   return (
     <article className={styles.page}>
@@ -97,7 +108,12 @@ export const ActiveWorkPage = (): ReactElement => {
         </Text>
       </header>
 
-      <ReleaseSelector releases={releases} selected={selected} workspaceId={context.workspaceId} />
+      <ReleaseSelector
+        releases={releases}
+        selected={selected}
+        stateForRelease={stateForRelease}
+        workspaceId={context.workspaceId}
+      />
 
       <section aria-labelledby="active-release-title" className={styles.selectedRelease}>
         <div className={styles.identity}>

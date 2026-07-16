@@ -23,6 +23,10 @@ const contextualAgentPath = (pathname: string, search: string): string => {
   if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "releases" && isReleaseId(releaseId)) {
     return releaseAgentPath(workspaceId, releaseId)
   }
+  const activeWorkReleaseId = new URLSearchParams(search).get("release") ?? undefined
+  if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "work" && isReleaseId(activeWorkReleaseId)) {
+    return releaseAgentPath(workspaceId, activeWorkReleaseId)
+  }
   return `/agent?from=${encodeURIComponent(`${pathname}${search}`)}`
 }
 
@@ -76,7 +80,7 @@ export const AppShell = (): ReactElement => {
           <span className={styles.brandName}>Control Center</span>
         </NavLink>
         <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
-        <NavLink className={styles.agent ?? ""} to={agentDestination}>
+        <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
           Ask Relay
         </NavLink>
         <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
