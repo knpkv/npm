@@ -33,6 +33,30 @@ describe("release workset presenter", () => {
     expect(new Set(workset.pullRequestGroups.flatMap(({ linkedJiraKeys }) => linkedJiraKeys))).toHaveLength(5)
   })
 
+  it("matches Jira work across every graph node resolved to the same pull request", () => {
+    const pullRequestNode = releaseWorksetFixture.nodes.find(({ endpointKind }) => endpointKind === "pull-request")
+    const movedRelationship = releaseWorksetFixture.relationships.find(
+      (relationship) => relationship.kind === "implements" && relationship.sourceNodeId === pullRequestNode?.nodeId
+    )
+    if (pullRequestNode === undefined || movedRelationship === undefined) {
+      throw new Error("Expected a pull-request node with implemented Jira work")
+    }
+    const duplicateNodeId = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d4-000000000099")
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      nodes: [...releaseWorksetFixture.nodes, { ...pullRequestNode, nodeId: duplicateNodeId }],
+      relationships: releaseWorksetFixture.relationships.map((relationship) =>
+        relationship.relationshipId === movedRelationship.relationshipId
+          ? { ...relationship, sourceNodeId: duplicateNodeId }
+          : relationship
+      )
+    }
+
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+
+    expect(workset.pullRequestGroups[0]?.linkedJiraKeys).toEqual(["OPS-428", "OPS-429", "OPS-430"])
+  })
+
   it("keeps the unlinked item, pipeline stages, runbook, and navigable object identities explicit", () => {
     const workset = presentReleaseWorkset(releaseWorksetFixture, WORKSET_WORKSPACE_ID, stages)
 

@@ -1,6 +1,7 @@
+import { LinkProvider, type RlyLinkProps } from "@knpkv/rly/foundations"
 import { ServiceMark, WorksetCard } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import { forwardRef, type ReactElement } from "react"
 import { Link, useLocation } from "react-router"
 
 import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
@@ -16,6 +17,14 @@ const LoadingWorkset = (): ReactElement => (
     <Skeleton height="15rem" />
   </div>
 )
+
+const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function ReleaseWorksetLink(
+  { href, ...props },
+  ref
+) {
+  const location = useLocation()
+  return <Link {...props} ref={ref} state={location.state} to={href} />
+})
 
 /** Cookie-authenticated reads remain available when only mutation-proof storage failed. */
 export const releaseWorksetSessionKey = (state: BrowserSessionState): string | null => {
@@ -106,7 +115,7 @@ export const ReleaseWorkset = ({
           ) : (
             <div className={styles.runbooks}>
               {workset.runbooks.map((runbook) => (
-                <Link className={styles.runbook} key={runbook.id} to={runbook.href}>
+                <Link className={styles.runbook} key={runbook.id} state={location.state} to={runbook.href}>
                   <strong>{runbook.title}</strong>
                   <span>{runbook.reference}</span>
                 </Link>
@@ -121,13 +130,15 @@ export const ReleaseWorkset = ({
           <StateLabel label={`Selected object · ${selectedObject.label}`} size="compact" tone="progress" />
         )}
       </div>
-      <WorksetCard
-        gaps={workset.gaps}
-        heading={`${release.serviceName} release work`}
-        jiraItems={workset.jiraItems}
-        pipelines={workset.pipelines}
-        pullRequestGroups={workset.pullRequestGroups}
-      />
+      <LinkProvider component={ReleaseWorksetLink}>
+        <WorksetCard
+          gaps={workset.gaps}
+          heading={`${release.serviceName} release work`}
+          jiraItems={workset.jiraItems}
+          pipelines={workset.pipelines}
+          pullRequestGroups={workset.pullRequestGroups}
+        />
+      </LinkProvider>
     </div>
   )
 }

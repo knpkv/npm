@@ -371,6 +371,33 @@ test("preserves a filtered overview through Active work and the full release", a
   await expect(page).toHaveURL(filteredOverviewPath)
 })
 
+test("preserves a filtered overview through every release-work object link", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention`
+  const objectLinks = [
+    { kind: "Jira", selector: "[data-rly-workset-jira-id] a" },
+    { kind: "pull request", selector: "[data-rly-workset-pr-id] a" },
+    { kind: "pipeline", selector: "[data-rly-workset-pipeline-id] a" },
+    { kind: "runbook", selector: null }
+  ]
+
+  for (const objectLink of objectLinks) {
+    await page.goto(filteredOverviewPath)
+    const blockedRow = page.locator(`[data-portfolio-release-id="${release.releaseId}"]`)
+    await blockedRow.getByRole("button", { name: /^Preview /u }).click()
+    const preview = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
+    const link = objectLink.selector === null
+      ? preview.getByRole("link", { name: /Payments release runbook/u })
+      : preview.locator(objectLink.selector).first()
+
+    await link.click()
+    await expect(page, `${objectLink.kind} link opens the canonical full release`).toHaveURL(
+      new RegExp(`${fullPath}\\?object=`)
+    )
+    await page.getByRole("link", { name: "Back to overview" }).click()
+    await expect(page, `${objectLink.kind} link retains the filtered origin`).toHaveURL(filteredOverviewPath)
+  }
+})
+
 test("shows six Jira items as one release workset with PR and pipeline dimensions", async ({ page }) => {
   await page.goto(fullPath)
 
@@ -390,6 +417,8 @@ test("shows six Jira items as one release workset with PR and pipeline dimension
   await firstJiraItem.getByRole("link").click()
   await expect(page).toHaveURL(new RegExp(`object=${firstJiraId}`))
   await expect(page.getByText("Selected object · OPS-428")).toBeVisible()
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await expect(page).toHaveURL(overviewPath)
 })
 
 test("keeps the complete release context and persists its relationship-repair review", async ({ page }) => {

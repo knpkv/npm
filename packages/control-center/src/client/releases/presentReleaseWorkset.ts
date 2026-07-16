@@ -211,19 +211,22 @@ export const presentReleaseWorkset = (
       href: href(issue)
     })),
     pullRequestGroups: pullRequests.map((pullRequest) => {
-      const sourceNode = Array.from(projections).find(([, projection]) => projection.entityId === pullRequest.entityId)
-        ?.[0]
-      const linkedJiraKeys = sourceNode === undefined
-        ? []
-        : inspection.relationships.flatMap((relationship): ReadonlyArray<string> => {
+      const sourceNodes = new Set(
+        Array.from(projections).flatMap(([nodeId, projection]): ReadonlyArray<GraphNodeId> =>
+          projection.entityId === pullRequest.entityId ? [nodeId] : []
+        )
+      )
+      const linkedJiraKeys = Array.from(
+        new Set(inspection.relationships.flatMap((relationship): ReadonlyArray<string> => {
           if (
             relationship.kind !== "implements" ||
-            relationship.sourceNodeId !== sourceNode ||
+            !sourceNodes.has(relationship.sourceNodeId) ||
             !currentRelationship(relationship)
           ) return []
           const issue = projections.get(relationship.targetNodeId)
           return issue?.details._tag === "issue" ? [issue.details.key] : []
-        })
+        }))
+      )
       const state = reviewStateLabel(pullRequest.details.reviewState)
       return {
         id: pullRequest.entityId,
