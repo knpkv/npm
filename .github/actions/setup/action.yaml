@@ -15,10 +15,20 @@ runs:
   using: composite
   steps:
     - name: Install Socket Firewall
-      uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
-      with:
-        mode: firewall-free
-        firewall-version: 1.13.1
+      shell: bash
+      env:
+        SOCKET_FIREWALL_SHA256: 4dc46b626a7c5b81c0b54e1984ee53be5a628dbfb2f55ab14e9b04c8a134db6a
+        SOCKET_FIREWALL_URL: https://github.com/SocketDev/sfw-free/releases/download/v1.13.1/sfw-free-linux-x86_64
+      run: |
+        install_directory="${RUNNER_TEMP}/socket-firewall"
+        binary_path="${install_directory}/sfw"
+        mkdir -p "${install_directory}"
+        curl --fail --location --retry 4 --retry-all-errors \
+          --output "${binary_path}" "${SOCKET_FIREWALL_URL}"
+        printf '%s  %s\n' "${SOCKET_FIREWALL_SHA256}" "${binary_path}" \
+          | sha256sum --check --strict
+        chmod +x "${binary_path}"
+        echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm
       uses: pnpm/action-setup@v6
     - name: Install node
