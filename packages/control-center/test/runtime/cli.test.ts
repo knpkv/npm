@@ -415,7 +415,9 @@ describe("Control Center CLI", () => {
         const database = yield* Database
         yield* database.validateMigrationLedger
       }).pipe(Effect.provide(databaseLayer(prepared.persistenceConfig)), Effect.scoped)
-      const durableEntries = (yield* fileSystem.readDirectory(prepared.dataRoot)).sort()
+      const durableEntries = (yield* fileSystem.readDirectory(prepared.dataRoot))
+        .filter((entry) => !entry.endsWith("-shm") && !entry.endsWith("-wal"))
+        .sort()
       const parentEntries = (yield* fileSystem.readDirectory(parent)).sort()
 
       yield* fileSystem.remove(root)
@@ -428,7 +430,12 @@ describe("Control Center CLI", () => {
         (yield* fileSystem.readDirectory(parent)).sort(),
         parentEntries.filter((entry) => entry !== "data")
       )
-      assert.deepStrictEqual((yield* fileSystem.readDirectory(prepared.dataRoot)).sort(), durableEntries)
+      assert.deepStrictEqual(
+        (yield* fileSystem.readDirectory(prepared.dataRoot))
+          .filter((entry) => !entry.endsWith("-shm") && !entry.endsWith("-wal"))
+          .sort(),
+        durableEntries
+      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("allows a different claim beside an orphan bound to another basename", () =>
