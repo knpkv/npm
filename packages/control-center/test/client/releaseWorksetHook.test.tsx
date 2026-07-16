@@ -6,6 +6,9 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
+import { SessionSummary } from "../../src/api/session.js"
+import type { BrowserSessionState } from "../../src/client/BrowserSession.js"
+import { releaseWorksetSessionKey } from "../../src/client/releases/ReleaseWorkset.js"
 import type { ReleaseId } from "../../src/domain/identifiers.js"
 import { ReleaseId as ReleaseIdSchema } from "../../src/domain/identifiers.js"
 import {
@@ -57,6 +60,19 @@ const Harness = ({
   )
 }
 
+const SessionHarness = ({
+  state,
+  transport
+}: {
+  readonly state: BrowserSessionState
+  readonly transport: ReleaseWorksetTransport
+}): ReactElement => {
+  const controller = useReleaseWorkset(WORKSET_RELEASE_ID, releaseWorksetSessionKey(state), transport)
+  return (
+    <span>{controller.state._tag === "ready" ? controller.state.inspection.releaseId : controller.state._tag}</span>
+  )
+}
+
 describe("useReleaseWorkset", () => {
   it("never exposes a previous release or session while the next graph is loading", async () => {
     const releaseB = Schema.decodeSync(ReleaseIdSchema)("01890f6f-6d6a-7cc0-98d2-000000000012")
@@ -97,5 +113,40 @@ describe("useReleaseWorkset", () => {
     )
     expect(observations.some((state) => state._tag === "ready" && state.sessionKey === "session-a")).toBe(false)
     expect(host.textContent).toBe("loading")
+  })
+
+  it("keeps cookie-authenticated reads available when mutation-proof storage is unavailable", async () => {
+    const session = Schema.decodeUnknownSync(SessionSummary)({
+      sessionId: "01890f6f-6d6a-7cc0-98d2-000000000002",
+      workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001",
+      actor: { _tag: "human", personId: "01890f6f-6d6a-7cc0-98d2-000000000003" },
+      permission: "workspace-owner",
+      createdAt: "2026-07-14T10:00:00.000Z",
+      lastSeenAt: "2026-07-14T10:01:00.000Z",
+      idleExpiresAt: "2026-07-14T22:00:00.000Z",
+      absoluteExpiresAt: "2026-08-13T10:00:00.000Z",
+      revokedAt: null
+    })
+    const transport = {
+      load: vi.fn((_releaseId: ReleaseId, _signal: AbortSignal) => Promise.resolve(releaseWorksetFixture))
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(<SessionHarness state={{ _tag: "storage-unavailable", session }} transport={transport} />)
+    )
+    await act(async () => Promise.resolve())
+    expect(transport.load).toHaveBeenCalledOnce()
+    expect(host.textContent).toBe(WORKSET_RELEASE_ID)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <SessionHarness state={{ _tag: "storage-unavailable", session: null }} transport={transport} />
+      )
+    )
+    expect(transport.load).toHaveBeenCalledOnce()
+    expect(host.textContent).toBe("idle")
   })
 })

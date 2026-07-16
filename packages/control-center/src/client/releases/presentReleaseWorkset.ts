@@ -84,7 +84,9 @@ const pipelineStateLabel = (
 ): string => `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
 
 const currentRelationship = (relationship: DeliveryRelationship): boolean =>
-  relationship.lifecycle._tag !== "rejected" && relationship.lifecycle._tag !== "superseded"
+  relationship.lifecycle._tag !== "missing" &&
+  relationship.lifecycle._tag !== "rejected" &&
+  relationship.lifecycle._tag !== "superseded"
 
 const gapService = (relationship: DeliveryRelationship): RlyService => {
   const missingKind = relationship.sourceNodeKind === "release"

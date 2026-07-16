@@ -3,7 +3,7 @@ import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primi
 import type { ReactElement } from "react"
 import { Link, useLocation } from "react-router"
 
-import { useBrowserSession } from "../BrowserSession.js"
+import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import { presentReleaseWorkset } from "./presentReleaseWorkset.js"
@@ -17,6 +17,21 @@ const LoadingWorkset = (): ReactElement => (
   </div>
 )
 
+/** Cookie-authenticated reads remain available when only mutation-proof storage failed. */
+export const releaseWorksetSessionKey = (state: BrowserSessionState): string | null => {
+  switch (state._tag) {
+    case "authenticated":
+      return state.session.sessionId
+    case "storage-unavailable":
+      return state.session?.sessionId ?? null
+    case "anonymous":
+    case "blocked":
+    case "checking":
+    case "unavailable":
+      return null
+  }
+}
+
 /** Render one server-backed release graph without substituting demo relationships. */
 export const ReleaseWorkset = ({
   release,
@@ -27,7 +42,7 @@ export const ReleaseWorkset = ({
 }): ReactElement => {
   const browserSession = useBrowserSession()
   const location = useLocation()
-  const sessionKey = browserSession.state._tag === "authenticated" ? browserSession.state.session.sessionId : null
+  const sessionKey = releaseWorksetSessionKey(browserSession.state)
   const controller = useReleaseWorkset(release.id, sessionKey)
   if (sessionKey === null || controller.state._tag === "idle" || controller.state._tag === "loading") {
     return <LoadingWorkset />

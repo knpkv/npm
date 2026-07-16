@@ -1,6 +1,7 @@
 import type { RlyStage } from "@knpkv/rly/patterns"
 import { describe, expect, it } from "vitest"
 
+import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import { presentReleaseWorkset } from "../../src/client/releases/presentReleaseWorkset.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
@@ -66,5 +67,26 @@ describe("release workset presenter", () => {
       { state: "Approved", tone: "positive" }
     ])
     expect(workset.truncated).toBe(false)
+  })
+
+  it("keeps a missing resolved PR-to-Jira edge out of linked work while retaining its gap", () => {
+    const firstVerified = releaseWorksetFixture.relationships.find(({ lifecycle }) => lifecycle._tag === "verified")
+    const missing = releaseWorksetFixture.relationships.find(({ lifecycle }) => lifecycle._tag === "missing")
+    if (firstVerified === undefined || missing === undefined) {
+      throw new Error("Expected verified and missing fixture edges")
+    }
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      relationships: releaseWorksetFixture.relationships.map((relationship) =>
+        relationship.relationshipId === missing.relationshipId
+          ? { ...relationship, sourceNodeId: firstVerified.sourceNodeId }
+          : relationship
+      )
+    }
+
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+
+    expect(workset.pullRequestGroups[0]?.linkedJiraKeys).toEqual(["OPS-428", "OPS-429", "OPS-430"])
+    expect(workset.gaps).toEqual([expect.objectContaining({ label: "OPS-433 has no CodeCommit pull request" })])
   })
 })
