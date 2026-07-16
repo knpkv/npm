@@ -209,6 +209,15 @@ const ProposalRow = ({
         )}
       </div>
 
+      {proposal.review === null ? null : (
+        <div className={styles.reviewEvidence}>
+          <Text as="strong" variant="label">
+            Review note
+          </Text>
+          <Text tone="secondary">{proposal.review.rationale}</Text>
+        </div>
+      )}
+
       {actionFailed ? (
         <StatePanel
           action={<Button onClick={onRetry}>Reload decisions</Button>}

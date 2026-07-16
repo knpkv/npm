@@ -1,5 +1,8 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test"
+import * as Schema from "effect/Schema"
 
+import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
+import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 interface ReleaseTransitionGeometry {
@@ -50,6 +53,14 @@ interface BrowserTransitionNameCollision {
 const snapshot = releasePortfolioFixture
 const release = snapshot.releases[0]
 if (release === undefined) throw new Error("Expected one browser release fixture")
+const proposalAuthor = release.collaborators[0]
+if (proposalAuthor === undefined) throw new Error("Expected one release proposal author")
+
+const ReviewPayload = Schema.Struct({
+  decision: Schema.Literals(["approved", "rejected"]),
+  rationale: Schema.String,
+  reviewId: Schema.String
+})
 
 const pairedSession = {
   absoluteExpiresAt: "2026-08-13T10:00:00.000Z",
@@ -91,6 +102,26 @@ const portfolioInvalidation = {
 }
 
 const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
+  const proposal = Schema.decodeUnknownSync(RelationshipRepairProposal)({
+    schemaVersion: 2,
+    proposalId: "01890f6f-6d6a-7cc0-98d2-000000000081",
+    workspaceId: snapshot.workspaceId,
+    releaseId: release.releaseId,
+    environmentId: null,
+    relationshipId: "01890f6f-6d6a-7cc0-98d5-000000000006",
+    expectedRevision: 1,
+    disposition: "link",
+    rationale: "OPS-428 needs a verified CodeCommit relationship before the release can move.",
+    origin: {
+      actor: { _tag: "human", personId: proposalAuthor.personId },
+      sessionId: "01890f6f-6d6a-7cc0-98d2-000000000091"
+    },
+    status: "pending",
+    proposedAt: "2026-07-14T10:00:00.000Z",
+    review: null
+  })
+  const encodedProposal = Schema.encodeSync(RelationshipRepairProposal)(proposal)
+  let currentProposal = proposal
   await context.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ csrfToken: "cd".repeat(32), session: pairedSession }),
@@ -100,6 +131,53 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   })
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
+  })
+  await context.route("**/api/v1/relationships/repair-proposals/*/reviews", async (route) => {
+    const payload = Schema.decodeUnknownSync(ReviewPayload)(route.request().postDataJSON())
+    currentProposal = Schema.decodeUnknownSync(RelationshipRepairProposal)({
+      ...encodedProposal,
+      status: payload.decision === "approved" ? "approved" : "rejected",
+      review: {
+        reviewId: payload.reviewId,
+        decision: payload.decision,
+        rationale: payload.rationale,
+        origin: { actor: pairedSession.actor, sessionId: pairedSession.sessionId },
+        reviewedAt: "2026-07-14T10:18:00.000Z"
+      }
+    })
+    await route.fulfill({ body: JSON.stringify(currentProposal), contentType: "application/json", status: 200 })
+  })
+  await context.route("**/api/v1/relationships/releases/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname.endsWith("/repair-proposals")) {
+      await route.fulfill({
+        body: JSON.stringify({
+          applications: [],
+          environmentId: null,
+          proposals: [currentProposal],
+          releaseId: release.releaseId,
+          status: null,
+          truncated: false
+        }),
+        contentType: "application/json",
+        status: 200
+      })
+      return
+    }
+    if (pathname.endsWith("/repair-candidates")) {
+      await route.fulfill({
+        body: JSON.stringify({
+          candidates: [],
+          environmentId: null,
+          releaseId: release.releaseId,
+          truncated: false
+        }),
+        contentType: "application/json",
+        status: 200
+      })
+      return
+    }
+    await route.fulfill({ body: JSON.stringify(releaseWorksetFixture), contentType: "application/json", status: 200 })
   })
   await context.route("**/api/v1/events**", async (route) => route.abort("failed"))
   await context.route("**/api/v1/agent/releases/*/turns", async (route) => {
@@ -248,7 +326,7 @@ test("opens preview first, restores focus, then pushes the canonical full route"
   const fullHeading = page.getByRole("heading", { level: 1, name: "payments-api" })
   await expect(fullHeading).toBeVisible()
   await expect(fullHeading).toBeFocused()
-  await expect(page.getByText("Relationship detail not synchronized")).toBeVisible()
+  await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
 
   await page.goBack()
   await expect(page).toHaveURL(previewPath)
@@ -256,6 +334,59 @@ test("opens preview first, restores focus, then pushes the canonical full route"
   await page.keyboard.press("Escape")
   await expect(page).toHaveURL(overviewPath)
   await expect(previewButton).toBeFocused()
+})
+
+test("shows six Jira items as one release workset with PR and pipeline dimensions", async ({ page }) => {
+  await page.goto(fullPath)
+
+  await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
+  await expect(page.locator("[data-rly-workset-pr-id]")).toHaveCount(2)
+  await expect(page.locator("[data-rly-workset-gap-id]")).toHaveCount(1)
+  await expect(page.locator("[data-rly-workset-pipeline-id]")).toHaveCount(1)
+  await expect(page.getByText("OPS-433 has no CodeCommit pull request")).toBeVisible()
+  await expect(page.getByRole("link", { name: /Payments release runbook/u })).toBeVisible()
+  await expect(page.locator("[data-rly-workset-jira-id] a")).toHaveCount(6)
+  await expect(page.locator("[data-rly-workset-pr-id] a")).toHaveCount(2)
+  await expect(page.locator("[data-rly-workset-pipeline-id] a")).toHaveCount(1)
+
+  const firstJiraItem = page.locator("[data-rly-workset-jira-id]").first()
+  const firstJiraId = await firstJiraItem.getAttribute("data-rly-workset-jira-id")
+  if (firstJiraId === null) throw new Error("Expected the first Jira work item to expose its entity id")
+  await firstJiraItem.getByRole("link").click()
+  await expect(page).toHaveURL(new RegExp(`object=${firstJiraId}`))
+  await expect(page.getByText("Selected object · OPS-428")).toBeVisible()
+})
+
+test("keeps the complete release context and persists its relationship-repair review", async ({ page }) => {
+  await page.goto(`/w/${snapshot.workspaceId}/work?release=${release.releaseId}`)
+
+  await expect(page.getByRole("heading", { name: /Decisions, not tickets/u })).toBeVisible()
+  await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
+  await expect(page.locator("[data-rly-workset-pr-id]")).toHaveCount(2)
+  await expect(page.locator("[data-rly-workset-pipeline-id]")).toHaveCount(1)
+  await expect(page.getByRole("link", { name: /Payments release runbook/u })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Review blocker" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Ask about this release" })).toBeVisible()
+  await expect(page.getByText(/OPS-428 needs a verified CodeCommit relationship/u)).toBeVisible()
+  await page.getByRole("button", { name: "Review proposal" }).click()
+  await page.getByRole("textbox", { name: "Review note" }).fill("The implementation evidence is ready.")
+  await page.getByRole("button", { name: "Approve" }).click()
+  await expect(page.getByText("Ready to apply")).toBeVisible()
+
+  await page.reload()
+  await expect(page.getByText("Ready to apply")).toBeVisible()
+  await expect(page.getByText("The implementation evidence is ready.")).toBeVisible()
+})
+
+test("keeps the complete release workset readable on a compact viewport", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 640 })
+  await page.goto(fullPath)
+
+  await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
+  await expect(page.locator("[data-rly-workset-dimension]")).toHaveCount(3)
+  await expect.poll(() => page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true
+  )
 })
 
 test("keeps one human-first Relay thread per canonical release", async ({ page }) => {
@@ -452,7 +583,8 @@ test("renders a compact full-screen sheet and returns direct loads to the semant
   await page.setViewportSize({ height: 800, width: 320 })
   await page.goto(previewPath)
   await expect(page.locator("[data-rly-release-preview-presentation=\"sheet\"]")).toBeVisible()
-  await expect(page.getByText("No demo relationships are substituted.")).toBeVisible()
+  await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
+  await expect(page.locator("[data-rly-workset-dimension]")).toHaveCount(3)
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)
 
   await page.getByRole("button", { name: "Close Release preview: 2.18.0-rc.1 Solar Grove" }).click()

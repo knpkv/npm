@@ -10,7 +10,13 @@ import {
 } from "../../domain/identifiers.js"
 import { releaseParentPath } from "./releasePaths.js"
 
-export { releaseAgentPath, releaseFullPath, releaseParentPath, releasePreviewPath } from "./releasePaths.js"
+export {
+  releaseActiveWorkPath,
+  releaseAgentPath,
+  releaseFullPath,
+  releaseParentPath,
+  releasePreviewPath
+} from "./releasePaths.js"
 
 /** Exact in-application location preserved while release routes are open. */
 export interface ReleaseOrigin {

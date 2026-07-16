@@ -26,11 +26,20 @@ const contextualAgentPath = (pathname: string, search: string): string => {
   return `/agent?from=${encodeURIComponent(`${pathname}${search}`)}`
 }
 
-const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => [
-  { label: "Overview", to: overviewPath },
-  { label: "Releases", to: "/releases" },
-  { label: "Services", to: "/services" }
-]
+const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => {
+  const workspaceId = overviewPath.split("/")[2]
+  return isWorkspaceId(workspaceId)
+    ? [
+        { label: "Overview", to: overviewPath },
+        { label: "Active work", to: `/w/${workspaceId}/work` },
+        { label: "Services", to: "/services" }
+      ]
+    : [
+        { label: "Overview", to: overviewPath },
+        { label: "Releases", to: "/releases" },
+        { label: "Services", to: "/services" }
+      ]
+}
 
 const navClassName = ({ isActive }: { readonly isActive: boolean }): string =>
   `${styles.navLink ?? ""}${isActive ? ` ${styles.navLinkActive ?? ""}` : ""}`

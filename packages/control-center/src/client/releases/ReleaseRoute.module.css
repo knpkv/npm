@@ -5,10 +5,29 @@
 }
 
 .state a,
-.back {
+.back,
+.releaseAction {
   color: inherit;
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
+}
+
+.releaseAction {
+  display: inline-flex;
+  min-block-size: var(--rly-space-48);
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--rly-space-24);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-action-background);
+  color: var(--rly-color-action-foreground);
+  font-size: var(--rly-type-body-large-size);
+  text-decoration: none;
+}
+
+.releaseAction:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-4);
 }
 
 .previewDetails,

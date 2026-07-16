@@ -3,10 +3,18 @@
 .proposal,
 .proposalHeader,
 .decision,
+.reviewEvidence,
 .reviewForm,
 .loading,
 .panelStack {
   display: grid;
+}
+
+.reviewEvidence {
+  gap: var(--rly-space-4);
+  padding: var(--rly-space-12) var(--rly-space-16);
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2);
+  background: var(--rly-color-surface-1);
 }
 
 .root,
