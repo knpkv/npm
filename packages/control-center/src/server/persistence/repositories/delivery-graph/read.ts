@@ -9,6 +9,7 @@ import { RecordNotFoundError } from "../../errors.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
 import { makeDeliveryGraphDecoders } from "./decode.js"
 import { captureMalformedDeliveryGraphRow } from "./quarantine.js"
+import { selectBoundedRelationshipClosure } from "./release-slice.js"
 import { ClaimRow, decodeRows, EvidenceRow, graphRecordError, NodeRow, ProjectionRow, RelationshipRow } from "./rows.js"
 
 export const makeDeliveryGraphReader = Effect.gen(function*() {
@@ -314,6 +315,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         return DeliveryGraphReadResult.make({ _tag: "relationshipHistory", value })
       }
       case "releaseSlice": {
+        const identityLimit = query.limit + 1
         const identityRows = query.environmentId === null
           ? yield* sql`SELECT revision.relationship_id AS relationshipId
               FROM relationship_revisions revision
@@ -325,7 +327,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id IS NULL
               ORDER BY revision.recorded_at DESC
-              LIMIT ${query.limit}`
+              LIMIT ${identityLimit}`
           : yield* sql`SELECT revision.relationship_id AS relationshipId
               FROM relationship_revisions revision
               INNER JOIN relationship_heads head
@@ -336,12 +338,18 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id = ${query.environmentId}
               ORDER BY revision.recorded_at DESC
-              LIMIT ${query.limit}`
+              LIMIT ${identityLimit}`
         const identities = yield* decodeRows(Schema.Struct({ relationshipId: RelationshipId }), identityRows)
-        const relationships = yield* Effect.forEach(
-          identities,
+        const candidateRelationships = yield* Effect.forEach(
+          identities.slice(0, query.limit),
           ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
         )
+        const bounded = selectBoundedRelationshipClosure(candidateRelationships, {
+          relationships: query.limit,
+          nodes: 500,
+          evidenceClaims: 500
+        })
+        const relationships = bounded.relationships
         const nodeIds = Array.from(
           new Set(relationships.flatMap((relationship) => [
             relationship.sourceNodeId,
@@ -377,6 +385,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           value: {
             releaseId: query.releaseId,
             environmentId: query.environmentId,
+            truncated: identities.length > query.limit || bounded.truncated,
             nodes,
             entityProjections,
             relationships,

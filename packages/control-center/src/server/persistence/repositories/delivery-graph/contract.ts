@@ -92,6 +92,7 @@ const EvidenceBundle = Schema.Struct({
 const ReleaseSlice = Schema.Struct({
   releaseId: ReleaseId,
   environmentId: Schema.NullOr(EnvironmentId),
+  truncated: Schema.Boolean,
   nodes: Schema.Array(DeliveryNode),
   entityProjections: Schema.Array(PersistedEntityProjection),
   relationships: Schema.Array(DeliveryRelationship),

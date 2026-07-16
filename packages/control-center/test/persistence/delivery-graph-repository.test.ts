@@ -17,6 +17,7 @@ import {
   RecordNotFoundError,
   RevisionConflictError
 } from "../../src/server/persistence/errors.js"
+import { selectBoundedRelationshipClosure } from "../../src/server/persistence/repositories/delivery-graph/release-slice.js"
 import {
   DeliveryGraphInputError,
   DeliveryGraphRepository
@@ -562,6 +563,81 @@ const sixIssueBatch = {
 }
 
 describe("DeliveryGraphRepository", () => {
+  it("bounds the complete release closure at 250 of 251 disjoint relationships", () => {
+    const relationships = Array.from({ length: 251 }, (_, index) => ({
+      sourceNodeId: `source-${index}`,
+      targetNodeId: `target-${index}`,
+      evidenceClaimIds: []
+    }))
+
+    const exactBoundary = selectBoundedRelationshipClosure(relationships.slice(0, 250), {
+      relationships: 500,
+      nodes: 500,
+      evidenceClaims: 500
+    })
+    assert.lengthOf(exactBoundary.relationships, 250)
+    assert.isFalse(exactBoundary.truncated)
+
+    const overflow = selectBoundedRelationshipClosure(relationships, {
+      relationships: 500,
+      nodes: 500,
+      evidenceClaims: 500
+    })
+    assert.lengthOf(overflow.relationships, 250)
+    assert.isTrue(overflow.truncated)
+    assert.lengthOf(
+      new Set(overflow.relationships.flatMap(({ sourceNodeId, targetNodeId }) => [
+        sourceNodeId,
+        targetNodeId
+      ])),
+      500
+    )
+
+    const claimHeavy = selectBoundedRelationshipClosure(
+      Array.from({ length: 5 }, (_, relationshipIndex) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: Array.from(
+          { length: 128 },
+          (_, claimIndex) => `claim-${relationshipIndex}-${claimIndex}`
+        )
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(claimHeavy.relationships, 3)
+    assert.lengthOf(new Set(claimHeavy.relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)), 384)
+    assert.isTrue(claimHeavy.truncated)
+
+    const exactClaimBoundary = selectBoundedRelationshipClosure(
+      Array.from({ length: 4 }, (_, relationshipIndex) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: Array.from(
+          { length: 125 },
+          (_, claimIndex) => `boundary-claim-${relationshipIndex}-${claimIndex}`
+        )
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(exactClaimBoundary.relationships, 4)
+    assert.lengthOf(
+      new Set(exactClaimBoundary.relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)),
+      500
+    )
+    assert.isFalse(exactClaimBoundary.truncated)
+
+    const rootOverflow = selectBoundedRelationshipClosure(
+      Array.from({ length: 501 }, (_, index) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: [`shared-claim-${index % 500}`]
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(rootOverflow.relationships, 500)
+    assert.isTrue(rootOverflow.truncated)
+  })
+
   it.effect("bounds evidence claim inspection at the repository query", () =>
     withRepository(Effect.gen(function*() {
       yield* insertFoundation

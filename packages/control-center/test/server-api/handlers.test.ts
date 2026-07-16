@@ -88,6 +88,7 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
       ? Effect.succeed({
         releaseId,
         environmentId,
+        truncated: false,
         nodes: [],
         entityProjections: [],
         relationships: [],
@@ -157,6 +158,7 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.releaseId, inspectedReleaseId)
       assert.isNull(result.environmentId)
+      assert.isFalse(result.truncated)
       assert.deepStrictEqual(result.relationships, [])
     }).pipe(
       Effect.provide([

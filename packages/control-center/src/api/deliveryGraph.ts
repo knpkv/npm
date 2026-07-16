@@ -34,10 +34,11 @@ export const InspectedEntityProjection = Schema.Struct({
   recordedAt: UtcTimestamp
 }).annotate({ identifier: "InspectedEntityProjection" })
 
-/** Complete bounded graph material for one release and optional environment. */
+/** Bounded deterministic graph prefix; `truncated` explicitly reports incomplete material. */
 export const ReleaseDeliveryGraphInspection = Schema.Struct({
   releaseId: ReleaseId,
   environmentId: Schema.NullOr(EnvironmentId),
+  truncated: Schema.Boolean,
   nodes: boundedArray(DeliveryNode, MAXIMUM_RELEASE_SLICE_RECORDS),
   entityProjections: boundedArray(InspectedEntityProjection, MAXIMUM_RELEASE_SLICE_RECORDS),
   relationships: boundedArray(DeliveryRelationship, MAXIMUM_RELEASE_SLICE_RECORDS),

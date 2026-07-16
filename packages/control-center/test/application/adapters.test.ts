@@ -202,6 +202,7 @@ describe("application adapters", () => {
       assert.deepStrictEqual(slice, {
         releaseId: RELEASE_ID,
         environmentId: null,
+        truncated: false,
         nodes: [],
         entityProjections: [],
         relationships: [],
