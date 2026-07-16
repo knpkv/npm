@@ -24,6 +24,7 @@ import {
   ApplicationServiceUnavailable
 } from "../../src/server/api/ApplicationServices.js"
 import {
+  makeDeliveryGraphInspection,
   makeMediaReads,
   makePluginAdministration,
   makePortfolioSnapshots,
@@ -187,6 +188,38 @@ const setup = Effect.gen(function*() {
 })
 
 describe("application adapters", () => {
+  it.effect("inspects only a workspace-owned release graph without substituting demo data", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      const inspection = yield* makeDeliveryGraphInspection
+
+      const slice = yield* inspection.releaseSlice({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null
+      })
+      assert.deepStrictEqual(slice, {
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        nodes: [],
+        entityProjections: [],
+        relationships: [],
+        evidenceClaims: [],
+        evidenceItems: []
+      })
+
+      const crossWorkspace = yield* inspection.releaseSlice({
+        workspaceId: OTHER_WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(crossWorkspace))
+      if (Result.isFailure(crossWorkspace)) {
+        assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
+      }
+    })))
+
   it.effect("projects plugin facts, validates descriptor fields, redacts secrets, and preserves CAS", () =>
     withApplication(Effect.gen(function*() {
       yield* setup

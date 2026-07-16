@@ -4,6 +4,7 @@ export {
   ApplicationRateLimited,
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
+  DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
   PluginAdministration,

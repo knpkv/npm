@@ -17,6 +17,13 @@ export {
 } from "./client.js"
 export { ControlCenterApi } from "./controlCenterApi.js"
 export {
+  DeliveryGraphApiGroup,
+  EvidenceInspection,
+  InspectedEntityProjection,
+  RelationshipHistoryInspection,
+  ReleaseDeliveryGraphInspection
+} from "./deliveryGraph.js"
+export {
   ConflictApiError,
   CorrelationId,
   CorrelationResponseHeaders,

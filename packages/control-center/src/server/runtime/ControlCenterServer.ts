@@ -3,11 +3,17 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
-import type { MediaReads, PluginAdministration, PortfolioSnapshots } from "../api/ApplicationServices.js"
+import type {
+  DeliveryGraphInspection,
+  MediaReads,
+  PluginAdministration,
+  PortfolioSnapshots
+} from "../api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
 import {
+  deliveryGraphInspectionLayer,
   liveEventsLayer,
   mediaReadsLayer,
   pluginAdministrationLayer,
@@ -52,7 +58,11 @@ import {
 } from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 
-type ControlCenterCoreApplicationServices = MediaReads | PluginAdministration | PortfolioSnapshots
+type ControlCenterCoreApplicationServices =
+  | DeliveryGraphInspection
+  | MediaReads
+  | PluginAdministration
+  | PortfolioSnapshots
 
 /** Runtime construction settings after security and persistence decoding. */
 export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
@@ -89,6 +99,7 @@ const liveApplicationServices: Layer.Layer<
   Persistence | SecretStore
 > = Layer.mergeAll(
   pluginAdministrationLayer,
+  deliveryGraphInspectionLayer,
   portfolioSnapshotsLayer,
   mediaReadsLayer
 )

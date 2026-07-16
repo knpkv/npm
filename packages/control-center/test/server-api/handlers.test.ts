@@ -19,6 +19,7 @@ import {
 import { EventCursor, ReleaseId } from "../../src/domain/identifiers.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
   PluginAdministration,
@@ -26,7 +27,12 @@ import {
   ReleaseAgentTurns
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
-import { agentHandlersLayer, liveEventHandlersLayer, portfolioHandlersLayer } from "../../src/server/api/Handlers.js"
+import {
+  agentHandlersLayer,
+  deliveryGraphHandlersLayer,
+  liveEventHandlersLayer,
+  portfolioHandlersLayer
+} from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
@@ -57,6 +63,7 @@ const snapshot = Schema.decodeSync(PortfolioSnapshot)({
   releases: [],
   plugins: []
 })
+const inspectedReleaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000004")
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
 
@@ -73,6 +80,24 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
     requestedWorkspaceId === session.workspaceId
       ? Effect.succeed(snapshot)
       : Effect.die("portfolio handler crossed a workspace boundary")
+})
+
+const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
+  releaseSlice: ({ environmentId, releaseId, workspaceId: requestedWorkspaceId }) =>
+    requestedWorkspaceId === session.workspaceId && releaseId === inspectedReleaseId
+      ? Effect.succeed({
+        releaseId,
+        environmentId,
+        nodes: [],
+        entityProjections: [],
+        relationships: [],
+        evidenceClaims: [],
+        evidenceItems: []
+      })
+      : Effect.die("delivery graph handler crossed its workspace or release boundary"),
+  relationship: () => Effect.die("not used"),
+  relationshipHistory: () => Effect.die("not used"),
+  evidence: () => Effect.die("not used")
 })
 
 const agentLayer = Layer.succeed(ReleaseAgentTurns, {
@@ -116,7 +141,32 @@ const portfolioHandlersTestLayer = portfolioHandlersLayer.pipe(
   Layer.provide(portfolioLayer)
 )
 
+const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
+  Layer.provide(sessionMiddlewareLayer),
+  Layer.provide(deliveryGraphLayer)
+)
+
 describe("Control Center API handlers", () => {
+  it.effect("serves a workspace-scoped release relationship slice", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+      const result = yield* client.deliveryGraph.releaseSlice({
+        params: { releaseId: inspectedReleaseId },
+        query: {}
+      })
+
+      assert.strictEqual(result.releaseId, inspectedReleaseId)
+      assert.isNull(result.environmentId)
+      assert.deepStrictEqual(result.relationships, [])
+    }).pipe(
+      Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        deliveryGraphHandlersTestLayer
+      ])
+    ))
+
   it.effect("serves the bird's-eye snapshot through the generated in-memory client", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["portfolio"])
@@ -338,6 +388,7 @@ describe("Control Center API handlers", () => {
             Layer.succeed(Clock.Clock, instrumentedClock),
             Layer.succeed(LiveEvents, trackedLiveEvents),
             portfolioLayer,
+            deliveryGraphLayer,
             agentLayer,
             NodeHttpServer.layerHttpServices,
             NodeServices.layer
@@ -418,6 +469,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          deliveryGraphLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -507,6 +559,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          deliveryGraphLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -605,6 +658,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          deliveryGraphLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer
@@ -725,6 +779,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
           portfolioLayer,
+          deliveryGraphLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
           NodeServices.layer

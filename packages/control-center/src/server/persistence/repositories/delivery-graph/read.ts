@@ -183,12 +183,14 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
 
   const listClaimsForEvidence = Effect.fn("DeliveryGraphRepository.listClaimsForEvidence")(function*(
     workspaceId: WorkspaceId,
-    evidenceId: EvidenceId
+    evidenceId: EvidenceId,
+    limit: number
   ) {
     const identities = yield* sql`SELECT evidence_claim_id AS evidenceClaimId
       FROM evidence_claims
       WHERE workspace_id = ${workspaceId} AND evidence_id = ${evidenceId}
-      ORDER BY recorded_at, evidence_claim_id`
+      ORDER BY recorded_at, evidence_claim_id
+      LIMIT ${limit}`
     const decoded = yield* decodeRows(Schema.Struct({ evidenceClaimId: EvidenceClaimId }), identities)
     return yield* Effect.forEach(decoded, ({ evidenceClaimId }) => loadClaim(workspaceId, evidenceClaimId))
   })
@@ -284,7 +286,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         })
       case "evidence": {
         const evidence = yield* loadEvidence(workspaceId, query.evidenceId)
-        const claims = yield* listClaimsForEvidence(workspaceId, query.evidenceId)
+        const claims = yield* listClaimsForEvidence(workspaceId, query.evidenceId, query.limit)
         return DeliveryGraphReadResult.make({ _tag: "evidence", value: { evidence, claims } })
       }
       case "relationship":

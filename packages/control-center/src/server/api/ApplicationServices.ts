@@ -5,6 +5,11 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 
 import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
+import type {
+  EvidenceInspection,
+  RelationshipHistoryInspection,
+  ReleaseDeliveryGraphInspection
+} from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
@@ -15,7 +20,16 @@ import type {
   PluginHealthResponse
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
-import type { EventCursor, PluginConnectionId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
+import type {
+  EnvironmentId,
+  EventCursor,
+  EvidenceId,
+  PluginConnectionId,
+  RelationshipId,
+  ReleaseId,
+  WorkspaceId
+} from "../../domain/identifiers.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -94,6 +108,40 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
     workspaceId: WorkspaceId
   ) => Effect.Effect<PortfolioSnapshot, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/PortfolioSnapshots") {}
+
+/** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
+export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {
+  readonly releaseSlice: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly environmentId: EnvironmentId | null
+  }) => Effect.Effect<
+    ReleaseDeliveryGraphInspection,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly relationship: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly relationshipId: RelationshipId
+    readonly revision: LedgerRevision | null
+  }) => Effect.Effect<
+    DeliveryRelationship,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly relationshipHistory: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly relationshipId: RelationshipId
+  }) => Effect.Effect<
+    RelationshipHistoryInspection,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly evidence: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly evidenceId: EvidenceId
+  }) => Effect.Effect<
+    EvidenceInspection,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+}>()("@knpkv/control-center/server/api/DeliveryGraphInspection") {}
 
 /**
  * Release-aware conversational boundary. Implementations own context projection,

@@ -562,6 +562,37 @@ const sixIssueBatch = {
 }
 
 describe("DeliveryGraphRepository", () => {
+  it.effect("bounds evidence claim inspection at the repository query", () =>
+    withRepository(Effect.gen(function*() {
+      yield* insertFoundation
+      const repository = yield* DeliveryGraphRepository
+      yield* repository.write(WORKSPACE_A, initialBatch)
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [{
+          ...initialBatch.evidenceClaims[0],
+          evidenceClaimId: SUCCESSOR_CLAIM_ID,
+          value: { _tag: "flag", value: true },
+          supersedesEvidenceClaimId: CLAIM_ID,
+          recordedAt: UPDATED_AT
+        }],
+        relationships: []
+      })
+
+      const bounded = yield* repository.read(WORKSPACE_A, {
+        _tag: "evidence",
+        evidenceId: EVIDENCE_ID,
+        limit: 1
+      })
+      assert.strictEqual(bounded._tag, "evidence")
+      if (bounded._tag === "evidence") {
+        assert.lengthOf(bounded.value.claims, 1)
+        assert.strictEqual(bounded.value.claims[0]?.evidenceClaimId, CLAIM_ID)
+      }
+    })))
+
   it.effect("persists the six-issue release fixture across PR and pipeline dimensions", () =>
     withRepository(
       Effect.gen(function*() {
@@ -1317,7 +1348,8 @@ describe("DeliveryGraphRepository", () => {
 
         yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         })
         assert.isEmpty(yield* quarantine.list(WORKSPACE_A))
 
@@ -1329,7 +1361,8 @@ describe("DeliveryGraphRepository", () => {
 
         const corrupted = yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(corrupted))
         if (Result.isFailure(corrupted)) {
@@ -1339,7 +1372,8 @@ describe("DeliveryGraphRepository", () => {
 
         yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         }).pipe(Effect.result)
         const records = yield* quarantine.list(WORKSPACE_A)
         assert.lengthOf(records, 1)

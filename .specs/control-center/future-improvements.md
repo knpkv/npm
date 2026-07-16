@@ -55,10 +55,16 @@ boundaries, stale preflight, missing `action.reconcile`, both durable cancellati
 orderings for every result kind, and a concurrent terminal race. Real provider mutations remain
 disabled until production adapters, policy integration, and an explicit enablement review land.
 
+The first D04 inspection slice exposes bounded, authenticated release graph, relationship revision,
+lifecycle history, and evidence reads. The application boundary derives workspace ownership from
+the session, rejects missing or cross-workspace releases, and returns only normalized ledger fields.
+Evidence claim reads are bounded in SQL rather than only at response encoding.
+
 ## Remaining roadmap
 
-- D04–D09: relationship repair, six-state portfolio/work views, search/traces/shares, timeline and
-  exports, graceful drain, and startup reconciliation.
+- Complete D04 candidate discovery and governed proposal/review/apply, then D05–D09: six-state
+  portfolio/work views, search/traces/shares, timeline and exports, graceful drain, and startup
+  reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
 - S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
@@ -102,6 +108,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Begin D04 relationship inspection and governed repair. Run one independent exact-commit review
-after each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable
-findings into static rules or repository instructions.
+Add D04 relationship candidate discovery and a non-mutating repair proposal with exact impact,
+permission, and confidence explanation. Run one independent exact-commit review after each
+deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings into
+static rules or repository instructions.
