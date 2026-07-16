@@ -278,6 +278,41 @@ describe("RelationshipRepairPanel", () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
+  it("closes a stale review form when refreshed server state is immutable", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(view(readyState())))
+
+    const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Review proposal"
+    )
+    if (reviewButton === undefined) throw new Error("Expected review action")
+    await act(async () => reviewButton.click())
+    expect(host.querySelector("textarea")).not.toBeNull()
+
+    const reviewedProposal = RelationshipRepairProposal.make({
+      ...proposal,
+      status: "approved",
+      review: {
+        reviewId: reviewIdA,
+        decision: "approved",
+        rationale: "The server already recorded this decision.",
+        origin: { actor: session.actor, sessionId: session.sessionId },
+        reviewedAt: session.lastSeenAt
+      }
+    })
+    await act(async () => mountedRoot?.render(view(readyState(reviewedProposal))))
+
+    expect(host.querySelector("textarea")).toBeNull()
+    expect(
+      [...host.querySelectorAll<HTMLButtonElement>("button")].some(
+        (button) => button.textContent === "Approve" || button.textContent === "Reject"
+      )
+    ).toBe(false)
+    expect(host.textContent).toContain("Ready to apply")
+  })
+
   it("suppresses stale releases and keeps a newer action lock when an aborted request settles late", async () => {
     const releaseB = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000012")
     const proposalB = RelationshipRepairProposal.make({

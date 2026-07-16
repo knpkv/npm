@@ -219,7 +219,7 @@ const ProposalRow = ({
         />
       ) : null}
 
-      {isReviewing ? (
+      {isReviewing && canReview ? (
         <form className={styles.reviewForm} onSubmit={(event) => event.preventDefault()}>
           <Field description="Stored with the immutable decision." label="Review note" required>
             {(controlProps) => (
