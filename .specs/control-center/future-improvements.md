@@ -50,10 +50,9 @@ complete.
 
 1. **Complete the begin/recovery failure matrix.** The real-database happy path, one-use replay,
    concurrent duplicate begin, lease-write rollback, runtime rotation, reconciliation deadline,
-   changed recovery replay, and reconciliation restart fold are covered. Still add expired
-   preparation/session boundaries, stale preflight, missing `action.reconcile`, and the full
-   cancellation-versus-reconciliation race matrix. Authorization expiry already has an atomic
-   consumption regression.
+   changed recovery replay, reconciliation restart fold, expired preparation/authorization/session
+   boundaries, stale preflight, and missing `action.reconcile` are covered. Still add the full
+   cancellation-versus-reconciliation race matrix.
    Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
    stay disabled.
 
@@ -108,7 +107,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Close the next begin/recovery failure cases: expired preparation/session boundaries, stale
-preflight, missing `action.reconcile`, then the cancellation-versus-reconciliation race matrix.
-Run one independent exact-commit review after the deterministic milestone gate; turn recurring,
-high-impact, mechanically enforceable findings into static rules or repository instructions.
+Close the cancellation-versus-reconciliation race matrix, including observations on both sides of
+each durable boundary. Run one independent exact-commit review after the deterministic milestone
+gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
+repository instructions.

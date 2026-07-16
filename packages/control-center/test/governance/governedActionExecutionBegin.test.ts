@@ -104,6 +104,16 @@ const rotatedRuntime = Schema.decodeUnknownSync(CurrentPluginRuntimeAuthority)({
   generation: 2,
   runtimeAuthorityToken: `sha256:${"d".repeat(64)}`
 })
+const encodedCurrentRuntime = Schema.encodeSync(CurrentPluginRuntimeAuthority)(currentRuntime)
+const runtimeWithoutReconciliation = Schema.decodeUnknownSync(CurrentPluginRuntimeAuthority)({
+  ...encodedCurrentRuntime,
+  negotiated: {
+    descriptor: encodedCurrentRuntime.negotiated.descriptor,
+    capabilities: encodedCurrentRuntime.negotiated.capabilities.filter(
+      ({ capabilityId }) => capabilityId !== "action.reconcile"
+    )
+  }
+})
 
 const runtimeAuthorityLayerFor = (runtime: typeof currentRuntime) =>
   Layer.effect(
@@ -552,6 +562,149 @@ describe("governed action execution begin", () => {
         })
       }),
       runtimeAuthorityLayerFor(rotatedRuntime)
+    ))
+
+  it.effect("consumes a preparation exactly at its expiry boundary", () =>
+    withBegin(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+      yield* seedGovernedAction()
+      yield* seedCurrentInputs()
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const prepared = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(prepared._tag, "dispatch")
+      if (prepared._tag !== "dispatch") return
+
+      yield* TestClock.adjust("30 seconds")
+      const begin = yield* makeGovernedActionExecutionBegin
+      const result = yield* begin.begin({
+        preparationToken: prepared.preparationToken,
+        preflight: Schema.decodeUnknownSync(ReadyPluginActionPreflightV1)({
+          _tag: "ready",
+          checkedRevision: "1",
+          checkedAt: "2026-07-15T10:02:00.000Z"
+        }),
+        runtimeAuthorityToken: currentRuntime.runtimeAuthorityToken,
+        scope: prepared.scope
+      })
+
+      assert.deepStrictEqual(result, { _tag: "inactive", state: "authorized" })
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly attempts: number
+        readonly preparations: number
+        readonly startTransitions: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_attempts) AS attempts,
+        (SELECT COUNT(*) FROM governed_action_execution_preparations) AS preparations,
+        (SELECT COUNT(*) FROM governed_action_transitions WHERE command_tag = 'start') AS startTransitions`
+      assert.deepStrictEqual(counts[0], { attempts: 0, preparations: 0, startTransitions: 0 })
+    })))
+
+  it.effect("rejects a session exactly at its idle expiry without consuming the preparation", () =>
+    withBegin(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+      yield* seedGovernedAction()
+      yield* seedCurrentInputs()
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const prepared = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(prepared._tag, "dispatch")
+      if (prepared._tag !== "dispatch") return
+      const { sql } = yield* Database
+      yield* sql`UPDATE sessions SET idle_expires_at = ${DateTime.formatIso(NOW)}
+        WHERE workspace_id = ${WORKSPACE}`
+
+      const begin = yield* makeGovernedActionExecutionBegin
+      const result = yield* begin.begin({
+        preparationToken: prepared.preparationToken,
+        preflight: Schema.decodeUnknownSync(ReadyPluginActionPreflightV1)({
+          _tag: "ready",
+          checkedRevision: "1",
+          checkedAt: "2026-07-15T10:02:00.000Z"
+        }),
+        runtimeAuthorityToken: currentRuntime.runtimeAuthorityToken,
+        scope: prepared.scope
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "authority-changed")
+      const counts = yield* sql<{
+        readonly attempts: number
+        readonly preparations: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_attempts) AS attempts,
+        (SELECT COUNT(*) FROM governed_action_execution_preparations) AS preparations`
+      assert.deepStrictEqual(counts[0], { attempts: 0, preparations: 1 })
+    })))
+
+  it.effect("rejects stale preflight evidence without consuming the preparation", () =>
+    withBegin(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+      yield* seedGovernedAction()
+      yield* seedCurrentInputs()
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const prepared = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(prepared._tag, "dispatch")
+      if (prepared._tag !== "dispatch") return
+
+      const begin = yield* makeGovernedActionExecutionBegin
+      const result = yield* begin.begin({
+        preparationToken: prepared.preparationToken,
+        preflight: Schema.decodeUnknownSync(ReadyPluginActionPreflightV1)({
+          _tag: "ready",
+          checkedRevision: "1",
+          checkedAt: "2026-07-15T10:01:59.999Z"
+        }),
+        runtimeAuthorityToken: currentRuntime.runtimeAuthorityToken,
+        scope: prepared.scope
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "conflict")
+      const { sql } = yield* Database
+      const counts = yield* sql<{
+        readonly attempts: number
+        readonly preparations: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_attempts) AS attempts,
+        (SELECT COUNT(*) FROM governed_action_execution_preparations) AS preparations`
+      assert.deepStrictEqual(counts[0], { attempts: 0, preparations: 1 })
+    })))
+
+  it.effect("rejects a runtime without reconciliation capability and preserves retry state", () =>
+    withBegin(
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+        yield* seedGovernedAction()
+        yield* seedCurrentInputs()
+        const inspect = yield* makeGovernedActionExecutionInspect
+        const prepared = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+        assert.strictEqual(prepared._tag, "dispatch")
+        if (prepared._tag !== "dispatch") return
+
+        const begin = yield* makeGovernedActionExecutionBegin
+        const result = yield* begin.begin({
+          preparationToken: prepared.preparationToken,
+          preflight: Schema.decodeUnknownSync(ReadyPluginActionPreflightV1)({
+            _tag: "ready",
+            checkedRevision: "1",
+            checkedAt: "2026-07-15T10:02:00.000Z"
+          }),
+          runtimeAuthorityToken: runtimeWithoutReconciliation.runtimeAuthorityToken,
+          scope: prepared.scope
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.strictEqual(result.failure.reason, "conflict")
+        const { sql } = yield* Database
+        const counts = yield* sql<{
+          readonly attempts: number
+          readonly preparations: number
+        }>`SELECT
+        (SELECT COUNT(*) FROM governed_action_attempts) AS attempts,
+        (SELECT COUNT(*) FROM governed_action_execution_preparations) AS preparations`
+        assert.deepStrictEqual(counts[0], { attempts: 0, preparations: 1 })
+      }),
+      runtimeAuthorityLayerFor(runtimeWithoutReconciliation)
     ))
 
   it.effect("expires authority and consumes its preparation in the same transaction", () =>
