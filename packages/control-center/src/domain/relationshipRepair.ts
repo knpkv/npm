@@ -56,6 +56,18 @@ export const RelationshipRepairReview = Schema.Struct({
 /** Decoded relationship-repair review. */
 export type RelationshipRepairReview = typeof RelationshipRepairReview.Type
 
+/** Immutable evidence that one approved proposal appended an exact ledger revision. */
+export const RelationshipRepairApplication = Schema.Struct({
+  proposalId: RelationshipRepairProposalId,
+  relationshipId: RelationshipId,
+  appliedRevision: LedgerRevision,
+  origin: RelationshipRepairProposalOrigin,
+  appliedAt: UtcTimestamp
+}).annotate({ identifier: "RelationshipRepairApplication" })
+
+/** Decoded relationship-repair application evidence. */
+export type RelationshipRepairApplication = typeof RelationshipRepairApplication.Type
+
 /** Durable proposal bound to one exact immutable relationship revision. */
 export const RelationshipRepairProposal = Schema.Struct({
   schemaVersion: Schema.Literal(2),

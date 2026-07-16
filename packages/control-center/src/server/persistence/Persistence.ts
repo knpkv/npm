@@ -274,6 +274,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("readiness.register-rule", readiness.registerRule(...args))
     },
     relationshipRepairProposals: {
+      application: (...args: Parameters<RelationshipRepairProposalRepositoryService["application"]>) =>
+        publicOperation("relationship-repair-proposal.application", relationshipRepairProposals.application(...args)),
       create: (...args: Parameters<RelationshipRepairProposalRepositoryService["create"]>) =>
         publicOperation("relationship-repair-proposal.create", relationshipRepairProposals.create(...args)),
       get: (...args: Parameters<RelationshipRepairProposalRepositoryService["get"]>) =>
@@ -281,7 +283,12 @@ const makePersistence = Effect.gen(function*() {
       list: (...args: Parameters<RelationshipRepairProposalRepositoryService["list"]>) =>
         publicOperation("relationship-repair-proposal.list", relationshipRepairProposals.list(...args)),
       review: (...args: Parameters<RelationshipRepairProposalRepositoryService["review"]>) =>
-        publicOperation("relationship-repair-proposal.review", relationshipRepairProposals.review(...args))
+        publicOperation("relationship-repair-proposal.review", relationshipRepairProposals.review(...args)),
+      recordApplication: (...args: Parameters<RelationshipRepairProposalRepositoryService["recordApplication"]>) =>
+        publicOperation(
+          "relationship-repair-proposal.record-application",
+          relationshipRepairProposals.recordApplication(...args)
+        )
     },
     releases: {
       append: (...args: Parameters<ReleaseRepositoryService["append"]>) =>

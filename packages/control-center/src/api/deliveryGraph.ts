@@ -18,6 +18,7 @@ import {
   ReleaseId
 } from "../domain/identifiers.js"
 import {
+  RelationshipRepairApplication,
   RelationshipRepairDisposition,
   RelationshipRepairProposal,
   RelationshipRepairRationale,
@@ -160,6 +161,15 @@ export const ReviewRelationshipRepairProposalRequest = Schema.Struct({
 /** Decoded relationship-repair review request. */
 export type ReviewRelationshipRepairProposalRequest = typeof ReviewRelationshipRepairProposalRequest.Type
 
+/** Applied proposal together with the immutable relationship revision it appended. */
+export const ApplyRelationshipRepairProposalResponse = Schema.Struct({
+  application: RelationshipRepairApplication,
+  relationship: DeliveryRelationship
+}).annotate({ identifier: "ApplyRelationshipRepairProposalResponse" })
+
+/** Decoded approved-proposal application response. */
+export type ApplyRelationshipRepairProposalResponse = typeof ApplyRelationshipRepairProposalResponse.Type
+
 const readErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -269,6 +279,22 @@ const reviewRepairProposal = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const applyRepairProposal = HttpApiEndpoint.post(
+  "applyRepairProposal",
+  "/api/v1/relationships/repair-proposals/:proposalId/applications",
+  {
+    params: { proposalId: RelationshipRepairProposalId },
+    success: ApplyRelationshipRepairProposalResponse,
+    error: [
+      ...readErrors,
+      InvalidRequestApiError,
+      ConflictApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const relationshipHistory = HttpApiEndpoint.get(
   "relationshipHistory",
   "/api/v1/relationships/:relationshipId/history",
@@ -295,6 +321,7 @@ export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
     listRepairProposals,
     getRepairProposal,
     reviewRepairProposal,
+    applyRepairProposal,
     relationship,
     relationshipHistory,
     evidence

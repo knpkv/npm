@@ -80,9 +80,16 @@ a current session, preserves the reviewer actor/rationale/time as an immutable r
 only the matching `pending → approved|rejected` proposal-head transition. Review still does not
 mutate the delivery relationship.
 
+The D04 apply slice adds an owner-only, CSRF-protected application endpoint for approved proposals.
+One transaction compares the proposal's expected revision with the current relationship head,
+appends exactly one immutable successor, and records immutable application authority. Link, verify,
+and reject intents become governed, verified, and rejected lifecycle revisions respectively;
+existing evidence and edge identity are preserved. Exact retries return the original application,
+while stale heads conflict instead of overwriting newer graph state.
+
 ## Remaining roadmap
 
-- Complete D04 compare-and-swap apply and repair UI, then D05–D09: six-state portfolio/work views,
+- Complete the D04 repair UI, then D05–D09: six-state portfolio/work views,
   search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
@@ -128,8 +135,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Implement the approved-proposal apply transition that appends an immutable relationship revision
-only when the proposal's expected revision is still current, then connect proposal/review/apply to
-the relationship repair UI. Run one independent exact-commit review after each deterministic
+Connect proposal/review/apply to the relationship repair UI. Run one independent exact-commit review
+after each deterministic
 milestone gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
 repository instructions.

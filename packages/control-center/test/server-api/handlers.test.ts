@@ -137,6 +137,7 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
 })
 
 const relationshipRepairProposalsLayer = Layer.succeed(RelationshipRepairProposals, {
+  apply: () => Effect.die("not used"),
   create: () => Effect.die("not used"),
   get: () => Effect.die("not used"),
   list: () => Effect.die("not used"),
@@ -249,6 +250,7 @@ describe("Control Center API handlers", () => {
       const proposalApplicationLayer = Layer.merge(
         deliveryGraphLayer,
         Layer.succeed(RelationshipRepairProposals, {
+          apply: () => Effect.die("not used"),
           create: (input) =>
             Ref.set(received, {
               workspaceId: input.workspaceId,
@@ -299,6 +301,7 @@ describe("Control Center API handlers", () => {
       const proposalApplicationLayer = Layer.merge(
         deliveryGraphLayer,
         Layer.succeed(RelationshipRepairProposals, {
+          apply: () => Effect.die("not used"),
           create: () => Effect.die("watcher reached proposal persistence"),
           get: () => Effect.die("not used"),
           list: () => Effect.die("not used"),
@@ -361,6 +364,7 @@ describe("Control Center API handlers", () => {
         sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
       })
       const proposals = Layer.succeed(RelationshipRepairProposals, {
+        apply: () => Effect.die("not used"),
         create: () => Effect.die("not used"),
         get: () => Effect.die("not used"),
         list: () => Effect.die("not used"),
@@ -391,6 +395,40 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.status, "approved")
       assert.strictEqual(yield* Ref.get(receivedSessionId), approverSession.sessionId)
+    }))
+
+  it.effect("rejects an approver before applying a reviewed repair proposal", () =>
+    Effect.gen(function*() {
+      const approverMiddleware = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const proposals = Layer.succeed(RelationshipRepairProposals, {
+        apply: () => Effect.die("approver reached repair application persistence"),
+        create: () => Effect.die("not used"),
+        get: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        review: () => Effect.die("not used")
+      })
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(approverMiddleware),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.merge(deliveryGraphLayer, proposals))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.applyRepairProposal({
+          params: { proposalId: repairProposalId }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddleware,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
     }))
 
   it.effect("serves the bird's-eye snapshot through the generated in-memory client", () =>

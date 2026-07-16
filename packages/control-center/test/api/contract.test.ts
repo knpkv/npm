@@ -110,6 +110,21 @@ describe("ControlCenterApi contract", () => {
       "413",
       "503"
     ])
+
+    const applyRepairProposalPath =
+      specification.paths["/api/v1/relationships/repair-proposals/{proposalId}/applications"]
+    assert.isDefined(applyRepairProposalPath)
+    assert.isDefined(applyRepairProposalPath.post)
+    assert.deepStrictEqual(Object.keys(applyRepairProposalPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "503"
+    ])
   })
 
   it("keeps the seven API groups and endpoint routes explicit", () => {
@@ -170,6 +185,7 @@ describe("ControlCenterApi contract", () => {
         ["listRepairProposals", "GET", "/api/v1/relationships/releases/:releaseId/repair-proposals"],
         ["getRepairProposal", "GET", "/api/v1/relationships/repair-proposals/:proposalId"],
         ["reviewRepairProposal", "POST", "/api/v1/relationships/repair-proposals/:proposalId/reviews"],
+        ["applyRepairProposal", "POST", "/api/v1/relationships/repair-proposals/:proposalId/applications"],
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
@@ -222,6 +238,7 @@ describe("ControlCenterApi contract", () => {
       listRepairProposals: [SessionCookieAuth.key],
       getRepairProposal: [SessionCookieAuth.key],
       reviewRepairProposal: [SessionCookieAuth.key, SessionMutationAuth.key],
+      applyRepairProposal: [SessionCookieAuth.key, SessionMutationAuth.key],
       relationship: [SessionCookieAuth.key],
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
@@ -304,6 +321,10 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.deliveryGraph.reviewRepairProposal({ params: { proposalId } }),
       "https://control.example/api/v1/relationships/repair-proposals/01890f6f-6d6a-7cc0-98d2-000000000096/reviews"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.applyRepairProposal({ params: { proposalId } }),
+      "https://control.example/api/v1/relationships/repair-proposals/01890f6f-6d6a-7cc0-98d2-000000000096/applications"
     )
     assert.strictEqual(
       urls.deliveryGraph.evidence({ params: { evidenceId } }),

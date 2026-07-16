@@ -6,6 +6,7 @@ import type * as Stream from "effect/Stream"
 
 import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
 import type {
+  ApplyRelationshipRepairProposalResponse,
   CreateRelationshipRepairProposalRequest,
   EvidenceInspection,
   RelationshipHistoryInspection,
@@ -207,6 +208,15 @@ export class RelationshipRepairProposals extends Context.Service<RelationshipRep
     readonly sessionId: SessionId
   }) => Effect.Effect<
     RelationshipRepairProposal,
+    ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly apply: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly proposalId: RelationshipRepairProposalId
+    readonly actor: Actor
+    readonly sessionId: SessionId
+  }) => Effect.Effect<
+    ApplyRelationshipRepairProposalResponse,
     ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/RelationshipRepairProposals") {}
