@@ -9,8 +9,8 @@ import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph
 import { SessionSummary } from "../../src/api/session.js"
 import type { BrowserSessionState } from "../../src/client/BrowserSession.js"
 import { releaseWorksetSessionKey } from "../../src/client/releases/ReleaseWorkset.js"
-import type { ReleaseId } from "../../src/domain/identifiers.js"
-import { ReleaseId as ReleaseIdSchema } from "../../src/domain/identifiers.js"
+import type { EnvironmentId, ReleaseId } from "../../src/domain/identifiers.js"
+import { EnvironmentId as EnvironmentIdSchema, ReleaseId as ReleaseIdSchema } from "../../src/domain/identifiers.js"
 import {
   type ReleaseWorksetState,
   type ReleaseWorksetTransport,
@@ -45,15 +45,17 @@ afterEach(async () => {
 })
 
 const Harness = ({
+  environmentIds = [],
   releaseId,
   sessionKey,
   transport
 }: {
+  readonly environmentIds?: ReadonlyArray<EnvironmentId>
   readonly releaseId: ReleaseId
   readonly sessionKey: string
   readonly transport: ReleaseWorksetTransport
 }): ReactElement => {
-  const controller = useReleaseWorkset(releaseId, sessionKey, transport)
+  const controller = useReleaseWorkset(releaseId, environmentIds, sessionKey, transport)
   observations.push(controller.state)
   return (
     <span>{controller.state._tag === "ready" ? controller.state.inspection.releaseId : controller.state._tag}</span>
@@ -67,7 +69,7 @@ const SessionHarness = ({
   readonly state: BrowserSessionState
   readonly transport: ReleaseWorksetTransport
 }): ReactElement => {
-  const controller = useReleaseWorkset(WORKSET_RELEASE_ID, releaseWorksetSessionKey(state), transport)
+  const controller = useReleaseWorkset(WORKSET_RELEASE_ID, [], releaseWorksetSessionKey(state), transport)
   return (
     <span>{controller.state._tag === "ready" ? controller.state.inspection.releaseId : controller.state._tag}</span>
   )
@@ -82,7 +84,7 @@ describe("useReleaseWorkset", () => {
     const requestSessionB = deferred<ReleaseDeliveryGraphInspection>()
     const requests = [requestA.promise, requestB.promise, requestSessionB.promise]
     const transport = {
-      load: vi.fn((_releaseId: ReleaseId, _signal: AbortSignal) => {
+      load: vi.fn((_releaseId: ReleaseId, _environmentId: EnvironmentId | null, _signal: AbortSignal) => {
         const request = requests.shift()
         return request ?? Promise.reject(new Error("Unexpected workset request"))
       })
@@ -128,7 +130,9 @@ describe("useReleaseWorkset", () => {
       revokedAt: null
     })
     const transport = {
-      load: vi.fn((_releaseId: ReleaseId, _signal: AbortSignal) => Promise.resolve(releaseWorksetFixture))
+      load: vi.fn((_releaseId: ReleaseId, _environmentId: EnvironmentId | null, _signal: AbortSignal) =>
+        Promise.resolve(releaseWorksetFixture)
+      )
     } satisfies ReleaseWorksetTransport
     const host = document.createElement("div")
     document.body.append(host)
@@ -148,5 +152,50 @@ describe("useReleaseWorkset", () => {
     )
     expect(transport.load).toHaveBeenCalledOnce()
     expect(host.textContent).toBe("idle")
+  })
+
+  it("combines release-scoped and target-environment relationships", async () => {
+    const environmentId = Schema.decodeSync(EnvironmentIdSchema)("01890f6f-6d6a-7cc0-98d2-000000000031")
+    const sourceRelationship = releaseWorksetFixture.relationships[0]
+    if (sourceRelationship === undefined) throw new Error("Expected an environment relationship fixture")
+    const environmentRelationship = {
+      ...sourceRelationship,
+      scope: { _tag: "environment" as const, environmentId, releaseId: WORKSET_RELEASE_ID }
+    }
+    const releaseInspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      relationships: []
+    }
+    const environmentInspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      environmentId,
+      relationships: [environmentRelationship]
+    }
+    const transport = {
+      load: vi.fn((_releaseId: ReleaseId, scope: EnvironmentId | null, _signal: AbortSignal) =>
+        Promise.resolve(scope === null ? releaseInspection : environmentInspection)
+      )
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <Harness
+          environmentIds={[environmentId]}
+          releaseId={WORKSET_RELEASE_ID}
+          sessionKey="session-a"
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(transport.load).toHaveBeenCalledTimes(2)
+    expect(transport.load.mock.calls.map(([, scope]) => scope)).toEqual([null, environmentId])
+    const ready = [...observations].reverse().find(({ _tag }) => _tag === "ready")
+    expect(ready?._tag === "ready" ? ready.inspection.relationships : []).toContainEqual(environmentRelationship)
+    expect(ready?._tag === "ready" ? ready.inspection.nodes.length : 0).toBe(releaseWorksetFixture.nodes.length)
   })
 })

@@ -18,7 +18,10 @@ import {
   type RelationshipRepairProposalController,
   useRelationshipRepairProposals
 } from "../../src/client/releases/useRelationshipRepairProposals.js"
-import { RelationshipRepairPanelView } from "../../src/client/releases/RelationshipRepairPanel.js"
+import {
+  RelationshipRepairPanelContent,
+  RelationshipRepairPanelView
+} from "../../src/client/releases/RelationshipRepairPanel.js"
 import {
   makeRelationshipRepairReviewId,
   type RelationshipRepairTransport
@@ -104,6 +107,7 @@ const view = (
   onReview = vi.fn(async () => true)
 ) => (
   <RelationshipRepairPanelView
+    mutationsEnabled
     onApply={onApply}
     onRetry={vi.fn()}
     onReview={onReview}
@@ -242,6 +246,7 @@ describe("RelationshipRepairPanel", () => {
     await act(async () =>
       mountedRoot?.render(
         <RelationshipRepairPanelView
+          mutationsEnabled
           onApply={vi.fn(async () => true)}
           onRetry={onRetry}
           onReview={onReview}
@@ -277,6 +282,39 @@ describe("RelationshipRepairPanel", () => {
     if (reloadButton === undefined) throw new Error("Expected reload action")
     await act(async () => reloadButton.click())
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it("keeps decisions readable without storage proof and hides every mutation control", async () => {
+    const current = readyState()
+    if (current._tag !== "ready") throw new Error("Expected ready state")
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable"))),
+      list: vi.fn(() => Promise.resolve(current.page)),
+      makeReviewId: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable"))),
+      review: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <RelationshipRepairPanelContent
+          browserSessionState={{ _tag: "storage-unavailable", session }}
+          release={release}
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(transport.list).toHaveBeenCalledOnce()
+    expect(host.textContent).toContain("Verify")
+    expect(host.textContent).not.toContain("Review proposal")
+    expect(host.textContent).not.toContain("Apply repair")
+    expect(host.textContent).not.toContain("Find repair candidates")
+    expect(transport.apply).not.toHaveBeenCalled()
+    expect(transport.review).not.toHaveBeenCalled()
   })
 
   it("closes a stale review form when refreshed server state is immutable", async () => {
