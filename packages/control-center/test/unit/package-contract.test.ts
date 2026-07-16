@@ -10,6 +10,7 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
+    "@effect/platform-browser": "4.0.0-beta.97",
     "@effect/platform-node": "4.0.0-beta.97",
     "@effect/sql-libsql": "4.0.0-beta.97",
     "@knpkv/ai-claude": "workspace:^",
@@ -109,5 +110,14 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.98" }
       })
     ).toContain("@effect/sql-libsql must align with the pinned Effect beta")
+  })
+
+  it("rejects a browser platform adapter from a different Effect release", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.98" }
+      })
+    ).toContain("@effect/platform-browser must align with the pinned Effect beta")
   })
 })

@@ -62,6 +62,7 @@
     "validate:dist": "tsx scripts/validate-dist.ts"
   },
   "dependencies": {
+    "@effect/platform-browser": "4.0.0-beta.97",
     "@effect/platform-node": "4.0.0-beta.97",
     "@effect/sql-libsql": "4.0.0-beta.97",
     "@knpkv/ai-claude": "workspace:^",

@@ -28,6 +28,7 @@ import {
 } from "./releaseRoutes.js"
 import styles from "./ReleaseRoute.module.css"
 import { useCompactReleasePreview, usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
+import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
 
 interface ReleaseRouteSelection {
   readonly release: PortfolioReleasePresentation
@@ -294,6 +295,7 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
         <Text as="h2" id="release-work" variant="section-title">
           Delivery relationships
         </Text>
+        <RelationshipRepairPanel release={release} />
         <MissingRelationships />
       </section>
       <section aria-labelledby="release-evidence" className={styles.section}>
