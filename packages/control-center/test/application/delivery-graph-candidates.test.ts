@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import type { DeliveryRelationship } from "../../src/domain/deliveryGraph.js"
+import { EnvironmentId } from "../../src/domain/identifiers.js"
 import {
   deriveRelationshipRepairCandidates,
   deriveRelationshipRepairProposalDraft
@@ -96,8 +97,7 @@ describe("relationship repair candidates", () => {
     const candidate = result.candidates[0]
     assert.isDefined(candidate)
     const draft = deriveRelationshipRepairProposalDraft(
-      result,
-      candidate.relationship.relationshipId,
+      candidate,
       candidate.relationship.revision
     )
     assert.deepStrictEqual(draft, {
@@ -112,9 +112,15 @@ describe("relationship repair candidates", () => {
       }
     })
     assert.isUndefined(deriveRelationshipRepairProposalDraft(
-      result,
-      candidate.relationship.relationshipId,
+      candidate,
       Schema.decodeSync(LedgerRevision)(2)
     ))
+    assert.deepStrictEqual(
+      deriveRelationshipRepairCandidates({
+        ...slice,
+        environmentId: Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-410000000003")
+      }).candidates,
+      []
+    )
   })
 })
