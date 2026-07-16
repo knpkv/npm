@@ -118,6 +118,7 @@ describe("ControlCenterApi contract", () => {
       ]),
       [
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
+        ["repairCandidates", "GET", "/api/v1/relationships/releases/:releaseId/repair-candidates"],
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
@@ -164,6 +165,7 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
       releaseSlice: [SessionCookieAuth.key],
+      repairCandidates: [SessionCookieAuth.key],
       relationship: [SessionCookieAuth.key],
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
@@ -215,6 +217,10 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.deliveryGraph.relationship({ params: { relationshipId }, query: {} }),
       "https://control.example/api/v1/relationships/01890f6f-6d6a-7cc0-98d2-000000000094"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.repairCandidates({ params: { releaseId }, query: {} }),
+      "https://control.example/api/v1/relationships/releases/01890f6f-6d6a-7cc0-98d2-000000000093/repair-candidates"
     )
     assert.strictEqual(
       urls.deliveryGraph.evidence({ params: { evidenceId } }),

@@ -8,6 +8,7 @@ import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnR
 import type {
   EvidenceInspection,
   RelationshipHistoryInspection,
+  RelationshipRepairCandidates,
   ReleaseDeliveryGraphInspection
 } from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
@@ -117,6 +118,14 @@ export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspec
     readonly environmentId: EnvironmentId | null
   }) => Effect.Effect<
     ReleaseDeliveryGraphInspection,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly repairCandidates: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly environmentId: EnvironmentId | null
+  }) => Effect.Effect<
+    RelationshipRepairCandidates,
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
   readonly relationship: (input: {

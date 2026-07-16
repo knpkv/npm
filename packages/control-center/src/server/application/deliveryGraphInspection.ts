@@ -4,9 +4,12 @@ import * as Layer from "effect/Layer"
 import type {
   EvidenceInspection,
   RelationshipHistoryInspection,
+  RelationshipRepairCandidate,
+  RelationshipRepairCandidates,
   ReleaseDeliveryGraphInspection
 } from "../../api/deliveryGraph.js"
 import type { DeliveryRelationship } from "../../domain/deliveryGraph.js"
+import type { EnvironmentId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { DeliveryGraphInspection } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { mapPersistenceRead } from "./errors.js"
@@ -14,21 +17,62 @@ import { mapPersistenceRead } from "./errors.js"
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
   Effect.die(`Delivery graph repository returned an unexpected result for ${operation}`)
 
+const candidateExplanation = (relationship: DeliveryRelationship): string => {
+  if (relationship.lifecycle._tag === "missing") return relationship.lifecycle.reason
+  if (relationship.confidence._tag === "inferred") return relationship.confidence.rationale
+  if (relationship.provenance._tag === "human" || relationship.provenance._tag === "agent") {
+    return relationship.provenance.rationale
+  }
+  if (relationship.provenance._tag === "rule") return relationship.provenance.rationale
+  return "Provider evidence requires human verification."
+}
+
+/** Derive non-mutating repair suggestions from the current incomplete relationship prefix. */
+export const deriveRelationshipRepairCandidates = (
+  slice: ReleaseDeliveryGraphInspection
+): RelationshipRepairCandidates => ({
+  releaseId: slice.releaseId,
+  environmentId: slice.environmentId,
+  truncated: slice.truncated,
+  candidates: slice.relationships.flatMap((relationship): ReadonlyArray<RelationshipRepairCandidate> => {
+    if (!["missing", "inferred", "proposed"].includes(relationship.lifecycle._tag)) return []
+    return [{
+      relationship,
+      suggestedDisposition: relationship.lifecycle._tag === "missing" ? "link" : "verify",
+      explanation: candidateExplanation(relationship),
+      impact: {
+        releaseId: slice.releaseId,
+        environmentId: slice.environmentId
+      },
+      requiredPermission: "workspace-owner"
+    }]
+  })
+})
+
 /** Construct bounded workspace-safe delivery graph inspection reads. */
 export const makeDeliveryGraphInspection = Effect.gen(function*() {
   const persistence = yield* Persistence
 
+  const releaseSlice = Effect.fn("DeliveryGraphInspection.releaseSlice")(function*(input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly environmentId: EnvironmentId | null
+  }) {
+    yield* mapPersistenceRead(persistence.releases.get(input.workspaceId, input.releaseId))
+    const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
+      _tag: "releaseSlice",
+      releaseId: input.releaseId,
+      environmentId: input.environmentId,
+      limit: 500
+    }))
+    if (result._tag !== "releaseSlice") return yield* unexpectedResult("release slice")
+    return result.value satisfies ReleaseDeliveryGraphInspection
+  })
+
   return DeliveryGraphInspection.of({
-    releaseSlice: Effect.fn("DeliveryGraphInspection.releaseSlice")(function*(input) {
-      yield* mapPersistenceRead(persistence.releases.get(input.workspaceId, input.releaseId))
-      const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
-        _tag: "releaseSlice",
-        releaseId: input.releaseId,
-        environmentId: input.environmentId,
-        limit: 500
-      }))
-      if (result._tag !== "releaseSlice") return yield* unexpectedResult("release slice")
-      return result.value satisfies ReleaseDeliveryGraphInspection
+    releaseSlice,
+    repairCandidates: Effect.fn("DeliveryGraphInspection.repairCandidates")(function*(input) {
+      return deriveRelationshipRepairCandidates(yield* releaseSlice(input))
     }),
     relationship: Effect.fn("DeliveryGraphInspection.relationship")(function*(input) {
       const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {

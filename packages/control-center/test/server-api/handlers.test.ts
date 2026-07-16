@@ -96,6 +96,10 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
         evidenceItems: []
       })
       : Effect.die("delivery graph handler crossed its workspace or release boundary"),
+  repairCandidates: ({ environmentId, releaseId, workspaceId: requestedWorkspaceId }) =>
+    requestedWorkspaceId === session.workspaceId && releaseId === inspectedReleaseId
+      ? Effect.succeed({ releaseId, environmentId, truncated: false, candidates: [] })
+      : Effect.die("repair candidate handler crossed its workspace or release boundary"),
   relationship: () => Effect.die("not used"),
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
@@ -160,6 +164,12 @@ describe("Control Center API handlers", () => {
       assert.isNull(result.environmentId)
       assert.isFalse(result.truncated)
       assert.deepStrictEqual(result.relationships, [])
+
+      const candidates = yield* client.deliveryGraph.repairCandidates({
+        params: { releaseId: inspectedReleaseId },
+        query: {}
+      })
+      assert.deepStrictEqual(candidates.candidates, [])
     }).pipe(
       Effect.provide([
         NodeHttpServer.layerHttpServices,

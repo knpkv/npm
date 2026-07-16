@@ -209,6 +209,17 @@ describe("application adapters", () => {
         evidenceClaims: [],
         evidenceItems: []
       })
+      const candidates = yield* inspection.repairCandidates({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null
+      })
+      assert.deepStrictEqual(candidates, {
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        truncated: false,
+        candidates: []
+      })
 
       const crossWorkspace = yield* inspection.releaseSlice({
         workspaceId: OTHER_WORKSPACE_ID,
