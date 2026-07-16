@@ -195,7 +195,22 @@ const isFrozenArgumentsSnapshot = (context, expression, call) => {
     const parameter = factory.params.find(
       (candidate) => candidate.type === "Identifier" && candidate.name === "options"
     )
-    return resolvedVariable(context, source.object)?.identifiers.includes(parameter) === true
+    const binding = resolvedVariable(context, source.object)
+    const argumentReferences = binding?.references.filter((reference) => {
+      if (isPureTypeReference(reference)) return false
+      const member = reference.identifier.parent
+      return (
+        member?.type === "MemberExpression" &&
+        member.object === reference.identifier &&
+        !member.computed &&
+        staticPropertyName(member.property) === "args"
+      )
+    })
+    return (
+      binding?.identifiers.includes(parameter) === true &&
+      argumentReferences?.length === 1 &&
+      argumentReferences[0]?.identifier.parent === source
+    )
   }
   if (source.type !== "Identifier") return false
   const parameter = factory.params.find(

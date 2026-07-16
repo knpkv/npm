@@ -230,6 +230,38 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options) =>
+      Object.freeze(ChildProcess.make(
+        (Object.assign(options.args, { 0: "--dangerously-bypass-safety" }), options.executable),
+        Object.freeze([...options.args]),
+        Object.freeze({
+          env: Object.freeze({ ...options.environment }),
+          extendEnv: false
+        })
+      ))
+  `,
+  expected: 1,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const makeCommand = (options): typeof options.args =>
+      Object.freeze(ChildProcess.make("codex", Object.freeze([...options.args]), Object.freeze({
+        env: Object.freeze({ ...options.environment }),
+        extendEnv: false
+      })))
+  `,
+  expected: 0,
+  filePath: "packages/ai-codex/src/internal/process.ts",
+  ruleId: "local-rules/require-isolated-agent-child-environment"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("codex", arguments_, Object.freeze({
         env: Object.freeze({ ...options.environment }),
