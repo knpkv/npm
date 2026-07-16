@@ -28,6 +28,15 @@ const StoredReleaseAgentThreadMessage = Schema.Struct({
   time: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(32))
 })
 
+const hasUniqueMessageIds = (messages: ReadonlyArray<{ readonly id: string }>): boolean => {
+  const ids = new Set<string>()
+  for (const message of messages) {
+    if (ids.has(message.id)) return false
+    ids.add(message.id)
+  }
+  return true
+}
+
 const StoredReleaseAgentThread = Schema.Array(StoredReleaseAgentThreadMessage).check(
   Schema.makeFilter((messages) => messages.length <= MAXIMUM_STORED_MESSAGES, {
     expected: `at most ${MAXIMUM_STORED_MESSAGES} stored release-agent messages`
@@ -35,7 +44,10 @@ const StoredReleaseAgentThread = Schema.Array(StoredReleaseAgentThreadMessage).c
   Schema.makeFilter(
     (messages) => messages.reduce((length, message) => length + message.content.length, 0) <= MAXIMUM_STORED_CONTENT,
     { expected: `at most ${MAXIMUM_STORED_CONTENT} stored release-agent characters` }
-  )
+  ),
+  Schema.makeFilter(hasUniqueMessageIds, {
+    expected: "unique stored release-agent message ids"
+  })
 )
 
 const StoredReleaseAgentThreadJson = Schema.fromJsonString(StoredReleaseAgentThread)

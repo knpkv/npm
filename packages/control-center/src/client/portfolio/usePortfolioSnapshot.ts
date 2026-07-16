@@ -262,6 +262,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
       const streamResult = yield* Effect.result(
         Effect.gen(function*() {
           const stream = yield* transport.openStream(cursor)
+          attempt = 0
           return yield* consumeStream(stream, cursor)
         })
       )
