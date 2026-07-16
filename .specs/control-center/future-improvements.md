@@ -96,18 +96,12 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The interactive shell exposes Node 24, but its installed `pnpm` launcher is backed by Node 22.
   Direct local validation therefore invokes test tools with Node 24; PR CI remains the authoritative
   Node 24 workspace check.
-- `governedActionExecutionBegin.test.ts` now holds the end-to-end persistence fixtures for begin,
-  dispatch, unknown, recovery claims, and reconciliation. Split the shared fixture and outcome
-  matrices into focused files after D03 is wired; keeping one database harness avoided duplicating
-  security-sensitive setup during this checkpoint.
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
 
 ## Recommended next session
 
-Split `governedActionExecutionBegin.test.ts` into focused begin, dispatch, recovery-claim, and
-reconciliation suites while retaining one shared security-sensitive database harness. Then begin
-D04 relationship inspection and governed repair. Run one independent exact-commit review after
-each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings
-into static rules or repository instructions.
+Begin D04 relationship inspection and governed repair. Run one independent exact-commit review
+after each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable
+findings into static rules or repository instructions.
