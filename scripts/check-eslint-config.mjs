@@ -130,9 +130,10 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     export { createRequire } from "node:module"
+    export { default as Loader } from "node:module"
     export * from "module"
   `,
-  expected: 2,
+  expected: 3,
   filePath: "packages/ai-codex/src/commonjs-export-invalid.ts",
   ruleId: "local-rules/require-isolated-agent-child-environment"
 })

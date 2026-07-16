@@ -319,7 +319,7 @@ const hasIsolatedChildEnvironment = (context, options, call) => {
 const CHILD_PROCESS_MODULE = "effect/unstable/process/ChildProcess"
 const CHILD_PROCESS_BARREL = "effect/unstable/process"
 const COMMONJS_LOADER_MODULES = new Set(["module", "node:module"])
-const COMMONJS_LOADER_EXPORTS = new Set(["Module", "createRequire"])
+const COMMONJS_LOADER_EXPORTS = new Set(["Module", "createRequire", "default"])
 const PROCESS_MODULES = new Set(["node:process", "process"])
 const AGENT_COMMAND_SEAMS = new Map([
   [path.resolve(__dirname, "packages/ai-claude/src/runner.ts"), { importKind: "named", localName: "ChildProcess" }],
