@@ -46,15 +46,14 @@ complete.
   responsive dark/light presentation, and reusable `rly` composition rather than prototype
   imports.
 
-## Critical unfinished work
+## Critical checkpoint completed
 
-1. **Complete the begin/recovery failure matrix.** The real-database happy path, one-use replay,
-   concurrent duplicate begin, lease-write rollback, runtime rotation, reconciliation deadline,
-   changed recovery replay, reconciliation restart fold, expired preparation/authorization/session
-   boundaries, stale preflight, and missing `action.reconcile` are covered. Still add the full
-   cancellation-versus-reconciliation race matrix.
-   Until this failure matrix is complete, D03 remains incomplete and real provider mutations must
-   stay disabled.
+The D03 begin/recovery failure matrix now covers the real-database happy path, one-use replay,
+concurrent duplicate begin, lease-write rollback, runtime rotation, reconciliation deadlines,
+changed recovery replay, reconciliation restart folding, expired preparation/authorization/session
+boundaries, stale preflight, missing `action.reconcile`, both durable cancellation/reconciliation
+orderings for every result kind, and a concurrent terminal race. Real provider mutations remain
+disabled until production adapters, policy integration, and an explicit enablement review land.
 
 ## Remaining roadmap
 
@@ -103,11 +102,12 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   security-sensitive setup during this checkpoint.
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
-  disabled until the remaining D03 failure matrix is complete.
+  disabled pending production adapter and policy integration.
 
 ## Recommended next session
 
-Close the cancellation-versus-reconciliation race matrix, including observations on both sides of
-each durable boundary. Run one independent exact-commit review after the deterministic milestone
-gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
-repository instructions.
+Split `governedActionExecutionBegin.test.ts` into focused begin, dispatch, recovery-claim, and
+reconciliation suites while retaining one shared security-sensitive database harness. Then begin
+D04 relationship inspection and governed repair. Run one independent exact-commit review after
+each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings
+into static rules or repository instructions.
