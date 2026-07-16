@@ -57,7 +57,10 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     revision: Schema.NullOr(LedgerRevision)
   },
   node: { nodeId: GraphNodeId },
-  evidence: { evidenceId: EvidenceId },
+  evidence: {
+    evidenceId: EvidenceId,
+    limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))
+  },
   relationship: {
     relationshipId: RelationshipId,
     revision: Schema.NullOr(LedgerRevision)
@@ -89,6 +92,7 @@ const EvidenceBundle = Schema.Struct({
 const ReleaseSlice = Schema.Struct({
   releaseId: ReleaseId,
   environmentId: Schema.NullOr(EnvironmentId),
+  truncated: Schema.Boolean,
   nodes: Schema.Array(DeliveryNode),
   entityProjections: Schema.Array(PersistedEntityProjection),
   relationships: Schema.Array(DeliveryRelationship),

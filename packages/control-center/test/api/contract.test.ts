@@ -5,6 +5,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import {
   AgentApiGroup,
   ControlCenterApi,
+  DeliveryGraphApiGroup,
   LiveEventsApiGroup,
   makeControlCenterApiClient,
   makeControlCenterApiUrls,
@@ -18,7 +19,7 @@ import {
   SessionId,
   SessionMutationAuth
 } from "../../src/api/index.js"
-import { PluginConnectionId, ReleaseId } from "../../src/domain/identifiers.js"
+import { EvidenceId, PluginConnectionId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
   Array.from(middlewares, ({ key }) => key)
@@ -73,12 +74,13 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the six API groups and endpoint routes explicit", () => {
+  it("keeps the seven API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
       "plugins",
       "portfolio",
+      "deliveryGraph",
       "media",
       "liveEvents",
       "agent"
@@ -107,6 +109,19 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(
       Object.entries(PortfolioApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [["snapshot", "GET", "/api/v1/portfolio/snapshot"]]
+    )
+    assert.deepStrictEqual(
+      Object.entries(DeliveryGraphApiGroup.endpoints).map(([identifier, { method, path }]) => [
+        identifier,
+        method,
+        path
+      ]),
+      [
+        ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
+        ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
+        ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
+        ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
+      ]
     )
     assert.deepStrictEqual(
       Object.entries(MediaApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
@@ -147,6 +162,12 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(PortfolioApiGroup.endpoints), {
       snapshot: [SessionCookieAuth.key]
     })
+    assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
+      releaseSlice: [SessionCookieAuth.key],
+      relationship: [SessionCookieAuth.key],
+      relationshipHistory: [SessionCookieAuth.key],
+      evidence: [SessionCookieAuth.key]
+    })
     assert.deepStrictEqual(middlewareByEndpoint(MediaApiGroup.endpoints), {
       read: [SessionCookieAuth.key]
     })
@@ -170,6 +191,8 @@ describe("ControlCenterApi contract", () => {
     const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
     const mediaId = Schema.decodeSync(OpaqueMediaId)(`media_${"ab".repeat(32)}`)
     const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000093")
+    const relationshipId = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000094")
+    const evidenceId = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-000000000095")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
@@ -188,6 +211,14 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.agent.turn({ params: { releaseId } }),
       "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/turns"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.relationship({ params: { relationshipId }, query: {} }),
+      "https://control.example/api/v1/relationships/01890f6f-6d6a-7cc0-98d2-000000000094"
+    )
+    assert.strictEqual(
+      urls.deliveryGraph.evidence({ params: { evidenceId } }),
+      "https://control.example/api/v1/evidence/01890f6f-6d6a-7cc0-98d2-000000000095"
     )
     assert.isTrue(Effect.isEffect(makeControlCenterApiClient({ baseUrl: "https://control.example" })))
   })

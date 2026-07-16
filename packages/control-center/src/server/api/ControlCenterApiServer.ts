@@ -5,6 +5,7 @@ import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
   agentHandlersLayer,
+  deliveryGraphHandlersLayer,
   liveEventHandlersLayer,
   mediaHandlersLayer,
   pluginHandlersLayer,
@@ -24,6 +25,7 @@ export const controlCenterApiHandlersLayer = Layer.mergeAll(
   sessionHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
+  deliveryGraphHandlersLayer,
   agentHandlersLayer,
   mediaHandlersLayer,
   liveEventHandlersLayer

@@ -16,6 +16,7 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
+  DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
   PluginAdministration,
@@ -218,6 +219,63 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
         }))
+    })
+)
+
+/** Authenticated workspace-scoped delivery relationship and evidence handlers. */
+export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "deliveryGraph",
+  (handlers) =>
+    Effect.gen(function*() {
+      const inspection = yield* DeliveryGraphInspection
+      return handlers
+        .handle("releaseSlice", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* inspection.releaseSlice({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              environmentId: query.environmentId ?? null
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("relationship", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* inspection.relationship({
+              workspaceId: session.workspaceId,
+              relationshipId: params.relationshipId,
+              revision: query.revision ?? null
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("relationshipHistory", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* inspection.relationshipHistory({
+              workspaceId: session.workspaceId,
+              relationshipId: params.relationshipId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("evidence", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* inspection.evidence({
+              workspaceId: session.workspaceId,
+              evidenceId: params.evidenceId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
     })
 )
 

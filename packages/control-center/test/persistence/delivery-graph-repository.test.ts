@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer, Ref, Result, Schema } from "effect"
 
+import { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
 import {
   EntityId,
   EvidenceId,
@@ -17,6 +18,7 @@ import {
   RecordNotFoundError,
   RevisionConflictError
 } from "../../src/server/persistence/errors.js"
+import { selectBoundedRelationshipClosure } from "../../src/server/persistence/repositories/delivery-graph/release-slice.js"
 import {
   DeliveryGraphInputError,
   DeliveryGraphRepository
@@ -562,6 +564,192 @@ const sixIssueBatch = {
 }
 
 describe("DeliveryGraphRepository", () => {
+  it("bounds the complete release closure at 250 of 251 disjoint relationships", () => {
+    const relationships = Array.from({ length: 251 }, (_, index) => ({
+      sourceNodeId: `source-${index}`,
+      targetNodeId: `target-${index}`,
+      evidenceClaimIds: []
+    }))
+
+    const exactBoundary = selectBoundedRelationshipClosure(relationships.slice(0, 250), {
+      relationships: 500,
+      nodes: 500,
+      evidenceClaims: 500
+    })
+    assert.lengthOf(exactBoundary.relationships, 250)
+    assert.isFalse(exactBoundary.truncated)
+
+    const overflow = selectBoundedRelationshipClosure(relationships, {
+      relationships: 500,
+      nodes: 500,
+      evidenceClaims: 500
+    })
+    assert.lengthOf(overflow.relationships, 250)
+    assert.isTrue(overflow.truncated)
+    assert.lengthOf(
+      new Set(overflow.relationships.flatMap(({ sourceNodeId, targetNodeId }) => [
+        sourceNodeId,
+        targetNodeId
+      ])),
+      500
+    )
+
+    const claimHeavy = selectBoundedRelationshipClosure(
+      Array.from({ length: 5 }, (_, relationshipIndex) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: Array.from(
+          { length: 128 },
+          (_, claimIndex) => `claim-${relationshipIndex}-${claimIndex}`
+        )
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(claimHeavy.relationships, 3)
+    assert.lengthOf(new Set(claimHeavy.relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)), 384)
+    assert.isTrue(claimHeavy.truncated)
+
+    const exactClaimBoundary = selectBoundedRelationshipClosure(
+      Array.from({ length: 4 }, (_, relationshipIndex) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: Array.from(
+          { length: 125 },
+          (_, claimIndex) => `boundary-claim-${relationshipIndex}-${claimIndex}`
+        )
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(exactClaimBoundary.relationships, 4)
+    assert.lengthOf(
+      new Set(exactClaimBoundary.relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)),
+      500
+    )
+    assert.isFalse(exactClaimBoundary.truncated)
+
+    const rootOverflow = selectBoundedRelationshipClosure(
+      Array.from({ length: 501 }, (_, index) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: [`shared-claim-${index % 500}`]
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(rootOverflow.relationships, 500)
+    assert.isTrue(rootOverflow.truncated)
+
+    const rootBoundary = selectBoundedRelationshipClosure(
+      Array.from({ length: 500 }, (_, index) => ({
+        sourceNodeId: "shared-source",
+        targetNodeId: "shared-target",
+        evidenceClaimIds: [`boundary-root-claim-${index}`]
+      })),
+      { relationships: 500, nodes: 500, evidenceClaims: 500 }
+    )
+    assert.lengthOf(rootBoundary.relationships, 500)
+    assert.isFalse(rootBoundary.truncated)
+  })
+
+  it.effect("bounds evidence claim inspection at the repository query", () =>
+    withRepository(Effect.gen(function*() {
+      yield* insertFoundation
+      const repository = yield* DeliveryGraphRepository
+      yield* repository.write(WORKSPACE_A, initialBatch)
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [{
+          ...initialBatch.evidenceClaims[0],
+          evidenceClaimId: SUCCESSOR_CLAIM_ID,
+          value: { _tag: "flag", value: true },
+          supersedesEvidenceClaimId: CLAIM_ID,
+          recordedAt: UPDATED_AT
+        }],
+        relationships: []
+      })
+
+      const bounded = yield* repository.read(WORKSPACE_A, {
+        _tag: "evidence",
+        evidenceId: EVIDENCE_ID,
+        limit: 1
+      })
+      assert.strictEqual(bounded._tag, "evidence")
+      if (bounded._tag === "evidence") {
+        assert.lengthOf(bounded.value.claims, 1)
+        assert.strictEqual(bounded.value.claims[0]?.evidenceClaimId, CLAIM_ID)
+      }
+    })))
+
+  it.effect("bounds derived release closure before loading 502 disjoint nodes", () =>
+    withRepository(Effect.gen(function*() {
+      yield* insertFoundation
+      const repository = yield* DeliveryGraphRepository
+      const nodes = Array.from({ length: 502 }, (_, index) => ({
+        workspaceId: WORKSPACE_A,
+        nodeId: `01890f6f-6d6a-7cc0-98e0-${index.toString(16).padStart(12, "0")}`,
+        endpointKind: "issue",
+        resolution: {
+          _tag: "missing",
+          expectedKind: "entity",
+          expectedEntityKind: "issue",
+          missingKey: `overflow-issue-${index}`
+        },
+        createdAt: CREATED_AT
+      }))
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: nodes.slice(0, 500),
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      yield* repository.write(WORKSPACE_A, {
+        entityProjections: [],
+        nodes: nodes.slice(500),
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: Array.from({ length: 251 }, (_, index) => ({
+          workspaceId: WORKSPACE_A,
+          relationshipId: `01890f6f-6d6a-7cc0-98e1-${index.toString(16).padStart(12, "0")}`,
+          relationshipSchemaVersion: 1,
+          revision: 1,
+          supersedesRevision: null,
+          kind: "depends-on",
+          sourceNodeId: nodes[index * 2]?.nodeId,
+          sourceNodeKind: "issue",
+          targetNodeId: nodes[index * 2 + 1]?.nodeId,
+          targetNodeKind: "issue",
+          scope: { _tag: "release", releaseId: RELEASE_ID },
+          lifecycle: { _tag: "proposed", effectiveAt: CREATED_AT },
+          confidence: { _tag: "unknown", rationale: "Generated closure overflow fixture." },
+          provenance: {
+            _tag: "rule",
+            ruleId: "closure-overflow-fixture",
+            ruleVersion: 1,
+            rationale: "Generated relationship exercises aggregate read bounds."
+          },
+          recordedBy: { _tag: "system", component: "delivery-graph-fixture" },
+          evidenceClaimIds: [],
+          recordedAt: CREATED_AT
+        }))
+      })
+
+      const slice = yield* repository.read(WORKSPACE_A, {
+        _tag: "releaseSlice",
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        limit: 500
+      })
+      assert.strictEqual(slice._tag, "releaseSlice")
+      if (slice._tag === "releaseSlice") {
+        assert.lengthOf(slice.value.relationships, 250)
+        assert.lengthOf(slice.value.nodes, 500)
+        assert.isTrue(slice.value.truncated)
+        assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(slice.value))
+      }
+    })))
+
   it.effect("persists the six-issue release fixture across PR and pipeline dimensions", () =>
     withRepository(
       Effect.gen(function*() {
@@ -584,6 +772,8 @@ describe("DeliveryGraphRepository", () => {
         })
         assert.strictEqual(slice._tag, "releaseSlice")
         if (slice._tag === "releaseSlice") {
+          assert.isFalse(slice.value.truncated)
+          assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(slice.value))
           const implementsLinks = slice.value.relationships.filter(({ kind }) => kind === "implements")
           const pipelineLinks = slice.value.relationships.filter(({ kind }) => kind === "delivered-by")
           const missingLinks = implementsLinks.filter(({ lifecycle }) => lifecycle._tag === "missing")
@@ -600,6 +790,21 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(secondPullRequestLinks, 3)
           assert.lengthOf(slice.value.entityProjections, 9)
           assert.lengthOf(slice.value.evidenceClaims, 0)
+        }
+
+        const bounded = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSlice",
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          limit: 1
+        })
+        assert.strictEqual(bounded._tag, "releaseSlice")
+        if (bounded._tag === "releaseSlice") {
+          assert.isTrue(bounded.value.truncated)
+          assert.lengthOf(bounded.value.relationships, 1)
+          assert.isAtMost(bounded.value.nodes.length, 500)
+          assert.isAtMost(bounded.value.evidenceClaims.length, 500)
+          assert.doesNotThrow(() => Schema.encodeSync(ReleaseDeliveryGraphInspection)(bounded.value))
         }
       })
     ))
@@ -1317,7 +1522,8 @@ describe("DeliveryGraphRepository", () => {
 
         yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         })
         assert.isEmpty(yield* quarantine.list(WORKSPACE_A))
 
@@ -1329,7 +1535,8 @@ describe("DeliveryGraphRepository", () => {
 
         const corrupted = yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(corrupted))
         if (Result.isFailure(corrupted)) {
@@ -1339,7 +1546,8 @@ describe("DeliveryGraphRepository", () => {
 
         yield* repository.read(WORKSPACE_A, {
           _tag: "evidence",
-          evidenceId: EVIDENCE_ID
+          evidenceId: EVIDENCE_ID,
+          limit: 200
         }).pipe(Effect.result)
         const records = yield* quarantine.list(WORKSPACE_A)
         assert.lengthOf(records, 1)
