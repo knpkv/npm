@@ -6,11 +6,12 @@ import type {
   RelationshipHistoryInspection,
   RelationshipRepairCandidate,
   RelationshipRepairCandidates,
+  RelationshipRepairProposalDraft,
   ReleaseDeliveryGraphInspection
 } from "../../api/deliveryGraph.js"
-import type { DeliveryRelationship } from "../../domain/deliveryGraph.js"
-import type { EnvironmentId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
-import { DeliveryGraphInspection } from "../api/ApplicationServices.js"
+import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
+import type { EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import { ApplicationResourceNotFound, DeliveryGraphInspection } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { mapPersistenceRead } from "./errors.js"
 
@@ -49,6 +50,26 @@ export const deriveRelationshipRepairCandidates = (
   })
 })
 
+/** Draft one future repair proposal only when the selected immutable candidate still exists. */
+export const deriveRelationshipRepairProposalDraft = (
+  candidates: RelationshipRepairCandidates,
+  relationshipId: RelationshipId,
+  revision: LedgerRevision
+): RelationshipRepairProposalDraft | undefined => {
+  const candidate = candidates.candidates.find((candidate) =>
+    candidate.relationship.relationshipId === relationshipId && candidate.relationship.revision === revision
+  )
+  if (candidate === undefined) return undefined
+  return {
+    candidate,
+    precondition: { relationshipId, expectedRevision: revision },
+    proposal: {
+      disposition: candidate.suggestedDisposition,
+      rationale: candidate.explanation
+    }
+  }
+}
+
 /** Construct bounded workspace-safe delivery graph inspection reads. */
 export const makeDeliveryGraphInspection = Effect.gen(function*() {
   const persistence = yield* Persistence
@@ -73,6 +94,12 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
     releaseSlice,
     repairCandidates: Effect.fn("DeliveryGraphInspection.repairCandidates")(function*(input) {
       return deriveRelationshipRepairCandidates(yield* releaseSlice(input))
+    }),
+    repairProposalDraft: Effect.fn("DeliveryGraphInspection.repairProposalDraft")(function*(input) {
+      const candidates = deriveRelationshipRepairCandidates(yield* releaseSlice(input))
+      const draft = deriveRelationshipRepairProposalDraft(candidates, input.relationshipId, input.revision)
+      if (draft === undefined) return yield* new ApplicationResourceNotFound()
+      return draft
     }),
     relationship: Effect.fn("DeliveryGraphInspection.relationship")(function*(input) {
       const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {

@@ -60,11 +60,13 @@ lifecycle history, and evidence reads. The application boundary derives workspac
 the session, rejects missing or cross-workspace releases, and returns only normalized ledger fields.
 Evidence claim reads are bounded in SQL rather than only at response encoding.
 Read-only repair candidate discovery now derives link/verify suggestions, explanations, impact, and
-required permission from those facts; it deliberately creates no proposal or ledger mutation.
+required permission from those facts. A selected candidate can now be projected into a non-mutating
+proposal draft with its exact relationship revision preserved as a future stale-write precondition;
+neither read creates a durable proposal or ledger mutation.
 
 ## Remaining roadmap
 
-- Complete D04 candidate discovery and governed proposal/review/apply, then D05–D09: six-state
+- Complete D04 governed proposal persistence/review/apply, then D05–D09: six-state
   portfolio/work views, search/traces/shares, timeline and exports, graceful drain, and startup
   reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
@@ -110,7 +112,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Add a non-mutating D04 repair proposal draft for one selected candidate, preserving the candidate's
-relationship revision as a future stale-write guard. Run one independent exact-commit review after each
-deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings into
-static rules or repository instructions.
+Add durable D04 repair proposal persistence behind an explicit mutation boundary, using the draft's
+expected relationship revision for compare-and-swap validation. Run one independent exact-commit review
+after each deterministic milestone gate; turn recurring, high-impact, mechanically enforceable findings
+into static rules or repository instructions.

@@ -93,6 +93,22 @@ export const RelationshipRepairCandidates = Schema.Struct({
 /** Decoded relationship repair candidate discovery result. */
 export type RelationshipRepairCandidates = typeof RelationshipRepairCandidates.Type
 
+/** Non-mutating proposal input with the optimistic precondition required by a future apply step. */
+export const RelationshipRepairProposalDraft = Schema.Struct({
+  candidate: RelationshipRepairCandidate,
+  precondition: Schema.Struct({
+    relationshipId: RelationshipId,
+    expectedRevision: LedgerRevision
+  }),
+  proposal: Schema.Struct({
+    disposition: Schema.Literals(["link", "verify", "reject"]),
+    rationale: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+  })
+}).annotate({ identifier: "RelationshipRepairProposalDraft" })
+
+/** Decoded read-only relationship repair proposal draft. */
+export type RelationshipRepairProposalDraft = typeof RelationshipRepairProposalDraft.Type
+
 const readErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -128,6 +144,20 @@ const repairCandidates = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const repairProposalDraft = HttpApiEndpoint.get(
+  "repairProposalDraft",
+  "/api/v1/relationships/releases/:releaseId/repair-candidates/:relationshipId/proposal-draft",
+  {
+    params: { releaseId: ReleaseId, relationshipId: RelationshipId },
+    query: {
+      environmentId: Schema.optionalKey(EnvironmentId),
+      revision: CanonicalNonNegativeIntegerFromString.pipe(Schema.decodeTo(LedgerRevision))
+    },
+    success: RelationshipRepairProposalDraft,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
+
 const relationshipHistory = HttpApiEndpoint.get(
   "relationshipHistory",
   "/api/v1/relationships/:relationshipId/history",
@@ -146,5 +176,5 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 
 /** Authenticated, workspace-safe delivery relationship and evidence inspection. */
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
-  .add(releaseSlice, repairCandidates, relationship, relationshipHistory, evidence)
+  .add(releaseSlice, repairCandidates, repairProposalDraft, relationship, relationshipHistory, evidence)
 {}

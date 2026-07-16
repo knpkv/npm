@@ -6,10 +6,12 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { OpaqueMediaId, OpaqueSecretReference, PluginConfigurationKey } from "../../src/api/index.js"
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
+import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   EnvironmentId,
   PersonId,
   PluginConnectionId,
+  RelationshipId,
   ReleaseId,
   RoleAssignmentId,
   WorkspaceId
@@ -42,6 +44,8 @@ const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2
 const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000074")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
+const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
+const RELATIONSHIP_REVISION = Schema.decodeSync(LedgerRevision)(1)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:00:00.000Z")
 const SNAPSHOT_AT = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:10:00.000Z")
 
@@ -220,6 +224,18 @@ describe("application adapters", () => {
         truncated: false,
         candidates: []
       })
+
+      const missingDraft = yield* inspection.repairProposalDraft({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        environmentId: null,
+        relationshipId: RELATIONSHIP_ID,
+        revision: RELATIONSHIP_REVISION
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missingDraft))
+      if (Result.isFailure(missingDraft)) {
+        assert.instanceOf(missingDraft.failure, ApplicationResourceNotFound)
+      }
 
       const crossWorkspace = yield* inspection.releaseSlice({
         workspaceId: OTHER_WORKSPACE_ID,
