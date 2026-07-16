@@ -13,6 +13,7 @@ import type {
 import type { RelationshipRepairProposalId } from "../../domain/identifiers.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
+import { RelationshipRepairCandidatePicker } from "./RelationshipRepairCandidatePicker.js"
 import { type RelationshipRepairPanelState, useRelationshipRepairProposals } from "./useRelationshipRepairProposals.js"
 import styles from "./RelationshipRepairPanel.module.css"
 
@@ -351,6 +352,11 @@ export const RelationshipRepairPanelView = ({
   )
 }
 
+const sessionScopeKey = (session: SessionSummary): string => {
+  const actorId = session.actor._tag === "human" ? session.actor.personId : session.actor.agentId
+  return `${session.sessionId}:${session.workspaceId}:${session.permission}:${session.actor._tag}:${actorId}`
+}
+
 /** Connect one full release view to its authenticated repair-proposal ledger. */
 export const RelationshipRepairPanel = ({
   release
@@ -362,13 +368,21 @@ export const RelationshipRepairPanel = ({
   const controller = useRelationshipRepairProposals(release.id, session?.sessionId ?? null)
   if (session === null) return <LoadingPanel />
   return (
-    <RelationshipRepairPanelView
-      onApply={controller.apply}
-      onRetry={controller.retry}
-      onReview={controller.review}
-      release={release}
-      session={session}
-      state={controller.state}
-    />
+    <div className={styles.panelStack}>
+      <RelationshipRepairPanelView
+        onApply={controller.apply}
+        onRetry={controller.retry}
+        onReview={controller.review}
+        release={release}
+        session={session}
+        state={controller.state}
+      />
+      <RelationshipRepairCandidatePicker
+        key={`${release.id}:${sessionScopeKey(session)}`}
+        onCreated={controller.retry}
+        releaseId={release.id}
+        session={session}
+      />
+    </div>
   )
 }
