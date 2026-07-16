@@ -76,6 +76,12 @@ export const RelationshipRepairProposalId = canonicalUuid7("RelationshipRepairPr
 /** Decoded relationship-repair proposal identifier. */
 export type RelationshipRepairProposalId = typeof RelationshipRepairProposalId.Type
 
+/** Canonical identifier of one immutable relationship-repair review. */
+export const RelationshipRepairReviewId = canonicalUuid7("RelationshipRepairReviewId")
+
+/** Decoded relationship-repair review identifier. */
+export type RelationshipRepairReviewId = typeof RelationshipRepairReviewId.Type
+
 /** Canonical identifier of one immutable evidence claim. */
 export const EvidenceClaimId = canonicalUuid7("EvidenceClaimId")
 

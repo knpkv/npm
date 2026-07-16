@@ -72,11 +72,18 @@ database triggers bind the proposal to a current owner session and an eligible r
 Creating a proposal still does not mutate the relationship ledger; review and apply remain separate
 governed transitions.
 
+The D04 review slice adds authenticated proposal lookup and bounded newest-first release/environment
+lists with optional status filtering. A workspace owner or approver may record one immutable,
+client-identified review, but the proposal author cannot review their own intent. Exact review
+replays are idempotent; changed or competing decisions conflict. The database binds the reviewer to
+a current session, preserves the reviewer actor/rationale/time as an immutable record, and permits
+only the matching `pending → approved|rejected` proposal-head transition. Review still does not
+mutate the delivery relationship.
+
 ## Remaining roadmap
 
-- Complete D04 proposal listing, review, and compare-and-swap apply, then D05–D09: six-state
-  portfolio/work views, search/traces/shares, timeline and exports, graceful drain, and startup
-  reconciliation.
+- Complete D04 compare-and-swap apply and repair UI, then D05–D09: six-state portfolio/work views,
+  search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
 - S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
@@ -98,8 +105,8 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   a private reader so it can later move to `effect-qb` without changing governed-execution callers.
 - `begin.ts` deliberately maps the canonical runtime-authority token into the governed connection
   authority digest because both represent the same non-secret configured runtime generation. This
-  should become one shared nominal domain type when the proposal API is implemented, avoiding the
-  explicit schema-brand conversion at the execution boundary.
+  should become one shared nominal domain type in a future governance cleanup, avoiding the explicit
+  schema-brand conversion at the execution boundary.
 - Local `effect-qb` `0.20.0` requires Effect `4.0.0-beta.98`, while this workspace and vendored
   Effect source use `beta.97`. Do not add it until the workspace, lockfile, and vendored subtree are
   aligned deliberately. Migrations, views, triggers, and the isolated repair-proposal repository
@@ -121,8 +128,8 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Add the D04 review lifecycle and bounded proposal list/read endpoints, then implement an approved
-proposal apply transition that appends an immutable relationship revision only when the proposal's
-expected revision is still current. Run one independent exact-commit review after each deterministic
+Implement the approved-proposal apply transition that appends an immutable relationship revision
+only when the proposal's expected revision is still current, then connect proposal/review/apply to
+the relationship repair UI. Run one independent exact-commit review after each deterministic
 milestone gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
 repository instructions.

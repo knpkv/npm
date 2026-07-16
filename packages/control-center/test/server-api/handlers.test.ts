@@ -17,7 +17,13 @@ import {
   SessionSummary
 } from "../../src/api/session.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
-import { EventCursor, RelationshipId, RelationshipRepairProposalId, ReleaseId } from "../../src/domain/identifiers.js"
+import {
+  EventCursor,
+  RelationshipId,
+  RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
@@ -73,9 +79,23 @@ const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
 const repairProposalId = Schema.decodeSync(RelationshipRepairProposalId)(
   "01890f6f-6d6a-7cc0-98d2-000000000006"
 )
+const repairReviewId = Schema.decodeSync(RelationshipRepairReviewId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000007"
+)
 const inspectedRelationshipRevision = Schema.decodeSync(LedgerRevision)(1)
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+const approverSession = Schema.decodeSync(SessionSummary)({
+  sessionId: "01890f6f-6d6a-7cc0-98d2-000000000008",
+  workspaceId,
+  actor: { _tag: "human", personId: "01890f6f-6d6a-7cc0-98d2-000000000009" },
+  permission: "workspace-approver",
+  createdAt: "2026-07-14T10:00:00.000Z",
+  lastSeenAt: "2026-07-14T10:01:00.000Z",
+  idleExpiresAt: "2026-07-14T22:00:00.000Z",
+  absoluteExpiresAt: "2026-08-13T10:00:00.000Z",
+  revokedAt: null
+})
 
 const sessionMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
   sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, session)
@@ -118,7 +138,9 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
 
 const relationshipRepairProposalsLayer = Layer.succeed(RelationshipRepairProposals, {
   create: () => Effect.die("not used"),
-  get: () => Effect.die("not used")
+  get: () => Effect.die("not used"),
+  list: () => Effect.die("not used"),
+  review: () => Effect.die("not used")
 })
 
 const deliveryGraphApplicationLayer = Layer.merge(
@@ -210,7 +232,7 @@ describe("Control Center API handlers", () => {
         } | null
       >(null)
       const proposal = RelationshipRepairProposal.make({
-        schemaVersion: 1,
+        schemaVersion: 2,
         proposalId: repairProposalId,
         workspaceId: session.workspaceId,
         releaseId: inspectedReleaseId,
@@ -221,7 +243,8 @@ describe("Control Center API handlers", () => {
         rationale: "Verify the inferred link before release.",
         origin: { actor: session.actor, sessionId: session.sessionId },
         status: "pending",
-        proposedAt: session.lastSeenAt
+        proposedAt: session.lastSeenAt,
+        review: null
       })
       const proposalApplicationLayer = Layer.merge(
         deliveryGraphLayer,
@@ -231,7 +254,9 @@ describe("Control Center API handlers", () => {
               workspaceId: input.workspaceId,
               sessionId: input.sessionId
             }).pipe(Effect.as(proposal)),
-          get: () => Effect.die("not used")
+          get: () => Effect.die("not used"),
+          list: () => Effect.die("not used"),
+          review: () => Effect.die("not used")
         })
       )
       const handler = deliveryGraphHandlersLayer.pipe(
@@ -275,7 +300,9 @@ describe("Control Center API handlers", () => {
         deliveryGraphLayer,
         Layer.succeed(RelationshipRepairProposals, {
           create: () => Effect.die("watcher reached proposal persistence"),
-          get: () => Effect.die("not used")
+          get: () => Effect.die("not used"),
+          list: () => Effect.die("not used"),
+          review: () => Effect.die("not used")
         })
       )
       const handler = deliveryGraphHandlersLayer.pipe(
@@ -304,6 +331,66 @@ describe("Control Center API handlers", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
+
+  it.effect("derives relationship repair review authority from an approver session", () =>
+    Effect.gen(function*() {
+      const receivedSessionId = yield* Ref.make<string | null>(null)
+      const reviewed = RelationshipRepairProposal.make({
+        schemaVersion: 2,
+        proposalId: repairProposalId,
+        workspaceId: session.workspaceId,
+        releaseId: inspectedReleaseId,
+        environmentId: null,
+        relationshipId: inspectedRelationshipId,
+        expectedRevision: inspectedRelationshipRevision,
+        disposition: "verify",
+        rationale: "Verify the inferred link before release.",
+        origin: { actor: session.actor, sessionId: session.sessionId },
+        status: "approved",
+        proposedAt: session.lastSeenAt,
+        review: {
+          reviewId: repairReviewId,
+          decision: "approved",
+          rationale: "The evidence is sufficient.",
+          origin: { actor: approverSession.actor, sessionId: approverSession.sessionId },
+          reviewedAt: approverSession.lastSeenAt
+        }
+      })
+      const approverMiddleware = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const proposals = Layer.succeed(RelationshipRepairProposals, {
+        create: () => Effect.die("not used"),
+        get: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        review: (input) => Ref.set(receivedSessionId, input.sessionId).pipe(Effect.as(reviewed))
+      })
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(approverMiddleware),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.merge(deliveryGraphLayer, proposals))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.reviewRepairProposal({
+          params: { proposalId: repairProposalId },
+          payload: {
+            reviewId: repairReviewId,
+            decision: "approved",
+            rationale: "The evidence is sufficient."
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddleware,
+        handler
+      ]))
+
+      assert.strictEqual(result.status, "approved")
+      assert.strictEqual(yield* Ref.get(receivedSessionId), approverSession.sessionId)
     }))
 
   it.effect("serves the bird's-eye snapshot through the generated in-memory client", () =>

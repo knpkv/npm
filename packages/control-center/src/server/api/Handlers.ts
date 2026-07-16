@@ -290,6 +290,52 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("listRepairProposals", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* repairProposals.list({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              environmentId: query.environmentId ?? null,
+              status: query.status ?? null
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("getRepairProposal", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            return yield* repairProposals.get({
+              workspaceId: session.workspaceId,
+              proposalId: params.proposalId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("reviewRepairProposal", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (
+              session.permission !== "workspace-owner" &&
+              session.permission !== "workspace-approver"
+            ) {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* repairProposals.review({
+              workspaceId: session.workspaceId,
+              proposalId: params.proposalId,
+              request: payload,
+              actor: session.actor,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("relationship", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
