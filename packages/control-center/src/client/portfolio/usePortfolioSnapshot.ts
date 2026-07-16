@@ -178,8 +178,10 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
 
   const consumeStream = Effect.fn("PortfolioLiveController.consumeStream")(function*(
     stream: Stream.Stream<ControlCenterLiveEvent, unknown>,
-    resumeCursor: EventCursor
+    resumeCursor: EventCursor,
+    onUsable: Effect.Effect<void>
   ) {
+    let isUsable = false
     let resetHeadCursor = currentState._tag === "loaded" && currentState.awaitingResetSnapshot
       ? currentState.minimumRefreshCursor
       : null
@@ -241,7 +243,14 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
       }
     }
 
-    yield* Stream.runForEach(stream, consumeEvent)
+    yield* Stream.runForEach(stream, (event) =>
+      consumeEvent(event).pipe(
+        Effect.tap(() => {
+          if (isUsable) return Effect.void
+          isUsable = true
+          return onUsable
+        })
+      ))
     return yield* Effect.fail(new PortfolioStreamClosedError())
   })
 
@@ -262,8 +271,13 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
       const streamResult = yield* Effect.result(
         Effect.gen(function*() {
           const stream = yield* transport.openStream(cursor)
-          attempt = 0
-          return yield* consumeStream(stream, cursor)
+          return yield* consumeStream(
+            stream,
+            cursor,
+            Effect.sync(() => {
+              attempt = 0
+            })
+          )
         })
       )
       if (Result.isSuccess(streamResult)) return yield* Effect.never

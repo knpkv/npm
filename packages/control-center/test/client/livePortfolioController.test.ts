@@ -635,6 +635,37 @@ describe("live portfolio controller", () => {
       yield* Fiber.interrupt(fiber)
     }))
 
+  it("keeps increasing backoff when acquired streams fail before a valid event", () =>
+    Effect.gen(function*() {
+      let openings = 0
+      const reconnectAttempts: Array<number> = []
+      const transport: PortfolioLiveTransport = {
+        loadSnapshot: Effect.succeed(makePortfolioSnapshot("current", 10)),
+        openStream: () => {
+          openings += 1
+          return openings === 1
+            ? Effect.fail({ _tag: "TransportFailure" })
+            : Effect.succeed(Stream.fail({ _tag: "TransportFailure" }))
+        }
+      }
+      const fiber = yield* runPortfolioLiveController({
+        connectivity: onlineConnectivity,
+        onSessionExpired: () => undefined,
+        onState: (state) => {
+          if (state._tag === "loaded" && state.connection._tag === "reconnecting") {
+            reconnectAttempts.push(state.connection.attempt)
+          }
+        },
+        sessionKey: "session-a",
+        transport
+      }).pipe(Effect.provideService(Random.Random, deterministicRandom), Effect.forkChild({ startImmediately: true }))
+
+      yield* TestClock.adjust(250)
+      yield* TestClock.adjust(500)
+      assert.deepStrictEqual(reconnectAttempts, [1, 2, 3])
+      yield* Fiber.interrupt(fiber)
+    }))
+
   it("keeps one reconnect span across repeated transient failures", () =>
     Effect.gen(function*() {
       let activeReconnectSpans = 0
