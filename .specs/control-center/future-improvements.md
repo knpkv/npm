@@ -87,9 +87,17 @@ and reject intents become governed, verified, and rejected lifecycle revisions r
 existing evidence and edge identity are preserved. Exact retries return the original application,
 while stale heads conflict instead of overwriting newer graph state.
 
+The first D04 UI slice adds a release-context decision ledger to the full release view. It loads the
+bounded proposal list, presents the exact disposition and revision transition, attributes proposal,
+review, and in-session application steps to release collaborators or agents, and exposes only the
+review/apply actions permitted by the current session. Review notes are required, review identities
+use browser-generated UUIDv7 values, mutations carry the session CSRF proof, and retry/failure/empty
+states remain explicit.
+
 ## Remaining roadmap
 
-- Complete the D04 repair UI, then D05–D09: six-state portfolio/work views,
+- Complete candidate-to-proposal creation and durable application readback in the D04 repair UI,
+  then D05–D09: six-state portfolio/work views,
   search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
@@ -132,10 +140,12 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
+- The release decision ledger retains newly returned application evidence only for the mounted
+  page. Add an authenticated application read endpoint before representing an approved proposal as
+  durably applied after reload.
 
 ## Recommended next session
 
-Connect proposal/review/apply to the relationship repair UI. Run one independent exact-commit review
-after each deterministic
-milestone gate; turn recurring, high-impact, mechanically enforceable findings into static rules or
-repository instructions.
+Add candidate-to-proposal creation and durable application readback to the relationship repair UI.
+Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
+high-impact, mechanically enforceable findings into static rules or repository instructions.

@@ -51,6 +51,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
 
   const runtimeKeys = [
+    "@effect/platform-browser",
     "@effect/platform-node",
     "@effect/sql-libsql",
     "@knpkv/ai-claude",
@@ -81,6 +82,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.97") {
     violations.push("@effect/platform-node must align with the pinned Effect beta")
+  }
+  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.97") {
+    violations.push("@effect/platform-browser must align with the pinned Effect beta")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()
