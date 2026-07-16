@@ -106,10 +106,21 @@ that exact page, and the client hydrates its applied-revision and attribution st
 response. Applied decisions therefore survive route reloads without per-proposal network or
 database fan-out.
 
+The D05 portfolio MVP adds an exact six-release reference fixture spanning blocked, ready,
+deploying, building, shipped, and held. Overview now consumes compact server-owned readiness,
+Build/Verify/Production, finding, and relationship-count projections; it never derives production
+state from CSS or copied labels. All, Need attention, Deploying, and Shipped are large native links
+whose counts and rows come from one live release set. Their query state survives direct load,
+refresh, Back, unrelated query parameters, and live membership changes without replacing the
+selected control or stealing focus. Empty filters recover to All, while each row keeps its Relay
+identity, named owner/approver, freshness, service, Jira/PR/pipeline/gap totals, and domain stages.
+The relationship totals use one aggregate delivery-graph query rather than hydrating complete
+nodes, projections, evidence, and claims.
+
 ## Remaining roadmap
 
-- D05–D09: six-state portfolio/work views,
-  search/traces/shares, timeline and exports, graceful drain, and startup reconciliation.
+- D06–D09: work views, search/traces/shares, timeline and exports, graceful drain, and startup
+  reconciliation. D05 performance refinement remains recorded below.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
 - S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
@@ -151,9 +162,15 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
+- Portfolio readiness currently performs one integrity-verified current-head read per release
+  inside the snapshot transaction. Add a bounded repository batch read before the 100-release
+  benchmark so digest/materialization verification stays authoritative without per-release query
+  fan-out. Relationship counts already use a compact aggregate query and should not regress to
+  `releaseSlice` hydration.
 
 ## Recommended next session
 
-Continue with the D05 six-state portfolio/work views.
+Continue with D06 work views, then return to the recorded D05 readiness batch optimization before
+the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

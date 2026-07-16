@@ -213,6 +213,8 @@ describe("public API schemas", () => {
       targetEnvironmentIds: [environmentId],
       collaborators: [collaborator],
       collaboratorCount: 1,
+      readiness: null,
+      relationships: { issues: 0, pullRequests: 0, pipelineExecutions: 0, truncated: false },
       sourceRevisionCount: 0,
       updatedAt: timestamp
     }
@@ -441,6 +443,8 @@ describe("public API schemas", () => {
       targetEnvironmentIds: [environmentId],
       collaborators: [],
       collaboratorCount: 0,
+      readiness: null,
+      relationships: { issues: 0, pullRequests: 0, pipelineExecutions: 0, truncated: false },
       sourceRevisionCount: 0,
       updatedAt: timestamp
     }

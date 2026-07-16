@@ -301,7 +301,14 @@ export const makeBenchmarkPortfolioSnapshot = (
           synchronizedAt: FIXED_TIMESTAMP
         },
         lifecycle: "candidate",
+        readiness: null,
         relay: deriveReleaseRelay(releaseId),
+        relationships: {
+          issues: 0,
+          pipelineExecutions: 0,
+          pullRequests: 0,
+          truncated: false
+        },
         releaseId,
         serviceName: release.serviceName,
         sourceRevisionCount: 1,

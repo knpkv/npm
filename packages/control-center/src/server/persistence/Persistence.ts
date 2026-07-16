@@ -1,5 +1,5 @@
-import type { Crypto, FileSystem, Path } from "effect"
-import { Context, Effect, Layer, Predicate } from "effect"
+import type { FileSystem, Path } from "effect"
+import { Context, Crypto, Effect, Layer, Predicate } from "effect"
 import type { Success } from "effect/Effect"
 
 import type { BackupFailure, MigrationWriteBarrierError } from "./backup/index.js"
@@ -132,6 +132,7 @@ export type PersistenceLayerError =
   | PersistenceConfigError
 
 const makePersistence = Effect.gen(function*() {
+  const cryptoService = yield* Crypto.Crypto
   const database = yield* Database
   const content = yield* ContentStore
   const deliveryGraph = yield* DeliveryGraphRepository
@@ -267,7 +268,9 @@ const makePersistence = Effect.gen(function*() {
       enqueueInvalidation: (...args: Parameters<ReadinessRepositoryService["enqueueInvalidation"]>) =>
         publicOperation("readiness.enqueue-invalidation", readiness.enqueueInvalidation(...args)),
       readCurrent: (...args: Parameters<ReadinessRepositoryService["readCurrent"]>) =>
-        publicOperation("readiness.read-current", readiness.readCurrent(...args)),
+        publicOperation("readiness.read-current", readiness.readCurrent(...args)).pipe(
+          Effect.provideService(Crypto.Crypto, cryptoService)
+        ),
       readHistory: (...args: Parameters<ReadinessRepositoryService["readHistory"]>) =>
         publicOperation("readiness.read-history", readiness.readHistory(...args)),
       registerRule: (...args: Parameters<ReadinessRepositoryService["registerRule"]>) =>

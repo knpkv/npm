@@ -28,6 +28,8 @@ export const makeNodePortfolioSnapshot = (): PortfolioSnapshot =>
           role: "release-approver"
         }
       ],
+      readiness: null,
+      relationships: { issues: 0, pullRequests: 0, pipelineExecutions: 0, truncated: false },
       freshness: {
         _tag: "missing",
         pluginHealth: { _tag: "healthy", checkedAt: "2026-07-14T10:04:00.000Z" },

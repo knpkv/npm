@@ -131,7 +131,7 @@ export const ReleaseRow = ({
 
       <dl className={style("facts")}>
         {release.facts.map((fact) => (
-          <div className={style("fact")} key={fact.id}>
+          <div className={style("fact")} data-rly-release-fact={fact.id} key={fact.id}>
             <dt>{fact.label}</dt>
             <dd>{fact.value}</dd>
           </div>

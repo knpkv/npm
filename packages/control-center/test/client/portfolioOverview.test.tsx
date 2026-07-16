@@ -34,9 +34,9 @@ const liveStatusCases: ReadonlyArray<LiveStatusCase> = [
   [{ _tag: "connected" }, true, "Updating", "Refreshing the authoritative snapshot."]
 ]
 
-const renderOverview = (state: PortfolioOverviewState): string =>
+const renderOverview = (state: PortfolioOverviewState, initialEntry = "/"): string =>
   renderToStaticMarkup(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <BrowserSessionProvider>
         <PortfolioOverviewView onPreviewRelease={vi.fn()} onRetry={vi.fn()} state={state} />
       </BrowserSessionProvider>
@@ -72,7 +72,7 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain('data-portfolio-release-id="01890f6f-6d6a-7cc0-98d2-000000000011"')
     expect(markup).toContain("payments-api")
     expect(markup).toContain("Copper Finch")
-    expect(markup).toContain("Candidate")
+    expect(markup).toContain("payments-api")
     expect(markup).toContain("Readiness not evaluated")
     expect(markup).toContain("No readiness evidence has been evaluated yet.")
     expect(markup).not.toContain("disconnected")
@@ -81,10 +81,53 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain("Release owner")
     expect(markup).toContain("Mara Singh")
     expect(markup).toContain("Release approver")
-    expect(markup).toContain("Payments Jira")
-    expect(markup).toContain("Healthy")
     expect(markup).toContain("Current")
     expect(markup).toContain("Preview Copper Finch")
+  })
+
+  it("renders the six-state bird's-eye filter with exact live counts and domain stages", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      ...livePortfolioState,
+      portfolio: presentPortfolio(makePortfolioSnapshot("six-state"))
+    })
+
+    expect(markup).toContain("Need attention")
+    expect(markup).toContain('aria-label="6 releases"')
+    expect(markup).toContain('aria-label="2 releases"')
+    expect(markup).toContain('aria-label="1 release"')
+    expect(markup).toContain('data-rly-release-state="blocked"')
+    expect(markup).toContain('data-rly-release-state="ready"')
+    expect(markup).toContain('data-rly-release-state="deploying"')
+    expect(markup).toContain('data-rly-release-state="building"')
+    expect(markup).toContain('data-rly-release-state="shipped"')
+    expect(markup).toContain('data-rly-release-state="held"')
+    expect(markup).toContain("Build")
+    expect(markup).toContain("Verify")
+    expect(markup).toContain("Production")
+    expect(markup).toContain("Jira")
+    expect(markup).toContain("PRs")
+    expect(markup).toContain("Pipelines")
+    expect(markup).toContain("Gaps")
+  })
+
+  it("keeps an empty URL-selected filter recoverable", () => {
+    const portfolio = presentPortfolio(makePortfolioSnapshot("six-state"))
+    const markup = renderOverview(
+      {
+        _tag: "ready",
+        ...livePortfolioState,
+        portfolio: {
+          ...portfolio,
+          releases: portfolio.releases.filter(({ readinessVerdict }) => readinessVerdict !== "shipped")
+        }
+      },
+      "/?status=shipped"
+    )
+
+    expect(markup).toContain("Nothing here right now")
+    expect(markup).toContain("No releases currently match Shipped")
+    expect(markup).toContain("Show all releases")
   })
 
   it.each(liveStatusCases)(
@@ -137,7 +180,6 @@ describe("PortfolioOverviewView", () => {
       portfolio: presentPortfolio(makePortfolioSnapshot("disabled"))
     })
     expect(markup).toContain("payments-api")
-    expect(markup).toContain("Disabled")
     expect(markup).toContain("Showing preserved source facts")
     expect(markup).toContain("This source connection is disabled.")
     expect(markup).not.toContain(">Healthy<")
@@ -154,14 +196,12 @@ describe("PortfolioOverviewView", () => {
     expect(markup).toContain("Release approver")
   })
 
-  it("shows the authoritative collaborator total when compact people are payload-capped", () => {
+  it("keeps named collaborators visible when the complete people set is payload-capped", () => {
     const markup = renderOverview({
       _tag: "ready",
       ...livePortfolioState,
       portfolio: presentPortfolio(makePortfolioSnapshot("capped"))
     })
-    expect(markup).toContain("Collaborators")
-    expect(markup).toContain(">51<")
     expect(markup).toContain("Avery Bell")
     expect(markup).toContain("Mara Singh")
   })

@@ -73,6 +73,9 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     releaseId: ReleaseId,
     environmentId: Schema.NullOr(EnvironmentId),
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
+  },
+  releaseSummary: {
+    releaseId: ReleaseId
   }
 })
 
@@ -100,6 +103,12 @@ const ReleaseSlice = Schema.Struct({
   evidenceItems: Schema.Array(EvidenceItem)
 })
 
+const ReleaseRelationshipSummary = Schema.Struct({
+  issues: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  pullRequests: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  pipelineExecutions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
 /** Tagged read result; callers never need to understand the SQL representation. */
 export const DeliveryGraphReadResult = Schema.TaggedUnion({
   entityProjection: { value: PersistedEntityProjection },
@@ -107,7 +116,8 @@ export const DeliveryGraphReadResult = Schema.TaggedUnion({
   evidence: { value: EvidenceBundle },
   relationship: { value: DeliveryRelationship },
   relationshipHistory: { value: Schema.Array(DeliveryRelationship) },
-  releaseSlice: { value: ReleaseSlice }
+  releaseSlice: { value: ReleaseSlice },
+  releaseSummary: { value: ReleaseRelationshipSummary }
 })
 
 /** Decoded delivery-graph read result. */

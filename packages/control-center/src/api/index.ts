@@ -67,6 +67,8 @@ export {
 } from "./plugins.js"
 export {
   PortfolioApiGroup,
+  PortfolioReadinessSummary,
+  PortfolioRelationshipCounts,
   PortfolioReleaseCollaborator,
   PortfolioReleaseRole,
   PortfolioReleaseSummary,

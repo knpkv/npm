@@ -394,6 +394,49 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           }
         })
       }
+      case "releaseSummary": {
+        const rows = yield* sql`WITH current_relationships AS (
+            SELECT revision.source_node_id, revision.source_node_kind,
+              revision.target_node_id, revision.target_node_kind
+            FROM relationship_revisions revision
+            INNER JOIN relationship_heads head
+              ON head.workspace_id = revision.workspace_id
+             AND head.relationship_id = revision.relationship_id
+             AND head.current_revision = revision.revision
+            WHERE revision.workspace_id = ${workspaceId}
+              AND revision.release_id = ${query.releaseId}
+              AND revision.environment_id IS NULL
+          ), endpoints AS (
+            SELECT source_node_id AS node_id, source_node_kind AS endpoint_kind
+            FROM current_relationships
+            UNION
+            SELECT target_node_id AS node_id, target_node_kind AS endpoint_kind
+            FROM current_relationships
+          ), resolved_endpoints AS (
+            SELECT endpoints.node_id, endpoints.endpoint_kind
+            FROM endpoints
+            INNER JOIN delivery_nodes node
+              ON node.workspace_id = ${workspaceId}
+             AND node.node_id = endpoints.node_id
+             AND node.resolution_state = 'resolved'
+          )
+          SELECT
+            COUNT(DISTINCT CASE WHEN endpoint_kind = 'issue' THEN node_id END) AS issues,
+            COUNT(DISTINCT CASE WHEN endpoint_kind = 'pull-request' THEN node_id END) AS pullRequests,
+            COUNT(DISTINCT CASE WHEN endpoint_kind = 'pipeline-execution' THEN node_id END) AS pipelineExecutions
+          FROM resolved_endpoints`
+        const summaries = yield* decodeRows(
+          Schema.Struct({
+            issues: Schema.Int,
+            pullRequests: Schema.Int,
+            pipelineExecutions: Schema.Int
+          }),
+          rows
+        )
+        const value = summaries[0]
+        if (value === undefined) return yield* Effect.die("release relationship summary query returned no row")
+        return DeliveryGraphReadResult.make({ _tag: "releaseSummary", value })
+      }
     }
   })
 
