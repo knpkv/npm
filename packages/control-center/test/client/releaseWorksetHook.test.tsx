@@ -160,7 +160,11 @@ describe("useReleaseWorkset", () => {
     if (sourceRelationship === undefined) throw new Error("Expected an environment relationship fixture")
     const environmentRelationship = {
       ...sourceRelationship,
-      scope: { _tag: "environment" as const, environmentId, releaseId: WORKSET_RELEASE_ID }
+      scope: {
+        _tag: "environment",
+        environmentId,
+        releaseId: WORKSET_RELEASE_ID
+      } satisfies typeof sourceRelationship.scope
     }
     const releaseInspection: ReleaseDeliveryGraphInspection = {
       ...releaseWorksetFixture,
