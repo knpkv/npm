@@ -42,6 +42,11 @@ const releaseFullRoute = async () => {
   return { Component: module.ReleaseFullRoute }
 }
 
+const activeWorkRoute = async () => {
+  const module = await import("./releases/ActiveWorkPage.js")
+  return { Component: module.ActiveWorkPage }
+}
+
 /** Browser routes remain application-owned while rly receives only a link bridge. */
 export const router = createBrowserRouter([
   {
@@ -57,6 +62,7 @@ export const router = createBrowserRouter([
         lazy: workspaceRoute,
         children: [
           { path: "overview", lazy: workspaceOverviewRoute },
+          { path: "work", lazy: activeWorkRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
           { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },

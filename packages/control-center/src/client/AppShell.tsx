@@ -23,14 +23,27 @@ const contextualAgentPath = (pathname: string, search: string): string => {
   if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "releases" && isReleaseId(releaseId)) {
     return releaseAgentPath(workspaceId, releaseId)
   }
+  const activeWorkReleaseId = new URLSearchParams(search).get("release") ?? undefined
+  if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "work" && isReleaseId(activeWorkReleaseId)) {
+    return releaseAgentPath(workspaceId, activeWorkReleaseId)
+  }
   return `/agent?from=${encodeURIComponent(`${pathname}${search}`)}`
 }
 
-const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => [
-  { label: "Overview", to: overviewPath },
-  { label: "Releases", to: "/releases" },
-  { label: "Services", to: "/services" }
-]
+const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => {
+  const workspaceId = overviewPath.split("/")[2]
+  return isWorkspaceId(workspaceId)
+    ? [
+        { label: "Overview", to: overviewPath },
+        { label: "Active work", to: `/w/${workspaceId}/work` },
+        { label: "Services", to: "/services" }
+      ]
+    : [
+        { label: "Overview", to: overviewPath },
+        { label: "Releases", to: "/releases" },
+        { label: "Services", to: "/services" }
+      ]
+}
 
 const navClassName = ({ isActive }: { readonly isActive: boolean }): string =>
   `${styles.navLink ?? ""}${isActive ? ` ${styles.navLinkActive ?? ""}` : ""}`
@@ -67,7 +80,7 @@ export const AppShell = (): ReactElement => {
           <span className={styles.brandName}>Control Center</span>
         </NavLink>
         <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
-        <NavLink className={styles.agent ?? ""} to={agentDestination}>
+        <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
           Ask Relay
         </NavLink>
         <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />

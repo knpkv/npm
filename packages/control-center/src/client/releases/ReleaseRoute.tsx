@@ -18,6 +18,7 @@ import type { WorkspaceReleaseOutletContext } from "./WorkspaceReleaseLayout.js"
 import {
   decodeReleaseRouteId,
   readReleaseOrigin,
+  releaseActiveWorkPath,
   releaseAgentPath,
   resolveReleaseOrigin,
   releaseFullPath,
@@ -29,6 +30,7 @@ import {
 import styles from "./ReleaseRoute.module.css"
 import { useCompactReleasePreview, usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
 import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
+import { ReleaseWorkset } from "./ReleaseWorkset.js"
 
 interface ReleaseRouteSelection {
   readonly release: PortfolioReleasePresentation
@@ -73,20 +75,45 @@ const ReleaseRouteLoading = ({ context }: { readonly context: WorkspaceReleaseOu
   )
 }
 
-const ReleaseAction = (): ReactElement => (
-  <Button disabled size="principal" stretch variant="primary">
-    Readiness evidence required
-  </Button>
-)
+export const ReleaseAction = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
+  const context = useOutletContext<WorkspaceReleaseOutletContext>()
+  const location = useLocation()
+  const action = (() => {
+    switch (release.readinessVerdict) {
+      case "blocked":
+        return { label: "Review blocker", to: releaseActiveWorkPath(context.workspaceId, release.id) }
+      case "held":
+        return { label: "Repair missing links", to: `${releaseFullPath(context.workspaceId, release.id)}#release-work` }
+      case "ready":
+        return {
+          label: "Review ship evidence",
+          to: `${releaseFullPath(context.workspaceId, release.id)}#release-evidence`
+        }
+      case "deploying":
+        return { label: "Open deployment", to: `${releaseFullPath(context.workspaceId, release.id)}#release-work` }
+      case "building":
+        return { label: "Open build", to: `${releaseFullPath(context.workspaceId, release.id)}#release-work` }
+      case "shipped":
+        return {
+          label: "View release record",
+          to: `${releaseFullPath(context.workspaceId, release.id)}#release-evidence`
+        }
+      case "unknown":
+        return null
+    }
+  })()
+  return action === null ? (
+    <Button disabled size="principal" stretch variant="primary">
+      Readiness evidence required
+    </Button>
+  ) : (
+    <Link className={styles.releaseAction} state={location.state} to={action.to}>
+      {action.label}
+    </Link>
+  )
+}
 
-const MissingRelationships = (): ReactElement => (
-  <StatePanel
-    description="Jira work, pull requests, and pipeline executions are not included in this summary snapshot. No demo relationships are substituted."
-    title="Relationship detail not synchronized"
-  />
-)
-
-const ReleaseEvidence = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => (
+export const ReleaseEvidence = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => (
   <Surface as="section" className={styles.evidence} padding="compact" tone="secondary">
     <div className={styles.evidenceHeading}>
       {release.source.service === null ? null : <ServiceMark service={release.source.service} />}
@@ -111,8 +138,9 @@ const ReleaseEvidence = ({ release }: { readonly release: PortfolioReleasePresen
 const releaseContextLabel = (release: PortfolioReleasePresentation): string =>
   `${release.serviceName} · ${release.version} · ${release.relay.codename} · ${release.id}`
 
-const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
+export const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioReleasePresentation }): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
+  const location = useLocation()
   const navigate = useNavigate()
   const prefersReducedMotion = usePrefersReducedReleaseMotion()
   return (
@@ -121,7 +149,10 @@ const ReleaseAgentEntry = ({ release }: { readonly release: PortfolioReleasePres
       agentName="Relay"
       context={releaseContextLabel(release)}
       onClick={() =>
-        navigate(releaseAgentPath(context.workspaceId, release.id), { viewTransition: !prefersReducedMotion })
+        navigate(releaseAgentPath(context.workspaceId, release.id), {
+          state: location.state,
+          viewTransition: !prefersReducedMotion
+        })
       }
     />
   )
@@ -191,13 +222,13 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
       open={isOpen}
       openFullViewLabel={`Open ${selection.release.relay.codename} full view`}
       presentation={isCompact ? "sheet" : "dialog"}
-      primaryAction={<ReleaseAction />}
+      primaryAction={<ReleaseAction release={selection.release} />}
       release={selection.release.release}
       stages={<StageRail heading="Release stages" stages={selection.release.stages} />}
       {...(transitionNames === undefined ? {} : { transitionNames })}
       workset={
         <div className={styles.previewDetails}>
-          <MissingRelationships />
+          <ReleaseWorkset release={selection.release} workspaceId={context.workspaceId} />
         </div>
       }
     />
@@ -278,10 +309,10 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
           data-rly-release-transition-part="verdict"
           reason={release.readinessReason}
           style={transitionNames === undefined ? undefined : { viewTransitionName: transitionNames.verdict }}
-          tone="neutral"
-          verdict="Readiness not evaluated"
+          tone={release.release.tone}
+          verdict={release.release.verdict}
         />
-        <ReleaseAction />
+        <ReleaseAction release={release} />
       </header>
 
       <StageRail heading="Build, verify, production" stages={release.stages} />
@@ -291,15 +322,15 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
         </Text>
         <CompleteCollaborators release={release} />
       </section>
-      <section aria-labelledby="release-work" className={styles.section}>
-        <Text as="h2" id="release-work" variant="section-title">
+      <section aria-labelledby="release-work-title" className={styles.section} id="release-work">
+        <Text as="h2" id="release-work-title" variant="section-title">
           Delivery relationships
         </Text>
+        <ReleaseWorkset release={release} workspaceId={context.workspaceId} />
         <RelationshipRepairPanel release={release} />
-        <MissingRelationships />
       </section>
-      <section aria-labelledby="release-evidence" className={styles.section}>
-        <Text as="h2" id="release-evidence" variant="section-title">
+      <section aria-labelledby="release-evidence-title" className={styles.section} id="release-evidence">
+        <Text as="h2" id="release-evidence-title" variant="section-title">
           Evidence
         </Text>
         <ReleaseEvidence release={release} />

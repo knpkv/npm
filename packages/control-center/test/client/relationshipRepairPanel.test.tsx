@@ -18,7 +18,10 @@ import {
   type RelationshipRepairProposalController,
   useRelationshipRepairProposals
 } from "../../src/client/releases/useRelationshipRepairProposals.js"
-import { RelationshipRepairPanelView } from "../../src/client/releases/RelationshipRepairPanel.js"
+import {
+  RelationshipRepairPanelContent,
+  RelationshipRepairPanelView
+} from "../../src/client/releases/RelationshipRepairPanel.js"
 import {
   makeRelationshipRepairReviewId,
   type RelationshipRepairTransport
@@ -26,7 +29,12 @@ import {
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import { RelationshipRepairApplication, RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
-import { RelationshipRepairProposalId, RelationshipRepairReviewId, ReleaseId } from "../../src/domain/identifiers.js"
+import {
+  RelationshipId,
+  RelationshipRepairProposalId,
+  RelationshipRepairReviewId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -34,6 +42,8 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 const snapshot = makePortfolioSnapshot()
 const release = presentPortfolio(snapshot).releases[0]
 if (release === undefined) throw new Error("Expected a release fixture")
+const environmentId = release.targetEnvironmentIds[0]
+if (environmentId === undefined) throw new Error("Expected a target environment fixture")
 
 const proposal = Schema.decodeUnknownSync(RelationshipRepairProposal)({
   schemaVersion: 2,
@@ -77,6 +87,7 @@ const readyState = (
   actionFailure: null,
   applications: application === undefined ? new Map() : new Map([[currentProposal.proposalId, application]]),
   busyProposalId: null,
+  environmentScopeKey: "",
   page: {
     releaseId: release.id,
     environmentId: null,
@@ -104,6 +115,7 @@ const view = (
   onReview = vi.fn(async () => true)
 ) => (
   <RelationshipRepairPanelView
+    mutationsEnabled
     onApply={onApply}
     onRetry={vi.fn()}
     onReview={onReview}
@@ -114,6 +126,7 @@ const view = (
 )
 
 let currentController: RelationshipRepairProposalController | undefined
+const ignoreSessionExpired = (): void => undefined
 
 const deferred = <Value,>() => {
   let resolveValue: ((value: Value) => void) | undefined
@@ -136,14 +149,20 @@ const deferred = <Value,>() => {
 }
 
 const ControllerHarness = ({
+  onSessionExpired = ignoreSessionExpired,
   releaseId,
   transport
 }: {
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly releaseId: ReleaseId
   readonly transport: RelationshipRepairTransport
 }): ReactElement => {
-  currentController = useRelationshipRepairProposals(releaseId, session.sessionId, transport)
-  return <span>{currentController.state._tag === "ready" ? currentController.state.page.releaseId : "loading"}</span>
+  currentController = useRelationshipRepairProposals(releaseId, [], session.sessionId, transport, onSessionExpired)
+  return (
+    <span>
+      {currentController.state._tag === "ready" ? currentController.state.page.releaseId : currentController.state._tag}
+    </span>
+  )
 }
 
 describe("RelationshipRepairPanel", () => {
@@ -242,6 +261,7 @@ describe("RelationshipRepairPanel", () => {
     await act(async () =>
       mountedRoot?.render(
         <RelationshipRepairPanelView
+          mutationsEnabled
           onApply={vi.fn(async () => true)}
           onRetry={onRetry}
           onReview={onReview}
@@ -277,6 +297,146 @@ describe("RelationshipRepairPanel", () => {
     if (reloadButton === undefined) throw new Error("Expected reload action")
     await act(async () => reloadButton.click())
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it("keeps decisions readable without storage proof and hides every mutation control", async () => {
+    const current = readyState()
+    if (current._tag !== "ready") throw new Error("Expected ready state")
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable"))),
+      list: vi.fn((_releaseId: ReleaseId, _environmentId: typeof environmentId | null) =>
+        Promise.resolve(current.page)
+      ),
+      makeReviewId: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable"))),
+      review: vi.fn(() => Promise.reject(new Error("Mutation must remain unavailable")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <RelationshipRepairPanelContent
+          browserSessionState={{ _tag: "storage-unavailable", session }}
+          release={release}
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(transport.list).toHaveBeenCalledTimes(2)
+    expect(transport.list.mock.calls.map(([, scope]) => scope)).toEqual([null, environmentId])
+    expect(host.textContent).toContain("Verify")
+    expect(host.textContent).not.toContain("Review proposal")
+    expect(host.textContent).not.toContain("Apply repair")
+    expect(host.textContent).not.toContain("Find repair candidates")
+    expect(transport.apply).not.toHaveBeenCalled()
+    expect(transport.review).not.toHaveBeenCalled()
+  })
+
+  it("shows both release and target-environment repair proposals", async () => {
+    const environmentProposal = RelationshipRepairProposal.make({
+      ...proposal,
+      proposalId: Schema.decodeSync(RelationshipRepairProposalId)("01890f6f-6d6a-7cc0-98d2-000000000086"),
+      environmentId,
+      relationshipId: Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000087"),
+      disposition: "link",
+      rationale: "The production target is missing its deployment relationship."
+    })
+    const releaseState = readyState()
+    if (releaseState._tag !== "ready") throw new Error("Expected release proposal page")
+    const releasePage = releaseState.page
+    const environmentPage: RelationshipRepairProposalList = {
+      releaseId: release.id,
+      environmentId,
+      status: null,
+      truncated: false,
+      proposals: [environmentProposal],
+      applications: []
+    }
+    const list = vi.fn((_releaseId: ReleaseId, scope: typeof environmentId | null) =>
+      Promise.resolve(scope === null ? releasePage : environmentPage)
+    )
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list,
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <RelationshipRepairPanelContent
+          browserSessionState={{ _tag: "authenticated", session }}
+          release={release}
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(list.mock.calls.map(([, scope]) => scope)).toEqual([null, environmentId])
+    expect(host.textContent).toContain(proposal.rationale)
+    expect(host.textContent).toContain(environmentProposal.rationale)
+    expect(host.textContent).toContain("Verify")
+    expect(host.textContent).toContain("Link")
+  })
+
+  it("invalidates only the expired session after an unauthorized proposal read", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.reject({ _tag: "UnauthorizedApiError" })),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <ControllerHarness onSessionExpired={onSessionExpired} releaseId={release.id} transport={transport} />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).toHaveBeenCalledOnce()
+    expect(onSessionExpired).toHaveBeenCalledWith(session.sessionId)
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("keeps service-unavailable proposal reads authenticated and retryable", async () => {
+    const onSessionExpired = vi.fn()
+    const transport = {
+      apply: vi.fn(() => Promise.reject(new Error("Unexpected apply"))),
+      list: vi.fn(() => Promise.reject({ _tag: "ServiceUnavailableApiError" })),
+      makeReviewId: vi.fn(() => Promise.resolve(reviewIdA)),
+      review: vi.fn(() => Promise.reject(new Error("Unexpected review")))
+    } satisfies RelationshipRepairTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <RelationshipRepairPanelContent
+          browserSessionState={{ _tag: "authenticated", session }}
+          onSessionExpired={onSessionExpired}
+          release={release}
+          transport={transport}
+        />
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    expect(onSessionExpired).not.toHaveBeenCalled()
+    expect(host.textContent).toContain("Release decisions unavailable")
+    expect(host.textContent).toContain("Try again")
   })
 
   it("closes a stale review form when refreshed server state is immutable", async () => {

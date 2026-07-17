@@ -9,6 +9,6 @@
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.client-test.tsbuildinfo",
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src/api", "src/client", "src/domain", "test/client"],
+  "include": ["src/api", "src/client", "src/domain", "test/client", "test/fixtures/releaseWorkset.ts"],
   "exclude": ["dist", "node_modules"]
 }

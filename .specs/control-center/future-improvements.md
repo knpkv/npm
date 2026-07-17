@@ -117,9 +117,17 @@ identity, named owner/approver, freshness, service, Jira/PR/pipeline/gap totals,
 The relationship totals use one aggregate delivery-graph query rather than hydrating complete
 nodes, projections, evidence, and claims.
 
+The D06 work-view MVP adds one compact release relationship card with all six Jira items, two
+explicit pull-request groups, pipeline delivery stages, a Confluence runbook, and the unlinked
+OPS-433 gap. Every supplied object changes the canonical release URL and leaves a visible selected
+object acknowledgement. The full release uses server-owned readiness for its verdict and exposes a
+state-specific next action. Active work adds a release-scoped decision surface whose OPS-428
+relationship-repair review and rationale survive reload through the existing governed proposal ledger. Compact browser
+coverage proves the three dimensions remain complete without horizontal overflow.
+
 ## Remaining roadmap
 
-- D06–D09: work views, search/traces/shares, timeline and exports, graceful drain, and startup
+- D07–D09: service workspaces, search/traces/shares, timeline and exports, graceful drain, and startup
   reconciliation. D05 performance refinement remains recorded below.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
@@ -167,10 +175,26 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   benchmark so digest/materialization verification stays authoritative without per-release query
   fan-out. Relationship counts already use a compact aggregate query and should not regress to
   `releaseSlice` hydration.
+- D06 object links intentionally converge on the canonical release workset and acknowledge the
+  selected object there. Provider-specific Jira, CodeCommit, Confluence, and CodePipeline detail
+  routes remain S01–S07 work rather than simulated local pages.
+- The D06 pipeline column projects the release's authoritative Build/Verify/Production stages
+  because the current delivery-graph pipeline projection carries execution status but not
+  provider-stage records. Replace this with provider-owned stage evidence when the CodePipeline
+  adapter lands.
+- Active work is deliberately release-scoped. Cross-release decision aggregation, sorting, and
+  assignment remain later work; the current route preserves exact release selection in its query.
+- The D06 Active work MVP keeps provider PR review state read-only. It does not yet implement the
+  required not-requested → requested → reviewed/ready-to-merge mutation or a real-runtime restart
+  test for that transition. Relationship-repair approval remains a separate governed D04 workflow;
+  add a dedicated PR-review domain/API/persistence path before claiming the D06 review lifecycle.
+- D06 verdict actions are state-specific navigation to the relevant decision/evidence surface, not
+  remote mutations. Governed deploy, watch, notify, acknowledge, and trace-repair completion remain
+  adapter-dependent action work and must reuse the D03 authority/idempotency boundary.
 
 ## Recommended next session
 
-Continue with D06 work views, then return to the recorded D05 readiness batch optimization before
+Continue with D07 service workspaces, then return to the recorded D05 readiness batch optimization before
 the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

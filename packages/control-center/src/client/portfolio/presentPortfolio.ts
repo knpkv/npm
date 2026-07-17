@@ -79,6 +79,7 @@ export interface PortfolioReleasePresentation {
   readonly serviceName: string
   readonly source: PortfolioSourcePresentation
   readonly stages: ReadonlyArray<RlyStage>
+  readonly targetEnvironmentIds: PortfolioSnapshot["releases"][number]["targetEnvironmentIds"]
   readonly version: string
 }
 
@@ -440,6 +441,7 @@ const releasePresentation = (
     serviceName: release.serviceName,
     source,
     stages: readiness === null ? unevaluatedStages() : readinessStages(readiness.stages),
+    targetEnvironmentIds: release.targetEnvironmentIds,
     version: release.version
   }
 }

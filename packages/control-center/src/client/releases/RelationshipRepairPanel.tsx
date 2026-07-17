@@ -11,13 +11,17 @@ import type {
   RelationshipRepairReviewDecision
 } from "../../domain/relationshipRepair.js"
 import type { RelationshipRepairProposalId } from "../../domain/identifiers.js"
-import { useBrowserSession } from "../BrowserSession.js"
+import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import { RelationshipRepairCandidatePicker } from "./RelationshipRepairCandidatePicker.js"
 import { type RelationshipRepairPanelState, useRelationshipRepairProposals } from "./useRelationshipRepairProposals.js"
+import type { RelationshipRepairTransport } from "./relationshipRepairTransport.js"
 import styles from "./RelationshipRepairPanel.module.css"
 
+const ignoreSessionExpired = (): void => undefined
+
 interface RelationshipRepairPanelViewProps {
+  readonly mutationsEnabled: boolean
   readonly onApply: (proposalId: RelationshipRepairProposalId) => Promise<boolean>
   readonly onRetry: () => void
   readonly onReview: (
@@ -102,6 +106,7 @@ interface ProposalRowProps {
   readonly application: RelationshipRepairApplication | undefined
   readonly isBusy: boolean
   readonly isGloballyBusy: boolean
+  readonly mutationsEnabled: boolean
   readonly onApply: RelationshipRepairPanelViewProps["onApply"]
   readonly onRetry: RelationshipRepairPanelViewProps["onRetry"]
   readonly onReview: RelationshipRepairPanelViewProps["onReview"]
@@ -115,6 +120,7 @@ const ProposalRow = ({
   application,
   isBusy,
   isGloballyBusy,
+  mutationsEnabled,
   onApply,
   onRetry,
   onReview,
@@ -128,11 +134,15 @@ const ProposalRow = ({
   const statusRef = useRef<HTMLDivElement>(null)
   const status = statusPresentation(proposal, application)
   const canReview =
+    mutationsEnabled &&
     proposal.status === "pending" &&
     (session.permission === "workspace-owner" || session.permission === "workspace-approver") &&
     !isSameActor(proposal.origin.actor, session.actor)
   const canApply =
-    proposal.status === "approved" && application === undefined && session.permission === "workspace-owner"
+    mutationsEnabled &&
+    proposal.status === "approved" &&
+    application === undefined &&
+    session.permission === "workspace-owner"
   const reviewRationale = rationale.trim()
 
   const review = async (decision: RelationshipRepairReviewDecision): Promise<void> => {
@@ -208,6 +218,15 @@ const ProposalRow = ({
           </>
         )}
       </div>
+
+      {proposal.review === null ? null : (
+        <div className={styles.reviewEvidence}>
+          <Text as="strong" variant="label">
+            Review note
+          </Text>
+          <Text tone="secondary">{proposal.review.rationale}</Text>
+        </div>
+      )}
 
       {actionFailed ? (
         <StatePanel
@@ -289,6 +308,7 @@ const LoadingPanel = (): ReactElement => (
 
 /** Render the exact, human-attributed decision ledger for one release. */
 export const RelationshipRepairPanelView = ({
+  mutationsEnabled,
   onApply,
   onRetry,
   onReview,
@@ -339,6 +359,7 @@ export const RelationshipRepairPanelView = ({
             isBusy={state.busyProposalId === proposal.proposalId}
             isGloballyBusy={state.busyProposalId !== null}
             key={proposal.proposalId}
+            mutationsEnabled={mutationsEnabled}
             onApply={onApply}
             onRetry={onRetry}
             onReview={onReview}
@@ -357,6 +378,71 @@ const sessionScopeKey = (session: SessionSummary): string => {
   return `${session.sessionId}:${session.workspaceId}:${session.permission}:${session.actor._tag}:${actorId}`
 }
 
+interface RelationshipRepairSessionAccess {
+  readonly mutationsEnabled: boolean
+  readonly session: SessionSummary | null
+}
+
+/** Cookie-authenticated reads survive storage failure; mutation controls do not. */
+export const relationshipRepairSessionAccess = (state: BrowserSessionState): RelationshipRepairSessionAccess => {
+  switch (state._tag) {
+    case "authenticated":
+      return { mutationsEnabled: true, session: state.session }
+    case "storage-unavailable":
+      return { mutationsEnabled: false, session: state.session }
+    case "anonymous":
+    case "blocked":
+    case "checking":
+    case "unavailable":
+      return { mutationsEnabled: false, session: null }
+  }
+}
+
+/** Render the repair ledger from an explicit browser-session state. */
+export const RelationshipRepairPanelContent = ({
+  browserSessionState,
+  onSessionExpired = ignoreSessionExpired,
+  release,
+  transport
+}: {
+  readonly browserSessionState: BrowserSessionState
+  readonly onSessionExpired?: (sessionKey: string) => void
+  readonly release: PortfolioReleasePresentation
+  readonly transport?: RelationshipRepairTransport
+}): ReactElement => {
+  const access = relationshipRepairSessionAccess(browserSessionState)
+  const controller = useRelationshipRepairProposals(
+    release.id,
+    release.targetEnvironmentIds,
+    access.session?.sessionId ?? null,
+    transport,
+    onSessionExpired
+  )
+  if (access.session === null) return <LoadingPanel />
+  return (
+    <div className={styles.panelStack}>
+      <RelationshipRepairPanelView
+        mutationsEnabled={access.mutationsEnabled}
+        onApply={controller.apply}
+        onRetry={controller.retry}
+        onReview={controller.review}
+        release={release}
+        session={access.session}
+        state={controller.state}
+      />
+      {access.mutationsEnabled ? (
+        <RelationshipRepairCandidatePicker
+          environmentIds={release.targetEnvironmentIds}
+          key={`${release.id}:${release.targetEnvironmentIds.join(":")}:${sessionScopeKey(access.session)}`}
+          onCreated={controller.retry}
+          releaseId={release.id}
+          session={access.session}
+        />
+      ) : null}
+    </div>
+  )
+}
+
 /** Connect one full release view to its authenticated repair-proposal ledger. */
 export const RelationshipRepairPanel = ({
   release
@@ -364,25 +450,11 @@ export const RelationshipRepairPanel = ({
   readonly release: PortfolioReleasePresentation
 }): ReactElement => {
   const browserSession = useBrowserSession()
-  const session = browserSession.state._tag === "authenticated" ? browserSession.state.session : null
-  const controller = useRelationshipRepairProposals(release.id, session?.sessionId ?? null)
-  if (session === null) return <LoadingPanel />
   return (
-    <div className={styles.panelStack}>
-      <RelationshipRepairPanelView
-        onApply={controller.apply}
-        onRetry={controller.retry}
-        onReview={controller.review}
-        release={release}
-        session={session}
-        state={controller.state}
-      />
-      <RelationshipRepairCandidatePicker
-        key={`${release.id}:${sessionScopeKey(session)}`}
-        onCreated={controller.retry}
-        releaseId={release.id}
-        session={session}
-      />
-    </div>
+    <RelationshipRepairPanelContent
+      browserSessionState={browserSession.state}
+      onSessionExpired={browserSession.invalidateSession}
+      release={release}
+    />
   )
 }

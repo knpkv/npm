@@ -1,0 +1,120 @@
+.page,
+.hero,
+.selectedRelease,
+.identity,
+.contextSection {
+  display: grid;
+}
+
+.page {
+  gap: clamp(3rem, 8vw, 7rem);
+}
+
+.hero {
+  gap: var(--rly-space-16);
+}
+
+.hero p,
+.hero h1 {
+  margin: 0;
+}
+
+.hero h1 {
+  max-inline-size: 10ch;
+  letter-spacing: -0.07em;
+  text-wrap: balance;
+}
+
+.intro {
+  max-inline-size: 48rem;
+}
+
+.releaseSelector {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+}
+
+.releaseChoice {
+  display: grid;
+  gap: var(--rly-space-8);
+  min-block-size: 7rem;
+  padding: var(--rly-space-20);
+  color: var(--rly-color-text-2);
+  text-decoration: none;
+}
+
+.releaseChoice + .releaseChoice {
+  border-inline-start: 1px solid var(--rly-color-border-1);
+}
+
+.releaseChoice:nth-child(n + 4) {
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.releaseChoice[data-active="true"] {
+  background: var(--rly-color-action-background);
+  color: var(--rly-color-action-foreground);
+}
+
+.releaseChoice:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: -2px;
+}
+
+.selectedRelease {
+  gap: var(--rly-space-32);
+}
+
+.identity {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--rly-space-20);
+}
+
+.identity h2 {
+  margin: 0;
+}
+
+.contextSection {
+  gap: var(--rly-space-20);
+}
+
+.contextSection h3 {
+  margin: 0;
+}
+
+.fullLink {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  text-underline-offset: var(--rly-space-2);
+}
+
+@media (max-width: 48rem) {
+  .releaseSelector {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .releaseChoice:nth-child(n + 3) {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .releaseChoice:nth-child(odd) {
+    border-inline-start: 0;
+  }
+}
+
+@media (max-width: 30rem) {
+  .releaseSelector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .releaseChoice + .releaseChoice {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    border-inline-start: 0;
+  }
+}
