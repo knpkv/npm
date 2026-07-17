@@ -18,6 +18,8 @@ import * as Stream from "effect/Stream"
 
 import type { PluginHealth } from "../../../domain/freshness.js"
 import {
+  hasMaximumPluginJsonBytes,
+  MaximumPluginPayloadBytes,
   type NegotiatedPluginDescriptorV1,
   ReadPluginEntityResultV1,
   type ReadPluginEntityResultV1 as ReadPluginEntityResultV1Type
@@ -68,6 +70,9 @@ const SiteUrl = Schema.String.pipe(
   )
 )
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const BoundedNormalizedAttributes = Schema.Json.check(
+  hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes)
+)
 
 /** Secret-free configuration consumed after a registry has constructed the authenticated client. @internal */
 export const ConfluencePageAdapterConfiguration = Schema.Struct({
@@ -100,6 +105,28 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
   Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(() => malformed(operation, diagnosticCode))
   )
+
+const decodeScopedPage = Effect.fn("ConfluencePage.decodeScopedPage")(function*(
+  operation: string,
+  invalidDiagnosticCode: string,
+  rawPage: unknown,
+  expectedPageId: string,
+  expectedSpaceId: string
+) {
+  const page = yield* decodeProvider(
+    operation,
+    invalidDiagnosticCode,
+    RawConfluencePage,
+    rawPage
+  )
+  if (page.id !== expectedPageId) {
+    return yield* malformed(operation, "confluence-page-identity-mismatch")
+  }
+  if (page.spaceId !== expectedSpaceId) {
+    return yield* malformed(operation, "confluence-page-space-mismatch")
+  }
+  return page
+})
 
 const toPluginFailure = Effect.fn("ConfluencePage.toPluginFailure")(function*(
   failure: ConfluencePageClientFailure
@@ -281,48 +308,52 @@ const readPageEntity = Effect.fn("ConfluencePage.readEntity")(function*(
       }
     )
   }
-  const rawPage = pageRead.value
-  const page = yield* decodeProvider(
+  const page = yield* decodeScopedPage(
     "confluence-page-read",
     "confluence-page-invalid",
-    RawConfluencePage,
-    rawPage
+    pageRead.value,
+    pageId,
+    input.configuration.spaceId
   )
-  if (page.id !== pageId) {
-    return yield* malformed("confluence-page-read", "confluence-page-identity-mismatch")
-  }
   const history = yield* readVersions(input.client, pageId)
   const contributors = yield* normalizedContributors(input.client, page, history.versions)
   const adf = page.body?.atlas_doc_format?.value
   const markdown = adf === undefined
     ? null
     : yield* toSafeConfluenceMarkdown(input.converter, adf)
+  const attributesInput = {
+    schemaVersion: 1,
+    status: page.status,
+    spaceId: page.spaceId,
+    parentId: page.parentId ?? null,
+    createdAt: page.createdAt,
+    updatedAt: page.version.createdAt,
+    currentVersion: page.version.number,
+    content: markdown === null ? null : { representation: "safe-markdown", markdown },
+    versions: history.versions.map((version) => ({
+      number: version.number,
+      createdAt: version.createdAt,
+      message: version.message ?? null,
+      minorEdit: version.minorEdit ?? false,
+      authorId: version.authorId ?? null
+    })),
+    versionHistory: {
+      complete: history.complete,
+      pagesFetched: history.pagesFetched
+    },
+    contributors
+  }
+  yield* decodeProvider(
+    "confluence-page-normalization",
+    "confluence-content-too-large",
+    BoundedNormalizedAttributes,
+    attributesInput
+  )
   const attributes = yield* decodeProvider(
     "confluence-page-normalization",
     "confluence-normalized-page-invalid",
     ConfluencePageAttributesV1,
-    {
-      schemaVersion: 1,
-      status: page.status,
-      spaceId: page.spaceId,
-      parentId: page.parentId ?? null,
-      createdAt: page.createdAt,
-      updatedAt: page.version.createdAt,
-      currentVersion: page.version.number,
-      content: markdown === null ? null : { representation: "safe-markdown", markdown },
-      versions: history.versions.map((version) => ({
-        number: version.number,
-        createdAt: version.createdAt,
-        message: version.message ?? null,
-        minorEdit: version.minorEdit ?? false,
-        authorId: version.authorId ?? null
-      })),
-      versionHistory: {
-        complete: history.complete,
-        pagesFetched: history.pagesFetched
-      },
-      contributors
-    }
+    attributesInput
   )
   const observedAt = yield* DateTime.now
   return yield* decodeProvider(
@@ -382,7 +413,13 @@ export const makeConfluencePageAdapter = (
     }),
     health: providerCall(input.client.getPage(input.configuration.probePageId)).pipe(
       Effect.flatMap((page) =>
-        decodeProvider("confluence-health", "confluence-health-page-invalid", RawConfluencePage, page)
+        decodeScopedPage(
+          "confluence-health",
+          "confluence-health-page-invalid",
+          page,
+          input.configuration.probePageId,
+          input.configuration.spaceId
+        )
       ),
       Effect.andThen(DateTime.now),
       Effect.map((checkedAt): PluginHealth => ({ _tag: "healthy", checkedAt }))

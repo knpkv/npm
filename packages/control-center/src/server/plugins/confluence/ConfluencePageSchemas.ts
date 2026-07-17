@@ -2,6 +2,7 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import { hasMaximumPluginJsonBytes, MaximumPluginPayloadBytes } from "../../../domain/plugins/bounds.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 const boundedString = (maximum: number) =>
@@ -114,8 +115,8 @@ export const ConfluencePageAttributesV1 = Schema.Struct({
     complete: Schema.Boolean,
     pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
   }),
-  contributors: Schema.Array(NormalizedContributor).check(Schema.isMaxLength(500))
-})
+  contributors: Schema.Array(NormalizedContributor).check(Schema.isMaxLength(502))
+}).check(hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes))
 
 /** Decoded normalized Confluence page attributes. @internal */
 export type ConfluencePageAttributesV1 = typeof ConfluencePageAttributesV1.Type

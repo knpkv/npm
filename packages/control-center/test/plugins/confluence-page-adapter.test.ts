@@ -8,7 +8,7 @@ import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import { ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import { MaximumPluginPayloadBytes, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import {
   ConfluencePageAdapterConfiguration,
   makeConfluencePageAdapter
@@ -62,8 +62,15 @@ const request = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
   vendorImmutableId: PAGE_ID
 })
 
-const converter = (markdown = "Runbook\n"): MarkdownConverter["Service"] => ({
-  adfToMarkdown: () => Effect.succeed(markdown),
+const converter = (
+  markdown = "Runbook\n",
+  onConvert: () => void = () => undefined
+): MarkdownConverter["Service"] => ({
+  adfToMarkdown: () =>
+    Effect.sync(() => {
+      onConvert()
+      return markdown
+    }),
   markdownToAdf: (value) => Effect.succeed(value)
 })
 
@@ -84,16 +91,59 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
 
 const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
   client: ConfluencePageClientShape,
-  markdown?: string
+  markdown?: string,
+  onConvert?: () => void
 ) {
   const descriptor = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
   return makeConfluencePageAdapter({
     client,
     configuration,
-    converter: converter(markdown),
+    converter: converter(markdown, onConvert),
     descriptor
   })
 })
+
+const normalizedAttributes = (
+  markdown: string,
+  contributors: ReadonlyArray<unknown> = [
+    {
+      accountId: "account-author",
+      displayName: "author",
+      active: true,
+      external: false,
+      resolved: true,
+      roles: ["author", "contributor"]
+    },
+    {
+      accountId: "account-owner",
+      displayName: "owner",
+      active: true,
+      external: false,
+      resolved: true,
+      roles: ["owner"]
+    }
+  ]
+) => ({
+  schemaVersion: 1,
+  status: "current",
+  spaceId: currentPage.spaceId,
+  parentId: currentPage.parentId,
+  createdAt: currentPage.createdAt,
+  updatedAt: currentPage.version.createdAt,
+  currentVersion: currentPage.version.number,
+  content: { representation: "safe-markdown", markdown },
+  versions: [{
+    number: currentPage.version.number,
+    createdAt: currentPage.version.createdAt,
+    message: currentPage.version.message,
+    minorEdit: currentPage.version.minorEdit,
+    authorId: currentPage.version.authorId
+  }],
+  versionHistory: { complete: true, pagesFetched: 1 },
+  contributors
+})
+
+const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 describe("Confluence page adapter", () => {
   it.effect("normalizes current content, bounded history, contributors, and a same-origin source URL", () =>
@@ -174,6 +224,50 @@ describe("Confluence page adapter", () => {
       assert.notInclude(attributes.content?.markdown, "](")
     }))
 
+  it.effect("rejects pages outside the configured space before history, users, or content", () =>
+    Effect.gen(function*() {
+      let versionCalls = 0
+      let userCalls = 0
+      let conversionCalls = 0
+      const client = defaultClient({
+        getPage: () => Effect.succeed({ ...currentPage, spaceId: "space-other" }),
+        getPageVersions: () =>
+          Effect.sync(() => {
+            versionCalls += 1
+            return { results: [] }
+          }),
+        getUsers: () =>
+          Effect.sync(() => {
+            userCalls += 1
+            return { results: [] }
+          })
+      })
+      const adapter = yield* makeAdapter(client, undefined, () => {
+        conversionCalls += 1
+      })
+
+      const read = yield* adapter.connection.readEntity(request).pipe(Effect.result)
+      const health = yield* adapter.connection.health.pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(read))
+      if (Result.isFailure(read)) {
+        assert.strictEqual(read.failure._tag, "PluginMalformedResponseFailure")
+        if (read.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(read.failure.diagnosticCode, "confluence-page-space-mismatch")
+        }
+      }
+      assert.isTrue(Result.isFailure(health))
+      if (Result.isFailure(health)) {
+        assert.strictEqual(health.failure._tag, "PluginMalformedResponseFailure")
+        if (health.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(health.failure.diagnosticCode, "confluence-page-space-mismatch")
+        }
+      }
+      assert.strictEqual(versionCalls, 0)
+      assert.strictEqual(userCalls, 0)
+      assert.strictEqual(conversionCalls, 0)
+    }))
+
   it.effect("stops version traversal at five pages and marks history incomplete", () =>
     Effect.gen(function*() {
       let calls = 0
@@ -199,6 +293,105 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(calls, 5)
       assert.strictEqual(attributes.versionHistory.complete, false)
       assert.strictEqual(attributes.versionHistory.pagesFetched, 5)
+    }))
+
+  it.effect("retains the complete bounded set of 500 version authors plus page author and owner", () =>
+    Effect.gen(function*() {
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        authorId: `v${String(index).padStart(3, "0")}`
+      }))
+      let versionPage = 0
+      const userBatches: Array<ReadonlyArray<string>> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.succeed({
+            ...currentPage,
+            authorId: "page-author",
+            ownerId: "page-owner",
+            version: { ...currentPage.version, authorId: "page-author" }
+          }),
+        getPageVersions: () =>
+          Effect.sync(() => {
+            const page = versionPage
+            versionPage += 1
+            return {
+              results: versions.slice(page * 100, (page + 1) * 100),
+              ...(page < 4 ? { _links: { next: `/versions?cursor=page-${page + 1}` } } : {})
+            }
+          }),
+        getUsers: (accountIds) =>
+          Effect.sync(() => {
+            userBatches.push(accountIds)
+            return {
+              results: accountIds.map((accountId) => ({
+                accountId,
+                displayName: "u",
+                accountStatus: "active",
+                isExternalCollaborator: false
+              }))
+            }
+          })
+      }))
+
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.strictEqual(attributes.versions.length, 500)
+      assert.strictEqual(attributes.contributors.length, 502)
+      assert.deepStrictEqual(userBatches.map(({ length }) => length), [250, 250, 2])
+    }))
+
+  it("accepts exactly 502 normalized contributors and rejects 503", () => {
+    const contributors = Array.from({ length: 503 }, (_, index) => ({
+      accountId: `account-${index}`,
+      displayName: "u",
+      active: true,
+      external: false,
+      resolved: true,
+      roles: ["contributor"]
+    }))
+
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(ConfluencePageAttributesV1)(
+        normalizedAttributes("Runbook\n", contributors.slice(0, 502))
+      )
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(ConfluencePageAttributesV1)(normalizedAttributes("Runbook\n", contributors))
+    ))
+  })
+
+  it.effect("accepts an exact normalized attributes byte budget and reports content overflow", () =>
+    Effect.gen(function*() {
+      const baselineAdapter = yield* makeAdapter(defaultClient(), "x")
+      const baseline = yield* baselineAdapter.connection.readEntity(request)
+      assert.strictEqual(baseline._tag, "found")
+      if (baseline._tag !== "found") return
+      const baselineAttributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(baseline.event.attributes)
+      const fittingMarkdown = "x".repeat(
+        1 + MaximumPluginPayloadBytes - jsonBytes(baselineAttributes)
+      )
+      const fittingAdapter = yield* makeAdapter(defaultClient(), fittingMarkdown)
+      const fitting = yield* fittingAdapter.connection.readEntity(request)
+
+      assert.strictEqual(fitting._tag, "found")
+      if (fitting._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(fitting.event.attributes)
+      assert.strictEqual(jsonBytes(attributes), MaximumPluginPayloadBytes)
+
+      const oversizedAdapter = yield* makeAdapter(defaultClient(), `${fittingMarkdown}x`)
+      const oversized = yield* oversizedAdapter.connection.readEntity(request).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(oversized))
+      if (Result.isFailure(oversized)) {
+        assert.strictEqual(oversized.failure._tag, "PluginMalformedResponseFailure")
+        if (oversized.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(oversized.failure.diagnosticCode, "confluence-content-too-large")
+        }
+      }
     }))
 
   it.effect("rejects provider identity drift and repeated pagination cursors", () =>
