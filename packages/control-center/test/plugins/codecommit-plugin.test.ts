@@ -8,9 +8,17 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
-import { DiffInventoryPageRequestV1, PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import {
+  DiffInventoryPageRequestV1,
+  PluginSyncRequestV1,
+  ReadPluginEntityRequestV1
+} from "../../src/domain/plugins/index.js"
 import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
-import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import {
+  PluginAuthenticationFailure,
+  PluginAuthorizationFailure,
+  PluginConfigurationFailure
+} from "../../src/server/plugins/failures.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { buildPluginDefinitionLayer } from "../../src/server/plugins/PluginDefinition.js"
 
@@ -20,22 +28,29 @@ const configuration = {
   repositoryName: "payments-api"
 }
 
-const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
-  pullRequestId: "17",
-  revisionId: "revision-17",
-  repositoryName: "payments-api",
-  title: "Preserve exact revisions",
-  description: "Expose immutable base and head commits.",
-  authorArn: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
-  status: "OPEN",
-  sourceReference: "refs/heads/feature/read-adapter",
-  destinationReference: "refs/heads/main",
-  sourceCommit: "head-commit-17",
-  destinationCommit: "base-commit-17",
-  mergeBase: "merge-base-17",
-  creationDate: new Date("2026-07-16T08:00:00.000Z"),
-  lastActivityDate: new Date("2026-07-16T09:00:00.000Z")
-})
+const makePullRequest = (
+  repositoryName: string,
+  status: "OPEN" | "CLOSED" | "MERGED" = "OPEN",
+  revisionId = "revision-17"
+) =>
+  Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+    pullRequestId: "17",
+    revisionId,
+    repositoryName,
+    title: "Preserve exact revisions",
+    description: "Expose immutable base and head commits.",
+    authorArn: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+    status,
+    sourceReference: "refs/heads/feature/read-adapter",
+    destinationReference: "refs/heads/main",
+    sourceCommit: "head-commit-17",
+    destinationCommit: "base-commit-17",
+    mergeBase: "merge-base-17",
+    creationDate: new Date("2026-07-16T08:00:00.000Z"),
+    lastActivityDate: new Date("2026-07-16T09:00:00.000Z")
+  })
+
+const pullRequest = makePullRequest(configuration.repositoryName)
 
 const changedFiles = [
   Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
@@ -97,14 +112,24 @@ const runWithClient = <A, E>(
 describe("CodeCommitPlugin", () => {
   it.effect("normalizes paginated pull-request sync and resumes from the provider cursor", () =>
     Effect.gen(function*() {
-      const requestedTokens = yield* Ref.make<ReadonlyArray<string | null>>([])
+      const requestedPages = yield* Ref.make<
+        ReadonlyArray<{
+          readonly status: "OPEN" | "CLOSED"
+          readonly nextToken: string | null
+        }>
+      >([])
       const client = baseReadClient({
         listPullRequestsPage: (request) =>
-          Ref.update(requestedTokens, (tokens) => [...tokens, request.nextToken]).pipe(
+          Ref.update(requestedPages, (pages) => [...pages, {
+            status: request.status,
+            nextToken: request.nextToken
+          }]).pipe(
             Effect.as(
               new ReadClient.CodeCommitPullRequestPage({
-                pullRequests: [pullRequest],
-                nextToken: request.nextToken === null ? ReadClient.CodeCommitPageToken.make("provider-page-2") : null
+                pullRequests: request.status === "OPEN" ? [pullRequest] : [],
+                nextToken: request.status === "OPEN" && request.nextToken === null
+                  ? ReadClient.CodeCommitPageToken.make("provider-page-2")
+                  : null
               })
             )
           )
@@ -127,13 +152,22 @@ describe("CodeCommitPlugin", () => {
         })
       )
 
-      assert.deepStrictEqual(yield* Ref.get(requestedTokens), [null, "provider-page-2", "provider-page-2"])
-      assert.strictEqual(pages.first.length, 2)
+      assert.deepStrictEqual(yield* Ref.get(requestedPages), [
+        { status: "OPEN", nextToken: null },
+        { status: "OPEN", nextToken: "provider-page-2" },
+        { status: "CLOSED", nextToken: null },
+        { status: "OPEN", nextToken: "provider-page-2" },
+        { status: "CLOSED", nextToken: null }
+      ])
+      assert.strictEqual(pages.first.length, 3)
       assert.strictEqual(pages.first[0]?.checkpointAfterPage, "next:provider-page-2")
       assert.isTrue(pages.first[0]?.hasMore)
-      assert.strictEqual(pages.first[1]?.checkpointAfterPage, "complete")
-      assert.isFalse(pages.first[1]?.hasMore)
-      assert.strictEqual(pages.resumed[0]?.checkpointAfterPage, "complete")
+      assert.strictEqual(pages.first[1]?.checkpointAfterPage, "closed")
+      assert.isTrue(pages.first[1]?.hasMore)
+      assert.strictEqual(pages.first[2]?.checkpointAfterPage, "complete")
+      assert.isFalse(pages.first[2]?.hasMore)
+      assert.strictEqual(pages.resumed[0]?.checkpointAfterPage, "closed")
+      assert.strictEqual(pages.resumed[1]?.checkpointAfterPage, "complete")
       const event = pages.first[0]?.events[0]
       assert.strictEqual(event?._tag, "UpsertEntity")
       if (event?._tag === "UpsertEntity") {
@@ -142,6 +176,55 @@ describe("CodeCommitPlugin", () => {
         assert.strictEqual(event.revision, "revision-17")
         assert.strictEqual(event.attributes.headRevision, "head-commit-17")
         assert.strictEqual(event.attributes.baseRevision, "base-commit-17")
+      }
+    }))
+
+  it.effect("emits a terminal revision when a previously open pull request is merged", () =>
+    Effect.gen(function*() {
+      const terminal = yield* Ref.make(false)
+      const mergedPullRequest = makePullRequest(configuration.repositoryName, "MERGED", "revision-18")
+      const client = baseReadClient({
+        listPullRequestsPage: (request) =>
+          Ref.get(terminal).pipe(
+            Effect.map((isTerminal) =>
+              new ReadClient.CodeCommitPullRequestPage({
+                pullRequests: isTerminal
+                  ? request.status === "CLOSED" ? [mergedPullRequest] : []
+                  : request.status === "OPEN"
+                  ? [pullRequest]
+                  : [],
+                nextToken: null
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+        streamKey: "pull-requests",
+        checkpoint: null
+      })
+      const pages = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const open = yield* connection.sync(request).pipe(Stream.runCollect)
+          yield* Ref.set(terminal, true)
+          const merged = yield* connection.sync(request).pipe(Stream.runCollect)
+          return { open, merged }
+        })
+      )
+
+      const openEvents = pages.open.flatMap(({ events }) => events)
+      const mergedEvents = pages.merged.flatMap(({ events }) => events)
+      assert.strictEqual(openEvents.length, 1)
+      const openEvent = openEvents[0]
+      assert.strictEqual(openEvent?._tag, "UpsertEntity")
+      if (openEvent?._tag === "UpsertEntity") assert.strictEqual(openEvent.attributes.status, "OPEN")
+      assert.strictEqual(mergedEvents.length, 1)
+      const mergedEvent = mergedEvents[0]
+      assert.strictEqual(mergedEvent?._tag, "UpsertEntity")
+      if (mergedEvent?._tag === "UpsertEntity") {
+        assert.strictEqual(mergedEvent.revision, "revision-18")
+        assert.strictEqual(mergedEvent.attributes.status, "MERGED")
       }
     }))
 
@@ -168,6 +251,51 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(page.nextCursor, null)
     }))
 
+  it.effect("rejects cross-repository entity and inventory reads before normalization or diff access", () =>
+    Effect.gen(function*() {
+      const differenceCalls = yield* Ref.make(0)
+      const mismatchedPullRequest = makePullRequest("other-repository")
+      const client = baseReadClient({
+        getPullRequest: () => Effect.succeed(mismatchedPullRequest),
+        getChangedFilesPage: () =>
+          Ref.update(differenceCalls, (calls) => calls + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: changedFiles,
+                nextToken: null,
+                providerPageLimit: 100
+              })
+            )
+          )
+      })
+      const entityRequest = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
+        entityType: "pull-request",
+        vendorImmutableId: "17"
+      })
+      const inventoryRequest = Schema.decodeUnknownSync(DiffInventoryPageRequestV1)({
+        entity: entityRequest,
+        cursor: null
+      })
+      const results = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const entity = yield* connection.readEntity(entityRequest).pipe(Effect.result)
+          const inventory = yield* connection.diff.value.readInventoryPage(inventoryRequest).pipe(Effect.result)
+          return { entity, inventory }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(results.entity))
+      if (Result.isFailure(results.entity)) assert.instanceOf(results.entity.failure, PluginConfigurationFailure)
+      assert.isTrue(Result.isFailure(results.inventory))
+      if (Result.isFailure(results.inventory)) {
+        assert.instanceOf(results.inventory.failure, PluginConfigurationFailure)
+      }
+      assert.strictEqual(yield* Ref.get(differenceCalls), 0)
+    }))
+
   it.effect("maps credential rejection to the Control Center authentication taxonomy", () =>
     Effect.gen(function*() {
       const client = baseReadClient({
@@ -190,5 +318,34 @@ describe("CodeCommitPlugin", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthenticationFailure)
+    }))
+
+  it.effect("maps CodeCommit encryption-key denial to the authorization taxonomy", () =>
+    Effect.gen(function*() {
+      const client = baseReadClient({
+        getPullRequest: () =>
+          Effect.fail(
+            new Errors.AwsApiError({
+              operation: "getPullRequest",
+              profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+              region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+              cause: { _tag: "EncryptionKeyAccessDeniedException" }
+            })
+          )
+      })
+      const request = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
+        entityType: "pull-request",
+        vendorImmutableId: "17"
+      })
+      const result = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.readEntity(request)
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthorizationFailure)
     }))
 })

@@ -9,7 +9,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
-import { CodeCommitMalformedResponseError } from "../src/ReadClient/errors.js"
+import { AwsApiError } from "../src/Errors.js"
+import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../src/ReadClient/errors.js"
 import { CodeCommitReadClient } from "../src/ReadClient/ReadClient.js"
 import { CodeCommitReadProvider, type CodeCommitReadProviderService } from "../src/ReadClient/ReadProvider.js"
 
@@ -162,6 +163,27 @@ describe("CodeCommitReadClient", () => {
         const result = yield* client.getPullRequest({ account, pullRequestId: "17" }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(result))
         if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
+      })
+    ))
+
+  it.effect("retains repository absence as a typed not-found read failure", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: () =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "getPullRequest",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "RepositoryDoesNotExistException" }
+            })
+          )
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getPullRequest({ account, pullRequestId: "17" }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReadNotFoundError)
       })
     ))
 

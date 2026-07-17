@@ -46,7 +46,16 @@ import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 const PULL_REQUEST_STREAM_KEY = "pull-requests"
 const COMPLETED_CHECKPOINT = "complete"
 const NEXT_CHECKPOINT_PREFIX = "next:"
+const CLOSED_CHECKPOINT = "closed"
+const CLOSED_NEXT_CHECKPOINT_PREFIX = "closed:"
 const RETRY_DELAY_SECONDS = 30
+
+type PullRequestStatus = "OPEN" | "CLOSED"
+
+interface SyncCursor {
+  readonly status: PullRequestStatus
+  readonly nextToken: string | null
+}
 
 const CodeCommitPluginConfiguration = Schema.Struct({
   profile: Domain.AwsProfileName,
@@ -129,7 +138,7 @@ const failRead = Effect.fn("CodeCommitPlugin.failRead")(function*(
       if (causeHasTag(error.cause, ["InvalidClientTokenId", "UnrecognizedClientException", "ExpiredTokenException"])) {
         return yield* new PluginAuthenticationFailure({ operation })
       }
-      if (causeHasTag(error.cause, ["AccessDeniedException"])) {
+      if (causeHasTag(error.cause, ["AccessDeniedException", "EncryptionKeyAccessDeniedException"])) {
         return yield* new PluginAuthorizationFailure({ operation })
       }
       if (causeHasTag(error.cause, ["ThrottlingException", "TooManyRequestsException"])) {
@@ -193,21 +202,52 @@ const toPullRequestEvent = (
   }
 })
 
-const providerTokenFromCheckpoint = (
+const syncCursorFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"]
-): Effect.Effect<string | null, PluginConfigurationFailure> => {
-  if (checkpoint === null || checkpoint === COMPLETED_CHECKPOINT) return Effect.succeed(null)
+): Effect.Effect<SyncCursor, PluginConfigurationFailure> => {
+  if (checkpoint === null || checkpoint === COMPLETED_CHECKPOINT) {
+    return Effect.succeed({ status: "OPEN", nextToken: null })
+  }
+  if (checkpoint === CLOSED_CHECKPOINT) return Effect.succeed({ status: "CLOSED", nextToken: null })
   if (checkpoint.startsWith(NEXT_CHECKPOINT_PREFIX)) {
     const token = checkpoint.slice(NEXT_CHECKPOINT_PREFIX.length)
     return token.length > 0
-      ? Effect.succeed(token)
+      ? Effect.succeed({ status: "OPEN", nextToken: token })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint.startsWith(CLOSED_NEXT_CHECKPOINT_PREFIX)) {
+    const token = checkpoint.slice(CLOSED_NEXT_CHECKPOINT_PREFIX.length)
+    return token.length > 0
+      ? Effect.succeed({ status: "CLOSED", nextToken: token })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
   }
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
 }
 
-const checkpointFromProviderToken = (nextToken: string | null): string =>
-  nextToken === null ? COMPLETED_CHECKPOINT : `${NEXT_CHECKPOINT_PREFIX}${nextToken}`
+const checkpointFromSyncCursor = (cursor: SyncCursor | null): string => {
+  if (cursor === null) return COMPLETED_CHECKPOINT
+  if (cursor.nextToken === null) return CLOSED_CHECKPOINT
+  return cursor.status === "OPEN"
+    ? `${NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
+    : `${CLOSED_NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
+}
+
+const nextSyncCursor = (status: PullRequestStatus, nextToken: string | null): SyncCursor | null => {
+  if (nextToken !== null) return { status, nextToken }
+  return status === "OPEN" ? { status: "CLOSED", nextToken: null } : null
+}
+
+const enforceConfiguredRepository = Effect.fn("CodeCommitPlugin.enforceConfiguredRepository")(function*(
+  configuredRepositoryName: string,
+  pullRequest: ReadClient.CodeCommitPullRequestRevision
+) {
+  if (pullRequest.repositoryName !== configuredRepositoryName) {
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "codecommit-pull-request-repository-mismatch"
+    })
+  }
+  return pullRequest
+})
 
 interface InventoryEntryInput {
   readonly path: string
@@ -276,20 +316,25 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     )
   )
 
-  const readSyncPage = Effect.fn("CodeCommitPlugin.readSyncPage")(function*(nextToken: string | null) {
+  const readSyncPage = Effect.fn("CodeCommitPlugin.readSyncPage")(function*(cursor: SyncCursor) {
     const page = yield* readClient.listPullRequestsPage({
       account,
       repositoryName: configuration.repositoryName,
-      status: "OPEN",
-      nextToken
+      status: cursor.status,
+      nextToken: cursor.nextToken
     }).pipe(Effect.catch((error) => failRead("sync", error)))
-    const events = page.pullRequests.map((pullRequest) => toPullRequestEvent(configuration, pullRequest))
+    const pullRequests = yield* Effect.forEach(
+      page.pullRequests,
+      (pullRequest) => enforceConfiguredRepository(configuration.repositoryName, pullRequest)
+    )
+    const events = pullRequests.map((pullRequest) => toPullRequestEvent(configuration, pullRequest))
+    const nextCursor = nextSyncCursor(cursor.status, page.nextToken)
     const normalized = yield* output("sync", PluginSyncPageV1, {
       events,
-      checkpointAfterPage: checkpointFromProviderToken(page.nextToken),
-      hasMore: page.nextToken !== null
+      checkpointAfterPage: checkpointFromSyncCursor(nextCursor),
+      hasMore: nextCursor !== null
     })
-    return { normalized, nextToken: page.nextToken }
+    return { normalized, nextCursor }
   })
 
   const sync = (request: PluginSyncRequestV1) => {
@@ -297,15 +342,15 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       return Stream.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-stream-unsupported" }))
     }
     return Stream.unwrap(
-      providerTokenFromCheckpoint(request.checkpoint).pipe(
-        Effect.map((initialToken) =>
-          Stream.paginate<string | null, PluginSyncPageV1, PluginFailure>(
-            initialToken,
-            (nextToken) =>
-              readSyncPage(nextToken).pipe(
-                Effect.map(({ nextToken, normalized }) => [
+      syncCursorFromCheckpoint(request.checkpoint).pipe(
+        Effect.map((initialCursor) =>
+          Stream.paginate<SyncCursor, PluginSyncPageV1, PluginFailure>(
+            initialCursor,
+            (cursor) =>
+              readSyncPage(cursor).pipe(
+                Effect.map(({ nextCursor, normalized }) => [
                   [normalized],
-                  nextToken === null ? Option.none<string | null>() : Option.some<string | null>(nextToken)
+                  nextCursor === null ? Option.none<SyncCursor>() : Option.some(nextCursor)
                 ])
               )
           )
@@ -337,7 +382,8 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       }
       return yield* failRead("read-entity", result.failure)
     }
-    const event = toPullRequestEvent(configuration, result.success)
+    const pullRequest = yield* enforceConfiguredRepository(configuration.repositoryName, result.success)
+    const event = toPullRequestEvent(configuration, pullRequest)
     return yield* output("read-entity", ReadPluginEntityResultV1, { _tag: "found", event })
   })
 
@@ -355,9 +401,10 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       account,
       pullRequestId: request.entity.vendorImmutableId
     }).pipe(Effect.catch((error) => failRead("diff-inventory", error)))
+    yield* enforceConfiguredRepository(configuration.repositoryName, pullRequest)
     const page = yield* readClient.getChangedFilesPage({
       account,
-      repositoryName: pullRequest.repositoryName,
+      repositoryName: configuration.repositoryName,
       beforeCommitSpecifier: pullRequest.destinationCommit,
       afterCommitSpecifier: pullRequest.sourceCommit,
       nextToken: request.cursor
