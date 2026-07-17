@@ -10,7 +10,7 @@ import { EntityId, PersonId, SessionId, ShareId, WorkspaceId } from "../../../do
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
 import { RecordAlreadyExistsError, RecordNotFoundError } from "../errors.js"
-import { mapAlreadyExists, mapPersistenceOperation } from "./internal.js"
+import { mapPersistenceOperation } from "./internal.js"
 
 const RECORD_KIND = "authorized-share"
 
@@ -152,32 +152,24 @@ const makeAuthorizedShareRepository = Effect.gen(function*() {
   return {
     create: Effect.fn("AuthorizedShareRepository.create")(function*(input: unknown) {
       const request = yield* decodeInput(CreateAuthorizedShareInput, "create", input)
-      return yield* database.transaction(Effect.gen(function*() {
-        const existingRow = (yield* findRows(request.workspaceId, request.shareId))[0]
-        if (existingRow !== undefined) {
-          const existing = yield* grantFromRow(existingRow)
-          if (sameCreateIntent(existing, request)) return existing
-          return yield* new RecordAlreadyExistsError({
-            workspaceId: request.workspaceId,
-            recordKind: RECORD_KIND,
-            recordKey: request.shareId
-          })
-        }
-        yield* sql`INSERT INTO authorized_share_grants (
-          workspace_id, share_id, schema_version, entity_id, grantee_person_id,
-          created_by_person_id, created_by_session_id, expires_at, created_at
-        ) VALUES (
-          ${request.workspaceId}, ${request.shareId}, 1, ${request.entityId}, ${request.granteePersonId},
-          ${request.createdByPersonId}, ${request.createdBySessionId},
-          ${Schema.encodeSync(UtcTimestamp)(request.expiresAt)},
-          ${Schema.encodeSync(UtcTimestamp)(request.createdAt)}
-        )`.pipe(mapAlreadyExists({
-          workspaceId: request.workspaceId,
-          recordKind: RECORD_KIND,
-          recordKey: request.shareId
-        }))
-        return yield* readGrant(request)
-      }))
+      // Keep conflict arbitration in one autocommit statement so concurrent processes cannot
+      // both hold deferred read transactions before competing for the immutable grant identity.
+      yield* sql`INSERT INTO authorized_share_grants (
+        workspace_id, share_id, schema_version, entity_id, grantee_person_id,
+        created_by_person_id, created_by_session_id, expires_at, created_at
+      ) VALUES (
+        ${request.workspaceId}, ${request.shareId}, 1, ${request.entityId}, ${request.granteePersonId},
+        ${request.createdByPersonId}, ${request.createdBySessionId},
+        ${Schema.encodeSync(UtcTimestamp)(request.expiresAt)},
+        ${Schema.encodeSync(UtcTimestamp)(request.createdAt)}
+      ) ON CONFLICT(workspace_id, share_id) DO NOTHING`
+      const existing = yield* readGrant(request)
+      if (sameCreateIntent(existing, request)) return existing
+      return yield* new RecordAlreadyExistsError({
+        workspaceId: request.workspaceId,
+        recordKind: RECORD_KIND,
+        recordKey: request.shareId
+      })
     }, mapPersistenceOperation("authorized-share.create")),
     get: read,
     revoke: Effect.fn("AuthorizedShareRepository.revoke")(function*(input: unknown) {

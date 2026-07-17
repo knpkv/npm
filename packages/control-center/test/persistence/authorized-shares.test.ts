@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Result, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Result, Schema } from "effect"
 
 import {
   EntityId,
@@ -105,6 +105,50 @@ const createInput = (selectedShareId: ShareId) => ({
 })
 
 describe("authorized share repository", () => {
+  it.effect("makes concurrent same-intent creation idempotent", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-concurrent-authorized-share-")
+      const firstContext = yield* Layer.build(
+        AuthorizedShareRepository.layer.pipe(Layer.provideMerge(databaseLayer(config)))
+      )
+      const secondContext = yield* Layer.build(
+        AuthorizedShareRepository.layer.pipe(Layer.provideMerge(databaseLayer(config)))
+      )
+      const firstRepository = Context.get(firstContext, AuthorizedShareRepository)
+      const secondRepository = Context.get(secondContext, AuthorizedShareRepository)
+      const firstDatabase = Context.get(firstContext, Database)
+      yield* seedAuthorityAndTarget.pipe(Effect.provideService(Database, firstDatabase))
+
+      const start = yield* Deferred.make<void>()
+      const firstCreate = yield* Deferred.await(start).pipe(
+        Effect.andThen(firstRepository.create(createInput(shareId))),
+        Effect.forkChild
+      )
+      const secondCreate = yield* Deferred.await(start).pipe(
+        Effect.andThen(secondRepository.create(createInput(shareId))),
+        Effect.forkChild
+      )
+      yield* Deferred.succeed(start, undefined)
+
+      const [firstGrant, secondGrant] = yield* Effect.all([
+        Fiber.join(firstCreate),
+        Fiber.join(secondCreate)
+      ], { concurrency: "unbounded" })
+      assert.deepStrictEqual(secondGrant, firstGrant)
+
+      const conflictingRetry = yield* secondRepository.create({
+        ...createInput(shareId),
+        expiresAt: differentExpiresAt
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(conflictingRetry))
+      if (Result.isFailure(conflictingRetry)) {
+        assert.instanceOf(conflictingRetry.failure, RecordAlreadyExistsError)
+      }
+
+      const separateGrant = yield* secondRepository.create(createInput(secondShareId))
+      assert.strictEqual(separateGrant.shareId, secondShareId)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("persists exact grants, isolates workspace lookup, and records immutable revocation", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityAndTarget
