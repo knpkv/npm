@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { renderTimelineQueries } from "@knpkv/control-center-sql"
 import { Effect, Layer, Schema } from "effect"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
@@ -13,6 +14,7 @@ const newestAt = Schema.decodeSync(UtcTimestamp)("2026-07-17T12:00:00.000Z")
 const olderAt = Schema.decodeSync(UtcTimestamp)("2026-07-17T11:00:00.000Z")
 const newestEventId = "01890f6f-6d6a-7cc0-98d2-000000000142"
 const olderEventId = "01890f6f-6d6a-7cc0-98d2-000000000143"
+const ExplainQueryPlanRow = Schema.Struct({ detail: Schema.String })
 
 const withRepository = <Success, Failure>(
   use: Effect.Effect<Success, Failure, Database | TimelineRepository>
@@ -140,5 +142,47 @@ describe("TimelineRepository", () => {
         workspaceId
       })
       assert.deepStrictEqual(second.map(({ eventKey }) => eventKey), [`sync:${"1".repeat(64)}`])
+    })))
+
+  it.effect("uses source-specific workspace-time indexes without temporary Timeline sorts", () =>
+    withRepository(Effect.gen(function*() {
+      const { sql } = yield* Database
+      const plans = renderTimelineQueries({
+        actorKind: null,
+        before: null,
+        from: "2026-07-01T00:00:00.000Z",
+        limit: 25,
+        to: "2026-07-31T23:59:59.999Z",
+        workspaceId
+      })
+      const expectedIndexes: Readonly<Record<"action" | "plugin-sync" | "relationship" | "system", string>> = {
+        action: "governed_action_audit_timeline_idx",
+        "plugin-sync": "plugin_sync_pages_timeline_idx",
+        relationship: "relationship_revision_timeline_idx",
+        system: "domain_events_timeline_idx"
+      }
+
+      for (const plan of plans) {
+        const rows = yield* sql.unsafe(`EXPLAIN QUERY PLAN ${plan.sql}`, [...plan.params]).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExplainQueryPlanRow)))
+        )
+        const details = rows.map(({ detail }) => detail).join("\n")
+        assert.include(details, expectedIndexes[plan.sourceKind])
+        assert.notInclude(details, "USE TEMP B-TREE FOR ORDER BY")
+      }
+
+      const rowsWithoutIndex = yield* sql.unsafe(
+        `EXPLAIN QUERY PLAN
+          SELECT event_id
+          FROM domain_events NOT INDEXED
+          WHERE workspace_id = ?
+          ORDER BY occurred_at DESC, event_id DESC
+          LIMIT ?`,
+        [workspaceId, 25]
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExplainQueryPlanRow))))
+      assert.include(
+        rowsWithoutIndex.map(({ detail }) => detail).join("\n"),
+        "USE TEMP B-TREE FOR ORDER BY"
+      )
     })))
 })

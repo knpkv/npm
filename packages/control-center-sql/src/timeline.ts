@@ -155,7 +155,7 @@ const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
       )
     ),
     Query.orderBy(auditEvents.occurredAt, "desc"),
-    Query.orderBy(eventKey, "desc"),
+    Query.orderBy(auditEvents.auditEventId, "desc"),
     Query.limit(input.limit)
   )
   const rendered = renderer.render(plan)
@@ -210,7 +210,7 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
       )
     ),
     Query.orderBy(pluginSyncPages.committedAt, "desc"),
-    Query.orderBy(eventKey, "desc"),
+    Query.orderBy(pluginSyncPages.timelineEventDigest, "desc"),
     Query.limit(input.limit)
   )
   const rendered = renderer.render(plan)
@@ -275,7 +275,7 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
       )
     ),
     Query.orderBy(relationshipRevisions.recordedAt, "desc"),
-    Query.orderBy(eventKey, "desc"),
+    Query.orderBy(relationshipRevisions.revisionDigest, "desc"),
     Query.limit(input.limit)
   )
   const rendered = renderer.render(plan)
@@ -321,7 +321,7 @@ const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
       )
     ),
     Query.orderBy(domainEvents.occurredAt, "desc"),
-    Query.orderBy(eventKey, "desc"),
+    Query.orderBy(domainEvents.eventId, "desc"),
     Query.limit(input.limit)
   )
   const rendered = renderer.render(plan)

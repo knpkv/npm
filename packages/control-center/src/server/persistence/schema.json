@@ -343,6 +343,11 @@
     },
     {
       "type": "index",
+      "name": "domain_events_timeline_idx",
+      "sql": "CREATE INDEX domain_events_timeline_idx\n    ON domain_events(workspace_id, occurred_at DESC, event_id DESC)"
+    },
+    {
+      "type": "index",
       "name": "entities_governed_action_scope_idx",
       "sql": "CREATE UNIQUE INDEX entities_governed_action_scope_idx\n    ON entities(workspace_id, entity_id, plugin_connection_id, provider_id)"
     },
@@ -385,6 +390,11 @@
       "type": "index",
       "name": "governed_action_audit_history_idx",
       "sql": "CREATE INDEX governed_action_audit_history_idx\n    ON audit_events(workspace_id, action_id, occurred_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "governed_action_audit_timeline_idx",
+      "sql": "CREATE INDEX governed_action_audit_timeline_idx\n    ON audit_events(workspace_id, occurred_at DESC, audit_event_id DESC)"
     },
     {
       "type": "index",
@@ -455,6 +465,11 @@
       "type": "index",
       "name": "plugin_secret_binding_scope_idx",
       "sql": "CREATE INDEX plugin_secret_binding_scope_idx\n    ON plugin_secret_bindings(workspace_id, plugin_connection_id, field_key)"
+    },
+    {
+      "type": "index",
+      "name": "plugin_sync_pages_timeline_idx",
+      "sql": "CREATE INDEX plugin_sync_pages_timeline_idx\n    ON plugin_sync_pages(workspace_id, committed_at DESC, timeline_event_digest DESC)"
     },
     {
       "type": "index",
@@ -530,6 +545,11 @@
       "type": "index",
       "name": "relationship_revision_target_idx",
       "sql": "CREATE INDEX relationship_revision_target_idx\n    ON relationship_revisions(workspace_id, target_node_id, kind, recorded_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "relationship_revision_timeline_idx",
+      "sql": "CREATE INDEX relationship_revision_timeline_idx\n    ON relationship_revisions(workspace_id, recorded_at DESC, revision_digest DESC)"
     },
     {
       "type": "index",
