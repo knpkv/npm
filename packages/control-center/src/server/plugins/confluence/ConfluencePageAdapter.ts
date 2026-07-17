@@ -229,12 +229,16 @@ const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
   const users = new Map<string, RawConfluenceUser>()
   for (const batch of chunksOf(accountIds, MAXIMUM_USERS_PER_REQUEST)) {
     if (batch.length === 0) continue
-    const raw = yield* providerCall(client.getUsers(batch))
+    const raw = yield* providerCall(client.getUsers(batch)).pipe(
+      Effect.map(Option.some),
+      Effect.catchTag("PluginAuthorizationFailure", () => Effect.succeed(Option.none<unknown>()))
+    )
+    if (Option.isNone(raw)) return new Map<string, RawConfluenceUser>()
     const response = yield* decodeProvider(
       "confluence-user-lookup",
       "confluence-user-page-invalid",
       RawConfluenceUsers,
-      raw
+      raw.value
     )
     for (const user of response.results ?? []) users.set(user.accountId, user)
   }
@@ -263,7 +267,7 @@ const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")
   const users = yield* readUsers(client, accountIds)
   return accountIds.map((accountId) => {
     const user = users.get(accountId)
-    const resolved = user !== undefined && user.accountStatus !== "unknown"
+    const resolved = user?.accountStatus !== undefined && user.accountStatus !== "unknown"
     return {
       accountId,
       displayName: user?.displayName ?? accountId,

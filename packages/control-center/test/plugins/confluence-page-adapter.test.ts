@@ -347,7 +347,7 @@ describe("Confluence page adapter", () => {
       )
     }))
 
-  it.effect("marks missing and unknown user profiles unresolved and inactive", () =>
+  it.effect("marks missing, unknown, and status-less user profiles unresolved and inactive", () =>
     Effect.gen(function*() {
       const client = defaultClient({
         getPageVersions: () =>
@@ -358,6 +358,11 @@ describe("Confluence page adapter", () => {
                 number: 2,
                 createdAt: "2026-07-15T08:00:00.000Z",
                 authorId: "account-missing"
+              },
+              {
+                number: 1,
+                createdAt: "2026-07-14T08:00:00.000Z",
+                authorId: "account-no-status"
               }
             ]
           }),
@@ -368,6 +373,11 @@ describe("Confluence page adapter", () => {
                 accountId: "account-author",
                 displayName: "author",
                 accountStatus: "active",
+                isExternalCollaborator: false
+              },
+              {
+                accountId: "account-no-status",
+                displayName: "no status",
                 isExternalCollaborator: false
               },
               {
@@ -390,9 +400,54 @@ describe("Confluence page adapter", () => {
         [
           { accountId: "account-author", active: true, resolved: true },
           { accountId: "account-missing", active: false, resolved: false },
+          { accountId: "account-no-status", active: false, resolved: false },
           { accountId: "account-owner", active: false, resolved: false }
         ]
       )
+    }))
+
+  it.effect("returns unresolved inactive contributors when profile lookup is forbidden", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getUsers: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-user-lookup",
+              reason: "authorization",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.deepStrictEqual(
+        attributes.contributors.map(({ accountId, active, resolved }) => ({ accountId, active, resolved })),
+        [
+          { accountId: "account-author", active: false, resolved: false },
+          { accountId: "account-owner", active: false, resolved: false }
+        ]
+      )
+    }))
+
+  it.effect("keeps non-authorization profile lookup failures fatal", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getUsers: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-user-lookup",
+              reason: "outage",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+      const outcome = yield* adapter.connection.readEntity(request).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "PluginOutageFailure")
     }))
 
   it.effect("rejects pages outside the configured space before history, users, or content", () =>
