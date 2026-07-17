@@ -120,6 +120,7 @@ const withPersistence = <Success, Failure>(use: Effect.Effect<Success, Failure, 
 
 const makeTestService = Effect.fn("AuthorizedSharesTest.makeService")(function*(input?: {
   readonly grant?: AuthorizedShareGrant
+  readonly granteeIsActive?: boolean
   readonly entityState?: "present" | "deleted"
 }) {
   const persistence = yield* Persistence
@@ -128,6 +129,10 @@ const makeTestService = Effect.fn("AuthorizedSharesTest.makeService")(function*(
   const selectedProjection = DeliveryEntityProjection.make({
     ...projection,
     entityState: input?.entityState ?? "present"
+  })
+  const selectedGrantee = PersonRecord.make({
+    ...grantee,
+    person: Person.make({ ...grantee.person, isActive: input?.granteeIsActive ?? true })
   })
   const fakePersistence = Persistence.of({
     ...persistence,
@@ -157,7 +162,7 @@ const makeTestService = Effect.fn("AuthorizedSharesTest.makeService")(function*(
     },
     people: {
       ...persistence.people,
-      getPerson: () => Effect.succeed(grantee)
+      getPerson: () => Effect.succeed(selectedGrantee)
     }
   })
   const service = yield* makeAuthorizedShares.pipe(Effect.provideService(Persistence, fakePersistence))
@@ -206,6 +211,22 @@ describe("authorized shares", () => {
         if (Result.isFailure(attempted)) assert.instanceOf(attempted.failure, ApplicationResourceNotFound)
         assert.strictEqual(yield* Ref.get(targetReads), 0)
       }
+    })))
+
+  it.effect("denies a deactivated grantee before reading target state", () =>
+    withPersistence(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now))
+      const { service, targetReads } = yield* makeTestService({ granteeIsActive: false })
+
+      const attempted = yield* service.resolve({
+        workspaceId,
+        shareId,
+        actor: { _tag: "human", personId: granteePersonId }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(attempted))
+      if (Result.isFailure(attempted)) assert.instanceOf(attempted.failure, ApplicationResourceNotFound)
+      assert.strictEqual(yield* Ref.get(targetReads), 0)
     })))
 
   it.effect("rejects a deleted current target after authenticating the grantee", () =>

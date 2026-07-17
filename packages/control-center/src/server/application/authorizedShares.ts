@@ -85,6 +85,10 @@ export const makeAuthorizedShares = Effect.gen(function*() {
         ) {
           return yield* new ApplicationResourceNotFound()
         }
+        const grantee = yield* mapPersistenceRead(
+          persistence.people.getPerson(input.workspaceId, grant.granteePersonId)
+        )
+        if (!grantee.person.isActive) return yield* new ApplicationResourceNotFound()
         const target = yield* readCurrentPresentProjection(input.workspaceId, grant.target.entityId)
         return {
           share: summaryFromGrant(grant),
