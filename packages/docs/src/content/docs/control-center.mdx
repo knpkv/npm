@@ -74,6 +74,14 @@ Reads normalize the issue description, environment, workflow fields, versions, p
 
 This first production slice is read-only. Workspace JQL synchronization, separate `UpsertPerson` sync events, attachment content, and governed Jira mutations remain deferred rather than being represented as supported capabilities.
 
+## Read Clockify time entries
+
+The server entry exports `makeClockifyReadPluginRuntime`, a production read-only adapter backed by `@knpkv/clockify-api-client`. Supply Clockify credentials through that client layer; adapter configuration contains only a web URL, workspace ID, comma-separated user IDs, pagination/concurrency bounds, and a request timeout.
+
+The `time-entries` sync stream reads configured users concurrently up to the explicit limit and emits Schema-decoded `clockify.time-entry` events with stable provider IDs, SHA-256 revisions, billable/project/task/tag facts, provider interval duration, and explicit source freshness. A full last allowed page reports a bounded checkpoint instead of pretending the provider was exhausted. Exact entity reads share the same normalization and typed failure boundary.
+
+People synchronization, Jira association evidence, rollups, approval and attribution state, corrections, and governed writes remain outside this first adapter slice.
+
 ## Configure local providers
 
 For Confluence Cloud page reads, see the [Control Center Confluence adapter](/control-center-confluence/). The first production slice is intentionally read-only and server-composed.

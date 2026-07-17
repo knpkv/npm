@@ -542,6 +542,9 @@ importers:
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
+      '@knpkv/clockify-api-client':
+        specifier: workspace:^
+        version: link:../clockify-api-client
       '@knpkv/control-center-sql':
         specifier: workspace:^
         version: link:../control-center-sql
