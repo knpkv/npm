@@ -13,6 +13,7 @@ import {
 import { presentWorkspaceItems, type WorkspaceItemPresentation } from "./presentWorkspaceItems.js"
 
 export const MAXIMUM_WORKSPACE_ITEMS = 500
+export const MAXIMUM_WORKSPACE_RELEASES = 25
 
 export type WorkspaceItemsState =
   | { readonly _tag: "idle" }
@@ -55,13 +56,15 @@ const loadWorkspaceInspections = async (
 export const useWorkspaceItems = (
   workspaceId: WorkspaceId,
   releases: ReadonlyArray<PortfolioReleasePresentation>,
+  refreshKey: string,
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
   transport: ReleaseWorksetTransport = browserReleaseWorksetTransport
 ): { readonly retry: () => void; readonly state: WorkspaceItemsState } => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<WorkspaceItemsState>({ _tag: "idle" })
-  const scopeKey = `${workspaceId}|${releaseScopeKey(releases)}`
+  const scopeKey = `${workspaceId}|${releaseScopeKey(releases)}|${refreshKey}`
+  const boundedReleases = releases.slice(0, MAXIMUM_WORKSPACE_RELEASES)
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -70,7 +73,7 @@ export const useWorkspaceItems = (
     }
     const abort = new AbortController()
     setState({ _tag: "loading", scopeKey, sessionKey })
-    loadWorkspaceInspections(releases, abort.signal, transport).then(
+    loadWorkspaceInspections(boundedReleases, abort.signal, transport).then(
       (inspections) => {
         if (abort.signal.aborted) return
         const allItems = presentWorkspaceItems(workspaceId, inspections)
@@ -79,7 +82,9 @@ export const useWorkspaceItems = (
           items: allItems.slice(0, MAXIMUM_WORKSPACE_ITEMS),
           scopeKey,
           sessionKey,
-          truncated: inspections.some(({ truncated }) => truncated) || allItems.length > MAXIMUM_WORKSPACE_ITEMS
+          truncated: releases.length > MAXIMUM_WORKSPACE_RELEASES ||
+            inspections.some(({ truncated }) => truncated) ||
+            allItems.length > MAXIMUM_WORKSPACE_ITEMS
         })
       },
       (failure) => {

@@ -65,7 +65,9 @@ const statusPresentation = (status: string): Pick<WorkspaceItemPresentation, "st
     )
   ) return { statusGroup: "failed", tone: "critical" }
   if (
-    ["approved", "current", "done", "merged", "ready", "resolved", "succeeded"].some((part) => value.includes(part))
+    ["approved", "current", "done", "merged", "not required", "ready", "resolved", "succeeded"].some((part) =>
+      value.includes(part)
+    )
   ) return { statusGroup: "done", tone: "positive" }
   return { statusGroup: "active", tone: "progress" }
 }

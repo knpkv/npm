@@ -78,8 +78,16 @@ export const ItemsPage = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams()
   const releases =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.releases : EMPTY_WORKSPACE_RELEASES
+  const refreshKey =
+    context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
   const sessionKey = releaseWorksetSessionKey(browserSession.state)
-  const controller = useWorkspaceItems(context.workspaceId, releases, sessionKey, browserSession.invalidateSession)
+  const controller = useWorkspaceItems(
+    context.workspaceId,
+    releases,
+    refreshKey,
+    sessionKey,
+    browserSession.invalidateSession
+  )
   const filters = filtersFrom(searchParams)
   const update = (key: keyof ItemFilters, value: string): void => {
     const next = new URLSearchParams(searchParams)

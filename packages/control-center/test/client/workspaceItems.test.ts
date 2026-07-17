@@ -78,14 +78,23 @@ describe("workspace items", () => {
       entityType: "time-entry",
       displayKey: "CLOCK-902",
       title: "Release verification",
-      details: { _tag: "time-entry", durationMinutes: 45, billable: true, approvalState: "approved" }
+      details: { _tag: "time-entry", durationMinutes: 45, billable: true, approvalState: "not-required" }
+    })
+    const pendingTimeEntry = Schema.decodeUnknownSync(DeliveryEntityProjection)({
+      ...source.projection,
+      entityId: "01890f6f-6d6a-7cc0-98d3-000000000093",
+      entityType: "time-entry",
+      displayKey: "CLOCK-903",
+      title: "Release follow-up",
+      details: { _tag: "time-entry", durationMinutes: 15, billable: false, approvalState: "pending" }
     })
     const inspection = {
       ...releaseWorksetFixture,
       entityProjections: [
         ...releaseWorksetFixture.entityProjections,
         { recordedAt: source.recordedAt, projection: deployment },
-        { recordedAt: source.recordedAt, projection: timeEntry }
+        { recordedAt: source.recordedAt, projection: timeEntry },
+        { recordedAt: source.recordedAt, projection: pendingTimeEntry }
       ]
     }
 
@@ -100,5 +109,22 @@ describe("workspace items", () => {
       title: "Release verification"
     })
     expect(selectReleaseWorksetObject(inspection, "not-an-entity")).toBeNull()
+
+    const extendedItems = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [inspection])
+    expect(extendedItems.find(({ key }) => key === "CLOCK-902")).toMatchObject({
+      status: "Not Required",
+      statusGroup: "done",
+      tone: "positive"
+    })
+    expect(extendedItems.find(({ key }) => key === "CLOCK-903")).toMatchObject({
+      status: "Pending",
+      statusGroup: "active",
+      tone: "progress"
+    })
+    expect(
+      filterWorkspaceItems(extendedItems, { query: "", service: "clockify", status: "done", type: "time-entry" }).map(
+        ({ key }) => key
+      )
+    ).toEqual(["CLOCK-902"])
   })
 })
