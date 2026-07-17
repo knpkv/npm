@@ -10,6 +10,7 @@ import type {
   PluginAdministration,
   PortfolioSnapshots,
   RelationshipRepairProposals,
+  TimelineExportAudits,
   TimelineReads
 } from "../api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
@@ -26,6 +27,7 @@ import {
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
+  timelineExportAuditsLayer,
   timelineReadsLayer
 } from "../application/index.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
@@ -71,6 +73,7 @@ type ControlCenterCoreApplicationServices =
   | PluginAdministration
   | PortfolioSnapshots
   | RelationshipRepairProposals
+  | TimelineExportAudits
   | TimelineReads
 
 /** Runtime construction settings after security and persistence decoding. */
@@ -111,6 +114,7 @@ const liveApplicationServices: Layer.Layer<
   pluginAdministrationLayer,
   deliveryGraphInspectionLayer,
   portfolioSnapshotsLayer,
+  timelineExportAuditsLayer,
   timelineReadsLayer,
   mediaReadsLayer,
   relationshipRepairProposalsLayer

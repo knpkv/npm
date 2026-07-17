@@ -308,6 +308,11 @@
     },
     {
       "type": "table",
+      "name": "timeline_export_audits",
+      "sql": "CREATE TABLE timeline_export_audits (\n    workspace_id TEXT NOT NULL,\n    export_audit_id TEXT NOT NULL,\n    schema_version INTEGER NOT NULL CHECK(schema_version = 1),\n    person_id TEXT NOT NULL,\n    session_id TEXT NOT NULL,\n    format TEXT NOT NULL CHECK(format IN ('csv', 'json')),\n    actor_filter TEXT CHECK(actor_filter IS NULL OR actor_filter IN ('agent', 'human', 'plugin', 'system')),\n    from_filter TEXT,\n    to_filter TEXT,\n    requested_limit INTEGER NOT NULL CHECK(requested_limit BETWEEN 1 AND 1000),\n    returned_count INTEGER NOT NULL CHECK(returned_count BETWEEN 0 AND requested_limit),\n    is_truncated INTEGER NOT NULL CHECK(is_truncated IN (0, 1)),\n    recorded_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, export_audit_id),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, person_id) REFERENCES persons(workspace_id, person_id),\n    FOREIGN KEY (workspace_id, session_id) REFERENCES sessions(workspace_id, session_id),\n    CHECK(from_filter IS NULL OR to_filter IS NULL OR from_filter <= to_filter)\n  )"
+    },
+    {
+      "type": "table",
       "name": "workspaces",
       "sql": "CREATE TABLE workspaces (\n    workspace_id TEXT NOT NULL,\n    display_name TEXT NOT NULL CHECK(length(display_name) BETWEEN 1 AND 200),\n    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id),\n    CHECK(created_at <= updated_at)\n  )"
     },
@@ -580,6 +585,11 @@
       "type": "index",
       "name": "sessions_active_idx",
       "sql": "CREATE INDEX sessions_active_idx\n    ON sessions(workspace_id, absolute_expires_at)\n    WHERE revoked_at IS NULL"
+    },
+    {
+      "type": "index",
+      "name": "timeline_export_audits_recorded_idx",
+      "sql": "CREATE INDEX timeline_export_audits_recorded_idx\n    ON timeline_export_audits(workspace_id, recorded_at DESC, export_audit_id DESC)"
     },
     {
       "type": "view",
@@ -1255,6 +1265,21 @@
       "type": "trigger",
       "name": "release_targets_no_delete",
       "sql": "CREATE TRIGGER release_targets_no_delete\n    BEFORE DELETE ON release_targets\n    BEGIN\n      SELECT RAISE(ABORT, 'release target identity is durable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "timeline_export_audits_authority",
+      "sql": "CREATE TRIGGER timeline_export_audits_authority\n    BEFORE INSERT ON timeline_export_audits\n    WHEN NOT EXISTS (\n      SELECT 1 FROM sessions session\n      WHERE session.workspace_id = NEW.workspace_id\n        AND session.session_id = NEW.session_id\n        AND session.actor_kind = 'human'\n        AND session.person_id = NEW.person_id\n        AND session.agent_id IS NULL\n        AND session.permission IN ('workspace-owner', 'workspace-approver')\n        AND session.revoked_at IS NULL\n        AND session.created_at <= NEW.recorded_at\n        AND session.idle_expires_at > NEW.recorded_at\n        AND session.absolute_expires_at > NEW.recorded_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'timeline export audit requires current human read authority');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "timeline_export_audits_no_delete",
+      "sql": "CREATE TRIGGER timeline_export_audits_no_delete\n    BEFORE DELETE ON timeline_export_audits\n    BEGIN\n      SELECT RAISE(ABORT, 'timeline export audits are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "timeline_export_audits_no_update",
+      "sql": "CREATE TRIGGER timeline_export_audits_no_update\n    BEFORE UPDATE ON timeline_export_audits\n    BEGIN\n      SELECT RAISE(ABORT, 'timeline export audits are immutable');\n    END"
     }
   ]
 }

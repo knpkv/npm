@@ -18,6 +18,7 @@ import {
 } from "../../src/api/session.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
+  AgentId,
   EntityId,
   EventCursor,
   RelationshipId,
@@ -30,6 +31,7 @@ import {
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  ApplicationServiceUnavailable,
   AuthorizedShares,
   DeliveryGraphInspection,
   LiveEvents,
@@ -38,6 +40,7 @@ import {
   PortfolioSnapshots,
   RelationshipRepairProposals,
   ReleaseAgentTurns,
+  TimelineExportAudits,
   TimelineReads
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
@@ -116,6 +119,13 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+const agentOwnerSession = SessionSummary.make({
+  ...session,
+  actor: {
+    _tag: "agent",
+    agentId: AgentId.make("01890f6f-6d6a-7cc0-98d2-00000000000d")
+  }
+})
 
 const assertForbidden = <A, E extends { readonly _tag: string }>(attempted: Result.Result<A, E>) => {
   assert.isTrue(Result.isFailure(attempted))
@@ -155,6 +165,12 @@ const timelineLayer = Layer.succeed(TimelineReads, {
       ? Effect.succeed({ events: [], nextCursor: null })
       : Effect.die("timeline handler crossed a workspace boundary")
 })
+
+const timelineExportAuditsLayer = Layer.succeed(TimelineExportAudits, {
+  record: () => Effect.void
+})
+
+const timelineApplicationLayer = Layer.merge(timelineLayer, timelineExportAuditsLayer)
 
 const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
   workspaceEntityProjections: ({
@@ -277,7 +293,7 @@ const portfolioHandlersTestLayer = portfolioHandlersLayer.pipe(
 
 const timelineHandlersTestLayer = timelineHandlersLayer.pipe(
   Layer.provide(sessionMiddlewareLayer),
-  Layer.provide(timelineLayer)
+  Layer.provide(timelineApplicationLayer)
 )
 
 const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
@@ -772,6 +788,83 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("attributes each successful Timeline download to its human session", () =>
+    Effect.gen(function*() {
+      const recorded = yield* Ref.make<
+        Array<Parameters<TimelineExportAudits["Service"]["record"]>[0]>
+      >([])
+      const handler = timelineHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(timelineLayer),
+        Layer.provide(Layer.succeed(TimelineExportAudits, {
+          record: (input) => Ref.update(recorded, (all) => [...all, input])
+        }))
+      )
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        yield* client.timeline.exportCsv({ query: { actor: "agent", limit: 25 } })
+        yield* client.timeline.exportJson({ query: { limit: 10 } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(yield* Ref.get(recorded), [
+        {
+          workspaceId: session.workspaceId,
+          personId: sessionPersonId,
+          sessionId: session.sessionId,
+          format: "csv",
+          actorKind: "agent",
+          from: null,
+          to: null,
+          requestedLimit: 25,
+          returnedCount: 0,
+          truncated: false
+        },
+        {
+          workspaceId: session.workspaceId,
+          personId: sessionPersonId,
+          sessionId: session.sessionId,
+          format: "json",
+          actorKind: null,
+          from: null,
+          to: null,
+          requestedLimit: 10,
+          returnedCount: 0,
+          truncated: false
+        }
+      ])
+    }))
+
+  it.effect("does not audit a Timeline download when collection fails", () =>
+    Effect.gen(function*() {
+      const auditCount = yield* Ref.make(0)
+      const handler = timelineHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineReads, {
+          page: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
+        })),
+        Layer.provide(Layer.succeed(TimelineExportAudits, {
+          record: () => Ref.update(auditCount, (count) => count + 1)
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        return yield* client.timeline.exportJson({ query: { limit: 25 } }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      assert.strictEqual(yield* Ref.get(auditCount), 0)
+    }))
+
   it("applies Timeline download security and attachment headers to web responses", async () => {
     const authentication = streamAuthentication
     const plugins = PluginAdministration.of({
@@ -800,7 +893,7 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineLayer,
+          timelineApplicationLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
@@ -844,8 +937,12 @@ describe("Control Center API handlers", () => {
 
   it.effect("rejects inverted Timeline export dates before application reads", () =>
     Effect.gen(function*() {
+      const auditCount = yield* Ref.make(0)
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineExportAudits, {
+          record: () => Ref.update(auditCount, (count) => count + 1)
+        })),
         Layer.provide(Layer.succeed(TimelineReads, {
           page: () => Effect.die("invalid export range reached Timeline application work")
         }))
@@ -864,6 +961,7 @@ describe("Control Center API handlers", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "InvalidRequestApiError")
+      assert.strictEqual(yield* Ref.get(auditCount), 0)
     }))
 
   it.effect("rejects watcher Timeline reads before application work", () =>
@@ -873,6 +971,7 @@ describe("Control Center API handlers", () => {
       })
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(timelineExportAuditsLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
           page: () => Effect.die("watcher reached Timeline application work")
         }))
@@ -892,11 +991,15 @@ describe("Control Center API handlers", () => {
 
   it.effect("rejects watcher Timeline exports before application work", () =>
     Effect.gen(function*() {
+      const auditCount = yield* Ref.make(0)
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
         sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
       })
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineExportAudits, {
+          record: () => Ref.update(auditCount, (count) => count + 1)
+        })),
         Layer.provide(Layer.succeed(TimelineReads, {
           page: () => Effect.die("watcher reached Timeline export application work")
         }))
@@ -912,6 +1015,36 @@ describe("Control Center API handlers", () => {
       ]))
 
       assertForbidden(result)
+      assert.strictEqual(yield* Ref.get(auditCount), 0)
+    }))
+
+  it.effect("rejects agent-owned Timeline exports before reads or audit work", () =>
+    Effect.gen(function*() {
+      const auditCount = yield* Ref.make(0)
+      const agentMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, agentOwnerSession)
+      })
+      const handler = timelineHandlersLayer.pipe(
+        Layer.provide(agentMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineReads, {
+          page: () => Effect.die("agent owner reached Timeline export application work")
+        })),
+        Layer.provide(Layer.succeed(TimelineExportAudits, {
+          record: () => Ref.update(auditCount, (count) => count + 1)
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        return yield* client.timeline.exportCsv({ query: { limit: 10 } }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        agentMiddlewareLayer,
+        handler
+      ]))
+
+      assertForbidden(result)
+      assert.strictEqual(yield* Ref.get(auditCount), 0)
     }))
 
   it.effect("derives the agent workspace from the authenticated session", () =>
@@ -1119,7 +1252,7 @@ describe("Control Center API handlers", () => {
             Layer.succeed(LiveEvents, trackedLiveEvents),
             authorizedSharesLayer,
             portfolioLayer,
-            timelineLayer,
+            timelineApplicationLayer,
             deliveryGraphApplicationLayer,
             agentLayer,
             NodeHttpServer.layerHttpServices,
@@ -1202,7 +1335,7 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineLayer,
+          timelineApplicationLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
@@ -1311,7 +1444,7 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineLayer,
+          timelineApplicationLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
@@ -1412,7 +1545,7 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineLayer,
+          timelineApplicationLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,
@@ -1535,7 +1668,7 @@ describe("Control Center API handlers", () => {
           liveEventsLayer,
           authorizedSharesLayer,
           portfolioLayer,
-          timelineLayer,
+          timelineApplicationLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
           NodeHttpServer.layerHttpServices,

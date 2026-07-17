@@ -146,6 +146,22 @@ export class TimelineReads extends Context.Service<TimelineReads, {
   }) => Effect.Effect<TimelinePage, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/TimelineReads") {}
 
+/** Durable attribution boundary for successfully collected Timeline downloads. */
+export class TimelineExportAudits extends Context.Service<TimelineExportAudits, {
+  readonly record: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly personId: PersonId
+    readonly sessionId: SessionId
+    readonly format: "csv" | "json"
+    readonly actorKind: TimelineActorKind | null
+    readonly from: UtcTimestamp | null
+    readonly to: UtcTimestamp | null
+    readonly requestedLimit: number
+    readonly returnedCount: number
+    readonly truncated: boolean
+  }) => Effect.Effect<void, ApplicationServiceUnavailable>
+}>()("@knpkv/control-center/server/api/TimelineExportAudits") {}
+
 /** Exact-entity authenticated share creation, resolution, and revocation boundary. */
 export class AuthorizedShares extends Context.Service<AuthorizedShares, {
   readonly create: (input: {

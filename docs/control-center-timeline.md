@@ -19,7 +19,10 @@ connected services, and Control Center itself into one compact chronology.
 - Downloads: authenticated CSV and JSON endpoints require an explicit event cap,
   accept the same actor and UTC date filters, page through the stable Timeline
   cursor, and stop at 1,000 default-redacted events. Responses are private,
-  non-sniffable attachments; JSON and response headers report truncation.
+  non-sniffable attachments; JSON and response headers report truncation. Each
+  successfully collected download records an immutable workspace, human,
+  session, format, filters, requested limit, returned count, truncation, and
+  timestamp audit before streaming starts.
 - UI: large source totals, actor/date filters, incremental paging, deep links, and
   a Timeline-aware Relay entry.
 
@@ -31,8 +34,8 @@ database row before it enters the domain projection.
 
 These are intentionally outside this fast MVP and remain follow-up work:
 
-- export audit events and export-artifact retention policy; the bounded MVP
-  streams the response directly and does not persist an artifact;
+- export-artifact retention policy; the bounded MVP streams the response directly
+  and persists attribution, not the downloaded artifact;
 - owner-only expansion for raw identifiers and agent job details;
 - provider provenance for action, relationship, and system rows when their source
   connection is indirect or absent;

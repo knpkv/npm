@@ -54,6 +54,9 @@ import {
   type RelationshipRepairProposalRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
+  type TimelineExportAuditInputError,
+  TimelineExportAuditRepository,
+  type TimelineExportAuditRepositoryService,
   TimelineRepository,
   type TimelineRepositoryService,
   WorkspaceRepository,
@@ -79,6 +82,7 @@ export type PersistenceOperationFailure =
   | RevisionConflictError
   | SecretReferenceScopeConflictError
   | SourceIdentityMismatchError
+  | TimelineExportAuditInputError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "AuthorizedShareInputError",
@@ -102,7 +106,8 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "ReproducibleContentUnavailableError",
   "RevisionConflictError",
   "SecretReferenceScopeConflictError",
-  "SourceIdentityMismatchError"
+  "SourceIdentityMismatchError",
+  "TimelineExportAuditInputError"
 ])
 
 const isPersistenceOperationFailure = (error: unknown): error is PersistenceOperationFailure =>
@@ -153,6 +158,7 @@ const makePersistence = Effect.gen(function*() {
   const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
   const timeline = yield* TimelineRepository
+  const timelineExportAudits = yield* TimelineExportAuditRepository
   const workspaces = yield* WorkspaceRepository
 
   return {
@@ -331,6 +337,10 @@ const makePersistence = Effect.gen(function*() {
       page: (...args: Parameters<TimelineRepositoryService["page"]>) =>
         publicOperation("timeline.page", timeline.page(...args))
     },
+    timelineExportAudits: {
+      record: (...args: Parameters<TimelineExportAuditRepositoryService["record"]>) =>
+        publicOperation("timeline-export-audit.record", timelineExportAudits.record(...args))
+    },
     workspaces: {
       create: (...args: Parameters<WorkspaceRepositoryService["create"]>) =>
         publicOperation("workspace.create", workspaces.create(...args)),
@@ -380,6 +390,7 @@ export const persistenceLayerFromDatabase = (
         const relationshipRepairProposals = RelationshipRepairProposalRepository.layer
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
         const timeline = TimelineRepository.layer
+        const timelineExportAudits = TimelineExportAuditRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
         const content = ContentStore.layer.pipe(
@@ -401,6 +412,7 @@ export const persistenceLayerFromDatabase = (
           relationshipRepairProposals,
           release,
           timeline,
+          timelineExportAudits,
           content,
           workspaces
         )
