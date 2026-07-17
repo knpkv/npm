@@ -29,6 +29,13 @@ export interface ReleaseWorksetRunbook {
   readonly title: string
 }
 
+export interface SelectedReleaseWorksetObject {
+  readonly id: EntityId
+  readonly kind: DeliveryEntityProjection["entityType"]
+  readonly label: string
+  readonly title: string
+}
+
 export interface ReleaseWorksetPresentation {
   readonly gaps: ReadonlyArray<RlyWorksetGap>
   readonly jiraItems: ReadonlyArray<RlyWorksetJiraItem>
@@ -43,6 +50,20 @@ const objectHref = (
   releaseId: ReleaseId,
   entityId: EntityId
 ): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+
+/** Resolve any present normalized object, including kinds outside the three primary workset dimensions. */
+export const selectReleaseWorksetObject = (
+  inspection: ReleaseDeliveryGraphInspection,
+  selectedObjectId: string | null
+): SelectedReleaseWorksetObject | null => {
+  if (selectedObjectId === null) return null
+  const selected = inspection.entityProjections.find(
+    ({ projection }) => projection.entityState === "present" && projection.entityId === selectedObjectId
+  )?.projection
+  return selected === undefined
+    ? null
+    : { id: selected.entityId, kind: selected.entityType, label: selected.displayKey, title: selected.title }
+}
 
 const statusTone = (status: string): RlyStateTone => {
   const normalized = status.toLocaleLowerCase("en-US")

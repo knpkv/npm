@@ -5,6 +5,7 @@ import { Link, useLocation, useOutletContext, useSearchParams } from "react-rout
 
 import type { DeliveryEntityKind } from "../../domain/deliveryGraph.js"
 import { useBrowserSession } from "../BrowserSession.js"
+import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio/PortfolioOverview.js"
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
 import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
@@ -80,11 +81,32 @@ export const ItemsPage = (): ReactElement => {
     setSearchParams(next, { replace: true })
   }
 
-  if (
-    context.controller.state._tag !== "ready" ||
-    controller.state._tag === "idle" ||
-    controller.state._tag === "loading"
-  ) {
+  const portfolioBoundary: PortfolioOverviewState | null = context.controller.state._tag !== "ready"
+    ? context.controller.state
+    : sessionKey === null
+    ? {
+      _tag: "session",
+      reason: browserSession.state._tag === "authenticated" ? "checking" : browserSession.state._tag
+    }
+    : null
+  if (portfolioBoundary?._tag === "loading") {
+    return (
+      <section aria-label="Loading delivery items" className={styles.page}>
+        <Skeleton height="8rem" variant="block" />
+        <Skeleton height="20rem" variant="block" />
+      </section>
+    )
+  }
+  if (portfolioBoundary !== null) {
+    return (
+      <PortfolioOverviewView
+        onPreviewRelease={() => undefined}
+        onRetry={context.controller.onRetry}
+        state={portfolioBoundary}
+      />
+    )
+  }
+  if (controller.state._tag === "idle" || controller.state._tag === "loading") {
     return (
       <section aria-label="Loading delivery items" className={styles.page}>
         <Skeleton height="8rem" variant="block" />

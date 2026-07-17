@@ -1,7 +1,10 @@
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import { filterWorkspaceItems } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
+import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
+import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const items = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, releaseWorksetFixture])
@@ -49,5 +52,51 @@ describe("workspace items", () => {
     expect(
       filterWorkspaceItems(items, { query: "does-not-exist", service: "all", status: "all", type: "all" })
     ).toEqual([])
+  })
+
+  it("preserves selection for deployment and time-entry objects outside the primary workset dimensions", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const deployment = Schema.decodeUnknownSync(DeliveryEntityProjection)({
+      ...source.projection,
+      entityId: "01890f6f-6d6a-7cc0-98d3-000000000091",
+      entityType: "deployment",
+      displayKey: "production/capture-1842",
+      title: "Capture production deployment",
+      details: {
+        _tag: "deployment",
+        environmentId: "01890f6f-6d6a-7cc0-98d2-000000000091",
+        revision: "capture-1842",
+        status: "deploying"
+      }
+    })
+    const timeEntry = Schema.decodeUnknownSync(DeliveryEntityProjection)({
+      ...source.projection,
+      entityId: "01890f6f-6d6a-7cc0-98d3-000000000092",
+      entityType: "time-entry",
+      displayKey: "CLOCK-902",
+      title: "Release verification",
+      details: { _tag: "time-entry", durationMinutes: 45, billable: true, approvalState: "approved" }
+    })
+    const inspection = {
+      ...releaseWorksetFixture,
+      entityProjections: [
+        ...releaseWorksetFixture.entityProjections,
+        { recordedAt: source.recordedAt, projection: deployment },
+        { recordedAt: source.recordedAt, projection: timeEntry }
+      ]
+    }
+
+    expect(selectReleaseWorksetObject(inspection, "01890f6f-6d6a-7cc0-98d3-000000000091")).toMatchObject({
+      kind: "deployment",
+      label: "production/capture-1842",
+      title: "Capture production deployment"
+    })
+    expect(selectReleaseWorksetObject(inspection, "01890f6f-6d6a-7cc0-98d3-000000000092")).toMatchObject({
+      kind: "time-entry",
+      label: "CLOCK-902",
+      title: "Release verification"
+    })
+    expect(selectReleaseWorksetObject(inspection, "not-an-entity")).toBeNull()
   })
 })

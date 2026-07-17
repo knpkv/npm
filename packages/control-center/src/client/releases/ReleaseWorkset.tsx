@@ -7,7 +7,7 @@ import { Link, useLocation } from "react-router"
 import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
-import { presentReleaseWorkset } from "./presentReleaseWorkset.js"
+import { presentReleaseWorkset, selectReleaseWorksetObject } from "./presentReleaseWorkset.js"
 import styles from "./ReleaseWorkset.module.css"
 import { useReleaseWorkset } from "./useReleaseWorkset.js"
 
@@ -74,12 +74,7 @@ export const ReleaseWorkset = ({
 
   const workset = presentReleaseWorkset(controller.state.inspection, workspaceId, release.stages)
   const selectedObjectId = new URLSearchParams(location.search).get("object")
-  const selectedObject = [
-    ...workset.jiraItems.map((item) => ({ id: item.id, label: item.key })),
-    ...workset.pullRequestGroups.map((group) => ({ id: group.id, label: group.reference })),
-    ...workset.pipelines.map((pipeline) => ({ id: pipeline.id, label: pipeline.reference })),
-    ...workset.runbooks.map((runbook) => ({ id: runbook.id, label: runbook.reference }))
-  ].find(({ id }) => id === selectedObjectId)
+  const selectedObject = selectReleaseWorksetObject(controller.state.inspection, selectedObjectId)
   return (
     <div className={styles.root}>
       <div className={styles.context}>
@@ -126,8 +121,13 @@ export const ReleaseWorkset = ({
         {workset.truncated ? (
           <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
         ) : null}
-        {selectedObject === undefined ? null : (
-          <StateLabel label={`Selected object · ${selectedObject.label}`} size="compact" tone="progress" />
+        {selectedObject === null ? null : (
+          <StateLabel
+            label={`Selected object · ${selectedObject.label}`}
+            size="compact"
+            title={`${selectedObject.title} · ${selectedObject.kind}`}
+            tone="progress"
+          />
         )}
       </div>
       <LinkProvider component={ReleaseWorksetLink}>

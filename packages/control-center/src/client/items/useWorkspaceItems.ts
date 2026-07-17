@@ -89,7 +89,7 @@ export const useWorkspaceItems = (
       }
     )
     return () => abort.abort()
-  }, [onSessionExpired, releases, requestRevision, scopeKey, sessionKey, transport, workspaceId])
+  }, [onSessionExpired, requestRevision, scopeKey, sessionKey, transport, workspaceId])
 
   const currentState: WorkspaceItemsState = sessionKey === null
     ? { _tag: "idle" }
