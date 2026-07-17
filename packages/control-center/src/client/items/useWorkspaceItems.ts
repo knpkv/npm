@@ -14,6 +14,7 @@ import { presentWorkspaceItems, type WorkspaceItemPresentation } from "./present
 
 export const MAXIMUM_WORKSPACE_ITEMS = 500
 export const MAXIMUM_WORKSPACE_RELEASES = 25
+export const MAXIMUM_WORKSPACE_SLICE_REQUESTS = 100
 
 export type WorkspaceItemsState =
   | { readonly _tag: "idle" }
@@ -38,18 +39,33 @@ const loadWorkspaceInspections = async (
   releases: ReadonlyArray<PortfolioReleasePresentation>,
   signal: AbortSignal,
   transport: ReleaseWorksetTransport
-): Promise<ReadonlyArray<ReleaseDeliveryGraphInspection>> => {
+): Promise<{
+  readonly inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
+  readonly truncated: boolean
+}> => {
   const inspections: Array<ReleaseDeliveryGraphInspection> = []
+  let remainingReleases = releases.length
+  let remainingRequests = MAXIMUM_WORKSPACE_SLICE_REQUESTS
+  let truncated = false
   for (const release of releases) {
+    if (remainingRequests === 0) {
+      truncated = true
+      break
+    }
+    const environmentBudget = Math.max(remainingRequests - remainingReleases, 0)
+    const environmentIds = release.targetEnvironmentIds.slice(0, environmentBudget)
+    if (environmentIds.length < release.targetEnvironmentIds.length) truncated = true
     const slices = await loadReleaseWorksetInspections(
       release.id,
-      release.targetEnvironmentIds,
+      environmentIds,
       signal,
       transport
     )
     inspections.push(aggregateReleaseWorksetInspections(release.id, slices))
+    remainingRequests -= 1 + environmentIds.length
+    remainingReleases -= 1
   }
-  return inspections
+  return { inspections, truncated }
 }
 
 /** Load one bounded normalized item index from current release graph slices. */
@@ -74,7 +90,7 @@ export const useWorkspaceItems = (
     const abort = new AbortController()
     setState({ _tag: "loading", scopeKey, sessionKey })
     loadWorkspaceInspections(boundedReleases, abort.signal, transport).then(
-      (inspections) => {
+      ({ inspections, truncated }) => {
         if (abort.signal.aborted) return
         const allItems = presentWorkspaceItems(workspaceId, inspections)
         setState({
@@ -82,7 +98,8 @@ export const useWorkspaceItems = (
           items: allItems.slice(0, MAXIMUM_WORKSPACE_ITEMS),
           scopeKey,
           sessionKey,
-          truncated: releases.length > MAXIMUM_WORKSPACE_RELEASES ||
+          truncated: truncated ||
+            releases.length > MAXIMUM_WORKSPACE_RELEASES ||
             inspections.some(({ truncated }) => truncated) ||
             allItems.length > MAXIMUM_WORKSPACE_ITEMS
         })

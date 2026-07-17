@@ -5,7 +5,11 @@ import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { MAXIMUM_WORKSPACE_RELEASES, useWorkspaceItems } from "../../src/client/items/useWorkspaceItems.js"
+import {
+  MAXIMUM_WORKSPACE_RELEASES,
+  MAXIMUM_WORKSPACE_SLICE_REQUESTS,
+  useWorkspaceItems
+} from "../../src/client/items/useWorkspaceItems.js"
 import { presentPortfolio, type PortfolioReleasePresentation } from "../../src/client/portfolio/presentPortfolio.js"
 import type { ReleaseWorksetTransport } from "../../src/client/releases/useReleaseWorkset.js"
 import { EnvironmentId, ReleaseId } from "../../src/domain/identifiers.js"
@@ -105,6 +109,31 @@ describe("useWorkspaceItems", () => {
     await act(async () => Promise.resolve())
 
     expect(transport.load).toHaveBeenCalledTimes(MAXIMUM_WORKSPACE_RELEASES)
+    expect(host.textContent).toBe("ready:true")
+  })
+
+  it("bounds the total release and environment slice workload", async () => {
+    const source = presentPortfolio(makePortfolioSnapshot()).releases[0]
+    if (source === undefined) throw new Error("Expected one portfolio release")
+    const environments = Array.from({ length: 50 }, (_, index) =>
+      Schema.decodeUnknownSync(EnvironmentId)(`01890f6f-6d6a-7cc0-98d2-${String(index + 2_000).padStart(12, "0")}`)
+    )
+    const releases = Array.from({ length: MAXIMUM_WORKSPACE_RELEASES }, (_, index) => ({
+      ...source,
+      id: Schema.decodeUnknownSync(ReleaseId)(`01890f6f-6d6a-7cc0-98d2-${String(index + 3_000).padStart(12, "0")}`),
+      targetEnvironmentIds: environments
+    }))
+    const transport = {
+      load: vi.fn(() => Promise.resolve(releaseWorksetFixture))
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    expect(transport.load).toHaveBeenCalledTimes(MAXIMUM_WORKSPACE_SLICE_REQUESTS)
     expect(host.textContent).toBe("ready:true")
   })
 })
