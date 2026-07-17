@@ -129,7 +129,15 @@ const contextFor = (path: string | null): AgentPageContext => {
       path: safePath
     }
   }
-  if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "work" && releaseId === null) {
+  const activeWorkRelease = contextUrl.searchParams.get("release")
+  const hasValidActiveWorkRelease = activeWorkRelease === null || decodeReleaseRouteId(activeWorkRelease) !== null
+  if (
+    isWorkspaceCollectionRoute &&
+    workspaceId !== null &&
+    routeKind === "work" &&
+    releaseId === null &&
+    hasValidActiveWorkRelease
+  ) {
     return {
       description: `Active release decisions in workspace ${workspaceId}, including the exact selected release and filters.`,
       label: "Active work",

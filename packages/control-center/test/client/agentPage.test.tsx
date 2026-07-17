@@ -115,7 +115,8 @@ describe("AgentPage context", () => {
       "/api/v1/portfolio/snapshot",
       "/w/not-an-id/overview",
       `/x/${workspaceId}/items`,
-      `/w/${workspaceId}/items/not-a-route`
+      `/w/${workspaceId}/items/not-a-route`,
+      `/w/${workspaceId}/work?release=invalid`
     ]) {
       const markup = renderAgentPage(path)
       expect(markup).toContain("Context unavailable")
