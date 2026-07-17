@@ -19,7 +19,11 @@ import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import {
+  MaximumPluginSyncPageBytes,
+  PluginSyncRequestV1,
+  ReadPluginEntityRequestV1
+} from "../../src/domain/plugins/index.js"
 import { makeClockifyReadPluginRuntimeFromProvider } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
@@ -378,7 +382,40 @@ describe("ClockifyReadPlugin", () => {
       assert.isTrue(Result.isFailure(outcome))
       if (Result.isFailure(outcome)) {
         assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+        if (outcome.failure._tag === "PluginConfigurationFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "clockify-sync-page-capacity-exceeded")
+        }
       }
+    }))
+
+  it.effect("keeps the maximum configured Clockify page below the atomic payload cap", () =>
+    Effect.gen(function*() {
+      const tagIds = Array.from(
+        { length: 100 },
+        (_, index) => `tag-${String(index).padStart(3, "0")}`.padEnd(512, "x")
+      )
+      const entries = Array.from({ length: 10 }, (_, index) =>
+        timeEntry(`entry-${index + 1}`, "user-1", {
+          description: "d".repeat(4_000),
+          tagIds
+        }))
+      const pages = yield* withConnection(
+        baseProvider({ getTimeEntries: () => Effect.succeed(entries) }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        {
+          ...configuration,
+          userIds: "user-1",
+          pageSize: 10,
+          maximumPages: 1
+        }
+      )
+
+      assert.lengthOf(pages, 1)
+      assert.lengthOf(pages[0]?.events ?? [], 10)
+      assert.isAtMost(
+        new TextEncoder().encode(JSON.stringify(pages[0])).byteLength,
+        MaximumPluginSyncPageBytes
+      )
     }))
 
   it.effect("returns missing and rejects malformed or mismatched provider identities", () =>

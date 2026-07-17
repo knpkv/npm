@@ -329,6 +329,11 @@ const streamSyncPages = (options: {
     })
   )
 
+// Clockify's accepted entry shape is below 64 KiB at its longest description
+// and 100 longest tag IDs. Ten such events leave ample room below the host's
+// 1 MiB atomic sync-page envelope without introducing partial-page checkpoints.
+const MAXIMUM_CLOCKIFY_EVENTS_PER_SYNC_PAGE = 10
+
 const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   provider: ClockifyReadProvider,
   configuration: ClockifyReadPluginConfiguration,
@@ -368,7 +373,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const userIds = yield* decodeUserIds(decoded.userIds)
-        if (userIds.length * decoded.pageSize > 100) {
+        if (userIds.length * decoded.pageSize > MAXIMUM_CLOCKIFY_EVENTS_PER_SYNC_PAGE) {
           return yield* new PluginConfigurationFailure({
             diagnosticCode: "clockify-sync-page-capacity-exceeded"
           })
