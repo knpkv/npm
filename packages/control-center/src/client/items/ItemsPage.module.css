@@ -50,7 +50,8 @@
 
 .filters input:focus-visible,
 .filters select:focus-visible,
-.itemLink:focus-visible {
+.itemLink:focus-visible,
+.membershipChoices a:focus-visible {
   outline: 2px solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
@@ -76,7 +77,8 @@
 }
 
 .selectionHeader,
-.selectionActions {
+.selectionActions,
+.membershipChoices {
   display: flex;
   align-items: center;
   gap: var(--rly-space-12);
@@ -86,10 +88,28 @@
   justify-content: space-between;
 }
 
-.selectionActions a {
+.membershipChoices {
+  flex-wrap: wrap;
+}
+
+.membershipChoices a {
+  display: grid;
+  gap: var(--rly-space-2);
+  min-block-size: 3rem;
+  padding: var(--rly-space-8) var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
+  text-decoration: none;
+}
+
+.membershipChoices a span {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
 }
 
 .items {

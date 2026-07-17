@@ -43,6 +43,7 @@ import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
 export const MAXIMUM_RELEASE_SLICE_RECORDS = 500
 export const MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS = 500
+export const MAXIMUM_WORKSPACE_ENTITY_RELEASES = 500
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
 export const MAXIMUM_REPAIR_PROPOSALS = 128
@@ -71,12 +72,37 @@ export const ReleaseDeliveryGraphInspection = Schema.Struct({
 /** Decoded release delivery-graph inspection. */
 export type ReleaseDeliveryGraphInspection = typeof ReleaseDeliveryGraphInspection.Type
 
-/** One current workspace entity projection and its optional canonical release route. */
+const WorkspaceEntityReleaseIds = Schema.Array(ReleaseId).check(
+  Schema.isUnique(),
+  Schema.isMaxLength(MAXIMUM_WORKSPACE_ENTITY_RELEASES),
+  Schema.makeFilter(
+    (releaseIds) =>
+      releaseIds.every((releaseId, index) => {
+        const previous = releaseIds[index - 1]
+        return index === 0 || (previous !== undefined && previous < releaseId)
+      }),
+    { expected: "sorted workspace entity release identifiers" }
+  )
+)
+
+/** One current workspace entity projection and every bounded current release membership. */
 export const WorkspaceEntityProjection = Schema.Struct({
   canonicalReleaseId: Schema.NullOr(ReleaseId),
+  releaseIds: WorkspaceEntityReleaseIds,
+  releaseMembershipsTruncated: Schema.Boolean,
   projection: DeliveryEntityProjection,
   recordedAt: UtcTimestamp
-}).annotate({ identifier: "WorkspaceEntityProjection" })
+}).check(
+  Schema.makeFilter(
+    ({ canonicalReleaseId, releaseIds }) => canonicalReleaseId === (releaseIds[0] ?? null),
+    { expected: "canonical release identifier to be the first current release membership" }
+  ),
+  Schema.makeFilter(
+    ({ releaseIds, releaseMembershipsTruncated }) =>
+      !releaseMembershipsTruncated || releaseIds.length === MAXIMUM_WORKSPACE_ENTITY_RELEASES,
+    { expected: "truncated workspace release memberships to contain the complete bounded prefix" }
+  )
+).annotate({ identifier: "WorkspaceEntityProjection" })
 
 /** Bounded workspace-wide index of current present normalized entities. */
 export const WorkspaceEntityProjectionIndex = Schema.Struct({

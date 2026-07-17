@@ -127,15 +127,16 @@ coverage proves the three dimensions remain complete without horizontal overflow
 
 The D07 Items route now reads one authenticated, workspace-scoped server index instead of composing
 release slices in the browser. The query returns at most 500 latest present projections, includes
-unlinked entities, excludes deleted or stale projection heads, and supplies an optional deterministic
-release route for linked objects. It maps provider service and current status and keeps text, service,
+unlinked entities, excludes deleted or stale projection heads, and retains up to 500 sorted current
+release memberships per object. A unique visible membership routes directly; ambiguous membership
+requires an exact release choice. It maps provider service and current status and keeps text, service,
 type, and status filters in the URL. Empty, loading, read-failure, and bounded-result states remain
 explicit. Those filters now execute against the complete current workspace projection set before the
 500-item response bound, and the response reports authoritative matched and total counts.
 
 ## Remaining roadmap
 
-- Complete D07 with owner filtering, multi-release membership, delivery traces, command search, and
+- Complete D07 with owner filtering, delivery traces, command search, and
   exact-scope authorized shares. D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
@@ -204,10 +205,10 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - Items reports `Unassigned` when the graph carries no authoritative owner and does not yet expose
   owner data or an owner filter. Text, service, type, and status filters plus aggregate counts are
   server-authoritative; provider-specific full-text indexes remain a later scale optimization.
-- The workspace query returns one deterministic canonical release route, not every release
-  membership. The complete trace model must retain every membership and require an explicit release
-  choice where context is ambiguous. Unlinked objects currently remain on the Items route until the
-  provider-specific S01–S07 full views exist.
+- The workspace query retains every current release membership up to an explicit per-object bound of 500. The first sorted membership remains the compatibility canonical identifier, while the client
+  requires an exact choice whenever more than one membership exists. Memberships outside the current
+  bounded portfolio are counted but do not yet expose a release route. Unlinked objects remain on the
+  Items route until the provider-specific S01–S07 full views exist.
 - The workspace projection query remains explicit Effect SQL. Local `effect-qb` cannot be adopted in
   isolation because it introduces table definitions, rendering, and execution boundaries and version
   `0.20.0` requires Effect `4.0.0-beta.98` while this workspace uses `beta.97`. Migrate repositories as

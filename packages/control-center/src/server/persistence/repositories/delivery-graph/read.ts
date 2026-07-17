@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 
 import { LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
-import { EvidenceClaimId, RelationshipId } from "../../../../domain/identifiers.js"
+import { EvidenceClaimId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
 import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
@@ -25,6 +25,8 @@ const WorkspaceProjectionCountRow = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 })
+
+const WorkspaceProjectionReleaseIds = Schema.fromJsonString(Schema.Array(ReleaseId))
 
 export const makeDeliveryGraphReader = Effect.gen(function*() {
   const database = yield* Database
@@ -506,21 +508,26 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             projection.extension_json AS extensionJson,
             projection.extension_digest AS extensionDigest,
             projection.recorded_at AS recordedAt,
-            (
-              SELECT MIN(relationship.release_id)
-              FROM delivery_nodes node
-              INNER JOIN relationship_revisions relationship
-                ON relationship.workspace_id = node.workspace_id
-               AND (relationship.source_node_id = node.node_id OR relationship.target_node_id = node.node_id)
-              INNER JOIN relationship_heads head
-                ON head.workspace_id = relationship.workspace_id
-               AND head.relationship_id = relationship.relationship_id
-               AND head.current_revision = relationship.revision
-              WHERE node.workspace_id = projection.workspace_id
-                AND node.entity_id = projection.entity_id
-                AND relationship.release_id IS NOT NULL
-                AND relationship.lifecycle NOT IN ('rejected', 'superseded')
-            ) AS canonicalReleaseId
+            COALESCE((
+              SELECT json_group_array(current_release.release_id)
+              FROM (
+                SELECT DISTINCT relationship.release_id
+                FROM delivery_nodes node
+                INNER JOIN relationship_revisions relationship
+                  ON relationship.workspace_id = node.workspace_id
+                 AND (relationship.source_node_id = node.node_id OR relationship.target_node_id = node.node_id)
+                INNER JOIN relationship_heads head
+                  ON head.workspace_id = relationship.workspace_id
+                 AND head.relationship_id = relationship.relationship_id
+                 AND head.current_revision = relationship.revision
+                WHERE node.workspace_id = projection.workspace_id
+                  AND node.entity_id = projection.entity_id
+                  AND relationship.release_id IS NOT NULL
+                  AND relationship.lifecycle NOT IN ('rejected', 'superseded')
+                ORDER BY relationship.release_id
+                LIMIT 501
+              ) current_release
+            ), '[]') AS releaseIdsJson
           FROM entity_projection_revisions projection
           INNER JOIN entities entity
             ON entity.workspace_id = projection.workspace_id
@@ -541,14 +548,31 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           captureMalformedDeliveryGraphRow(rows)
         )
         const items = yield* Effect.forEach(decoded.slice(0, query.limit), (row) =>
-          decodeProjectionRow(row).pipe(
-            Effect.map(({ projection, recordedAt }) => ({
-              canonicalReleaseId: row.canonicalReleaseId,
+          Effect.gen(function*() {
+            const releaseIds = yield* Schema.decodeUnknownEffect(WorkspaceProjectionReleaseIds)(row.releaseIdsJson)
+              .pipe(
+                Effect.mapError(() =>
+                  graphRecordError(
+                    workspaceId,
+                    "workspace-entity-projections",
+                    row.entityId,
+                    "workspace-release-memberships-schema-invalid"
+                  )
+                ),
+                captureMalformedDeliveryGraphRow(row)
+              )
+            const boundedReleaseIds = releaseIds.slice(0, 500)
+            const { projection, recordedAt } = yield* decodeProjectionRow(row).pipe(
+              captureMalformedDeliveryGraphRow(row)
+            )
+            return {
+              canonicalReleaseId: boundedReleaseIds[0] ?? null,
+              releaseIds: boundedReleaseIds,
+              releaseMembershipsTruncated: releaseIds.length > 500,
               projection,
               recordedAt
-            })),
-            captureMalformedDeliveryGraphRow(row)
-          ))
+            }
+          }))
         return DeliveryGraphReadResult.make({
           _tag: "workspaceEntityProjections",
           value: {

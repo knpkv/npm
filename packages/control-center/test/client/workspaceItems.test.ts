@@ -1,14 +1,16 @@
-import * as Schema from "effect/Schema"
+import { Result, Schema } from "effect"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
+import { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph.js"
 import {
   filterWorkspaceItems,
   formatItemFreshness,
   itemsLocationWithSearch,
   selectWorkspaceItem,
-  unlinkedItemLocation
+  unlinkedItemLocation,
+  workspaceItemMembershipDescription
 } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceEntityIndex, presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
@@ -51,7 +53,7 @@ describe("workspace items", () => {
       matchedCount: 1,
       totalCount: 1,
       truncated: false,
-      items: [{ ...source, canonicalReleaseId: null }]
+      items: [{ ...source, canonicalReleaseId: null, releaseIds: [], releaseMembershipsTruncated: false }]
     })
 
     expect(unlinked).toMatchObject({
@@ -74,7 +76,12 @@ describe("workspace items", () => {
       matchedCount: 1,
       totalCount: 1,
       truncated: false,
-      items: [{ ...source, canonicalReleaseId }]
+      items: [{
+        ...source,
+        canonicalReleaseId,
+        releaseIds: [canonicalReleaseId],
+        releaseMembershipsTruncated: false
+      }]
     }
 
     expect(
@@ -297,7 +304,7 @@ describe("workspace items", () => {
     expect(items.find(({ key }) => key === "OPS-428")).toMatchObject({ statusGroup: "active", tone: "progress" })
   })
 
-  it("chooses a canonical release route for entities linked to multiple releases", () => {
+  it("preserves every release membership and requires an explicit choice when membership is ambiguous", () => {
     const source = releaseWorksetFixture.entityProjections[0]
     if (source === undefined) throw new Error("Expected a source projection")
     const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000099")
@@ -318,15 +325,65 @@ describe("workspace items", () => {
     }
     const forward = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, otherInspection])
     const reverse = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [otherInspection, releaseWorksetFixture])
-    const canonicalReleaseId = releaseWorksetFixture.releaseId.localeCompare(otherReleaseId) <= 0
-      ? releaseWorksetFixture.releaseId
-      : otherReleaseId
+    const releaseIds = [releaseWorksetFixture.releaseId, otherReleaseId]
+      .sort((left, right) => left.localeCompare(right))
+    const forwardShared = forward.find(({ key }) => key === "OPS-428")
+    const reverseShared = reverse.find(({ key }) => key === "OPS-428")
 
-    expect(forward.find(({ key }) => key === "OPS-428")?.href).toBe(
-      reverse.find(({ key }) => key === "OPS-428")?.href
-    )
-    expect(forward.find(({ key }) => key === "OPS-428")?.releaseId).toBe(canonicalReleaseId)
+    expect(forwardShared?.href).toBe(reverseShared?.href)
+    expect(forwardShared).toMatchObject({ releaseId: null, releaseIds, routableReleaseIds: releaseIds })
+    expect(forwardShared?.href).toContain(`/w/${WORKSET_WORKSPACE_ID}/items?object=`)
     expect(forward.find(({ key }) => key === "OPS-499")?.releaseId).toBe(otherReleaseId)
+  })
+
+  it("keeps truncated and outside-portfolio memberships ambiguous", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const releaseIds = Array.from({ length: 500 }, (_, index) =>
+      Schema.decodeUnknownSync(ReleaseId)(
+        `01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`
+      ))
+    const truncatedEntry = {
+      ...source,
+      canonicalReleaseId: releaseIds[0] ?? null,
+      releaseIds,
+      releaseMembershipsTruncated: true
+    }
+    const truncatedIndex = {
+      matchedCount: 1,
+      totalCount: 1,
+      truncated: false,
+      items: [truncatedEntry]
+    }
+    const encodedTruncatedIndex = {
+      ...truncatedIndex,
+      items: [{ ...truncatedEntry, recordedAt: "2026-07-14T10:02:00.000Z" }]
+    }
+    expect(Result.isSuccess(Schema.decodeUnknownResult(WorkspaceEntityProjectionIndex)(encodedTruncatedIndex))).toBe(
+      true
+    )
+    const [truncated] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, truncatedIndex, new Set(releaseIds))
+    expect(truncated?.releaseId).toBeNull()
+
+    const malformed = {
+      ...truncatedIndex,
+      items: [{
+        ...source,
+        canonicalReleaseId: releaseWorksetFixture.releaseId,
+        releaseIds: [releaseWorksetFixture.releaseId],
+        releaseMembershipsTruncated: true,
+        recordedAt: "2026-07-14T10:02:00.000Z"
+      }]
+    }
+    expect(Result.isFailure(Schema.decodeUnknownResult(WorkspaceEntityProjectionIndex)(malformed))).toBe(true)
+
+    const outsidePortfolio = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
+      ...truncatedIndex,
+      items: [{ ...truncatedEntry, releaseMembershipsTruncated: false, releaseIds: releaseIds.slice(0, 2) }]
+    }, new Set())[0]
+    if (outsidePortfolio === undefined) throw new Error("Expected an outside-portfolio item")
+    expect(workspaceItemMembershipDescription(outsidePortfolio)).toContain("2 releases outside the current portfolio")
+    expect(workspaceItemMembershipDescription(outsidePortfolio)).not.toContain("Choose")
   })
 })
 

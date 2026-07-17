@@ -20,6 +20,9 @@ export interface WorkspaceItemPresentation {
   readonly kind: DeliveryEntityKind
   readonly owner: string
   readonly releaseId: ReleaseId | null
+  readonly releaseIds: ReadonlyArray<ReleaseId>
+  readonly releaseMembershipsTruncated: boolean
+  readonly routableReleaseIds: ReadonlyArray<ReleaseId>
   readonly service: RlyService
   readonly status: string
   readonly statusGroup: WorkspaceItemStatus
@@ -88,18 +91,30 @@ const statusPresentation = (
   return { statusGroup: "active", tone: "progress" }
 }
 
+export const workspaceItemReleaseHref = (
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId,
+  entityId: EntityId
+): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+
 const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId | null, entityId: EntityId): string =>
   releaseId === null
     ? `/w/${workspaceId}/items?object=${encodeURIComponent(entityId)}#item-details`
-    : `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+    : workspaceItemReleaseHref(workspaceId, releaseId, entityId)
 
 const presentProjection = (
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId | null,
-  entry: WorkspaceEntityProjectionIndex["items"][number]
+  entry: WorkspaceEntityProjectionIndex["items"][number],
+  routableReleaseIds?: ReadonlySet<ReleaseId>
 ): WorkspaceItemPresentation => {
   const projection = entry.projection
   const status = statusFor(projection.details)
+  const routableMemberships = entry.releaseIds.filter(
+    (releaseId) => routableReleaseIds === undefined || routableReleaseIds.has(releaseId)
+  )
+  const releaseId = entry.releaseIds.length === 1 && !entry.releaseMembershipsTruncated
+    ? (routableMemberships[0] ?? null)
+    : null
   return {
     entityId: projection.entityId,
     freshness: DateTime.formatIso(entry.recordedAt),
@@ -108,6 +123,9 @@ const presentProjection = (
     kind: projection.entityType,
     owner: "Unassigned",
     releaseId,
+    releaseIds: entry.releaseIds,
+    releaseMembershipsTruncated: entry.releaseMembershipsTruncated,
+    routableReleaseIds: routableMemberships,
     service: serviceFor(projection.entityType),
     status,
     ...statusPresentation(projection.entityType, status),
@@ -123,15 +141,7 @@ export const presentWorkspaceEntityIndex = (
 ): ReadonlyArray<WorkspaceItemPresentation> =>
   index.items
     .filter(({ projection }) => projection.entityState === "present")
-    .map((entry) =>
-      presentProjection(
-        workspaceId,
-        entry.canonicalReleaseId !== null && routableReleaseIds?.has(entry.canonicalReleaseId) !== false
-          ? entry.canonicalReleaseId
-          : null,
-        entry
-      )
-    )
+    .map((entry) => presentProjection(workspaceId, entry, routableReleaseIds))
     .sort((left, right) => left.service.localeCompare(right.service) || left.key.localeCompare(right.key))
 
 /** Present bounded release slices as one deduplicated release-linked item index. */
@@ -139,22 +149,30 @@ export const presentWorkspaceItems = (
   workspaceId: WorkspaceId,
   inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
 ): ReadonlyArray<WorkspaceItemPresentation> => {
-  const items = new Map<EntityId, WorkspaceItemPresentation>()
+  const items = new Map<EntityId, {
+    readonly entry: ReleaseDeliveryGraphInspection["entityProjections"][number]
+    readonly releaseIds: Set<ReleaseId>
+  }>()
   const canonicalInspections = [...inspections].sort((left, right) => left.releaseId.localeCompare(right.releaseId))
   for (const inspection of canonicalInspections) {
     for (const entry of inspection.entityProjections) {
       const projection = entry.projection
-      if (projection.entityState !== "present" || items.has(projection.entityId)) continue
-      items.set(
-        projection.entityId,
-        presentProjection(workspaceId, inspection.releaseId, {
-          ...entry,
-          canonicalReleaseId: inspection.releaseId
-        })
-      )
+      if (projection.entityState !== "present") continue
+      const existing = items.get(projection.entityId)
+      if (existing !== undefined) {
+        existing.releaseIds.add(inspection.releaseId)
+        continue
+      }
+      items.set(projection.entityId, { entry, releaseIds: new Set([inspection.releaseId]) })
     }
   }
-  return [...items.values()].sort((left, right) =>
-    left.service.localeCompare(right.service) || left.key.localeCompare(right.key)
-  )
+  return [...items.values()].map(({ entry, releaseIds: membershipSet }) => {
+    const releaseIds = [...membershipSet].sort((left, right) => left.localeCompare(right))
+    return presentProjection(workspaceId, {
+      ...entry,
+      canonicalReleaseId: releaseIds[0] ?? null,
+      releaseIds,
+      releaseMembershipsTruncated: false
+    })
+  }).sort((left, right) => left.service.localeCompare(right.service) || left.key.localeCompare(right.key))
 }

@@ -927,6 +927,7 @@ describe("DeliveryGraphRepository", () => {
           assert.strictEqual(bounded.value.totalCount, 2)
           assert.lengthOf(bounded.value.items, 1)
           assert.strictEqual(bounded.value.items[0]?.canonicalReleaseId, RELEASE_ID)
+          assert.deepStrictEqual(bounded.value.items[0]?.releaseIds, [RELEASE_ID])
         }
 
         const current = yield* repository.read(WORKSPACE_A, {
@@ -943,6 +944,10 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(current.value.items, 2)
           assert.isNull(
             current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.canonicalReleaseId
+          )
+          assert.deepStrictEqual(
+            current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.releaseIds,
+            []
           )
         }
 
@@ -995,26 +1000,48 @@ describe("DeliveryGraphRepository", () => {
           }],
           evidenceItems: [],
           evidenceClaims: [],
-          relationships: [
-            {
-              ...firstRelationship,
-              revision: 2,
-              supersedesRevision: 1,
-              lifecycle: { _tag: "rejected", effectiveAt: UPDATED_AT, reason: "Incorrect release association." },
-              recordedAt: UPDATED_AT
-            },
-            {
-              ...firstRelationship,
-              relationshipId: OTHER_RELATIONSHIP_ID,
-              revision: 1,
-              supersedesRevision: null,
-              sourceNodeId: OTHER_RELEASE_NODE_ID,
-              scope: { _tag: "release", releaseId: OTHER_RELEASE_ID },
-              confidence: { _tag: "unknown", rationale: "Independent release association fixture." },
-              evidenceClaimIds: [],
-              recordedAt: UPDATED_AT
-            }
-          ]
+          relationships: [{
+            ...firstRelationship,
+            relationshipId: OTHER_RELATIONSHIP_ID,
+            revision: 1,
+            supersedesRevision: null,
+            sourceNodeId: OTHER_RELEASE_NODE_ID,
+            scope: { _tag: "release", releaseId: OTHER_RELEASE_ID },
+            confidence: { _tag: "unknown", rationale: "Independent release association fixture." },
+            evidenceClaimIds: [],
+            recordedAt: UPDATED_AT
+          }]
+        })
+        const multipleAssociations = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        })
+        assert.strictEqual(multipleAssociations._tag, "workspaceEntityProjections")
+        if (multipleAssociations._tag === "workspaceEntityProjections") {
+          const issue = multipleAssociations.value.items.find(
+            ({ projection }) => projection.entityId === ISSUE_ID
+          )
+          assert.deepStrictEqual(issue?.releaseIds, [RELEASE_ID, OTHER_RELEASE_ID].sort())
+          assert.strictEqual(issue?.canonicalReleaseId, [RELEASE_ID, OTHER_RELEASE_ID].sort()[0])
+          assert.isFalse(issue?.releaseMembershipsTruncated)
+        }
+
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [{
+            ...firstRelationship,
+            revision: 2,
+            supersedesRevision: 1,
+            lifecycle: { _tag: "rejected", effectiveAt: UPDATED_AT, reason: "Incorrect release association." },
+            recordedAt: UPDATED_AT
+          }]
         })
         const activeAssociation = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
@@ -1030,6 +1057,10 @@ describe("DeliveryGraphRepository", () => {
             activeAssociation.value.items.find(({ projection }) => projection.entityId === ISSUE_ID)
               ?.canonicalReleaseId,
             OTHER_RELEASE_ID
+          )
+          assert.deepStrictEqual(
+            activeAssociation.value.items.find(({ projection }) => projection.entityId === ISSUE_ID)?.releaseIds,
+            [OTHER_RELEASE_ID]
           )
         }
 
@@ -1074,6 +1105,7 @@ describe("DeliveryGraphRepository", () => {
             afterDeletion.value.items.map(({ projection }) => projection.entityId),
             [PIPELINE_ID]
           )
+          assert.deepStrictEqual(afterDeletion.value.items[0]?.releaseIds, [])
         }
       })
     ))

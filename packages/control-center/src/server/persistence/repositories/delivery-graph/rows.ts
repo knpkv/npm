@@ -48,7 +48,7 @@ export const ProjectionRow = Schema.Struct({
 
 export const WorkspaceProjectionRow = Schema.Struct({
   ...ProjectionRow.fields,
-  canonicalReleaseId: Schema.NullOr(ReleaseId)
+  releaseIdsJson: Schema.String
 })
 
 export const NodeRow = Schema.Struct({
