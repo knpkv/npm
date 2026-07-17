@@ -1,9 +1,9 @@
-import { ServiceMark, type RlyService } from "@knpkv/rly/patterns"
+import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, useMemo } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useSearchParams } from "react-router"
 
-import type { DeliveryEntityKind } from "../../domain/deliveryGraph.js"
+import type { DeliveryEntityKind, DeliveryEntityService } from "../../domain/deliveryGraph.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio/PortfolioOverview.js"
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
@@ -15,7 +15,7 @@ import styles from "./ItemsPage.module.css"
 
 interface ItemFilters {
   readonly query: string
-  readonly service: string
+  readonly service: DeliveryEntityService | "all"
   readonly status: WorkspaceItemStatus | "all"
   readonly type: DeliveryEntityKind | "all"
 }
@@ -28,7 +28,7 @@ const entityKinds: ReadonlyArray<DeliveryEntityKind> = [
   "deployment",
   "time-entry"
 ]
-const services: ReadonlyArray<RlyService> = ["jira", "codecommit", "confluence", "codepipeline", "clockify"]
+const services: ReadonlyArray<DeliveryEntityService> = ["jira", "codecommit", "confluence", "codepipeline", "clockify"]
 const freshnessFormatter = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -111,14 +111,15 @@ export const ItemsPage = (): ReactElement => {
   const refreshKey =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
   const sessionKey = releaseWorksetSessionKey(browserSession.state)
+  const filters = filtersFrom(searchParams)
   const controller = useWorkspaceItems(
     context.workspaceId,
     routableReleaseIds,
+    filters,
     refreshKey,
     sessionKey,
     browserSession.invalidateSession
   )
-  const filters = filtersFrom(searchParams)
   const replaceSearch = (next: URLSearchParams): void => {
     navigate(itemsLocationWithSearch(location, next), { replace: true })
   }
@@ -174,7 +175,7 @@ export const ItemsPage = (): ReactElement => {
     )
   }
 
-  const visibleItems = filterWorkspaceItems(controller.state.items, filters)
+  const visibleItems = controller.state.items
   const selectedEntityId = searchParams.get("object")
   const selectedItem = selectWorkspaceItem(controller.state.items, selectedEntityId)
   const clearSelection = (): void => {
@@ -207,6 +208,7 @@ export const ItemsPage = (): ReactElement => {
         <label className={styles.search}>
           <span>Search</span>
           <input
+            maxLength={200}
             onChange={(event) => update("query", event.currentTarget.value)}
             placeholder="Key, title, or status"
             type="search"
@@ -292,12 +294,18 @@ export const ItemsPage = (): ReactElement => {
 
       <div className={styles.resultHeading} id="results">
         <Text as="h2" variant="section-title">
-          {visibleItems.length} of {controller.state.items.length} workspace items
+          {controller.state.matchedCount} of {controller.state.totalCount} workspace items
         </Text>
         <StateLabel
-          label={controller.state.truncated ? "Bounded workspace result" : "Workspace scope"}
+          label={
+            controller.state.refreshing
+              ? "Updating results"
+              : controller.state.truncated
+                ? "Bounded workspace result"
+                : "Workspace scope"
+          }
           size="compact"
-          tone={controller.state.truncated ? "caution" : "neutral"}
+          tone={controller.state.truncated && !controller.state.refreshing ? "caution" : "neutral"}
         />
       </div>
 

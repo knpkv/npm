@@ -3,10 +3,14 @@ import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
 import type { ReleaseDeliveryGraphInspection, WorkspaceEntityProjectionIndex } from "../../api/deliveryGraph.js"
-import type { DeliveryEntityDetails, DeliveryEntityKind } from "../../domain/deliveryGraph.js"
+import type {
+  DeliveryEntityDetails,
+  DeliveryEntityKind,
+  DeliveryEntityStatusGroup
+} from "../../domain/deliveryGraph.js"
 import type { EntityId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 
-export type WorkspaceItemStatus = "active" | "done" | "failed"
+export type WorkspaceItemStatus = DeliveryEntityStatusGroup
 
 export interface WorkspaceItemPresentation {
   readonly entityId: EntityId

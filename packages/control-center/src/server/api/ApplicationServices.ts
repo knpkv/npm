@@ -28,7 +28,13 @@ import type {
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
 import type { Actor } from "../../domain/actors.js"
-import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
+import type {
+  DeliveryEntityKind,
+  DeliveryEntityService,
+  DeliveryEntityStatusGroup,
+  DeliveryRelationship,
+  LedgerRevision
+} from "../../domain/deliveryGraph.js"
 import type {
   EnvironmentId,
   EventCursor,
@@ -123,7 +129,13 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
 /** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
 export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {
   readonly workspaceEntityProjections: (
-    workspaceId: WorkspaceId
+    input: {
+      readonly workspaceId: WorkspaceId
+      readonly query: string | null
+      readonly service: DeliveryEntityService | null
+      readonly status: DeliveryEntityStatusGroup | null
+      readonly type: DeliveryEntityKind | null
+    }
   ) => Effect.Effect<
     WorkspaceEntityProjectionIndex,
     ApplicationResourceNotFound | ApplicationServiceUnavailable

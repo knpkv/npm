@@ -113,9 +113,20 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
 })
 
 const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
-  workspaceEntityProjections: (requestedWorkspaceId) =>
+  workspaceEntityProjections: ({
+    query,
+    service,
+    status,
+    type,
+    workspaceId: requestedWorkspaceId
+  }) =>
     requestedWorkspaceId === session.workspaceId
-      ? Effect.succeed({ truncated: false, items: [] })
+      ? Effect.succeed({
+        matchedCount: query === "refunds" && service === "jira" && status === "active" && type === "issue" ? 1 : 0,
+        totalCount: 1,
+        truncated: false,
+        items: []
+      })
       : Effect.die("delivery graph handler crossed its workspace boundary"),
   releaseSlice: ({ environmentId, releaseId, workspaceId: requestedWorkspaceId }) =>
     requestedWorkspaceId === session.workspaceId && releaseId === inspectedReleaseId
@@ -204,9 +215,14 @@ describe("Control Center API handlers", () => {
   it.effect("serves the authenticated workspace entity index", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
-      const result = yield* client.deliveryGraph.workspaceEntityProjections({})
+      const result = yield* client.deliveryGraph.workspaceEntityProjections({ query: {} })
 
-      assert.deepStrictEqual(result, { truncated: false, items: [] })
+      assert.deepStrictEqual(result, { matchedCount: 0, totalCount: 1, truncated: false, items: [] })
+
+      const filtered = yield* client.deliveryGraph.workspaceEntityProjections({
+        query: { q: "refunds", service: "jira", status: "active", type: "issue" }
+      })
+      assert.deepStrictEqual(filtered, { matchedCount: 1, totalCount: 1, truncated: false, items: [] })
     }).pipe(
       Effect.provide([
         NodeHttpServer.layerHttpServices,

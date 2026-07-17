@@ -130,12 +130,13 @@ release slices in the browser. The query returns at most 500 latest present proj
 unlinked entities, excludes deleted or stale projection heads, and supplies an optional deterministic
 release route for linked objects. It maps provider service and current status and keeps text, service,
 type, and status filters in the URL. Empty, loading, read-failure, and bounded-result states remain
-explicit.
+explicit. Those filters now execute against the complete current workspace projection set before the
+500-item response bound, and the response reports authoritative matched and total counts.
 
 ## Remaining roadmap
 
-- Complete D07 with server-side filtered search/counts, owner filtering, multi-release membership,
-  delivery traces, command search, and exact-scope authorized shares. D08–D09 retain timeline and
+- Complete D07 with owner filtering, multi-release membership, delivery traces, command search, and
+  exact-scope authorized shares. D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
@@ -201,8 +202,8 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   remote mutations. Governed deploy, watch, notify, acknowledge, and trace-repair completion remain
   adapter-dependent action work and must reuse the D03 authority/idempotency boundary.
 - Items reports `Unassigned` when the graph carries no authoritative owner and does not yet expose
-  owner data or an owner filter. Search filters and aggregate counts also remain client-side over the
-  bounded 500-item prefix; move them into the query before supporting large workspaces.
+  owner data or an owner filter. Text, service, type, and status filters plus aggregate counts are
+  server-authoritative; provider-specific full-text indexes remain a later scale optimization.
 - The workspace query returns one deterministic canonical release route, not every release
   membership. The complete trace model must retain every membership and require an explicit release
   choice where context is ambiguous. Unlinked objects currently remain on the Items route until the

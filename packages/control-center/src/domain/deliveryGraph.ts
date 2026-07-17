@@ -37,6 +37,24 @@ export const DeliveryEntityKind = Schema.Literals([
 /** Decoded normalized entity kind. */
 export type DeliveryEntityKind = typeof DeliveryEntityKind.Type
 
+/** Connected service responsible for a normalized delivery entity. */
+export const DeliveryEntityService = Schema.Literals([
+  "jira",
+  "codecommit",
+  "confluence",
+  "codepipeline",
+  "clockify"
+])
+
+/** Decoded connected delivery service. */
+export type DeliveryEntityService = typeof DeliveryEntityService.Type
+
+/** Coarse cross-provider lifecycle used by workspace item search. */
+export const DeliveryEntityStatusGroup = Schema.Literals(["active", "done", "failed"])
+
+/** Decoded cross-provider lifecycle group. */
+export type DeliveryEntityStatusGroup = typeof DeliveryEntityStatusGroup.Type
+
 /** Canonical semantic kind recorded for either endpoint of a relationship. */
 export const RelationshipEndpointKind = Schema.Union([
   DeliveryEntityKind,

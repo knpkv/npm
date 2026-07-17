@@ -21,6 +21,11 @@ import {
   WorkspaceProjectionRow
 } from "./rows.js"
 
+const WorkspaceProjectionCountRow = Schema.Struct({
+  matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
 export const makeDeliveryGraphReader = Effect.gen(function*() {
   const database = yield* Database
   const sql = database.sql
@@ -405,6 +410,88 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       }
       case "workspaceEntityProjections": {
         const rowLimit = query.limit + 1
+        const entityType = sql`CASE entity.entity_type
+          WHEN 'pipeline' THEN 'pipeline-execution'
+          ELSE entity.entity_type
+        END`
+        const service = sql`CASE ${entityType}
+          WHEN 'issue' THEN 'jira'
+          WHEN 'pull-request' THEN 'codecommit'
+          WHEN 'page' THEN 'confluence'
+          WHEN 'pipeline-execution' THEN 'codepipeline'
+          WHEN 'deployment' THEN 'codepipeline'
+          WHEN 'time-entry' THEN 'clockify'
+        END`
+        const rawStatusText = sql`lower(COALESCE(
+          json_extract(projection.extension_json, '$.status'),
+          json_extract(projection.extension_json, '$.reviewState'),
+          json_extract(projection.extension_json, '$.approvalState'),
+          ''
+        ))`
+        const statusText = sql`CASE ${entityType}
+          WHEN 'issue' THEN ${rawStatusText}
+          ELSE replace(${rawStatusText}, '-', ' ')
+        END`
+        const statusGroup = sql`CASE ${entityType}
+          WHEN 'issue' THEN CASE
+            WHEN ${statusText} IN ('blocked', 'rejected') THEN 'failed'
+            WHEN ${statusText} IN ('closed', 'done', 'resolved') THEN 'done'
+            ELSE 'active'
+          END
+          WHEN 'pull-request' THEN CASE
+            WHEN ${statusText} = 'changes requested' THEN 'failed'
+            WHEN ${statusText} IN ('approved', 'merged') THEN 'done'
+            ELSE 'active'
+          END
+          WHEN 'page' THEN CASE
+            WHEN ${statusText} = 'superseded' THEN 'failed'
+            WHEN ${statusText} = 'current' THEN 'done'
+            ELSE 'active'
+          END
+          WHEN 'pipeline-execution' THEN CASE
+            WHEN ${statusText} IN ('failed', 'stopped') THEN 'failed'
+            WHEN ${statusText} = 'succeeded' THEN 'done'
+            ELSE 'active'
+          END
+          WHEN 'deployment' THEN CASE
+            WHEN ${statusText} IN ('failed', 'rolled back') THEN 'failed'
+            WHEN ${statusText} = 'succeeded' THEN 'done'
+            ELSE 'active'
+          END
+          WHEN 'time-entry' THEN CASE
+            WHEN ${statusText} = 'rejected' THEN 'failed'
+            WHEN ${statusText} IN ('approved', 'not required') THEN 'done'
+            ELSE 'active'
+          END
+        END`
+        const isCurrent = sql`projection.workspace_id = ${workspaceId}
+          AND projection.entity_state = 'present'
+          AND projection.source_entity_revision = entity.current_revision
+          AND NOT EXISTS (
+            SELECT 1
+            FROM entity_projection_revisions newer
+            WHERE newer.workspace_id = projection.workspace_id
+              AND newer.entity_id = projection.entity_id
+              AND newer.projection_revision > projection.projection_revision
+          )`
+        const matchesFilters = sql`(${query.query} IS NULL OR instr(
+            lower(projection.display_key || ' ' || projection.title || ' ' || ${statusText}),
+            lower(${query.query})
+          ) > 0)
+          AND (${query.service} IS NULL OR ${service} = ${query.service})
+          AND (${query.status} IS NULL OR ${statusGroup} = ${query.status})
+          AND (${query.type} IS NULL OR ${entityType} = ${query.type})`
+        // The repository executes this reader in one transaction, so counts and rows share a snapshot.
+        const countRows = yield* sql`SELECT
+            COUNT(CASE WHEN ${matchesFilters} THEN 1 END) AS matchedCount,
+            COUNT(*) AS totalCount
+          FROM entity_projection_revisions projection
+          INNER JOIN entities entity
+            ON entity.workspace_id = projection.workspace_id
+           AND entity.entity_id = projection.entity_id
+          WHERE ${isCurrent}`
+        const counts = (yield* decodeRows(WorkspaceProjectionCountRow, countRows))[0]
+        if (counts === undefined) return yield* Effect.die("Expected workspace projection counts")
         const rows = yield* sql`SELECT
             projection.workspace_id AS workspaceId,
             projection.entity_id AS entityId,
@@ -413,10 +500,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             projection.supersedes_projection_revision AS supersedesProjectionRevision,
             projection.projection_schema_version AS projectionSchemaVersion,
             projection.entity_state AS entityState,
-            CASE entity.entity_type
-              WHEN 'pipeline' THEN 'pipeline-execution'
-              ELSE entity.entity_type
-            END AS entityType,
+            ${entityType} AS entityType,
             projection.display_key AS displayKey,
             projection.title,
             projection.extension_json AS extensionJson,
@@ -441,16 +525,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           INNER JOIN entities entity
             ON entity.workspace_id = projection.workspace_id
            AND entity.entity_id = projection.entity_id
-          WHERE projection.workspace_id = ${workspaceId}
-            AND projection.entity_state = 'present'
-            AND projection.source_entity_revision = entity.current_revision
-            AND NOT EXISTS (
-              SELECT 1
-              FROM entity_projection_revisions newer
-              WHERE newer.workspace_id = projection.workspace_id
-                AND newer.entity_id = projection.entity_id
-                AND newer.projection_revision > projection.projection_revision
-            )
+          WHERE ${isCurrent}
+            AND ${matchesFilters}
           ORDER BY projection.display_key, projection.entity_id
           LIMIT ${rowLimit}`
         const decoded = yield* decodeRows(WorkspaceProjectionRow, rows).pipe(
@@ -475,7 +551,12 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           ))
         return DeliveryGraphReadResult.make({
           _tag: "workspaceEntityProjections",
-          value: { items, truncated: decoded.length > query.limit }
+          value: {
+            items,
+            matchedCount: counts.matchedCount,
+            totalCount: counts.totalCount,
+            truncated: decoded.length > query.limit
+          }
         })
       }
       case "releaseSummary": {
