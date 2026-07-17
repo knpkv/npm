@@ -1,0 +1,48 @@
+id: use-tagged-error
+snapshots:
+  ? |
+    class DecodeError extends Error {
+      readonly cause: unknown
+    }
+  : labels:
+      - source: |-
+          class DecodeError extends Error {
+            readonly cause: unknown
+          }
+        style: primary
+        start: 0
+        end: 61
+  ? |
+    class ProtocolFailure {
+      readonly _tag = "ProtocolFailure"
+    }
+  : labels:
+      - source: |-
+          class ProtocolFailure {
+            readonly _tag = "ProtocolFailure"
+          }
+        style: primary
+        start: 0
+        end: 61
+      - source: readonly _tag = "ProtocolFailure"
+        style: secondary
+        start: 26
+        end: 59
+  ? |
+    class ProtocolFailure {
+      readonly cause: unknown
+      readonly _tag = "ProtocolFailure"
+    }
+  : labels:
+      - source: |-
+          class ProtocolFailure {
+            readonly cause: unknown
+            readonly _tag = "ProtocolFailure"
+          }
+        style: primary
+        start: 0
+        end: 87
+      - source: readonly _tag = "ProtocolFailure"
+        style: secondary
+        start: 52
+        end: 85

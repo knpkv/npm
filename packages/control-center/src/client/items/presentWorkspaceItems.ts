@@ -62,7 +62,7 @@ const collaboratorRoleLabel = (role: Role): string => {
   }
 }
 
-const serviceFor = (kind: DeliveryEntityKind): RlyService => {
+export const serviceFor = (kind: DeliveryEntityKind): RlyService => {
   switch (kind) {
     case "issue":
       return "jira"
@@ -81,7 +81,7 @@ const serviceFor = (kind: DeliveryEntityKind): RlyService => {
 const titleCase = (value: string): string =>
   value.split("-").map((part) => `${part.charAt(0).toLocaleUpperCase("en-US")}${part.slice(1)}`).join(" ")
 
-const statusFor = (details: DeliveryEntityDetails): string => {
+export const statusFor = (details: DeliveryEntityDetails): string => {
   switch (details._tag) {
     case "issue":
       return details.status
@@ -105,7 +105,7 @@ const issueStatusPresentation = (status: string): Pick<WorkspaceItemPresentation
   return { statusGroup: "active", tone: "progress" }
 }
 
-const statusPresentation = (
+export const statusPresentation = (
   kind: DeliveryEntityKind,
   status: string
 ): Pick<WorkspaceItemPresentation, "statusGroup" | "tone"> => {

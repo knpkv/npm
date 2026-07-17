@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-mutation-proof-read
+language: tsx
+severity: error
+message: "Read the Control Center mutation proof through makeAuthenticatedMutationClient"
+
+rule:
+  pattern: sessionStorage.getItem("cc_csrf")
+
+files:
+  - "packages/control-center/src/client/**/*.ts"
+  - "packages/control-center/src/client/**/*.tsx"
+
+ignores:
+  - "packages/control-center/src/client/authenticatedMutationClient.ts"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+
+note: |
+  Mutation transports must share one decoded CSRF boundary so storage failures and request headers
+  cannot drift between features.

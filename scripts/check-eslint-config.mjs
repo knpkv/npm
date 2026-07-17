@@ -78,6 +78,34 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    window.sessionStorage.getItem("cc_csrf")
+    const storage = sessionStorage
+    storage.getItem("cc_csrf")
+  `,
+  expected: 2,
+  filePath: "packages/control-center/src/client/eslint-mutation-proof-invalid.ts",
+  ruleId: "local-rules/no-direct-mutation-proof-read"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const client = yield* makeAuthenticatedMutationClient
+    sessionStorage.getItem("theme")
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/eslint-mutation-proof-valid.ts",
+  ruleId: "local-rules/no-direct-mutation-proof-read"
+})
+
+await assertRuleDiagnostics({
+  code: `sessionStorage.getItem("cc_csrf")`,
+  expected: 0,
+  filePath: "packages/control-center/src/client/authenticatedMutationClient.ts",
+  ruleId: "local-rules/no-direct-mutation-proof-read"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Process from "effect/unstable/process/ChildProcess"
     import { ChildProcess as AliasedProcess } from "effect/unstable/process"
     import { make as makeProcess } from "effect/unstable/process/ChildProcess"

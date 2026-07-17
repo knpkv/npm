@@ -16,6 +16,7 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
+  AuthorizedShares,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -35,6 +36,7 @@ import {
   mapApplicationUnavailable,
   mapAuthenticationFailures,
   mapCredentialAuthenticationFailures,
+  notFoundApiError,
   serviceUnavailableApiError
 } from "./ErrorMapping.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
@@ -45,6 +47,11 @@ const currentSessionToken = (request: { readonly cookies: Readonly<Record<string
   Redacted.make(request.cookies.cc_session ?? "")
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
+
+const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
+  session.permission === "workspace-owner" || session.permission === "workspace-approver"
+    ? Effect.void
+    : Effect.flatMap(forbiddenApiError, Effect.fail)
 
 const revalidateSession = (
   auth: Auth["Service"],
@@ -134,6 +141,72 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
     })
 )
 
+/** Exact-scope authenticated entity-share handlers. */
+export const shareHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "shares",
+  (handlers) =>
+    Effect.gen(function*() {
+      const shares = yield* AuthorizedShares
+      return handlers
+        .handle("create", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner" || session.actor._tag !== "human") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* shares.create({
+              workspaceId: session.workspaceId,
+              request: payload,
+              createdByPersonId: session.actor.personId,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("resolve", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.workspaceId !== params.workspaceId) {
+              return yield* Effect.flatMap(notFoundApiError, Effect.fail)
+            }
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "private, no-store"))
+            )
+            return yield* shares.resolve({
+              workspaceId: params.workspaceId,
+              shareId: params.shareId,
+              actor: session.actor
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("revoke", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.workspaceId !== params.workspaceId) {
+              return yield* Effect.flatMap(notFoundApiError, Effect.fail)
+            }
+            if (session.permission !== "workspace-owner" || session.actor._tag !== "human") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* shares.revoke({
+              workspaceId: params.workspaceId,
+              shareId: params.shareId,
+              revokedByPersonId: session.actor.personId,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+    })
+)
+
 /** Secret-free plugin list, health, and configuration metadata handlers. */
 export const pluginHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
@@ -145,6 +218,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("list", () =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.list(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
@@ -152,6 +226,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("health", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.health({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -164,6 +239,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("configurationMetadata", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.configurationMetadata({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -176,6 +252,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("configuration", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.configuration({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -216,6 +293,7 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("snapshot", () =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           return yield* portfolio.snapshot(session.workspaceId).pipe(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
@@ -235,6 +313,9 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("workspaceEntityProjections", ({ query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
             return yield* inspection.workspaceEntityProjections({
               workspaceId: session.workspaceId,
               owner: query.owner ?? null,
@@ -250,6 +331,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("releaseSlice", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.releaseSlice({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -262,6 +344,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("repairCandidates", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.repairCandidates({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -274,6 +357,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("repairProposalDraft", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.repairProposalDraft({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -308,6 +392,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("listRepairProposals", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* repairProposals.list({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -321,6 +406,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("getRepairProposal", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* repairProposals.get({
               workspaceId: session.workspaceId,
               proposalId: params.proposalId
@@ -372,6 +458,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("relationship", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.relationship({
               workspaceId: session.workspaceId,
               relationshipId: params.relationshipId,
@@ -384,6 +471,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("relationshipHistory", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.relationshipHistory({
               workspaceId: session.workspaceId,
               relationshipId: params.relationshipId
@@ -395,6 +483,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("evidence", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.evidence({
               workspaceId: session.workspaceId,
               evidenceId: params.evidenceId
@@ -445,6 +534,7 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("stream", ({ headers, query, request }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           const queryCursor = query.after
           const headerCursor = headers["last-event-id"]
           if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
@@ -487,6 +577,7 @@ export const mediaHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("read", ({ params }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           const media = yield* mediaReads.read({
             mediaId: params.mediaId,
             workspaceId: session.workspaceId

@@ -49,6 +49,8 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
       return "provider-configuration"
     case "session":
       return endpointIdentifier === "current" ? "session-self-read" : "session-administration"
+    case "shares":
+      return endpointIdentifier === "resolve" ? "release-read" : "policy-administration"
     default:
       return "policy-administration"
   }

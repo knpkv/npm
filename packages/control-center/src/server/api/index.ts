@@ -4,6 +4,7 @@ export {
   ApplicationRateLimited,
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
+  AuthorizedShares,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,

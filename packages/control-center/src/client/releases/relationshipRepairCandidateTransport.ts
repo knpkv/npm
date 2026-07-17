@@ -15,7 +15,7 @@ import type {
 } from "../../domain/identifiers.js"
 import { RelationshipRepairProposalId as RelationshipRepairProposalIdSchema } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
-import { makeRelationshipRepairMutationClient } from "./relationshipRepairTransport.js"
+import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
 /** Generate one canonical proposal identity at the browser mutation boundary. */
 export const makeRelationshipRepairProposalId = Effect.gen(function*() {
@@ -51,7 +51,7 @@ export const browserRelationshipRepairCandidateTransport: RelationshipRepairCand
   create: (releaseId, draft, proposalId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const client = yield* makeRelationshipRepairMutationClient
+        const client = yield* makeAuthenticatedMutationClient
         return yield* client.deliveryGraph.createRepairProposal({
           params: {
             releaseId,

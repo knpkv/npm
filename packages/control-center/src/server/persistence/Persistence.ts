@@ -24,6 +24,9 @@ import { BlobStore } from "./object-store/BlobStore.js"
 import type { BlobStoreError } from "./object-store/BlobStoreError.js"
 import { decodePersistenceConfig } from "./PersistenceConfig.js"
 import {
+  type AuthorizedShareInputError,
+  AuthorizedShareRepository,
+  type AuthorizedShareRepositoryService,
   ContentBlobMetadataRepository,
   type DeliveryGraphInputError,
   DeliveryGraphRepository,
@@ -59,6 +62,7 @@ import { mapPersistenceOperation } from "./repositories/internal.js"
 
 /** Typed failures that may cross the public persistence operation boundary. */
 export type PersistenceOperationFailure =
+  | AuthorizedShareInputError
   | BlobStoreError
   | ContentMetadataMismatchError
   | DeliveryGraphInputError
@@ -76,6 +80,7 @@ export type PersistenceOperationFailure =
   | SourceIdentityMismatchError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
+  "AuthorizedShareInputError",
   "BlobContainmentError",
   "BlobIntegrityError",
   "BlobNotFoundError",
@@ -134,6 +139,7 @@ export type PersistenceLayerError =
 const makePersistence = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const database = yield* Database
+  const authorizedShares = yield* AuthorizedShareRepository
   const content = yield* ContentStore
   const deliveryGraph = yield* DeliveryGraphRepository
   const events = yield* DomainEventRepository
@@ -149,6 +155,14 @@ const makePersistence = Effect.gen(function*() {
   const workspaces = yield* WorkspaceRepository
 
   return {
+    authorizedShares: {
+      create: (...args: Parameters<AuthorizedShareRepositoryService["create"]>) =>
+        publicOperation("authorized-share.create", authorizedShares.create(...args)),
+      get: (...args: Parameters<AuthorizedShareRepositoryService["get"]>) =>
+        publicOperation("authorized-share.get", authorizedShares.get(...args)),
+      revoke: (...args: Parameters<AuthorizedShareRepositoryService["revoke"]>) =>
+        publicOperation("authorized-share.revoke", authorizedShares.revoke(...args))
+    },
     transact: <Success, Failure, Requirements>(
       effect: Effect.Effect<Success, Failure, Requirements>
     ) => database.transaction(effect).pipe(mapPersistenceOperation("persistence.transaction")),
@@ -341,6 +355,7 @@ export const persistenceLayerFromDatabase = (
     decodePersistenceConfig(input).pipe(
       Effect.map((config) => {
         const foundation = QuarantineRepository.layer
+        const authorizedShares = AuthorizedShareRepository.layer
         const contentMetadata = ContentBlobMetadataRepository.layer.pipe(
           Layer.provide(foundation)
         )
@@ -362,6 +377,7 @@ export const persistenceLayerFromDatabase = (
         )
         const services = Layer.mergeAll(
           foundation,
+          authorizedShares,
           contentMetadata,
           deliveryGraph,
           entities,

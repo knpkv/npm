@@ -1,45 +1,16 @@
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
-import { makeControlCenterApiClient } from "../../api/client.js"
-import { CsrfToken } from "../../api/session.js"
 import type { ReleaseAgentTurn } from "../AgentPage.js"
+import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
-class MutationProofUnavailable {
-  readonly _tag = "ForbiddenApiError"
-}
-
-class ReleaseAgentProtocolError {
-  readonly _tag = "ReleaseAgentProtocolError"
-}
-
-const mutationProof = (): Effect.Effect<CsrfToken, MutationProofUnavailable> =>
-  Effect.try({
-    try: () => sessionStorage.getItem("cc_csrf"),
-    catch: () => new MutationProofUnavailable()
-  }).pipe(
-    Effect.flatMap((value) =>
-      value === null
-        ? Effect.fail(new MutationProofUnavailable())
-        : Schema.decodeUnknownEffect(CsrfToken)(value).pipe(
-          Effect.mapError(() => new MutationProofUnavailable())
-        )
-    )
-  )
+class ReleaseAgentProtocolError extends Data.TaggedError("ReleaseAgentProtocolError") {}
 
 const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
   input: Parameters<ReleaseAgentTurn>[0]
 ) {
-  const csrfToken = yield* mutationProof()
-  const client = yield* makeControlCenterApiClient({
-    transformClient: (httpClient) =>
-      httpClient.pipe(
-        HttpClient.mapRequest(HttpClientRequest.setHeader("x-csrf-token", csrfToken))
-      )
-  })
+  const client = yield* makeAuthenticatedMutationClient
   const response = yield* client.agent.turn({
     params: { releaseId: input.releaseId },
     payload: {

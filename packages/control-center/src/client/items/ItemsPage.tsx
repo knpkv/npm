@@ -18,6 +18,8 @@ import {
   workspaceItemReleaseHref
 } from "./presentWorkspaceItems.js"
 import { browserWorkspaceItemsTransport, useWorkspaceItems, type WorkspaceItemsTransport } from "./useWorkspaceItems.js"
+import { AuthorizedSharePanel } from "./AuthorizedSharePanel.js"
+import type { AuthorizedShareTransport } from "./authorizedShareTransport.js"
 import styles from "./ItemsPage.module.css"
 
 interface ItemFilters {
@@ -29,6 +31,7 @@ interface ItemFilters {
 }
 
 export interface ItemsPageProps {
+  readonly shareTransport?: AuthorizedShareTransport
   readonly transport?: WorkspaceItemsTransport
 }
 
@@ -151,7 +154,10 @@ export const workspaceItemMembershipDescription = (item: WorkspaceItemPresentati
 }
 
 /** Compact workspace-wide index of normalized delivery objects. */
-export const ItemsPage = ({ transport = browserWorkspaceItemsTransport }: ItemsPageProps = {}): ReactElement => {
+export const ItemsPage = ({
+  shareTransport,
+  transport = browserWorkspaceItemsTransport
+}: ItemsPageProps = {}): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const browserSession = useBrowserSession()
   const location = useLocation()
@@ -240,6 +246,12 @@ export const ItemsPage = ({ transport = browserWorkspaceItemsTransport }: ItemsP
       : controller.state.items.flatMap(({ owners }) => owners).find(({ id }) => id === filters.owner)
   const selectedEntityId = searchParams.get("object")
   const selectedItem = selectWorkspaceItem(controller.state.items, selectedEntityId)
+  const shareOwnerPersonId =
+    browserSession.state._tag === "authenticated" &&
+    browserSession.state.session.permission === "workspace-owner" &&
+    browserSession.state.session.actor._tag === "human"
+      ? browserSession.state.session.actor.personId
+      : null
   const clearSelection = (): void => {
     const next = new URLSearchParams(searchParams)
     next.delete("object")
@@ -350,6 +362,16 @@ export const ItemsPage = ({ transport = browserWorkspaceItemsTransport }: ItemsP
             {workspaceItemMembershipDescription(selectedItem)}
           </Text>
           <ItemOwners item={selectedItem} />
+          {shareOwnerPersonId === null ? null : (
+            <AuthorizedSharePanel
+              key={selectedItem.entityId}
+              currentPersonId={shareOwnerPersonId}
+              entityId={selectedItem.entityId}
+              grantees={controller.state.ownerOptions}
+              workspaceId={context.workspaceId}
+              {...(shareTransport === undefined ? {} : { transport: shareTransport })}
+            />
+          )}
           <div className={styles.selectionActions}>
             <div className={styles.membershipChoices}>
               {selectedItem.routableReleaseIds.map((releaseId) => {
@@ -428,6 +450,14 @@ export const ItemsPage = ({ transport = browserWorkspaceItemsTransport }: ItemsP
                   {formatItemFreshness(item.freshness)}
                 </time>
               </div>
+              {shareOwnerPersonId === null ? null : (
+                <Link
+                  className={styles.shareLink}
+                  to={unlinkedItemLocation(location.pathname, searchParams, item.entityId)}
+                >
+                  Share
+                </Link>
+              )}
             </Surface>
           ))}
         </div>

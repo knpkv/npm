@@ -1,0 +1,24 @@
+id: use-tagged-error
+valid:
+  - |
+    class DecodeError extends Data.TaggedError("DecodeError")<{
+      readonly cause: unknown
+    }> {}
+  - |
+    class PageState {
+      readonly status = "ready"
+    }
+invalid:
+  - |
+    class DecodeError extends Error {
+      readonly cause: unknown
+    }
+  - |
+    class ProtocolFailure {
+      readonly _tag = "ProtocolFailure"
+    }
+  - |
+    class ProtocolFailure {
+      readonly cause: unknown
+      readonly _tag = "ProtocolFailure"
+    }

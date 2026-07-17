@@ -1,0 +1,9 @@
+id: no-direct-mutation-proof-read
+valid:
+  - |
+    const client = yield* makeAuthenticatedMutationClient
+  - |
+    const preference = sessionStorage.getItem("theme")
+invalid:
+  - |
+    const csrfToken = sessionStorage.getItem("cc_csrf")

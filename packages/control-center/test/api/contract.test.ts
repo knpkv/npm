@@ -17,7 +17,8 @@ import {
   SessionApiGroup,
   SessionCookieAuth,
   SessionId,
-  SessionMutationAuth
+  SessionMutationAuth,
+  SharesApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -25,7 +26,9 @@ import {
   PluginConnectionId,
   RelationshipId,
   RelationshipRepairProposalId,
-  ReleaseId
+  ReleaseId,
+  ShareId,
+  WorkspaceId
 } from "../../src/domain/identifiers.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
@@ -127,10 +130,11 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the seven API groups and endpoint routes explicit", () => {
+  it("keeps the eight API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
+      "shares",
       "plugins",
       "portfolio",
       "deliveryGraph",
@@ -147,6 +151,14 @@ describe("ControlCenterApi contract", () => {
         ["list", "GET", "/api/v1/session"],
         ["revoke", "DELETE", "/api/v1/session/:sessionId"],
         ["logout", "POST", "/api/v1/session/logout"]
+      ]
+    )
+    assert.deepStrictEqual(
+      Object.entries(SharesApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
+      [
+        ["create", "POST", "/api/v1/shares"],
+        ["resolve", "GET", "/api/v1/shares/:workspaceId/:shareId"],
+        ["revoke", "DELETE", "/api/v1/shares/:workspaceId/:shareId"]
       ]
     )
     assert.deepStrictEqual(
@@ -221,6 +233,11 @@ describe("ControlCenterApi contract", () => {
       revoke: [SessionCookieAuth.key, MutationCsrf.key],
       logout: [SessionCookieAuth.key, MutationCsrf.key]
     })
+    assert.deepStrictEqual(middlewareByEndpoint(SharesApiGroup.endpoints), {
+      create: [SessionCookieAuth.key, SessionMutationAuth.key],
+      resolve: [SessionCookieAuth.key],
+      revoke: [SessionCookieAuth.key, SessionMutationAuth.key]
+    })
     assert.deepStrictEqual(middlewareByEndpoint(PluginsApiGroup.endpoints), {
       list: [SessionCookieAuth.key],
       health: [SessionCookieAuth.key],
@@ -272,12 +289,18 @@ describe("ControlCenterApi contract", () => {
     const proposalId = Schema.decodeSync(RelationshipRepairProposalId)("01890f6f-6d6a-7cc0-98d2-000000000096")
     const revision = Schema.decodeSync(LedgerRevision)(1)
     const evidenceId = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-000000000095")
+    const shareId = Schema.decodeSync(ShareId)("01890f6f-6d6a-7cc0-98d2-000000000097")
+    const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000001")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
     assert.strictEqual(
       urls.session.revoke({ params: { sessionId } }),
       "https://control.example/api/v1/session/01890f6f-6d6a-7cc0-98d2-000000000091"
+    )
+    assert.strictEqual(
+      urls.shares.resolve({ params: { workspaceId, shareId } }),
+      "https://control.example/api/v1/shares/01890f6f-6d6a-7cc0-98d2-000000000001/01890f6f-6d6a-7cc0-98d2-000000000097"
     )
     assert.strictEqual(
       urls.plugins.health({ params: { pluginConnectionId } }),

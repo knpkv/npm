@@ -16,17 +16,21 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
-import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
+import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
+  EntityId,
   EventCursor,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
-  ReleaseId
+  ReleaseId,
+  ShareId,
+  WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  AuthorizedShares,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -40,7 +44,8 @@ import {
   agentHandlersLayer,
   deliveryGraphHandlersLayer,
   liveEventHandlersLayer,
-  portfolioHandlersLayer
+  portfolioHandlersLayer,
+  shareHandlersLayer
 } from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
@@ -85,8 +90,36 @@ const repairReviewId = Schema.decodeSync(RelationshipRepairReviewId)(
   "01890f6f-6d6a-7cc0-98d2-000000000007"
 )
 const inspectedRelationshipRevision = Schema.decodeSync(LedgerRevision)(1)
+const sharedEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000000a")
+const authorizedShareId = Schema.decodeSync(ShareId)("01890f6f-6d6a-7cc0-98d2-00000000000b")
+const otherShareWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-00000000000c")
+const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
+  workspaceId,
+  entityId: sharedEntityId,
+  projectionRevision: 1,
+  sourceEntityRevision: 1,
+  supersedesProjectionRevision: null,
+  projectionSchemaVersion: 1,
+  entityState: "present",
+  entityType: "issue",
+  displayKey: "PAY-42",
+  title: "Ship guarded refunds",
+  details: {
+    _tag: "issue",
+    key: "PAY-42",
+    status: "Ready",
+    priority: "High",
+    estimatePoints: 5
+  }
+})
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+
+const assertForbidden = <A, E extends { readonly _tag: string }>(attempted: Result.Result<A, E>) => {
+  assert.isTrue(Result.isFailure(attempted))
+  if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure._tag, "ForbiddenApiError")
+}
+
 const approverSession = Schema.decodeSync(SessionSummary)({
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000008",
   workspaceId,
@@ -175,6 +208,23 @@ const deliveryGraphApplicationLayer = Layer.merge(
   relationshipRepairProposalsLayer
 )
 
+const authorizedSharesLayer = Layer.succeed(AuthorizedShares, {
+  create: () => Effect.die("not used"),
+  resolve: () =>
+    Effect.succeed({
+      share: {
+        shareId: authorizedShareId,
+        entityId: sharedEntityId,
+        granteePersonId: sessionPersonId,
+        createdAt: session.createdAt,
+        expiresAt: session.absoluteExpiresAt,
+        revokedAt: null
+      },
+      item: { projection: sharedProjection, recordedAt: session.lastSeenAt }
+    }),
+  revoke: () => Effect.die("not used")
+})
+
 const agentLayer = Layer.succeed(ReleaseAgentTurns, {
   runTurn: () => Effect.die("not used")
 })
@@ -223,6 +273,97 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("creates an exact share from session-derived human owner authority", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<
+        {
+          readonly workspaceId: string
+          readonly createdByPersonId: string
+          readonly sessionId: string
+        } | null
+      >(null)
+      const shares = Layer.succeed(AuthorizedShares, {
+        create: (input) =>
+          Ref.set(received, {
+            workspaceId: input.workspaceId,
+            createdByPersonId: input.createdByPersonId,
+            sessionId: input.sessionId
+          }).pipe(Effect.as({
+            shareId: input.request.shareId,
+            entityId: input.request.entityId,
+            granteePersonId: input.request.granteePersonId,
+            createdAt: session.lastSeenAt,
+            expiresAt: input.request.expiresAt,
+            revokedAt: null
+          })),
+        resolve: () => Effect.die("not used"),
+        revoke: () => Effect.die("not used")
+      })
+      const handler = shareHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(shares)
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["shares"])
+        return yield* client.shares.create({
+          payload: {
+            shareId: authorizedShareId,
+            entityId: sharedEntityId,
+            granteePersonId: sessionPersonId,
+            expiresAt: session.absoluteExpiresAt
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.shareId, authorizedShareId)
+      assert.deepStrictEqual(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        createdByPersonId: sessionPersonId,
+        sessionId: session.sessionId
+      })
+    }))
+
+  it.effect("rejects a watcher before authorized-share persistence", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = shareHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(AuthorizedShares, {
+          create: () => Effect.die("watcher reached authorized-share persistence"),
+          resolve: () => Effect.die("not used"),
+          revoke: () => Effect.die("not used")
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["shares"])
+        return yield* client.shares.create({
+          payload: {
+            shareId: authorizedShareId,
+            entityId: sharedEntityId,
+            granteePersonId: sessionPersonId,
+            expiresAt: session.absoluteExpiresAt
+          }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
+
   it.effect("serves the authenticated workspace entity index", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
@@ -256,6 +397,62 @@ describe("Control Center API handlers", () => {
         deliveryGraphHandlersTestLayer
       ])
     ))
+
+  it.effect("keeps an exact-share watcher out of adjacent workspace reads", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = Layer.mergeAll(
+        shareHandlersLayer,
+        deliveryGraphHandlersLayer,
+        portfolioHandlersLayer,
+        liveEventHandlersLayer
+      ).pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.mergeAll(
+          authorizedSharesLayer,
+          deliveryGraphApplicationLayer,
+          portfolioLayer,
+          liveEventsLayer,
+          Layer.succeed(Auth, streamAuthentication),
+          LiveStreamAdmission.layer
+        ))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "shares",
+          "deliveryGraph",
+          "portfolio",
+          "liveEvents"
+        ])
+        const shared = yield* client.shares.resolve({
+          params: { workspaceId: session.workspaceId, shareId: authorizedShareId }
+        })
+        assert.strictEqual(shared.item.projection.entityId, sharedEntityId)
+        return yield* Effect.all([
+          client.deliveryGraph.workspaceEntityProjections({ query: {} }).pipe(Effect.result),
+          client.deliveryGraph.releaseSlice({
+            params: { releaseId: inspectedReleaseId },
+            query: {}
+          }).pipe(Effect.result),
+          client.portfolio.snapshot().pipe(Effect.result),
+          client.liveEvents.stream({ headers: {}, query: {} }).pipe(Effect.result)
+        ])
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      const [entityIndex, releaseSlice, portfolioSnapshot, liveEventStream] = result
+      assertForbidden(entityIndex)
+      assertForbidden(releaseSlice)
+      assertForbidden(portfolioSnapshot)
+      assertForbidden(liveEventStream)
+    }))
 
   it.effect("serves a workspace-scoped release relationship slice", () =>
     Effect.gen(function*() {
@@ -711,6 +908,7 @@ describe("Control Center API handlers", () => {
             Layer.succeed(PluginAdministration, plugins),
             Layer.succeed(Clock.Clock, instrumentedClock),
             Layer.succeed(LiveEvents, trackedLiveEvents),
+            authorizedSharesLayer,
             portfolioLayer,
             deliveryGraphApplicationLayer,
             agentLayer,
@@ -792,6 +990,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
+          authorizedSharesLayer,
           portfolioLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
@@ -820,6 +1019,23 @@ describe("Control Center API handlers", () => {
       const responseBody = Schema.decodeUnknownSync(CurrentSessionResponse)(await response.json())
       assert.strictEqual(responseBody.csrfToken, recoveredCsrf)
       assert.strictEqual(responseBody.session.sessionId, session.sessionId)
+
+      const shareResponse = await webHandler.handler(
+        new Request(`http://127.0.0.1:4173/api/v1/shares/${workspaceId}/${authorizedShareId}`, {
+          headers: liveRequestHeaders
+        }),
+        requestContext
+      )
+      assert.strictEqual(shareResponse.status, 200)
+      assert.strictEqual(shareResponse.headers.get("cache-control"), "private, no-store")
+
+      const crossWorkspaceShareResponse = await webHandler.handler(
+        new Request(`http://127.0.0.1:4173/api/v1/shares/${otherShareWorkspaceId}/${authorizedShareId}`, {
+          headers: liveRequestHeaders
+        }),
+        requestContext
+      )
+      assert.strictEqual(crossWorkspaceShareResponse.status, 404)
 
       const malformedCursorRequests = [
         ...[
@@ -882,6 +1098,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
+          authorizedSharesLayer,
           portfolioLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
@@ -981,6 +1198,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
+          authorizedSharesLayer,
           portfolioLayer,
           deliveryGraphApplicationLayer,
           agentLayer,
@@ -1102,6 +1320,7 @@ describe("Control Center API handlers", () => {
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
+          authorizedSharesLayer,
           portfolioLayer,
           deliveryGraphApplicationLayer,
           agentLayer,

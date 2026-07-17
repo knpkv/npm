@@ -137,9 +137,10 @@ explicit. Those filters now execute against the complete current workspace proje
 
 ## Remaining roadmap
 
-- Complete D07 with exact-scope authorized shares. The workspace command search
-  now combines the authenticated release portfolio and Items index with deterministic ranking,
-  keyboard navigation, exact destinations, and contextual Relay access.
+- D07 is complete through exact-scope authenticated item shares. The workspace command search
+  combines the authenticated release portfolio and Items index with deterministic ranking,
+  keyboard navigation, exact destinations, and contextual Relay access. Authorized links resolve
+  one current item projection only after grantee, expiry, revocation, workspace, and target checks.
   D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
@@ -232,13 +233,23 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   opens a URL-addressable detail sheet that reads its immutable revision ledger and only the evidence
   observations referenced by the selected revision. The existing history and evidence endpoints cap
   results at 200 records without an explicit truncation flag; add that contract before histories can
-  exceed the current fixture scale. Authenticated share grants with exact scope, expiry, revocation,
-  and grantee checks remain unfinished D07 work. Command search intentionally routes ambiguous and
-  unlinked objects through Items until provider-specific full views exist.
+  exceed the current fixture scale. Command search intentionally routes ambiguous and unlinked objects
+  through Items until provider-specific full views exist.
+- Authorized shares currently grant one current normalized entity projection to one human person.
+  Creation is owner-only, the Items picker uses the existing bounded 200-person owner facet, and the
+  page intentionally excludes ordinary workspace navigation, release membership, relationships,
+  evidence, and adjacent objects. Cookie-authenticated read recovery remains available without
+  browser mutation-proof storage, while watcher sessions cannot use adjacent workspace portfolio,
+  live-event, plugin, media, Items, or delivery-graph reads. Workspace owners and approvers retain
+  broader application reads through their existing session roles. Resolution rechecks that the named
+  grantee remains active before target reads. Create retries preserve both the random share identifier
+  and its originally computed expiry.
+  Add a paginated workspace people picker, durable share-administration list, and release-scoped grants
+  only when those scopes have equally exact response projections and resolution-time authorization.
 
 ## Recommended next session
 
-Complete D07 authorized shares around the Items checkpoint, then return to
-the recorded D05 readiness batch optimization before the large-fixture performance gate.
+Return to the recorded D05 readiness batch optimization before the large-fixture performance gate,
+then continue with D08 attributable Timeline and bounded exports.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

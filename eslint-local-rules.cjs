@@ -951,6 +951,65 @@ module.exports = {
       }
     }
   },
+  "no-direct-mutation-proof-read": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "centralize Control Center mutation-proof reads in the authenticated client helper",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        directRead: "Read cc_csrf through makeAuthenticatedMutationClient instead of accessing sessionStorage."
+      }
+    },
+    create(context) {
+      if (context.filename.replaceAll("\\", "/").endsWith("/client/authenticatedMutationClient.ts")) return {}
+
+      const isUnshadowedGlobal = (identifier) =>
+        identifier.type === "Identifier" && (resolvedVariable(context, identifier)?.defs.length ?? 0) === 0
+
+      const isSessionStorage = (expression, visited = new Set()) => {
+        const candidate = unwrapTypeExpression(expression)
+        if (candidate.type === "Identifier") {
+          if (candidate.name === "sessionStorage" && isUnshadowedGlobal(candidate)) return true
+          const variable = resolvedVariable(context, candidate)
+          if (variable === undefined || visited.has(variable)) return false
+          visited.add(variable)
+          const definition = variable.defs.find(
+            (entry) => entry.type === "Variable" && entry.node.type === "VariableDeclarator" && entry.node.init !== null
+          )
+          return definition === undefined ? false : isSessionStorage(definition.node.init, visited)
+        }
+        return (
+          candidate.type === "MemberExpression" &&
+          !candidate.computed &&
+          candidate.object.type === "Identifier" &&
+          candidate.object.name === "window" &&
+          isUnshadowedGlobal(candidate.object) &&
+          staticPropertyName(candidate.property) === "sessionStorage"
+        )
+      }
+
+      return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            staticPropertyName(node.callee.property) !== "getItem" ||
+            node.arguments.length === 0 ||
+            node.arguments[0].type === "SpreadElement" ||
+            node.arguments[0].type !== "Literal" ||
+            node.arguments[0].value !== "cc_csrf" ||
+            !isSessionStorage(node.callee.object)
+          ) {
+            return
+          }
+          context.report({ node, messageId: "directRead" })
+        }
+      }
+    }
+  },
   "no-opaque-instance-fields": {
     meta: {
       type: "problem",

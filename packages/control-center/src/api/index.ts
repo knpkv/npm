@@ -89,3 +89,9 @@ export {
   SessionMutationAuth,
   SessionSummary
 } from "./session.js"
+export {
+  AuthorizedShareResolution,
+  AuthorizedShareSummary,
+  CreateAuthorizedShareRequest,
+  SharesApiGroup
+} from "./shares.js"

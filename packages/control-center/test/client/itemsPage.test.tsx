@@ -6,15 +6,20 @@ import { createRoot, type Root } from "react-dom/client"
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import type { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph.js"
+import { CsrfToken, SessionSummary } from "../../src/api/session.js"
+import { AuthorizedShareSummary } from "../../src/api/shares.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
+import type {
+  AuthorizedShareTransport,
+  CreateAuthorizedShareTransportInput
+} from "../../src/client/items/authorizedShareTransport.js"
 import { ItemsPage } from "../../src/client/items/ItemsPage.js"
 import type { WorkspaceItemsTransport } from "../../src/client/items/useWorkspaceItems.js"
 import type { PortfolioOverviewController } from "../../src/client/portfolio/PortfolioOverview.js"
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
 import type { WorkspaceReleaseOutletContext } from "../../src/client/releases/WorkspaceReleaseLayout.js"
-import { PersonId } from "../../src/domain/identifiers.js"
+import { PersonId, ShareId } from "../../src/domain/identifiers.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
@@ -63,7 +68,8 @@ const ItemsLayout = ({ controller }: { readonly controller: PortfolioOverviewCon
 
 const renderItems = async (
   controller: PortfolioOverviewController,
-  transport?: WorkspaceItemsTransport
+  transport?: WorkspaceItemsTransport,
+  shareTransport?: AuthorizedShareTransport
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -73,7 +79,17 @@ const renderItems = async (
       {
         path: "/w/:workspaceId",
         element: <ItemsLayout controller={controller} />,
-        children: [{ path: "items", element: <ItemsPage {...(transport === undefined ? {} : { transport })} /> }]
+        children: [
+          {
+            path: "items",
+            element: (
+              <ItemsPage
+                {...(shareTransport === undefined ? {} : { shareTransport })}
+                {...(transport === undefined ? {} : { transport })}
+              />
+            )
+          }
+        ]
       }
     ],
     { initialEntries: [`/w/${WORKSET_WORKSPACE_ID}/items`] }
@@ -190,5 +206,119 @@ describe("ItemsPage boundaries", () => {
       status: "all",
       type: "all"
     })
+  })
+
+  it("creates an authenticated exact-item link without embedding session authority and revokes it", async () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected an item fixture")
+    const granteeId = Schema.decodeUnknownSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    const selectedShareId = Schema.decodeUnknownSync(ShareId)("01890f6f-6d6a-7cc0-98d2-00000000009a")
+    const ownerOption: WorkspaceEntityProjectionIndex["ownerOptions"][number] = {
+      avatarFallback: "GR",
+      displayName: "Grace Rivera",
+      personId: granteeId,
+      roles: ["reviewer"]
+    }
+    const index = {
+      matchedCount: 1,
+      ownerOptions: [ownerOption],
+      ownerOptionsTruncated: false,
+      totalCount: 1,
+      truncated: false,
+      items: [
+        {
+          ...source,
+          canonicalReleaseId: releaseWorksetFixture.releaseId,
+          owners: [ownerOption],
+          ownersTruncated: false,
+          releaseIds: [releaseWorksetFixture.releaseId],
+          releaseMembershipsTruncated: false
+        }
+      ]
+    } satisfies WorkspaceEntityProjectionIndex
+    const transport = { load: vi.fn(() => Promise.resolve(index)) } satisfies WorkspaceItemsTransport
+    const share = Schema.decodeUnknownSync(AuthorizedShareSummary)({
+      shareId: selectedShareId,
+      entityId: source.projection.entityId,
+      granteePersonId: granteeId,
+      createdAt: "2026-07-17T10:00:00.000Z",
+      expiresAt: "2026-07-18T10:00:00.000Z",
+      revokedAt: null
+    })
+    const shareTransport = {
+      create: vi.fn(() => Promise.resolve(share)),
+      prepareCreate: vi.fn(() =>
+        Promise.resolve({
+          entityId: source.projection.entityId,
+          expiresAt: share.expiresAt,
+          granteePersonId: granteeId,
+          lifetime: "day",
+          shareId: selectedShareId
+        } satisfies CreateAuthorizedShareTransportInput)
+      ),
+      resolve: vi.fn(() => Promise.reject(new Error("not used"))),
+      revoke: vi.fn(() => Promise.resolve())
+    } satisfies AuthorizedShareTransport
+    const controller = {
+      onRetry: vi.fn(),
+      state: {
+        _tag: "ready",
+        connection: { _tag: "connected" },
+        isSnapshotStale: false,
+        portfolio: presentPortfolio(makePortfolioSnapshot())
+      }
+    } satisfies PortfolioOverviewController
+    const host = await renderItems(controller, transport, shareTransport)
+    if (sessionControls === undefined) throw new Error("Expected browser session controls")
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    await act(async () => Promise.resolve())
+
+    const shareAction = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(
+      ({ textContent }) => textContent === "Share"
+    )
+    if (shareAction === undefined) throw new Error("Expected linked item share action")
+    await act(async () => shareAction.click())
+    const personSelect = [...host.querySelectorAll<HTMLSelectElement>("select")].find(
+      (select) => select.parentElement?.textContent?.startsWith("Person") === true
+    )
+    if (personSelect === undefined) throw new Error("Expected share grantee selector")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected select value setter")
+      valueSetter.call(personSelect, granteeId)
+      personSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    const create = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Create authorized link"
+    )
+    if (create === undefined) throw new Error("Expected share creation action")
+    await act(async () => create.click())
+    await act(async () => Promise.resolve())
+
+    expect(shareTransport.create).toHaveBeenCalledWith(
+      {
+        entityId: source.projection.entityId,
+        expiresAt: share.expiresAt,
+        granteePersonId: granteeId,
+        lifetime: "day",
+        shareId: selectedShareId
+      },
+      expect.any(AbortSignal)
+    )
+    const shareLink = host.querySelector<HTMLAnchorElement>(
+      `a[href="/shares/${WORKSET_WORKSPACE_ID}/${selectedShareId}"]`
+    )
+    expect(shareLink).not.toBeNull()
+    expect(shareLink?.textContent).not.toContain("cc_session")
+    expect(shareLink?.textContent).not.toContain(csrfToken)
+
+    const revoke = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Revoke link"
+    )
+    if (revoke === undefined) throw new Error("Expected share revocation action")
+    await act(async () => revoke.click())
+    await act(async () => Promise.resolve())
+    expect(shareTransport.revoke).toHaveBeenCalledWith(WORKSET_WORKSPACE_ID, selectedShareId, expect.any(AbortSignal))
+    expect(host.textContent).toContain("This link no longer resolves")
   })
 })
