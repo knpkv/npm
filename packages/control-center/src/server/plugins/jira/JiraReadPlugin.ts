@@ -201,7 +201,7 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
     configuration,
     load: (page) =>
       provider.getChangelogs(request.vendorImmutableId, page).pipe(
-        Effect.map((response) => ({ values: response.histories, total: response.total }))
+        Effect.map((response) => ({ values: response.values, total: response.total }))
       )
   })
   const event = yield* normalizeJiraIssue({

@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import { MaximumPluginPayloadBytes } from "../../../domain/plugins/bounds.js"
 import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
 import type { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { PluginMalformedResponseFailure } from "../failures.js"
@@ -134,6 +135,9 @@ interface MutablePerson {
 const JsonRecord = Schema.Record(Schema.String, Schema.Json)
 const MAX_RICH_TEXT_CHARACTERS = 4_000
 const MAX_CHANGE_VALUE_CHARACTERS = 1_000
+const jsonEncoder = new TextEncoder()
+
+const jsonByteLength = (value: unknown): number => jsonEncoder.encode(JSON.stringify(value)).byteLength
 
 const richTextFragments = (value: Schema.Json): ReadonlyArray<string> => {
   if (typeof value === "string") return [value]
@@ -227,53 +231,44 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     "jira-changelog-shape-invalid"
   )
 
-  const people = new Map<string, MutablePerson>()
-  const assigneeId = addPerson(people, issue.fields.assignee, "assignee")
-  const reporterId = addPerson(people, issue.fields.reporter, "reporter")
-  const creatorId = addPerson(people, issue.fields.creator, "creator")
-
-  const normalizedComments = comments.map((comment) => ({
-    id: comment.id,
-    authorId: addPerson(people, comment.author, "commenter"),
-    updateAuthorId: addPerson(people, comment.updateAuthor, "comment-editor"),
-    body: normalizeRichText(comment.body),
-    createdAt: comment.created ?? null,
-    updatedAt: comment.updated ?? null
-  }))
-
-  const normalizedHistory = changelogs.map((history) => ({
-    id: history.id,
-    authorId: addPerson(people, history.author, "change-author"),
-    createdAt: history.created ?? null,
-    changes: (history.items ?? []).map((item) => ({
-      field: item.field ?? item.fieldId ?? "unknown",
-      from: compact(item.fromString ?? item.from),
-      to: compact(item.toString ?? item.to)
-    }))
-  }))
-
-  const collaborators = Array.from(people.values()).map((person) => ({
-    providerPersonId: person.providerPersonId,
-    displayName: person.displayName,
-    avatarUrl: person.avatarUrl,
-    active: person.active,
-    roles: Array.from(person.roles).sort()
-  }))
   const baseUrl = input.webBaseUrl.href.endsWith("/")
     ? input.webBaseUrl.href.slice(0, -1)
     : input.webBaseUrl.href
   const sourceUrl = new URL(`${baseUrl}/browse/${encodeURIComponent(issue.key)}`)
 
-  const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
-    _tag: "UpsertEntity",
-    eventId: `jira:issue:${issue.id}:${issue.fields.updated}`,
-    observedAt: input.observedAt,
-    revision: issue.fields.updated,
-    entityType: "jira.issue",
-    vendorImmutableId: issue.id,
-    sourceUrl,
-    title: `${issue.key} · ${issue.fields.summary}`.slice(0, 500),
-    attributes: {
+  const retainedComments = [...comments]
+  const retainedChangelogs = [...changelogs]
+  const makeAttributes = () => {
+    const people = new Map<string, MutablePerson>()
+    const assigneeId = addPerson(people, issue.fields.assignee, "assignee")
+    const reporterId = addPerson(people, issue.fields.reporter, "reporter")
+    const creatorId = addPerson(people, issue.fields.creator, "creator")
+    const normalizedComments = retainedComments.map((comment) => ({
+      id: comment.id,
+      authorId: addPerson(people, comment.author, "commenter"),
+      updateAuthorId: addPerson(people, comment.updateAuthor, "comment-editor"),
+      body: normalizeRichText(comment.body),
+      createdAt: comment.created ?? null,
+      updatedAt: comment.updated ?? null
+    }))
+    const normalizedHistory = retainedChangelogs.map((history) => ({
+      id: history.id,
+      authorId: addPerson(people, history.author, "change-author"),
+      createdAt: history.created ?? null,
+      changes: (history.items ?? []).map((item) => ({
+        field: item.field ?? item.fieldId ?? "unknown",
+        from: compact(item.fromString ?? item.from),
+        to: compact(item.toString ?? item.to)
+      }))
+    }))
+    const collaborators = Array.from(people.values()).map((person) => ({
+      providerPersonId: person.providerPersonId,
+      displayName: person.displayName,
+      avatarUrl: person.avatarUrl,
+      active: person.active,
+      roles: Array.from(person.roles).sort()
+    }))
+    return {
       schemaVersion: 1,
       key: issue.key,
       summary: issue.fields.summary,
@@ -310,11 +305,43 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       collaborators,
       comments: normalizedComments,
       commentTotal: input.comments.total,
-      commentsTruncated: input.comments.truncated,
+      commentsTruncated: input.comments.truncated || retainedComments.length < comments.length,
       history: normalizedHistory,
       historyTotal: input.changelogs.total,
-      historyTruncated: input.changelogs.truncated
+      historyTruncated: input.changelogs.truncated || retainedChangelogs.length < changelogs.length
     }
+  }
+  let attributes = makeAttributes()
+  while (
+    jsonByteLength(attributes) > MaximumPluginPayloadBytes &&
+    (retainedComments.length > 0 || retainedChangelogs.length > 0)
+  ) {
+    const currentBytes = jsonByteLength(attributes)
+    const activityCount = retainedComments.length + retainedChangelogs.length
+    const removeCount = Math.max(
+      1,
+      Math.ceil(activityCount * (1 - MaximumPluginPayloadBytes / currentBytes))
+    )
+    for (let removed = 0; removed < removeCount; removed += 1) {
+      if (retainedComments.length >= retainedChangelogs.length && retainedComments.length > 0) {
+        retainedComments.shift()
+      } else {
+        retainedChangelogs.shift()
+      }
+    }
+    attributes = makeAttributes()
+  }
+
+  const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
+    _tag: "UpsertEntity",
+    eventId: `jira:issue:${issue.id}:${issue.fields.updated}`,
+    observedAt: input.observedAt,
+    revision: issue.fields.updated,
+    entityType: "jira.issue",
+    vendorImmutableId: issue.id,
+    sourceUrl,
+    title: `${issue.key} · ${issue.fields.summary}`.slice(0, 500),
+    attributes
   }).pipe(Effect.mapError(() => malformed("jira-normalized-issue-invalid")))
   if (event._tag !== "UpsertEntity") return yield* malformed("jira-normalized-event-kind-invalid")
   return event

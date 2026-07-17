@@ -128,7 +128,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
     }),
   getChangelogs: (_issueId, request) =>
     Effect.succeed({
-      histories: request.startAt === 0 ? changelogs : [],
+      values: request.startAt === 0 ? changelogs : [],
       startAt: request.startAt,
       maxResults: request.maxResults,
       total: changelogs.length
@@ -237,6 +237,48 @@ describe("JiraReadPlugin", () => {
       assert.lengthOf(yield* Ref.get(requests), 1)
       assert.strictEqual(attributes.commentTotal, 10)
       assert.isTrue(attributes.commentsTruncated)
+    }))
+
+  it.effect("trims combined comment and history activity to the normalized payload budget", () =>
+    Effect.gen(function*() {
+      const largeComments = Array.from({ length: 250 }, (_, index) => ({
+        ...comments[0],
+        id: `large-comment-${index}`,
+        body: "c".repeat(4_000)
+      }))
+      const largeChangelogs = Array.from({ length: 250 }, (_, index) => ({
+        ...changelogs[0],
+        id: `large-history-${index}`,
+        items: [{ field: "description", fromString: "f".repeat(1_000), toString: "t".repeat(1_000) }]
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Effect.succeed({
+            comments: largeComments.slice(request.startAt, request.startAt + request.maxResults),
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: largeComments.length
+          }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({
+            values: largeChangelogs.slice(request.startAt, request.startAt + request.maxResults),
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: largeChangelogs.length
+          })
+      })
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 5 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+      assert.isBelow(new TextEncoder().encode(JSON.stringify(result.event.attributes)).byteLength, 262_145)
+      assert.isBelow(attributes.comments.length, largeComments.length)
+      assert.isBelow(attributes.history.length, largeChangelogs.length)
+      assert.isTrue(attributes.commentsTruncated)
+      assert.isTrue(attributes.historyTruncated)
     }))
 
   it.effect("reports an inconsistent empty provider page as truncated", () =>

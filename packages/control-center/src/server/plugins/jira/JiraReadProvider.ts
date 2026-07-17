@@ -45,7 +45,7 @@ export interface JiraReadProvider {
   readonly getChangelogs: (
     issueId: string,
     request: JiraPageRequest
-  ) => Effect.Effect<JiraApi.PageOfChangelogs, PluginFailure>
+  ) => Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -60,12 +60,16 @@ const statusOf = (error: unknown): number | undefined => {
 
 const isNotFound = (error: unknown): boolean => statusOf(error) === 404
 
-const retryAfterSeconds = (error: unknown): number => {
+const retryAfterSeconds = (error: unknown, now: DateTime.DateTime): number => {
   if (!HttpClientError.isHttpClientError(error)) return 60
   const value = error.response?.headers["retry-after"]
   if (value === undefined) return 60
   const seconds = Number(value)
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 3_600) : 60
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds, 3_600)
+  const retryAt = DateTime.make(value)
+  if (Option.isNone(retryAt)) return 60
+  const delayMillis = DateTime.toEpochMillis(retryAt.value) - DateTime.toEpochMillis(now)
+  return Math.min(Math.max(Math.ceil(delayMillis / 1_000), 0), 3_600)
 }
 
 const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
@@ -77,7 +81,8 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
   if (status === 403) return yield* new PluginAuthorizationFailure({ operation })
   if (status === 408 || status === 504) return yield* new PluginTimeoutFailure({ operation })
   if (status === 429) {
-    const retryAt = DateTime.add(yield* DateTime.now, { seconds: retryAfterSeconds(error) })
+    const now = yield* DateTime.now
+    const retryAt = DateTime.add(now, { seconds: retryAfterSeconds(error, now) })
     return yield* new PluginRateLimitFailure({ operation, retryAt })
   }
   if (Schema.isSchemaError(error)) {
@@ -97,6 +102,9 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
   }
   return yield* new PluginOutageFailure({ operation })
 })
+
+/** Translate a generated-client failure at the provider boundary. @internal */
+export const mapJiraReadProviderFailure = mapFailure
 
 const providerCall = <Value, Error>(
   operation: string,
