@@ -105,7 +105,8 @@ const AwsCredentialIdentity = Schema.Struct({
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
   tags.some((tag) => Predicate.isTagged(cause, tag))
 
-const mapAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(function*(
+/** Map provider failures without exposing raw AWS causes. @internal */
+export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(function*(
   operation: string,
   cause: unknown
 ): Effect.fn.Return<never, CodePipelineProviderFailure> {
@@ -130,7 +131,9 @@ const mapAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(functi
     const retryAt = DateTime.add(yield* DateTime.now, { seconds: RETRY_DELAY_SECONDS })
     return yield* new PluginRateLimitFailure({ operation, retryAt })
   }
-  if (hasTag(cause, ["TimeoutError"])) return yield* new PluginTimeoutFailure({ operation })
+  if (hasTag(cause, ["TimeoutError", "RequestTimeoutException", "RequestExpired"])) {
+    return yield* new PluginTimeoutFailure({ operation })
+  }
   if (Schema.isSchemaError(cause)) {
     return yield* new PluginMalformedResponseFailure({
       operation,
@@ -140,6 +143,9 @@ const mapAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(functi
   return yield* new PluginOutageFailure({ operation })
 })
 
+/** Keep the configured shared profile explicit, including `default`. @internal */
+export const codePipelineCredentialProviderOptions = (profile: string): { readonly profile: string } => ({ profile })
+
 const acquireCredentials = Effect.fn("CodePipelineReadProvider.acquireCredentials")(function*(
   operation: string,
   account: CodePipelineAwsAccount
@@ -148,7 +154,7 @@ const acquireCredentials = Effect.fn("CodePipelineReadProvider.acquireCredential
   PluginAuthenticationFailure | PluginTimeoutFailure
 > {
   const raw = yield* Effect.tryPromise({
-    try: () => fromNodeProviderChain(account.profile === "default" ? {} : { profile: account.profile })(),
+    try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
     catch: () => new PluginAuthenticationFailure({ operation })
   }).pipe(
     Effect.timeoutOrElse({
@@ -185,7 +191,9 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
       orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
     }),
     Effect.catch((cause): Effect.Effect<never, CodePipelineProviderFailure> =>
-      Predicate.isTagged(cause, "PluginTimeoutFailure") ? Effect.fail(cause) : mapAwsFailure(operation, cause)
+      Predicate.isTagged(cause, "PluginTimeoutFailure")
+        ? Effect.fail(cause)
+        : mapCodePipelineAwsFailure(operation, cause)
     )
   )
 })

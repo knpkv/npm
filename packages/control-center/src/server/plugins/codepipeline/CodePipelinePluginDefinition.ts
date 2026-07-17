@@ -604,13 +604,15 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
                     diagnosticCode: "codepipeline-execution-cursor-repeated"
                   })
                 }
+                const remaining = state.remaining - 1
+                // A bounded run is terminal even when its persisted checkpoint can resume the provider cursor later.
+                const hasMore = page.nextToken !== null && remaining > 0
                 const normalized = yield* decodeOutput("codepipeline-sync", Schema.toType(PluginSyncPageV1), {
                   events,
                   checkpointAfterPage: checkpointFromToken(page.nextToken),
-                  hasMore: page.nextToken !== null
+                  hasMore
                 })
-                const remaining = state.remaining - 1
-                const next = page.nextToken === null || remaining <= 0
+                const next = !hasMore
                   ? Option.none<typeof state>()
                   : Option.some({
                     includePipeline: false,

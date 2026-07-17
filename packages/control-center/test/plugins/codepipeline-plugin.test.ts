@@ -15,13 +15,17 @@ import {
 } from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
 import { CodePipelineReadClient } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
+  codePipelineCredentialProviderOptions,
   CodePipelineReadProvider,
-  type CodePipelineReadProviderService
+  type CodePipelineReadProviderService,
+  mapCodePipelineAwsFailure
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
 import {
   PluginAuthenticationFailure,
   PluginConfigurationFailure,
-  PluginMalformedResponseFailure
+  PluginMalformedResponseFailure,
+  PluginOutageFailure,
+  PluginTimeoutFailure
 } from "../../src/server/plugins/failures.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { buildPluginDefinitionLayer } from "../../src/server/plugins/PluginDefinition.js"
@@ -296,6 +300,99 @@ describe("CodePipelinePlugin", () => {
         assert.strictEqual(stage.event.entityType, "aws.codepipeline.stage")
         assert.strictEqual(stage.event.attributes.status, "Succeeded")
       }
+    }))
+
+  it.effect("ends bounded execution runs terminally and resumes from the persisted provider cursor", () =>
+    Effect.gen(function*() {
+      const requestedTokens = yield* Ref.make<ReadonlyArray<string | null>>([])
+      const provider = baseProvider({
+        listPipelineExecutionsPage: (request) =>
+          Ref.update(requestedTokens, (tokens) => [...tokens, request.nextToken]).pipe(
+            Effect.as({
+              pipelineExecutionSummaries: [executionSummary(
+                request.nextToken === null ? "execution-1842" : "execution-1843",
+                "Succeeded"
+              )],
+              nextToken: request.nextToken === null ? "execution-page-2" : "execution-page-3"
+            })
+          )
+      })
+      const boundedConfiguration = { ...configuration, maximumExecutionPages: 1 }
+      const synchronize = (checkpoint: string | null) =>
+        runWithProvider(
+          provider,
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "executions", checkpoint })
+            return yield* connection.sync(request).pipe(Stream.runCollect)
+          }),
+          boundedConfiguration
+        )
+
+      const first = yield* synchronize(null)
+      const resumed = yield* synchronize(first[0]?.checkpointAfterPage ?? null)
+
+      assert.strictEqual(first.length, 1)
+      assert.isFalse(first[0]?.hasMore)
+      assert.strictEqual(first[0]?.checkpointAfterPage, "next:execution-page-2")
+      assert.strictEqual(resumed.length, 1)
+      assert.isFalse(resumed[0]?.hasMore)
+      assert.strictEqual(resumed[0]?.checkpointAfterPage, "next:execution-page-3")
+      assert.deepStrictEqual(yield* Ref.get(requestedTokens), [null, "execution-page-2"])
+    }))
+
+  it.effect("reserves checkpoint prefix space when decoding provider cursors", () =>
+    Effect.gen(function*() {
+      const synchronize = (nextToken: string) =>
+        runWithProvider(
+          baseProvider({
+            listPipelineExecutionsPage: () =>
+              Effect.succeed({
+                pipelineExecutionSummaries: [executionSummary("execution-1842", "Succeeded")],
+                nextToken
+              })
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "executions", checkpoint: null })
+            return yield* connection.sync(request).pipe(Stream.runCollect)
+          }),
+          { ...configuration, maximumExecutionPages: 1 }
+        )
+
+      const invalid = yield* synchronize("x".repeat(2_044)).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+      if (Result.isFailure(invalid)) assert.instanceOf(invalid.failure, PluginMalformedResponseFailure)
+
+      const valid = yield* synchronize("x".repeat(2_043))
+      assert.strictEqual(valid.length, 1)
+      assert.isFalse(valid[0]?.hasMore)
+      assert.strictEqual(valid[0]?.checkpointAfterPage.length, 2_048)
+    }))
+
+  it("keeps default and named AWS profiles explicit for credential acquisition", () => {
+    assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), { profile: "default" })
+    assert.deepStrictEqual(codePipelineCredentialProviderOptions("production"), { profile: "production" })
+  })
+
+  it.effect("maps AWS request-timeout tags separately from provider outages", () =>
+    Effect.gen(function*() {
+      const requestTimeout = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline",
+        { _tag: "RequestTimeoutException" }
+      ).pipe(Effect.flip)
+      const requestExpired = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline",
+        { _tag: "RequestExpired" }
+      ).pipe(Effect.flip)
+      const outage = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline",
+        { _tag: "ServiceUnavailable" }
+      ).pipe(Effect.flip)
+
+      assert.instanceOf(requestTimeout, PluginTimeoutFailure)
+      assert.instanceOf(requestExpired, PluginTimeoutFailure)
+      assert.instanceOf(outage, PluginOutageFailure)
     }))
 
   it.effect("Schema-rejects malformed AWS output before normalization", () =>

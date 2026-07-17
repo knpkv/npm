@@ -26,10 +26,16 @@ const EXECUTION_PROVIDER_PAGE_LIMIT = 1
 const ACTION_PROVIDER_PAGE_LIMIT = 100
 const PIPELINE_STAGE_LIMIT = 50
 const STAGE_ACTION_LIMIT = 50
+// Plugin checkpoints allow 2,048 characters and sync prefixes provider cursors with `next:`.
+const CHECKPOINT_PROVIDER_TOKEN_LIMIT = 2_043
 
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const Summary = Schema.String.check(Schema.isMaxLength(4_000))
-const PageToken = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_048))
+const PageToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(CHECKPOINT_PROVIDER_TOKEN_LIMIT)
+)
 const AwsStatus = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
 const RawCallerIdentity = Schema.Struct({
