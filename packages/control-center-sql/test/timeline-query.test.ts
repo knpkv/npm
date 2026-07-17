@@ -41,4 +41,30 @@ describe("renderTimelineQueries", () => {
     expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["action", "relationship"])
     expect(rendered.every(({ params }) => params.includes("human"))).toBe(true)
   })
+
+  it("renders only plugin sync activity for a plugin actor", () => {
+    const rendered = renderTimelineQueries({
+      actorKind: "plugin",
+      before: null,
+      from: null,
+      limit: 10,
+      to: null,
+      workspaceId: "workspace-1"
+    })
+
+    expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["plugin-sync"])
+  })
+
+  it("retains every system-capable source for a system actor", () => {
+    const rendered = renderTimelineQueries({
+      actorKind: "system",
+      before: null,
+      from: null,
+      limit: 10,
+      to: null,
+      workspaceId: "workspace-1"
+    })
+
+    expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["action", "relationship", "system"])
+  })
 })

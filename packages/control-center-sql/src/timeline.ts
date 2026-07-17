@@ -330,7 +330,10 @@ const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
 
 /** Render independently bounded source plans for one stable merged Timeline page. */
 export const renderTimelineQueries = (input: TimelineQueryInput): ReadonlyArray<RenderedTimelineQuery> => {
-  const queries: Array<RenderedTimelineQuery> = [auditQuery(input), relationshipQuery(input)]
+  const queries: Array<RenderedTimelineQuery> = []
+  if (input.actorKind !== "plugin") {
+    queries.push(auditQuery(input), relationshipQuery(input))
+  }
   if (input.actorKind === null || input.actorKind === "plugin") {
     queries.push(syncQuery(input))
   }

@@ -129,6 +129,13 @@ const contextFor = (path: string | null): AgentPageContext => {
       path: safePath
     }
   }
+  if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "timeline" && releaseId === null) {
+    return {
+      description: `Attributable delivery activity in workspace ${workspaceId}, including the exact actor and date filters.`,
+      label: "Workspace timeline",
+      path: safePath
+    }
+  }
   const activeWorkRelease = contextUrl.searchParams.get("release")
   const hasValidActiveWorkRelease = activeWorkRelease === null || decodeReleaseRouteId(activeWorkRelease) !== null
   if (
