@@ -29,6 +29,13 @@ const entityKinds: ReadonlyArray<DeliveryEntityKind> = [
   "time-entry"
 ]
 const services: ReadonlyArray<RlyService> = ["jira", "codecommit", "confluence", "codepipeline", "clockify"]
+const freshnessFormatter = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC"
+})
+
+export const formatItemFreshness = (freshness: string): string => freshnessFormatter.format(Date.parse(freshness))
 
 const entityKind = (value: string | null): DeliveryEntityKind | "all" =>
   entityKinds.find((candidate) => candidate === value) ?? "all"
@@ -214,7 +221,9 @@ export const ItemsPage = (): ReactElement => {
                 <StateLabel label={item.status} size="compact" tone={item.tone} />
                 <span>{labelForKind(item.kind)}</span>
                 <span>{item.owner}</span>
-                <time dateTime={item.freshness}>Synced</time>
+                <time dateTime={item.freshness} title={`Synchronized ${item.freshness}`}>
+                  {formatItemFreshness(item.freshness)}
+                </time>
               </div>
             </Surface>
           ))}

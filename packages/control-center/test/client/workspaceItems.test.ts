@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
-import { filterWorkspaceItems } from "../../src/client/items/ItemsPage.js"
+import { filterWorkspaceItems, formatItemFreshness } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
@@ -30,6 +30,8 @@ describe("workspace items", () => {
     expect(issue.href).toBe(
       `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${issue.entityId}#release-work`
     )
+    expect(issue.freshness).toBe("2026-07-14T10:02:00.000Z")
+    expect(formatItemFreshness(issue.freshness)).toBe("14 Jul 2026, 10:02")
   })
 
   it("combines text, service, type, and status filters without substituting results", () => {
