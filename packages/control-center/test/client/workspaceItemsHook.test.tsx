@@ -25,7 +25,9 @@ const index: WorkspaceEntityProjectionIndex = {
   truncated: false,
   items: releaseWorksetFixture.entityProjections.map((entry) => ({
     ...entry,
-    canonicalReleaseId: releaseWorksetFixture.releaseId
+    canonicalReleaseId: releaseWorksetFixture.releaseId,
+    releaseIds: [releaseWorksetFixture.releaseId],
+    releaseMembershipsTruncated: false
   }))
 }
 

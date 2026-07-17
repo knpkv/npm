@@ -115,11 +115,38 @@ const ReleaseSlice = Schema.Struct({
   evidenceItems: Schema.Array(EvidenceItem)
 })
 
+const MAXIMUM_WORKSPACE_ENTITY_RELEASES = 500
+
+const WorkspaceEntityReleaseIds = Schema.Array(ReleaseId).check(
+  Schema.isUnique(),
+  Schema.isMaxLength(MAXIMUM_WORKSPACE_ENTITY_RELEASES),
+  Schema.makeFilter(
+    (releaseIds) =>
+      releaseIds.every((releaseId, index) => {
+        const previous = releaseIds[index - 1]
+        return index === 0 || (previous !== undefined && previous < releaseId)
+      }),
+    { expected: "sorted workspace entity release identifiers" }
+  )
+)
+
 const WorkspaceEntityProjection = Schema.Struct({
   canonicalReleaseId: Schema.NullOr(ReleaseId),
+  releaseIds: WorkspaceEntityReleaseIds,
+  releaseMembershipsTruncated: Schema.Boolean,
   projection: DeliveryEntityProjection,
   recordedAt: UtcTimestamp
-})
+}).check(
+  Schema.makeFilter(
+    ({ canonicalReleaseId, releaseIds }) => canonicalReleaseId === (releaseIds[0] ?? null),
+    { expected: "canonical release identifier to be the first current release membership" }
+  ),
+  Schema.makeFilter(
+    ({ releaseIds, releaseMembershipsTruncated }) =>
+      !releaseMembershipsTruncated || releaseIds.length === MAXIMUM_WORKSPACE_ENTITY_RELEASES,
+    { expected: "truncated workspace release memberships to contain the complete bounded prefix" }
+  )
+)
 
 const WorkspaceEntityProjections = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

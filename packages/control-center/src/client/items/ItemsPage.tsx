@@ -9,7 +9,11 @@ import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
 import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
-import type { WorkspaceItemPresentation, WorkspaceItemStatus } from "./presentWorkspaceItems.js"
+import {
+  type WorkspaceItemPresentation,
+  type WorkspaceItemStatus,
+  workspaceItemReleaseHref
+} from "./presentWorkspaceItems.js"
 import { useWorkspaceItems } from "./useWorkspaceItems.js"
 import styles from "./ItemsPage.module.css"
 
@@ -99,6 +103,19 @@ const labelForKind = (kind: DeliveryEntityKind): string =>
     .map((part) => `${part.charAt(0).toLocaleUpperCase("en-US")}${part.slice(1)}`)
     .join(" ")
 
+export const workspaceItemMembershipDescription = (item: WorkspaceItemPresentation): string => {
+  if (item.releaseIds.length === 0) {
+    return "This current object is not linked to a release yet. Its provider-specific full view will remain available here when that integration is connected."
+  }
+  if (item.routableReleaseIds.length === 0) {
+    return `This object is linked to ${item.releaseIds.length}${item.releaseMembershipsTruncated ? "+" : ""} release${item.releaseIds.length === 1 ? "" : "s"} outside the current portfolio. Its membership remains visible without routing to an unavailable release page.`
+  }
+  if (item.releaseIds.length === 1) {
+    return "This object is linked to one release and can be opened in its complete delivery context."
+  }
+  return `This object is linked to ${item.releaseIds.length}${item.releaseMembershipsTruncated ? "+" : ""} releases. Choose the exact release context to avoid silently substituting another delivery trace.`
+}
+
 /** Compact workspace-wide index of normalized delivery objects. */
 export const ItemsPage = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
@@ -107,6 +124,10 @@ export const ItemsPage = (): ReactElement => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const portfolio = context.controller.state._tag === "ready" ? context.controller.state.portfolio : null
+  const releaseById = useMemo(
+    () => new Map(portfolio?.releases.map((release) => [release.id, release]) ?? []),
+    [portfolio]
+  )
   const routableReleaseIds = useMemo(() => new Set(portfolio?.releases.map(({ id }) => id) ?? []), [portfolio])
   const refreshKey =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
@@ -270,23 +291,24 @@ export const ItemsPage = (): ReactElement => {
             {selectedItem.title}
           </Text>
           <Text tone="secondary" variant="body-large">
-            {selectedItem.releaseId === null
-              ? "This current object is not linked to a release yet. Its provider-specific full view will remain available here when that integration is connected."
-              : "This object is linked to a release and can be opened in its complete delivery context."}
+            {workspaceItemMembershipDescription(selectedItem)}
           </Text>
           <div className={styles.selectionActions}>
-            {selectedItem.releaseId === null ? null : (
-              <Link
-                state={makeReleaseRouteState(
-                  context.workspaceId,
-                  selectedItem.releaseId,
-                  releaseOriginFromLocation(location)
-                )}
-                to={selectedItem.href}
-              >
-                Open release context
-              </Link>
-            )}
+            <div className={styles.membershipChoices}>
+              {selectedItem.routableReleaseIds.map((releaseId) => {
+                const release = releaseById.get(releaseId)
+                return (
+                  <Link
+                    key={releaseId}
+                    state={makeReleaseRouteState(context.workspaceId, releaseId, releaseOriginFromLocation(location))}
+                    to={workspaceItemReleaseHref(context.workspaceId, releaseId, selectedItem.entityId)}
+                  >
+                    Open {release === undefined ? `release ${releaseId.slice(-6)}` : release.relay.codename}
+                    {release === undefined ? null : <span>{release.version}</span>}
+                  </Link>
+                )
+              })}
+            </div>
             <Button onClick={clearSelection}>Back to items</Button>
           </div>
         </Surface>
@@ -339,6 +361,11 @@ export const ItemsPage = (): ReactElement => {
               <div className={styles.meta}>
                 <StateLabel label={item.status} size="compact" tone={item.tone} />
                 <span>{labelForKind(item.kind)}</span>
+                <span>
+                  {item.releaseIds.length === 0
+                    ? "Unlinked"
+                    : `${item.releaseIds.length}${item.releaseMembershipsTruncated ? "+" : ""} release${item.releaseIds.length === 1 ? "" : "s"}`}
+                </span>
                 <span>{item.owner}</span>
                 <time dateTime={item.freshness} title={`Synchronized ${item.freshness}`}>
                   {formatItemFreshness(item.freshness)}
