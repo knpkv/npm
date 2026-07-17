@@ -282,44 +282,45 @@ const makeStagedDataRootWriter = Effect.fn("DataRootProtocol.makeStagedWriter")(
     const destination = path.join(parent.path, name)
     yield* assertRootIdentity
     yield* parent.assertIdentity
-    const opened = yield* fileSystem.open(destination, { flag: "wx", mode: STAGED_FILE_MODE }).pipe(
-      Effect.provideService(Scope.Scope, scope),
-      Effect.result
-    )
-    if (Result.isFailure(opened)) {
-      return yield* protocolError(opened.failure.reason._tag === "AlreadyExists" ? "cleanup-uncertain" : "storage")
-    }
+    yield* Effect.scoped(Effect.gen(function*() {
+      const opened = yield* fileSystem.open(destination, { flag: "wx", mode: STAGED_FILE_MODE }).pipe(Effect.result)
+      if (Result.isFailure(opened)) {
+        return yield* protocolError(
+          opened.failure.reason._tag === "AlreadyExists" ? "cleanup-uncertain" : "storage"
+        )
+      }
 
-    // The pathname open may have crossed a concurrent stage substitution. No
-    // bytes reach the stable handle until every opened and named identity has
-    // been rebound to the pinned root and parent after that open.
-    yield* assertRootIdentity
-    yield* parent.assertIdentity
-    yield* mapProtocolStorage(fileSystem.chmod(destination, STAGED_FILE_MODE))
-    const info = yield* mapProtocolStorage(opened.success.stat)
-    const assertFileIdentity = Effect.gen(function*() {
+      // The pathname open may have crossed a concurrent stage substitution. No
+      // bytes reach the stable handle until every opened and named identity has
+      // been rebound to the pinned root and parent after that open.
       yield* assertRootIdentity
       yield* parent.assertIdentity
-      const descriptorInfo = yield* opened.success.stat.pipe(Effect.result)
-      const namedInfo = yield* fileSystem.stat(destination).pipe(Effect.result)
-      const canonical = yield* fileSystem.realPath(destination).pipe(Effect.result)
-      if (
-        Result.isFailure(descriptorInfo) ||
-        Result.isFailure(namedInfo) ||
-        Result.isFailure(canonical) ||
-        canonical.success !== destination ||
-        !sameIdentity(info, descriptorInfo.success) ||
-        !sameIdentity(descriptorInfo.success, namedInfo.success) ||
-        !isPrivateFile(descriptorInfo.success) ||
-        !isPrivateFile(namedInfo.success)
-      ) return yield* protocolError("cleanup-uncertain")
-      yield* parent.assertIdentity
-      yield* assertRootIdentity
-    })
-    yield* assertFileIdentity
-    yield* mapProtocolStorage(opened.success.writeAll(bytes))
-    yield* mapProtocolStorage(opened.success.sync)
-    yield* assertFileIdentity
+      yield* mapProtocolStorage(fileSystem.chmod(destination, STAGED_FILE_MODE))
+      const info = yield* mapProtocolStorage(opened.success.stat)
+      const assertFileIdentity = Effect.gen(function*() {
+        yield* assertRootIdentity
+        yield* parent.assertIdentity
+        const descriptorInfo = yield* opened.success.stat.pipe(Effect.result)
+        const namedInfo = yield* fileSystem.stat(destination).pipe(Effect.result)
+        const canonical = yield* fileSystem.realPath(destination).pipe(Effect.result)
+        if (
+          Result.isFailure(descriptorInfo) ||
+          Result.isFailure(namedInfo) ||
+          Result.isFailure(canonical) ||
+          canonical.success !== destination ||
+          !sameIdentity(info, descriptorInfo.success) ||
+          !sameIdentity(descriptorInfo.success, namedInfo.success) ||
+          !isPrivateFile(descriptorInfo.success) ||
+          !isPrivateFile(namedInfo.success)
+        ) return yield* protocolError("cleanup-uncertain")
+        yield* parent.assertIdentity
+        yield* assertRootIdentity
+      })
+      yield* assertFileIdentity
+      yield* mapProtocolStorage(opened.success.writeAll(bytes))
+      yield* mapProtocolStorage(opened.success.sync)
+      yield* assertFileIdentity
+    }))
     yield* mapProtocolStorage(parent.handle.sync)
   })
 

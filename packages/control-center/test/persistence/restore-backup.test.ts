@@ -125,6 +125,38 @@ describe("restore backup", () => {
       yield* assertOwnerOnlyTree(prepared.dataRoot)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("closes each staged file handle before restoring the next file", () =>
+    Effect.gen(function*() {
+      const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-file-handles-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const activeStagedFileHandles = yield* Ref.make(0)
+      const maximumActiveStagedFileHandles = yield* Ref.make(0)
+      const tracking = FileSystem.make({
+        ...fileSystem,
+        open: (target, options) =>
+          fileSystem.open(target, options).pipe(
+            Effect.tap(() =>
+              options?.flag === "wx"
+                ? Ref.updateAndGet(activeStagedFileHandles, (active) => active + 1).pipe(
+                  Effect.tap((active) =>
+                    Ref.update(maximumActiveStagedFileHandles, (maximum) => Math.max(maximum, active))
+                  ),
+                  Effect.tap(() =>
+                    Effect.addFinalizer(() => Ref.update(activeStagedFileHandles, (active) => active - 1))
+                  )
+                )
+                : Effect.void
+            )
+          )
+      })
+      yield* restoreBackup({
+        archiveRoot,
+        configuredDataRoot: path.join(root, "restored")
+      }).pipe(Effect.provideService(FileSystem.FileSystem, tracking))
+      assert.strictEqual(yield* Ref.get(maximumActiveStagedFileHandles), 1)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("survives data-root preparation and database reopen after restart", () =>
     Effect.gen(function*() {
       const { archiveRoot, root } = yield* makeEmptyVerifiedArchive("control-center-restore-restart-")
