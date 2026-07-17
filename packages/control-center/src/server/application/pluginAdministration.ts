@@ -240,7 +240,7 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
   const identity = {
     kind: outcome.success.discovery.account === null
       ? "workspace"
-      : record.providerId === "jira" || record.providerId === "clockify"
+      : record.providerId === "jira" || record.providerId === "confluence" || record.providerId === "clockify"
       ? "user"
       : "account",
     label: identityLabel(record.providerId),

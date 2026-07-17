@@ -58,6 +58,8 @@ const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000
 const OTHER_WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000072")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000073")
 const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000074")
+const CONFLUENCE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008b")
+const CODEPIPELINE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008c")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
@@ -1362,9 +1364,24 @@ describe("application adapters", () => {
       }
     })))
 
-  it.effect("tests the scoped provider and returns its secret-free user identity", () =>
+  it.effect("classifies retrieved people as users and AWS principals as accounts", () =>
     withApplication(Effect.gen(function*() {
       yield* setup
+      const persistence = yield* Persistence
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        displayName: PluginConnectionDisplayName.make("Payments Confluence"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        displayName: PluginConnectionDisplayName.make("Payments CodePipeline"),
+        isEnabled: true,
+        createdAt: T0
+      })
       const connection: PluginConnectionV1 = {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
@@ -1381,7 +1398,10 @@ describe("application adapters", () => {
       }
       const pluginConnections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId, workspaceId }) =>
-          pluginConnectionId === PLUGIN_ID && workspaceId === WORKSPACE_ID
+          workspaceId === WORKSPACE_ID &&
+            (pluginConnectionId === PLUGIN_ID ||
+              pluginConnectionId === CONFLUENCE_PLUGIN_ID ||
+              pluginConnectionId === CODEPIPELINE_PLUGIN_ID)
             ? Effect.succeed(Context.make(PluginConnection, connection))
             : Effect.die("connection test crossed its requested scope"),
         invalidate: () => Effect.void
@@ -1397,6 +1417,34 @@ describe("application adapters", () => {
         assert.deepStrictEqual(result.identity, {
           kind: "user",
           label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+
+      const confluenceResult = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID
+      })
+      assert.strictEqual(confluenceResult._tag, "healthy")
+      if (confluenceResult._tag === "healthy") {
+        assert.deepStrictEqual(confluenceResult.identity, {
+          kind: "user",
+          label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+
+      const codePipelineResult = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID
+      })
+      assert.strictEqual(codePipelineResult._tag, "healthy")
+      if (codePipelineResult._tag === "healthy") {
+        assert.deepStrictEqual(codePipelineResult.identity, {
+          kind: "account",
+          label: "AWS account",
           displayName: "Avery Bell",
           providerImmutableId: "atlassian-account-123"
         })
