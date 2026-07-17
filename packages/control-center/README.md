@@ -124,7 +124,7 @@ The exported `PluginConnection` service contains reads, health, sync, complete-d
 
 The first production CodeCommit slice exports an opaque `CodeCommitPluginDefinition` from `@knpkv/control-center/server`. One connection configures an AWS profile, region, and repository name. It negotiates `entity.read@1`, `sync.incremental@1`, and `diff.inventory@1`, then normalizes open pull requests with immutable PR/base/head revisions and complete cursor-based changed-file pages. Provider output is decoded by `@knpkv/codecommit-core` before it enters the vendor-neutral plugin contract; raw AWS types and causes do not cross the adapter.
 
-This milestone is deliberately read-only. It does not negotiate diff content, comments, commits/history, checks, review state changes, approval, merge, or any governed mutation capability. CodeCommit's changed-file API does not report binary, generated, or oversized classification, so this slice leaves those inventory flags false until the owning package gains bounded blob/content inspection. The adapter definition is available for first-party runtime registration, but connection administration and the production runtime catalog remain later integration work.
+This milestone is deliberately read-only. It does not negotiate diff content, comments, commits/history, checks, review state changes, approval, merge, or any governed mutation capability. CodeCommit's changed-file API does not report binary, generated, or oversized classification, so this slice leaves those inventory flags false until the owning package gains bounded blob/content inspection.
 
 ### AWS CodePipeline read adapter
 
@@ -138,7 +138,7 @@ Normalized events carry the pipeline ARN, region, provider update/sample time, i
 
 `makeJiraReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Jira adapter around the shared Schema-validated `JiraApiClient`. Its negotiated surface is deliberately limited to `entity.read` for `jira.issue`; provider mutations and workspace-wide JQL synchronization are not implied by this adapter.
 
-The secret-free runtime configuration requires a root `webBaseUrl`, an activity `pageSize` from 1 to 50, a `maximumPages` limit from 1 to 5, and a per-request `operationTimeoutMillis` from 1,000 to 120,000. Authentication remains in the externally supplied `JiraApiClient` layer, so tokens never enter plugin configuration.
+The secret-free runtime configuration requires an HTTPS Jira Cloud tenant root `webBaseUrl` under `atlassian.net`, an activity `pageSize` from 1 to 50, a `maximumPages` limit from 1 to 5, and a per-request `operationTimeoutMillis` from 1,000 to 120,000. Authentication remains in the externally supplied `JiraApiClient` layer, so tokens never enter plugin configuration.
 
 An issue read fetches the issue, comments, and changelog through interruptible Effect operations. Pagination stops at the configured bound and records explicit comment/history truncation flags. The normalized issue attributes include description and environment text, workflow metadata, release versions, parent and subtasks, comments, history, and deduplicated collaborators with roles and avatar URLs. If fixed issue fields would cross the payload cap, optional arrays and presentation fields are omitted deterministically and named in `truncatedFields`. OpenAPI, HTTP, timeout, authentication, authorization, rate-limit, outage, and adapter-schema failures are translated to the closed plugin failure taxonomy without retaining raw provider causes.
 
@@ -182,7 +182,7 @@ Provider credentials belong in `SecretStore`, never normal SQL rows. The store r
 
 The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, release-aware agent turns, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types. Agent turns are authenticated CSRF-protected mutations; the server derives workspace identity from the session and returns the exact bounded release projection and event cursor used for the answer.
 
-An owner can run a live connection test from the Services page. The CSRF-protected endpoint acquires the workspace-scoped provider runtime, calls its health and discovery operations, and returns only a normalized provider identity, checked time, latency, and safe failure classification. Credentials, headers, provider response bodies, and executor authority never enter the response. A server composition must supply `pluginConnections` (or reuse the release-synchronization connection map) for live tests; without a configured runtime registry the endpoint reports service unavailable.
+An owner can run a live connection test from the Services page. The CSRF-protected endpoint acquires the workspace-scoped provider runtime, calls its health and discovery operations, and returns only a normalized provider identity, checked time, latency, and safe failure classification. Credentials, headers, provider response bodies, and executor authority never enter the response. The ordinary `start` command installs the first-party runtime map; embedded server compositions may still inject `pluginConnections` for tests or specialized hosting.
 
 The authenticated Timeline merges bounded pages from governed-action audit events,
 plugin sync commits, relationship revisions, and domain events. Each source query
@@ -201,6 +201,22 @@ entry; approvers retain the ordinary redacted page and receive no inspect
 control. Persisted artifacts and retention mutations remain deferred.
 
 Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
+
+### Production first-party runtime
+
+The server owns one scoped runtime cache shared by connection administration. A lookup first loads the exact workspace-scoped connection, configuration, and negotiated descriptor records. Disabled, absent, malformed, cross-provider, or stale-descriptor records fail before a provider client is acquired. Invalidation closes the cached layer and its secret leases; the runtime authority digest changes with connection and configuration revisions, runtime revision and descriptor generation, descriptor digest, and credential reference generation.
+
+Provisioning must persist the descriptor-advertised keys with the exact value kinds below. AWS uses the local profile chain and stores no credential secret. The Clockify API origin is fixed by the server as `https://api.clockify.me/api` and is not configurable.
+
+| Provider     | Required persisted keys                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CodeCommit   | `profile` (text), `region` (text), `repositoryName` (text)                                                                                                                    |
+| CodePipeline | `profile`, `region`, `pipelineName` (text); `maximumExecutionPages`, `actionPageSize`, `maximumActionPages`, `maximumActionsPerExecution`, `operationTimeoutMillis` (integer) |
+| Jira         | `webBaseUrl` (url), `email` (text), `apiToken` (secret reference), `pageSize`, `maximumPages`, `operationTimeoutMillis` (integer)                                             |
+| Confluence   | `siteBaseUrl` (url), `email` (text), `apiToken` (secret reference), `siteId`, `spaceId`, `probePageId` (text)                                                                 |
+| Clockify     | `apiKey` (secret reference), `webBaseUrl` (url), `workspaceId`, `userIds` (text), `pageSize`, `maximumPages`, `maximumConcurrency`, `operationTimeoutMillis` (integer)        |
+
+The runtime catalog remains read-oriented. It is not installed as the governed action executor registry; existing governed fake-registry coverage remains the only write-execution composition in this slice.
 
 The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.
 

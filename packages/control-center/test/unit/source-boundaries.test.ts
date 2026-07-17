@@ -80,6 +80,12 @@ describe("Control Center source boundaries", () => {
         "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client/ConfluenceApiClient\""
       )
     ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts",
+        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client\""
+      )
+    ).toEqual([])
   })
 
   it("rejects browser and API imports of server code", () => {

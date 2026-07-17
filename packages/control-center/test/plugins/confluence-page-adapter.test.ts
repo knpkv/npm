@@ -151,6 +151,32 @@ const normalizedAttributes = (
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 describe("Confluence page adapter", () => {
+  it("accepts only HTTPS Confluence Cloud tenant root URLs", () => {
+    const decode = Schema.decodeUnknownResult(ConfluencePageAdapterConfiguration)
+    const configured = (siteBaseUrl: string) => ({
+      siteBaseUrl,
+      siteId: "site-acme",
+      spaceId: "space-payments",
+      probePageId: PAGE_ID
+    })
+
+    assert.isTrue(Result.isSuccess(decode(configured("https://acme.atlassian.net"))))
+    for (
+      const invalid of [
+        "http://acme.atlassian.net",
+        "https://localhost",
+        "https://collector.example",
+        "https://atlassian.net.evil.example",
+        "https://user:token@acme.atlassian.net",
+        "https://acme.atlassian.net:8443",
+        "https://acme.atlassian.net/wiki",
+        "https://acme.atlassian.net#collector"
+      ]
+    ) {
+      assert.isTrue(Result.isFailure(decode(configured(invalid))), invalid)
+    }
+  })
+
   it.effect("discovers the authenticated Confluence user and configured space", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(defaultClient())

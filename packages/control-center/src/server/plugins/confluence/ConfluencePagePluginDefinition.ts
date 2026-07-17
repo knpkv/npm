@@ -17,8 +17,23 @@ export const confluencePagePluginDescriptor = {
       _tag: "url",
       key: "siteBaseUrl",
       label: "Site URL",
-      description: "HTTPS base URL of the Confluence Cloud site.",
+      description: "HTTPS Confluence Cloud tenant root URL under atlassian.net.",
       required: true
+    },
+    {
+      _tag: "text",
+      key: "email",
+      label: "Account email",
+      description: "Atlassian account email used for Confluence Cloud basic authentication.",
+      required: true
+    },
+    {
+      _tag: "secret-reference",
+      key: "apiToken",
+      label: "API token",
+      description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+      required: true,
+      secretKind: "token"
     },
     {
       _tag: "text",

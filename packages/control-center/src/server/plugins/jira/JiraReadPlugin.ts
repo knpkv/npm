@@ -33,8 +33,15 @@ const OperationTimeoutMillis = Schema.Int.check(Schema.isBetween({ minimum: 1_00
 const JiraWebBaseUrl = SourceUrl.pipe(
   Schema.check(
     Schema.makeFilter(
-      ({ hash, pathname, search }) => hash.length === 0 && search.length === 0 && pathname === "/",
-      { expected: "a root Jira web URL without query parameters or fragments" }
+      ({ hash, hostname, pathname, port, protocol, search }) =>
+        protocol === "https:" &&
+        hostname.endsWith(".atlassian.net") &&
+        hostname.length > ".atlassian.net".length &&
+        port.length === 0 &&
+        hash.length === 0 &&
+        search.length === 0 &&
+        pathname === "/",
+      { expected: "an HTTPS Jira Cloud tenant root URL under atlassian.net" }
     )
   )
 )
@@ -56,7 +63,8 @@ export interface JiraReadPluginRuntime {
   readonly layer: ReturnType<typeof buildPluginDefinitionLayer>
 }
 
-const descriptor = {
+/** Descriptor persisted by provisioning before the runtime can be acquired. */
+export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
@@ -67,8 +75,23 @@ const descriptor = {
       _tag: "url",
       key: "webBaseUrl",
       label: "Jira site URL",
-      description: "Browser-facing Jira site URL, without a path, query, or credentials.",
+      description: "HTTPS Jira Cloud tenant root URL under atlassian.net, without query or credentials.",
       required: true
+    },
+    {
+      _tag: "text",
+      key: "email",
+      label: "Account email",
+      description: "Atlassian account email used for Jira Cloud basic authentication.",
+      required: true
+    },
+    {
+      _tag: "secret-reference",
+      key: "apiToken",
+      label: "API token",
+      description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+      required: true,
+      secretKind: "token"
     },
     {
       _tag: "integer",
@@ -231,7 +254,7 @@ const makeRuntime = (
   configuration: unknown
 ): JiraReadPluginRuntime => {
   const definition = definePluginV1({
-    rawDescriptor: descriptor,
+    rawDescriptor: jiraReadPluginDescriptor,
     configurationSchema: JiraReadPluginConfiguration,
     capabilityCodecs: { entityRead: pluginCapabilityCodecsV1.entityRead },
     make: ({ configuration: decoded, descriptor: negotiated }) => {

@@ -66,13 +66,22 @@ export interface ClockifyReadPluginRuntime {
   readonly layer: Layer.Layer<PluginConnection, PluginFailure, Crypto.Crypto>
 }
 
-const descriptor = {
+/** Descriptor persisted by provisioning before the runtime can be acquired. */
+export const clockifyReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.clockify.read",
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   displayName: "Clockify time-entry reader",
   configurationFields: [
+    {
+      _tag: "secret-reference",
+      key: "apiKey",
+      label: "API key",
+      description: "Owner-only Clockify API key resolved only for the scoped runtime.",
+      required: true,
+      secretKind: "token"
+    },
     {
       _tag: "url",
       key: "webBaseUrl",
@@ -395,7 +404,7 @@ const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
 
 const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): ClockifyReadPluginRuntime => {
   const definition = definePluginV1({
-    rawDescriptor: descriptor,
+    rawDescriptor: clockifyReadPluginDescriptor,
     configurationSchema: ClockifyReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,

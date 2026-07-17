@@ -1,4 +1,7 @@
+import type * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
@@ -45,7 +48,7 @@ import {
   persistenceLayerFromDatabase
 } from "../persistence/Persistence.js"
 import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
-import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
+import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
 import type { SecretStoreError } from "../secrets/SecretStoreError.js"
 import type { BindConfig } from "../security/BindConfig.js"
@@ -55,12 +58,18 @@ import {
   type ControlCenterBootstrapOptions
 } from "./Bootstrap.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
+import { firstPartyPluginConnectionMapLayer } from "./FirstPartyPluginRuntime.js"
 import {
   governedActionExecutionServerLayer,
   type GovernedActionExecutionStartupError,
   type GovernedActionExecutionStartupOptions
 } from "./GovernedActionExecutionStartup.js"
-import { type DirectTlsServerError, makeNodeTransportLayer, nodeSecretPlatformLayer } from "./NodeTransport.js"
+import {
+  type DirectTlsServerError,
+  makeNodeTransportLayer,
+  nodeOutboundHttpClientLayer,
+  nodeSecretPlatformLayer
+} from "./NodeTransport.js"
 import {
   type ReleaseSynchronizationStartupError,
   releaseSynchronizationStartupLayer,
@@ -84,6 +93,8 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly persistenceConfig: PersistenceConfig
   /** Scoped first-party provider runtimes used by live connection checks. */
   readonly pluginConnections?: PluginConnectionMapV1 | null
+  /** Enable the fixed production provider registry when no test map is injected. */
+  readonly firstPartyPluginRuntime?: boolean | undefined
   readonly secretRoot: SecretRoot
   readonly staticAssets: StaticAssetStoreOptions
   readonly bootstrap?: ControlCenterBootstrapOptions | null
@@ -110,13 +121,25 @@ export type ControlCenterServerError<ApplicationError = never> =
   | StaticAssetStoreError
 
 const liveApplicationServices = (
-  pluginConnections: PluginConnectionMapV1 | null
-): Layer.Layer<ControlCenterCoreApplicationServices, never, Persistence | SecretStore> =>
+  pluginConnections: PluginConnectionMapV1 | null,
+  firstPartyPluginRuntime: boolean
+): Layer.Layer<
+  ControlCenterCoreApplicationServices,
+  never,
+  Crypto.Crypto | HttpClient.HttpClient | Persistence | SecretStore
+> =>
   Layer.mergeAll(
     authorizedSharesLayer,
-    pluginConnections === null
-      ? pluginAdministrationLayer
-      : pluginAdministrationLayerWithConnections(pluginConnections),
+    pluginConnections !== null
+      ? pluginAdministrationLayerWithConnections(pluginConnections)
+      : firstPartyPluginRuntime
+      ? Layer.unwrap(
+        Effect.map(
+          PluginConnectionMap,
+          pluginAdministrationLayerWithConnections
+        )
+      ).pipe(Layer.provide(firstPartyPluginConnectionMapLayer))
+      : pluginAdministrationLayer,
     deliveryGraphInspectionLayer,
     portfolioSnapshotsLayer,
     timelineExportAuditsLayer,
@@ -139,9 +162,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
-    ApplicationRequirements | Persistence | SecretStore
+    ApplicationRequirements | Crypto.Crypto | HttpClient.HttpClient | Persistence | SecretStore
   > = options.applicationServices ?? liveApplicationServices(
-    options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null
+    options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null,
+    options.firstPartyPluginRuntime ?? false
   )
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence)
@@ -202,7 +226,8 @@ const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
   return HttpRouter.serve(application.application, { disableLogger: true }).pipe(
     Layer.provide(application.runtimeServices),
     Layer.provide(transport),
-    Layer.provide(secrets)
+    Layer.provide(secrets),
+    Layer.provide(nodeOutboundHttpClientLayer)
   )
 }
 
