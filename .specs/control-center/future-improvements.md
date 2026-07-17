@@ -136,7 +136,7 @@ explicit. Those filters now execute against the complete current workspace proje
 
 ## Remaining roadmap
 
-- Complete D07 with owner filtering, delivery traces, command search, and
+- Complete D07 with owner filtering, command search, and
   exact-scope authorized shares. D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
@@ -213,13 +213,15 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   isolation because it introduces table definitions, rendering, and execution boundaries and version
   `0.20.0` requires Effect `4.0.0-beta.98` while this workspace uses `beta.97`. Migrate repositories as
   a deliberate version-aligned milestone rather than mixing two database abstractions in one read.
-- Delivery trace entry points, global command search, and authenticated share grants with exact
-  scope, expiry, revocation, and grantee checks remain unfinished D07 work. No current Items control
-  implies those capabilities.
+- Item and release entry points now converge on an exact item-centered trace inside the selected
+  release. It derives incoming/outgoing current relationships, connected objects, lifecycle,
+  confidence, and evidence counts from the existing bounded release slice. Dedicated relationship
+  history/evidence drill-down, global command search, and authenticated share grants with exact
+  scope, expiry, revocation, and grantee checks remain unfinished D07 work.
 
 ## Recommended next session
 
-Complete D07 delivery traces and authorized shares around the Items checkpoint, then return to the
+Complete D07 authorized shares and detailed relationship/evidence drill-down around the Items checkpoint, then return to the
 recorded D05 readiness batch optimization before the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

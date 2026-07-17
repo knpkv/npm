@@ -4,6 +4,8 @@
 .contextGroup,
 .selected,
 .selectedFacts,
+.trace,
+.traceList,
 .runbooks,
 .runbook {
   display: grid;
@@ -83,6 +85,64 @@
   overflow-wrap: anywhere;
 }
 
+.trace {
+  gap: var(--rly-space-8);
+  padding-block-start: var(--rly-space-12);
+  border-block-start: 1px solid var(--rly-color-border-1);
+}
+
+.traceHeading,
+.traceRelation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+
+.traceHeading {
+  justify-content: space-between;
+}
+
+.traceHeading h4,
+.traceConnection p {
+  margin: 0;
+}
+
+.traceList {
+  gap: var(--rly-space-4);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.traceList li {
+  display: grid;
+  grid-template-columns: auto minmax(10rem, 1fr) auto auto;
+  align-items: center;
+  gap: var(--rly-space-12);
+  min-width: 0;
+  padding: var(--rly-space-8) var(--rly-space-12);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-2);
+}
+
+.traceConnection {
+  min-width: 0;
+}
+
+.traceConnection a {
+  color: var(--rly-color-text-1);
+  overflow-wrap: anywhere;
+  text-decoration-color: var(--rly-color-border-2);
+  text-underline-offset: var(--rly-space-2);
+}
+
+.traceConnection a:focus-visible {
+  border-radius: var(--rly-radius-tag);
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
 .runbooks {
   gap: var(--rly-space-8);
 }
@@ -108,5 +168,14 @@
 @media (max-width: 48rem) {
   .context {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .traceList li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .traceRelation,
+  .traceList li > span:last-child {
+    grid-column: 2;
   }
 }

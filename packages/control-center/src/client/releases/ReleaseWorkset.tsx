@@ -10,7 +10,9 @@ import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio
 import {
   presentReleaseWorkset,
   selectReleaseWorksetObject,
-  type SelectedReleaseWorksetObject
+  selectReleaseWorksetTrace,
+  type SelectedReleaseWorksetObject,
+  type SelectedReleaseWorksetTrace
 } from "./presentReleaseWorkset.js"
 import styles from "./ReleaseWorkset.module.css"
 import { useReleaseWorkset } from "./useReleaseWorkset.js"
@@ -24,34 +26,89 @@ const LoadingWorkset = (): ReactElement => (
 
 /** Inspectable destination for an Items result selected within its release context. */
 export const SelectedReleaseWorksetObjectPanel = ({
-  selectedObject
+  linkState,
+  selectedObject,
+  trace
 }: {
+  readonly linkState?: unknown
   readonly selectedObject: SelectedReleaseWorksetObject
-}): ReactElement => (
-  <section aria-label={`Selected ${selectedObject.kind} ${selectedObject.label}`} className={styles.selected}>
-    <div className={styles.selectedHeading}>
-      <ServiceMark service={selectedObject.service} size="compact" />
-      <Text as="p" variant="label">
-        Selected object · {selectedObject.label}
+  readonly trace?: SelectedReleaseWorksetTrace
+}): ReactElement => {
+  return (
+    <section aria-label={`Selected ${selectedObject.kind} ${selectedObject.label}`} className={styles.selected}>
+      <div className={styles.selectedHeading}>
+        <ServiceMark service={selectedObject.service} size="compact" />
+        <Text as="p" variant="label">
+          Selected object · {selectedObject.label}
+        </Text>
+        <StateLabel label={selectedObject.status} size="compact" tone={selectedObject.tone} />
+      </div>
+      <Text as="h3" variant="section-title">
+        {selectedObject.title}
       </Text>
-      <StateLabel label={selectedObject.status} size="compact" tone={selectedObject.tone} />
-    </div>
-    <Text as="h3" variant="section-title">
-      {selectedObject.title}
-    </Text>
-    <Text tone="secondary" variant="meta">
-      {selectedObject.kind}
-    </Text>
-    <dl className={styles.selectedFacts}>
-      {selectedObject.facts.map((fact) => (
-        <div key={fact.label}>
-          <dt>{fact.label}</dt>
-          <dd>{fact.value}</dd>
+      <Text tone="secondary" variant="meta">
+        {selectedObject.kind}
+      </Text>
+      <dl className={styles.selectedFacts}>
+        {selectedObject.facts.map((fact) => (
+          <div key={fact.label}>
+            <dt>{fact.label}</dt>
+            <dd>{fact.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {trace === undefined ? null : (
+        <div className={styles.trace}>
+          <div className={styles.traceHeading}>
+            <Text as="h4" variant="label">
+              Delivery trace
+            </Text>
+            <StateLabel
+              label={`${trace.relationships.length} relationship${trace.relationships.length === 1 ? "" : "s"}${trace.truncated ? "+" : ""}`}
+              size="compact"
+              tone={trace.truncated ? "caution" : "neutral"}
+            />
+          </div>
+          {trace.relationships.length === 0 ? (
+            <Text tone="secondary">No relationship touches this object in the current release slice.</Text>
+          ) : (
+            <ul className={styles.traceList}>
+              {trace.relationships.map((relationship) => (
+                <li key={relationship.id}>
+                  {relationship.other.service === null ? null : (
+                    <ServiceMark service={relationship.other.service} size="compact" />
+                  )}
+                  <div className={styles.traceConnection}>
+                    <Text as="p" variant="label">
+                      {relationship.direction === "incoming" ? "From" : "To"} {relationship.other.label}
+                    </Text>
+                    {relationship.other.href === null ? (
+                      <Text tone="secondary">{relationship.other.title}</Text>
+                    ) : (
+                      <Link state={linkState} to={relationship.other.href}>
+                        {relationship.other.title}
+                      </Link>
+                    )}
+                  </div>
+                  <div className={styles.traceRelation}>
+                    <Text as="span" tone="secondary" variant="meta">
+                      {relationship.kind}
+                    </Text>
+                    <StateLabel label={relationship.lifecycle} size="compact" tone={relationship.tone} />
+                  </div>
+                  <Text as="span" tone="secondary" variant="meta">
+                    {relationship.confidence} · {relationship.evidenceCount} evidence claim
+                    {relationship.evidenceCount === 1 ? "" : "s"}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      ))}
-    </dl>
-  </section>
-)
+      )}
+    </section>
+  )
+}
 
 const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function ReleaseWorksetLink(
   { href, ...props },
@@ -110,6 +167,7 @@ export const ReleaseWorkset = ({
   const workset = presentReleaseWorkset(controller.state.inspection, workspaceId, release.stages)
   const selectedObjectId = new URLSearchParams(location.search).get("object")
   const selectedObject = selectReleaseWorksetObject(controller.state.inspection, selectedObjectId)
+  const selectedTrace = selectReleaseWorksetTrace(controller.state.inspection, workspaceId, selectedObjectId)
   return (
     <div className={styles.root}>
       <div className={styles.context}>
@@ -156,7 +214,13 @@ export const ReleaseWorkset = ({
         {workset.truncated ? (
           <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
         ) : null}
-        {selectedObject === null ? null : <SelectedReleaseWorksetObjectPanel selectedObject={selectedObject} />}
+        {selectedObject === null || selectedTrace === null ? null : (
+          <SelectedReleaseWorksetObjectPanel
+            linkState={location.state}
+            selectedObject={selectedObject}
+            trace={selectedTrace}
+          />
+        )}
       </div>
       <LinkProvider component={ReleaseWorksetLink}>
         <WorksetCard

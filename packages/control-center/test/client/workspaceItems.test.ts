@@ -1,6 +1,7 @@
 import { Result, Schema } from "effect"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router"
 import { describe, expect, it } from "vitest"
 
 import { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph.js"
@@ -13,10 +14,13 @@ import {
   workspaceItemMembershipDescription
 } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceEntityIndex, presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
-import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
+import {
+  selectReleaseWorksetObject,
+  selectReleaseWorksetTrace
+} from "../../src/client/releases/presentReleaseWorkset.js"
 import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
-import { ReleaseId } from "../../src/domain/identifiers.js"
+import { GraphNodeId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const items = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, releaseWorksetFixture])
@@ -238,6 +242,138 @@ describe("workspace items", () => {
         ({ key }) => key
       )
     ).toEqual(["CLOCK-902"])
+  })
+
+  it("centers a compact delivery trace on the exact selected object", () => {
+    const issue = releaseWorksetFixture.entityProjections.find(({ projection }) => projection.displayKey === "OPS-428")
+    const pullRequest = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.displayKey === "PR-184"
+    )
+    const blockedIssue = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.displayKey === "OPS-433"
+    )
+    if (issue === undefined || pullRequest === undefined || blockedIssue === undefined) {
+      throw new Error("Expected trace fixture objects")
+    }
+
+    const selectedObject = selectReleaseWorksetObject(releaseWorksetFixture, issue.projection.entityId)
+    const trace = selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, issue.projection.entityId)
+    expect(trace).toMatchObject({
+      relationships: [{
+        confidence: "Confidence unknown",
+        direction: "incoming",
+        evidenceCount: 0,
+        kind: "implements",
+        lifecycle: "Verified",
+        other: {
+          kind: "pull-request",
+          label: "PR-184",
+          service: "codecommit",
+          title: "Checkout and capture"
+        },
+        tone: "positive"
+      }],
+      truncated: false
+    })
+    if (selectedObject === null || trace === null) throw new Error("Expected selected trace presentation")
+    const markup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/"] },
+        createElement(SelectedReleaseWorksetObjectPanel, { selectedObject, trace })
+      )
+    )
+    expect(markup).toContain("Delivery trace")
+    expect(markup).toContain("From PR-184")
+    expect(markup).toContain("Checkout and capture")
+    expect(markup).toContain("Verified")
+    expect(markup).toContain("Confidence unknown · 0 evidence claims")
+    expect(trace.relationships[0]?.other.href).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${pullRequest.projection.entityId}#release-work`
+    )
+    expect(
+      selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, pullRequest.projection.entityId)
+        ?.relationships
+    ).toHaveLength(4)
+    expect(
+      selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, blockedIssue.projection.entityId)
+        ?.relationships
+    ).toMatchObject([{
+      direction: "incoming",
+      kind: "implements",
+      lifecycle: "Missing",
+      other: { href: null, kind: "pull-request", title: "Missing Pull Request" },
+      tone: "critical"
+    }])
+    expect(
+      selectReleaseWorksetTrace(
+        { ...releaseWorksetFixture, truncated: true },
+        WORKSET_WORKSPACE_ID,
+        issue.projection.entityId
+      )?.truncated
+    ).toBe(true)
+
+    const deletedConnection = selectReleaseWorksetTrace(
+      {
+        ...releaseWorksetFixture,
+        entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+          entry.projection.entityId === pullRequest.projection.entityId
+            ? ({ ...entry, projection: { ...entry.projection, entityState: "deleted" } } satisfies typeof entry)
+            : entry
+        )
+      },
+      WORKSET_WORKSPACE_ID,
+      issue.projection.entityId
+    )?.relationships[0]?.other
+    expect(deletedConnection).toMatchObject({ href: null, title: "Checkout and capture · Deleted" })
+
+    const runbook = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.displayKey === "PAY/RUNBOOK-12"
+    )
+    if (runbook === undefined) throw new Error("Expected a runbook trace fixture")
+    expect(
+      selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, runbook.projection.entityId)
+        ?.relationships[0]?.other.title
+    ).toBe("Current release context")
+    const issueNode = releaseWorksetFixture.nodes.find((node) =>
+      node.resolution._tag === "resolved" &&
+      node.resolution.target._tag === "entity" &&
+      node.resolution.target.entityId === issue.projection.entityId
+    )
+    const relationshipTemplate = releaseWorksetFixture.relationships[0]
+    if (issueNode === undefined || relationshipTemplate === undefined) throw new Error("Expected trace graph fixtures")
+    const connectedReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    const connectedReleaseNodeId = Schema.decodeUnknownSync(GraphNodeId)(
+      "01890f6f-6d6a-7cc0-98d4-000000000099"
+    )
+    const connectedReleaseTrace = selectReleaseWorksetTrace(
+      {
+        ...releaseWorksetFixture,
+        nodes: [...releaseWorksetFixture.nodes, {
+          ...issueNode,
+          nodeId: connectedReleaseNodeId,
+          endpointKind: "release",
+          resolution: { _tag: "resolved", target: { _tag: "release", releaseId: connectedReleaseId } }
+        }],
+        relationships: [...releaseWorksetFixture.relationships, {
+          ...relationshipTemplate,
+          relationshipId: Schema.decodeUnknownSync(RelationshipId)(
+            "01890f6f-6d6a-7cc0-98d5-000000000099"
+          ),
+          kind: "depends-on",
+          sourceNodeId: issueNode.nodeId,
+          sourceNodeKind: "issue",
+          targetNodeId: connectedReleaseNodeId,
+          targetNodeKind: "release"
+        }]
+      },
+      WORKSET_WORKSPACE_ID,
+      issue.projection.entityId
+    )
+    expect(connectedReleaseTrace?.relationships.find(({ other }) => other.kind === "release")?.other.title).toBe(
+      "Connected release"
+    )
+    expect(selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, "missing-object")).toBeNull()
   })
 
   it("treats superseded documentation as needing attention", () => {

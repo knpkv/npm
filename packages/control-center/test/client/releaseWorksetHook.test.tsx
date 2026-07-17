@@ -217,53 +217,120 @@ describe("useReleaseWorkset", () => {
     expect(transport.load.mock.calls.map(([, scope]) => scope)).toEqual([null, environmentId])
     const ready = [...observations].reverse().find(({ _tag }) => _tag === "ready")
     expect(ready?._tag === "ready" ? ready.inspection.relationships : []).toContainEqual(environmentRelationship)
-    expect(ready?._tag === "ready" ? ready.inspection.nodes.length : 0).toBe(releaseWorksetFixture.nodes.length)
+    expect(ready?._tag === "ready" ? ready.inspection.nodes.length : 0).toBe(2)
+    expect(ready?._tag === "ready" ? ready.inspection.entityProjections.length : 0).toBe(2)
     expect(ready?._tag === "ready" ? ready.inspection.truncated : true).toBe(false)
   })
 
   it("globally bounds disjoint records aggregated from many environment scopes", () => {
-    const sourceNode = releaseWorksetFixture.nodes[0]
-    const sourceProjection = releaseWorksetFixture.entityProjections[0]
     const sourceRelationship = releaseWorksetFixture.relationships[0]
-    if (sourceNode === undefined || sourceProjection === undefined || sourceRelationship === undefined) {
-      throw new Error("Expected complete workset fixtures")
+    if (sourceRelationship === undefined) throw new Error("Expected a relationship fixture")
+    const sourceNode = releaseWorksetFixture.nodes.find(({ nodeId }) => nodeId === sourceRelationship.sourceNodeId)
+    const targetNode = releaseWorksetFixture.nodes.find(({ nodeId }) => nodeId === sourceRelationship.targetNodeId)
+    if (sourceNode?.resolution._tag !== "resolved" || targetNode?.resolution._tag !== "resolved") {
+      throw new Error("Expected resolved relationship endpoints")
     }
-    const recordId = (scopeIndex: number, recordIndex: number): string =>
-      String(scopeIndex * 20 + recordIndex + 1).padStart(12, "0")
-    const inspections: ReadonlyArray<ReleaseDeliveryGraphInspection> = Array.from({ length: 50 }, (_, scopeIndex) => ({
-      ...releaseWorksetFixture,
-      environmentId:
-        scopeIndex === 0
-          ? null
-          : Schema.decodeSync(EnvironmentIdSchema)(`01890f6f-6d6a-7cc0-98d6-${String(scopeIndex).padStart(12, "0")}`),
-      nodes: Array.from({ length: 20 }, (_, recordIndex) => ({
-        ...sourceNode,
-        nodeId: Schema.decodeSync(GraphNodeId)(`01890f6f-6d6a-7cc0-98d4-${recordId(scopeIndex, recordIndex)}`)
-      })),
-      entityProjections: Array.from({ length: 20 }, (_, recordIndex) => ({
-        ...sourceProjection,
-        projection: {
-          ...sourceProjection.projection,
-          entityId: Schema.decodeSync(EntityId)(`01890f6f-6d6a-7cc0-98d3-${recordId(scopeIndex, recordIndex)}`)
+    const sourceResolution = sourceNode.resolution
+    const targetResolution = targetNode.resolution
+    if (sourceResolution.target._tag !== "entity" || targetResolution.target._tag !== "entity") {
+      throw new Error("Expected entity relationship endpoints")
+    }
+    const sourceTarget = sourceResolution.target
+    const targetTarget = targetResolution.target
+    const sourceProjection = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.entityId === sourceTarget.entityId
+    )
+    const targetProjection = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.entityId === targetTarget.entityId
+    )
+    if (sourceProjection === undefined || targetProjection === undefined) {
+      throw new Error("Expected endpoint projections")
+    }
+    const recordId = (ordinal: number): string => String(ordinal).padStart(12, "0")
+    const inspections: ReadonlyArray<ReleaseDeliveryGraphInspection> = Array.from({ length: 50 }, (_, scopeIndex) => {
+      const records = Array.from({ length: 20 }, (_, recordIndex) => {
+        const relationshipOrdinal = scopeIndex * 20 + recordIndex + 1
+        const sourceOrdinal = relationshipOrdinal * 2 - 1
+        const targetOrdinal = relationshipOrdinal * 2
+        const sourceEntityId = Schema.decodeSync(EntityId)(`01890f6f-6d6a-7cc0-98d3-${recordId(sourceOrdinal)}`)
+        const targetEntityId = Schema.decodeSync(EntityId)(`01890f6f-6d6a-7cc0-98d3-${recordId(targetOrdinal)}`)
+        const sourceNodeId = Schema.decodeSync(GraphNodeId)(`01890f6f-6d6a-7cc0-98d4-${recordId(sourceOrdinal)}`)
+        const targetNodeId = Schema.decodeSync(GraphNodeId)(`01890f6f-6d6a-7cc0-98d4-${recordId(targetOrdinal)}`)
+        return {
+          sourceEntityId,
+          sourceNodeId,
+          targetEntityId,
+          targetNodeId,
+          relationshipId: Schema.decodeSync(RelationshipId)(`01890f6f-6d6a-7cc0-98d5-${recordId(relationshipOrdinal)}`)
         }
-      })),
-      relationships: Array.from({ length: 20 }, (_, recordIndex) => ({
-        ...sourceRelationship,
-        relationshipId: Schema.decodeSync(RelationshipId)(
-          `01890f6f-6d6a-7cc0-98d5-${recordId(scopeIndex, recordIndex)}`
-        )
-      })),
-      evidenceClaims: [],
-      evidenceItems: [],
-      truncated: false
-    }))
+      })
+      return {
+        ...releaseWorksetFixture,
+        environmentId:
+          scopeIndex === 0
+            ? null
+            : Schema.decodeSync(EnvironmentIdSchema)(`01890f6f-6d6a-7cc0-98d6-${String(scopeIndex).padStart(12, "0")}`),
+        nodes: records.flatMap(({ sourceEntityId, sourceNodeId, targetEntityId, targetNodeId }) => [
+          {
+            ...sourceNode,
+            nodeId: sourceNodeId,
+            resolution: {
+              ...sourceResolution,
+              target: { ...sourceTarget, entityId: sourceEntityId }
+            }
+          },
+          {
+            ...targetNode,
+            nodeId: targetNodeId,
+            resolution: {
+              ...targetResolution,
+              target: { ...targetTarget, entityId: targetEntityId }
+            }
+          }
+        ]),
+        entityProjections: records.flatMap(({ sourceEntityId, targetEntityId }) => [
+          {
+            ...sourceProjection,
+            projection: { ...sourceProjection.projection, entityId: sourceEntityId }
+          },
+          {
+            ...targetProjection,
+            projection: { ...targetProjection.projection, entityId: targetEntityId }
+          }
+        ]),
+        relationships: records.map(({ relationshipId, sourceNodeId, targetNodeId }) => ({
+          ...sourceRelationship,
+          relationshipId,
+          sourceNodeId,
+          targetNodeId
+        })),
+        evidenceClaims: [],
+        evidenceItems: [],
+        truncated: false
+      }
+    })
 
     const inspection = aggregateReleaseWorksetInspections(WORKSET_RELEASE_ID, inspections)
 
     expect(inspection.nodes).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
     expect(inspection.entityProjections).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
-    expect(inspection.relationships).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS)
+    expect(inspection.relationships).toHaveLength(MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS / 2)
     expect(inspection.truncated).toBe(true)
+    const nodeIds = new Set(inspection.nodes.map(({ nodeId }) => nodeId))
+    const projectionIds = new Set(inspection.entityProjections.map(({ projection }) => projection.entityId))
+    expect(
+      inspection.relationships.every(
+        ({ sourceNodeId, targetNodeId }) => nodeIds.has(sourceNodeId) && nodeIds.has(targetNodeId)
+      )
+    ).toBe(true)
+    expect(
+      inspection.nodes.every(
+        (node) =>
+          node.resolution._tag !== "resolved" ||
+          node.resolution.target._tag !== "entity" ||
+          projectionIds.has(node.resolution.target.entityId)
+      )
+    ).toBe(true)
   })
 
   it("invalidates only an unauthorized matching session", async () => {
