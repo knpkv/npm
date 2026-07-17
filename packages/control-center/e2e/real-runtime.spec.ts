@@ -55,7 +55,9 @@ test.describe("repository-managed real runtime", () => {
       })()`)
     ).toBe("37px")
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
-    await expect(page.getByText("Health and configuration for every negotiated delivery plugin.")).toBeVisible()
+    await expect(
+      page.getByText("Verify provider access and the exact account each connection represents.")
+    ).toBeVisible()
 
     await realRuntime.pairThroughUi(page)
     await expect(page).toHaveURL(`${realRuntime.origin}/w/${REAL_WORKSPACE_ID}/overview`)
