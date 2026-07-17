@@ -15,12 +15,15 @@ import {
 } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceEntityIndex, presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import {
+  releaseWorksetRelationshipEvidenceClaims,
+  releaseWorksetRelationshipEvidenceIds,
   selectReleaseWorksetObject,
+  selectReleaseWorksetRelationship,
   selectReleaseWorksetTrace
 } from "../../src/client/releases/presentReleaseWorkset.js"
 import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
-import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
-import { GraphNodeId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
+import { DeliveryEntityProjection, EvidenceClaim } from "../../src/domain/deliveryGraph.js"
+import { EvidenceClaimId, EvidenceId, GraphNodeId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const items = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, releaseWorksetFixture])
@@ -288,13 +291,37 @@ describe("workspace items", () => {
     expect(markup).toContain("Checkout and capture")
     expect(markup).toContain("Verified")
     expect(markup).toContain("Confidence unknown · 0 evidence claims")
+    expect(markup).toContain("Details")
+    expect(markup).toContain("aria-label=\"Details for implements incoming relationship with PR-184\"")
+    expect(trace.relationships[0]?.detailsHref).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${issue.projection.entityId}&relationship=${
+        trace.relationships[0]?.id
+      }#release-work`
+    )
     expect(trace.relationships[0]?.other.href).toBe(
       `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${pullRequest.projection.entityId}#release-work`
     )
-    expect(
-      selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, pullRequest.projection.entityId)
-        ?.relationships
-    ).toHaveLength(4)
+    const pullRequestTrace = selectReleaseWorksetTrace(
+      releaseWorksetFixture,
+      WORKSET_WORKSPACE_ID,
+      pullRequest.projection.entityId
+    )
+    expect(pullRequestTrace?.relationships).toHaveLength(4)
+    const selectedPullRequest = selectReleaseWorksetObject(releaseWorksetFixture, pullRequest.projection.entityId)
+    if (pullRequestTrace === null || selectedPullRequest === null) throw new Error("Expected pull request trace")
+    const pullRequestMarkup = renderToStaticMarkup(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/"] },
+        createElement(SelectedReleaseWorksetObjectPanel, {
+          selectedObject: selectedPullRequest,
+          trace: pullRequestTrace
+        })
+      )
+    )
+    const detailLabels = [...pullRequestMarkup.matchAll(/aria-label="(Details for [^"]+)"/gu)].map((match) => match[1])
+    expect(detailLabels).toHaveLength(4)
+    expect(new Set(detailLabels).size).toBe(4)
     expect(
       selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, blockedIssue.projection.entityId)
         ?.relationships
@@ -374,6 +401,47 @@ describe("workspace items", () => {
       "Connected release"
     )
     expect(selectReleaseWorksetTrace(releaseWorksetFixture, WORKSET_WORKSPACE_ID, "missing-object")).toBeNull()
+  })
+
+  it("selects relationship details and their exact evidence only within the selected object trace", () => {
+    const issue = releaseWorksetFixture.entityProjections.find(({ projection }) => projection.displayKey === "OPS-428")
+    const otherIssue = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.displayKey === "OPS-429"
+    )
+    const relationship = releaseWorksetFixture.relationships[0]
+    if (issue === undefined || otherIssue === undefined || relationship === undefined) {
+      throw new Error("Expected relationship detail fixtures")
+    }
+    const evidenceClaimId = Schema.decodeUnknownSync(EvidenceClaimId)(
+      "01890f6f-6d6a-7cc0-98d6-000000000001"
+    )
+    const evidenceId = Schema.decodeUnknownSync(EvidenceId)("01890f6f-6d6a-7cc0-98d7-000000000001")
+    const claim = Schema.decodeUnknownSync(EvidenceClaim)({
+      workspaceId: WORKSET_WORKSPACE_ID,
+      evidenceClaimId,
+      evidenceId,
+      subjectNodeId: relationship.targetNodeId,
+      predicate: "relationship-observed",
+      value: { _tag: "flag", value: true },
+      recordedAt: "2026-07-14T10:02:00.000Z",
+      supersedesEvidenceClaimId: null
+    })
+    const relationshipWithEvidence = { ...relationship, evidenceClaimIds: [evidenceClaimId] }
+    const inspection = {
+      ...releaseWorksetFixture,
+      evidenceClaims: [claim],
+      relationships: [relationshipWithEvidence, ...releaseWorksetFixture.relationships.slice(1)]
+    }
+
+    expect(
+      selectReleaseWorksetRelationship(inspection, issue.projection.entityId, relationship.relationshipId)
+    ).toEqual(relationshipWithEvidence)
+    expect(releaseWorksetRelationshipEvidenceIds(inspection, relationshipWithEvidence)).toEqual([evidenceId])
+    expect(releaseWorksetRelationshipEvidenceClaims(inspection, relationshipWithEvidence)).toEqual([claim])
+    expect(
+      selectReleaseWorksetRelationship(inspection, otherIssue.projection.entityId, relationship.relationshipId)
+    ).toBeNull()
+    expect(selectReleaseWorksetRelationship(inspection, issue.projection.entityId, "unknown")).toBeNull()
   })
 
   it("treats superseded documentation as needing attention", () => {

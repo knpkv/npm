@@ -2,18 +2,23 @@ import { LinkProvider, type RlyLinkProps } from "@knpkv/rly/foundations"
 import { ServiceMark, WorksetCard } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import { forwardRef, type ReactElement } from "react"
-import { Link, useLocation } from "react-router"
+import { Link, useLocation, useNavigate } from "react-router"
 
 import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import {
   presentReleaseWorkset,
+  releaseWorksetRelationshipEvidenceClaims,
+  releaseWorksetRelationshipEvidenceIds,
   selectReleaseWorksetObject,
+  selectReleaseWorksetRelationship,
   selectReleaseWorksetTrace,
   type SelectedReleaseWorksetObject,
   type SelectedReleaseWorksetTrace
 } from "./presentReleaseWorkset.js"
+import { RelationshipDetailSheet } from "./RelationshipDetailSheet.js"
+import { closeRelationshipDetailRoute, makeRelationshipDetailRouteState } from "./relationshipDetailRoute.js"
 import styles from "./ReleaseWorkset.module.css"
 import { useReleaseWorkset } from "./useReleaseWorkset.js"
 
@@ -100,6 +105,14 @@ export const SelectedReleaseWorksetObjectPanel = ({
                     {relationship.confidence} · {relationship.evidenceCount} evidence claim
                     {relationship.evidenceCount === 1 ? "" : "s"}
                   </Text>
+                  <Link
+                    aria-label={`Details for ${relationship.kind} ${relationship.direction} relationship with ${relationship.other.label}`}
+                    className={styles.traceDetails}
+                    state={makeRelationshipDetailRouteState(linkState, selectedObject.id, relationship.id)}
+                    to={relationship.detailsHref}
+                  >
+                    Details
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -143,6 +156,7 @@ export const ReleaseWorkset = ({
 }): ReactElement => {
   const browserSession = useBrowserSession()
   const location = useLocation()
+  const navigate = useNavigate()
   const sessionKey = releaseWorksetSessionKey(browserSession.state)
   const controller = useReleaseWorkset(
     release.id,
@@ -165,72 +179,98 @@ export const ReleaseWorkset = ({
   }
 
   const workset = presentReleaseWorkset(controller.state.inspection, workspaceId, release.stages)
-  const selectedObjectId = new URLSearchParams(location.search).get("object")
+  const searchParams = new URLSearchParams(location.search)
+  const selectedObjectId = searchParams.get("object")
+  const selectedRelationshipId = searchParams.get("relationship")
   const selectedObject = selectReleaseWorksetObject(controller.state.inspection, selectedObjectId)
   const selectedTrace = selectReleaseWorksetTrace(controller.state.inspection, workspaceId, selectedObjectId)
+  const selectedRelationship = selectReleaseWorksetRelationship(
+    controller.state.inspection,
+    selectedObjectId,
+    selectedRelationshipId
+  )
+  const selectedEvidenceIds = releaseWorksetRelationshipEvidenceIds(controller.state.inspection, selectedRelationship)
+  const selectedEvidenceClaims = releaseWorksetRelationshipEvidenceClaims(
+    controller.state.inspection,
+    selectedRelationship
+  )
+  const closeRelationshipDetails = (): void => {
+    if (selectedObject === null || selectedRelationship === null) return
+    closeRelationshipDetailRoute(navigate, location, selectedObject.id, selectedRelationship.relationshipId)
+  }
   return (
-    <div className={styles.root}>
-      <div className={styles.context}>
-        <div className={styles.contextGroup}>
-          <Text as="h3" variant="label">
-            Environment
-          </Text>
-          {release.targetEnvironmentIds.length === 0 ? (
-            <Text tone="secondary">No target environment recorded.</Text>
-          ) : (
-            <div className={styles.tags}>
-              {release.targetEnvironmentIds.map((environmentId) => (
-                <StateLabel
-                  key={environmentId}
-                  label={`Unknown target · ${environmentId.slice(-4)}`}
-                  size="compact"
-                  title={`Environment ${environmentId}; provider metadata unavailable`}
-                  tone="neutral"
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        <div className={styles.contextGroup}>
-          <div className={styles.contextHeading}>
-            <ServiceMark service="confluence" size="compact" />
+    <>
+      <div className={styles.root}>
+        <div className={styles.context}>
+          <div className={styles.contextGroup}>
             <Text as="h3" variant="label">
-              Runbook
+              Environment
             </Text>
+            {release.targetEnvironmentIds.length === 0 ? (
+              <Text tone="secondary">No target environment recorded.</Text>
+            ) : (
+              <div className={styles.tags}>
+                {release.targetEnvironmentIds.map((environmentId) => (
+                  <StateLabel
+                    key={environmentId}
+                    label={`Unknown target · ${environmentId.slice(-4)}`}
+                    size="compact"
+                    title={`Environment ${environmentId}; provider metadata unavailable`}
+                    tone="neutral"
+                  />
+                ))}
+              </div>
+            )}
           </div>
-          {workset.runbooks.length === 0 ? (
-            <Text tone="secondary">No runbook linked.</Text>
-          ) : (
-            <div className={styles.runbooks}>
-              {workset.runbooks.map((runbook) => (
-                <Link className={styles.runbook} key={runbook.id} state={location.state} to={runbook.href}>
-                  <strong>{runbook.title}</strong>
-                  <span>{runbook.reference}</span>
-                </Link>
-              ))}
+          <div className={styles.contextGroup}>
+            <div className={styles.contextHeading}>
+              <ServiceMark service="confluence" size="compact" />
+              <Text as="h3" variant="label">
+                Runbook
+              </Text>
             </div>
+            {workset.runbooks.length === 0 ? (
+              <Text tone="secondary">No runbook linked.</Text>
+            ) : (
+              <div className={styles.runbooks}>
+                {workset.runbooks.map((runbook) => (
+                  <Link className={styles.runbook} key={runbook.id} state={location.state} to={runbook.href}>
+                    <strong>{runbook.title}</strong>
+                    <span>{runbook.reference}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+          {workset.truncated ? (
+            <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
+          ) : null}
+          {selectedObject === null || selectedTrace === null ? null : (
+            <SelectedReleaseWorksetObjectPanel
+              linkState={location.state}
+              selectedObject={selectedObject}
+              trace={selectedTrace}
+            />
           )}
         </div>
-        {workset.truncated ? (
-          <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
-        ) : null}
-        {selectedObject === null || selectedTrace === null ? null : (
-          <SelectedReleaseWorksetObjectPanel
-            linkState={location.state}
-            selectedObject={selectedObject}
-            trace={selectedTrace}
+        <LinkProvider component={ReleaseWorksetLink}>
+          <WorksetCard
+            gaps={workset.gaps}
+            heading={`${release.serviceName} release work`}
+            jiraItems={workset.jiraItems}
+            pipelines={workset.pipelines}
+            pullRequestGroups={workset.pullRequestGroups}
           />
-        )}
+        </LinkProvider>
       </div>
-      <LinkProvider component={ReleaseWorksetLink}>
-        <WorksetCard
-          gaps={workset.gaps}
-          heading={`${release.serviceName} release work`}
-          jiraItems={workset.jiraItems}
-          pipelines={workset.pipelines}
-          pullRequestGroups={workset.pullRequestGroups}
-        />
-      </LinkProvider>
-    </div>
+      <RelationshipDetailSheet
+        claims={selectedEvidenceClaims}
+        evidenceIds={selectedEvidenceIds}
+        onClose={closeRelationshipDetails}
+        onSessionExpired={browserSession.invalidateSession}
+        relationship={selectedRelationship}
+        sessionKey={sessionKey}
+      />
+    </>
   )
 }

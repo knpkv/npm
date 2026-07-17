@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest"
+import type { NavigateFunction } from "react-router"
+import { describe, expect, it, vi } from "vitest"
+
+import {
+  closeRelationshipDetailRoute,
+  makeRelationshipDetailRouteState,
+  matchesRelationshipDetailRouteState
+} from "../../src/client/releases/relationshipDetailRoute.js"
 
 import {
   decodeReleaseRouteId,
@@ -14,6 +21,7 @@ import {
   releaseTransitionNames,
   workspaceItemsPath
 } from "../../src/client/releases/releaseRoutes.js"
+import { releaseWorksetFixture } from "../fixtures/releaseWorkset.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 const snapshot = makePortfolioSnapshot()
@@ -89,5 +97,51 @@ describe("release routes", () => {
     expect(
       readReleaseOrigin({ ...valid, origin: { ...origin, search: `?${"x".repeat(2_048)}` } }, workspaceId, releaseId)
     ).toEqual(fallback)
+  })
+
+  it("backs out of in-app relationship details and canonicalizes direct detail links", () => {
+    const objectId = releaseWorksetFixture.entityProjections[0]?.projection.entityId
+    const relationshipId = releaseWorksetFixture.relationships[0]?.relationshipId
+    if (objectId === undefined || relationshipId === undefined) throw new Error("Expected detail route fixtures")
+    const origin = { hash: "#results", pathname: workspaceItemsPath(workspaceId), search: "?service=jira" }
+    const releaseState = makeReleaseRouteState(workspaceId, releaseId, origin)
+    const markedState = makeRelationshipDetailRouteState(releaseState, objectId, relationshipId)
+    expect(matchesRelationshipDetailRouteState(markedState, objectId, relationshipId)).toBe(true)
+    expect(readReleaseOrigin(markedState, workspaceId, releaseId)).toEqual(origin)
+
+    const navigateBack: NavigateFunction = vi.fn()
+    closeRelationshipDetailRoute(
+      navigateBack,
+      {
+        hash: "#release-work",
+        pathname: releaseFullPath(workspaceId, releaseId),
+        search: `?object=${objectId}&relationship=${relationshipId}`,
+        state: markedState
+      },
+      objectId,
+      relationshipId
+    )
+    expect(navigateBack).toHaveBeenCalledWith(-1)
+
+    const navigateDirect: NavigateFunction = vi.fn()
+    closeRelationshipDetailRoute(
+      navigateDirect,
+      {
+        hash: "#release-work",
+        pathname: releaseFullPath(workspaceId, releaseId),
+        search: `?object=${objectId}&relationship=${relationshipId}`,
+        state: null
+      },
+      objectId,
+      relationshipId
+    )
+    expect(navigateDirect).toHaveBeenCalledWith(
+      {
+        hash: "#release-work",
+        pathname: releaseFullPath(workspaceId, releaseId),
+        search: `?object=${objectId}`
+      },
+      { replace: true, state: null }
+    )
   })
 })

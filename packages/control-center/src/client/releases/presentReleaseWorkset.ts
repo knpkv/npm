@@ -12,9 +12,17 @@ import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
 import type {
   DeliveryEntityDetails,
   DeliveryEntityProjection,
-  DeliveryRelationship
+  DeliveryRelationship,
+  EvidenceClaim
 } from "../../domain/deliveryGraph.js"
-import type { EntityId, GraphNodeId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import type {
+  EntityId,
+  EvidenceId,
+  GraphNodeId,
+  RelationshipId,
+  ReleaseId,
+  WorkspaceId
+} from "../../domain/identifiers.js"
 
 type Projection = ReleaseDeliveryGraphInspection["entityProjections"][number]["projection"]
 type ProjectionWithDetails<Tag extends DeliveryEntityDetails["_tag"]> = Projection & {
@@ -50,6 +58,7 @@ export interface SelectedReleaseWorksetTraceConnection {
 
 export interface SelectedReleaseWorksetTraceRelationship {
   readonly confidence: string
+  readonly detailsHref: string
   readonly direction: "incoming" | "outgoing"
   readonly evidenceCount: number
   readonly id: RelationshipId
@@ -78,6 +87,16 @@ const objectHref = (
   releaseId: ReleaseId,
   entityId: EntityId
 ): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+
+const relationshipHref = (
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId,
+  entityId: EntityId,
+  relationshipId: RelationshipId
+): string =>
+  `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}&relationship=${
+    encodeURIComponent(relationshipId)
+  }#release-work`
 
 const statusTone = (status: string): RlyStateTone => {
   const normalized = status.toLocaleLowerCase("en-US")
@@ -345,7 +364,8 @@ export const selectReleaseWorksetTrace = (
   workspaceId: WorkspaceId,
   selectedObjectId: string | null
 ): SelectedReleaseWorksetTrace | null => {
-  if (selectReleaseWorksetObject(inspection, selectedObjectId) === null || selectedObjectId === null) return null
+  const selectedObject = selectReleaseWorksetObject(inspection, selectedObjectId)
+  if (selectedObject === null || selectedObjectId === null) return null
   const selectedNodeIds = new Set(
     inspection.nodes.flatMap((node): ReadonlyArray<GraphNodeId> =>
       node.resolution._tag === "resolved" &&
@@ -367,6 +387,12 @@ export const selectReleaseWorksetTrace = (
       const otherNodeId = direction === "outgoing" ? relationship.targetNodeId : relationship.sourceNodeId
       return [{
         confidence: relationshipConfidenceLabel(relationship.confidence),
+        detailsHref: relationshipHref(
+          workspaceId,
+          inspection.releaseId,
+          selectedObject.id,
+          relationship.relationshipId
+        ),
         direction,
         evidenceCount: relationship.evidenceClaimIds.length,
         id: relationship.relationshipId,
@@ -381,6 +407,62 @@ export const selectReleaseWorksetTrace = (
     left.id.localeCompare(right.id)
   )
   return { relationships, truncated: inspection.truncated }
+}
+
+/** Resolve a URL-selected relationship only when it touches the selected object in this bounded slice. */
+export const selectReleaseWorksetRelationship = (
+  inspection: ReleaseDeliveryGraphInspection,
+  selectedObjectId: string | null,
+  selectedRelationshipId: string | null
+): DeliveryRelationship | null => {
+  if (
+    selectedRelationshipId === null ||
+    selectedObjectId === null ||
+    selectReleaseWorksetObject(inspection, selectedObjectId) === null
+  ) return null
+  const selectedNodeIds = new Set(
+    inspection.nodes.flatMap((node): ReadonlyArray<GraphNodeId> =>
+      node.resolution._tag === "resolved" &&
+        node.resolution.target._tag === "entity" &&
+        node.resolution.target.entityId === selectedObjectId
+        ? [node.nodeId]
+        : []
+    )
+  )
+  let selected: DeliveryRelationship | null = null
+  for (const relationship of inspection.relationships) {
+    if (
+      relationship.relationshipId === selectedRelationshipId &&
+      (selectedNodeIds.has(relationship.sourceNodeId) || selectedNodeIds.has(relationship.targetNodeId)) &&
+      (selected === null || relationship.revision > selected.revision)
+    ) selected = relationship
+  }
+  return selected
+}
+
+/** Resolve exact referenced claims from the closure-checked release slice. */
+export const releaseWorksetRelationshipEvidenceClaims = (
+  inspection: ReleaseDeliveryGraphInspection,
+  relationship: DeliveryRelationship | null
+): ReadonlyArray<EvidenceClaim> => {
+  if (relationship === null) return []
+  const claimById = new Map(inspection.evidenceClaims.map((claim) => [claim.evidenceClaimId, claim]))
+  return relationship.evidenceClaimIds.flatMap((claimId) => {
+    const claim = claimById.get(claimId)
+    return claim === undefined ? [] : [claim]
+  })
+}
+
+/** Resolve the unique evidence observations referenced by one relationship from the closed release slice. */
+export const releaseWorksetRelationshipEvidenceIds = (
+  inspection: ReleaseDeliveryGraphInspection,
+  relationship: DeliveryRelationship | null
+): ReadonlyArray<EvidenceId> => {
+  const evidenceIds = new Set<EvidenceId>()
+  for (const claim of releaseWorksetRelationshipEvidenceClaims(inspection, relationship)) {
+    evidenceIds.add(claim.evidenceId)
+  }
+  return [...evidenceIds].sort((left, right) => left.localeCompare(right))
 }
 
 const releaseRunbookEntityIds = (
