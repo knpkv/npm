@@ -1,10 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Result, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
-import { OpaqueMediaId, OpaqueSecretReference, PluginConfigurationKey } from "../../src/api/index.js"
+import {
+  OpaqueMediaId,
+  OpaqueSecretReference,
+  PluginConfigurationKey,
+  PluginConnectionTestResult
+} from "../../src/api/index.js"
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -1396,6 +1401,61 @@ describe("application adapters", () => {
           providerImmutableId: "atlassian-account-123"
         })
       }
+    })))
+
+  it.effect("keeps disabled connection tests provider-inert", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const acquisitions = yield* Ref.make(0)
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () =>
+          Ref.update(acquisitions, (count) => count + 1).pipe(
+            Effect.andThen(Effect.die("disabled connection acquired a provider runtime"))
+          ),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "failed")
+      assert.strictEqual(result._tag === "failed" ? result.safeMessage : null, "This connection is disabled.")
+      assert.strictEqual(yield* Ref.get(acquisitions), 0)
+    })))
+
+  it.effect("bounds provider-reported health messages for the API response", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.die("discovery must not run after unavailable health"),
+        health: Effect.succeed({
+          _tag: "unavailable",
+          checkedAt: T0,
+          failureClass: "outage",
+          retryAt: null,
+          safeMessage: "x".repeat(201)
+        }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      const decoded = Schema.decodeUnknownSync(Schema.toType(PluginConnectionTestResult))(result)
+      assert.strictEqual(decoded._tag, "failed")
+      assert.strictEqual(decoded._tag === "failed" ? decoded.safeMessage.length : null, 200)
     })))
 
   it.effect("redacts provider operation details when a connection test fails", () =>

@@ -44,6 +44,7 @@ import { SecretStore } from "../secrets/SecretStore.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 
 const decodeNegotiatedDescriptor = (descriptorJson: string) => {
   const json = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorJson)
@@ -146,6 +147,9 @@ const failureMessage = (failure: PluginFailure): string => {
 const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number =>
   Math.max(0, Number((finishedAt - startedAt) / 1_000_000n))
 
+const boundedConnectionTestMessage = (message: string): string =>
+  message.slice(0, MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH).trimEnd()
+
 type LiveConnectionTestOutcome =
   | { readonly _tag: "reported-failure"; readonly health: PluginHealth }
   | {
@@ -161,9 +165,21 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
   pluginConnectionId: PluginConnectionId
 ) {
   const record = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  const startedAt = yield* Clock.currentTimeNanos
+  if (!record.isEnabled) {
+    return {
+      _tag: "failed",
+      pluginConnectionId,
+      providerId: record.providerId,
+      checkedAt: DateTime.makeUnsafe(yield* Clock.currentTimeMillis),
+      latencyMilliseconds: elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos),
+      failureClass: "unknown",
+      retryAt: null,
+      safeMessage: "This connection is disabled."
+    } satisfies PluginConnectionTestResult
+  }
   if (pluginConnections === null) return yield* unavailable()
 
-  const startedAt = yield* Clock.currentTimeNanos
   const outcome = yield* Effect.scoped(
     Effect.gen(function*() {
       const context = yield* pluginConnections.contextEffect({ workspaceId, pluginConnectionId })
@@ -202,7 +218,9 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
       latencyMilliseconds,
       failureClass: health._tag === "disabled" ? "unknown" : health.failureClass,
       retryAt: health._tag === "disabled" ? null : health.retryAt,
-      safeMessage: health._tag === "disabled" ? "This connection is disabled." : health.safeMessage
+      safeMessage: health._tag === "disabled"
+        ? "This connection is disabled."
+        : boundedConnectionTestMessage(health.safeMessage)
     } satisfies PluginConnectionTestResult
   }
 
