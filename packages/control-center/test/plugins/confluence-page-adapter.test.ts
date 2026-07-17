@@ -166,6 +166,41 @@ describe("Confluence page adapter", () => {
       })
     }))
 
+  it.effect("uses the public name for a privacy-limited current-user profile", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getCurrentUser: Effect.succeed({
+          accountId: "account-private-user",
+          displayName: null,
+          publicName: "Private Avery"
+        })
+      }))
+
+      const discovery = yield* adapter.connection.discover
+
+      assert.deepStrictEqual(discovery.account, {
+        providerImmutableId: "account-private-user",
+        displayName: "Private Avery"
+      })
+    }))
+
+  it.effect("rejects a current-user profile without an immutable account id", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getCurrentUser: Effect.succeed({ accountId: "", publicName: "Missing identity" })
+      }))
+
+      const outcome = yield* adapter.connection.discover.pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "confluence-current-user-invalid")
+        }
+      }
+    }))
+
   it.effect("normalizes current content, bounded history, contributors, and a same-origin source URL", () =>
     Effect.gen(function*() {
       const cursors: Array<string | null> = []

@@ -62,6 +62,16 @@ export type RawConfluenceVersionPage = typeof RawConfluenceVersionPage.Type
 /** Decoded Confluence page version. @internal */
 export type RawConfluenceVersion = typeof RawConfluenceVersion.Type
 
+/** Privacy-limited profile returned by the current-user endpoint. @internal */
+export const RawConfluenceCurrentUser = Schema.Struct({
+  accountId: boundedString(512),
+  displayName: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(200)))),
+  publicName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
+})
+
+/** Decoded current Confluence user. @internal */
+export type RawConfluenceCurrentUser = typeof RawConfluenceCurrentUser.Type
+
 /** Bounded Confluence user returned by current-user and bulk-user reads. @internal */
 export const RawConfluenceUser = Schema.Struct({
   accountId: boundedString(512),

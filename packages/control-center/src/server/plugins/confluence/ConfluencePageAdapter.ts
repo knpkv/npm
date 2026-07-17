@@ -44,8 +44,9 @@ import {
 } from "./ConfluencePageClient.js"
 import {
   ConfluencePageAttributesV1,
+  RawConfluenceCurrentUser,
   RawConfluencePage,
-  RawConfluenceUser,
+  type RawConfluenceUser,
   RawConfluenceUsers,
   type RawConfluenceVersion,
   RawConfluenceVersionPage,
@@ -390,6 +391,14 @@ const unsupported = (capabilityId: "action.execute" | "action.cancel" | "action.
     diagnosticCode: "confluence-read-adapter-capability-unavailable"
   })
 
+const currentUserDisplayName = (displayName: string | null | undefined, publicName: string | undefined): string => {
+  for (const candidate of [displayName, publicName]) {
+    const normalized = candidate?.trim()
+    if (normalized !== undefined && normalized.length > 0) return normalized
+  }
+  return "Confluence user"
+}
+
 /** Construct the page-read adapter against an authenticated, scoped client. @internal */
 export const makeConfluencePageAdapter = (
   input: MakeConfluencePageAdapterInput
@@ -405,7 +414,7 @@ export const makeConfluencePageAdapter = (
       const user = yield* decodeProvider(
         "confluence-current-user",
         "confluence-current-user-invalid",
-        RawConfluenceUser,
+        RawConfluenceCurrentUser,
         rawUser
       )
       const endpoint = yield* Schema.decodeUnknownEffect(SourceUrl)(
@@ -414,7 +423,7 @@ export const makeConfluencePageAdapter = (
       return {
         account: {
           providerImmutableId: user.accountId,
-          displayName: user.displayName
+          displayName: currentUserDisplayName(user.displayName, user.publicName)
         },
         workspace: {
           providerImmutableId: input.configuration.spaceId,
