@@ -75,7 +75,7 @@ const statusPresentation = (status: string): Pick<WorkspaceItemPresentation, "st
 const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId, entityId: EntityId): string =>
   `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
 
-/** Present bounded release slices as one deduplicated workspace item index. */
+/** Present bounded release slices as one deduplicated release-linked item index. */
 export const presentWorkspaceItems = (
   workspaceId: WorkspaceId,
   inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>

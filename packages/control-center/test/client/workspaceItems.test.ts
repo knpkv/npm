@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
-import { filterWorkspaceItems, formatItemFreshness } from "../../src/client/items/ItemsPage.js"
+import { filterWorkspaceItems, formatItemFreshness, itemsLocationWithSearch } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
@@ -54,6 +54,19 @@ describe("workspace items", () => {
     expect(
       filterWorkspaceItems(items, { query: "does-not-exist", service: "all", status: "all", type: "all" })
     ).toEqual([])
+  })
+
+  it("preserves the exact Items fragment while replacing or clearing filters", () => {
+    const filtered = new URLSearchParams("service=jira&status=failed")
+    expect(itemsLocationWithSearch({ hash: "#results", pathname: `/w/${WORKSET_WORKSPACE_ID}/items` }, filtered))
+      .toEqual({
+        hash: "#results",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+        search: "?service=jira&status=failed"
+      })
+    expect(
+      itemsLocationWithSearch({ hash: "", pathname: `/w/${WORKSET_WORKSPACE_ID}/items` }, new URLSearchParams())
+    ).toEqual({ hash: "", pathname: `/w/${WORKSET_WORKSPACE_ID}/items`, search: "" })
   })
 
   it("preserves selection for deployment and time-entry objects outside the primary workset dimensions", () => {

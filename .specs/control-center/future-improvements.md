@@ -126,7 +126,7 @@ relationship-repair review and rationale survive reload through the existing gov
 coverage proves the three dimensions remain complete without horizontal overflow.
 
 The first D07 Items slice adds a workspace route over the existing authenticated release-graph
-reads. It deduplicates normalized objects, maps their provider service and current status, bounds
+reads. It deduplicates normalized release-linked objects, maps their provider service and current status, bounds
 the client index to 500 results, and keeps text, service, type, and status filters in the URL. Every
 result opens the selected object in its canonical release workset and returns to the exact filtered
 Items origin. Empty, loading, read-failure, and bounded-result states remain explicit.
@@ -204,6 +204,10 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   but does not yet expose authoritative owner data or an owner filter. Replace it with one bounded
   server query before large workspaces; return aggregate counts from that query instead of loading
   every release slice.
+- Because release-slice reads follow relationship closure, the MVP index explicitly presents itself
+  as release-linked scope and does not count present entity projections with no relationship. The
+  dedicated workspace query must include unlinked present projections and exclude deleted heads
+  before the route can claim complete normalized workspace search.
 - Items currently deduplicates an object that appears in multiple release slices to its first stable
   release route. The complete trace model must retain every release membership and require an
   explicit release choice where context is ambiguous.

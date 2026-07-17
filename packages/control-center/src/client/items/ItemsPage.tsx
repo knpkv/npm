@@ -1,7 +1,7 @@
 import { ServiceMark, type RlyService } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
-import { Link, useLocation, useOutletContext, useSearchParams } from "react-router"
+import { Link, useLocation, useNavigate, useOutletContext, useSearchParams } from "react-router"
 
 import type { DeliveryEntityKind } from "../../domain/deliveryGraph.js"
 import { useBrowserSession } from "../BrowserSession.js"
@@ -36,6 +36,15 @@ const freshnessFormatter = new Intl.DateTimeFormat("en-GB", {
 })
 
 export const formatItemFreshness = (freshness: string): string => freshnessFormatter.format(Date.parse(freshness))
+
+export const itemsLocationWithSearch = (
+  location: Pick<Location, "hash" | "pathname">,
+  params: URLSearchParams
+): { readonly hash: string; readonly pathname: string; readonly search: string } => ({
+  hash: location.hash,
+  pathname: location.pathname,
+  search: params.size === 0 ? "" : `?${params.toString()}`
+})
 
 const entityKind = (value: string | null): DeliveryEntityKind | "all" =>
   entityKinds.find((candidate) => candidate === value) ?? "all"
@@ -75,7 +84,8 @@ export const ItemsPage = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const browserSession = useBrowserSession()
   const location = useLocation()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const releases =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.releases : EMPTY_WORKSPACE_RELEASES
   const refreshKey =
@@ -89,11 +99,14 @@ export const ItemsPage = (): ReactElement => {
     browserSession.invalidateSession
   )
   const filters = filtersFrom(searchParams)
+  const replaceSearch = (next: URLSearchParams): void => {
+    navigate(itemsLocationWithSearch(location, next), { replace: true })
+  }
   const update = (key: keyof ItemFilters, value: string): void => {
     const next = new URLSearchParams(searchParams)
     if (value.length === 0 || value === "all") next.delete(key === "query" ? "q" : key)
     else next.set(key === "query" ? "q" : key, value)
-    setSearchParams(next, { replace: true })
+    replaceSearch(next)
   }
 
   const portfolioBoundary: PortfolioOverviewState | null =
@@ -146,13 +159,13 @@ export const ItemsPage = (): ReactElement => {
     <article className={styles.page}>
       <header className={styles.hero}>
         <Text as="p" tone="secondary" variant="label">
-          Items
+          Release-linked items
         </Text>
         <Text as="h1" variant="verdict">
-          Find anything.
+          Find release work.
         </Text>
         <Text tone="secondary" variant="body-large">
-          One quiet index across tickets, pull requests, docs, pipelines, deployments, and time.
+          One quiet index across release-linked tickets, pull requests, docs, pipelines, deployments, and time.
         </Text>
       </header>
 
@@ -201,14 +214,18 @@ export const ItemsPage = (): ReactElement => {
 
       <div className={styles.resultHeading}>
         <Text as="h2" variant="section-title">
-          {visibleItems.length} of {controller.state.items.length} items
+          {visibleItems.length} of {controller.state.items.length} release-linked items
         </Text>
-        {controller.state.truncated ? <StateLabel label="Bounded result" size="compact" tone="caution" /> : null}
+        <StateLabel
+          label={controller.state.truncated ? "Bounded release-linked result" : "Release-linked scope"}
+          size="compact"
+          tone={controller.state.truncated ? "caution" : "neutral"}
+        />
       </div>
 
       {visibleItems.length === 0 ? (
         <StatePanel
-          action={<Button onClick={() => setSearchParams({}, { replace: true })}>Clear filters</Button>}
+          action={<Button onClick={() => replaceSearch(new URLSearchParams())}>Clear filters</Button>}
           description="Try a broader word, service, type, or status. No demo object is substituted."
           title="No matching items"
         />
