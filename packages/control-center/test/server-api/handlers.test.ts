@@ -114,6 +114,12 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+
+const assertForbidden = <A, E extends { readonly _tag: string }>(attempted: Result.Result<A, E>) => {
+  assert.isTrue(Result.isFailure(attempted))
+  if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure._tag, "ForbiddenApiError")
+}
+
 const approverSession = Schema.decodeSync(SessionSummary)({
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000008",
   workspaceId,
@@ -392,30 +398,48 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
-  it.effect("keeps an exact-share watcher out of the workspace entity index", () =>
+  it.effect("keeps an exact-share watcher out of adjacent workspace reads", () =>
     Effect.gen(function*() {
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
         sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
       })
-      const handler = Layer.merge(
-        shareHandlersLayer.pipe(
-          Layer.provide(watcherMiddlewareLayer),
-          Layer.provide(mutationMiddlewareLayer),
-          Layer.provide(authorizedSharesLayer)
-        ),
-        deliveryGraphHandlersLayer.pipe(
-          Layer.provide(watcherMiddlewareLayer),
-          Layer.provide(mutationMiddlewareLayer),
-          Layer.provide(deliveryGraphApplicationLayer)
-        )
+      const handler = Layer.mergeAll(
+        shareHandlersLayer,
+        deliveryGraphHandlersLayer,
+        portfolioHandlersLayer,
+        liveEventHandlersLayer
+      ).pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.mergeAll(
+          authorizedSharesLayer,
+          deliveryGraphApplicationLayer,
+          portfolioLayer,
+          liveEventsLayer,
+          Layer.succeed(Auth, streamAuthentication),
+          LiveStreamAdmission.layer
+        ))
       )
       const result = yield* Effect.gen(function*() {
-        const client = yield* HttpApiTest.groups(ControlCenterApi, ["shares", "deliveryGraph"])
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "shares",
+          "deliveryGraph",
+          "portfolio",
+          "liveEvents"
+        ])
         const shared = yield* client.shares.resolve({
           params: { workspaceId: session.workspaceId, shareId: authorizedShareId }
         })
         assert.strictEqual(shared.item.projection.entityId, sharedEntityId)
-        return yield* client.deliveryGraph.workspaceEntityProjections({ query: {} }).pipe(Effect.result)
+        return yield* Effect.all([
+          client.deliveryGraph.workspaceEntityProjections({ query: {} }).pipe(Effect.result),
+          client.deliveryGraph.releaseSlice({
+            params: { releaseId: inspectedReleaseId },
+            query: {}
+          }).pipe(Effect.result),
+          client.portfolio.snapshot().pipe(Effect.result),
+          client.liveEvents.stream({ headers: {}, query: {} }).pipe(Effect.result)
+        ])
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -423,8 +447,11 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
-      assert.isTrue(Result.isFailure(result))
-      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+      const [entityIndex, releaseSlice, portfolioSnapshot, liveEventStream] = result
+      assertForbidden(entityIndex)
+      assertForbidden(releaseSlice)
+      assertForbidden(portfolioSnapshot)
+      assertForbidden(liveEventStream)
     }))
 
   it.effect("serves a workspace-scoped release relationship slice", () =>

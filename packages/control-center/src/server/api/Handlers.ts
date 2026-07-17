@@ -48,6 +48,11 @@ const currentSessionToken = (request: { readonly cookies: Readonly<Record<string
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
 
+const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
+  session.permission === "workspace-owner" || session.permission === "workspace-approver"
+    ? Effect.void
+    : Effect.flatMap(forbiddenApiError, Effect.fail)
+
 const revalidateSession = (
   auth: Auth["Service"],
   token: Redacted.Redacted<string>,
@@ -213,6 +218,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("list", () =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.list(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
@@ -220,6 +226,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("health", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.health({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -232,6 +239,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("configurationMetadata", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.configurationMetadata({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -244,6 +252,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
         .handle("configuration", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* plugins.configuration({
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
@@ -284,6 +293,7 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("snapshot", () =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           return yield* portfolio.snapshot(session.workspaceId).pipe(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
@@ -321,6 +331,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("releaseSlice", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.releaseSlice({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -333,6 +344,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("repairCandidates", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.repairCandidates({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -345,6 +357,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("repairProposalDraft", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.repairProposalDraft({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -379,6 +392,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("listRepairProposals", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* repairProposals.list({
               workspaceId: session.workspaceId,
               releaseId: params.releaseId,
@@ -392,6 +406,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("getRepairProposal", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* repairProposals.get({
               workspaceId: session.workspaceId,
               proposalId: params.proposalId
@@ -443,6 +458,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("relationship", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.relationship({
               workspaceId: session.workspaceId,
               relationshipId: params.relationshipId,
@@ -455,6 +471,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("relationshipHistory", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.relationshipHistory({
               workspaceId: session.workspaceId,
               relationshipId: params.relationshipId
@@ -466,6 +483,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("evidence", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             return yield* inspection.evidence({
               workspaceId: session.workspaceId,
               evidenceId: params.evidenceId
@@ -516,6 +534,7 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("stream", ({ headers, query, request }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           const queryCursor = query.after
           const headerCursor = headers["last-event-id"]
           if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
@@ -558,6 +577,7 @@ export const mediaHandlersLayer = HttpApiBuilder.group(
       return handlers.handle("read", ({ params }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
           const media = yield* mediaReads.read({
             mediaId: params.mediaId,
             workspaceId: session.workspaceId

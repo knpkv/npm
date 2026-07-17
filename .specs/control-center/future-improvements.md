@@ -239,9 +239,11 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   Creation is owner-only, the Items picker uses the existing bounded 200-person owner facet, and the
   page intentionally excludes ordinary workspace navigation, release membership, relationships,
   evidence, and adjacent objects. Cookie-authenticated read recovery remains available without
-  browser mutation-proof storage, while watcher sessions cannot use the owner-only workspace index.
-  Resolution rechecks that the named grantee remains active before target reads. Create retries
-  preserve both the random share identifier and its originally computed expiry.
+  browser mutation-proof storage, while watcher sessions cannot use adjacent workspace portfolio,
+  live-event, plugin, media, Items, or delivery-graph reads. Workspace owners and approvers retain
+  broader application reads through their existing session roles. Resolution rechecks that the named
+  grantee remains active before target reads. Create retries preserve both the random share identifier
+  and its originally computed expiry.
   Add a paginated workspace people picker, durable share-administration list, and release-scoped grants
   only when those scopes have equally exact response projections and resolution-time authorization.
 
