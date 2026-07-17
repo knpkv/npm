@@ -11,7 +11,7 @@
  * **Mental model**
  *
  * - {@link withAwsContext}: acquires credentials, provides Credentials + Region +
- *   HttpClient + AwsClientConfig to inner effect, wraps with throttle-retry + timeout
+ *   HttpClient + AwsClientConfig to inner effect, wraps with optional throttle-retry + timeout
  * - {@link throttleRetry}: exponential backoff on AWS ThrottlingException
  * - {@link normalizeAuthor}: `arn:aws:sts::ACCT:assumed-role/Role/Session` → `Session`
  * - {@link PullRequestDetail}: transport type for single-PR path. Uses inline struct
@@ -144,14 +144,14 @@ export const makeApiError = (operation: string, profile: AwsProfileName, region:
 export type AccountParams = Pick<Account, "profile" | "region">
 
 /**
- * Shared combinator: acquire credentials → build Layer → provide → retry → timeout.
+ * Shared combinator: acquire credentials → build Layer → provide → optional retry → timeout.
  * Eliminates boilerplate repeated across all AwsClient method files.
  */
 export const withAwsContext = <A, E>(
   operation: string,
   account: AccountParams,
   effect: Effect.Effect<A, E, AwsRuntimeEnv>,
-  options?: { readonly timeout?: "stream" }
+  options?: { readonly retry?: boolean; readonly timeout?: "stream" }
 ): Effect.Effect<A, E | AwsCredentialError | AwsApiError, AwsClientConfig | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const config = yield* AwsClientConfig
@@ -159,7 +159,7 @@ export const withAwsContext = <A, E>(
     const credentials = yield* acquireCredentials(account.profile, account.region)
     const timeout = options?.timeout === "stream" ? config.streamTimeout : config.operationTimeout
 
-    return yield* Effect.provide(
+    const provided = Effect.provide(
       effect,
       Layer.mergeAll(
         DistilledCredentials.fromCredentials(credentials),
@@ -167,8 +167,10 @@ export const withAwsContext = <A, E>(
         Layer.succeed(DistilledRegion.Region, account.region),
         Layer.succeed(AwsClientConfig, config)
       )
-    ).pipe(
-      throttleRetry,
+    )
+    const attempted = options?.retry === false ? provided : throttleRetry(provided)
+
+    return yield* attempted.pipe(
       Effect.timeout(timeout),
       Effect.catchTag(
         "TimeoutError",

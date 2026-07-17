@@ -15,6 +15,7 @@ const validManifest = {
     "@effect/sql-libsql": "4.0.0-beta.98",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
+    "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/rly": "workspace:^",
     effect: "4.0.0-beta.98",
@@ -84,6 +85,15 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@knpkv/rly": "^0.1.0" }
       })
     ).toContain("@knpkv/rly must use workspace:^")
+  })
+
+  it("rejects a non-workspace CodeCommit owning-package dependency", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: { ...validManifest.dependencies, "@knpkv/codecommit-core": "^0.8.0" }
+      })
+    ).toContain("@knpkv/codecommit-core must use workspace:^")
   })
 
   it("rejects a CLI that bypasses the built server boundary", () => {

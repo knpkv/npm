@@ -54,6 +54,12 @@ Opening `/shares/<workspace-id>/<share-id>` first recovers the browser session, 
 
 The current Items control offers one-hour, one-day, and seven-day expiries and can revoke the newly created link immediately. If a create response is lost, retry preserves the original share identifier and expiry so the durable grant remains idempotent. Broader share administration and release-scoped grants remain future work.
 
+## CodeCommit adapter milestone
+
+The first production CodeCommit adapter is a read-only vertical slice for one configured AWS profile, region, and repository. It normalizes open pull requests, exact PR/base/head revisions, and every cursor-paginated changed-file entry through `entity.read@1`, `sync.incremental@1`, and `diff.inventory@1`. The owning `@knpkv/codecommit-core` package performs the real provider calls and Schema-decodes responses before Control Center normalization.
+
+This slice does not yet register connections in the production runtime catalog or expose provider setup in Settings. Diff content, binary/generated/oversized detection, commits/history, comments, checks, review actions, approval, merge, receipts, and reconciliation remain deferred. No mutation capability is advertised, so the adapter cannot invoke CodeCommit writes.
+
 ## Configure local providers
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:

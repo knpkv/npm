@@ -56,6 +56,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@effect/sql-libsql",
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
+    "@knpkv/codecommit-core",
     "@knpkv/control-center-sql",
     "@knpkv/rly",
     "effect",
@@ -68,6 +69,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
+  }
+  if (manifest.dependencies["@knpkv/codecommit-core"] !== "workspace:^") {
+    violations.push("@knpkv/codecommit-core must use workspace:^")
   }
   const localAgentDependencies: ReadonlyArray<"@knpkv/ai-claude" | "@knpkv/ai-codex"> = [
     "@knpkv/ai-claude",

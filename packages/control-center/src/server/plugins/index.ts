@@ -10,3 +10,5 @@ export * from "./failures.js"
 export * from "./negotiation.js"
 /** Bounded retry policy for explicitly safe or idempotent provider operations. */
 export * from "./retryPolicy.js"
+/** Production CodeCommit read adapter. */
+export * from "./codecommit/index.js"

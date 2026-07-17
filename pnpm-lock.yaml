@@ -536,6 +536,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/codecommit-core':
+        specifier: workspace:^
+        version: link:../codecommit-core
       '@knpkv/control-center-sql':
         specifier: workspace:^
         version: link:../control-center-sql
