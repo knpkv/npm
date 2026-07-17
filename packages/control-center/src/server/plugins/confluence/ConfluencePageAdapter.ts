@@ -257,7 +257,7 @@ const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")
     roles.set(accountId, current)
   }
   addRole(page.ownerId, "owner")
-  addRole(page.authorId, "author")
+  addRole(page.version.authorId, "author")
   for (const version of versions) addRole(version.authorId, "contributor")
   const accountIds = [...roles.keys()].sort()
   const users = yield* readUsers(client, accountIds)
@@ -281,6 +281,7 @@ const sourceUrl = (
   if (webui === undefined) return null
   const candidate = Result.try(() => new URL(webui, siteBaseUrl))
   if (Result.isFailure(candidate) || candidate.success.origin !== siteBaseUrl.origin) return null
+  if (candidate.success.username.length > 0 || candidate.success.password.length > 0) return null
   return candidate.success.toString()
 }
 

@@ -8,7 +8,7 @@ const MAXIMUM_SAFE_MARKDOWN_CHARACTERS = 262_144
 const ADF_METADATA = /<!--\s*adf:[\s\S]*?-->/gu
 const GENERATED_IMAGE = /!\[([^\]]*)\]\((?:<[^>\n]*>|[^)\n]*)\)/gu
 const GENERATED_LINK = /\[([^\]]*)\]\((?:<[^>\n]*>|[^)\n]*)\)/gu
-const RAW_HTML = /<[^>\n]*>/gu
+const RAW_HTML = /<[^>]*>/gu
 const ACTIVE_DESTINATION = /\b(?:data|file|https?|javascript):[^\s)]*/giu
 
 /**

@@ -224,6 +224,90 @@ describe("Confluence page adapter", () => {
       assert.notInclude(attributes.content?.markdown, "](")
     }))
 
+  it.effect("removes newline-bearing raw HTML while preserving multiline plain text", () =>
+    Effect.gen(function*() {
+      const markdown = [
+        "First plain-text line",
+        "<span data-color=\"green",
+        "onmouseover=\"alert(1)\">Status</span>",
+        "Second plain-text line"
+      ].join("\n")
+      const adapter = yield* makeAdapter(defaultClient(), markdown)
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.strictEqual(
+        attributes.content?.markdown,
+        "First plain-text line\nStatus\nSecond plain-text line\n"
+      )
+      assert.notInclude(attributes.content?.markdown, "<span")
+      assert.notInclude(attributes.content?.markdown, "onmouseover")
+    }))
+
+  it.effect("drops same-origin source URLs with userinfo while retaining relative links", () =>
+    Effect.gen(function*() {
+      const credentialedAdapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.succeed({
+            ...currentPage,
+            _links: { webui: `https://user:secret@acme.atlassian.net/wiki/pages/${PAGE_ID}` }
+          })
+      }))
+      const credentialed = yield* credentialedAdapter.connection.readEntity(request)
+
+      assert.strictEqual(credentialed._tag, "found")
+      if (credentialed._tag !== "found") return
+      assert.isNull(credentialed.event.sourceUrl)
+
+      const relativeAdapter = yield* makeAdapter(defaultClient())
+      const relative = yield* relativeAdapter.connection.readEntity(request)
+
+      assert.strictEqual(relative._tag, "found")
+      if (relative._tag !== "found") return
+      assert.strictEqual(
+        relative.event.sourceUrl?.toString(),
+        `https://acme.atlassian.net/wiki/spaces/PAY/pages/${PAGE_ID}`
+      )
+    }))
+
+  it.effect("assigns the author role to the current editor rather than the page creator", () =>
+    Effect.gen(function*() {
+      const editedPage = {
+        ...currentPage,
+        authorId: "account-creator",
+        version: { ...currentPage.version, authorId: "account-editor" }
+      }
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () => Effect.succeed(editedPage),
+        getPageVersions: () =>
+          Effect.succeed({
+            results: [
+              editedPage.version,
+              {
+                number: 2,
+                createdAt: "2026-07-15T08:00:00.000Z",
+                authorId: "account-creator"
+              }
+            ]
+          })
+      }))
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.deepStrictEqual(
+        attributes.contributors.map(({ accountId, roles }) => ({ accountId, roles })),
+        [
+          { accountId: "account-creator", roles: ["contributor"] },
+          { accountId: "account-editor", roles: ["author", "contributor"] },
+          { accountId: "account-owner", roles: ["owner"] }
+        ]
+      )
+    }))
+
   it.effect("rejects pages outside the configured space before history, users, or content", () =>
     Effect.gen(function*() {
       let versionCalls = 0
