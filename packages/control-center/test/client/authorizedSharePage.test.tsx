@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { AuthorizedShareResolution } from "../../src/api/shares.js"
+import { AppShell } from "../../src/client/AppShell.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { AuthorizedSharePage } from "../../src/client/items/AuthorizedSharePage.js"
 import type { AuthorizedShareTransport } from "../../src/client/items/authorizedShareTransport.js"
@@ -57,8 +58,13 @@ const renderShare = async (
         ),
         children: [
           {
-            path: "/shares/:workspaceId/:shareId",
-            element: <AuthorizedSharePage transport={transport} />
+            element: <AppShell />,
+            children: [
+              {
+                path: "/shares/:workspaceId/:shareId",
+                element: <AuthorizedSharePage transport={transport} />
+              }
+            ]
           }
         ]
       }
@@ -71,6 +77,7 @@ const renderShare = async (
 
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
+  vi.restoreAllMocks()
   mountedRoot = undefined
   sessionControls = undefined
   document.body.replaceChildren()
@@ -109,6 +116,44 @@ describe("AuthorizedSharePage", () => {
     expect(host.textContent).toContain(source.projection.title)
     expect(host.textContent).toContain("Releases, relationships, and evidence remain private")
     expect(host.textContent).not.toContain("Details")
+    expect(host.querySelector(`a[href^="/w/${WORKSET_WORKSPACE_ID}"]`)).toBeNull()
+    expect(host.querySelector("header a")).toBeNull()
+    expect(host.textContent).not.toContain("Ask Relay")
+  })
+
+  it("resolves a cookie-authenticated share when mutation-proof storage is unavailable", async () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected shared item fixture")
+    const resolution = AuthorizedShareResolution.make({
+      share: {
+        shareId,
+        entityId: source.projection.entityId,
+        granteePersonId: personId,
+        createdAt: Schema.decodeUnknownSync(UtcTimestamp)("2026-07-17T10:00:00.000Z"),
+        expiresAt: Schema.decodeUnknownSync(UtcTimestamp)("2099-07-18T10:00:00.000Z"),
+        revokedAt: null
+      },
+      item: source
+    })
+    const transport = {
+      create: vi.fn(() => Promise.reject(new Error("not used"))),
+      makeShareId: vi.fn(() => Promise.resolve(shareId)),
+      resolve: vi.fn(() => Promise.resolve(resolution)),
+      revoke: vi.fn(() => Promise.reject(new Error("not used")))
+    } satisfies AuthorizedShareTransport
+    const host = await renderShare(transport)
+    if (sessionControls === undefined) throw new Error("Expected browser session controls")
+    vi.spyOn(sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable")
+    })
+
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    await act(async () => Promise.resolve())
+
+    expect(sessionControls?.state).toMatchObject({ _tag: "storage-unavailable", session })
+    expect(transport.resolve).toHaveBeenCalledWith(WORKSET_WORKSPACE_ID, shareId, expect.any(AbortSignal))
+    expect(host.textContent).toContain(source.projection.title)
+    expect(host.textContent).not.toContain("Authentication required")
   })
 
   it("rejects a share URL scoped to another workspace before resolving its identifier", async () => {
@@ -144,7 +189,7 @@ describe("AuthorizedSharePage", () => {
 
     expect(host.textContent).toContain("Share unavailable")
     expect(host.textContent).toContain("another person, be expired or revoked, or point to a deleted item")
-    expect(host.querySelector<HTMLAnchorElement>(`a[href="/w/${WORKSET_WORKSPACE_ID}/items"]`)).not.toBeNull()
+    expect(host.querySelector<HTMLAnchorElement>(`a[href^="/w/${WORKSET_WORKSPACE_ID}"]`)).toBeNull()
   })
 
   it("removes a rendered item when server revalidation reports the share unavailable", async () => {

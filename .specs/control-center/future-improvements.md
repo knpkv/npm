@@ -237,7 +237,9 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   through Items until provider-specific full views exist.
 - Authorized shares currently grant one current normalized entity projection to one human person.
   Creation is owner-only, the Items picker uses the existing bounded 200-person owner facet, and the
-  page intentionally excludes release membership, relationships, evidence, and adjacent objects.
+  page intentionally excludes ordinary workspace navigation, release membership, relationships,
+  evidence, and adjacent objects. Cookie-authenticated read recovery remains available without
+  browser mutation-proof storage, while watcher sessions cannot use the owner-only workspace index.
   Add a paginated workspace people picker, durable share-administration list, and release-scoped grants
   only when those scopes have equally exact response projections and resolution-time authorization.
 

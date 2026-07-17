@@ -303,6 +303,9 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
         .handle("workspaceEntityProjections", ({ query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
             return yield* inspection.workspaceEntityProjections({
               workspaceId: session.workspaceId,
               owner: query.owner ?? null,

@@ -392,6 +392,41 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("keeps an exact-share watcher out of the workspace entity index", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = Layer.merge(
+        shareHandlersLayer.pipe(
+          Layer.provide(watcherMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(authorizedSharesLayer)
+        ),
+        deliveryGraphHandlersLayer.pipe(
+          Layer.provide(watcherMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(deliveryGraphApplicationLayer)
+        )
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["shares", "deliveryGraph"])
+        const shared = yield* client.shares.resolve({
+          params: { workspaceId: session.workspaceId, shareId: authorizedShareId }
+        })
+        assert.strictEqual(shared.item.projection.entityId, sharedEntityId)
+        return yield* client.deliveryGraph.workspaceEntityProjections({ query: {} }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
+
   it.effect("serves a workspace-scoped release relationship slice", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])

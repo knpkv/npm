@@ -47,10 +47,14 @@ export const AuthorizedSharePage = ({
   const decodedWorkspaceId = Schema.decodeUnknownOption(WorkspaceId)(params.workspaceId)
   const shareId = Option.isSome(decodedShareId) ? decodedShareId.value : null
   const workspaceId = Option.isSome(decodedWorkspaceId) ? decodedWorkspaceId.value : null
-  const session =
-    browserSession.state._tag === "authenticated" && browserSession.state.session.workspaceId === workspaceId
+  const authenticatedSession =
+    browserSession.state._tag === "authenticated"
       ? browserSession.state.session
-      : null
+      : browserSession.state._tag === "storage-unavailable"
+        ? browserSession.state.session
+        : null
+  const session =
+    authenticatedSession !== null && authenticatedSession.workspaceId === workspaceId ? authenticatedSession : null
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<AuthorizedSharePageState>({ _tag: "idle" })
 
@@ -103,7 +107,7 @@ export const AuthorizedSharePage = ({
     )
   }
 
-  if (browserSession.state._tag !== "authenticated") {
+  if (authenticatedSession === null) {
     return (
       <StatePanel
         action={<Link to="/pair">Pair this browser</Link>}
@@ -114,10 +118,9 @@ export const AuthorizedSharePage = ({
     )
   }
 
-  if (browserSession.state.session.workspaceId !== workspaceId) {
+  if (authenticatedSession.workspaceId !== workspaceId) {
     return (
       <StatePanel
-        action={<Link to={`/w/${browserSession.state.session.workspaceId}/items`}>Open workspace items</Link>}
         description="This link is scoped to another workspace. No item was substituted."
         title="Share unavailable"
         tone="caution"
@@ -128,7 +131,6 @@ export const AuthorizedSharePage = ({
   if (state._tag === "not-found") {
     return (
       <StatePanel
-        action={<Link to={`/w/${browserSession.state.session.workspaceId}/items`}>Open workspace items</Link>}
         description="The link may target another person, be expired or revoked, or point to a deleted item."
         title="Share unavailable"
         tone="caution"
@@ -189,9 +191,6 @@ export const AuthorizedSharePage = ({
             <dd>{DateTime.formatIso(state.resolution.share.expiresAt)}</dd>
           </div>
         </dl>
-        <Link to={`/w/${browserSession.state.session.workspaceId}/items?object=${projection.entityId}#item-details`}>
-          Open in workspace
-        </Link>
       </Surface>
     </article>
   )

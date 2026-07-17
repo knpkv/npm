@@ -58,6 +58,7 @@ const PrimaryNavigation = ({
 /** Quiet application chrome that keeps delivery work and the contextual agent one action away. */
 export const AppShell = (): ReactElement => {
   const location = useLocation()
+  const isAuthorizedShare = location.pathname.startsWith("/shares/")
   const overviewPath = workspaceOverviewPath(location.pathname)
   const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
@@ -65,24 +66,37 @@ export const AppShell = (): ReactElement => {
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to={overviewPath}>
-          <span aria-hidden="true" className={styles.brandMark}>
-            C
+        {isAuthorizedShare ? (
+          <span className={styles.brand ?? ""}>
+            <span aria-hidden="true" className={styles.brandMark}>
+              C
+            </span>
+            <span className={styles.brandName}>Control Center</span>
           </span>
-          <span className={styles.brandName}>Control Center</span>
-        </NavLink>
-        <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
-        <div className={styles.actions}>
-          {workspaceId === null ? null : (
-            <Suspense fallback={null}>
-              <CommandSearch workspaceId={workspaceId} />
-            </Suspense>
-          )}
-          <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
-            Ask Relay
+        ) : (
+          <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to={overviewPath}>
+            <span aria-hidden="true" className={styles.brandMark}>
+              C
+            </span>
+            <span className={styles.brandName}>Control Center</span>
           </NavLink>
-        </div>
-        <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
+        )}
+        {isAuthorizedShare ? null : (
+          <>
+            <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
+            <div className={styles.actions}>
+              {workspaceId === null ? null : (
+                <Suspense fallback={null}>
+                  <CommandSearch workspaceId={workspaceId} />
+                </Suspense>
+              )}
+              <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
+                Ask Relay
+              </NavLink>
+            </div>
+            <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
+          </>
+        )}
       </header>
       <main className={styles.main}>
         <Outlet />
