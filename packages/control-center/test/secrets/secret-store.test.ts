@@ -50,6 +50,35 @@ describe("SecretRef", () => {
 })
 
 describe("SecretStore", () => {
+  it.effect("initializes and stores values when descriptor path aliases are unavailable", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-portable-" })
+      const root = Schema.decodeSync(SecretRoot)(path.join(parent, "secrets"))
+      const portableFileSystem = FileSystem.make({
+        ...fs,
+        realPath: (target) =>
+          target.startsWith("/proc/self/fd/") || target.startsWith("/dev/fd/")
+            ? Effect.fail(
+              PlatformError.systemError({
+                _tag: "NotFound",
+                method: "realPath",
+                module: "FileSystem",
+                pathOrDescriptor: target
+              })
+            )
+            : fs.realPath(target)
+      })
+
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, portableFileSystem)
+      )
+      const ref = yield* store.create(encoder.encode("portable-secret"))
+
+      assert.strictEqual(yield* resolveString(store, ref), "portable-secret")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
   it.effect("creates and durably secures a missing root beneath a canonical parent", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem

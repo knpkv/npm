@@ -1,4 +1,3 @@
-import type { FileSystem as FileSystemType, Path as PathType } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
@@ -86,14 +85,6 @@ const sameIdentity = (left: FileSystem.File.Info, right: FileSystem.File.Info): 
   Option.isSome(right.ino) &&
   left.ino.value === right.ino.value &&
   sameOwner(left, right)
-
-const descriptorAliases = (
-  path: PathType.Path,
-  descriptor: FileSystemType.File.Descriptor
-): ReadonlyArray<string> => [
-  path.join("/proc/self/fd", String(descriptor)),
-  path.join("/dev/fd", String(descriptor))
-]
 
 interface MarkerPublication {
   readonly claimBasename: string
@@ -377,30 +368,23 @@ const verifyProcessOwnership = Effect.fn("ControlCenterCli.verifyProcessOwnershi
         const directoryInfo = yield* mapConfigurationError(directory.stat)
         if (!isExpectedRoot(directoryInfo)) return yield* configurationError()
 
-        let alias: string | undefined
-        for (const candidate of descriptorAliases(path, directory.fd)) {
-          const resolved = yield* fileSystem.realPath(candidate).pipe(Effect.result)
-          if (Result.isSuccess(resolved) && resolved.success === dataRoot) {
-            alias = candidate
-            break
-          }
-        }
-        if (alias === undefined) return yield* configurationError()
-
         const assertIdentity = Effect.gen(function*() {
           const current = yield* directory.stat.pipe(Effect.result)
-          const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
+          const named = yield* fileSystem.stat(dataRoot).pipe(Effect.result)
+          const resolved = yield* fileSystem.realPath(dataRoot).pipe(Effect.result)
           if (
             Result.isFailure(current) ||
+            Result.isFailure(named) ||
             Result.isFailure(resolved) ||
             resolved.success !== dataRoot ||
-            !isExpectedRoot(current.success)
+            !isExpectedRoot(current.success) ||
+            !sameIdentity(current.success, named.success)
           ) return yield* configurationError()
         })
 
         yield* assertIdentity
         const random = yield* mapConfigurationError(cryptoService.randomBytes(16))
-        const probePath = path.join(alias, `${DATA_ROOT_OWNER_PROBE_PREFIX}${Encoding.encodeHex(random)}`)
+        const probePath = path.join(dataRoot, `${DATA_ROOT_OWNER_PROBE_PREFIX}${Encoding.encodeHex(random)}`)
         const probe = yield* mapConfigurationError(
           fileSystem.open(probePath, { flag: "wx", mode: DATA_ROOT_MARKER_MODE })
         )

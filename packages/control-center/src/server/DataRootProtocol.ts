@@ -110,24 +110,6 @@ const sameIdentity = (left: FileSystem.File.Info, right: FileSystem.File.Info): 
   Option.isSome(right.uid) &&
   left.uid.value === right.uid.value
 
-const descriptorAliases = (path: Path.Path, descriptor: FileSystem.File.Descriptor): ReadonlyArray<string> => [
-  path.join("/proc/self/fd", String(descriptor)),
-  path.join("/dev/fd", String(descriptor))
-]
-
-const resolveDescriptorAlias = Effect.fn("DataRootProtocol.resolveDescriptorAlias")(function*(
-  fileSystem: FileSystem.FileSystem,
-  path: Path.Path,
-  descriptor: FileSystem.File.Descriptor,
-  expectedPath: string
-) {
-  for (const alias of descriptorAliases(path, descriptor)) {
-    const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
-    if (Result.isSuccess(resolved) && resolved.success === expectedPath) return alias
-  }
-  return yield* protocolError("storage")
-})
-
 interface PinnedStage {
   readonly _tag: "PinnedStage"
   readonly accessPath: string
@@ -217,7 +199,7 @@ export const inspectFreshDataRootClaim = Effect.fn("DataRootProtocol.inspectFres
   const dataRoot = yield* validateConfiguredDataRootClaim(configuredDataRoot)
   const parent = path.dirname(dataRoot)
   const canonicalParent = yield* mapProtocolStorage(fileSystem.realPath(parent))
-  const parentInfo = yield* mapProtocolStorage(fileSystem.stat(parent))
+  const parentInfo = yield* mapProtocolStorage(fileSystem.stat(canonicalParent))
   if (parentInfo.type !== "Directory") return yield* protocolError("invalid-path")
   return {
     canonicalDataRoot: path.join(canonicalParent, path.basename(dataRoot)),
@@ -342,6 +324,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const { configuredDataRoot } = location
+  const canonicalParent = location.canonicalParent
   yield* assertParentIdentity(location)
   const claimState = yield* Ref.make<"attempted" | "lost-race" | "not-attempted" | "observed" | "owned">(
     "not-attempted"
@@ -349,35 +332,34 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
   const cleanupFailed = yield* Ref.make(false)
   return yield* Effect.uninterruptibleMask((restore) =>
     restore(Effect.scoped(Effect.gen(function*() {
-      const parentHandle = yield* mapProtocolStorage(fileSystem.open(location.canonicalParent, { flag: "r" }))
+      const parentHandle = yield* mapProtocolStorage(fileSystem.open(canonicalParent, { flag: "r" }))
       const parentInfo = yield* mapProtocolStorage(parentHandle.stat)
-      if (!sameIdentity(parentInfo, location.parentInfo)) return yield* protocolError("parent-changed")
-      const parentAlias = yield* resolveDescriptorAlias(
-        fileSystem,
-        path,
-        parentHandle.fd,
-        location.canonicalParent
-      )
-      const claimPath = path.join(parentAlias, path.basename(configuredDataRoot))
+      const canonicalParentInfo = yield* mapProtocolStorage(fileSystem.stat(canonicalParent))
+      if (
+        !sameIdentity(parentInfo, canonicalParentInfo) ||
+        !sameIdentity(canonicalParentInfo, location.parentInfo)
+      ) return yield* protocolError("parent-changed")
+      const claimPath = path.join(canonicalParent, path.basename(configuredDataRoot))
 
       const assertPinnedParent = Effect.gen(function*() {
         const descriptorInfo = yield* parentHandle.stat.pipe(Effect.result)
-        const descriptorPath = yield* fileSystem.realPath(parentAlias).pipe(Effect.result)
+        const canonicalInfo = yield* fileSystem.stat(canonicalParent).pipe(Effect.result)
         const configuredParent = yield* fileSystem.realPath(location.parent).pipe(Effect.result)
         if (
           Result.isFailure(descriptorInfo) ||
-          Result.isFailure(descriptorPath) ||
+          Result.isFailure(canonicalInfo) ||
           Result.isFailure(configuredParent) ||
-          descriptorPath.success !== location.canonicalParent ||
-          configuredParent.success !== location.canonicalParent ||
-          !sameIdentity(descriptorInfo.success, location.parentInfo)
+          configuredParent.success !== canonicalParent ||
+          !sameIdentity(descriptorInfo.success, canonicalInfo.success) ||
+          !sameIdentity(canonicalInfo.success, location.parentInfo)
         ) return yield* protocolError("parent-changed")
       })
 
       return yield* acquireUseReleaseMasked(
         Effect.gen(function*() {
+          yield* assertPinnedParent
           const created = yield* mapProtocolStorage(
-            fileSystem.makeTempDirectory({ directory: parentAlias, prefix: DATA_ROOT_STAGING_PREFIX })
+            fileSystem.makeTempDirectory({ directory: canonicalParent, prefix: DATA_ROOT_STAGING_PREFIX })
           )
           // The portable API returns only a pathname from mkdtemp. A same-UID actor
           // can substitute it before the first open; later identity capture detects
@@ -396,26 +378,24 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
             if (unidentified._tag !== "UnidentifiedStage") return yield* protocolError("storage")
             const name = path.basename(unidentified.createdPath)
             if (
-              path.dirname(unidentified.createdPath) !== parentAlias ||
+              path.dirname(unidentified.createdPath) !== canonicalParent ||
               !name.startsWith(DATA_ROOT_STAGING_PREFIX) ||
               name === DATA_ROOT_STAGING_PREFIX
             ) return yield* protocolError("cleanup-uncertain")
-            const accessPath = path.join(parentAlias, name)
-            const canonicalPath = path.join(location.canonicalParent, name)
+            const canonicalPath = path.join(canonicalParent, name)
             const pinned = yield* Effect.gen(function*() {
-              const handle = yield* mapProtocolStorage(fileSystem.open(accessPath, { flag: "r" }))
+              const handle = yield* mapProtocolStorage(fileSystem.open(canonicalPath, { flag: "r" }))
               const info = yield* mapProtocolStorage(handle.stat)
-              const namedInfo = yield* mapProtocolStorage(fileSystem.stat(accessPath))
-              const resolved = yield* mapProtocolStorage(fileSystem.realPath(accessPath))
+              const namedInfo = yield* mapProtocolStorage(fileSystem.stat(canonicalPath))
+              const resolved = yield* mapProtocolStorage(fileSystem.realPath(canonicalPath))
               if (
                 info.type !== "Directory" ||
                 resolved !== canonicalPath ||
                 !sameIdentity(info, namedInfo)
               ) return yield* protocolError("cleanup-uncertain")
-              const descriptorPath = yield* resolveDescriptorAlias(fileSystem, path, handle.fd, canonicalPath)
               return {
                 _tag: "PinnedStage",
-                accessPath: descriptorPath,
+                accessPath: canonicalPath,
                 canonicalPath,
                 handle,
                 info,
@@ -430,7 +410,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                   Exit.isSuccess(scopeExit)
                     ? Effect.void
                     : Effect.gen(function*() {
-                      const entries = yield* fileSystem.readDirectory(parentAlias).pipe(Effect.result)
+                      const entries = yield* fileSystem.readDirectory(canonicalParent).pipe(Effect.result)
                       if (Result.isFailure(entries)) return yield* Ref.set(cleanupFailed, true)
                       if (!entries.success.includes(lease.name)) {
                         const synced = yield* parentHandle.sync.pipe(Effect.result)
@@ -439,10 +419,10 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                       if (entries.success.includes(path.basename(configuredDataRoot))) {
                         return yield* Ref.set(cleanupFailed, true)
                       }
-                      const currentInfo = yield* fileSystem.stat(path.join(parentAlias, lease.name)).pipe(
+                      const currentInfo = yield* fileSystem.stat(path.join(canonicalParent, lease.name)).pipe(
                         Effect.result
                       )
-                      const currentPath = yield* fileSystem.realPath(path.join(parentAlias, lease.name)).pipe(
+                      const currentPath = yield* fileSystem.realPath(path.join(canonicalParent, lease.name)).pipe(
                         Effect.result
                       )
                       if (
@@ -457,7 +437,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                       // named identity is compared with the already captured fstat.
                       const preflightSynced = yield* parentHandle.sync.pipe(Effect.result)
                       if (Result.isFailure(preflightSynced)) return yield* Ref.set(cleanupFailed, true)
-                      const removed = yield* fileSystem.remove(path.join(parentAlias, lease.name), {
+                      const removed = yield* fileSystem.remove(path.join(canonicalParent, lease.name), {
                         force: true,
                         recursive: true
                       }).pipe(Effect.result)
@@ -478,16 +458,13 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
             )
             const assertPinnedStageBinding = Effect.gen(function*() {
               const descriptorInfo = yield* lease.handle.stat.pipe(Effect.result)
-              const namedInfo = yield* fileSystem.stat(path.join(parentAlias, lease.name)).pipe(Effect.result)
-              const namedPath = yield* fileSystem.realPath(path.join(parentAlias, lease.name)).pipe(Effect.result)
-              const descriptorPath = yield* fileSystem.realPath(lease.accessPath).pipe(Effect.result)
+              const namedInfo = yield* fileSystem.stat(path.join(canonicalParent, lease.name)).pipe(Effect.result)
+              const namedPath = yield* fileSystem.realPath(path.join(canonicalParent, lease.name)).pipe(Effect.result)
               if (
                 Result.isFailure(descriptorInfo) ||
                 Result.isFailure(namedInfo) ||
                 Result.isFailure(namedPath) ||
-                Result.isFailure(descriptorPath) ||
                 namedPath.success !== lease.canonicalPath ||
-                descriptorPath.success !== lease.canonicalPath ||
                 !sameIdentity(descriptorInfo.success, lease.info) ||
                 !sameIdentity(namedInfo.success, lease.info)
               ) return yield* protocolError("cleanup-uncertain")
@@ -545,8 +522,8 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
 
               const removeOwnedStaging = Effect.gen(function*() {
                 const descriptorInfo = yield* lease.handle.stat.pipe(Effect.result)
-                const currentInfo = yield* fileSystem.stat(path.join(parentAlias, lease.name)).pipe(Effect.result)
-                const canonical = yield* fileSystem.realPath(path.join(parentAlias, lease.name)).pipe(Effect.result)
+                const currentInfo = yield* fileSystem.stat(path.join(canonicalParent, lease.name)).pipe(Effect.result)
+                const canonical = yield* fileSystem.realPath(path.join(canonicalParent, lease.name)).pipe(Effect.result)
                 if (
                   Result.isFailure(descriptorInfo) ||
                   Result.isFailure(currentInfo) ||
@@ -560,7 +537,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                 // the final checked pathname operation; all observable substitutions fail closed.
                 const preflightSynced = yield* parentHandle.sync.pipe(Effect.result)
                 if (Result.isFailure(preflightSynced)) return yield* protocolError("cleanup-uncertain")
-                const removed = yield* fileSystem.remove(path.join(parentAlias, lease.name), {
+                const removed = yield* fileSystem.remove(path.join(canonicalParent, lease.name), {
                   force: true,
                   recursive: true
                 }).pipe(Effect.result)
@@ -583,7 +560,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                   yield* Ref.set(claimState, "not-attempted")
                 }
 
-                const parentEntries = yield* fileSystem.readDirectory(parentAlias).pipe(Effect.result)
+                const parentEntries = yield* fileSystem.readDirectory(canonicalParent).pipe(Effect.result)
                 if (Result.isFailure(parentEntries)) return yield* protocolError("cleanup-uncertain")
                 if (!parentEntries.success.includes(path.basename(configuredDataRoot))) {
                   yield* removeOwnedStaging

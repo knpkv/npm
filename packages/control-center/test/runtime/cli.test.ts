@@ -181,6 +181,36 @@ describe("Control Center CLI", () => {
       assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("creates a fresh root when descriptor path aliases are unavailable", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-portable-fresh-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const portableFileSystem = FileSystem.make({
+        ...fileSystem,
+        realPath: (target) =>
+          target.startsWith("/proc/self/fd/") || target.startsWith("/dev/fd/")
+            ? Effect.fail(
+              PlatformError.systemError({
+                _tag: "NotFound",
+                method: "realPath",
+                module: "FileSystem",
+                pathOrDescriptor: target
+              })
+            )
+            : fileSystem.realPath(target)
+      })
+
+      const prepared = yield* prepareControlCenterDataRoot(dataPaths).pipe(
+        Effect.provideService(FileSystem.FileSystem, portableFileSystem)
+      )
+
+      assert.strictEqual(path.join(parent, yield* fileSystem.readLink(root)), prepared.dataRoot)
+      assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("does not replace an empty root that appears during atomic publication", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
