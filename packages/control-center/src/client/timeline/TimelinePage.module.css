@@ -119,6 +119,12 @@
   border-block-start: 1px solid var(--rly-color-border-1);
 }
 
+.rowActor {
+  display: grid;
+  gap: var(--rly-space-8);
+  justify-items: start;
+}
+
 @media (max-width: 48rem) {
   .summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));

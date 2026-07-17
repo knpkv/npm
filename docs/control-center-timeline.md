@@ -26,8 +26,11 @@ connected services, and Control Center itself into one compact chronology.
   successfully collected download records an immutable workspace, human,
   session, format, filters, requested limit, returned count, truncation, and
   timestamp audit before streaming starts.
-- UI: large source totals, actor/date filters, incremental paging, deep links, and
-  a Timeline-aware Relay entry.
+- UI: large source totals, actor/date filters, incremental paging, deep links,
+  and a Timeline-aware Relay entry. Workspace owners can deliberately inspect
+  one row in a focused sheet that shows its large event identity and only the
+  non-secret durable references returned by the owner-only detail endpoint;
+  approvers keep the redacted chronology and never receive the inspect action.
 
 The query builder remains private to `@knpkv/control-center-sql`. The application
 repository receives rendered SQL plus bound parameters and Schema-decodes every

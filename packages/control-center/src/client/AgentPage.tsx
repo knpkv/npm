@@ -130,8 +130,12 @@ const contextFor = (path: string | null): AgentPageContext => {
     }
   }
   if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "timeline" && releaseId === null) {
+    const selectedEvent = contextUrl.searchParams.get("event")
     return {
-      description: `Attributable delivery activity in workspace ${workspaceId}, including the exact actor and date filters.`,
+      description:
+        selectedEvent === null
+          ? `Attributable delivery activity in workspace ${workspaceId}, including the exact actor and date filters.`
+          : `Timeline event ${selectedEvent} in workspace ${workspaceId}, including the exact actor and date filters.`,
       label: "Workspace timeline",
       path: safePath
     }

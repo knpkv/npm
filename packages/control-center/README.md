@@ -194,8 +194,9 @@ and cap every export at 1,000 events with explicit truncation metadata. Every
 successful download records immutable human/session attribution, filters,
 format, counts, truncation, and timestamp before streaming begins. Owners
 can deliberately expand one exact event to inspect its durable identifiers and
-agent-job reference; ordinary pages remain redacted. Persisted artifacts and
-retention mutations remain deferred.
+agent-job reference in a focused browser sheet with a Timeline-aware Relay
+entry; approvers retain the ordinary redacted page and receive no inspect
+control. Persisted artifacts and retention mutations remain deferred.
 
 Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
 

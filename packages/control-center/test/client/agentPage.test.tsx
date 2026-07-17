@@ -117,6 +117,11 @@ describe("AgentPage context", () => {
     expect(markup).toContain("Attributable delivery activity")
     expect(markup).toContain(`href="${timelinePath}"`)
     expect(markup).not.toContain("Context unavailable")
+
+    const eventPath = `/w/${workspaceId}/timeline?actor=agent&event=action%3Aevent-43`
+    const eventMarkup = renderAgentPage(eventPath)
+    expect(eventMarkup).toContain("Timeline event action:event-43")
+    expect(eventMarkup).toContain(`href="${eventPath.replaceAll("&", "&amp;")}"`)
   })
 
   it("rejects external and unknown contexts instead of falling back to Overview", () => {
