@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -236,6 +237,31 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(providerCalls.filter((page) => page === 1).length, 1)
     }))
 
+  it.effect("rejects duplicate vendor identities with different revisions in one page", () =>
+    Effect.gen(function*() {
+      const outcome = yield* withConnection(
+        baseProvider({
+          getTimeEntries: () =>
+            Effect.succeed([
+              timeEntry("entry-1", "user-1", { description: "First version" }),
+              timeEntry("entry-1", "user-1", { description: "Second version" })
+            ])
+        }),
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))
+        ),
+        { ...configuration, userIds: "user-1", maximumPages: 1 }
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "clockify-time-entry-identity-duplicate")
+        }
+      }
+    }))
+
   it.effect("marks a full final provider page as bounded instead of claiming exhaustion", () =>
     Effect.gen(function*() {
       const pages = yield* withConnection(
@@ -444,6 +470,23 @@ describe("ClockifyReadPlugin", () => {
       if (Result.isFailure(outcome)) assert.instanceOf(outcome.failure, PluginAuthenticationFailure)
     }))
 
+  it.effect("accepts a configured workspace in a response containing 101 workspaces", () =>
+    Effect.gen(function*() {
+      const workspaces = [
+        { id: "workspace-1", name: "Delivery" },
+        ...Array.from({ length: 100 }, (_, index) => ({
+          id: `workspace-${index + 2}`,
+          name: `Workspace ${index + 2}`
+        }))
+      ]
+      const health = yield* withConnection(
+        baseProvider({ getWorkspaces: Effect.succeed(workspaces) }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.health))
+      )
+
+      assert.strictEqual(health._tag, "healthy")
+    }))
+
   it.effect("maps shared-client HTTP failures into authentication and rate-limit failures", () =>
     Effect.gen(function*() {
       const authentication = yield* Effect.gen(function*() {
@@ -462,6 +505,25 @@ describe("ClockifyReadPlugin", () => {
       assert.isTrue(Result.isFailure(rateLimit))
       if (Result.isFailure(rateLimit)) {
         assert.strictEqual(rateLimit.failure._tag, "PluginRateLimitFailure")
+      }
+
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-18T09:00:00.000Z")))
+      const dateRateLimit = yield* Effect.gen(function*() {
+        const client = yield* ClockifyApiClient
+        return yield* makeClockifyReadProvider(client).getCurrentUser
+      }).pipe(
+        Effect.provide(clockifyClientLayer(429, { "retry-after": "Sat, 18 Jul 2026 10:00:00 GMT" })),
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(dateRateLimit))
+      if (Result.isFailure(dateRateLimit)) {
+        assert.strictEqual(dateRateLimit.failure._tag, "PluginRateLimitFailure")
+        if (dateRateLimit.failure._tag === "PluginRateLimitFailure") {
+          assert.strictEqual(
+            DateTime.toEpochMillis(dateRateLimit.failure.retryAt),
+            DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-18T10:00:00.000Z"))
+          )
+        }
       }
     }))
 

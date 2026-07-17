@@ -152,7 +152,7 @@ const ClockifyWorkspaces = Schema.Array(
     id: ClockifyIdentifier,
     name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
   })
-).check(Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify workspaces" }))
+)
 const ClockifyTimeEntryPage = Schema.Array(Schema.Unknown).check(
   Schema.makeFilter((values) => values.length <= 50, { expected: "at most 50 Clockify time entries" })
 )
@@ -307,7 +307,7 @@ const streamSyncPages = (options: {
           }),
         { concurrency: options.configuration.maximumConcurrency }
       )
-      if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
+      if (new Set(events.map(({ vendorImmutableId }) => vendorImmutableId)).size !== events.length) {
         return yield* malformed("clockify-sync", "clockify-time-entry-identity-duplicate")
       }
       const hasMore = providerHasMore && !reachedBound

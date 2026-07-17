@@ -49,6 +49,9 @@ export interface ClockifyReadProvider {
 const StatusResponse = Schema.Struct({
   response: Schema.Struct({ status: Schema.Number })
 })
+const RetryAfterDeltaSeconds = Schema.NumberFromString.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+)
 
 const statusOf = (error: unknown): number | undefined => {
   if (HttpClientError.isHttpClientError(error)) return error.response?.status
@@ -56,13 +59,15 @@ const statusOf = (error: unknown): number | undefined => {
   return Result.isSuccess(decoded) ? decoded.success.response.status : undefined
 }
 
-const retryAfterSeconds = (error: unknown): number => {
-  if (!HttpClientError.isHttpClientError(error)) return 60
+const retryAtForFailure = Effect.fn("ClockifyReadProvider.retryAtForFailure")(function*(error: unknown) {
+  const now = yield* DateTime.now
+  if (!HttpClientError.isHttpClientError(error)) return DateTime.add(now, { seconds: 60 })
   const value = error.response?.headers["retry-after"]
-  if (value === undefined) return 60
-  const seconds = Number(value)
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 3_600) : 60
-}
+  if (value === undefined) return DateTime.add(now, { seconds: 60 })
+  const seconds = Schema.decodeUnknownOption(RetryAfterDeltaSeconds)(value)
+  if (Option.isSome(seconds)) return DateTime.add(now, { seconds: Math.min(seconds.value, 3_600) })
+  return Option.getOrElse(DateTime.make(value), () => DateTime.add(now, { seconds: 60 }))
+})
 
 const mapFailure = Effect.fn("ClockifyReadProvider.mapFailure")(function*(
   operation: string,
@@ -73,7 +78,7 @@ const mapFailure = Effect.fn("ClockifyReadProvider.mapFailure")(function*(
   if (status === 403) return yield* new PluginAuthorizationFailure({ operation })
   if (status === 408 || status === 504) return yield* new PluginTimeoutFailure({ operation })
   if (status === 429) {
-    const retryAt = DateTime.add(yield* DateTime.now, { seconds: retryAfterSeconds(error) })
+    const retryAt = yield* retryAtForFailure(error)
     return yield* new PluginRateLimitFailure({ operation, retryAt })
   }
   if (Schema.isSchemaError(error)) {
