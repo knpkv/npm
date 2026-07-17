@@ -215,13 +215,16 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   a deliberate version-aligned milestone rather than mixing two database abstractions in one read.
 - Item and release entry points now converge on an exact item-centered trace inside the selected
   release. It derives incoming/outgoing current relationships, connected objects, lifecycle,
-  confidence, and evidence counts from the existing bounded release slice. Dedicated relationship
-  history/evidence drill-down, global command search, and authenticated share grants with exact
+  confidence, and evidence counts from the existing bounded release slice. Each relationship now
+  opens a URL-addressable detail sheet that reads its immutable revision ledger and only the evidence
+  observations referenced by the selected revision. The existing history and evidence endpoints cap
+  results at 200 records without an explicit truncation flag; add that contract before histories can
+  exceed the current fixture scale. Global command search and authenticated share grants with exact
   scope, expiry, revocation, and grantee checks remain unfinished D07 work.
 
 ## Recommended next session
 
-Complete D07 authorized shares and detailed relationship/evidence drill-down around the Items checkpoint, then return to the
-recorded D05 readiness batch optimization before the large-fixture performance gate.
+Complete D07 authorized shares and global command search around the Items checkpoint, then return to
+the recorded D05 readiness batch optimization before the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.
