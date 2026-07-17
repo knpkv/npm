@@ -40,6 +40,7 @@ export default defineConfig({
           label: "Libraries",
           items: [
             { label: "rly Design System", link: "/rly/" },
+            { label: "Control Center SQL", link: "/control-center-sql/" },
             { label: "Packages", link: "/packages/" },
             { label: "Agent Skills", link: "/agent-skills/" }
           ]

@@ -77,7 +77,7 @@ export const sessionCookieAuthLayer = Layer.effect(
           const request = yield* HttpServerRequest.HttpServerRequest
           if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
             yield* authorizeAuthenticatedRead({
-              capability: capabilityFor(group.identifier, endpoint.name),
+              capability: capabilityFor(group.identifier, endpoint.identifier),
               config,
               request: requestShape(request)
             }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
@@ -106,7 +106,7 @@ export const mutationCsrfLayer = Layer.effect(
           const sessionToken = Redacted.make(request.cookies.cc_session ?? "")
           yield* authorizeAuthenticatedMutation(
             {
-              capability: capabilityFor(group.identifier, endpoint.name),
+              capability: capabilityFor(group.identifier, endpoint.identifier),
               config,
               request: {
                 ...requestShape(request),

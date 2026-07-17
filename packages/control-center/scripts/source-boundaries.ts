@@ -17,7 +17,6 @@ const isPrototypeImport = (importPath: string): boolean =>
 const NON_LITERAL_DYNAMIC_IMPORT = "<non-literal dynamic import>"
 const UNCLASSIFIED_SOURCE = "<unclassified source>"
 const PROTOTYPE_RUNTIME_REASON = "production code cannot import prototype runtime"
-const QUIESCENT_BACKUP_REASON = "only Database can import the quiescent pre-migration backup helper"
 const BACKUP_ARCHIVE_CORE_REASON = "only backup entry points can import the archive assembly core"
 const BLOB_STORE_REASON = "only persistence composition and ContentStore can import the physical blob store"
 const CLI_BACKUP_BOUNDARY_REASON = "the CLI must use the public backup barrel instead of backup or database internals"
@@ -195,15 +194,8 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     return CLI_BACKUP_BOUNDARY_REASON
   }
   if (
-    target === "src/server/persistence/backup/QuiescentBackup" &&
-    normalizedSource !== "src/server/persistence/Database"
-  ) {
-    return QUIESCENT_BACKUP_REASON
-  }
-  if (
     target === "src/server/persistence/backup/BackupArchiveCore" &&
-    normalizedSource !== "src/server/persistence/backup/BackupArchive" &&
-    normalizedSource !== "src/server/persistence/backup/QuiescentBackup"
+    normalizedSource !== "src/server/persistence/backup/BackupArchive"
   ) {
     return BACKUP_ARCHIVE_CORE_REASON
   }

@@ -79,6 +79,7 @@ export class ReadinessInputError extends Schema.TaggedErrorClass<ReadinessInputE
     "commit-environment",
     "commit-release",
     "read-current",
+    "read-current-releases",
     "read-history",
     "enqueue-invalidation",
     "claim-invalidation",
@@ -248,6 +249,31 @@ export const ReadCurrentReadinessAssessmentResult = Schema.TaggedUnion({
 
 /** Decoded current-readiness result. */
 export type ReadCurrentReadinessAssessmentResult = typeof ReadCurrentReadinessAssessmentResult.Type
+
+/** Maximum release heads accepted by one bounded current-readiness batch read. */
+export const MAXIMUM_CURRENT_RELEASE_READINESS_BATCH = 200
+
+/** Request for current release readiness heads within one workspace. */
+export const ReadCurrentReleaseReadinessAssessmentsRequest = Schema.Struct({
+  workspaceId: WorkspaceId,
+  releaseIds: Schema.Array(ReleaseId).check(
+    Schema.isMaxLength(MAXIMUM_CURRENT_RELEASE_READINESS_BATCH),
+    Schema.makeFilter((releaseIds) => new Set(releaseIds).size === releaseIds.length, {
+      expected: "unique release identifiers"
+    })
+  )
+})
+
+/** Decoded bounded current release-readiness batch request. */
+export type ReadCurrentReleaseReadinessAssessmentsRequest = typeof ReadCurrentReleaseReadinessAssessmentsRequest.Type
+
+/** Existing current release heads returned in release-identifier order. */
+export const ReadCurrentReleaseReadinessAssessmentsResult = Schema.Array(
+  CurrentReleaseReadinessAssessmentRecord
+).check(Schema.isMaxLength(MAXIMUM_CURRENT_RELEASE_READINESS_BATCH))
+
+/** Decoded current release-readiness batch result. */
+export type ReadCurrentReleaseReadinessAssessmentsResult = typeof ReadCurrentReleaseReadinessAssessmentsResult.Type
 
 /** Exclusive-cursor request for newest-first immutable readiness history. */
 export const ReadReadinessHistoryRequest = Schema.TaggedUnion({

@@ -109,7 +109,7 @@ const stripUnreliableMetadata = (schema: JsonSchema.JsonSchema): JsonSchema.Json
 const stripTrailingWhitespace = (source: string): string => source.replace(/[ \t]+$/gm, "")
 
 /**
- * beta.97 emits an unused decoder when a spec declares no typed error bodies.
+ * The pinned Effect generator emits an unused decoder when a spec declares no typed error bodies.
  * Remove only that exact unused block; fail if the generator shape changes.
  */
 const removeUnusedErrorDecoder = (source: string): string => {

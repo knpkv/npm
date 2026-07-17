@@ -8,6 +8,7 @@ import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import type { WorkspaceId } from "../../../domain/identifiers.js"
 import { Database } from "../Database.js"
 import { PersistedRecordError, type PersistenceOperationError, type QuarantineWriteError } from "../errors.js"
 import { mapPersistenceOperation } from "./internal.js"
@@ -26,6 +27,8 @@ import {
   type EnvironmentReadinessAssessmentRecord,
   ReadCurrentReadinessAssessmentRequest,
   type ReadCurrentReadinessAssessmentResult,
+  ReadCurrentReleaseReadinessAssessmentsRequest,
+  type ReadCurrentReleaseReadinessAssessmentsResult,
   ReadinessInputError,
   ReadReadinessHistoryRequest,
   type ReadReadinessHistoryResult,
@@ -114,22 +117,38 @@ const makeReadinessRepository = Effect.gen(function*() {
     return yield* transactCaptured(assessments.commitRelease(request))
   })
 
+  type CurrentRow = Success<ReturnType<typeof assessments.currentRows>>[number]
+  type DecodedCurrentRecord = Success<ReturnType<typeof assessments.decodeCurrentRow>>
+  const verifyCurrentMaterialization = Effect.fn("ReadinessRepository.verifyCurrentMaterialization")(
+    function*(input: {
+      readonly workspaceId: WorkspaceId
+      readonly rows: ReadonlyArray<CurrentRow>
+      readonly records: ReadonlyArray<DecodedCurrentRecord>
+    }) {
+      const materialization = yield* assessments.loadAssessmentMaterialization({
+        workspaceId: input.workspaceId,
+        assessmentIds: input.records.map(({ assessment }) => assessment.assessmentId)
+      })
+      yield* Effect.forEach(
+        input.records,
+        (record, index) =>
+          assessments.verifyAssessmentMaterialization(record.assessment, input.rows[index], materialization),
+        { discard: true }
+      )
+    }
+  )
+
   const readCurrent = Effect.fn("ReadinessRepository.readCurrent")(function*(input: unknown) {
     const request = yield* decodeInput("read-current", ReadCurrentReadinessAssessmentRequest, input)
     const records = yield* transactCaptured(
       Effect.gen(function*() {
         const rows = yield* assessments.currentRows(request)
         const decoded = yield* Effect.forEach(rows, (row) => assessments.decodeCurrentRow(row, request))
-        const materialization = yield* assessments.loadAssessmentMaterialization({
+        yield* verifyCurrentMaterialization({
           workspaceId: request.workspaceId,
-          assessmentIds: decoded.map(({ assessment }) => assessment.assessmentId)
+          rows,
+          records: decoded
         })
-        yield* Effect.forEach(
-          decoded,
-          (record, index) =>
-            assessments.verifyAssessmentMaterialization(record.assessment, rows[index], materialization),
-          { discard: true }
-        )
         return decoded
       })
     )
@@ -165,6 +184,49 @@ const makeReadinessRepository = Effect.gen(function*() {
       recordKey: request._tag === "environment" ? request.environmentId : request.releaseId,
       diagnosticCode: "readiness-head-assessment-mismatch"
     })
+  })
+
+  const readCurrentReleases = Effect.fn("ReadinessRepository.readCurrentReleases")(function*(input: unknown) {
+    const request = yield* decodeInput(
+      "read-current-releases",
+      ReadCurrentReleaseReadinessAssessmentsRequest,
+      input
+    )
+    const decoded = yield* transactCaptured(
+      Effect.gen(function*() {
+        const rows = yield* assessments.currentReleaseRows(request)
+        const records = yield* Effect.forEach(
+          rows,
+          (row) => assessments.decodeCurrentReleaseRow(row, request.workspaceId)
+        )
+        yield* verifyCurrentMaterialization({
+          workspaceId: request.workspaceId,
+          rows,
+          records
+        })
+        return records
+      })
+    )
+    const records: Array<CurrentReleaseReadinessAssessmentRecord> = decoded.flatMap((record) =>
+      record.assessment._tag === "release"
+        ? [{ ...record, assessment: record.assessment }]
+        : []
+    )
+    const releaseIds = records.map(({ assessment }) => assessment.candidate.scope.releaseId)
+    const requestedReleaseIds = new Set(request.releaseIds)
+    if (
+      records.length !== decoded.length ||
+      new Set(releaseIds).size !== releaseIds.length ||
+      releaseIds.some((releaseId) => !requestedReleaseIds.has(releaseId))
+    ) {
+      return yield* new PersistedRecordError({
+        workspaceId: request.workspaceId,
+        recordKind: "readiness-release-head",
+        recordKey: "release-batch",
+        diagnosticCode: "readiness-head-assessment-mismatch"
+      })
+    }
+    return records satisfies ReadCurrentReleaseReadinessAssessmentsResult
   })
 
   const readHistory = Effect.fn("ReadinessRepository.readHistory")(function*(input: unknown) {
@@ -260,6 +322,7 @@ const makeReadinessRepository = Effect.gen(function*() {
     enqueueDue,
     enqueueInvalidation,
     readCurrent,
+    readCurrentReleases,
     readHistory,
     registerRule
   }

@@ -153,7 +153,6 @@ packages/
     ├── vite.config.ts
     ├── vitest.config.ts
     ├── playwright.config.ts
-    ├── migrations/
     ├── public/
     ├── src/
     │   ├── index.ts
@@ -289,12 +288,13 @@ sequenceDiagram
 
 Only affected release/environment keys are recomputed. Previous assessments remain immutable. A missing or failed plugin makes freshness and evidence unavailable/stale; it does not erase the last valid state or invent a ready verdict.
 
-### 4.4 Migrations, backup, and corruption
+### 4.4 Schema lifecycle, backup, and corruption
 
 - Use `@effect/sql-libsql` with foreign keys, WAL, and a bounded busy timeout.
-- Acquire an application migration lock before accepting traffic.
+- Before schema stability, initialize a fresh database from one checked-in exact schema snapshot and reject any existing database whose objects or definitions drift. Breaking schema changes require recreating local development data.
+- Start versioned, forward-only migrations only after the model is declared stable and a released database must remain readable by a newer build. At that point, acquire an application migration lock before accepting traffic.
 - Before an upgrade, enter a write barrier, run integrity checks, capture the highest committed event/revision boundary, create a consistent `VACUUM INTO` database backup, and copy or hard-link every immutable blob referenced at that boundary into the versioned backup directory. Write the manifest last with database/blob digests, counts, and boundary cursor, then atomically publish the backup.
-- Run ordered Effect SQL migrations; failure is startup-fatal and never resets data.
+- Once migrations exist, run them in order; failure is startup-fatal and never resets released data.
 - Classify blobs as durable (evidence, findings, decisions, audit attachments) or reproducible cache (vendor content/diffs/log ranges). A restore missing any durable blob fails integrity validation; a missing reproducible blob becomes an explicit unavailable/cache-refetch state. Test both complete restore and missing/corrupt blob recovery from the last released schema.
 - Schema-decode persisted JSON. Quarantine malformed content as bounded, redacted diagnostics and retain the last valid immutable revision.
 - Retention is separately configurable for audit, normalized cache, evidence, agent content, sandbox workspaces/logs, and large blobs. Cleanup is bounded and audited.

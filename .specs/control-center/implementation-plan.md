@@ -32,7 +32,7 @@ Every plan item is one intended commit. For each item:
 6. If review finds a blocker, correct and re-run the same gates before advancing. Every finding includes an implementation-ready **Prevention** proposal; ship its stable ast-grep, ESLint, type-check, test, or instruction guardrail with the fix, or record why automation would be brittle. Do not stack new feature scope on an unaccepted predecessor.
 7. Run the milestone exit journey before starting the next milestone. Run the repository-wide gate at H08.
 
-Commits must not leave dead routes, temporarily export vendor shapes, bypass typed errors, weaken tests, or rely on a future commit to make the current build pass. Database migrations are forward-only. Public package extensions land in their owning package before Control Center consumes them.
+Commits must not leave dead routes, temporarily export vendor shapes, bypass typed errors, weaken tests, or rely on a future commit to make the current build pass. Before schema stability, database changes update one exact unstable snapshot and may require recreating local data. After the first released schema, migrations are forward-only. Public package extensions land in their owning package before Control Center consumes them.
 
 ## Shared verification vocabulary
 

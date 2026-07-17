@@ -2,13 +2,12 @@ import type { FileSystem, Path } from "effect"
 import { Context, Crypto, Effect, Layer, Predicate } from "effect"
 import type { Success } from "effect/Effect"
 
-import type { BackupFailure, MigrationWriteBarrierError } from "./backup/index.js"
+import type { BackupFailure, SchemaWriteBarrierError } from "./backup/index.js"
 import { ContentStore, type ContentStoreService } from "./ContentStore.js"
 import { Database, databaseLayer } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
   type DatabaseInitializationError,
-  type MigrationLedgerError,
   type PersistedRecordError,
   type PersistenceConfigError,
   PersistenceOperationError,
@@ -132,8 +131,7 @@ export type PersistenceLayerError =
   | BackupFailure
   | BlobStoreError
   | DatabaseInitializationError
-  | MigrationLedgerError
-  | MigrationWriteBarrierError
+  | SchemaWriteBarrierError
   | PersistenceConfigError
 
 const makePersistence = Effect.gen(function*() {
@@ -283,6 +281,10 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("readiness.enqueue-invalidation", readiness.enqueueInvalidation(...args)),
       readCurrent: (...args: Parameters<ReadinessRepositoryService["readCurrent"]>) =>
         publicOperation("readiness.read-current", readiness.readCurrent(...args)).pipe(
+          Effect.provideService(Crypto.Crypto, cryptoService)
+        ),
+      readCurrentReleases: (...args: Parameters<ReadinessRepositoryService["readCurrentReleases"]>) =>
+        publicOperation("readiness.read-current-releases", readiness.readCurrentReleases(...args)).pipe(
           Effect.provideService(Crypto.Crypto, cryptoService)
         ),
       readHistory: (...args: Parameters<ReadinessRepositoryService["readHistory"]>) =>

@@ -342,21 +342,25 @@ describe("verified backup archive", () => {
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupManifestError")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects a manifest migration ledger that differs from the database", () =>
+  it.effect("rejects an unsupported manifest schema version", () =>
     Effect.gen(function*() {
       const { archiveRoot } = yield* makeEmptyVerifiedArchive("control-center-backup-ledger-")
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const manifest = path.join(archiveRoot, "manifest.json")
       const source = yield* fileSystem.readFileString(manifest)
-      yield* fileSystem.writeFileString(manifest, source.replace("\"migrationId\":1", "\"migrationId\":99"), {
-        mode: 0o600
-      })
+      yield* fileSystem.writeFileString(
+        manifest,
+        source.replace("\"schemaVersion\":\"unstable\"", "\"schemaVersion\":\"future\""),
+        {
+          mode: 0o600
+        }
+      )
       const result = yield* verifyBackup(archiveRoot).pipe(Effect.result)
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "BackupManifestError")
       if (Result.isFailure(result) && result.failure._tag === "BackupManifestError") {
-        assert.strictEqual(result.failure.reason, "migration-ledger-mismatch")
+        assert.strictEqual(result.failure.reason, "malformed")
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 

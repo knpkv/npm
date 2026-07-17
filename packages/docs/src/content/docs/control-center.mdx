@@ -30,6 +30,10 @@ Directional relationships connect Jira work, pull requests, pipeline executions,
 
 Server workflows use the durable module through two operations: a bounded atomic `write` and a tagged `read`. SQL rows, digests, table joins, and compatibility handling for older pipeline records remain private implementation details. Browser views consume later authenticated projections; they do not receive raw persistence access.
 
+Portfolio readiness uses a bounded `effect-qb` plan from `@knpkv/control-center-sql` to read all requested release heads in one transaction. The repository still Schema-decodes every row, verifies digest-bound materialization, and quarantines malformed persisted data before it reaches the application.
+
+The MVP database schema is deliberately unstable. Fresh databases are created from one checked-in schema snapshot; existing databases and backups must match it exactly. Schema changes may require recreating local development data. Versioned migrations begin only after the model is stable and a released database must remain readable by a newer build.
+
 ## Find workspace items
 
 The owner-only **Items** route searches current Jira work, pull requests, Confluence pages, pipeline executions, deployments, and time entries across the authenticated workspace. Text, owner, service, type, and lifecycle filters run on the server before the 500-item response bound, so a match cannot be hidden behind an unrelated client-side prefix. Active entity-scoped human ownership assignments provide canonical names and avatar fallbacks; genuinely unassigned work remains labeled **Unassigned**. The response includes authoritative matched and workspace totals plus explicit result and owner-facet truncation flags.

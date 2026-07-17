@@ -18,15 +18,6 @@ export const BackupId = Schema.String.check(
 /** Stable identity of one published backup archive. */
 export type BackupId = typeof BackupId.Type
 
-/** Exact migration entry captured by a database snapshot. */
-export const BackupMigrationEntry = Schema.Struct({
-  migrationId: PositiveInteger,
-  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(255))
-})
-
-/** Exact migration entry captured by a database snapshot. */
-export type BackupMigrationEntry = typeof BackupMigrationEntry.Type
-
 /** Commit boundary and row counts captured from the verified database snapshot. */
 export const BackupBoundaryV1 = Schema.Struct({
   domainEventCursor: NonNegativeInteger,
@@ -77,8 +68,8 @@ export const BackupManifestV1 = Schema.Struct({
   createdAt: UtcTimestamp,
   database: BackupDatabaseArtifactV1,
   format: Schema.Literal("@knpkv/control-center-backup"),
-  kind: Schema.Literals(["manual", "pre-migration"]),
-  migrations: Schema.Array(BackupMigrationEntry),
+  kind: Schema.Literal("manual"),
+  schemaVersion: Schema.Literal("unstable"),
   version: Schema.Literal(1)
 }).annotate({ identifier: "BackupManifestV1" })
 

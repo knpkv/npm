@@ -452,8 +452,8 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                         !sameIdentity(currentInfo.success, lease.info)
                       ) return yield* Ref.set(cleanupFailed, true)
                       // This finalizer was registered after fs.open, so the descriptor
-                      // still pins lease.info until it returns. beta.97 can defect when
-                      // handle.stat is evaluated under a pending external interrupt;
+                      // still pins lease.info until it returns. The pinned Effect file
+                      // service can defect when handle.stat is evaluated under a pending interrupt;
                       // named identity is compared with the already captured fstat.
                       const preflightSynced = yield* parentHandle.sync.pipe(Effect.result)
                       if (Result.isFailure(preflightSynced)) return yield* Ref.set(cleanupFailed, true)

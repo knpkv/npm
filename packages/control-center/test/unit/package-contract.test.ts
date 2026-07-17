@@ -10,13 +10,14 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
-    "@effect/platform-browser": "4.0.0-beta.97",
-    "@effect/platform-node": "4.0.0-beta.97",
-    "@effect/sql-libsql": "4.0.0-beta.97",
+    "@effect/platform-browser": "4.0.0-beta.98",
+    "@effect/platform-node": "4.0.0-beta.98",
+    "@effect/sql-libsql": "4.0.0-beta.98",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
+    "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    effect: "4.0.0-beta.97",
+    effect: "4.0.0-beta.98",
     react: "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router": "^8.2.0"
@@ -107,7 +108,7 @@ describe("package contract", () => {
     expect(
       inspectPackageContract({
         ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.98" }
+        dependencies: { ...validManifest.dependencies, "@effect/sql-libsql": "4.0.0-beta.97" }
       })
     ).toContain("@effect/sql-libsql must align with the pinned Effect beta")
   })
@@ -116,7 +117,7 @@ describe("package contract", () => {
     expect(
       inspectPackageContract({
         ...validManifest,
-        dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.98" }
+        dependencies: { ...validManifest.dependencies, "@effect/platform-browser": "4.0.0-beta.97" }
       })
     ).toContain("@effect/platform-browser must align with the pinned Effect beta")
   })

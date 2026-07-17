@@ -83,7 +83,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.98",
     "@playwright/test": "1.61.1",
     "@storybook/addon-a11y": "10.5.0",
     "@storybook/addon-docs": "10.5.0",
@@ -96,7 +96,7 @@
     "@vitest/browser": "4.1.10",
     "@vitest/browser-playwright": "4.1.10",
     "ajv": "8.20.0",
-    "effect": "4.0.0-beta.97",
+    "effect": "4.0.0-beta.98",
     "happy-dom": "20.8.9",
     "playwright": "1.61.1",
     "react": "^19.2.7",

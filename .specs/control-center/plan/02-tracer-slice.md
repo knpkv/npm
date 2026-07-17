@@ -16,12 +16,12 @@ Goal: prove one thin production path from an authenticated browser through typed
 - **Depends on:** T01.
 - **Review focus:** no assertions/`any`, no presentation types in domain, persisted provider IDs remain explicit despite future short package names.
 
-## T03 — Add ordered libSQL migrations and repositories
+## T03 — Add the unstable libSQL schema and repositories
 
-- **Scope:** create database service/layer, migration ledger, workspace/plugin/release/entity/people tables, content-addressed owner-only blob store boundary, transactions, revisions, quarantine, and fixture builders.
-- **Tests:** fresh/previous-schema migration, transaction rollback, optimistic conflict, blob digest/path containment, malformed-record quarantine, scoped teardown.
+- **Scope:** create the database service/layer, exact checked-in unstable schema, workspace/plugin/release/entity/people tables, content-addressed owner-only blob store boundary, transactions, revisions, quarantine, and fixture builders. Start versioned migrations only after a released schema needs forward compatibility.
+- **Tests:** fresh initialization, schema-drift rejection, transaction rollback, optimistic conflict, blob digest/path containment, malformed-record quarantine, scoped teardown.
 - **Depends on:** T02.
-- **Review focus:** no raw host APIs in Effect code, forward-only migrations, secret values structurally excluded.
+- **Review focus:** no raw host APIs in Effect code, schema ownership remains exact, secret values structurally excluded.
 
 ## T04 — Add pairing, sessions, and safe bind configuration
 
@@ -81,8 +81,8 @@ Goal: prove one thin production path from an authenticated browser through typed
 
 ## T12 — Establish verified backup and restore foundations
 
-- **Scope:** add the migration write barrier, atomic libSQL backup plus blob manifest, integrity verification, restore into a fresh data directory, and durable-vs-reproducible blob classification before the schema grows. Later milestones extend this same manifest and compatibility suite.
-- **Tests:** fresh and previous migration backup/restore, interrupted backup, invalid manifest, missing reproducible cache blob recovery, missing durable blob failure, owner-only file modes.
+- **Scope:** add the schema write barrier, atomic libSQL backup plus blob manifest, integrity verification, restore into a fresh data directory, and durable-vs-reproducible blob classification before the schema grows. Later milestones extend this same manifest and compatibility suite; released-schema upgrades add pre-migration backups at stabilization time.
+- **Tests:** exact-schema backup/restore, interrupted backup, invalid manifest, missing reproducible cache blob recovery, missing durable blob failure, owner-only file modes.
 - **Depends on:** T03, T11.
 - **Review focus:** backup success is reported only after database and blob manifest verification; no restore can overwrite a live data directory in place.
 

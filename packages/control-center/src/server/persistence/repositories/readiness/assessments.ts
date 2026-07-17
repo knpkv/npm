@@ -1,3 +1,4 @@
+import { renderCurrentReleaseReadinessQuery } from "@knpkv/control-center-sql"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -5,7 +6,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 
-import { EnvironmentId, type WorkspaceId } from "../../../../domain/identifiers.js"
+import { EnvironmentId, ReleaseId, type WorkspaceId } from "../../../../domain/identifiers.js"
 import type {
   EnvironmentReadinessAssessment,
   ReadinessAssessment,
@@ -23,6 +24,7 @@ import type {
   CommitEnvironmentReadinessAssessmentRequest,
   CommitReleaseReadinessAssessmentRequest,
   ReadCurrentReadinessAssessmentRequest,
+  ReadCurrentReleaseReadinessAssessmentsRequest,
   ReadReadinessHistoryRequest
 } from "./contract.js"
 import { ReadinessHeadRevision, ReadinessInputError } from "./contract.js"
@@ -666,6 +668,27 @@ export const makeReadinessAssessments = Effect.gen(function*() {
     })(undefined)
   }
 
+  const currentReleaseRows = Effect.fn("ReadinessAssessments.currentReleaseRows")((
+    request: ReadCurrentReleaseReadinessAssessmentsRequest
+  ) => {
+    const [firstReleaseId, ...remainingReleaseIds] = request.releaseIds
+    if (firstReleaseId === undefined) return Effect.succeed([])
+    const rendered = renderCurrentReleaseReadinessQuery({
+      workspaceId: request.workspaceId,
+      releaseIds: [firstReleaseId, ...remainingReleaseIds]
+    })
+    return sql.unsafe<typeof RawReadinessRow.Type>(rendered.sql, [...rendered.params]).pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          ...row,
+          headEnvironmentId: null,
+          joinComplete: row.historyAssessmentId !== null && row.assessmentId !== null ? 1 : 0,
+          pendingCount: row.pending === 1 ? 1 : 0
+        }))
+      )
+    )
+  })
+
   const historyRows = (request: ReadReadinessHistoryRequest) => {
     const environmentKey = request._tag === "environment" ? request.environmentId : ""
     return SqlSchema.findAll({
@@ -769,6 +792,26 @@ export const makeReadinessAssessments = Effect.gen(function*() {
     }
   })
 
+  const decodeCurrentReleaseRow = Effect.fn("ReadinessAssessments.decodeCurrentReleaseRow")(function*(
+    row: typeof RawReadinessRow.Type,
+    workspaceId: WorkspaceId
+  ) {
+    const releaseId = yield* Schema.decodeUnknownEffect(ReleaseId)(
+      Predicate.hasProperty(row, "headReleaseId") ? row.headReleaseId : undefined
+    ).pipe(
+      Effect.mapError(() =>
+        new PersistedRecordError({
+          workspaceId,
+          recordKind: "readiness-release-head",
+          recordKey: "unknown-release",
+          diagnosticCode: "readiness-release-head-schema-invalid"
+        })
+      ),
+      captureMalformedReadinessRow(row)
+    )
+    return yield* decodeCurrentRow(row, { _tag: "release", workspaceId, releaseId })
+  })
+
   const decodeHistoryRow = Effect.fn("ReadinessAssessments.decodeHistoryRow")(function*(
     row: typeof RawReadinessRow.Type,
     request: ReadReadinessHistoryRequest
@@ -816,7 +859,9 @@ export const makeReadinessAssessments = Effect.gen(function*() {
   return {
     commitEnvironment,
     commitRelease,
+    currentReleaseRows,
     currentRows,
+    decodeCurrentReleaseRow,
     decodeCurrentRow,
     decodeHistoryRow,
     historyRows,

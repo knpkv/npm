@@ -16,9 +16,11 @@
     "src/api",
     "src/domain",
     "src/server",
+    "src/server/persistence/schema.json",
     "test",
     "vite.config.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["dist", "node_modules", "test/client"]
+  "exclude": ["dist", "node_modules", "test/client"],
+  "references": [{ "path": "../control-center-sql/tsconfig.build.json" }]
 }

@@ -56,6 +56,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@effect/sql-libsql",
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
+    "@knpkv/control-center-sql",
     "@knpkv/rly",
     "effect",
     "react",
@@ -77,14 +78,20 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
       violations.push(`${dependency} must use workspace:^`)
     }
   }
-  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.97") {
+  if (manifest.dependencies["@knpkv/control-center-sql"] !== "workspace:^") {
+    violations.push("@knpkv/control-center-sql must use workspace:^")
+  }
+  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.98") {
     violations.push("@effect/sql-libsql must align with the pinned Effect beta")
   }
-  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.97") {
+  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.98") {
     violations.push("@effect/platform-node must align with the pinned Effect beta")
   }
-  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.97") {
+  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-beta.98") {
     violations.push("@effect/platform-browser must align with the pinned Effect beta")
+  }
+  if (manifest.dependencies.effect !== "4.0.0-beta.98") {
+    violations.push("effect must align with the pinned Effect beta")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()
