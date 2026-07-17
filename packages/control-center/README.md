@@ -142,6 +142,16 @@ The secret-free runtime configuration requires a root `webBaseUrl`, an activity 
 
 An issue read fetches the issue, comments, and changelog through interruptible Effect operations. Pagination stops at the configured bound and records explicit comment/history truncation flags. The normalized issue attributes include description and environment text, workflow metadata, release versions, parent and subtasks, comments, history, and deduplicated collaborators with roles and avatar URLs. If fixed issue fields would cross the payload cap, optional arrays and presentation fields are omitted deterministically and named in `truncatedFields`. OpenAPI, HTTP, timeout, authentication, authorization, rate-limit, outage, and adapter-schema failures are translated to the closed plugin failure taxonomy without retaining raw provider causes.
 
+### Clockify time-entry reader
+
+`makeClockifyReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Clockify adapter around the shared Schema-validated `ClockifyApiClient`. It negotiates only `entity.read` for `clockify.time-entry` and bounded `sync.incremental` snapshots on the `time-entries` stream. Credentials remain in the externally supplied client layer.
+
+The secret-free configuration names the root Clockify web URL, immutable workspace ID, comma-separated user IDs, page size, maximum pages, maximum concurrency, and per-request timeout. At most ten users are accepted, and user count multiplied by page size may not exceed 100 normalized entries. Sync reads one page per configured user with bounded concurrency, stops at the configured provider-page limit, and uses `bounded:<page>` rather than claiming provider exhaustion when the final page is full. Checkpoint replay and later polls retain stable provider IDs, SHA-256 revisions, and event identities.
+
+Every provider response is decoded again at the adapter boundary before it becomes a normalized event. Time-entry facts preserve the configured workspace, provider user, project/task/tag IDs, billable and lock state, interval timestamps, provider duration, and explicit running/completed state. Provider interval timestamps supply source freshness; authentication, authorization, rate-limit, timeout, malformed-response, and outage failures remain in the closed plugin taxonomy.
+
+This MVP is intentionally read-only. Workspace people, Jira-key association evidence, duration rollups, approval state, corrections, governed execution, cancellation, and ambiguous-outcome reconciliation remain deferred to I08/I09 rather than being represented as supported capabilities.
+
 ## Persistence boundary
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. The MVP schema is intentionally unstable: a fresh database is created from one checked-in schema snapshot, and an existing database must match it exactly. Schema changes are breaking and require recreating local development data. Versioned migrations start only after the persistence model is declared stable and a released database file must remain readable by a newer build.

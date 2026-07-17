@@ -58,6 +58,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
     "@knpkv/codecommit-core",
+    "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
     "@knpkv/confluence-to-markdown",
     "@knpkv/control-center-sql",
@@ -85,6 +86,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     | "@knpkv/ai-claude"
     | "@knpkv/ai-codex"
     | "@knpkv/codecommit-core"
+    | "@knpkv/clockify-api-client"
     | "@knpkv/confluence-api-client"
     | "@knpkv/confluence-to-markdown"
     | "@knpkv/jira-api-client"
@@ -92,6 +94,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
     "@knpkv/codecommit-core",
+    "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
     "@knpkv/confluence-to-markdown",
     "@knpkv/jira-api-client"
