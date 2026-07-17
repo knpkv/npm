@@ -9,11 +9,7 @@ import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { PluginConfigurationFailure, PluginMalformedResponseFailure } from "../failures.js"
 
-const ClockifyIdentifier = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(512)
-)
+const ClockifyIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const ClockifyText = Schema.String.check(Schema.isMaxLength(4_000))
 const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
 
@@ -54,17 +50,25 @@ const malformed = (diagnosticCode: string) =>
     diagnosticCode
   })
 
-const digestRevision = Effect.fn("ClockifyTimeEntryNormalization.digestRevision")(function*(value: Schema.Json) {
+const digestJson = Effect.fn("ClockifyTimeEntryNormalization.digestJson")(function*(value: Schema.Json) {
   const cryptoService = yield* Crypto.Crypto
   const json = JSON.stringify(value)
   const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(json))).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-encoding-failed" }))
   )
-  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-digest-failed" }))
-  )
+  const digest = yield* cryptoService
+    .digest("SHA-256", bytes)
+    .pipe(Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-digest-failed" })))
   return Encoding.encodeHex(digest)
 })
+
+/** Bind resumable checkpoints to every configuration value that shapes provider pagination. @internal */
+export const digestClockifySyncScope = (scope: {
+  readonly maximumPages: number
+  readonly pageSize: number
+  readonly userIds: ReadonlyArray<string>
+  readonly workspaceId: string
+}) => digestJson(scope)
 
 /** Normalize one untrusted provider entry into a stable vendor-neutral event. @internal */
 export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization.normalize")(function*(
@@ -88,9 +92,16 @@ export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalizat
   const end = entry.timeInterval.end === null || entry.timeInterval.end === undefined
     ? null
     : DateTime.formatIso(entry.timeInterval.end)
+  if (
+    entry.timeInterval.end !== null &&
+    entry.timeInterval.end !== undefined &&
+    DateTime.toEpochMillis(entry.timeInterval.end) < DateTime.toEpochMillis(entry.timeInterval.start)
+  ) {
+    return yield* malformed("clockify-time-entry-interval-backward")
+  }
   const observedAt = entry.timeInterval.end ?? entry.timeInterval.start
   const tagIds = [...(entry.tagIds ?? [])].sort()
-  const revision = yield* digestRevision({
+  const revision = yield* digestJson({
     billable: entry.billable,
     description: entry.description,
     id: entry.id,

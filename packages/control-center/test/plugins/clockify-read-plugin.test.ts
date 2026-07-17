@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as Cause from "effect/Cause"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -34,11 +35,7 @@ const configuration = {
   operationTimeoutMillis: 5_000
 }
 
-const timeEntry = (
-  id: string,
-  userId = "user-1",
-  overrides: Readonly<Record<string, unknown>> = {}
-) => ({
+const timeEntry = (id: string, userId = "user-1", overrides: Readonly<Record<string, unknown>> = {}) => ({
   id,
   workspaceId: "workspace-1",
   userId,
@@ -72,13 +69,11 @@ const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyRe
 const withConnection = <Value, Error>(
   provider: ClockifyReadProvider,
   use: Effect.Effect<Value, Error, PluginConnection>,
-  configured: unknown = configuration
+  configured: unknown = configuration,
+  cryptoLayer: Layer.Layer<Crypto.Crypto> = NodeCrypto.layer
 ): Effect.Effect<Value, Error | PluginFailure> => {
   const runtime = makeClockifyReadPluginRuntimeFromProvider(provider, configured)
-  return use.pipe(
-    Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
-    Effect.scoped
-  )
+  return use.pipe(Effect.provide(runtime.layer.pipe(Layer.provide(cryptoLayer))), Effect.scoped)
 }
 
 const syncRequest = (checkpoint: string | null = null) =>
@@ -113,24 +108,30 @@ const ExpectedAttributes = Schema.Struct({
 
 const clockifyClientLayer = (status: number, headers: Readonly<Record<string, string>> = {}) =>
   ClockifyApiClient.layer.pipe(
-    Layer.provide(Layer.succeed(ClockifyApiConfig, {
-      apiKey: Redacted.make("secret"),
-      workspaceId: "workspace-1",
-      userId: "user-1",
-      baseUrl: "https://clockify.test/api"
-    })),
-    Layer.provide(Layer.succeed(
-      HttpClient.HttpClient,
-      HttpClient.make((request) =>
-        Effect.succeed(HttpClientResponse.fromWeb(
-          request,
-          new Response(JSON.stringify({ message: "provider failure" }), {
-            status,
-            headers: { "content-type": "application/json", ...headers }
-          })
-        ))
+    Layer.provide(
+      Layer.succeed(ClockifyApiConfig, {
+        apiKey: Redacted.make("secret"),
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        baseUrl: "https://clockify.test/api"
+      })
+    ),
+    Layer.provide(
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ message: "provider failure" }), {
+                status,
+                headers: { "content-type": "application/json", ...headers }
+              })
+            )
+          )
+        )
       )
-    ))
+    )
   )
 
 describe("ClockifyReadPlugin", () => {
@@ -149,15 +150,13 @@ describe("ClockifyReadPlugin", () => {
             ? [timeEntry("entry-3", "user-2")]
             : []
           if (request.page > 1) {
-            return Ref.update(calls, (current) => [...current, `${userId}:${request.page}`]).pipe(
-              Effect.as(response)
-            )
+            return Ref.update(calls, (current) => [...current, `${userId}:${request.page}`]).pipe(Effect.as(response))
           }
           return Effect.acquireUseRelease(
             Ref.updateAndGet(active, (count) => count + 1).pipe(
               Effect.tap((count) => Ref.update(maximumActive, (maximum) => Math.max(maximum, count))),
               Effect.tap(() => Ref.update(calls, (current) => [...current, `${userId}:${request.page}`])),
-              Effect.tap((count) => count === 2 ? Deferred.succeed(twoEntered, undefined) : Effect.void)
+              Effect.tap((count) => (count === 2 ? Deferred.succeed(twoEntered, undefined) : Effect.void))
             ),
             () => Deferred.await(release).pipe(Effect.as(response)),
             () => Ref.update(active, (count) => count - 1)
@@ -166,9 +165,7 @@ describe("ClockifyReadPlugin", () => {
       })
       const fiber = yield* withConnection(
         provider,
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))
-        )
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect)))
       ).pipe(Effect.forkChild)
 
       yield* Deferred.await(twoEntered)
@@ -178,9 +175,9 @@ describe("ClockifyReadPlugin", () => {
       const pages = yield* Fiber.join(fiber)
 
       assert.strictEqual(pages.length, 2)
-      assert.strictEqual(pages[0]?.checkpointAfterPage, "next:2")
+      assert.match(pages[0]?.checkpointAfterPage ?? "", /^next:2:[0-9a-f]{64}$/u)
       assert.isTrue(pages[0]?.hasMore)
-      assert.strictEqual(pages[1]?.checkpointAfterPage, "complete")
+      assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.isFalse(pages[1]?.hasMore)
       assert.strictEqual(pages[0]?.events.length, 3)
       assert.lengthOf(yield* Ref.get(calls), 6)
@@ -204,14 +201,106 @@ describe("ClockifyReadPlugin", () => {
     Effect.gen(function*() {
       const pages = yield* withConnection(
         baseProvider(),
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))
-        ),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
         { ...configuration, maximumPages: 1 }
       )
       assert.strictEqual(pages.length, 1)
-      assert.strictEqual(pages[0]?.checkpointAfterPage, "bounded:1")
+      assert.match(pages[0]?.checkpointAfterPage ?? "", /^bounded:1:[0-9a-f]{64}$/u)
       assert.isFalse(pages[0]?.hasMore)
+    }))
+
+  it.effect("resumes a scoped checkpoint only for the unchanged ordered user set", () =>
+    Effect.gen(function*() {
+      const initialConfiguration = { ...configuration, userIds: "user-1,user-2" }
+      const initialPages = yield* withConnection(
+        baseProvider(),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        initialConfiguration
+      )
+      const checkpoint = initialPages[0]?.checkpointAfterPage
+      if (checkpoint === undefined) return assert.fail("expected a resumable checkpoint")
+
+      const unchangedCalls = yield* Ref.make<ReadonlyArray<string>>([])
+      yield* withConnection(
+        baseProvider({
+          getTimeEntries: (_workspaceId, userId, request) =>
+            Ref.update(unchangedCalls, (calls) => [...calls, `${userId}:${request.page}`]).pipe(Effect.as([]))
+        }),
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => connection.sync(syncRequest(checkpoint)).pipe(Stream.runCollect))
+        ),
+        initialConfiguration
+      )
+      assert.deepEqual([...(yield* Ref.get(unchangedCalls))].sort(), ["user-1:2", "user-2:2"])
+
+      const changedCalls = yield* Ref.make<ReadonlyArray<string>>([])
+      yield* withConnection(
+        baseProvider({
+          getTimeEntries: (_workspaceId, userId, request) =>
+            Ref.update(changedCalls, (calls) => [...calls, `${userId}:${request.page}`]).pipe(Effect.as([]))
+        }),
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => connection.sync(syncRequest(checkpoint)).pipe(Stream.runCollect))
+        ),
+        { ...configuration, userIds: "user-1,user-2,user-3" }
+      )
+      assert.deepEqual([...(yield* Ref.get(changedCalls))].sort(), ["user-1:1", "user-2:1", "user-3:1"])
+    }))
+
+  it.effect("applies one global concurrency bound to multi-user normalization", () =>
+    Effect.gen(function*() {
+      const digestCalls = yield* Ref.make(0)
+      const active = yield* Ref.make(0)
+      const maximumActive = yield* Ref.make(0)
+      const twoEntered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const digest = () =>
+        Ref.updateAndGet(digestCalls, (count) => count + 1).pipe(
+          Effect.flatMap((call) =>
+            call === 1
+              ? Effect.succeed(new Uint8Array(32))
+              : Effect.acquireUseRelease(
+                Ref.updateAndGet(active, (count) => count + 1).pipe(
+                  Effect.tap((count) => Ref.update(maximumActive, (maximum) => Math.max(maximum, count))),
+                  Effect.tap((count) => (count === 2 ? Deferred.succeed(twoEntered, undefined) : Effect.void))
+                ),
+                () => Deferred.await(release).pipe(Effect.as(new Uint8Array(32))),
+                () => Ref.update(active, (count) => count - 1)
+              )
+          )
+        )
+      const cryptoLayer = Layer.succeed(
+        Crypto.Crypto,
+        Crypto.make({
+          randomBytes: (size) => new Uint8Array(size),
+          digest
+        })
+      )
+      const provider = baseProvider({
+        getTimeEntries: (_workspaceId, userId) =>
+          Effect.succeed(Array.from({ length: 3 }, (_, index) => timeEntry(`${userId}-entry-${index + 1}`, userId)))
+      })
+      const fiber = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        {
+          ...configuration,
+          userIds: "user-1,user-2",
+          pageSize: 3,
+          maximumPages: 1,
+          maximumConcurrency: 2
+        },
+        cryptoLayer
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(twoEntered)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      assert.strictEqual(yield* Ref.get(maximumActive), 2)
+      yield* Deferred.succeed(release, undefined)
+      const pages = yield* Fiber.join(fiber)
+      assert.strictEqual(pages[0]?.events.length, 6)
+      assert.strictEqual(yield* Ref.get(digestCalls), 7)
     }))
 
   it.effect("rejects configuration that could exceed one normalized sync page", () =>
@@ -231,17 +320,13 @@ describe("ClockifyReadPlugin", () => {
     Effect.gen(function*() {
       const missing = yield* withConnection(
         baseProvider({ getTimeEntry: () => Effect.succeed(Option.none()) }),
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.readEntity(entryReference("missing")))
-        )
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("missing"))))
       )
       assert.strictEqual(missing._tag, "missing")
 
       const malformed = yield* withConnection(
         baseProvider({ getTimeEntry: () => Effect.succeed(Option.some({ id: "entry-1" })) }),
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1")))
-        )
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1"))))
       ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(malformed))
       if (Result.isFailure(malformed)) {
@@ -250,14 +335,62 @@ describe("ClockifyReadPlugin", () => {
 
       const mismatched = yield* withConnection(
         baseProvider({ getTimeEntry: () => Effect.succeed(Option.some(timeEntry("other-entry"))) }),
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1")))
-        )
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1"))))
       ).pipe(Effect.result)
       assert.isTrue(Result.isFailure(mismatched))
       if (Result.isFailure(mismatched)) {
         assert.strictEqual(mismatched.failure._tag, "PluginMalformedResponseFailure")
       }
+    }))
+
+  it.effect("rejects backward completed intervals and accepts a running interval", () =>
+    Effect.gen(function*() {
+      const backward = yield* withConnection(
+        baseProvider({
+          getTimeEntry: () =>
+            Effect.succeed(
+              Option.some(
+                timeEntry("entry-1", "user-1", {
+                  timeInterval: {
+                    start: "2026-07-17T10:00:00.000Z",
+                    end: "2026-07-17T09:00:00.000Z",
+                    duration: "PT-1H"
+                  }
+                })
+              )
+            )
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1"))))
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(backward))
+      if (Result.isFailure(backward)) {
+        assert.strictEqual(backward.failure._tag, "PluginMalformedResponseFailure")
+      }
+
+      const running = yield* withConnection(
+        baseProvider({
+          getTimeEntry: () =>
+            Effect.succeed(
+              Option.some(
+                timeEntry("entry-1", "user-1", {
+                  timeInterval: {
+                    start: "2026-07-17T10:00:00.000Z",
+                    end: null,
+                    duration: null
+                  }
+                })
+              )
+            )
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1"))))
+      )
+      assert.strictEqual(running._tag, "found")
+      if (running._tag !== "found") return assert.fail("expected a running time entry")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(running.event.attributes)
+      assert.strictEqual(attributes.interval.state, "running")
+      assert.strictEqual(attributes.interval.end, null)
+      assert.strictEqual(attributes.freshness.sourceObservedAt, "2026-07-17T10:00:00.000Z")
+      assert.strictEqual(attributes.freshness.sourceTimestamp, "interval-start")
     }))
 
   it.effect("preserves typed authentication failures without exposing provider causes", () =>

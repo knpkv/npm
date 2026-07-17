@@ -30,28 +30,19 @@ import { buildPluginDefinitionLayer, definePluginV1 } from "../PluginDefinition.
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import { type ClockifyReadProvider, makeClockifyReadProvider } from "./ClockifyReadProvider.js"
-import { normalizeClockifyTimeEntry } from "./ClockifyTimeEntryNormalization.js"
+import { digestClockifySyncScope, normalizeClockifyTimeEntry } from "./ClockifyTimeEntryNormalization.js"
 
 const PageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))
 const MaximumPages = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10 }))
 const MaximumConcurrency = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
 const OperationTimeoutMillis = Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 120_000 }))
-const ClockifyIdentifier = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(512)
-)
-const ClockifyUserIdsText = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(4_096)
-)
+const ClockifyIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const ClockifyUserIdsText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
 const ClockifyWebBaseUrl = SourceUrl.pipe(
   Schema.check(
-    Schema.makeFilter(
-      ({ hash, pathname, search }) => hash.length === 0 && search.length === 0 && pathname === "/",
-      { expected: "a root Clockify web URL without query parameters or fragments" }
-    )
+    Schema.makeFilter(({ hash, pathname, search }) => hash.length === 0 && search.length === 0 && pathname === "/", {
+      expected: "a root Clockify web URL without query parameters or fragments"
+    })
   )
 )
 
@@ -156,15 +147,26 @@ const ClockifyUser = Schema.Struct({
   id: ClockifyIdentifier,
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
 })
-const ClockifyWorkspaces = Schema.Array(Schema.Struct({
-  id: ClockifyIdentifier,
-  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
-})).check(
-  Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify workspaces" })
-)
+const ClockifyWorkspaces = Schema.Array(
+  Schema.Struct({
+    id: ClockifyIdentifier,
+    name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+  })
+).check(Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify workspaces" }))
 const ClockifyTimeEntryPage = Schema.Array(Schema.Unknown).check(
   Schema.makeFilter((values) => values.length <= 50, { expected: "at most 50 Clockify time entries" })
 )
+const ClockifyCheckpointPage = Schema.NumberFromString.pipe(
+  Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 10 }))
+)
+const ClockifyCheckpointScopeDigest = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 sync-scope digest" })
+)
+const ClockifyCheckpoint = Schema.Union([
+  Schema.TemplateLiteralParser(["next:", ClockifyCheckpointPage, ":", ClockifyCheckpointScopeDigest]),
+  Schema.TemplateLiteralParser(["bounded:", ClockifyCheckpointPage, ":", ClockifyCheckpointScopeDigest]),
+  Schema.TemplateLiteralParser(["complete:", ClockifyCheckpointScopeDigest])
+])
 
 const malformed = (operation: string, diagnosticCode: string) =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
@@ -175,17 +177,10 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
   schema: S,
   value: unknown
 ): Effect.Effect<S["Type"], PluginMalformedResponseFailure> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError(() => malformed(operation, diagnosticCode))
-  )
+  Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(() => malformed(operation, diagnosticCode)))
 
 const unsupported = (
-  capabilityId:
-    | "entity.read"
-    | "action.propose"
-    | "action.execute"
-    | "action.cancel"
-    | "action.reconcile"
+  capabilityId: "entity.read" | "action.propose" | "action.execute" | "action.cancel" | "action.reconcile"
 ) =>
   new PluginUnsupportedCapabilityFailure({
     capabilityId,
@@ -210,23 +205,35 @@ const decodeUserIds = (text: string): Effect.Effect<ReadonlyArray<string>, Plugi
 
 const startPageFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"],
-  maximumPages: number
-): Effect.Effect<number, PluginConfigurationFailure> => {
-  if (checkpoint === null || checkpoint === "complete" || checkpoint.startsWith("bounded:")) {
-    return Effect.succeed(1)
-  }
-  if (!checkpoint.startsWith("next:")) {
-    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "clockify-sync-checkpoint-invalid" }))
-  }
-  const page = Number(checkpoint.slice("next:".length))
-  return Number.isInteger(page) && page >= 1 && page <= maximumPages
-    ? Effect.succeed(page)
-    : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "clockify-sync-checkpoint-invalid" }))
-}
+  maximumPages: number,
+  syncScopeDigest: string
+): Effect.Effect<number, PluginConfigurationFailure> =>
+  checkpoint === null
+    ? Effect.succeed(1)
+    : Schema.decodeUnknownEffect(ClockifyCheckpoint)(checkpoint).pipe(
+      Effect.mapError(
+        () =>
+          new PluginConfigurationFailure({
+            diagnosticCode: "clockify-sync-checkpoint-invalid"
+          })
+      ),
+      Effect.flatMap((decoded) => {
+        const checkpointScopeDigest = decoded[0] === "complete:" ? decoded[1] : decoded[3]
+        if (checkpointScopeDigest !== syncScopeDigest) return Effect.succeed(1)
+        if (decoded[0] !== "next:") return Effect.succeed(1)
+        return decoded[1] <= maximumPages
+          ? Effect.succeed(decoded[1])
+          : Effect.fail(
+            new PluginConfigurationFailure({
+              diagnosticCode: "clockify-sync-checkpoint-invalid"
+            })
+          )
+      })
+    )
 
 interface DecodedWorkspaceContext {
   readonly user: typeof ClockifyUser.Type
-  readonly workspace: typeof ClockifyWorkspaces.Type[number]
+  readonly workspace: (typeof ClockifyWorkspaces.Type)[number]
 }
 
 const readWorkspaceContext = Effect.fn("ClockifyReadPlugin.readWorkspaceContext")(function*(
@@ -234,16 +241,14 @@ const readWorkspaceContext = Effect.fn("ClockifyReadPlugin.readWorkspaceContext"
   configuration: ClockifyReadPluginConfiguration,
   operation: string
 ): Effect.fn.Return<DecodedWorkspaceContext, PluginFailure> {
-  const [rawUser, rawWorkspaces] = yield* Effect.all([
-    withTimeout("clockify-current-user", configuration.operationTimeoutMillis, provider.getCurrentUser),
-    withTimeout("clockify-workspaces", configuration.operationTimeoutMillis, provider.getWorkspaces)
-  ], { concurrency: 2 })
-  const user = yield* decodeProvider(
-    operation,
-    "clockify-current-user-shape-invalid",
-    ClockifyUser,
-    rawUser
+  const [rawUser, rawWorkspaces] = yield* Effect.all(
+    [
+      withTimeout("clockify-current-user", configuration.operationTimeoutMillis, provider.getCurrentUser),
+      withTimeout("clockify-workspaces", configuration.operationTimeoutMillis, provider.getWorkspaces)
+    ],
+    { concurrency: 2 }
   )
+  const user = yield* decodeProvider(operation, "clockify-current-user-shape-invalid", ClockifyUser, rawUser)
   const workspaces = yield* decodeProvider(
     operation,
     "clockify-workspaces-shape-invalid",
@@ -261,6 +266,7 @@ const collectSyncPages = Effect.fn("ClockifyReadPlugin.collectSyncPages")(functi
   readonly provider: ClockifyReadProvider
   readonly configuration: ClockifyReadPluginConfiguration
   readonly userIds: ReadonlyArray<string>
+  readonly syncScopeDigest: string
   readonly startPage: number
 }): Effect.fn.Return<ReadonlyArray<typeof PluginSyncPageV1.Type>, PluginFailure, Crypto.Crypto> {
   const output: Array<typeof PluginSyncPageV1.Type> = []
@@ -278,12 +284,7 @@ const collectSyncPages = Effect.fn("ClockifyReadPlugin.collectSyncPages")(functi
           })
         ).pipe(
           Effect.flatMap((raw) =>
-            decodeProvider(
-              "clockify-sync",
-              "clockify-time-entry-page-shape-invalid",
-              ClockifyTimeEntryPage,
-              raw
-            )
+            decodeProvider("clockify-sync", "clockify-time-entry-page-shape-invalid", ClockifyTimeEntryPage, raw)
           ),
           Effect.flatMap((entries) =>
             entries.length > options.configuration.pageSize
@@ -295,38 +296,31 @@ const collectSyncPages = Effect.fn("ClockifyReadPlugin.collectSyncPages")(functi
     )
     const providerHasMore = userPages.some(({ entries }) => entries.length === options.configuration.pageSize)
     const reachedBound = page === options.configuration.maximumPages && providerHasMore
-    const eventsNested = yield* Effect.forEach(
-      userPages,
-      ({ entries, userId }) =>
-        Effect.forEach(
-          entries,
-          (entry) =>
-            normalizeClockifyTimeEntry({
-              entry,
-              expectedWorkspaceId: options.configuration.workspaceId,
-              expectedUserId: userId
-            }),
-          { concurrency: options.configuration.maximumConcurrency }
-        ),
+    const entries = userPages.flatMap(({ entries, userId }) => entries.map((entry) => ({ entry, userId })))
+    const events = yield* Effect.forEach(
+      entries,
+      ({ entry, userId }) =>
+        normalizeClockifyTimeEntry({
+          entry,
+          expectedWorkspaceId: options.configuration.workspaceId,
+          expectedUserId: userId
+        }),
       { concurrency: options.configuration.maximumConcurrency }
     )
-    const events = eventsNested.flat()
     if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
       return yield* malformed("clockify-sync", "clockify-time-entry-identity-duplicate")
     }
     const hasMore = providerHasMore && !reachedBound
     const checkpointAfterPage = hasMore
-      ? `next:${page + 1}`
+      ? `next:${page + 1}:${options.syncScopeDigest}`
       : reachedBound
-      ? `bounded:${page}`
-      : "complete"
+      ? `bounded:${page}:${options.syncScopeDigest}`
+      : `complete:${options.syncScopeDigest}`
     const normalized = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
       events,
       checkpointAfterPage,
       hasMore
-    }).pipe(
-      Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid"))
-    )
+    }).pipe(Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid")))
     output.push(normalized)
     if (!hasMore) break
   }
@@ -360,10 +354,7 @@ const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   return { _tag: "found", event }
 })
 
-const makeRuntime = (
-  provider: ClockifyReadProvider,
-  configuration: unknown
-): ClockifyReadPluginRuntime => {
+const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): ClockifyReadPluginRuntime => {
   const definition = definePluginV1({
     rawDescriptor: descriptor,
     configurationSchema: ClockifyReadPluginConfiguration,
@@ -380,6 +371,12 @@ const makeRuntime = (
           })
         }
         const cryptoService = yield* Crypto.Crypto
+        const syncScopeDigest = yield* digestClockifySyncScope({
+          maximumPages: decoded.maximumPages,
+          pageSize: decoded.pageSize,
+          userIds,
+          workspaceId: decoded.workspaceId
+        })
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
           discover: Effect.gen(function*() {
@@ -396,9 +393,7 @@ const makeRuntime = (
               },
               endpoints: [{ kind: "web", url: decoded.webBaseUrl, label: "Clockify" }],
               discoveredAt
-            }).pipe(
-              Effect.mapError(() => malformed("clockify-discover", "clockify-discovery-shape-invalid"))
-            )
+            }).pipe(Effect.mapError(() => malformed("clockify-discover", "clockify-discovery-shape-invalid")))
           }),
           health: Effect.gen(function*() {
             yield* readWorkspaceContext(provider, decoded, "clockify-health")
@@ -406,23 +401,20 @@ const makeRuntime = (
             return yield* Schema.decodeUnknownEffect(Schema.toType(PluginHealth))({
               _tag: "healthy",
               checkedAt
-            }).pipe(
-              Effect.mapError(() => malformed("clockify-health", "clockify-health-shape-invalid"))
-            )
+            }).pipe(Effect.mapError(() => malformed("clockify-health", "clockify-health-shape-invalid")))
           }),
           sync: (request) => {
             if (request.streamKey !== "time-entries") {
-              return Stream.fail(
-                new PluginConfigurationFailure({ diagnosticCode: "clockify-sync-stream-unsupported" })
-              )
+              return Stream.fail(new PluginConfigurationFailure({ diagnosticCode: "clockify-sync-stream-unsupported" }))
             }
             return Stream.unwrap(
-              startPageFromCheckpoint(request.checkpoint, decoded.maximumPages).pipe(
+              startPageFromCheckpoint(request.checkpoint, decoded.maximumPages, syncScopeDigest).pipe(
                 Effect.flatMap((startPage) =>
                   collectSyncPages({
                     provider,
                     configuration: decoded,
                     userIds,
+                    syncScopeDigest,
                     startPage
                   }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
                 ),
@@ -431,9 +423,7 @@ const makeRuntime = (
             )
           },
           readEntity: (request) =>
-            readTimeEntry(provider, decoded, request).pipe(
-              Effect.provideService(Crypto.Crypto, cryptoService)
-            ),
+            readTimeEntry(provider, decoded, request).pipe(Effect.provideService(Crypto.Crypto, cryptoService)),
           diff: Option.none(),
           proposeAction: () => Effect.fail(unsupported("action.propose"))
         }
