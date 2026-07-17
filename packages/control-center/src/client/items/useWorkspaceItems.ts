@@ -2,12 +2,11 @@ import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useState } from "react"
 
 import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
-import type { WorkspaceId } from "../../domain/identifiers.js"
+import type { EnvironmentId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import {
   aggregateReleaseWorksetInspections,
   browserReleaseWorksetTransport,
-  loadReleaseWorksetInspections,
   type ReleaseWorksetTransport
 } from "../releases/useReleaseWorkset.js"
 import { presentWorkspaceItems, type WorkspaceItemPresentation } from "./presentWorkspaceItems.js"
@@ -15,6 +14,7 @@ import { presentWorkspaceItems, type WorkspaceItemPresentation } from "./present
 export const MAXIMUM_WORKSPACE_ITEMS = 500
 export const MAXIMUM_WORKSPACE_RELEASES = 25
 export const MAXIMUM_WORKSPACE_SLICE_REQUESTS = 100
+export const MAXIMUM_WORKSPACE_SLICE_REQUEST_CONCURRENCY = 4
 
 export type WorkspaceItemsState =
   | { readonly _tag: "idle" }
@@ -35,6 +35,18 @@ export const EMPTY_WORKSPACE_RELEASES: ReadonlyArray<PortfolioReleasePresentatio
 const releaseScopeKey = (releases: ReadonlyArray<PortfolioReleasePresentation>): string =>
   releases.map((release) => `${release.id}:${release.targetEnvironmentIds.join(",")}`).join(";")
 
+interface WorkspaceReleaseLoadPlan {
+  readonly environmentIds: ReadonlyArray<EnvironmentId>
+  readonly releaseId: ReleaseId
+}
+
+interface WorkspaceSliceRequest {
+  readonly environmentId: EnvironmentId | null
+  readonly releaseIndex: number
+  readonly releaseId: ReleaseId
+  readonly scopeIndex: number
+}
+
 const loadWorkspaceInspections = async (
   releases: ReadonlyArray<PortfolioReleasePresentation>,
   signal: AbortSignal,
@@ -43,7 +55,7 @@ const loadWorkspaceInspections = async (
   readonly inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
   readonly truncated: boolean
 }> => {
-  const inspections: Array<ReleaseDeliveryGraphInspection> = []
+  const plans: Array<WorkspaceReleaseLoadPlan> = []
   let remainingReleases = releases.length
   let remainingRequests = MAXIMUM_WORKSPACE_SLICE_REQUESTS
   let truncated = false
@@ -55,16 +67,56 @@ const loadWorkspaceInspections = async (
     const environmentBudget = Math.max(remainingRequests - remainingReleases, 0)
     const environmentIds = release.targetEnvironmentIds.slice(0, environmentBudget)
     if (environmentIds.length < release.targetEnvironmentIds.length) truncated = true
-    const slices = await loadReleaseWorksetInspections(
-      release.id,
-      environmentIds,
-      signal,
-      transport
-    )
-    inspections.push(aggregateReleaseWorksetInspections(release.id, slices))
+    plans.push({ environmentIds, releaseId: release.id })
     remainingRequests -= 1 + environmentIds.length
     remainingReleases -= 1
   }
+  const requests: ReadonlyArray<WorkspaceSliceRequest> = [
+    ...plans.map(({ releaseId }, releaseIndex) => ({
+      environmentId: null,
+      releaseId,
+      releaseIndex,
+      scopeIndex: 0
+    })),
+    ...plans.flatMap(({ environmentIds, releaseId }, releaseIndex) =>
+      environmentIds.map((environmentId, index) => ({
+        environmentId,
+        releaseId,
+        releaseIndex,
+        scopeIndex: index + 1
+      }))
+    )
+  ]
+  const completed: Array<WorkspaceSliceRequest & { readonly inspection: ReleaseDeliveryGraphInspection }> = []
+  let nextIndex = 0
+  let isStopped = false
+  const loadNext = async (): Promise<void> => {
+    while (!isStopped && nextIndex < requests.length) {
+      const request = requests[nextIndex]
+      nextIndex += 1
+      if (request === undefined) return
+      try {
+        completed.push({
+          ...request,
+          inspection: await transport.load(request.releaseId, request.environmentId, signal)
+        })
+      } catch (failure) {
+        isStopped = true
+        throw failure
+      }
+    }
+  }
+  const workerCount = Math.min(MAXIMUM_WORKSPACE_SLICE_REQUEST_CONCURRENCY, requests.length)
+  await Promise.all(Array.from({ length: workerCount }, () => loadNext()))
+  const inspections = plans.map(({ releaseId }, releaseIndex) =>
+    aggregateReleaseWorksetInspections(
+      releaseId,
+      completed
+        .filter((result) => result.releaseIndex === releaseIndex)
+        .sort((left, right) => left.scopeIndex - right.scopeIndex)
+        .map(({ inspection }) => inspection)
+    )
+  )
   return { inspections, truncated }
 }
 

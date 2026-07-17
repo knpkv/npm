@@ -21,6 +21,20 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 let mountedRoot: Root | undefined
 const ignoreSessionExpiry = (): void => undefined
 
+const deferred = <Value,>() => {
+  let resolveValue: ((value: Value) => void) | undefined
+  const promise = new Promise<Value>((resolve) => {
+    resolveValue = resolve
+  })
+  return {
+    promise,
+    resolve: (value: Value): void => {
+      if (resolveValue === undefined) throw new Error("Deferred resolution unavailable")
+      resolveValue(value)
+    }
+  }
+}
+
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
   mountedRoot = undefined
@@ -135,5 +149,37 @@ describe("useWorkspaceItems", () => {
 
     expect(transport.load).toHaveBeenCalledTimes(MAXIMUM_WORKSPACE_SLICE_REQUESTS)
     expect(host.textContent).toBe("ready:true")
+  })
+
+  it("starts later release roots before the first release completes", async () => {
+    const source = presentPortfolio(makePortfolioSnapshot()).releases[0]
+    if (source === undefined) throw new Error("Expected one portfolio release")
+    const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    const releases = [
+      { ...source, targetEnvironmentIds: [] },
+      { ...source, id: otherReleaseId, targetEnvironmentIds: [] }
+    ]
+    const first = deferred<typeof releaseWorksetFixture>()
+    const second = deferred<typeof releaseWorksetFixture>()
+    const transport = {
+      load: vi.fn((releaseId: ReleaseId) => (releaseId === source.id ? first.promise : second.promise))
+    } satisfies ReleaseWorksetTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    expect(transport.load).toHaveBeenCalledTimes(2)
+    expect(transport.load).toHaveBeenCalledWith(source.id, null, expect.any(AbortSignal))
+    expect(transport.load).toHaveBeenCalledWith(otherReleaseId, null, expect.any(AbortSignal))
+
+    await act(async () => {
+      first.resolve(releaseWorksetFixture)
+      second.resolve(releaseWorksetFixture)
+      await Promise.all([first.promise, second.promise])
+    })
+    expect(host.textContent).toBe("ready:false")
   })
 })
