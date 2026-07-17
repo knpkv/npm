@@ -3,15 +3,12 @@ import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
   RelationshipRepairProposalList
 } from "../../api/deliveryGraph.js"
-import { CsrfToken } from "../../api/session.js"
 import type {
   EnvironmentId,
   RelationshipRepairProposalId,
@@ -20,33 +17,7 @@ import type {
 } from "../../domain/identifiers.js"
 import { RelationshipRepairReviewId as RelationshipRepairReviewIdSchema } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal, RelationshipRepairReviewDecision } from "../../domain/relationshipRepair.js"
-
-class MutationProofUnavailable {
-  readonly _tag = "ForbiddenApiError"
-}
-
-const mutationProof = (): Effect.Effect<CsrfToken, MutationProofUnavailable> =>
-  Effect.try({
-    try: () => sessionStorage.getItem("cc_csrf"),
-    catch: () => new MutationProofUnavailable()
-  }).pipe(
-    Effect.flatMap((value) =>
-      value === null
-        ? Effect.fail(new MutationProofUnavailable())
-        : Schema.decodeUnknownEffect(CsrfToken)(value).pipe(
-          Effect.mapError(() => new MutationProofUnavailable())
-        )
-    )
-  )
-
-/** Generated client carrying the browser session's mutation proof. */
-export const makeRelationshipRepairMutationClient = Effect.gen(function*() {
-  const csrfToken = yield* mutationProof()
-  return yield* makeControlCenterApiClient({
-    transformClient: (httpClient) =>
-      httpClient.pipe(HttpClient.mapRequest(HttpClientRequest.setHeader("x-csrf-token", csrfToken)))
-  })
-})
+import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
 /** Generate a browser-native UUID v7 without weakening the public identifier contract. */
 export const makeRelationshipRepairReviewId = Effect.gen(function*() {
@@ -80,7 +51,7 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
   apply: (proposalId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const client = yield* makeRelationshipRepairMutationClient
+        const client = yield* makeAuthenticatedMutationClient
         return yield* client.deliveryGraph.applyRepairProposal({ params: { proposalId } })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -100,7 +71,7 @@ export const browserRelationshipRepairTransport: RelationshipRepairTransport = {
   review: (proposalId, reviewId, decision, rationale, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const client = yield* makeRelationshipRepairMutationClient
+        const client = yield* makeAuthenticatedMutationClient
         return yield* client.deliveryGraph.reviewRepairProposal({
           params: { proposalId },
           payload: {

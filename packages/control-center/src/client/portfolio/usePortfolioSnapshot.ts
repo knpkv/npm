@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Predicate from "effect/Predicate"
@@ -63,13 +64,9 @@ const MAXIMUM_RECONNECT_DELAY_MILLIS = 30_000
 const INITIAL_RECONNECT_DELAY_MILLIS = 500
 const MAXIMUM_RECONNECT_EXPONENT = 16
 
-class PortfolioStreamProtocolError {
-  readonly _tag = "PortfolioStreamProtocolError"
-}
+class PortfolioStreamProtocolError extends Data.TaggedError("PortfolioStreamProtocolError") {}
 
-class PortfolioStreamClosedError {
-  readonly _tag = "PortfolioStreamClosedError"
-}
+class PortfolioStreamClosedError extends Data.TaggedError("PortfolioStreamClosedError") {}
 
 const classifyFailure = (failure: unknown): PortfolioLoadFailure => {
   if (!Predicate.hasProperty(failure, "_tag") || typeof failure._tag !== "string") return "unavailable"

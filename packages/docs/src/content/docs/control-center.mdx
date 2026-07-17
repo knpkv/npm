@@ -42,6 +42,14 @@ Inside the chosen release, the selected object includes a compact delivery trace
 
 Choose **Details** on a relationship to open its URL-addressable side panel. The panel reads the immutable relationship ledger and the exact evidence observations referenced by the selected revision. It keeps actor, provenance, lifecycle reasons, observation freshness, verification, validity, and retention visible without replacing the compact release view.
 
+## Share one exact item
+
+Workspace owners can open an item on the **Items** route and create an authenticated link for one explicit person. Every grant names the exact normalized entity, grantee, expiry, creating owner session, and later revocation separately in durable server state. The link contains only a random share identifier; it never carries the session cookie, CSRF proof, or another bearer credential.
+
+Opening `/shares/<workspace-id>/<share-id>` first recovers the browser session, then rechecks the URL workspace, grantee, expiry, revocation, and current target projection in one server-side snapshot. A valid link returns only that current item projection. Release membership, relationships, evidence, and adjacent entities are not included and cannot expand the grant. A mismatched workspace or person, expired or revoked grant, deleted target, or stale target projection shows a recoverable unavailable state without substituting another workspace or demo data.
+
+The current Items control offers one-hour, one-day, and seven-day expiries and can revoke the newly created link immediately. Broader share administration and release-scoped grants remain future work.
+
 ## Configure local providers
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:

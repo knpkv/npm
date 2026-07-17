@@ -4,6 +4,7 @@ import type { ServeError } from "effect/unstable/http/HttpServerError"
 
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
 import type {
+  AuthorizedShares,
   DeliveryGraphInspection,
   MediaReads,
   PluginAdministration,
@@ -14,6 +15,7 @@ import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
 import {
+  authorizedSharesLayer,
   deliveryGraphInspectionLayer,
   liveEventsLayer,
   mediaReadsLayer,
@@ -61,6 +63,7 @@ import {
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
 
 type ControlCenterCoreApplicationServices =
+  | AuthorizedShares
   | DeliveryGraphInspection
   | MediaReads
   | PluginAdministration
@@ -101,6 +104,7 @@ const liveApplicationServices: Layer.Layer<
   never,
   Persistence | SecretStore
 > = Layer.mergeAll(
+  authorizedSharesLayer,
   pluginAdministrationLayer,
   deliveryGraphInspectionLayer,
   portfolioSnapshotsLayer,

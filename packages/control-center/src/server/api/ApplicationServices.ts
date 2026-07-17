@@ -27,6 +27,11 @@ import type {
   PluginHealthResponse
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
+import type {
+  AuthorizedShareResolution,
+  AuthorizedShareSummary,
+  CreateAuthorizedShareRequest
+} from "../../api/shares.js"
 import type { Actor } from "../../domain/actors.js"
 import type {
   DeliveryEntityKind,
@@ -45,6 +50,7 @@ import type {
   RelationshipRepairProposalId,
   ReleaseId,
   SessionId,
+  ShareId,
   WorkspaceId
 } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
@@ -126,6 +132,33 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
     workspaceId: WorkspaceId
   ) => Effect.Effect<PortfolioSnapshot, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/PortfolioSnapshots") {}
+
+/** Exact-entity authenticated share creation, resolution, and revocation boundary. */
+export class AuthorizedShares extends Context.Service<AuthorizedShares, {
+  readonly create: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly request: CreateAuthorizedShareRequest
+    readonly createdByPersonId: PersonId
+    readonly sessionId: SessionId
+  }) => Effect.Effect<
+    AuthorizedShareSummary,
+    ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly resolve: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly shareId: ShareId
+    readonly actor: Actor
+  }) => Effect.Effect<
+    AuthorizedShareResolution,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly revoke: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly shareId: ShareId
+    readonly revokedByPersonId: PersonId
+    readonly sessionId: SessionId
+  }) => Effect.Effect<void, ApplicationResourceNotFound | ApplicationServiceUnavailable>
+}>()("@knpkv/control-center/server/api/AuthorizedShares") {}
 
 /** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
 export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {

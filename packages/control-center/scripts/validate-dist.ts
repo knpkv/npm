@@ -158,6 +158,24 @@ const program = Effect.gen(function*() {
     verbatimModuleSyntax: true
   }
   const defaultCompilerHost = ts.createCompilerHost(compilerOptions)
+  const publicApplicationServicesConsumerPath = path.join(packageRoot, "public-application-services-consumer.mts")
+  const publicApplicationServicesConsumerSource = `import {
+  AuthorizedShares,
+  DeliveryGraphInspection,
+  MediaReads,
+  PluginAdministration,
+  PortfolioSnapshots,
+  RelationshipRepairProposals
+} from ${JSON.stringify(path.join(serverRoot, "server/index.js"))}
+void [
+  AuthorizedShares,
+  DeliveryGraphInspection,
+  MediaReads,
+  PluginAdministration,
+  PortfolioSnapshots,
+  RelationshipRepairProposals
+]
+`
   const offlineBackupConsumerPath = path.join(packageRoot, "offline-backup-consumer.mts")
   const offlineBackupConsumerSource = `import { createOfflineVerifiedBackup } from ${
     JSON.stringify(path.join(serverRoot, "server/index.js"))
@@ -171,7 +189,8 @@ const program = Effect.gen(function*() {
   const virtualSources = new Map([
     [forbiddenFactoryConsumerPath, forbiddenFactoryConsumerSource],
     [offlineBackupConsumerPath, offlineBackupConsumerSource],
-    [packedConsumerPath, packedConsumerSource]
+    [packedConsumerPath, packedConsumerSource],
+    [publicApplicationServicesConsumerPath, publicApplicationServicesConsumerSource]
   ])
   const compilerHost: ts.CompilerHost = {
     ...defaultCompilerHost,
@@ -191,6 +210,17 @@ const program = Effect.gen(function*() {
     failures.push(
       `packed PluginDefinitionV1 consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`
     )
+  }
+
+  const publicApplicationServicesDiagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram({
+      rootNames: [publicApplicationServicesConsumerPath],
+      options: compilerOptions,
+      host: compilerHost
+    })
+  )
+  for (const diagnostic of publicApplicationServicesDiagnostics) {
+    failures.push(`public application service consumer typecheck failed: ${formatTypeScriptDiagnostic(diagnostic)}`)
   }
 
   const offlineBackupDiagnostics = ts.getPreEmitDiagnostics(

@@ -1,4 +1,5 @@
 /** Durable application adapters for the authenticated HTTP API. @packageDocumentation */
+export { authorizedSharesLayer, makeAuthorizedShares } from "./authorizedShares.js"
 export { deliveryGraphInspectionLayer, makeDeliveryGraphInspection } from "./deliveryGraphInspection.js"
 export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 export { liveEventsLayer, makeLiveEvents } from "./liveEvents.js"

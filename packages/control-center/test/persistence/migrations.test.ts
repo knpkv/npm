@@ -46,6 +46,8 @@ import {
 
 const expectedTables = [
   "audit_events",
+  "authorized_share_grants",
+  "authorized_share_revocations",
   "content_blobs",
   "control_center_migrations",
   "delivery_nodes",

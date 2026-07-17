@@ -52,6 +52,11 @@ const itemsRoute = async () => {
   return { Component: module.ItemsPage }
 }
 
+const authorizedShareRoute = async () => {
+  const module = await import("./items/AuthorizedSharePage.js")
+  return { Component: module.AuthorizedSharePage }
+}
+
 /** Browser routes remain application-owned while rly receives only a link bridge. */
 export const router = createBrowserRouter([
   {
@@ -62,6 +67,7 @@ export const router = createBrowserRouter([
       { path: "services", element: <ServicesPage /> },
       { path: "agent", lazy: agentRoute },
       { path: "pair", lazy: pairRoute },
+      { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },
       {
         path: "w/:workspaceId",
         lazy: workspaceRoute,

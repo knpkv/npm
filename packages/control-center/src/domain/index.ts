@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 export * from "./actors.js"
+export * from "./authorizedShare.js"
 export * from "./deliveryGraph.js"
 export * from "./domainEvent.js"
 export * from "./freshness.js"

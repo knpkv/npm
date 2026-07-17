@@ -161,6 +161,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-direct-mutation-proof-read": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/api/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-number-from-string-in-control-center-api": "error"

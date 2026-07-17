@@ -20,6 +20,7 @@ import { migration0018GovernedActionAllPendingOutcomes } from "./0018_governed_a
 import { migration0019RelationshipRepairProposals } from "./0019_relationship_repair_proposals.js"
 import { migration0020RelationshipRepairReviews } from "./0020_relationship_repair_reviews.js"
 import { migration0021RelationshipRepairApplications } from "./0021_relationship_repair_applications.js"
+import { migration0022AuthorizedShares } from "./0022_authorized_shares.js"
 
 /** Private table recording the exact ordered Control Center migration ledger. */
 export const MIGRATION_LEDGER_TABLE = "control_center_migrations"
@@ -46,7 +47,8 @@ export const EXPECTED_MIGRATIONS = [
   { id: 18, name: "governed_action_all_pending_outcomes" },
   { id: 19, name: "relationship_repair_proposals" },
   { id: 20, name: "relationship_repair_reviews" },
-  { id: 21, name: "relationship_repair_applications" }
+  { id: 21, name: "relationship_repair_applications" },
+  { id: 22, name: "authorized_shares" }
 ]
 
 /** Ordered, forward-only Control Center migrations. */
@@ -71,5 +73,6 @@ export const migrationLoader = LibsqlMigrator.fromRecord({
   "0018_governed_action_all_pending_outcomes": migration0018GovernedActionAllPendingOutcomes,
   "0019_relationship_repair_proposals": migration0019RelationshipRepairProposals,
   "0020_relationship_repair_reviews": migration0020RelationshipRepairReviews,
-  "0021_relationship_repair_applications": migration0021RelationshipRepairApplications
+  "0021_relationship_repair_applications": migration0021RelationshipRepairApplications,
+  "0022_authorized_shares": migration0022AuthorizedShares
 })

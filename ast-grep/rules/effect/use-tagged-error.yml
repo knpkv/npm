@@ -6,7 +6,19 @@ severity: error
 message: "Use Data.TaggedError instead of extending native Error"
 
 rule:
-  pattern: class $NAME extends Error { $$$BODY }
+  any:
+    - pattern: class $NAME extends Error { $$$BODY }
+    - all:
+        - pattern: class $NAME { $$$BODY }
+        - has:
+            all:
+              - kind: public_field_definition
+              - regex: ^readonly\s+_tag\s*=
+            stopBy: end
+
+constraints:
+  NAME:
+    regex: "(Error|Failure|Unavailable)$"
 
 files:
   - "packages/**/*.ts"
@@ -22,6 +34,7 @@ ignores:
 
 note: |
   Tagged errors give Effect code a stable _tag for catchTag/catchTags and searchable domain failures.
+  Do not hand-roll a tagged failure by declaring `_tag` directly on a class.
 
   Prefer:
 

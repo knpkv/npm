@@ -130,6 +130,12 @@ export const SessionId = canonicalUuid7("SessionId")
 /** Decoded authenticated browser-session identifier. */
 export type SessionId = typeof SessionId.Type
 
+/** Canonical identifier of one exact-scope authenticated share grant. */
+export const ShareId = canonicalUuid7("ShareId")
+
+/** Decoded authorized-share identifier. */
+export type ShareId = typeof ShareId.Type
+
 /** Canonical identifier of one governed provider action. */
 export const GovernedActionId = canonicalUuid7("GovernedActionId")
 

@@ -10,7 +10,8 @@ import {
   mediaHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
-  sessionHandlersLayer
+  sessionHandlersLayer,
+  shareHandlersLayer
 } from "./Handlers.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
@@ -23,6 +24,7 @@ export const controlCenterApiMiddlewareLayer = Layer.mergeAll(
 /** Complete group implementation, still requiring injectable application services. */
 export const controlCenterApiHandlersLayer = Layer.mergeAll(
   sessionHandlersLayer,
+  shareHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
   deliveryGraphHandlersLayer,

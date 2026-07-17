@@ -16,6 +16,7 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
+  AuthorizedShares,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -35,6 +36,7 @@ import {
   mapApplicationUnavailable,
   mapAuthenticationFailures,
   mapCredentialAuthenticationFailures,
+  notFoundApiError,
   serviceUnavailableApiError
 } from "./ErrorMapping.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
@@ -130,6 +132,72 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
               ...cookie,
               maxAge: 0
             })
+          }))
+    })
+)
+
+/** Exact-scope authenticated entity-share handlers. */
+export const shareHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "shares",
+  (handlers) =>
+    Effect.gen(function*() {
+      const shares = yield* AuthorizedShares
+      return handlers
+        .handle("create", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner" || session.actor._tag !== "human") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* shares.create({
+              workspaceId: session.workspaceId,
+              request: payload,
+              createdByPersonId: session.actor.personId,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("resolve", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.workspaceId !== params.workspaceId) {
+              return yield* Effect.flatMap(notFoundApiError, Effect.fail)
+            }
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "private, no-store"))
+            )
+            return yield* shares.resolve({
+              workspaceId: params.workspaceId,
+              shareId: params.shareId,
+              actor: session.actor
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("revoke", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.workspaceId !== params.workspaceId) {
+              return yield* Effect.flatMap(notFoundApiError, Effect.fail)
+            }
+            if (session.permission !== "workspace-owner" || session.actor._tag !== "human") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* shares.revoke({
+              workspaceId: params.workspaceId,
+              shareId: params.shareId,
+              revokedByPersonId: session.actor.personId,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
     })
 )
