@@ -14,7 +14,41 @@ const newestAt = Schema.decodeSync(UtcTimestamp)("2026-07-17T12:00:00.000Z")
 const olderAt = Schema.decodeSync(UtcTimestamp)("2026-07-17T11:00:00.000Z")
 const newestEventId = "01890f6f-6d6a-7cc0-98d2-000000000142"
 const olderEventId = "01890f6f-6d6a-7cc0-98d2-000000000143"
+const detailAuditEventId = "shared-audit-event"
+const detailSyncEventDigest = "3".repeat(64)
+const detailRelationshipEventDigest = "4".repeat(64)
+const detailDomainEventId = "shared-domain-event"
+const wrongWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000199")
 const ExplainQueryPlanRow = Schema.Struct({ detail: Schema.String })
+
+const detailWorkspaces = [
+  {
+    workspaceId,
+    suffix: "payments",
+    displayName: "Payments",
+    providerId: "jira",
+    connectionLabel: "Payments Jira",
+    personLabel: "Avery Bell",
+    secretMarker: "PAYMENTS_TIMELINE_PAYLOAD_SECRET"
+  },
+  {
+    workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000149"),
+    suffix: "identity",
+    displayName: "Identity",
+    providerId: "confluence",
+    connectionLabel: "Identity Confluence",
+    personLabel: "Jordan Lee",
+    secretMarker: "IDENTITY_TIMELINE_PAYLOAD_SECRET"
+  }
+] satisfies ReadonlyArray<{
+  readonly workspaceId: typeof workspaceId
+  readonly suffix: string
+  readonly displayName: string
+  readonly providerId: "jira" | "confluence"
+  readonly connectionLabel: string
+  readonly personLabel: string
+  readonly secretMarker: string
+}>
 
 const withRepository = <Success, Failure>(
   use: Effect.Effect<Success, Failure, Database | TimelineRepository>
@@ -65,6 +99,166 @@ const seedCollidingLegacyPluginPageKeys = Effect.gen(function*() {
         ${"c".repeat(64)}, ${"d".repeat(64)}, ${"1".repeat(64)}, 0, ${committedAt}),
       (${workspaceId}, ${connectionId}, 'a', 'b:c', 0,
         ${"e".repeat(64)}, ${"f".repeat(64)}, ${"2".repeat(64)}, 0, ${committedAt})`
+})
+
+const seedTimelineDetailSources = Effect.gen(function*() {
+  const { sql } = yield* Database
+  const occurredAt = Schema.encodeSync(UtcTimestamp)(newestAt)
+
+  yield* Effect.forEach(detailWorkspaces, (fixture) =>
+    Effect.gen(function*() {
+      const connectionId = `connection-${fixture.suffix}`
+      const entityId = `entity-${fixture.suffix}`
+      const releaseId = `release-${fixture.suffix}`
+      const personId = `person-${fixture.suffix}`
+      const agentId = `agent-${fixture.suffix}`
+      const agentJobId = `agent-job-${fixture.suffix}`
+      const actionId = `action-${fixture.suffix}`
+      const transitionId = `transition-${fixture.suffix}`
+      const relationshipId = `relationship-${fixture.suffix}`
+      const sourceNodeId = `source-node-${fixture.suffix}`
+      const targetNodeId = `target-node-${fixture.suffix}`
+      const envelopeDigest = `sha256:${"5".repeat(64)}`
+      const transitionDigest = `sha256:${"6".repeat(64)}`
+
+      yield* sql`INSERT INTO workspaces (
+        workspace_id, display_name, revision, created_at, updated_at
+      ) VALUES (${fixture.workspaceId}, ${fixture.displayName}, 1, ${occurredAt}, ${occurredAt})`
+      yield* sql`INSERT INTO plugin_connections (
+        workspace_id, plugin_connection_id, provider_id, display_name,
+        revision, is_enabled, created_at, updated_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, ${fixture.providerId}, ${fixture.connectionLabel},
+        1, 1, ${occurredAt}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO entities (
+        workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
+        entity_type, current_revision, created_at, updated_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${entityId}, ${connectionId}, ${fixture.providerId},
+        ${`vendor-${fixture.suffix}`}, 'issue', 1, ${occurredAt}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO entity_revisions (
+        workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+        source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${entityId}, 1, 'source-1', 1, NULL,
+        ${occurredAt}, ${occurredAt}, ${occurredAt}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO releases (
+        workspace_id, release_id, current_revision, created_at, updated_at
+      ) VALUES (${fixture.workspaceId}, ${releaseId}, 1, ${occurredAt}, ${occurredAt})`
+      yield* sql`INSERT INTO persons (
+        workspace_id, person_id, display_name, avatar_json, is_active,
+        revision, created_at, updated_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${personId}, ${fixture.personLabel},
+        ${JSON.stringify({ _tag: "initials", text: "TL" })}, 1, 1, ${occurredAt}, ${occurredAt}
+      )`
+
+      yield* sql`INSERT INTO governed_actions (
+        workspace_id, action_id, plugin_connection_id, provider_id, target_entity_id,
+        idempotency_key, envelope_digest, envelope_json, state, lineage_json,
+        lineage_kind, provider_operation_id, reconciliation_key, terminal_status,
+        head_transition_id, head_sequence, created_at, updated_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${actionId}, ${connectionId}, ${fixture.providerId}, ${entityId},
+        ${`idempotency-${fixture.suffix}`}, ${envelopeDigest},
+        ${JSON.stringify({ secret: fixture.secretMarker })}, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, ${occurredAt}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO governed_action_transitions (
+        workspace_id, action_id, transition_id, previous_transition_id, sequence,
+        command_id, command_tag, authorization_id, attempt_id, outcome_source_kind,
+        command_provider_operation_id, command_reconciliation_key, command_terminal_status,
+        command_unknown_kind, command_digest, transition_digest, envelope_digest,
+        from_state, to_state, result_lineage_json, result_lineage_kind,
+        result_provider_operation_id, result_reconciliation_key, result_terminal_status,
+        cause_kind, cause_actor_id, cause_session_id, cause_job_id, cause_system_component,
+        causation_id, correlation_id, transition_json, occurred_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${actionId}, ${transitionId}, NULL, 1,
+        ${`command-${fixture.suffix}`}, 'propose', NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, ${`sha256:${"7".repeat(64)}`}, ${transitionDigest}, ${envelopeDigest},
+        NULL, 'proposed', '{}', 'none', NULL, NULL, NULL,
+        'agent', ${agentId}, NULL, ${agentJobId}, NULL,
+        NULL, NULL, ${JSON.stringify({ secret: fixture.secretMarker })}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO audit_events (
+        workspace_id, action_id, transition_id, audit_event_id, event_kind,
+        cause_kind, actor_id, session_id, job_id, system_component, causation_id,
+        correlation_id, payload_digest, payload_json, occurred_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${actionId}, ${transitionId}, ${detailAuditEventId}, 'proposed',
+        'agent', ${agentId}, NULL, ${agentJobId}, NULL, NULL,
+        NULL, ${transitionDigest}, ${JSON.stringify({ secret: fixture.secretMarker })}, ${occurredAt}
+      )`
+      yield* sql`UPDATE governed_actions SET
+        state = 'proposed', lineage_json = '{}', lineage_kind = 'none',
+        head_transition_id = ${transitionId}, head_sequence = 1, updated_at = ${occurredAt}
+      WHERE workspace_id = ${fixture.workspaceId} AND action_id = ${actionId}`
+
+      yield* sql`INSERT INTO plugin_sync_streams (
+        workspace_id, plugin_connection_id, provider_id, stream_key, revision,
+        checkpoint_json, checkpoint_digest, last_page_id, synchronized_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, ${fixture.providerId}, 'timeline-detail', 1,
+        ${JSON.stringify({ secret: fixture.secretMarker })}, ${"8".repeat(64)}, 'detail-page', ${occurredAt}
+      )`
+      yield* sql`INSERT INTO plugin_sync_pages (
+        workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
+        page_digest, checkpoint_digest, timeline_event_digest, event_count, committed_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'detail-page', 0,
+        ${"9".repeat(64)}, ${"8".repeat(64)}, ${detailSyncEventDigest}, 1, ${occurredAt}
+      )`
+
+      yield* sql`INSERT INTO delivery_nodes (
+        workspace_id, node_id, node_key_digest, node_kind, endpoint_kind,
+        resolution_state, entity_id, release_id, environment_id, expected_entity_kind,
+        missing_key, created_at
+      ) VALUES
+        (${fixture.workspaceId}, ${sourceNodeId}, ${"a".repeat(64)}, 'entity', 'issue',
+          'missing', NULL, NULL, NULL, 'issue', ${`missing-source-${fixture.suffix}`}, ${occurredAt}),
+        (${fixture.workspaceId}, ${targetNodeId}, ${"b".repeat(64)}, 'entity', 'issue',
+          'missing', NULL, NULL, NULL, 'issue', ${`missing-target-${fixture.suffix}`}, ${occurredAt})`
+      yield* sql`INSERT INTO relationship_heads (
+        workspace_id, relationship_id, current_revision, edge_digest, created_at, updated_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${relationshipId}, 1, ${"c".repeat(64)}, ${occurredAt}, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO relationship_revisions (
+        workspace_id, relationship_id, revision, supersedes_revision, schema_version,
+        kind, source_node_id, source_node_kind, target_node_id, target_node_kind,
+        lifecycle, lifecycle_reason, release_id, environment_id,
+        confidence_kind, confidence_score, confidence_rationale,
+        provenance_kind, provenance_plugin_connection_id, provenance_source_entity_id,
+        provenance_source_entity_revision, provenance_person_id, provenance_agent_id,
+        provenance_rule_id, provenance_rule_version, provenance_rationale,
+        recorded_by_kind, recorded_by_person_id, recorded_by_agent_id, recorded_by_component,
+        effective_at, recorded_at, revision_digest
+      ) VALUES (
+        ${fixture.workspaceId}, ${relationshipId}, 1, NULL, 1,
+        'depends-on', ${sourceNodeId}, 'issue', ${targetNodeId}, 'issue',
+        'verified', NULL, ${releaseId}, NULL,
+        'confirmed', NULL, NULL,
+        'plugin', ${connectionId}, ${entityId}, 1, NULL, NULL,
+        NULL, NULL, ${fixture.secretMarker},
+        'human', ${personId}, NULL, NULL,
+        ${occurredAt}, ${occurredAt}, ${detailRelationshipEventDigest}
+      )`
+
+      yield* sql`INSERT INTO domain_events (
+        workspace_id, event_cursor, event_id, schema_version, event_type, dedupe_key,
+        release_id, plugin_connection_id, entity_id, job_id,
+        occurred_at, ingested_at, payload_json, payload_digest
+      ) VALUES (
+        ${fixture.workspaceId}, 1, ${detailDomainEventId}, 1, 'release-evaluated',
+        ${`domain-detail-${fixture.suffix}`}, ${releaseId}, ${connectionId}, ${entityId},
+        ${agentJobId}, ${occurredAt}, ${occurredAt},
+        ${JSON.stringify({ secret: fixture.secretMarker })}, ${"d".repeat(64)}
+      )`
+    }), { discard: true })
 })
 
 describe("TimelineRepository", () => {
@@ -144,29 +338,113 @@ describe("TimelineRepository", () => {
       assert.deepStrictEqual(second.map(({ eventKey }) => eventKey), [`sync:${"1".repeat(64)}`])
     })))
 
-  it.effect("resolves one exact workspace event with owner-visible attribution", () =>
+  it.effect("resolves exact source details without crossing workspace boundaries", () =>
     withRepository(Effect.gen(function*() {
-      yield* seedSystemEvents
+      yield* seedTimelineDetailSources
       const repository = yield* TimelineRepository
+      const detailKeys = {
+        audit: `audit:${detailAuditEventId}`,
+        sync: `sync:${detailSyncEventDigest}`,
+        relationship: `relationship:${detailRelationshipEventDigest}`,
+        domain: `domain:${detailDomainEventId}`
+      } satisfies Record<"audit" | "sync" | "relationship" | "domain", string>
+      const resolvedDetails = yield* Effect.forEach(detailWorkspaces, (fixture) =>
+        Effect.gen(function*() {
+          const connectionId = `connection-${fixture.suffix}`
+          const entityId = `entity-${fixture.suffix}`
+          const releaseId = `release-${fixture.suffix}`
+          const actionId = `action-${fixture.suffix}`
+          const relationshipId = `relationship-${fixture.suffix}`
+          const agentId = `agent-${fixture.suffix}`
+          const agentJobId = `agent-job-${fixture.suffix}`
+          const personId = `person-${fixture.suffix}`
+          const details = yield* Effect.all({
+            audit: repository.detail({ eventKey: detailKeys.audit, workspaceId: fixture.workspaceId }),
+            sync: repository.detail({ eventKey: detailKeys.sync, workspaceId: fixture.workspaceId }),
+            relationship: repository.detail({
+              eventKey: detailKeys.relationship,
+              workspaceId: fixture.workspaceId
+            }),
+            domain: repository.detail({ eventKey: detailKeys.domain, workspaceId: fixture.workspaceId })
+          })
 
-      const detail = yield* repository.detail({
-        eventKey: `domain:${newestEventId}`,
-        workspaceId
-      })
-      assert.strictEqual(detail?.agentJobId, "agent-job-42")
-      assert.strictEqual(detail?.eventType, "release-evaluated")
+          assert.deepStrictEqual(details.audit, {
+            eventKey: detailKeys.audit,
+            occurredAt: newestAt,
+            actorKind: "agent",
+            actorId: agentId,
+            actorLabel: null,
+            eventType: "proposed",
+            sourceKind: "action",
+            service: null,
+            releaseId: null,
+            entityId,
+            actionId,
+            relationshipId: null,
+            pluginConnectionId: connectionId,
+            agentJobId
+          })
+          assert.deepStrictEqual(details.sync, {
+            eventKey: detailKeys.sync,
+            occurredAt: newestAt,
+            actorKind: "plugin",
+            actorId: connectionId,
+            actorLabel: fixture.connectionLabel,
+            eventType: "synchronized",
+            sourceKind: "plugin-sync",
+            service: fixture.providerId,
+            releaseId: null,
+            entityId: null,
+            actionId: null,
+            relationshipId: null,
+            pluginConnectionId: connectionId,
+            agentJobId: null
+          })
+          assert.deepStrictEqual(details.relationship, {
+            eventKey: detailKeys.relationship,
+            occurredAt: newestAt,
+            actorKind: "human",
+            actorId: personId,
+            actorLabel: fixture.personLabel,
+            eventType: "verified",
+            sourceKind: "relationship",
+            service: null,
+            releaseId,
+            entityId: null,
+            actionId: null,
+            relationshipId,
+            pluginConnectionId: connectionId,
+            agentJobId: null
+          })
+          assert.deepStrictEqual(details.domain, {
+            eventKey: detailKeys.domain,
+            occurredAt: newestAt,
+            actorKind: "system",
+            actorId: null,
+            actorLabel: "Control Center",
+            eventType: "release-evaluated",
+            sourceKind: "system",
+            service: null,
+            releaseId,
+            entityId,
+            actionId: null,
+            relationshipId: null,
+            pluginConnectionId: connectionId,
+            agentJobId
+          })
+          return details
+        }))
 
-      const missing = yield* repository.detail({
-        eventKey: "domain:missing",
-        workspaceId
-      })
-      assert.isNull(missing)
+      assert.notDeepEqual(resolvedDetails[0], resolvedDetails[1])
+      for (const eventKey of Object.values(detailKeys)) {
+        const wrongWorkspace = yield* repository.detail({ eventKey, workspaceId: wrongWorkspaceId })
+        assert.isNull(wrongWorkspace)
+      }
 
-      const otherWorkspace = yield* repository.detail({
-        eventKey: `domain:${newestEventId}`,
-        workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000199")
-      })
-      assert.isNull(otherWorkspace)
+      const serializedDetails = JSON.stringify(resolvedDetails)
+      for (const { secretMarker } of detailWorkspaces) {
+        assert.notInclude(serializedDetails, secretMarker)
+      }
     })))
 
   it.effect("uses source-specific workspace-time indexes without temporary Timeline sorts", () =>
