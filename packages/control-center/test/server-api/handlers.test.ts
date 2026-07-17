@@ -8,6 +8,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
+import { PluginConnectionTestResult } from "../../src/api/plugins.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
   CurrentSession,
@@ -21,6 +22,7 @@ import {
   AgentId,
   EntityId,
   EventCursor,
+  PluginConnectionId,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
@@ -49,6 +51,7 @@ import {
   agentHandlersLayer,
   deliveryGraphHandlersLayer,
   liveEventHandlersLayer,
+  pluginHandlersLayer,
   portfolioHandlersLayer,
   shareHandlersLayer,
   timelineHandlersLayer
@@ -107,6 +110,7 @@ const timelineDetail = Schema.decodeSync(TimelineEventDetail)({
   agentJob: { jobId: "job-9" }
 })
 const inspectedReleaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000004")
+const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000010")
 const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
   "01890f6f-6d6a-7cc0-98d2-000000000005"
 )
@@ -761,6 +765,50 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("runs an owner-only live connection test through the generated client", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeSync(PluginConnectionTestResult)({
+        _tag: "healthy",
+        pluginConnectionId,
+        providerId: "jira",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 84,
+        identity: {
+          kind: "user",
+          label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "account-123"
+        }
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(expected)
+            : Effect.die("connection test crossed its authenticated scope")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.testConnection({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
   it.effect("serves a bounded Timeline and rejects half a stable cursor", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
@@ -942,7 +990,8 @@ describe("Control Center API handlers", () => {
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.succeed([]),
-      patchConfiguration: () => Effect.die("not used")
+      patchConfiguration: () => Effect.die("not used"),
+      testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const bind = await Effect.runPromise(decodeBindConfig({}))
@@ -1304,7 +1353,8 @@ describe("Control Center API handlers", () => {
         configurationMetadata: () => Effect.die("not used"),
         health: () => Effect.die("not used"),
         list: () => Effect.die("not used"),
-        patchConfiguration: () => Effect.die("not used")
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
       })
       const media = MediaReads.of({ read: () => Effect.die("not used") })
       const bind = yield* decodeBindConfig({})
@@ -1388,7 +1438,8 @@ describe("Control Center API handlers", () => {
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.die("not used"),
-      patchConfiguration: () => Effect.die("not used")
+      patchConfiguration: () => Effect.die("not used"),
+      testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const bind = await Effect.runPromise(decodeBindConfig({}))
@@ -1497,7 +1548,8 @@ describe("Control Center API handlers", () => {
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.die("not used"),
-      patchConfiguration: () => Effect.die("not used")
+      patchConfiguration: () => Effect.die("not used"),
+      testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const bind = await Effect.runPromise(decodeBindConfig({}))
@@ -1588,7 +1640,8 @@ describe("Control Center API handlers", () => {
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.die("not used"),
-      patchConfiguration: () => Effect.die("blocked insecure-LAN configuration reached its handler")
+      patchConfiguration: () => Effect.die("blocked insecure-LAN configuration reached its handler"),
+      testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const origin = "http://192.168.1.42:4173"
@@ -1721,7 +1774,8 @@ describe("Control Center API handlers", () => {
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.succeed([]),
-      patchConfiguration: () => Effect.die("non-owner reached plugin mutation")
+      patchConfiguration: () => Effect.die("non-owner reached plugin mutation"),
+      testConnection: () => Effect.die("non-owner reached connection test")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const bind = await Effect.runPromise(decodeBindConfig({}))
@@ -1772,6 +1826,19 @@ describe("Control Center API handlers", () => {
         _tag: "ForbiddenApiError",
         code: "forbidden"
       })
+      const testResponse = await webHandler.handler(
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/test", {
+          method: "POST",
+          headers: {
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          }
+        }),
+        requestContext
+      )
+      assert.strictEqual(testResponse.status, 403)
     } finally {
       await webHandler.dispose()
     }

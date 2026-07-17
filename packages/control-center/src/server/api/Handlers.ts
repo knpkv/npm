@@ -272,6 +272,21 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("testConnection", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* plugins.testConnection({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("configurationMetadata", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

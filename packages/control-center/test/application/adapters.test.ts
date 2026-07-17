@@ -1,10 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Result, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
-import { OpaqueMediaId, OpaqueSecretReference, PluginConfigurationKey } from "../../src/api/index.js"
+import {
+  OpaqueMediaId,
+  OpaqueSecretReference,
+  PluginConfigurationKey,
+  PluginConnectionTestResult
+} from "../../src/api/index.js"
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -19,6 +24,7 @@ import {
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { NegotiatedPluginDescriptorV1 } from "../../src/domain/plugins/descriptor.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -32,6 +38,7 @@ import {
   makeDeliveryGraphInspection,
   makeMediaReads,
   makePluginAdministration,
+  makePluginAdministrationWithConnections,
   makePortfolioSnapshots,
   makeRelationshipRepairProposals,
   mapPersistenceReadError
@@ -40,6 +47,10 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
+import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
+import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
@@ -47,6 +58,8 @@ const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000
 const OTHER_WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000072")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000073")
 const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000074")
+const CONFLUENCE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008b")
+const CODEPIPELINE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008c")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
@@ -125,6 +138,11 @@ const descriptor = {
   ],
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }
+
+const negotiatedDescriptor = Schema.decodeUnknownSync(NegotiatedPluginDescriptorV1)({
+  descriptor,
+  capabilities: [{ capabilityId: "entity.read", version: 1 }]
+})
 
 const release = Schema.decodeSync(Release)({
   createdAt: "2026-07-14T10:00:00.000Z",
@@ -1344,6 +1362,183 @@ describe("application adapters", () => {
       if (Result.isFailure(keepMissing)) {
         assert.instanceOf(keepMissing.failure, ApplicationInvalidRequest)
       }
+    })))
+
+  it.effect("classifies retrieved people as users and AWS principals as accounts", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const persistence = yield* Persistence
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        displayName: PluginConnectionDisplayName.make("Payments Confluence"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        displayName: PluginConnectionDisplayName.make("Payments CodePipeline"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "atlassian-account-123", displayName: "Avery Bell" },
+          workspace: { providerImmutableId: "site-456", displayName: "Payments Jira" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: ({ pluginConnectionId, workspaceId }) =>
+          workspaceId === WORKSPACE_ID &&
+            (pluginConnectionId === PLUGIN_ID ||
+              pluginConnectionId === CONFLUENCE_PLUGIN_ID ||
+              pluginConnectionId === CODEPIPELINE_PLUGIN_ID)
+            ? Effect.succeed(Context.make(PluginConnection, connection))
+            : Effect.die("connection test crossed its requested scope"),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "healthy")
+      if (result._tag === "healthy") {
+        assert.deepStrictEqual(result.identity, {
+          kind: "user",
+          label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+
+      const confluenceResult = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID
+      })
+      assert.strictEqual(confluenceResult._tag, "healthy")
+      if (confluenceResult._tag === "healthy") {
+        assert.deepStrictEqual(confluenceResult.identity, {
+          kind: "user",
+          label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+
+      const codePipelineResult = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID
+      })
+      assert.strictEqual(codePipelineResult._tag, "healthy")
+      if (codePipelineResult._tag === "healthy") {
+        assert.deepStrictEqual(codePipelineResult.identity, {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+    })))
+
+  it.effect("keeps disabled connection tests provider-inert", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const acquisitions = yield* Ref.make(0)
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () =>
+          Ref.update(acquisitions, (count) => count + 1).pipe(
+            Effect.andThen(Effect.die("disabled connection acquired a provider runtime"))
+          ),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "failed")
+      assert.strictEqual(result._tag === "failed" ? result.safeMessage : null, "This connection is disabled.")
+      assert.strictEqual(yield* Ref.get(acquisitions), 0)
+    })))
+
+  it.effect("bounds provider-reported health messages for the API response", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.die("discovery must not run after unavailable health"),
+        health: Effect.succeed({
+          _tag: "unavailable",
+          checkedAt: T0,
+          failureClass: "outage",
+          retryAt: null,
+          safeMessage: "x".repeat(201)
+        }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      const decoded = Schema.decodeUnknownSync(Schema.toType(PluginConnectionTestResult))(result)
+      assert.strictEqual(decoded._tag, "failed")
+      assert.strictEqual(decoded._tag === "failed" ? decoded.safeMessage.length : null, 200)
+    })))
+
+  it.effect("redacts provider operation details when a connection test fails", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.die("discovery must not run after failed health"),
+        health: Effect.fail(
+          new PluginAuthenticationFailure({
+            operation: "Bearer secret-token-never-return"
+          })
+        ),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "failed")
+      assert.strictEqual(result._tag === "failed" ? result.failureClass : null, "authentication")
+      assert.strictEqual(
+        result._tag === "failed" ? result.safeMessage : null,
+        "The provider rejected these credentials."
+      )
+      assert.notInclude(JSON.stringify(result), "secret-token-never-return")
     })))
 
   it.effect("caps compact collaborators deterministically while preserving the total count", () =>

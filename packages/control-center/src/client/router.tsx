@@ -1,6 +1,6 @@
 import { createBrowserRouter } from "react-router"
 import { AppShell } from "./AppShell.js"
-import { NotFoundPage, ReleasesPage, ServicesPage } from "./Pages.js"
+import { NotFoundPage, ReleasesPage } from "./Pages.js"
 
 const overviewRoute = async () => {
   const module = await import("./portfolio/PortfolioOverview.js")
@@ -57,6 +57,11 @@ const timelineRoute = async () => {
   return { Component: module.TimelinePage }
 }
 
+const servicesRoute = async () => {
+  const module = await import("./services/ServicesPage.js")
+  return { Component: module.ServicesPage }
+}
+
 const authorizedShareRoute = async () => {
   const module = await import("./items/AuthorizedSharePage.js")
   return { Component: module.AuthorizedSharePage }
@@ -69,7 +74,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, lazy: overviewRoute },
       { path: "releases", element: <ReleasesPage /> },
-      { path: "services", element: <ServicesPage /> },
+      { path: "services", lazy: servicesRoute },
       { path: "agent", lazy: agentRoute },
       { path: "pair", lazy: pairRoute },
       { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },

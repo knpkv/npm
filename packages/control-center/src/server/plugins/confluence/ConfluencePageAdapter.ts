@@ -44,6 +44,7 @@ import {
 } from "./ConfluencePageClient.js"
 import {
   ConfluencePageAttributesV1,
+  RawConfluenceCurrentUser,
   RawConfluencePage,
   type RawConfluenceUser,
   RawConfluenceUsers,
@@ -390,6 +391,14 @@ const unsupported = (capabilityId: "action.execute" | "action.cancel" | "action.
     diagnosticCode: "confluence-read-adapter-capability-unavailable"
   })
 
+const currentUserDisplayName = (displayName: string | null | undefined, publicName: string | undefined): string => {
+  for (const candidate of [displayName, publicName]) {
+    const normalized = candidate?.trim()
+    if (normalized !== undefined && normalized.length > 0) return normalized
+  }
+  return "Confluence user"
+}
+
 /** Construct the page-read adapter against an authenticated, scoped client. @internal */
 export const makeConfluencePageAdapter = (
   input: MakeConfluencePageAdapterInput
@@ -401,13 +410,20 @@ export const makeConfluencePageAdapter = (
     descriptor: input.descriptor,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
+      const rawUser = yield* providerCall(input.client.getCurrentUser)
+      const user = yield* decodeProvider(
+        "confluence-current-user",
+        "confluence-current-user-invalid",
+        RawConfluenceCurrentUser,
+        rawUser
+      )
       const endpoint = yield* Schema.decodeUnknownEffect(SourceUrl)(
         new URL("/wiki/api/v2", input.configuration.siteBaseUrl).toString()
       ).pipe(Effect.mapError(() => malformed("confluence-discover", "confluence-endpoint-invalid")))
       return {
         account: {
-          providerImmutableId: input.configuration.siteId,
-          displayName: "Confluence site"
+          providerImmutableId: user.accountId,
+          displayName: currentUserDisplayName(user.displayName, user.publicName)
         },
         workspace: {
           providerImmutableId: input.configuration.spaceId,

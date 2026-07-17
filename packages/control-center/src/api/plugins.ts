@@ -2,7 +2,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
-import { PluginHealth } from "../domain/freshness.js"
+import { PluginFailureClass, PluginHealth } from "../domain/freshness.js"
 import { PluginConnectionId } from "../domain/identifiers.js"
 import {
   NegotiatedPluginCapabilityV1,
@@ -173,6 +173,47 @@ export const PluginHealthResponse = Schema.Struct({
 /** Decoded plugin health response. */
 export type PluginHealthResponse = typeof PluginHealthResponse.Type
 
+const ConnectionIdentityText = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+)
+
+/** Secret-free provider identity proven by a live connection test. */
+export const PluginConnectionIdentity = Schema.Struct({
+  kind: Schema.Literals(["user", "account", "workspace"]),
+  label: ConnectionIdentityText,
+  displayName: ConnectionIdentityText,
+  providerImmutableId: ConnectionIdentityText
+}).annotate({ identifier: "PluginConnectionIdentity" })
+
+/** Decoded provider identity proven by a live connection test. */
+export type PluginConnectionIdentity = typeof PluginConnectionIdentity.Type
+
+const connectionTestTiming = {
+  pluginConnectionId: PluginConnectionId,
+  providerId: ProviderId,
+  checkedAt: UtcTimestamp,
+  latencyMilliseconds: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+}
+
+/** Normalized result of live health and identity discovery against one connection. */
+export const PluginConnectionTestResult = Schema.Union([
+  Schema.TaggedStruct("healthy", {
+    ...connectionTestTiming,
+    identity: PluginConnectionIdentity
+  }),
+  Schema.TaggedStruct("failed", {
+    ...connectionTestTiming,
+    failureClass: PluginFailureClass,
+    retryAt: Schema.NullOr(UtcTimestamp),
+    safeMessage: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+  })
+]).pipe(Schema.toTaggedUnion("_tag"), Schema.annotate({ identifier: "PluginConnectionTestResult" }))
+
+/** Decoded live connection test result. */
+export type PluginConnectionTestResult = typeof PluginConnectionTestResult.Type
+
 /** Secret-free configuration contract exposed to settings views. */
 export const PluginConfigurationMetadata = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
@@ -211,6 +252,14 @@ const health = HttpApiEndpoint.get("health", "/:pluginConnectionId/health", {
   error: [...pluginReadErrors, NotFoundApiError]
 }).middleware(SessionCookieAuth)
 
+const testConnection = HttpApiEndpoint.post("testConnection", "/:pluginConnectionId/test", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  success: PluginConnectionTestResult,
+  error: [...pluginReadErrors, NotFoundApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const configurationMetadata = HttpApiEndpoint.get(
   "configurationMetadata",
   "/:pluginConnectionId/configuration-metadata",
@@ -238,6 +287,6 @@ const patchConfiguration = HttpApiEndpoint.patch("patchConfiguration", "/:plugin
 
 /** Authenticated plugin list, health, and secret-free configuration contract. */
 export class PluginsApiGroup extends HttpApiGroup.make("plugins")
-  .add(list, health, configurationMetadata, configuration, patchConfiguration)
+  .add(list, health, testConnection, configurationMetadata, configuration, patchConfiguration)
   .prefix("/api/v1/plugins")
 {}

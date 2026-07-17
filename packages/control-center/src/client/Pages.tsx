@@ -28,10 +28,6 @@ export const ReleasesPage = (): ReactElement => (
   />
 )
 
-export const ServicesPage = (): ReactElement => (
-  <EmptyPage description="Health and configuration for every negotiated delivery plugin." title="Services" />
-)
-
 /** Keep an unknown application URL visible and recoverable without substituting another page. */
 export const NotFoundPage = (): ReactElement => (
   <section className={styles.page}>
