@@ -32,7 +32,7 @@ export const SelectedReleaseWorksetObjectPanel = ({
     <div className={styles.selectedHeading}>
       <ServiceMark service={selectedObject.service} size="compact" />
       <Text as="p" variant="label">
-        {selectedObject.label}
+        Selected object · {selectedObject.label}
       </Text>
       <StateLabel label={selectedObject.status} size="compact" tone={selectedObject.tone} />
     </div>

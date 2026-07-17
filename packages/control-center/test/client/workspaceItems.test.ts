@@ -198,6 +198,26 @@ describe("workspace items", () => {
       tone: "critical"
     })
   })
+
+  it("treats closed provider issues as completed", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const closedIssue = Schema.decodeUnknownSync(DeliveryEntityProjection)({
+      ...source.projection,
+      entityId: "01890f6f-6d6a-7cc0-98d3-000000000096",
+      entityType: "issue",
+      displayKey: "OPS-496",
+      title: "Retired delivery task",
+      details: { _tag: "issue", estimatePoints: null, key: "OPS-496", priority: null, status: "Closed" }
+    })
+    const closed = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [{
+      ...releaseWorksetFixture,
+      entityProjections: [{ recordedAt: source.recordedAt, projection: closedIssue }]
+    }])
+
+    expect(closed[0]).toMatchObject({ status: "Closed", statusGroup: "done", tone: "positive" })
+    expect(items.find(({ key }) => key === "OPS-428")).toMatchObject({ statusGroup: "active", tone: "progress" })
+  })
 })
 
 const titleCaseForTest = (value: string): string => `${value.charAt(0).toLocaleUpperCase("en-US")}${value.slice(1)}`
