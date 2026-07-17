@@ -545,6 +545,12 @@ importers:
       '@knpkv/control-center-sql':
         specifier: workspace:^
         version: link:../control-center-sql
+      '@knpkv/confluence-api-client':
+        specifier: workspace:^
+        version: link:../confluence-api-client
+      '@knpkv/confluence-to-markdown':
+        specifier: workspace:^
+        version: link:../confluence-to-markdown
       '@knpkv/jira-api-client':
         specifier: workspace:^
         version: link:../jira-api-client

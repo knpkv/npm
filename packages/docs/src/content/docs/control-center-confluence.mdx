@@ -1,0 +1,48 @@
+---
+title: Control Center Confluence adapter
+description: Configure the bounded, read-only Confluence Cloud page adapter.
+---
+
+The first production Confluence slice gives Control Center an authoritative current-page read without widening the browser trust boundary. It reuses the generated `@knpkv/confluence-api-client` transport and the `@knpkv/confluence-to-markdown` ADF converter, then decodes and normalizes the result again at the adapter boundary.
+
+The plugin advertises only `entity.read` version 1. Sync, attachments, watchers, activity, diffs, and governed writes are intentionally absent from capability negotiation until their complete contracts and recovery behavior are implemented. See the [plugin descriptor](https://github.com/knpkv/npm/blob/main/packages/control-center/src/server/plugins/confluence/ConfluencePagePluginDefinition.ts) and [adapter implementation](https://github.com/knpkv/npm/blob/main/packages/control-center/src/server/plugins/confluence/ConfluencePageAdapter.ts).
+
+## Configuration
+
+The runtime registry supplies authentication through the Confluence API client. Persist only these secret-free adapter fields:
+
+| Field         | Meaning                                                               |
+| ------------- | --------------------------------------------------------------------- |
+| `siteBaseUrl` | HTTPS Confluence Cloud origin with no credentials, query, or fragment |
+| `siteId`      | Stable Atlassian site identity used for connection isolation          |
+| `spaceId`     | Confluence space visible through the connection                       |
+| `probePageId` | Readable current page used by the bounded health check                |
+
+The adapter never accepts a token in its configuration. Compose `ConfluenceApiClient`, `confluencePageClientLayer`, and `MarkdownConverter` on the server, then construct the plugin definition through the scoped registry. The narrow [client boundary](https://github.com/knpkv/npm/blob/main/packages/control-center/src/server/plugins/confluence/ConfluencePageClient.ts) keeps generated wire types and transport errors out of normalized entities.
+
+## Normalized page
+
+An `entity.read` request uses entity type `confluence-page` and the immutable Confluence page ID. A found result contains:
+
+- current title, status, version, parent, space, creation, and update timestamps;
+- safe Markdown copied from the current ADF body;
+- up to 500 historical version summaries;
+- owner, current author, and historical contributors, with active and external-collaborator state;
+- a same-origin Confluence page URL, when the provider supplies one;
+- explicit `versionHistory.complete` and `versionHistory.pagesFetched` metadata.
+
+Contributor lookup uses account IDs only. It does not retain email addresses. Unknown accounts remain visible with their stable ID and `resolved: false`, so missing profile access cannot silently remove a collaborator.
+
+## Bounds and cancellation
+
+Every provider request has a 15-second boundary and remains Effect-cancellable. Version history follows at most five pages of 100 versions and rejects repeated or malformed cursors. User profiles are fetched in batches of at most 250. A history that still has a next cursor after five pages is returned with `complete: false`, rather than being mistaken for complete evidence.
+
+Provider data is decoded by the generated client and decoded again by the adapter-owned [normalization schemas](https://github.com/knpkv/npm/blob/main/packages/control-center/src/server/plugins/confluence/ConfluencePageSchemas.ts). Authentication, authorization, rate limits, timeouts, malformed responses, and outages map into the closed Control Center plugin failure taxonomy without retaining raw provider causes.
+
+## Safe content
+
+Current ADF content is converted through the owning Markdown package. The adapter then removes round-trip metadata, raw HTML, images, active link destinations, and URL schemes before storing a bounded safe-copy representation. Navigation remains a separate same-origin URL. This is a display-safe Markdown subset, not a lossless Confluence export; see the [safe conversion boundary](https://github.com/knpkv/npm/blob/main/packages/control-center/src/server/plugins/confluence/SafeConfluenceMarkdown.ts).
+
+## Current limitations
+
+This slice reads one current page by ID and is not yet exposed by the Settings connection registry. It does not yet discover pages, incrementally synchronize spaces, retrieve attachments/watchers/activity, distinguish historical page bodies, or publish updates. Those capabilities must be added as separate negotiated slices with their own pagination, authorization, evidence, idempotency, cancellation, and recovery tests.

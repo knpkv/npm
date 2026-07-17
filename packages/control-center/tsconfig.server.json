@@ -16,6 +16,8 @@
     { "path": "../ai-claude/tsconfig.build.json" },
     { "path": "../ai-codex/tsconfig.build.json" },
     { "path": "../control-center-sql/tsconfig.build.json" },
+    { "path": "../confluence-api-client/tsconfig.build.json" },
+    { "path": "../confluence-to-markdown/tsconfig.build.json" },
     { "path": "../jira-api-client/tsconfig.json" }
   ]
 }

@@ -27,7 +27,10 @@ export default defineConfig({
         },
         {
           label: "Applications",
-          items: [{ label: "Control Center", link: "/control-center/" }]
+          items: [
+            { label: "Control Center", link: "/control-center/" },
+            { label: "Confluence adapter", link: "/control-center-confluence/" }
+          ]
         },
         {
           label: "Local AI",
