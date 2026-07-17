@@ -35,6 +35,8 @@ const ISSUE_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-10
 const RELEASE_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-100000000007")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-100000000008")
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-10000000000f")
+const OTHER_RELEASE_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-100000000011")
+const OTHER_RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-100000000012")
 const EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000009")
 const SECOND_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-10000000000a")
 const THIRD_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000010")
@@ -898,6 +900,126 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(slice.value.entityProjections, 1)
           assert.lengthOf(slice.value.evidenceClaims, 1)
           assert.lengthOf(slice.value.evidenceItems, 1)
+        }
+      })
+    ))
+
+  it.effect("indexes current present workspace projections including unlinked entities and excluding deleted heads", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        yield* repository.write(WORKSPACE_A, initialBatch)
+
+        const bounded = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          limit: 1
+        })
+        assert.strictEqual(bounded._tag, "workspaceEntityProjections")
+        if (bounded._tag === "workspaceEntityProjections") {
+          assert.isTrue(bounded.value.truncated)
+          assert.lengthOf(bounded.value.items, 1)
+          assert.strictEqual(bounded.value.items[0]?.canonicalReleaseId, RELEASE_ID)
+        }
+
+        const current = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          limit: 500
+        })
+        assert.strictEqual(current._tag, "workspaceEntityProjections")
+        if (current._tag === "workspaceEntityProjections") {
+          assert.isFalse(current.value.truncated)
+          assert.lengthOf(current.value.items, 2)
+          assert.isNull(
+            current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.canonicalReleaseId
+          )
+        }
+
+        const firstRelationship = initialBatch.relationships[0]
+        if (firstRelationship === undefined) return yield* Effect.die("Expected relationship fixture")
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [{
+            workspaceId: WORKSPACE_A,
+            nodeId: OTHER_RELEASE_NODE_ID,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: OTHER_RELEASE_ID } },
+            createdAt: UPDATED_AT
+          }],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [
+            {
+              ...firstRelationship,
+              revision: 2,
+              supersedesRevision: 1,
+              lifecycle: { _tag: "rejected", effectiveAt: UPDATED_AT, reason: "Incorrect release association." },
+              recordedAt: UPDATED_AT
+            },
+            {
+              ...firstRelationship,
+              relationshipId: OTHER_RELATIONSHIP_ID,
+              revision: 1,
+              supersedesRevision: null,
+              sourceNodeId: OTHER_RELEASE_NODE_ID,
+              scope: { _tag: "release", releaseId: OTHER_RELEASE_ID },
+              confidence: { _tag: "unknown", rationale: "Independent release association fixture." },
+              evidenceClaimIds: [],
+              recordedAt: UPDATED_AT
+            }
+          ]
+        })
+        const activeAssociation = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          limit: 500
+        })
+        assert.strictEqual(activeAssociation._tag, "workspaceEntityProjections")
+        if (activeAssociation._tag === "workspaceEntityProjections") {
+          assert.strictEqual(
+            activeAssociation.value.items.find(({ projection }) => projection.entityId === ISSUE_ID)
+              ?.canonicalReleaseId,
+            OTHER_RELEASE_ID
+          )
+        }
+
+        yield* database.sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+          source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+        ) VALUES (
+          ${WORKSPACE_A}, ${ISSUE_ID}, 2, 'source-2', 1, NULL,
+          ${CREATED_AT}, ${UPDATED_AT}, ${UPDATED_AT}, ${UPDATED_AT}
+        )`
+        yield* database.sql`UPDATE entities
+          SET current_revision = 2, updated_at = ${UPDATED_AT}
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}`
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [{
+            projection: {
+              ...initialIssueProjection.projection,
+              projectionRevision: 2,
+              sourceEntityRevision: 2,
+              supersedesProjectionRevision: 1,
+              entityState: "deleted"
+            },
+            recordedAt: UPDATED_AT
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        })
+
+        const afterDeletion = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          limit: 500
+        })
+        assert.strictEqual(afterDeletion._tag, "workspaceEntityProjections")
+        if (afterDeletion._tag === "workspaceEntityProjections") {
+          assert.deepStrictEqual(
+            afterDeletion.value.items.map(({ projection }) => projection.entityId),
+            [PIPELINE_ID]
+          )
         }
       })
     ))

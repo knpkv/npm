@@ -14,7 +14,8 @@ import type {
   RelationshipRepairProposalDraft,
   RelationshipRepairProposalList,
   ReleaseDeliveryGraphInspection,
-  ReviewRelationshipRepairProposalRequest
+  ReviewRelationshipRepairProposalRequest,
+  WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
@@ -121,6 +122,12 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
 
 /** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
 export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {
+  readonly workspaceEntityProjections: (
+    workspaceId: WorkspaceId
+  ) => Effect.Effect<
+    WorkspaceEntityProjectionIndex,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly releaseSlice: (input: {
     readonly workspaceId: WorkspaceId
     readonly releaseId: ReleaseId

@@ -2,7 +2,7 @@ import type { RlyService } from "@knpkv/rly/patterns"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
-import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
+import type { ReleaseDeliveryGraphInspection, WorkspaceEntityProjectionIndex } from "../../api/deliveryGraph.js"
 import type { DeliveryEntityDetails, DeliveryEntityKind } from "../../domain/deliveryGraph.js"
 import type { EntityId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 
@@ -15,7 +15,7 @@ export interface WorkspaceItemPresentation {
   readonly key: string
   readonly kind: DeliveryEntityKind
   readonly owner: string
-  readonly releaseId: ReleaseId
+  readonly releaseId: ReleaseId | null
   readonly service: RlyService
   readonly status: string
   readonly statusGroup: WorkspaceItemStatus
@@ -84,8 +84,51 @@ const statusPresentation = (
   return { statusGroup: "active", tone: "progress" }
 }
 
-const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId, entityId: EntityId): string =>
-  `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId | null, entityId: EntityId): string =>
+  releaseId === null
+    ? `/w/${workspaceId}/items?object=${encodeURIComponent(entityId)}#item-details`
+    : `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+
+const presentProjection = (
+  workspaceId: WorkspaceId,
+  releaseId: ReleaseId | null,
+  entry: WorkspaceEntityProjectionIndex["items"][number]
+): WorkspaceItemPresentation => {
+  const projection = entry.projection
+  const status = statusFor(projection.details)
+  return {
+    entityId: projection.entityId,
+    freshness: DateTime.formatIso(entry.recordedAt),
+    href: itemHref(workspaceId, releaseId, projection.entityId),
+    key: projection.displayKey,
+    kind: projection.entityType,
+    owner: "Unassigned",
+    releaseId,
+    service: serviceFor(projection.entityType),
+    status,
+    ...statusPresentation(projection.entityType, status),
+    title: projection.title
+  }
+}
+
+/** Present one server-authoritative workspace entity index. */
+export const presentWorkspaceEntityIndex = (
+  workspaceId: WorkspaceId,
+  index: WorkspaceEntityProjectionIndex,
+  routableReleaseIds?: ReadonlySet<ReleaseId>
+): ReadonlyArray<WorkspaceItemPresentation> =>
+  index.items
+    .filter(({ projection }) => projection.entityState === "present")
+    .map((entry) =>
+      presentProjection(
+        workspaceId,
+        entry.canonicalReleaseId !== null && routableReleaseIds?.has(entry.canonicalReleaseId) !== false
+          ? entry.canonicalReleaseId
+          : null,
+        entry
+      )
+    )
+    .sort((left, right) => left.service.localeCompare(right.service) || left.key.localeCompare(right.key))
 
 /** Present bounded release slices as one deduplicated release-linked item index. */
 export const presentWorkspaceItems = (
@@ -98,20 +141,13 @@ export const presentWorkspaceItems = (
     for (const entry of inspection.entityProjections) {
       const projection = entry.projection
       if (projection.entityState !== "present" || items.has(projection.entityId)) continue
-      const status = statusFor(projection.details)
-      items.set(projection.entityId, {
-        entityId: projection.entityId,
-        freshness: DateTime.formatIso(entry.recordedAt),
-        href: itemHref(workspaceId, inspection.releaseId, projection.entityId),
-        key: projection.displayKey,
-        kind: projection.entityType,
-        owner: "Unassigned",
-        releaseId: inspection.releaseId,
-        service: serviceFor(projection.entityType),
-        status,
-        ...statusPresentation(projection.entityType, status),
-        title: projection.title
-      })
+      items.set(
+        projection.entityId,
+        presentProjection(workspaceId, inspection.releaseId, {
+          ...entry,
+          canonicalReleaseId: inspection.releaseId
+        })
+      )
     }
   }
   return [...items.values()].sort((left, right) =>

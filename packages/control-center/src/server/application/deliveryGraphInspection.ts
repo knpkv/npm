@@ -7,7 +7,8 @@ import type {
   RelationshipRepairCandidate,
   RelationshipRepairCandidates,
   RelationshipRepairProposalDraft,
-  ReleaseDeliveryGraphInspection
+  ReleaseDeliveryGraphInspection,
+  WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
 import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
 import type { EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
@@ -119,6 +120,16 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
   })
 
   return DeliveryGraphInspection.of({
+    workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(workspaceId) {
+      const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(workspaceId, {
+        _tag: "workspaceEntityProjections",
+        limit: 500
+      }))
+      if (result._tag !== "workspaceEntityProjections") {
+        return yield* unexpectedResult("workspace entity projections")
+      }
+      return result.value satisfies WorkspaceEntityProjectionIndex
+    }),
     releaseSlice,
     repairCandidates: Effect.fn("DeliveryGraphInspection.repairCandidates")(function*(input) {
       return deriveRelationshipRepairCandidates(yield* releaseSlice(input))

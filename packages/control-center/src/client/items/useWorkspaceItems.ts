@@ -1,20 +1,12 @@
+import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useState } from "react"
 
-import type { ReleaseDeliveryGraphInspection } from "../../api/deliveryGraph.js"
-import type { EnvironmentId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
-import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
-import {
-  aggregateReleaseWorksetInspections,
-  browserReleaseWorksetTransport,
-  type ReleaseWorksetTransport
-} from "../releases/useReleaseWorkset.js"
-import { presentWorkspaceItems, type WorkspaceItemPresentation } from "./presentWorkspaceItems.js"
-
-export const MAXIMUM_WORKSPACE_ITEMS = 500
-export const MAXIMUM_WORKSPACE_RELEASES = 25
-export const MAXIMUM_WORKSPACE_SLICE_REQUESTS = 100
-export const MAXIMUM_WORKSPACE_SLICE_REQUEST_CONCURRENCY = 4
+import { makeControlCenterApiClient } from "../../api/client.js"
+import type { WorkspaceEntityProjectionIndex } from "../../api/deliveryGraph.js"
+import type { ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import { presentWorkspaceEntityIndex, type WorkspaceItemPresentation } from "./presentWorkspaceItems.js"
 
 export type WorkspaceItemsState =
   | { readonly _tag: "idle" }
@@ -28,111 +20,37 @@ export type WorkspaceItemsState =
     readonly truncated: boolean
   }
 
+export interface WorkspaceItemsTransport {
+  readonly load: (signal: AbortSignal) => Promise<WorkspaceEntityProjectionIndex>
+}
+
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 
-export const EMPTY_WORKSPACE_RELEASES: ReadonlyArray<PortfolioReleasePresentation> = []
-
-const releaseScopeKey = (releases: ReadonlyArray<PortfolioReleasePresentation>): string =>
-  releases.map((release) => `${release.id}:${release.targetEnvironmentIds.join(",")}`).join(";")
-
-interface WorkspaceReleaseLoadPlan {
-  readonly environmentIds: ReadonlyArray<EnvironmentId>
-  readonly releaseId: ReleaseId
-}
-
-interface WorkspaceSliceRequest {
-  readonly environmentId: EnvironmentId | null
-  readonly releaseIndex: number
-  readonly releaseId: ReleaseId
-  readonly scopeIndex: number
-}
-
-const loadWorkspaceInspections = async (
-  releases: ReadonlyArray<PortfolioReleasePresentation>,
-  signal: AbortSignal,
-  transport: ReleaseWorksetTransport
-): Promise<{
-  readonly inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
-  readonly truncated: boolean
-}> => {
-  const plans: Array<WorkspaceReleaseLoadPlan> = []
-  let remainingReleases = releases.length
-  let remainingRequests = MAXIMUM_WORKSPACE_SLICE_REQUESTS
-  let truncated = false
-  for (const release of releases) {
-    if (remainingRequests === 0) {
-      truncated = true
-      break
-    }
-    const environmentBudget = Math.max(remainingRequests - remainingReleases, 0)
-    const environmentIds = release.targetEnvironmentIds.slice(0, environmentBudget)
-    if (environmentIds.length < release.targetEnvironmentIds.length) truncated = true
-    plans.push({ environmentIds, releaseId: release.id })
-    remainingRequests -= 1 + environmentIds.length
-    remainingReleases -= 1
-  }
-  const requests: ReadonlyArray<WorkspaceSliceRequest> = [
-    ...plans.map(({ releaseId }, releaseIndex) => ({
-      environmentId: null,
-      releaseId,
-      releaseIndex,
-      scopeIndex: 0
-    })),
-    ...plans.flatMap(({ environmentIds, releaseId }, releaseIndex) =>
-      environmentIds.map((environmentId, index) => ({
-        environmentId,
-        releaseId,
-        releaseIndex,
-        scopeIndex: index + 1
-      }))
+/** Generated-client transport for the authenticated workspace entity index. */
+export const browserWorkspaceItemsTransport: WorkspaceItemsTransport = {
+  load: (signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.deliveryGraph.workspaceEntityProjections({})
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
     )
-  ]
-  const completed: Array<WorkspaceSliceRequest & { readonly inspection: ReleaseDeliveryGraphInspection }> = []
-  let nextIndex = 0
-  let isStopped = false
-  const loadNext = async (): Promise<void> => {
-    while (!isStopped && nextIndex < requests.length) {
-      const request = requests[nextIndex]
-      nextIndex += 1
-      if (request === undefined) return
-      try {
-        completed.push({
-          ...request,
-          inspection: await transport.load(request.releaseId, request.environmentId, signal)
-        })
-      } catch (failure) {
-        isStopped = true
-        throw failure
-      }
-    }
-  }
-  const workerCount = Math.min(MAXIMUM_WORKSPACE_SLICE_REQUEST_CONCURRENCY, requests.length)
-  await Promise.all(Array.from({ length: workerCount }, () => loadNext()))
-  const inspections = plans.map(({ releaseId }, releaseIndex) =>
-    aggregateReleaseWorksetInspections(
-      releaseId,
-      completed
-        .filter((result) => result.releaseIndex === releaseIndex)
-        .sort((left, right) => left.scopeIndex - right.scopeIndex)
-        .map(({ inspection }) => inspection)
-    )
-  )
-  return { inspections, truncated }
 }
 
-/** Load one bounded normalized item index from current release graph slices. */
+/** Keep one bounded workspace entity index scoped to the exact browser session. */
 export const useWorkspaceItems = (
   workspaceId: WorkspaceId,
-  releases: ReadonlyArray<PortfolioReleasePresentation>,
+  routableReleaseIds: ReadonlySet<ReleaseId>,
   refreshKey: string,
   sessionKey: string | null,
   onSessionExpired: (sessionKey: string) => void,
-  transport: ReleaseWorksetTransport = browserReleaseWorksetTransport
+  transport: WorkspaceItemsTransport = browserWorkspaceItemsTransport
 ): { readonly retry: () => void; readonly state: WorkspaceItemsState } => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<WorkspaceItemsState>({ _tag: "idle" })
-  const scopeKey = `${workspaceId}|${releaseScopeKey(releases)}|${refreshKey}`
-  const boundedReleases = releases.slice(0, MAXIMUM_WORKSPACE_RELEASES)
+  const releaseScopeKey = [...routableReleaseIds].join(":")
+  const scopeKey = `${workspaceId}|${releaseScopeKey}|${refreshKey}`
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -141,19 +59,15 @@ export const useWorkspaceItems = (
     }
     const abort = new AbortController()
     setState({ _tag: "loading", scopeKey, sessionKey })
-    loadWorkspaceInspections(boundedReleases, abort.signal, transport).then(
-      ({ inspections, truncated }) => {
+    transport.load(abort.signal).then(
+      (index) => {
         if (abort.signal.aborted) return
-        const allItems = presentWorkspaceItems(workspaceId, inspections)
         setState({
           _tag: "ready",
-          items: allItems.slice(0, MAXIMUM_WORKSPACE_ITEMS),
+          items: presentWorkspaceEntityIndex(workspaceId, index, routableReleaseIds),
           scopeKey,
           sessionKey,
-          truncated: truncated ||
-            releases.length > MAXIMUM_WORKSPACE_RELEASES ||
-            inspections.some(({ truncated }) => truncated) ||
-            allItems.length > MAXIMUM_WORKSPACE_ITEMS
+          truncated: index.truncated
         })
       },
       (failure) => {
@@ -163,7 +77,7 @@ export const useWorkspaceItems = (
       }
     )
     return () => abort.abort()
-  }, [onSessionExpired, requestRevision, scopeKey, sessionKey, transport, workspaceId])
+  }, [onSessionExpired, requestRevision, routableReleaseIds, scopeKey, sessionKey, transport, workspaceId])
 
   const currentState: WorkspaceItemsState = sessionKey === null
     ? { _tag: "idle" }

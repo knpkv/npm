@@ -170,6 +170,7 @@ describe("ControlCenterApi contract", () => {
         path
       ]),
       [
+        ["workspaceEntityProjections", "GET", "/api/v1/items"],
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
         ["repairCandidates", "GET", "/api/v1/relationships/releases/:releaseId/repair-candidates"],
         [
@@ -231,6 +232,7 @@ describe("ControlCenterApi contract", () => {
       snapshot: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
+      workspaceEntityProjections: [SessionCookieAuth.key],
       releaseSlice: [SessionCookieAuth.key],
       repairCandidates: [SessionCookieAuth.key],
       repairProposalDraft: [SessionCookieAuth.key],
