@@ -47,6 +47,11 @@ const activeWorkRoute = async () => {
   return { Component: module.ActiveWorkPage }
 }
 
+const itemsRoute = async () => {
+  const module = await import("./items/ItemsPage.js")
+  return { Component: module.ItemsPage }
+}
+
 /** Browser routes remain application-owned while rly receives only a link bridge. */
 export const router = createBrowserRouter([
   {
@@ -63,6 +68,7 @@ export const router = createBrowserRouter([
         children: [
           { path: "overview", lazy: workspaceOverviewRoute },
           { path: "work", lazy: activeWorkRoute },
+          { path: "items", lazy: itemsRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
           { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },

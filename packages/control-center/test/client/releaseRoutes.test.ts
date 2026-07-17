@@ -11,7 +11,8 @@ import {
   releaseOriginHref,
   releaseParentPath,
   releasePreviewPath,
-  releaseTransitionNames
+  releaseTransitionNames,
+  workspaceItemsPath
 } from "../../src/client/releases/releaseRoutes.js"
 import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
@@ -47,6 +48,20 @@ describe("release routes", () => {
     expect(readReleaseOrigin(state, workspaceId, releaseId)).toEqual(origin)
     expect(releaseOriginHref(origin)).toBe(`${releaseParentPath(workspaceId)}?filter=attention#candidate`)
     expect(JSON.stringify(state)).not.toMatch(/csrf|session|snapshot|token/iu)
+  })
+
+  it("restores the exact filtered items origin", () => {
+    const origin = releaseOriginFromLocation({
+      hash: "#results",
+      pathname: workspaceItemsPath(workspaceId),
+      search: "?service=jira&status=failed"
+    })
+    const state = makeReleaseRouteState(workspaceId, releaseId, origin)
+
+    expect(readReleaseOrigin(state, workspaceId, releaseId)).toEqual(origin)
+    expect(releaseOriginHref(origin)).toBe(
+      `${workspaceItemsPath(workspaceId)}?service=jira&status=failed#results`
+    )
   })
 
   it("falls back to the semantic parent for malformed, cross-target, or non-UI origins", () => {

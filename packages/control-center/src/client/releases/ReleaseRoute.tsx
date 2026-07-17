@@ -25,7 +25,8 @@ import {
   releaseOriginHref,
   releaseParentPath,
   releasePreviewPath,
-  releaseTransitionNames
+  releaseTransitionNames,
+  workspaceItemsPath
 } from "./releaseRoutes.js"
 import styles from "./ReleaseRoute.module.css"
 import { useCompactReleasePreview, usePrefersReducedReleaseMotion } from "./useCompactReleasePreview.js"
@@ -253,6 +254,7 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
   const location = useLocation()
   const headingRef = useRef<HTMLHeadingElement>(null)
   const origin = readReleaseOrigin(location.state, context.workspaceId, selection.releaseId)
+  const originLabel = origin.pathname === workspaceItemsPath(context.workspaceId) ? "Back to items" : "Back to overview"
   const release = selection.release
   const fullPath = releaseFullPath(context.workspaceId, selection.releaseId)
   const agentPath = releaseAgentPath(context.workspaceId, selection.releaseId)
@@ -267,7 +269,7 @@ const FullRelease = ({ selection }: { readonly selection: ReleaseRouteSelection 
     <article className={styles.full} data-release-full-id={release.id}>
       <header className={styles.fullHeader}>
         <Link className={styles.back} to={releaseOriginHref(origin)}>
-          Back to overview
+          {originLabel}
         </Link>
         <div className={styles.fullIdentity}>
           <ReleaseRelay

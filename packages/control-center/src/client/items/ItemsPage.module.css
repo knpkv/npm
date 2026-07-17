@@ -1,0 +1,138 @@
+.page,
+.hero,
+.filters,
+.items,
+.item,
+.itemLink,
+.meta {
+  display: grid;
+}
+
+.page {
+  gap: var(--rly-space-32);
+}
+
+.hero {
+  gap: var(--rly-space-8);
+  max-inline-size: 52rem;
+}
+
+.hero > * {
+  margin: 0;
+}
+
+.filters {
+  grid-template-columns: minmax(16rem, 2fr) repeat(3, minmax(9rem, 1fr));
+  gap: var(--rly-space-12);
+  align-items: end;
+}
+
+.filters label {
+  display: grid;
+  gap: var(--rly-space-6);
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.filters input,
+.filters select {
+  min-block-size: 3.5rem;
+  inline-size: 100%;
+  padding-inline: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  font: inherit;
+}
+
+.filters input:focus-visible,
+.filters select:focus-visible,
+.itemLink:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}
+
+.resultHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-12);
+}
+
+.resultHeading h2 {
+  margin: 0;
+}
+
+.items {
+  gap: var(--rly-space-8);
+}
+
+.item {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--rly-space-16);
+  min-block-size: 5.5rem;
+  padding: var(--rly-space-16) var(--rly-space-20);
+}
+
+.itemLink {
+  gap: var(--rly-space-2);
+  min-inline-size: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.itemLink span,
+.meta {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.itemLink strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  grid-auto-flow: column;
+  align-items: center;
+  gap: var(--rly-space-12);
+}
+
+@media (max-width: 64rem) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .search {
+    grid-column: 1 / -1;
+  }
+
+  .item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .meta {
+    grid-column: 2;
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+  }
+}
+
+@media (max-width: 40rem) {
+  .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .search {
+    grid-column: auto;
+  }
+
+  .meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -7,7 +7,11 @@ import { Link, useLocation } from "react-router"
 import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
-import { presentReleaseWorkset } from "./presentReleaseWorkset.js"
+import {
+  presentReleaseWorkset,
+  selectReleaseWorksetObject,
+  type SelectedReleaseWorksetObject
+} from "./presentReleaseWorkset.js"
 import styles from "./ReleaseWorkset.module.css"
 import { useReleaseWorkset } from "./useReleaseWorkset.js"
 
@@ -16,6 +20,37 @@ const LoadingWorkset = (): ReactElement => (
     <Skeleton height="3rem" />
     <Skeleton height="15rem" />
   </div>
+)
+
+/** Inspectable destination for an Items result selected within its release context. */
+export const SelectedReleaseWorksetObjectPanel = ({
+  selectedObject
+}: {
+  readonly selectedObject: SelectedReleaseWorksetObject
+}): ReactElement => (
+  <section aria-label={`Selected ${selectedObject.kind} ${selectedObject.label}`} className={styles.selected}>
+    <div className={styles.selectedHeading}>
+      <ServiceMark service={selectedObject.service} size="compact" />
+      <Text as="p" variant="label">
+        Selected object · {selectedObject.label}
+      </Text>
+      <StateLabel label={selectedObject.status} size="compact" tone={selectedObject.tone} />
+    </div>
+    <Text as="h3" variant="section-title">
+      {selectedObject.title}
+    </Text>
+    <Text tone="secondary" variant="meta">
+      {selectedObject.kind}
+    </Text>
+    <dl className={styles.selectedFacts}>
+      {selectedObject.facts.map((fact) => (
+        <div key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </section>
 )
 
 const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function ReleaseWorksetLink(
@@ -74,12 +109,7 @@ export const ReleaseWorkset = ({
 
   const workset = presentReleaseWorkset(controller.state.inspection, workspaceId, release.stages)
   const selectedObjectId = new URLSearchParams(location.search).get("object")
-  const selectedObject = [
-    ...workset.jiraItems.map((item) => ({ id: item.id, label: item.key })),
-    ...workset.pullRequestGroups.map((group) => ({ id: group.id, label: group.reference })),
-    ...workset.pipelines.map((pipeline) => ({ id: pipeline.id, label: pipeline.reference })),
-    ...workset.runbooks.map((runbook) => ({ id: runbook.id, label: runbook.reference }))
-  ].find(({ id }) => id === selectedObjectId)
+  const selectedObject = selectReleaseWorksetObject(controller.state.inspection, selectedObjectId)
   return (
     <div className={styles.root}>
       <div className={styles.context}>
@@ -126,9 +156,7 @@ export const ReleaseWorkset = ({
         {workset.truncated ? (
           <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
         ) : null}
-        {selectedObject === undefined ? null : (
-          <StateLabel label={`Selected object · ${selectedObject.label}`} size="compact" tone="progress" />
-        )}
+        {selectedObject === null ? null : <SelectedReleaseWorksetObjectPanel selectedObject={selectedObject} />}
       </div>
       <LinkProvider component={ReleaseWorksetLink}>
         <WorksetCard

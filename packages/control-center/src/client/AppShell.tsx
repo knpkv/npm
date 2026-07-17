@@ -36,6 +36,7 @@ const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: strin
     ? [
         { label: "Overview", to: overviewPath },
         { label: "Active work", to: `/w/${workspaceId}/work` },
+        { label: "Items", to: `/w/${workspaceId}/items` },
         { label: "Services", to: "/services" }
       ]
     : [
