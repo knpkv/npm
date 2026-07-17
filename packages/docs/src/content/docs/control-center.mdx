@@ -30,6 +30,12 @@ Directional relationships connect Jira work, pull requests, pipeline executions,
 
 Server workflows use the durable module through two operations: a bounded atomic `write` and a tagged `read`. SQL rows, digests, table joins, and compatibility handling for older pipeline records remain private implementation details. Browser views consume later authenticated projections; they do not receive raw persistence access.
 
+## Find workspace items
+
+The **Items** route searches current Jira work, pull requests, Confluence pages, pipeline executions, deployments, and time entries across the authenticated workspace. Text, service, type, and lifecycle filters run on the server before the 500-item response bound, so a match cannot be hidden behind an unrelated client-side prefix. The response includes authoritative matched and workspace totals plus an explicit truncation flag.
+
+Filters remain in the URL for refresh and Back navigation. Linked items open their canonical release context; current unlinked items stay visible in the workspace index.
+
 ## Configure local providers
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:

@@ -48,6 +48,8 @@ describe("workspace items", () => {
     const source = releaseWorksetFixture.entityProjections[0]
     if (source === undefined) throw new Error("Expected a source projection")
     const [unlinked] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
+      matchedCount: 1,
+      totalCount: 1,
       truncated: false,
       items: [{ ...source, canonicalReleaseId: null }]
     })
@@ -69,6 +71,8 @@ describe("workspace items", () => {
     if (source === undefined) throw new Error("Expected a source projection")
     const canonicalReleaseId = releaseWorksetFixture.releaseId
     const index = {
+      matchedCount: 1,
+      totalCount: 1,
       truncated: false,
       items: [{ ...source, canonicalReleaseId }]
     }

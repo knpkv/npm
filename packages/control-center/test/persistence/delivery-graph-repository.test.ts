@@ -206,7 +206,7 @@ const initialIssueProjection = {
     details: {
       _tag: "issue",
       key: "PAY-42",
-      status: "In review",
+      status: "Ready-for-review",
       priority: "High",
       estimatePoints: 5
     }
@@ -914,17 +914,27 @@ describe("DeliveryGraphRepository", () => {
 
         const bounded = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          query: null,
+          service: null,
+          status: null,
+          type: null,
           limit: 1
         })
         assert.strictEqual(bounded._tag, "workspaceEntityProjections")
         if (bounded._tag === "workspaceEntityProjections") {
           assert.isTrue(bounded.value.truncated)
+          assert.strictEqual(bounded.value.matchedCount, 2)
+          assert.strictEqual(bounded.value.totalCount, 2)
           assert.lengthOf(bounded.value.items, 1)
           assert.strictEqual(bounded.value.items[0]?.canonicalReleaseId, RELEASE_ID)
         }
 
         const current = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          query: null,
+          service: null,
+          status: null,
+          type: null,
           limit: 500
         })
         assert.strictEqual(current._tag, "workspaceEntityProjections")
@@ -933,6 +943,42 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(current.value.items, 2)
           assert.isNull(
             current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.canonicalReleaseId
+          )
+        }
+
+        const filtered = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          query: "main pipeline",
+          service: "codepipeline",
+          status: "done",
+          type: "pipeline-execution",
+          limit: 500
+        })
+        assert.strictEqual(filtered._tag, "workspaceEntityProjections")
+        if (filtered._tag === "workspaceEntityProjections") {
+          assert.isFalse(filtered.value.truncated)
+          assert.strictEqual(filtered.value.matchedCount, 1)
+          assert.strictEqual(filtered.value.totalCount, 2)
+          assert.deepStrictEqual(
+            filtered.value.items.map(({ projection }) => projection.entityId),
+            [PIPELINE_ID]
+          )
+        }
+
+        const jiraStatusSearch = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          query: "Ready-for-review",
+          service: "jira",
+          status: "active",
+          type: "issue",
+          limit: 500
+        })
+        assert.strictEqual(jiraStatusSearch._tag, "workspaceEntityProjections")
+        if (jiraStatusSearch._tag === "workspaceEntityProjections") {
+          assert.strictEqual(jiraStatusSearch.value.matchedCount, 1)
+          assert.deepStrictEqual(
+            jiraStatusSearch.value.items.map(({ projection }) => projection.entityId),
+            [ISSUE_ID]
           )
         }
 
@@ -972,6 +1018,10 @@ describe("DeliveryGraphRepository", () => {
         })
         const activeAssociation = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          query: null,
+          service: null,
+          status: null,
+          type: null,
           limit: 500
         })
         assert.strictEqual(activeAssociation._tag, "workspaceEntityProjections")
@@ -1012,6 +1062,10 @@ describe("DeliveryGraphRepository", () => {
 
         const afterDeletion = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          query: null,
+          service: null,
+          status: null,
+          type: null,
           limit: 500
         })
         assert.strictEqual(afterDeletion._tag, "workspaceEntityProjections")

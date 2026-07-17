@@ -1,7 +1,10 @@
 import * as Schema from "effect/Schema"
 
 import {
+  DeliveryEntityKind,
   DeliveryEntityProjection,
+  DeliveryEntityService,
+  DeliveryEntityStatusGroup,
   DeliveryNode,
   DeliveryRelationship,
   EvidenceClaim,
@@ -75,6 +78,12 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
   },
   workspaceEntityProjections: {
+    query: Schema.NullOr(
+      Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+    ),
+    service: Schema.NullOr(DeliveryEntityService),
+    status: Schema.NullOr(DeliveryEntityStatusGroup),
+    type: Schema.NullOr(DeliveryEntityKind),
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
   },
   releaseSummary: {
@@ -113,6 +122,8 @@ const WorkspaceEntityProjection = Schema.Struct({
 })
 
 const WorkspaceEntityProjections = Schema.Struct({
+  matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
   items: Schema.Array(WorkspaceEntityProjection)
 })

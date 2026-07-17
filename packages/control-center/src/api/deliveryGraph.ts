@@ -2,7 +2,10 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import {
+  DeliveryEntityKind,
   DeliveryEntityProjection,
+  DeliveryEntityService,
+  DeliveryEntityStatusGroup,
   DeliveryNode,
   DeliveryRelationship,
   EvidenceClaim,
@@ -77,6 +80,8 @@ export const WorkspaceEntityProjection = Schema.Struct({
 
 /** Bounded workspace-wide index of current present normalized entities. */
 export const WorkspaceEntityProjectionIndex = Schema.Struct({
+  matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
   items: boundedArray(WorkspaceEntityProjection, MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS)
 }).annotate({ identifier: "WorkspaceEntityProjectionIndex" })
@@ -207,6 +212,14 @@ const workspaceEntityProjections = HttpApiEndpoint.get(
   "workspaceEntityProjections",
   "/api/v1/items",
   {
+    query: {
+      q: Schema.optionalKey(
+        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+      ),
+      service: Schema.optionalKey(DeliveryEntityService),
+      status: Schema.optionalKey(DeliveryEntityStatusGroup),
+      type: Schema.optionalKey(DeliveryEntityKind)
+    },
     success: WorkspaceEntityProjectionIndex,
     error: readErrors
   }

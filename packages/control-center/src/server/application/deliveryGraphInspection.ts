@@ -120,9 +120,13 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
   })
 
   return DeliveryGraphInspection.of({
-    workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(workspaceId) {
-      const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(workspaceId, {
+    workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(input) {
+      const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
         _tag: "workspaceEntityProjections",
+        query: input.query,
+        service: input.service,
+        status: input.status,
+        type: input.type,
         limit: 500
       }))
       if (result._tag !== "workspaceEntityProjections") {
