@@ -28,6 +28,7 @@ import {
   PortfolioSnapshots,
   RelationshipRepairProposals,
   ReleaseAgentTurns,
+  TimelineExportAudits,
   TimelineReads
 } from "./ApplicationServices.js"
 import {
@@ -343,10 +344,14 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const timeline = yield* TimelineReads
+      const exportAudits = yield* TimelineExportAudits
       const download = Effect.fn("Timeline.download")(
         function*(query: TimelineExportQuery, format: TimelineExportFormat) {
           const session = yield* CurrentSession
           yield* requireWorkspaceRead(session)
+          if (session.actor._tag !== "human") {
+            return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+          }
           if (timelineRangeIsInverted(query)) {
             return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
           }
@@ -356,6 +361,18 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
             eventLimit: query.limit,
             from: query.from ?? null,
             to: query.to ?? null
+          }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
+          yield* exportAudits.record({
+            workspaceId: session.workspaceId,
+            personId: session.actor.personId,
+            sessionId: session.sessionId,
+            format,
+            actorKind: query.actor ?? null,
+            from: query.from ?? null,
+            to: query.to ?? null,
+            requestedLimit: query.limit,
+            returnedCount: timelineExport.metadata.eventCount,
+            truncated: timelineExport.metadata.truncated
           }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
           yield* appendTimelineExportHeaders(format, timelineExport.metadata)
           return format === "csv" ? encodeTimelineCsv(timelineExport) : encodeTimelineJson(timelineExport)
