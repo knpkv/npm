@@ -102,6 +102,10 @@ export const AuthorizedSharePanel = ({
             setState({ _tag: "failed" })
             return
           }
+          if (share.revokedAt !== null) {
+            setState({ _tag: "revoked" })
+            return
+          }
           setState({
             _tag: "ready",
             shareId: share.shareId,

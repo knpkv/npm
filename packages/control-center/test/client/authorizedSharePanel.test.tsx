@@ -26,6 +26,7 @@ const firstShareId = Schema.decodeUnknownSync(ShareId)("01890f6f-6d6a-7cc0-98d2-
 const secondShareId = Schema.decodeUnknownSync(ShareId)("01890f6f-6d6a-7cc0-98d2-0000000000a3")
 const firstExpiry = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
 const secondExpiry = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-24T10:00:00.000Z")
+const revokedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-17T11:00:00.000Z")
 
 const intent = (
   shareId: ShareId,
@@ -41,6 +42,12 @@ const summary = (createIntent: CreateAuthorizedShareTransportInput) =>
     createdAt: Schema.decodeUnknownSync(UtcTimestamp)("2026-07-17T10:00:00.000Z"),
     expiresAt: createIntent.expiresAt,
     revokedAt: null
+  })
+
+const revokedSummary = (createIntent: CreateAuthorizedShareTransportInput) =>
+  AuthorizedShareSummary.make({
+    ...summary(createIntent),
+    revokedAt
   })
 
 const renderPanel = async (transport: AuthorizedShareTransport): Promise<HTMLElement> => {
@@ -110,6 +117,29 @@ describe("AuthorizedSharePanel", () => {
     expect(create).toHaveBeenCalledTimes(2)
     expect(create.mock.calls[0]?.[0]).toBe(createIntent)
     expect(create.mock.calls[1]?.[0]).toBe(createIntent)
+  })
+
+  it("does not advertise a share revoked before a lost-response retry", async () => {
+    const createIntent = intent(firstShareId, firstExpiry, "day")
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("response lost after commit"))
+      .mockResolvedValueOnce(revokedSummary(createIntent))
+    const transport = {
+      create,
+      prepareCreate: vi.fn(() => Promise.resolve(createIntent)),
+      resolve: vi.fn(() => Promise.reject(new Error("not used"))),
+      revoke: vi.fn(() => Promise.reject(new Error("not used")))
+    } satisfies AuthorizedShareTransport
+    const host = await renderPanel(transport)
+
+    await submit(host)
+    await vi.waitFor(() => expect(host.textContent).toContain("Could not create the link"))
+    await submit(host)
+    await vi.waitFor(() => expect(host.textContent).toContain("This link no longer resolves"))
+
+    expect(host.textContent).not.toContain("Authorized link ready")
+    expect(host.textContent).toContain("Create another")
   })
 
   it("prepares a distinct identity and expiry after the owner changes lifetime", async () => {
