@@ -12,6 +12,8 @@ type DeliveryGraphQuarantineRecordKind = Extract<
   | "evidence-claim"
   | "evidence-freshness"
   | "evidence-item"
+  | "person"
+  | "person-avatar"
 >
 
 interface DeliveryGraphQuarantineDiagnostic {
@@ -106,6 +108,22 @@ export const deliveryGraphQuarantineDiagnostic = (
         diagnosticCode: "evidence-item-schema-invalid",
         diagnosticSummary: "Stored evidence item failed schema validation."
       }
+    case "person-schema-invalid":
+      return error.recordKind === "person"
+        ? {
+          recordKind: "person",
+          diagnosticCode: "person-schema-invalid",
+          diagnosticSummary: "Stored person record failed schema validation."
+        }
+        : null
+    case "schema-decode-failed":
+      return error.recordKind === "person-avatar"
+        ? {
+          recordKind: "person-avatar",
+          diagnosticCode: "schema-decode-failed",
+          diagnosticSummary: "Stored person avatar failed schema validation."
+        }
+        : null
     default:
       return null
   }

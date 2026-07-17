@@ -10,7 +10,7 @@ import type {
   DeliveryEntityService,
   DeliveryEntityStatusGroup
 } from "../../domain/deliveryGraph.js"
-import type { ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import type { PersonId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { presentWorkspaceEntityIndex, type WorkspaceItemPresentation } from "./presentWorkspaceItems.js"
 
 export type WorkspaceItemsState =
@@ -21,6 +21,8 @@ export type WorkspaceItemsState =
     readonly _tag: "ready"
     readonly items: ReadonlyArray<WorkspaceItemPresentation>
     readonly matchedCount: number
+    readonly ownerOptions: WorkspaceEntityProjectionIndex["ownerOptions"]
+    readonly ownerOptionsTruncated: boolean
     readonly refreshing: boolean
     readonly scopeKey: string
     readonly sessionKey: string
@@ -29,6 +31,7 @@ export type WorkspaceItemsState =
   }
 
 export interface WorkspaceItemsQuery {
+  readonly owner: PersonId | "all"
   readonly query: string
   readonly service: DeliveryEntityService | "all"
   readonly status: DeliveryEntityStatusGroup | "all"
@@ -50,6 +53,7 @@ export const browserWorkspaceItemsTransport: WorkspaceItemsTransport = {
         return yield* client.deliveryGraph.workspaceEntityProjections({
           query: {
             ...(query.query.length === 0 ? {} : { q: query.query }),
+            ...(query.owner === "all" ? {} : { owner: query.owner }),
             ...(query.service === "all" ? {} : { service: query.service }),
             ...(query.status === "all" ? {} : { status: query.status }),
             ...(query.type === "all" ? {} : { type: query.type })
@@ -74,12 +78,13 @@ export const useWorkspaceItems = (
   const [state, setState] = useState<WorkspaceItemsState>({ _tag: "idle" })
   const releaseScopeKey = [...routableReleaseIds].join(":")
   const query = useMemo<WorkspaceItemsQuery>(() => ({
+    owner: filters.owner,
     query: filters.query,
     service: filters.service,
     status: filters.status,
     type: filters.type
-  }), [filters.query, filters.service, filters.status, filters.type])
-  const filterScopeKey = `${query.query}|${query.service}|${query.status}|${query.type}`
+  }), [filters.owner, filters.query, filters.service, filters.status, filters.type])
+  const filterScopeKey = `${query.query}|${query.owner}|${query.service}|${query.status}|${query.type}`
   const scopeKey = `${workspaceId}|${releaseScopeKey}|${refreshKey}|${filterScopeKey}`
 
   useEffect(() => {
@@ -100,6 +105,8 @@ export const useWorkspaceItems = (
           _tag: "ready",
           items: presentWorkspaceEntityIndex(workspaceId, index, routableReleaseIds),
           matchedCount: index.matchedCount,
+          ownerOptions: index.ownerOptions,
+          ownerOptionsTruncated: index.ownerOptionsTruncated,
           refreshing: false,
           scopeKey,
           sessionKey,

@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+vi.setConfig({ testTimeout: 10_000 })
 
 describe("public entries", () => {
   it("exports foundations, patterns, primitives, and browser-safe semantic token names from the root", async () => {

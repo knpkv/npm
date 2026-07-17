@@ -7,9 +7,11 @@ import {
   EntityId,
   EvidenceId,
   GraphNodeId,
+  PersonId,
   PluginConnectionId,
   RelationshipId,
   ReleaseId,
+  RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
@@ -21,6 +23,7 @@ import {
 import { selectBoundedRelationshipClosure } from "../../src/server/persistence/repositories/delivery-graph/release-slice.js"
 import {
   DeliveryGraphInputError,
+  DeliveryGraphQuery,
   DeliveryGraphRepository
 } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
@@ -37,6 +40,11 @@ const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-1000000
 const OTHER_RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-10000000000f")
 const OTHER_RELEASE_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-100000000011")
 const OTHER_RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-100000000012")
+const OWNER_PERSON_ID = Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-100000000013")
+const OWNER_ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-100000000014")
+const OWNER_AUTHOR_ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-100000000015")
+const OWNER_OPERATOR_ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-100000000016")
+const OWNER_ASSIGNEE_ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-100000000017")
 const EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000009")
 const SECOND_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-10000000000a")
 const THIRD_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-100000000010")
@@ -168,6 +176,34 @@ const insertFoundation = Effect.gen(function*() {
   ) VALUES (
     ${WORKSPACE_A}, ${ISSUE_ID}, ${PLUGIN_ID}, 'jira', 'PAY-42',
     'issue', 1, ${CREATED_AT}, ${CREATED_AT}
+  )`
+  yield* database.sql`INSERT INTO persons (
+    workspace_id, person_id, display_name, avatar_json, is_active,
+    revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_A}, ${OWNER_PERSON_ID}, 'Avery Bell',
+    ${JSON.stringify({ _tag: "initials", text: "AB" })}, 1, 1, ${CREATED_AT}, ${CREATED_AT}
+  )`
+  yield* database.sql`INSERT INTO role_assignments (
+    workspace_id, assignment_id, actor_kind, person_id, agent_id, role,
+    scope_kind, release_id, environment_id, entity_id, lifecycle_kind,
+    assigned_at, ended_at, revoked_at, revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_A}, ${OWNER_ASSIGNMENT_ID}, 'human', ${OWNER_PERSON_ID}, NULL, 'issue-owner',
+    'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+    ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}
+  ), (
+    ${WORKSPACE_A}, ${OWNER_AUTHOR_ASSIGNMENT_ID}, 'human', ${OWNER_PERSON_ID}, NULL, 'author',
+    'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+    ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}
+  ), (
+    ${WORKSPACE_A}, ${OWNER_OPERATOR_ASSIGNMENT_ID}, 'human', ${OWNER_PERSON_ID}, NULL, 'operator',
+    'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+    ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}
+  ), (
+    ${WORKSPACE_A}, ${OWNER_ASSIGNEE_ASSIGNMENT_ID}, 'human', ${OWNER_PERSON_ID}, NULL, 'issue-assignee',
+    'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+    ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}
   )`
   yield* database.sql`INSERT INTO entities (
     workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
@@ -914,6 +950,7 @@ describe("DeliveryGraphRepository", () => {
 
         const bounded = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: null,
           service: null,
           status: null,
@@ -928,10 +965,25 @@ describe("DeliveryGraphRepository", () => {
           assert.lengthOf(bounded.value.items, 1)
           assert.strictEqual(bounded.value.items[0]?.canonicalReleaseId, RELEASE_ID)
           assert.deepStrictEqual(bounded.value.items[0]?.releaseIds, [RELEASE_ID])
+          assert.deepStrictEqual(bounded.value.items[0]?.owners, [{
+            avatarFallback: "AB",
+            displayName: "Avery Bell",
+            personId: OWNER_PERSON_ID,
+            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+          }])
+          assert.isFalse(bounded.value.items[0]?.ownersTruncated)
+          assert.deepStrictEqual(bounded.value.ownerOptions, [{
+            avatarFallback: "AB",
+            displayName: "Avery Bell",
+            personId: OWNER_PERSON_ID,
+            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+          }])
+          assert.isFalse(bounded.value.ownerOptionsTruncated)
         }
 
         const current = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: null,
           service: null,
           status: null,
@@ -949,10 +1001,34 @@ describe("DeliveryGraphRepository", () => {
             current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.releaseIds,
             []
           )
+          assert.deepStrictEqual(
+            current.value.items.find(({ projection }) => projection.entityId === PIPELINE_ID)?.owners,
+            []
+          )
+        }
+
+        const owned = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          owner: OWNER_PERSON_ID,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        })
+        assert.strictEqual(owned._tag, "workspaceEntityProjections")
+        if (owned._tag === "workspaceEntityProjections") {
+          assert.strictEqual(owned.value.matchedCount, 1)
+          assert.strictEqual(owned.value.totalCount, 2)
+          assert.deepStrictEqual(
+            owned.value.items.map(({ projection }) => projection.entityId),
+            [ISSUE_ID]
+          )
         }
 
         const filtered = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: "main pipeline",
           service: "codepipeline",
           status: "done",
@@ -964,6 +1040,7 @@ describe("DeliveryGraphRepository", () => {
           assert.isFalse(filtered.value.truncated)
           assert.strictEqual(filtered.value.matchedCount, 1)
           assert.strictEqual(filtered.value.totalCount, 2)
+          assert.deepStrictEqual(filtered.value.ownerOptions.map(({ personId }) => personId), [OWNER_PERSON_ID])
           assert.deepStrictEqual(
             filtered.value.items.map(({ projection }) => projection.entityId),
             [PIPELINE_ID]
@@ -972,6 +1049,7 @@ describe("DeliveryGraphRepository", () => {
 
         const jiraStatusSearch = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: OWNER_PERSON_ID,
           query: "Ready-for-review",
           service: "jira",
           status: "active",
@@ -985,6 +1063,60 @@ describe("DeliveryGraphRepository", () => {
             jiraStatusSearch.value.items.map(({ projection }) => projection.entityId),
             [ISSUE_ID]
           )
+        }
+
+        const overflowOwners = Array.from({ length: 20 }, (_, index) => {
+          const suffix = String(index + 1).padStart(2, "0")
+          return {
+            assignmentId: Schema.decodeSync(RoleAssignmentId)(
+              `01890f6f-6d6a-7cc0-98d2-2000000001${suffix}`
+            ),
+            avatarFallback: `Z${suffix}`,
+            displayName: `Zed Owner ${suffix}`,
+            personId: Schema.decodeSync(PersonId)(`01890f6f-6d6a-7cc0-98d2-1000000001${suffix}`)
+          }
+        })
+        yield* Effect.forEach(
+          overflowOwners,
+          ({ assignmentId, avatarFallback, displayName, personId }) =>
+            Effect.gen(function*() {
+              yield* database.sql`INSERT INTO persons (
+              workspace_id, person_id, display_name, avatar_json, is_active,
+              revision, created_at, updated_at
+            ) VALUES (
+              ${WORKSPACE_A}, ${personId}, ${displayName},
+              ${JSON.stringify({ _tag: "initials", text: avatarFallback })}, 1, 1, ${CREATED_AT}, ${CREATED_AT}
+            )`
+              yield* database.sql`INSERT INTO role_assignments (
+              workspace_id, assignment_id, actor_kind, person_id, agent_id, role,
+              scope_kind, release_id, environment_id, entity_id, lifecycle_kind,
+              assigned_at, ended_at, revoked_at, revision, created_at, updated_at
+            ) VALUES (
+              ${WORKSPACE_A}, ${assignmentId}, 'human', ${personId}, NULL, 'issue-owner',
+              'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+              ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}
+            )`
+            })
+        )
+        const selectedOverflowOwner = overflowOwners.at(-1)
+        if (selectedOverflowOwner === undefined) return yield* Effect.die("Expected bounded owner fixture")
+        const selectedBoundedOwners = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          owner: selectedOverflowOwner.personId,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        })
+        assert.strictEqual(selectedBoundedOwners._tag, "workspaceEntityProjections")
+        if (selectedBoundedOwners._tag === "workspaceEntityProjections") {
+          assert.lengthOf(selectedBoundedOwners.value.items[0]?.owners ?? [], 20)
+          assert.strictEqual(
+            selectedBoundedOwners.value.items[0]?.owners[0]?.personId,
+            selectedOverflowOwner.personId
+          )
+          assert.isTrue(selectedBoundedOwners.value.items[0]?.ownersTruncated)
         }
 
         const firstRelationship = initialBatch.relationships[0]
@@ -1014,6 +1146,7 @@ describe("DeliveryGraphRepository", () => {
         })
         const multipleAssociations = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: null,
           service: null,
           status: null,
@@ -1045,6 +1178,7 @@ describe("DeliveryGraphRepository", () => {
         })
         const activeAssociation = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: null,
           service: null,
           status: null,
@@ -1093,6 +1227,7 @@ describe("DeliveryGraphRepository", () => {
 
         const afterDeletion = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
+          owner: null,
           query: null,
           service: null,
           status: null,
@@ -1729,6 +1864,55 @@ describe("DeliveryGraphRepository", () => {
           FROM relationship_revision_evidence
           WHERE workspace_id = ${WORKSPACE_A} AND relationship_id = ${RELATIONSHIP_ID}`
         assert.deepStrictEqual(causalRows, [{ count: 2 }])
+      })
+    ))
+
+  it.effect("quarantines malformed workspace collaborator identity data under the person record", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        const quarantine = yield* QuarantineRepository
+        yield* repository.write(WORKSPACE_A, initialBatch)
+
+        const query = Schema.decodeSync(DeliveryGraphQuery)({
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        })
+        yield* database.sql`UPDATE persons
+          SET avatar_json = '{"unexpected":"avatar"}'
+          WHERE workspace_id = ${WORKSPACE_A} AND person_id = ${OWNER_PERSON_ID}`
+        const malformedAvatar = yield* repository.read(WORKSPACE_A, query).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(malformedAvatar))
+        const avatarRecords = yield* quarantine.list(WORKSPACE_A)
+        assert.deepInclude(avatarRecords[0], {
+          recordKind: "person-avatar",
+          recordKey: OWNER_PERSON_ID,
+          diagnosticCode: "schema-decode-failed"
+        })
+
+        yield* database.sql`UPDATE persons
+          SET avatar_json = ${JSON.stringify({ _tag: "initials", text: "AB" })}
+          WHERE workspace_id = ${WORKSPACE_A} AND person_id = ${OWNER_PERSON_ID}`
+        yield* database.sql`PRAGMA ignore_check_constraints = ON`
+        yield* database.sql`UPDATE persons
+          SET display_name = ''
+          WHERE workspace_id = ${WORKSPACE_A} AND person_id = ${OWNER_PERSON_ID}`
+        yield* database.sql`PRAGMA ignore_check_constraints = OFF`
+        const malformedPerson = yield* repository.read(WORKSPACE_A, query).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(malformedPerson))
+        const records = yield* quarantine.list(WORKSPACE_A)
+        assert.deepInclude(records.find(({ recordKind }) => recordKind === "person"), {
+          recordKind: "person",
+          recordKey: OWNER_PERSON_ID,
+          diagnosticCode: "person-schema-invalid"
+        })
       })
     ))
 

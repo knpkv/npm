@@ -39,6 +39,7 @@ import type {
   EnvironmentId,
   EventCursor,
   EvidenceId,
+  PersonId,
   PluginConnectionId,
   RelationshipId,
   RelationshipRepairProposalId,
@@ -131,6 +132,7 @@ export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspec
   readonly workspaceEntityProjections: (
     input: {
       readonly workspaceId: WorkspaceId
+      readonly owner: PersonId | null
       readonly query: string | null
       readonly service: DeliveryEntityService | null
       readonly status: DeliveryEntityStatusGroup | null

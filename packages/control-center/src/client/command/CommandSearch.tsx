@@ -121,7 +121,7 @@ const CommandSearchSurface = ({
   )
   const releasesReady = releaseState._tag === "ready" && releaseState.workspaceId === workspaceId
   const filters = useMemo<WorkspaceItemsQuery>(
-    () => ({ query: queryReady ? deferredQuery : "", service: "all", status: "all", type: "all" }),
+    () => ({ owner: "all", query: queryReady ? deferredQuery : "", service: "all", status: "all", type: "all" }),
     [deferredQuery, queryReady]
   )
   const items = useWorkspaceItems(

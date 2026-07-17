@@ -23,10 +23,18 @@ import {
 } from "../../src/client/releases/presentReleaseWorkset.js"
 import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
 import { DeliveryEntityProjection, EvidenceClaim } from "../../src/domain/deliveryGraph.js"
-import { EvidenceClaimId, EvidenceId, GraphNodeId, RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
+import {
+  EvidenceClaimId,
+  EvidenceId,
+  GraphNodeId,
+  PersonId,
+  RelationshipId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const items = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, releaseWorksetFixture])
+const ownerId = Schema.decodeUnknownSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000071")
 
 describe("workspace items", () => {
   it("deduplicates normalized entities across release slices and maps their services", () => {
@@ -58,9 +66,18 @@ describe("workspace items", () => {
     if (source === undefined) throw new Error("Expected a source projection")
     const [unlinked] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
       matchedCount: 1,
+      ownerOptions: [],
+      ownerOptionsTruncated: false,
       totalCount: 1,
       truncated: false,
-      items: [{ ...source, canonicalReleaseId: null, releaseIds: [], releaseMembershipsTruncated: false }]
+      items: [{
+        ...source,
+        canonicalReleaseId: null,
+        owners: [],
+        ownersTruncated: false,
+        releaseIds: [],
+        releaseMembershipsTruncated: false
+      }]
     })
 
     expect(unlinked).toMatchObject({
@@ -75,17 +92,63 @@ describe("workspace items", () => {
     expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], "deleted-entity")).toBeNull()
   })
 
+  it("presents every canonical owner and filters by exact person identity", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const [owned] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
+      matchedCount: 1,
+      ownerOptions: [{ avatarFallback: "AB", displayName: "Avery Bell", personId: ownerId, roles: ["issue-owner"] }],
+      ownerOptionsTruncated: false,
+      totalCount: 1,
+      truncated: false,
+      items: [{
+        ...source,
+        canonicalReleaseId: null,
+        owners: [{ avatarFallback: "AB", displayName: "Avery Bell", personId: ownerId, roles: ["issue-owner"] }],
+        ownersTruncated: false,
+        releaseIds: [],
+        releaseMembershipsTruncated: false
+      }]
+    })
+    if (owned === undefined) throw new Error("Expected an owned item")
+
+    expect(owned.owner).toBe("Avery Bell")
+    expect(owned.owners).toEqual([{
+      avatarFallback: "AB",
+      id: ownerId,
+      name: "Avery Bell",
+      role: "Owner",
+      roles: ["issue-owner"]
+    }])
+    expect(
+      filterWorkspaceItems([owned], { owner: ownerId, query: "", service: "all", status: "all", type: "all" })
+    ).toEqual([owned])
+    expect(
+      filterWorkspaceItems([owned], {
+        owner: Schema.decodeUnknownSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000072"),
+        query: "",
+        service: "all",
+        status: "all",
+        type: "all"
+      })
+    ).toEqual([])
+  })
+
   it("does not advertise canonical releases outside the routable portfolio prefix", () => {
     const source = releaseWorksetFixture.entityProjections[0]
     if (source === undefined) throw new Error("Expected a source projection")
     const canonicalReleaseId = releaseWorksetFixture.releaseId
     const index = {
       matchedCount: 1,
+      ownerOptions: [],
+      ownerOptionsTruncated: false,
       totalCount: 1,
       truncated: false,
       items: [{
         ...source,
         canonicalReleaseId,
+        owners: [],
+        ownersTruncated: false,
         releaseIds: [canonicalReleaseId],
         releaseMembershipsTruncated: false
       }]
@@ -105,25 +168,25 @@ describe("workspace items", () => {
     expect(outsidePrefix?.href).toContain(`/w/${WORKSET_WORKSPACE_ID}/items?object=`)
   })
 
-  it("combines text, service, type, and status filters without substituting results", () => {
+  it("combines text, owner, service, type, and status filters without substituting results", () => {
     expect(
-      filterWorkspaceItems(items, { query: "ops-428", service: "all", status: "all", type: "all" }).map(
+      filterWorkspaceItems(items, { owner: "all", query: "ops-428", service: "all", status: "all", type: "all" }).map(
         ({ key }) => key
       )
     ).toEqual(["OPS-428"])
 
     expect(
-      filterWorkspaceItems(items, { query: "", service: "codecommit", status: "all", type: "all" })
+      filterWorkspaceItems(items, { owner: "all", query: "", service: "codecommit", status: "all", type: "all" })
     ).toHaveLength(2)
 
     expect(
-      filterWorkspaceItems(items, { query: "", service: "all", status: "failed", type: "issue" }).map(
+      filterWorkspaceItems(items, { owner: "all", query: "", service: "all", status: "failed", type: "issue" }).map(
         ({ key }) => key
       )
     ).toEqual(["OPS-433"])
 
     expect(
-      filterWorkspaceItems(items, { query: "does-not-exist", service: "all", status: "all", type: "all" })
+      filterWorkspaceItems(items, { owner: "all", query: "does-not-exist", service: "all", status: "all", type: "all" })
     ).toEqual([])
   })
 
@@ -241,7 +304,13 @@ describe("workspace items", () => {
       tone: "progress"
     })
     expect(
-      filterWorkspaceItems(extendedItems, { query: "", service: "clockify", status: "done", type: "time-entry" }).map(
+      filterWorkspaceItems(extendedItems, {
+        owner: "all",
+        query: "",
+        service: "clockify",
+        status: "done",
+        type: "time-entry"
+      }).map(
         ({ key }) => key
       )
     ).toEqual(["CLOCK-902"])
@@ -550,11 +619,15 @@ describe("workspace items", () => {
     const truncatedEntry = {
       ...source,
       canonicalReleaseId: releaseIds[0] ?? null,
+      owners: [],
+      ownersTruncated: false,
       releaseIds,
       releaseMembershipsTruncated: true
     }
     const truncatedIndex = {
       matchedCount: 1,
+      ownerOptions: [],
+      ownerOptionsTruncated: false,
       totalCount: 1,
       truncated: false,
       items: [truncatedEntry]
@@ -574,6 +647,8 @@ describe("workspace items", () => {
       items: [{
         ...source,
         canonicalReleaseId: releaseWorksetFixture.releaseId,
+        owners: [],
+        ownersTruncated: false,
         releaseIds: [releaseWorksetFixture.releaseId],
         releaseMembershipsTruncated: true,
         recordedAt: "2026-07-14T10:02:00.000Z"

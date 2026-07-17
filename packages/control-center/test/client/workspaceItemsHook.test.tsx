@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -10,6 +11,7 @@ import {
   type WorkspaceItemsTransport,
   useWorkspaceItems
 } from "../../src/client/items/useWorkspaceItems.js"
+import { PersonId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -17,15 +19,20 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 let mountedRoot: Root | undefined
 const ignoreSessionExpiry = (): void => undefined
 const ROUTABLE_RELEASE_IDS = new Set([releaseWorksetFixture.releaseId])
-const NO_FILTERS: WorkspaceItemsQuery = { query: "", service: "all", status: "all", type: "all" }
+const OWNER_ID = Schema.decodeUnknownSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000071")
+const NO_FILTERS: WorkspaceItemsQuery = { owner: "all", query: "", service: "all", status: "all", type: "all" }
 
 const index: WorkspaceEntityProjectionIndex = {
   matchedCount: releaseWorksetFixture.entityProjections.length,
+  ownerOptions: [],
+  ownerOptionsTruncated: false,
   totalCount: releaseWorksetFixture.entityProjections.length,
   truncated: false,
   items: releaseWorksetFixture.entityProjections.map((entry) => ({
     ...entry,
     canonicalReleaseId: releaseWorksetFixture.releaseId,
+    owners: [],
+    ownersTruncated: false,
     releaseIds: [releaseWorksetFixture.releaseId],
     releaseMembershipsTruncated: false
   }))
@@ -118,7 +125,7 @@ describe("useWorkspaceItems", () => {
 
     expect(transport.load).toHaveBeenLastCalledWith(expect.any(AbortSignal), NO_FILTERS)
 
-    const filters = { ...NO_FILTERS, query: "refunds", service: "jira" } satisfies WorkspaceItemsQuery
+    const filters = { ...NO_FILTERS, owner: OWNER_ID, query: "refunds", service: "jira" } satisfies WorkspaceItemsQuery
     await act(async () => mountedRoot?.render(<Harness filters={filters} transport={transport} />))
     await act(async () => Promise.resolve())
 
