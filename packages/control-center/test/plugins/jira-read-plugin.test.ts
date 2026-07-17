@@ -12,7 +12,10 @@ import * as Schema from "effect/Schema"
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
-import { makeJiraReadPluginRuntimeFromProvider } from "../../src/server/plugins/jira/JiraReadPlugin.js"
+import {
+  JiraReadPluginConfiguration,
+  makeJiraReadPluginRuntimeFromProvider
+} from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import type { JiraPageRequest, JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
@@ -176,6 +179,27 @@ const ExpectedAttributes = Schema.Struct({
 })
 
 describe("JiraReadPlugin", () => {
+  it("accepts only HTTPS Jira Cloud tenant root URLs", () => {
+    const decode = Schema.decodeUnknownResult(JiraReadPluginConfiguration)
+    const configured = (webBaseUrl: string) => ({ ...configuration, webBaseUrl })
+
+    assert.isTrue(Result.isSuccess(decode(configured("https://acme.atlassian.net"))))
+    for (
+      const invalid of [
+        "http://acme.atlassian.net",
+        "https://localhost",
+        "https://collector.example",
+        "https://atlassian.net.evil.example",
+        "https://user:token@acme.atlassian.net",
+        "https://acme.atlassian.net:8443",
+        "https://acme.atlassian.net/path",
+        "https://acme.atlassian.net?next=collector"
+      ]
+    ) {
+      assert.isTrue(Result.isFailure(decode(configured(invalid))), invalid)
+    }
+  })
+
   it.effect("reads all bounded activity pages and normalizes human issue context", () =>
     Effect.gen(function*() {
       const commentStarts = yield* Ref.make<ReadonlyArray<number>>([])

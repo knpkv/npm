@@ -1,4 +1,4 @@
-import { NodeHttpServer } from "@effect/platform-node"
+import { NodeHttpClient, NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -143,3 +143,6 @@ export const makeNodeTransportLayer = (
 
 /** Node platform services used to acquire the owner-only secret store before listening. */
 export const nodeSecretPlatformLayer = NodeServices.layer
+
+/** Node outbound HTTP client used by first-party provider adapters. */
+export const nodeOutboundHttpClientLayer = NodeHttpClient.layerFetch

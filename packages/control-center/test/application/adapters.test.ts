@@ -37,7 +37,6 @@ import {
 import {
   makeDeliveryGraphInspection,
   makeMediaReads,
-  makePluginAdministration,
   makePluginAdministrationWithConnections,
   makePortfolioSnapshots,
   makeRelationshipRepairProposals,
@@ -1155,10 +1154,17 @@ describe("application adapters", () => {
       )
     })))
 
-  it.effect("projects plugin facts, validates descriptor fields, redacts secrets, and preserves CAS", () =>
+  it.effect("projects plugin facts, redacts secrets, and invalidates only after successful configuration CAS", () =>
     withApplication(Effect.gen(function*() {
       yield* setup
-      const administration = yield* makePluginAdministration
+      const invalidations = yield* Ref.make<
+        Array<{ readonly pluginConnectionId: PluginConnectionId; readonly workspaceId: WorkspaceId }>
+      >([])
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.die("configuration patch must not acquire a provider runtime"),
+        invalidate: (scope) => Ref.update(invalidations, (scopes) => [...scopes, scope])
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
       const listed = yield* administration.list(WORKSPACE_ID)
       assert.lengthOf(listed, 2)
       assert.strictEqual(listed[0]?.health?._tag, "healthy")
@@ -1201,6 +1207,7 @@ describe("application adapters", () => {
       if (Result.isFailure(missingKeep)) {
         assert.instanceOf(missingKeep.failure, ApplicationInvalidRequest)
       }
+      assert.lengthOf(yield* Ref.get(invalidations), 0)
 
       const nonexistentReference = OpaqueSecretReference.make(`secret_${"a".repeat(64)}`)
       const missingSecret = yield* administration.patchConfiguration({
@@ -1223,6 +1230,7 @@ describe("application adapters", () => {
       if (Result.isFailure(missingSecret)) {
         assert.instanceOf(missingSecret.failure, ApplicationInvalidRequest)
       }
+      assert.lengthOf(yield* Ref.get(invalidations), 0)
 
       const secrets = yield* SecretStore
       const storedSecretReference = yield* secrets.create(new Uint8Array([115, 101, 99, 114, 101, 116]))
@@ -1250,6 +1258,10 @@ describe("application adapters", () => {
         state: "configured"
       })
       assert.notInclude(JSON.stringify(configured), secretReference)
+      assert.deepStrictEqual(yield* Ref.get(invalidations), [{
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      }])
 
       const kept = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -1274,6 +1286,7 @@ describe("application adapters", () => {
         state: "configured"
       })
       assert.notInclude(JSON.stringify(kept), secretReference)
+      assert.lengthOf(yield* Ref.get(invalidations), 2)
 
       const stale = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -1282,6 +1295,7 @@ describe("application adapters", () => {
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(stale))
       if (Result.isFailure(stale)) assert.instanceOf(stale.failure, ApplicationInvalidRequest)
+      assert.lengthOf(yield* Ref.get(invalidations), 2)
 
       const requiredSecretClear = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -1303,6 +1317,7 @@ describe("application adapters", () => {
       if (Result.isFailure(requiredSecretClear)) {
         assert.instanceOf(requiredSecretClear.failure, ApplicationInvalidRequest)
       }
+      assert.lengthOf(yield* Ref.get(invalidations), 2)
 
       const conflict = yield* administration.patchConfiguration({
         workspaceId: WORKSPACE_ID,
@@ -1322,6 +1337,7 @@ describe("application adapters", () => {
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(conflict))
       if (Result.isFailure(conflict)) assert.instanceOf(conflict.failure, ApplicationConflict)
+      assert.lengthOf(yield* Ref.get(invalidations), 2)
 
       const unavailable = yield* administration.configurationMetadata({
         workspaceId: WORKSPACE_ID,
@@ -1362,6 +1378,7 @@ describe("application adapters", () => {
       if (Result.isFailure(keepMissing)) {
         assert.instanceOf(keepMissing.failure, ApplicationInvalidRequest)
       }
+      assert.lengthOf(yield* Ref.get(invalidations), 2)
     })))
 
   it.effect("classifies retrieved people as users and AWS principals as accounts", () =>

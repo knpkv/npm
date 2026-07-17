@@ -28,6 +28,7 @@ const CONFLUENCE_PROVIDER_PACKAGES: ReadonlyArray<string> = [
   "@knpkv/confluence-api-client",
   "@knpkv/confluence-to-markdown"
 ]
+const FIRST_PARTY_RUNTIME_COMPOSITION = "src/server/plugins/internal/FirstPartyPluginRuntimeRegistry"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const isConfluenceProviderImport = (importPath: string): boolean =>
@@ -172,6 +173,7 @@ const mayImportPluginExecutionInternals = (sourcePath: string): boolean =>
   sourcePath === "src/server/governance/internal/GovernedActionExecutionEngine" ||
   sourcePath === "src/server/governance/internal/GovernedActionExecutionStore" ||
   sourcePath === "src/server/runtime/GovernedActionExecutionStartup" ||
+  sourcePath === "src/server/runtime/FirstPartyPluginRuntime" ||
   isWithin(sourcePath, "src/server/governance/internal/execution-store")
 
 const mayImportGovernedExecutionInternals = (sourcePath: string): boolean =>
@@ -195,7 +197,8 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
   }
   if (
     isConfluenceProviderImport(importPath) &&
-    !isWithin(normalizedSource, "src/server/plugins/confluence")
+    !isWithin(normalizedSource, "src/server/plugins/confluence") &&
+    normalizedSource !== FIRST_PARTY_RUNTIME_COMPOSITION
   ) {
     return CONFLUENCE_ADAPTER_REASON
   }

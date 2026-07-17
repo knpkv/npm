@@ -486,13 +486,23 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       // Keep operations resolve only the reference stored at the expected revision. The
       // repository CAS then prevents that reference from surviving a concurrent replacement.
       const values = yield* canonicalValues(secrets, currentValues, patch.values)
-      yield* persistence.pluginConfigurations.update(
-        workspaceId,
-        pluginConnectionId,
-        values,
-        patch.expectedRevision,
-        DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-      ).pipe(Effect.mapError(mapPersistenceWriteError))
+      const updatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+      yield* Effect.uninterruptible(
+        persistence.pluginConfigurations.update(
+          workspaceId,
+          pluginConnectionId,
+          values,
+          patch.expectedRevision,
+          updatedAt
+        ).pipe(
+          Effect.mapError(mapPersistenceWriteError),
+          Effect.andThen(
+            pluginConnections === null
+              ? Effect.void
+              : pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+          )
+        )
+      )
       return yield* configuration(persistence, secrets, workspaceId, pluginConnectionId)
     })
   } satisfies PluginAdministrationService

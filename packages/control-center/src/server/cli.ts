@@ -178,6 +178,7 @@ const program = Effect.scoped(
     const services = yield* Layer.build(
       makeControlCenterServer({
         bindConfig,
+        firstPartyPluginRuntime: true,
         bootstrap: {
           owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
           workspaceId: DEFAULT_WORKSPACE_ID,

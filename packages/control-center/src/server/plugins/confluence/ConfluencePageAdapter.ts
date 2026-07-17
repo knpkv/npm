@@ -61,7 +61,15 @@ const ConfluencePageEntityType = "confluence-page"
 const SiteUrl = Schema.String.pipe(
   Schema.decodeTo(Schema.URL, SchemaTransformation.urlFromString),
   Schema.check(
-    Schema.makeFilter(({ protocol }) => protocol === "https:", { expected: "an HTTPS Confluence site URL" }),
+    Schema.makeFilter(
+      ({ hostname, pathname, port, protocol }) =>
+        protocol === "https:" &&
+        hostname.endsWith(".atlassian.net") &&
+        hostname.length > ".atlassian.net".length &&
+        port.length === 0 &&
+        pathname === "/",
+      { expected: "an HTTPS Confluence Cloud tenant root URL under atlassian.net" }
+    ),
     Schema.makeFilter(({ password, username }) => password.length === 0 && username.length === 0, {
       expected: "a Confluence site URL without embedded credentials"
     }),
