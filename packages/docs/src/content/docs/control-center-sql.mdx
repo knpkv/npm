@@ -1,0 +1,12 @@
+---
+title: Control Center SQL
+description: Typed effect-qb query plans behind the Control Center persistence boundary.
+---
+
+`@knpkv/control-center-sql` isolates typed, dialect-specific `effect-qb` plans from the Control Center repository implementation. Its public API returns only SQL text and bound parameters, so query-builder tables and types do not leak into application services.
+
+The current release-readiness plan accepts one workspace and a non-empty, bounded release set. It renders one parameterized SQLite query that joins readiness heads, immutable history, and assessments while checking release and environment invalidation queues. Control Center executes the plan through its scoped Effect SQL client, then applies its existing Schema decoding, digest/materialization verification, and quarantine rules.
+
+The package deliberately does not own connections, transactions, schema creation, backup, or restore. Control Center owns those policies. During the MVP, the database uses one exact unstable schema snapshot; versioned migrations start only after the persistence model is stable and released database files require upgrades.
+
+Effect Persistence was evaluated but is not the relational storage foundation: its key/value cache and persisted queue abstractions do not replace joins, constraints, cross-operation transactions, or persisted-record quarantine. A later agent-job queue or disposable projection cache may use it behind a separate boundary.

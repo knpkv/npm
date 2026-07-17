@@ -11,7 +11,7 @@ import {
 } from "../../src/server/cliConfiguration.js"
 import { createOfflineVerifiedBackup, restoreBackup, verifyBackup } from "../../src/server/persistence/backup/index.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { EXPECTED_MIGRATIONS } from "../../src/server/persistence/migrations/index.js"
+import { CURRENT_SCHEMA_VERSION } from "../../src/server/persistence/schema.js"
 
 interface RegularFileSnapshot {
   readonly bytes: Uint8Array
@@ -68,8 +68,12 @@ const leaveHotRollbackJournal = Effect.fn("OfflineBackupTest.leaveHotRollbackJou
       PRAGMA journal_mode=DELETE;
       PRAGMA synchronous=FULL;
       BEGIN IMMEDIATE;
-      CREATE TABLE crash_recovery_probe(value TEXT NOT NULL);
-      INSERT INTO crash_recovery_probe(value) VALUES ('committed');
+      INSERT INTO workspaces(
+        workspace_id, display_name, revision, created_at, updated_at
+      ) VALUES (
+        'crash-recovery-probe', 'committed', 1,
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+      );
       COMMIT;
     \`)
     database.close()
@@ -79,7 +83,9 @@ const leaveHotRollbackJournal = Effect.fn("OfflineBackupTest.leaveHotRollbackJou
       PRAGMA synchronous=FULL;
       PRAGMA cache_size=1;
       BEGIN IMMEDIATE;
-      UPDATE crash_recovery_probe SET value = 'uncommitted';
+      UPDATE workspaces
+      SET display_name = 'uncommitted', updated_at = '2026-01-02T00:00:00.000Z'
+      WHERE workspace_id = 'crash-recovery-probe';
       CREATE TABLE crash_recovery_spill(id INTEGER PRIMARY KEY, payload BLOB NOT NULL);
       WITH RECURSIVE rows(id) AS (
         VALUES(1) UNION ALL SELECT id + 1 FROM rows WHERE id < 512
@@ -126,7 +132,11 @@ const readCrashRecoveryProbe = Effect.fn("OfflineBackupTest.readCrashRecoveryPro
     import { argv } from "node:process"
 
     const database = new DatabaseSync(argv[1], { readOnly: true })
-    const row = database.prepare("SELECT value FROM crash_recovery_probe").get()
+    const row = database.prepare(\`
+      SELECT display_name AS value
+      FROM workspaces
+      WHERE workspace_id = 'crash-recovery-probe'
+    \`).get()
     console.log(row.value)
   `
   const handle = yield* ChildProcess.make(
@@ -151,7 +161,7 @@ const makePreparedRoot = Effect.fn("OfflineBackupTest.makePreparedRoot")(functio
   const prepared = yield* prepareControlCenterDataRoot(configured)
   yield* Effect.gen(function*() {
     const database = yield* Database
-    yield* database.validateMigrationLedger
+    yield* database.validateSchema
   }).pipe(Effect.provide(databaseLayer(prepared.persistenceConfig)), Effect.scoped)
   return { configured, configuredRoot, parent, prepared }
 })
@@ -248,10 +258,7 @@ describe("offline backup commands", () => {
       const verified = yield* verifyBackup(archiveRoot)
       assert.strictEqual(published.verification._tag, "Complete")
       assert.strictEqual(verified._tag, "Complete")
-      assert.deepStrictEqual(
-        verified.manifest.migrations,
-        EXPECTED_MIGRATIONS.map(({ id, name }) => ({ migrationId: id, name }))
-      )
+      assert.strictEqual(verified.manifest.schemaVersion, CURRENT_SCHEMA_VERSION)
 
       const configuredDataRoot = path.join(parent, "restored")
       const restored = yield* restoreBackup({ archiveRoot, configuredDataRoot })

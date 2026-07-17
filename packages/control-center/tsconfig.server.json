@@ -10,7 +10,11 @@
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.server.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/index.ts", "src/api", "src/domain", "src/server"],
+  "include": ["src/index.ts", "src/api", "src/domain", "src/server", "src/server/persistence/schema.json"],
   "exclude": ["dist", "node_modules", "src/client"],
-  "references": [{ "path": "../ai-claude/tsconfig.build.json" }, { "path": "../ai-codex/tsconfig.build.json" }]
+  "references": [
+    { "path": "../ai-claude/tsconfig.build.json" },
+    { "path": "../ai-codex/tsconfig.build.json" },
+    { "path": "../control-center-sql/tsconfig.build.json" }
+  ]
 }

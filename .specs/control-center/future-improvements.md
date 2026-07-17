@@ -141,9 +141,8 @@ explicit. Those filters now execute against the complete current workspace proje
   combines the authenticated release portfolio and Items index with deterministic ranking,
   keyboard navigation, exact destinations, and contextual Relay access. Authorized links resolve
   one current item projection only after grantee, expiry, revocation, workspace, and target checks.
-  D08–D09 retain timeline and
-  exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
-  below.
+  D08–D09 retain timeline and exports, graceful drain, and startup reconciliation. The D05 bounded
+  readiness batch refinement is complete.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
 - S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
@@ -167,10 +166,19 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   authority digest because both represent the same non-secret configured runtime generation. This
   should become one shared nominal domain type in a future governance cleanup, avoiding the explicit
   schema-brand conversion at the execution boundary.
-- Local `effect-qb` `0.20.0` requires Effect `4.0.0-beta.98`, while this workspace and vendored
-  Effect source use `beta.97`. Do not add it until the workspace, lockfile, and vendored subtree are
-  aligned deliberately. Migrations, views, triggers, and the isolated repair-proposal repository
-  should remain explicit SQL until then.
+- `@knpkv/control-center-sql` now isolates `effect-qb` `0.20.0` behind rendered SQL and parameters,
+  and the workspace is aligned on Effect `4.0.0-beta.98`. The vendored Effect reference subtree is
+  still `beta.97`; update it through the documented subtree workflow before relying on it for a
+  beta.98-only API. Migrate the remaining large repository reads incrementally through the same
+  deep boundary instead of leaking query-builder types into Control Center.
+- The MVP database intentionally has no migration ledger or historical migration files. It creates
+  one exact checked-in unstable schema and rejects drift. Start versioned migrations only after the
+  persistence model is stable and a released database file must remain readable by a newer build.
+  Until then, schema changes are allowed to require recreation of local development data.
+- Effect Persistence is not the relational store: its key/value cache and persisted queue do not
+  replace joins, constraints, cross-operation transactions, or quarantine. Re-evaluate
+  `PersistedQueue` for durable agent jobs and `PersistedCache` for disposable projections after the
+  corresponding ownership, replay, and invalidation contracts are defined.
 - Evidence freshness treats `sourceObservedAt + staleAfterSeconds` as the canonical `currentUntil`.
   Add a boundary test and document the inclusive/exclusive millisecond convention before external
   adapters generate evidence references.
@@ -192,11 +200,10 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
-- Portfolio readiness currently performs one integrity-verified current-head read per release
-  inside the snapshot transaction. Add a bounded repository batch read before the 100-release
-  benchmark so digest/materialization verification stays authoritative without per-release query
-  fan-out. Relationship counts already use a compact aggregate query and should not regress to
-  `releaseSlice` hydration.
+- Portfolio readiness now performs one bounded, integrity-verified current-head batch read through
+  `@knpkv/control-center-sql`. Add the 100-release benchmark before raising the 200-release
+  repository bound; digest/materialization verification must remain authoritative and relationship
+  counts must not regress to `releaseSlice` hydration.
 - D06 object links intentionally converge on the canonical release workset and acknowledge the
   selected object there. Provider-specific Jira, CodeCommit, Confluence, and CodePipeline detail
   routes remain S01–S07 work rather than simulated local pages.
@@ -223,10 +230,9 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   requires an exact choice whenever more than one membership exists. Memberships outside the current
   bounded portfolio are counted but do not yet expose a release route. Unlinked objects remain on the
   Items route until the provider-specific S01–S07 full views exist.
-- The workspace projection query remains explicit Effect SQL. Local `effect-qb` cannot be adopted in
-  isolation because it introduces table definitions, rendering, and execution boundaries and version
-  `0.20.0` requires Effect `4.0.0-beta.98` while this workspace uses `beta.97`. Migrate repositories as
-  a deliberate version-aligned milestone rather than mixing two database abstractions in one read.
+- The workspace projection query remains explicit Effect SQL. Move it into
+  `@knpkv/control-center-sql` only when its current trust, bounds, and quarantine tests can be kept at
+  the repository boundary; do not duplicate table definitions inside application services.
 - Item and release entry points now converge on an exact item-centered trace inside the selected
   release. It derives incoming/outgoing current relationships, connected objects, lifecycle,
   confidence, and evidence counts from the existing bounded release slice. Each relationship now
@@ -249,7 +255,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Return to the recorded D05 readiness batch optimization before the large-fixture performance gate,
-then continue with D08 attributable Timeline and bounded exports.
+Run the remaining 100-release readiness benchmark, then continue with D08 attributable Timeline and
+bounded exports.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

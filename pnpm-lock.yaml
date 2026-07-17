@@ -7,11 +7,11 @@ settings:
 overrides:
   distilled-aws>fast-xml-parser: ^5.3.4
   vitest: ^4.1.10
-  '@effect/vitest': 4.0.0-beta.97
-  '@effect/platform-bun': 4.0.0-beta.97
-  '@effect/platform-node': 4.0.0-beta.97
+  '@effect/vitest': 4.0.0-beta.98
+  '@effect/platform-bun': 4.0.0-beta.98
+  '@effect/platform-node': 4.0.0-beta.98
   '@atlaskit/react-ufo': 7.1.0
-  effect: 4.0.0-beta.97
+  effect: 4.0.0-beta.98
   happy-dom@<20.8.9: 20.8.9
   markdown-it@<=14.1.1: 14.2.0
   file-type@>=13.0.0 <21.3.1: 21.3.3
@@ -23,12 +23,8 @@ overrides:
   diff@>=6.0.0 <8.0.3: 8.0.3
 
 patchedDependencies:
-  '@changesets/assemble-release-plan':
-    hash: 29cf7a343aefd3c59ad238a4cb067f0a1a0adbeed07b6d57d6f31d6c80a5e25e
-    path: patches/@changesets__assemble-release-plan.patch
-  distilled-aws@0.1.1:
-    hash: 1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c
-    path: patches/distilled-aws@0.1.1.patch
+  '@changesets/assemble-release-plan': 29cf7a343aefd3c59ad238a4cb067f0a1a0adbeed07b6d57d6f31d6c80a5e25e
+  distilled-aws@0.1.1: 1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c
 
 importers:
 
@@ -53,14 +49,14 @@ importers:
         specifier: ^0.86.6
         version: 0.86.6
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/tsgo':
         specifier: ^0.19.0
         version: 0.19.0
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.7.0(jiti@2.7.0))
@@ -77,8 +73,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@vitest/browser@4.1.10)(vitest@4.1.10)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       eslint:
         specifier: ^10.7.0
         version: 10.7.0(jiti@2.7.0)
@@ -134,11 +130,11 @@ importers:
   packages/agent-skills:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
     devDependencies:
       '@types/node':
         specifier: latest
@@ -153,17 +149,17 @@ importers:
   packages/ai-claude:
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -177,17 +173,17 @@ importers:
   packages/ai-codex:
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -201,8 +197,8 @@ importers:
   packages/atlassian-common:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
@@ -217,14 +213,14 @@ importers:
         version: 11.0.5
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -235,20 +231,20 @@ importers:
   packages/clockify-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(@effect/platform-node@4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1))(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(@effect/platform-node@4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1))(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       prettier:
         specifier: ^3.9.5
         version: 3.9.5
@@ -265,14 +261,14 @@ importers:
   packages/codecommit:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(react@19.2.7)(scheduler@0.27.0)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -289,8 +285,8 @@ importers:
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
         version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -299,8 +295,8 @@ importers:
         version: 2.8.1
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@storybook/react':
         specifier: ^10.5.0
         version: 10.5.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.5.0(@types/react@19.2.17)(prettier@3.9.5)(react@19.2.7))(typescript@6.0.3)
@@ -326,29 +322,29 @@ importers:
         specifier: ^3.1085.0
         version: 3.1085.0
       '@effect/sql-libsql':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
       distilled-aws:
         specifier: 0.1.1
-        version: 0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.97)
+        version: 0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
 
   packages/codecommit-web:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(react@19.2.7)(scheduler@0.27.0)
       '@effect/platform-bun':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@fontsource-variable/geist':
         specifier: ^5.2.9
         version: 5.2.9
@@ -377,8 +373,8 @@ importers:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       lucide-react:
         specifier: ^1.24.0
         version: 1.24.0(react@19.2.7)
@@ -420,8 +416,8 @@ importers:
         version: 1.4.0
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/react':
         specifier: ^19.2.17
         version: 19.2.17
@@ -444,20 +440,20 @@ importers:
   packages/confluence-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(@effect/platform-node@4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1))(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(@effect/platform-node@4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1))(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       prettier:
         specifier: ^3.9.5
         version: 3.9.5
@@ -475,16 +471,16 @@ importers:
     dependencies:
       '@atlaskit/adf-schema':
         specifier: ^56.1.3
-        version: 56.1.3(react@19.2.7)
+        version: 56.1.3(react@18.3.1)
       '@atlaskit/editor-json-transformer':
         specifier: ^9.0.2
-        version: 9.0.2(react@19.2.7)
+        version: 9.0.2(react@18.3.1)
       '@atlaskit/editor-markdown-transformer':
         specifier: ^6.0.1
-        version: 6.0.1(react@19.2.7)
+        version: 6.0.1(react@18.3.1)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -505,8 +501,8 @@ importers:
         version: 5.2.1
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -514,8 +510,8 @@ importers:
         specifier: ^26.1.1
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -526,26 +522,29 @@ importers:
   packages/control-center:
     dependencies:
       '@effect/platform-browser':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/sql-libsql':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@knpkv/ai-claude':
         specifier: workspace:^
         version: link:../ai-claude
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/control-center-sql':
+        specifier: workspace:^
+        version: link:../control-center-sql
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -557,8 +556,8 @@ importers:
         version: 8.2.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@playwright/test':
         specifier: 1.61.1
         version: 1.61.1
@@ -590,6 +589,28 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.8.9)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.0)(yaml@2.8.3))
 
+  packages/control-center-sql:
+    dependencies:
+      effect-qb:
+        specifier: 0.20.0
+        version: 0.20.0(effect@4.0.0-beta.98)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
+      effect:
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
+      rimraf:
+        specifier: ^6.1.3
+        version: 6.1.3
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.8.9)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.0)(yaml@2.8.3))
+
   packages/docs:
     dependencies:
       '@astrojs/markdown-remark':
@@ -612,20 +633,20 @@ importers:
   packages/jira-api-client:
     devDependencies:
       '@effect/openapi-generator':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(@effect/platform-node@4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1))(effect@4.0.0-beta.97)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(@effect/platform-node@4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1))(effect@4.0.0-beta.98)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       prettier:
         specifier: ^3.9.5
         version: 3.9.5
@@ -642,8 +663,8 @@ importers:
   packages/jira-cli:
     dependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -661,8 +682,8 @@ importers:
         version: 5.2.1
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -670,8 +691,8 @@ importers:
         specifier: latest
         version: 26.1.1
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -682,11 +703,11 @@ importers:
   packages/jira-clockify:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(react@19.2.7)(scheduler@0.27.0)
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
@@ -709,15 +730,15 @@ importers:
         specifier: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
         version: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e(react-devtools-core@7.0.1)(react@19.2.7)(stage-js@1.0.1)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       react:
         specifier: ^19.2.7
         version: 19.2.7
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)
       '@types/node':
         specifier: latest
         version: 26.1.1
@@ -750,8 +771,8 @@ importers:
         version: 1.6.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@effect/platform-node':
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
       '@playwright/test':
         specifier: 1.61.1
         version: 1.61.1
@@ -789,8 +810,8 @@ importers:
         specifier: 8.20.0
         version: 8.20.0
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
       happy-dom:
         specifier: 20.8.9
         version: 20.8.9
@@ -827,8 +848,8 @@ importers:
   scripts:
     dependencies:
       effect:
-        specifier: 4.0.0-beta.97
-        version: 4.0.0-beta.97
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98
 
 packages:
 
@@ -852,12 +873,14 @@ packages:
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@ast-grep/cli-linux-x64-gnu@0.44.1':
     resolution: {integrity: sha512-d5UNoDLT2i6xV4GGqcPnrAR6CB3H078+v3BiqjKxZdZMHFnDe46+i+DxfH1IK6yvJqViqv2F611+wiAAn/s7qw==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@ast-grep/cli-win32-arm64-msvc@0.44.1':
     resolution: {integrity: sha512-r6K49Z14BLOeJdBSmaoK+TdgtPRqJfJ562F0n0KvRi0qH3o8is8N2dXtEMYKynYm/tdOd65i69Mc1WKSuIeWyA==}
@@ -905,24 +928,28 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@astrojs/compiler-binding-linux-arm64-musl@0.3.1':
     resolution: {integrity: sha512-xqE8BVbDoBueK/B47w30PtkVofUWJKGkwoMVE+EOMLf11rnoANxIAdA9FPqY+rng4oNI5ndHGsri1yPj2k8vZQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@astrojs/compiler-binding-linux-x64-gnu@0.3.1':
     resolution: {integrity: sha512-1y0StU1qiCuDFH3rmbRJXcxdfHxFPrES1Rd+RLffosvUR7I2cH5SF5SFnBN9vXpzpkmyElZm3Yr47iJBPN7vVA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@astrojs/compiler-binding-linux-x64-musl@0.3.1':
     resolution: {integrity: sha512-16q0fYf7kpbmdObZEeZJEup8hQv/whgNwVjrSvT8umrKwLDSnNIWiQpm09lQQu6bweZB0XyIvHwlPitvJhC+hg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@astrojs/compiler-binding-wasm32-wasi@0.3.1':
     resolution: {integrity: sha512-cB456shIwDv/PrVT+2QG7LFndpHkVge5HjqADKZgGaAc9JHVktCtjSrcdkRQ+3tbkPazNKaTLRjXLIiz2NIx9g==}
@@ -1226,21 +1253,25 @@ packages:
     resolution: {integrity: sha512-u51id17uJwNEMK9nBlICsq6U31c+XVqQueVBkwRIzZG+gMpS8TOJctt5h5Wz33Z8xnMdTd+adtACVz0yHgGuOA==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@bruits/satteri-linux-arm64-musl@0.9.5':
     resolution: {integrity: sha512-v39HxiwGC5Rqm01HksP6+5Y+xKLPlsuVFgIgpEAo+SiQ22c+mJVhS3u7Z6ePAKdhL5NJoK1xq70kLz3L13AhpQ==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@bruits/satteri-linux-x64-gnu@0.9.5':
     resolution: {integrity: sha512-F3uO8uFp3pAP5ZGXttwvh57GS7s0lL953tnNdyI2gRyP4kOOkp6pyGojNJzCjkDvWI2Cvb9iNrKok3aqQPauAw==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@bruits/satteri-linux-x64-musl@0.9.5':
     resolution: {integrity: sha512-bicEqglLlz++mWyADaZoP0JY20s4vDfLjaPYgQqC+NI4zZLTOOg1T4GB8aqtc822Pqji8SQBmSrTb7CrP8i08Q==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@bruits/satteri-wasm32-wasi@0.9.5':
     resolution: {integrity: sha512-zauAuMwfPnKPUkd4AFixRFpXdgKwP2mKgxrIIo2gJzW0/ZneF9dbHnLkojSpaBnCCp7VUL1hIi5WWZvB1CqmAQ==}
@@ -1354,10 +1385,10 @@ packages:
     resolution: {integrity: sha512-NKBGBSIKUG584qrS1tyxVpX/AKJKQw5HgjYEnPLC0QsTw79JrGn+qUr8CXFb955Iy7GUdiiUv1rJ6JBGvaKb6w==}
     engines: {node: '>=18'}
 
-  '@effect/atom-react@4.0.0-beta.97':
-    resolution: {integrity: sha512-yKj5KqgDuAayxkVdXzt0kJaqob0QLozqepPVhGj/I0QPIvGSEfX3OaBGt09irGMyqbP4CKMGtiewyHwRwPZSsw==}
+  '@effect/atom-react@4.0.0-beta.98':
+    resolution: {integrity: sha512-M7BMiXyJZ1sSOwkipkF8/yNYoAp5WA6xhD0u8wobI6h9OIQp5oxx+AvE4FCj0wmfexAsUZPfZ4McCXstXYskbg==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       react: ^19.2.4
       scheduler: '*'
 
@@ -1373,40 +1404,40 @@ packages:
     resolution: {integrity: sha512-uwXbp+lWzt60bZnm6lG6S5DWy0m6TthUzV2hcQoiS6NzieEDm07tuBakscxOXoO+AU9+yTH+0TSIa9mEDt9dFA==}
     hasBin: true
 
-  '@effect/openapi-generator@4.0.0-beta.97':
-    resolution: {integrity: sha512-bT01/6+kMZqs1PQT4XzIwZQDtbpKeo/4JyXVx5Alk/oCaSIOHP1QWgtI472zuk0ZJ9p3VKl2modG3t8WUySvSQ==}
+  '@effect/openapi-generator@4.0.0-beta.98':
+    resolution: {integrity: sha512-7bqawr/HqJWqQ8H/bHyzBlLPA3LIIm3Y+cGYlIxnC/QVK795QpiEXb7uxTnP7V7w49V0sBtTerv4/9ZjsMffLQ==}
     hasBin: true
     peerDependencies:
-      '@effect/platform-node': 4.0.0-beta.97
-      effect: 4.0.0-beta.97
+      '@effect/platform-node': 4.0.0-beta.98
+      effect: 4.0.0-beta.98
 
-  '@effect/platform-browser@4.0.0-beta.97':
-    resolution: {integrity: sha512-CPF5Wk+OIR4/D6cvI1QEigL/f6cASTv5v8zBn7d2130KB3DFFsSgqplxaZB56vASb4WFBkQ1l8z+dbtosx5RxA==}
+  '@effect/platform-browser@4.0.0-beta.98':
+    resolution: {integrity: sha512-Y0BEe0N8clKmJTHqmZpS85pLZbqAxP5uV3IYF0tDw/1dcs8AbTRHjbRmOLdyLtmU32NBVAiaUD3Vopb5Et5R/g==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
 
-  '@effect/platform-bun@4.0.0-beta.97':
-    resolution: {integrity: sha512-WYjC7nKiWfNywIz1zeBEXnrpuHJM86DOi3lSZSSBeHCPz8HYw7IT2FL7u+aaJHHsJCyFiZVAgg2KFS8aMFSJBQ==}
+  '@effect/platform-bun@4.0.0-beta.98':
+    resolution: {integrity: sha512-QorRKhvwHDPwvE8lH5lE0r0dI2z+zj12VUN4h7hfoIunKUiXSoSOMZqF3w13W30RpV6ivsvJywUycaa/18yMPA==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
 
-  '@effect/platform-node-shared@4.0.0-beta.97':
-    resolution: {integrity: sha512-sAlygOlDLLERk7fC24f7Aa4G3wkEbGyyMEileHTHU2fThiPYSGMqNRK1LLnNr17m2+JR7BHbycwXkJkM18BAQw==}
+  '@effect/platform-node-shared@4.0.0-beta.98':
+    resolution: {integrity: sha512-iySXaffnCJX1sNAIp79ghhIeui9E5qwUQyqd1VLPkB9UNO4vdpd9B5fTEXwe7S/GusL4jsk9vSvX38XJgRFG1w==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
 
-  '@effect/platform-node@4.0.0-beta.97':
-    resolution: {integrity: sha512-Vd40VLh+Y08Bs37KWtbe9AgO2+t3RKZKGX9YC6ZKAcswu4tXR3CwSI7V2MN+GgS+ez/GLmqH1WrzDDlaIAxKPA==}
+  '@effect/platform-node@4.0.0-beta.98':
+    resolution: {integrity: sha512-IQu1TiLXQEDSGkDBllyYjVadf+UqdjptryqX4mmktVTTbGDq7X4uVxe7cSgXuqZvyfG6kagTzwj2lfynxOaKQg==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       ioredis: ^5.7.0
 
-  '@effect/sql-libsql@4.0.0-beta.97':
-    resolution: {integrity: sha512-DxHeUHtONz8ynzxOs0j+e6PuWOQiz4vE65XfFnrThehzy6y2T9rFvzladFuRbzu7kn6JrZxg4Jk0rb07bAxyAQ==}
+  '@effect/sql-libsql@4.0.0-beta.98':
+    resolution: {integrity: sha512-BLZBmLF2Ut4AHrXFwfZULaEJRvlPUFh+uHDmrypyJoCZxvesxaddRQ+etXuTGsj09JCRwBJX9DmZ2USppJ2GOQ==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
 
   '@effect/tsgo-darwin-arm64@0.19.0':
     resolution: {integrity: sha512-tieZTHXZlqOtm3YbGxclXNsyxILFtZqMC1fZEy2PAoEGKBHfwNc+r0gR3k3SU9dsSNj3KV8wLsXxfQr/VH1pAA==}
@@ -1447,10 +1478,10 @@ packages:
     resolution: {integrity: sha512-NDyG/RufHigI0bdvyggbr53J6c1GWcnNkm7rUwQbBDuRI1KRThFh2WtugMLL+i6wrRiMXJtgLHzh9lIMqy9gGA==}
     hasBin: true
 
-  '@effect/vitest@4.0.0-beta.97':
-    resolution: {integrity: sha512-1dH6LBWSZyqnTV7ZO+yIpPGPf/xd7RtFfvQ4ZpTy9elzFN+wr1YBFpHSCr8+BfXOml6b8g9Mtj5eDy1qjbizUA==}
+  '@effect/vitest@4.0.0-beta.98':
+    resolution: {integrity: sha512-uXRPuN8Y6v43/OVmQwKOd/VFDh+dipaxGKdWPr1bdnM+4bl8NZlYYRJi5omgXLFZ6ZbleduXKcmLM3NeePe69w==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       vitest: ^4.1.10
 
   '@emmetio/abbreviation@2.3.3':
@@ -1790,89 +1821,105 @@ packages:
     resolution: {integrity: sha512-dqVSFynCox4C/J8kT16V7SIFAns0IjgLwkvYT7p8LQVmJ5OS5b6tI9IGflxTeuBS//zXeFIUbwt5dwxyZ17cnA==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-arm@1.3.2':
     resolution: {integrity: sha512-1eMLzy92I4J6rmi4mAT8yC3HxOtniyGELlzGbNMLLeqe052ahFQ0h6LFq+lh5DsDIdYViIDst08abvSbcEdLXQ==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-ppc64@1.3.2':
     resolution: {integrity: sha512-3z0NHDxD6n5I9gc05U1eW1AyRm+Gznzq3naMrthPNqE6oYykcogW0l/jfpJdjYnuNl8R7yI9pNbE1XiUeyq0Aw==}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-riscv64@1.3.2':
     resolution: {integrity: sha512-bsb4rI+NldGOsXuej2r8OdSS8+zXDVaCWxyWrcv6kneTOlgAHtZABRzBBCwdsPiD90J4myNJuHpg6kA20ImW/w==}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-s390x@1.3.2':
     resolution: {integrity: sha512-/ABshyj8gCpyIrNXnHn4LorDJ0HHm1VhXPBlxZ8zAtfVPAaSafXPGn+sUSIRiwaSBy0mmFjSjiXI5mkcwdChKQ==}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-x64@1.3.2':
     resolution: {integrity: sha512-ITPEtgffGJ0S6G9dRyw/366tJQqFRcHWPHhC+Stpg3Z8AEMrDrTr2lhdz4f/Y/HMbRh//7Z5mBzEpVdi62Oc3w==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linuxmusl-arm64@1.3.2':
     resolution: {integrity: sha512-zE9EdiUzUmg5mDT5a1rk5fYJ6GWPloTwWBYDS14naqHsL+EaMpDj1AWnpLgh3u0YCORv2Tt50wrcrpYqkP97Kw==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-libvips-linuxmusl-x64@1.3.2':
     resolution: {integrity: sha512-m0lrLiUt+lBYnCFr8qV/65yMR4E/c7/wf78I5eKTdkEakFAlZ9QlzEM3QIhhAwVeUhLAHLcCq7a7Vszq/oFNZQ==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-linux-arm64@0.35.3':
     resolution: {integrity: sha512-QgKDspHPnrU+GQ55XPhGwyhC8acLVOOSyAvo1oVfFmrIXLkDNmGWzAfDZ4xK8oSA1qBQrALcHX0G5UZni/SuFQ==}
     engines: {node: '>=20.9.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-arm@0.35.3':
     resolution: {integrity: sha512-affVWCTLooy8TSxbDx2qkzuDeaWLNVBA+P//FNBirHsXpP2fuBhk5AuboYUnrDnzoXes8GFjpTx0SBFOCRg+FA==}
     engines: {node: '>=20.9.0'}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-ppc64@0.35.3':
     resolution: {integrity: sha512-sMd8rDxmpLOwv/7N44klFjOD5DUO7FLdjiXDI0hoxYaf7Ar262dQIEkosE98bps+5HPLtp/EvNqeqQtOycP/IA==}
     engines: {node: '>=20.9.0'}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-riscv64@0.35.3':
     resolution: {integrity: sha512-0Eob78yjlYPfL5vMNWAW55l3R9Y6BQS/gOfe0ZcP9mEz9ohhKSt4im1hayiknXgf8AWrFqMvJcKIdmLmEe7yeQ==}
     engines: {node: '>=20.9.0'}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-s390x@0.35.3':
     resolution: {integrity: sha512-KgAxQ0DxpNOq1rG2t5cgTgShJFGSuU7XO45cqC+1NVOuZnP6tlgZRuSYOfNupGkHID0o3cJOsw4DVeJpMovcGw==}
     engines: {node: '>=20.9.0'}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-x64@0.35.3':
     resolution: {integrity: sha512-8pqvxubL2PGdhlPy6GLqzDYMUjyRmKAwKHYKixpdJYBUK7PJ0C029XdsnpFIdgRZG68fZiGdHVWcKPvtiPB4cA==}
     engines: {node: '>=20.9.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linuxmusl-arm64@0.35.3':
     resolution: {integrity: sha512-Vz0iQjzzcSX3HCbfwFfCSG/9SCIqyO0mH2sXyiHaAYfBk0cRsCWXRyQYX0ovCK/PAQBbTzQ0dsPQHh5MAFL59w==}
     engines: {node: '>=20.9.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-linuxmusl-x64@0.35.3':
     resolution: {integrity: sha512-6O1NPKcDVj9QEdg7Hx549EX8U0rp6yXQERqru6yRN7fGBn32UvIRJUlWnk+8xDCiG76hXVBbX82NZ/ZKr0euIg==}
     engines: {node: '>=20.9.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-wasm32@0.35.3':
     resolution: {integrity: sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==}
@@ -2184,65 +2231,49 @@ packages:
     engines: {node: '>=8.0.0'}
 
   '@opentui/core-darwin-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-sDRSD1BY0O8M5krohikseLRu1nLxhtlx5vcdBwvujDmbxP1R2+mAbXxp8/N+z80Pg2rGehkM2aOqexWQnqqTug==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-sDRSD1BY0O8M5krohikseLRu1nLxhtlx5vcdBwvujDmbxP1R2+mAbXxp8/N+z80Pg2rGehkM2aOqexWQnqqTug==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [arm64]
     os: [darwin]
 
   '@opentui/core-darwin-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-5C9sISk7gpVxWc5lGcm6kQ5dn3pgDiHCCeAbg4JSAR7BRRb8ParlVwkXehjSpCLotxjnQe/uuzGcqNlLXdnAhQ==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-5C9sISk7gpVxWc5lGcm6kQ5dn3pgDiHCCeAbg4JSAR7BRRb8ParlVwkXehjSpCLotxjnQe/uuzGcqNlLXdnAhQ==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-darwin-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [x64]
     os: [darwin]
 
   '@opentui/core-linux-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-na2vSbKtgf3M2IQdgEb8j723r/A3Z0agQ+TdmTmj2MhGNJWQ1z9+L9igEjWgo4Lccrq7k0bI7pVN0OtZ7VyrdA==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-na2vSbKtgf3M2IQdgEb8j723r/A3Z0agQ+TdmTmj2MhGNJWQ1z9+L9igEjWgo4Lccrq7k0bI7pVN0OtZ7VyrdA==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [arm64]
     os: [linux]
 
   '@opentui/core-linux-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-LwXNEJZeQ6m44l4/YfHx+ZLvGENdAU1PG0qSpdSZjQs5ahXOREofd71JUah1FaJSRaffVrmvevvZQubllKpQhQ==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-LwXNEJZeQ6m44l4/YfHx+ZLvGENdAU1PG0qSpdSZjQs5ahXOREofd71JUah1FaJSRaffVrmvevvZQubllKpQhQ==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-linux-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [x64]
     os: [linux]
 
   '@opentui/core-win32-arm64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-CQcY3QV5eMQ4lpwyyfWCVyhLRsj72LJIJgR2eAN6Wu8p5nQC0skDX+pIFxd3rPICWumsZte4Z+uze7Qk9S2+0A==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-CQcY3QV5eMQ4lpwyyfWCVyhLRsj72LJIJgR2eAN6Wu8p5nQC0skDX+pIFxd3rPICWumsZte4Z+uze7Qk9S2+0A==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-arm64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [arm64]
     os: [win32]
 
   '@opentui/core-win32-x64@https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-pbrfcTQsjlBtbRdF5G/SSN2V6nBv4V46Kdt/1018kF4XDU3FiXB6jRpwKit8L59r7uAk7tS9e4Na6E0F2fZCag==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-pbrfcTQsjlBtbRdF5G/SSN2V6nBv4V46Kdt/1018kF4XDU3FiXB6jRpwKit8L59r7uAk7tS9e4Na6E0F2fZCag==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core-win32-x64@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     cpu: [x64]
     os: [win32]
 
   '@opentui/core@https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-Csyb9l8o5t38v8xsUItO5hBijlVlQ3nM97JNI9mxfI886zyvGviRd14IuDN6r+XnONoDNhXyElRFDHGGI4SjjQ==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-Csyb9l8o5t38v8xsUItO5hBijlVlQ3nM97JNI9mxfI886zyvGviRd14IuDN6r+XnONoDNhXyElRFDHGGI4SjjQ==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/core@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     peerDependencies:
       web-tree-sitter: 0.25.10
 
   '@opentui/react@https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e':
-    resolution:
-      integrity: sha512-ilsM8JOg52QUuuaEW5Crnr38HER7rqMzVQ2+1H485Cmbvfx4pFrhuvgEV+cHV6eGnFXE2PTtIn5464t8GqveUg==
-      tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e
+    resolution: {integrity: sha512-ilsM8JOg52QUuuaEW5Crnr38HER7rqMzVQ2+1H485Cmbvfx4pFrhuvgEV+cHV6eGnFXE2PTtIn5464t8GqveUg==, tarball: https://pkg.pr.new/anomalyco/opentui/@opentui/react@367a94087821b3b5feedd35bbb57df43b10a286e}
     version: 0.1.74
     peerDependencies:
       react: '>=19.0.0'
@@ -2299,48 +2330,56 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-parser/binding-linux-arm64-musl@0.127.0':
     resolution: {integrity: sha512-EoTCZneNFU/P2qrpEM+RHmQwt+CvDkyGESG6qhr7KaegXLZwePfbrkCDfAk8/rhxbDUVGsZILX+2tqPzFtoFWA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-parser/binding-linux-ppc64-gnu@0.127.0':
     resolution: {integrity: sha512-zALjmZYgxFLHjXeudcDF0xFGNydTAtkAeXAr2EuC17ywCyFxcmQra4w0BMde0Yi/re4Bi4iwEoEXtYN7l6eBLQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-parser/binding-linux-riscv64-gnu@0.127.0':
     resolution: {integrity: sha512-fPP8M6zQLS7Jz7o9d5ArUSuAuSK3e+WCYVrCpdzeCOejidtZExJ9tjhDrAd3HEPqARBCPmdpqxESPFqy44vkBQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-parser/binding-linux-riscv64-musl@0.127.0':
     resolution: {integrity: sha512-7IcC4Ao02oGpfnjt+X/oF4U2mllo2qoSkw5xxiXNKL9MCTsTiAC6616beOuehdxGcnz1bRoPC1RQ2f1GQDdN+g==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [riscv64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-parser/binding-linux-s390x-gnu@0.127.0':
     resolution: {integrity: sha512-pbXIhiNFHoqWeqDNLiJ9JkpHz1IM9k4DXa66x+1GTWMG7iLxtkXgE53iiuKSXwmk3zIYmaPVfBvgcAhS583K4Q==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-parser/binding-linux-x64-gnu@0.127.0':
     resolution: {integrity: sha512-MYCguB9RvBvlSd6gbuNI7QwiLoCCAlGnlRJFPrzLI6U1/9wkC/WK6LtBAUln55H1Ctqw45PWmqrobKoMhsYQzQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-parser/binding-linux-x64-musl@0.127.0':
     resolution: {integrity: sha512-5eY0B/bxf1xIUxb4NOTvOI3KWtBQfPWYyKAzgcrCt0mDibSZygVpO1Pz8bkeiSZ5Jj9+M09dkggG3H8I5d0Uyg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-parser/binding-openharmony-arm64@0.127.0':
     resolution: {integrity: sha512-Gld0ajrFTUXNtdw20fVBuTQx66FA75nIVg+//pPfR3sXkuABB4mTBhl3r9JNzrJpgW//qiwxf0nWXUWGJSL3UQ==}
@@ -2416,41 +2455,49 @@ packages:
     resolution: {integrity: sha512-//TcHVhrChyw5RYtgts6WO7KcWq9387c1Z5Zvhqpk/ktAbyaRYgBZrpSY1GDCFq50ASt6B6jhh+JxB1rB45IAg==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-resolver/binding-linux-arm64-musl@11.23.0':
     resolution: {integrity: sha512-ZFqlwiTf7CXLLSGyAR9tYiO33LiaeIEXW+xm42d8mnUGpDgPltyrCGYtQezyMMEXvjhOgCz1X+i7sbDTJEx+bg==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-resolver/binding-linux-ppc64-gnu@11.23.0':
     resolution: {integrity: sha512-oZ5LeN5+H1R19dRjTAxKrxQguH+AsemHcnthEfFxf4OjmBSty2doHLeSmMunKy3zpTHJQ3lh3Af+dNS+W6dYeA==}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-resolver/binding-linux-riscv64-gnu@11.23.0':
     resolution: {integrity: sha512-O4ciFDyX5ebQd0qkb1bjAIg8IEfiLT03GbSeylwlwlUMK9KwBWaALwrxSbc0Msaz4U6iPj+T9eRXpD5mxBfmvA==}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-resolver/binding-linux-riscv64-musl@11.23.0':
     resolution: {integrity: sha512-P3o8Y9kISYjcxadmbO+94ThRwLhwGuDAbA7dcdd4+YLpfeF+mmobz8fXf4NmSdfSqjyRSkceJDBRZha9NVYkiQ==}
     cpu: [riscv64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-resolver/binding-linux-s390x-gnu@11.23.0':
     resolution: {integrity: sha512-oj03m1E3RmTFczKhcKJDzHaEDKJnPIsDcQFVxBJsSdXGSuIPdt5TvcM332FfMQgzI6yDJqyl4InrnFfXrmUTKQ==}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-resolver/binding-linux-x64-gnu@11.23.0':
     resolution: {integrity: sha512-BqJxbSC8FdP7mSuSpRePTGHm0hXWV+dfz//f7SjsteZncLaBgWTBmi/OZNv7sX6CyG/Pt/eJkPorP+DkMOhMwQ==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@oxc-resolver/binding-linux-x64-musl@11.23.0':
     resolution: {integrity: sha512-utmw+VmUrW4K8LI5/6jhg4aGYKJHOIjQ9syYOOA6pF3w7haKu4r4enTe2U0C04/HbUvkq/Zif43xFsKW1Pnq9w==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@oxc-resolver/binding-openharmony-arm64@11.23.0':
     resolution: {integrity: sha512-V6lbRrthHa4TbvsLjPtg+EkXT1tRY+s4I8rYLXUfiHlZzGx3sLv1EH9CEOOevjvUYHLsbe/gqCIc73XnQfPb9A==}
@@ -3273,36 +3320,42 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-arm64-musl@1.1.5':
     resolution: {integrity: sha512-lAryqH7IteztmCXQXk0etKj4wBQ7Gx5S6LjKhsgp9zb8I5bsuvU/2llH1hDQcjsFeqIsovMVN339/8pUDDBXxA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-linux-ppc64-gnu@1.1.5':
     resolution: {integrity: sha512-fsK/sNBnxzBlL4O1JNrZakVQxPspqpED5dLtNsZS9oOKmtSpdNIzxH2kkol5HYTWJN47sE20ztMJPxfZ89qGOg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-s390x-gnu@1.1.5':
     resolution: {integrity: sha512-gLYb4BIadlfTOYT5gO503n8zQjXflgzpD0FcyKh0Mzx3rqCZKnHoJWV9xe1KXUJ5lx2JfcSHr/mhzS0PC/McAA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-gnu@1.1.5':
     resolution: {integrity: sha512-FjcpEKUyJygHgs1o50VYNvkt5+7Le/VEdYt0AkRpkL33MnyQfwr8l5mXwMmfmTbyMPr5vJLC+8/Gd9gXnwU1QQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.1.5':
     resolution: {integrity: sha512-Me+PfPI2TMeOQk0gYWfLQZtTktrmzbr8cDboqX83XKc7UrgAi55gF+2dUkWdxd19n55Essp2yeca+O9N5rBxHg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-openharmony-arm64@1.1.5':
     resolution: {integrity: sha512-yc5WrLzXks6zCQfn9Oxr8pORKyl/pF+QjHmW/Qx3qu0oyrrNC+y2JLTU1E2rcWYAmzlnqngWXHQjy51VzW70Vw==}
@@ -3572,24 +3625,28 @@ packages:
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@tailwindcss/oxide-linux-arm64-musl@4.3.2':
     resolution: {integrity: sha512-J5Nuk0uZQIiMTJj3LEx4sAA9tMFUoXQZFv1J6An+QGYe53HKRJuFDi0rpq/tuouCZeAbOBY3kQ6g8qeD4TUjtA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@tailwindcss/oxide-linux-x64-gnu@4.3.2':
     resolution: {integrity: sha512-kqCZpSKOBEJO4mz7OqWoofBZeXTAwaVGPj0ErAj7CojmhKpWVWVOnrt9dE8odoIraZq4oj3ausM37kXi+Tow8w==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@tailwindcss/oxide-linux-x64-musl@4.3.2':
     resolution: {integrity: sha512-cixpqbh2toJDmkuCRI68nXA8ZxNmdK9Y+9v5h3MC3ZQKy/0BO8AWzlkWyRM7JAFSGBlfig4YVTPsK6MVgqz1uw==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@tailwindcss/oxide-wasm32-wasi@4.3.2':
     resolution: {integrity: sha512-4ec2Z/LOmRsAgU23CS4xeJfcJlmRg94A/XrbGRCF1gyU/zdDfRLYDVsS+ynSZCmGNxQ1jQriQOKMQeQxBA3Isw==}
@@ -4028,51 +4085,61 @@ packages:
     resolution: {integrity: sha512-zJc0H99FEPoFfSrNpa91HYfxzfAJCr502oxNK1cfdC9hlaFI43RT+JFCann9JUgZmLzzntChHyn13Sgn9ljHNg==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-arm64-musl@1.12.2':
     resolution: {integrity: sha512-KQ3Lki6l+Pz1k/eBipN41ES+YUK30beLGb9YqcB1O542cyLCNE6GaxrfcY3T6EezmGGk84wb5XyO9loTM9tkcA==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@unrs/resolver-binding-linux-loong64-gnu@1.12.2':
     resolution: {integrity: sha512-3SJGEh1DborhG6pyxvhPzCT4bbSIVihsvgJc13P1bHG7KLdNDaF9T3gsTwFc7Jw/5Y5/iWOjkEx7Zy0NvCGX3Q==}
     cpu: [loong64]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-loong64-musl@1.12.2':
     resolution: {integrity: sha512-jiuG/Obbel7uw1PwHNFfrkiKhLAF6mnyZ6aWlOAVN9WqKm8v0OFGnciJIHu8+CMvXLQ8AD51LPzAoUfT21D5Ew==}
     cpu: [loong64]
     os: [linux]
+    libc: [musl]
 
   '@unrs/resolver-binding-linux-ppc64-gnu@1.12.2':
     resolution: {integrity: sha512-q7xRvVpmcfeL+LlZg8Pbbo6QaTZwDU5BaGZbwfhkEsXJn3Was8xYfE0RBH266xZt0rM6B7i8xAYIvjthuUIWHg==}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-riscv64-gnu@1.12.2':
     resolution: {integrity: sha512-0CVdx6lcnT3Q9inOH8tsMIOJ6ImndllMjqJHg8RLVdB7Vq4SfkEXl9mCSsVNuNA4MCYycRicCUxPCabVHJRr6A==}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-riscv64-musl@1.12.2':
     resolution: {integrity: sha512-iOwlRo9vnp6R6ohHQS11n0NnfdXx/omhkocmIfaPRpQhKZ+3BDMkkdRVh53qjkFkpPddf+FETA28NwGN7l5l+w==}
     cpu: [riscv64]
     os: [linux]
+    libc: [musl]
 
   '@unrs/resolver-binding-linux-s390x-gnu@1.12.2':
     resolution: {integrity: sha512-HYJtLfXq94q8iZNFT1lknx258wlkkWhZeUXJRqzKBBUJ00CvZ+N33zgbCqimLjsyw5Va6uUxhVa12mI+kaveEw==}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-x64-gnu@1.12.2':
     resolution: {integrity: sha512-mPsUhunKKDih5O96Y6enDQyHc1SqBPlY1E/SfMWDM3EdJ95Z9CArPeCVwCCqbP45ljvivdEk8Fxn+SIb1rDAJQ==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@unrs/resolver-binding-linux-x64-musl@1.12.2':
     resolution: {integrity: sha512-azrt6+5ydLd8Vt210AAFis/lZevSfPw93EJRIJG+xPu4WCJ8K0kppCTpMyLPcKT7H15M4Jnt2tMp5bOvCkRC6A==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@unrs/resolver-binding-openharmony-arm64@1.12.2':
     resolution: {integrity: sha512-YZ9hP4O0X9PQb8eO980qmLNGH4zT3I9+SZTdt0Pr0YyuGQhYKoOZkV02VzrzyOZJ5xIJ3UFIenKkUkGg8GjgWQ==}
@@ -4670,10 +4737,13 @@ packages:
     resolution: {integrity: sha512-9S6m9Sukh1cZNknO1CWAr2QAWsbKLafQiyM5gZ7VgXHeuaoUwffKN4q6NC4A/Mf9iiPlOXQEKW/Mv/mh9/3YFA==}
     hasBin: true
 
+  discontinuous-range@1.0.0:
+    resolution: {integrity: sha512-c68LpLbO+7kP/b1Hr1qs8/BJ09F5khZGTxqxZuhzxpmwJKOgRFHJWIb9/KmqnqHhLdO55aOxFH/EGBvUQbL/RQ==}
+
   distilled-aws@0.1.1:
     resolution: {integrity: sha512-FloVUMgHCvdGjxGBc6VBWEMkY/nDeK8ItJhRBfKxXepG8G0FXCQ+oUT48q+12ytEtyONesZ9prUvrBshb8Drbg==}
     peerDependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -4706,8 +4776,14 @@ packages:
     resolution: {integrity: sha512-2QF/g9/zTaPDc3BjNcVTGoBbXBgYfMTTceLaYcFJ/W9kggFUkhxD/hMEeuLKbugyef9SqAx8cpgwlIP/jinUTA==}
     engines: {node: '>=4'}
 
-  effect@4.0.0-beta.97:
-    resolution: {integrity: sha512-pK03HpQVxGZOWdwDAy/iwvV8u3KYcUf2mOWyWqaut2zau8V2u6ejWP7b4BELjyUIiZWW1fl/s/VJpgZUcTjThg==}
+  effect-qb@0.20.0:
+    resolution: {integrity: sha512-WmXdkLilYNS9N7fS/IjXTRv7R93aX/H0gAvNRMpt1LwLdzisCuJ8SPqEfFebbFwpkdSIV5AnKcQKvY3bkywuGg==}
+    engines: {bun: '>=1.3.5', node: '>=22'}
+    peerDependencies:
+      effect: 4.0.0-beta.98
+
+  effect@4.0.0-beta.98:
+    resolution: {integrity: sha512-oz+bsG5h+6RNrw4t5GMfQrk/xBS8ROoqkYsuvRhBr5O7mCOrpvH/hbw+QrDzvKIpX4HJClwm86F94c87W0sJxg==}
 
   electron-to-chromium@1.5.389:
     resolution: {integrity: sha512-cEto7aeOqBfU1D+c5py5pE+ooscKE75JifxLBdFUZsqAxRS6y7kebtxAZvICszSl05gPjYHDTjY+lXpyGvpJbg==}
@@ -5471,24 +5547,28 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.32.0:
     resolution: {integrity: sha512-UpQkoenr4UJEzgVIYpI80lDFvRmPVg6oqboNHfoH4CQIfNA+HOrZ7Mo7KZP02dC6LjghPQJeBsvXhJod/wnIBg==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.32.0:
     resolution: {integrity: sha512-V7Qr52IhZmdKPVr+Vtw8o+WLsQJYCTd8loIfpDaMRWGUZfBOYEJeyJIkqGIDMZPwPx24pUMfwSxxI8phr/MbOA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.32.0:
     resolution: {integrity: sha512-bYcLp+Vb0awsiXg/80uCRezCYHNg1/l3mt0gzHnWV9XP1W5sKa5/TCdGWaR/zBM2PeF/HbsQv/j2URNOiVuxWg==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.32.0:
     resolution: {integrity: sha512-8SbC8BR40pS6baCM8sbtYDSwEVQd4JlFTOlaD3gWGHfThTcABnNDBda6eTZeqbofalIJhFx0qKzgHJmcPTnGdw==}
@@ -5791,6 +5871,9 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
+  moo@0.5.3:
+    resolution: {integrity: sha512-m2fmM2dDm7GZQsY7KK2cme8agi+AAljILjQnof7p1ZMDe6dQ4bdnSMx0cPppudoeNv5hEFQirN6u+O4fDE0IWA==}
+
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
     engines: {node: '>=4'}
@@ -5830,6 +5913,10 @@ packages:
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
+
+  nearley@2.20.1:
+    resolution: {integrity: sha512-+Mc8UaAebFzgV+KpI5n7DasuuQCHA89dmwm7JXw3TV43ukfNQ9DnBH3Mdb2g/I4Fdxc26pwimBWvjIw0UAILSQ==}
+    hasBin: true
 
   neotraverse@0.6.18:
     resolution: {integrity: sha512-Z4SmBUweYa09+o6pG+eASabEpP6QkQ70yHj351pQoEXIs8uHbaU2DWVmzBANKgflPa47A50PtB2+NgRpQvr7vA==}
@@ -6038,6 +6125,9 @@ packages:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
 
+  pgsql-ast-parser@12.0.2:
+    resolution: {integrity: sha512-1WWa96Sw6h4uv9GLw98EzH/+xoBTC8j2TwV/AMW3E+Ir/fHOu/jLLbj6kPiz3y2bGISTKNYvKWwHoqvQ5FLuAw==}
+
   piccolore@0.1.3:
     resolution: {integrity: sha512-o8bTeDWjE086iwKrROaDf31K0qC/BENdm15/uH9usSC/uZjJOKb2YGiVHfLY4GhwsERiPI1jmwI2XrA7ACOxVw==}
 
@@ -6204,6 +6294,13 @@ packages:
   radix3@1.1.2:
     resolution: {integrity: sha512-b484I/7b8rDEdSDKckSSBA8knMpcdsXudlE/LNL639wFoHKwLbEkQFZHWEYwDC0wa0FKUcCY+GAF73Z7wxNVFA==}
 
+  railroad-diagrams@1.0.0:
+    resolution: {integrity: sha512-cz93DjNeLY0idrCNOH6PviZGRN9GJhsdm9hpn1YCS879fj4W+x5IFJhhkRZcwVgMmFF7R82UA/7Oh+R8lLZg6A==}
+
+  randexp@0.4.6:
+    resolution: {integrity: sha512-80WNmd9DA0tmZrw9qQa62GPPWfuXJknrmVmLcxvq4uZBdYqb1wYoKTmnlGUchvVWe0XiLupYkBoXVOxz3C8DYQ==}
+    engines: {node: '>=0.12'}
+
   react-day-picker@10.0.1:
     resolution: {integrity: sha512-eNh6BlwcYInWaJtRv18mXQ06Ys/H6rdTZAnTaSdOYJuTpwP1JMCHNd1FDRadA+gbeinq+psdULN5Xnowy9mV8w==}
     engines: {node: '>=18'}
@@ -6285,6 +6382,10 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  react@18.3.1:
+    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
+    engines: {node: '>=0.10.0'}
 
   react@19.2.7:
     resolution: {integrity: sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ==}
@@ -6415,6 +6516,10 @@ packages:
     resolution: {integrity: sha512-TyeJ1zif53BPfHootBGwPRYT1RUt6oGWsaQr8UyZW/eAm9bKoijtvruSDEmZHm92CwS9nj7/fWttqPCgzep8CA==}
     engines: {node: '>= 0.4'}
     hasBin: true
+
+  ret@0.1.15:
+    resolution: {integrity: sha512-TTlYpa+OL+vMMNG24xSlQGEJ3B/RzEfUlLct7b5G/ytav+wPrplCpVMFuwzXbkecJrb6IYo1iFb0S9v37754mg==}
+    engines: {node: '>=0.12'}
 
   retext-latin@4.0.0:
     resolution: {integrity: sha512-hv9woG7Fy0M9IlRQloq/N6atV82NxLGveq+3H2WOi79dtIYWN8OaxogDm77f8YnVXJL2VD3bbqowu5E3EMhBYA==}
@@ -7620,12 +7725,12 @@ snapshots:
       '@babel/runtime': 7.29.7
       lodash: 4.18.1
 
-  '@atlaskit/adf-schema@56.1.3(react@19.2.7)':
+  '@atlaskit/adf-schema@56.1.3(react@18.3.1)':
     dependencies:
       '@atlaskit/adf-schema-generator': 3.1.0
       '@atlaskit/editor-prosemirror': 8.0.0
-      '@atlaskit/platform-feature-flags': 2.0.0(react@19.2.7)
-      '@atlaskit/tmp-editor-statsig': 124.1.0(react@19.2.7)
+      '@atlaskit/platform-feature-flags': 2.0.0(react@18.3.1)
+      '@atlaskit/tmp-editor-statsig': 124.1.0(react@18.3.1)
       '@babel/runtime': 7.29.7
       css-color-names: 0.0.4
       linkify-it: 5.0.1
@@ -7633,38 +7738,43 @@ snapshots:
     transitivePeerDependencies:
       - react
 
-  '@atlaskit/adf-utils@20.3.3(react@19.2.7)':
+  '@atlaskit/adf-utils@20.3.3(react@18.3.1)':
     dependencies:
-      '@atlaskit/adf-schema': 56.1.3(react@19.2.7)
-      '@atlaskit/platform-feature-flags': 2.0.0(react@19.2.7)
-      '@atlaskit/tmp-editor-statsig': 124.1.0(react@19.2.7)
+      '@atlaskit/adf-schema': 56.1.3(react@18.3.1)
+      '@atlaskit/platform-feature-flags': 2.0.0(react@18.3.1)
+      '@atlaskit/tmp-editor-statsig': 124.1.0(react@18.3.1)
       '@babel/runtime': 7.29.7
     transitivePeerDependencies:
       - react
+
+  '@atlaskit/atlassian-context@1.0.0(react@18.3.1)':
+    dependencies:
+      '@babel/runtime': 7.29.7
+      react: 18.3.1
 
   '@atlaskit/atlassian-context@1.0.0(react@19.2.7)':
     dependencies:
       '@babel/runtime': 7.29.7
       react: 19.2.7
 
-  '@atlaskit/browser-apis@1.1.0(react@19.2.7)':
+  '@atlaskit/browser-apis@1.1.0(react@18.3.1)':
     dependencies:
       '@babel/runtime': 7.29.7
-      react: 19.2.7
+      react: 18.3.1
 
-  '@atlaskit/editor-json-transformer@9.0.2(react@19.2.7)':
+  '@atlaskit/editor-json-transformer@9.0.2(react@18.3.1)':
     dependencies:
-      '@atlaskit/adf-schema': 56.1.3(react@19.2.7)
-      '@atlaskit/adf-utils': 20.3.3(react@19.2.7)
+      '@atlaskit/adf-schema': 56.1.3(react@18.3.1)
+      '@atlaskit/adf-utils': 20.3.3(react@18.3.1)
       '@atlaskit/editor-prosemirror': 8.0.0
       '@babel/runtime': 7.29.7
       lodash: 4.18.1
     transitivePeerDependencies:
       - react
 
-  '@atlaskit/editor-markdown-transformer@6.0.1(react@19.2.7)':
+  '@atlaskit/editor-markdown-transformer@6.0.1(react@18.3.1)':
     dependencies:
-      '@atlaskit/adf-schema': 56.1.3(react@19.2.7)
+      '@atlaskit/adf-schema': 56.1.3(react@18.3.1)
       '@atlaskit/editor-prosemirror': 8.0.0
       '@babel/runtime': 7.29.7
       markdown-it: 14.2.0
@@ -7686,9 +7796,9 @@ snapshots:
       prosemirror-utils: 1.2.2(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)
       prosemirror-view: 1.41.5
 
-  '@atlaskit/feature-gate-js-client@6.0.0(react@19.2.7)':
+  '@atlaskit/feature-gate-js-client@6.0.0(react@18.3.1)':
     dependencies:
-      '@atlaskit/atlassian-context': 1.0.0(react@19.2.7)
+      '@atlaskit/atlassian-context': 1.0.0(react@18.3.1)
       '@babel/runtime': 7.29.7
       '@statsig/client-core': 3.33.3
       '@statsig/js-client': 3.33.3
@@ -7696,40 +7806,40 @@ snapshots:
     transitivePeerDependencies:
       - react
 
-  '@atlaskit/interaction-context@4.0.0(react@19.2.7)':
+  '@atlaskit/interaction-context@4.0.0(react@18.3.1)':
     dependencies:
       '@babel/runtime': 7.29.7
-      react: 19.2.7
+      react: 18.3.1
 
-  '@atlaskit/platform-feature-flags@2.0.0(react@19.2.7)':
+  '@atlaskit/platform-feature-flags@2.0.0(react@18.3.1)':
     dependencies:
-      '@atlaskit/feature-gate-js-client': 6.0.0(react@19.2.7)
+      '@atlaskit/feature-gate-js-client': 6.0.0(react@18.3.1)
       '@babel/runtime': 7.29.7
     transitivePeerDependencies:
       - react
 
-  '@atlaskit/react-ufo@7.1.0(react@19.2.7)':
+  '@atlaskit/react-ufo@7.1.0(react@18.3.1)':
     dependencies:
       '@atlaskit/atlassian-context': 1.0.0(react@19.2.7)
-      '@atlaskit/browser-apis': 1.1.0(react@19.2.7)
-      '@atlaskit/feature-gate-js-client': 6.0.0(react@19.2.7)
-      '@atlaskit/interaction-context': 4.0.0(react@19.2.7)
-      '@atlaskit/platform-feature-flags': 2.0.0(react@19.2.7)
+      '@atlaskit/browser-apis': 1.1.0(react@18.3.1)
+      '@atlaskit/feature-gate-js-client': 6.0.0(react@18.3.1)
+      '@atlaskit/interaction-context': 4.0.0(react@18.3.1)
+      '@atlaskit/platform-feature-flags': 2.0.0(react@18.3.1)
       '@babel/runtime': 7.29.7
       '@opentelemetry/api': 1.9.1
       bind-event-listener: 3.0.0
       bowser-ultralight: 1.0.6
-      react: 19.2.7
+      react: 18.3.1
       scheduler: 0.23.2
       uuid: 11.1.1
 
-  '@atlaskit/tmp-editor-statsig@124.1.0(react@19.2.7)':
+  '@atlaskit/tmp-editor-statsig@124.1.0(react@18.3.1)':
     dependencies:
-      '@atlaskit/feature-gate-js-client': 6.0.0(react@19.2.7)
-      '@atlaskit/platform-feature-flags': 2.0.0(react@19.2.7)
-      '@atlaskit/react-ufo': 7.1.0(react@19.2.7)
+      '@atlaskit/feature-gate-js-client': 6.0.0(react@18.3.1)
+      '@atlaskit/platform-feature-flags': 2.0.0(react@18.3.1)
+      '@atlaskit/react-ufo': 7.1.0(react@18.3.1)
       '@babel/runtime': 7.29.7
-      react: 19.2.7
+      react: 18.3.1
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -8236,9 +8346,9 @@ snapshots:
       '@edge-runtime/primitives': 6.0.0
     optional: true
 
-  '@effect/atom-react@4.0.0-beta.97(effect@4.0.0-beta.97)(react@19.2.7)(scheduler@0.27.0)':
+  '@effect/atom-react@4.0.0-beta.98(effect@4.0.0-beta.98)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       react: 19.2.7
       scheduler: 0.27.0
 
@@ -8255,40 +8365,40 @@ snapshots:
 
   '@effect/language-service@0.86.6': {}
 
-  '@effect/openapi-generator@4.0.0-beta.97(@effect/platform-node@4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1))(effect@4.0.0-beta.97)':
+  '@effect/openapi-generator@4.0.0-beta.98(@effect/platform-node@4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1))(effect@4.0.0-beta.98)':
     dependencies:
-      '@effect/platform-node': 4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)
-      effect: 4.0.0-beta.97
+      '@effect/platform-node': 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
+      effect: 4.0.0-beta.98
       swagger2openapi: 7.0.8
     transitivePeerDependencies:
       - encoding
 
-  '@effect/platform-browser@4.0.0-beta.97(effect@4.0.0-beta.97)':
+  '@effect/platform-browser@4.0.0-beta.98(effect@4.0.0-beta.98)':
     dependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       multipasta: 0.2.8
 
-  '@effect/platform-bun@4.0.0-beta.97(effect@4.0.0-beta.97)':
+  '@effect/platform-bun@4.0.0-beta.98(effect@4.0.0-beta.98)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.97(effect@4.0.0-beta.97)
-      effect: 4.0.0-beta.97
+      '@effect/platform-node-shared': 4.0.0-beta.98(effect@4.0.0-beta.98)
+      effect: 4.0.0-beta.98
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node-shared@4.0.0-beta.97(effect@4.0.0-beta.97)':
+  '@effect/platform-node-shared@4.0.0-beta.98(effect@4.0.0-beta.98)':
     dependencies:
       '@types/ws': 8.18.1
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.0.0-beta.97(effect@4.0.0-beta.97)(ioredis@5.11.1)':
+  '@effect/platform-node@4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)':
     dependencies:
-      '@effect/platform-node-shared': 4.0.0-beta.97(effect@4.0.0-beta.97)
-      effect: 4.0.0-beta.97
+      '@effect/platform-node-shared': 4.0.0-beta.98(effect@4.0.0-beta.98)
+      effect: 4.0.0-beta.98
       ioredis: 5.11.1
       mime: 4.1.0
       undici: 8.7.0
@@ -8296,10 +8406,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@effect/sql-libsql@4.0.0-beta.97(effect@4.0.0-beta.97)':
+  '@effect/sql-libsql@4.0.0-beta.98(effect@4.0.0-beta.98)':
     dependencies:
       '@libsql/client': 0.17.4
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8335,9 +8445,9 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.19.0
       '@effect/tsgo-win32-x64': 0.19.0
 
-  '@effect/vitest@4.0.0-beta.97(effect@4.0.0-beta.97)(vitest@4.1.10)':
+  '@effect/vitest@4.0.0-beta.98(effect@4.0.0-beta.98)(vitest@4.1.10)':
     dependencies:
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       vitest: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.8.9)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.0)(yaml@2.8.3))
 
   '@emmetio/abbreviation@2.3.3':
@@ -11399,8 +11509,7 @@ snapshots:
 
   commander@11.1.0: {}
 
-  commander@2.20.3:
-    optional: true
+  commander@2.20.3: {}
 
   comment-parser@1.4.7: {}
 
@@ -11517,7 +11626,9 @@ snapshots:
 
   direction@2.0.1: {}
 
-  distilled-aws@0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.97):
+  discontinuous-range@1.0.0: {}
+
+  distilled-aws@0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98):
     dependencies:
       '@aws-crypto/crc32': 5.2.0
       '@aws-crypto/util': 5.2.0
@@ -11527,7 +11638,7 @@ snapshots:
       '@smithy/types': 4.16.1
       '@smithy/util-base64': 4.5.8
       aws4fetch: 1.0.20
-      effect: 4.0.0-beta.97
+      effect: 4.0.0-beta.98
       fast-xml-parser: 5.9.3
 
   doctrine@3.0.0:
@@ -11560,7 +11671,12 @@ snapshots:
 
   dset@3.1.4: {}
 
-  effect@4.0.0-beta.97:
+  effect-qb@0.20.0(effect@4.0.0-beta.98):
+    dependencies:
+      effect: 4.0.0-beta.98
+      pgsql-ast-parser: 12.0.2
+
+  effect@4.0.0-beta.98:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
@@ -13083,6 +13199,8 @@ snapshots:
 
   minipass@7.1.3: {}
 
+  moo@0.5.3: {}
+
   mri@1.2.0: {}
 
   mrmime@2.0.1: {}
@@ -13116,6 +13234,13 @@ snapshots:
   natural-compare-lite@1.4.0: {}
 
   natural-compare@1.4.0: {}
+
+  nearley@2.20.1:
+    dependencies:
+      commander: 2.20.3
+      moo: 0.5.3
+      railroad-diagrams: 1.0.0
+      randexp: 0.4.6
 
   neotraverse@0.6.18: {}
 
@@ -13378,6 +13503,11 @@ snapshots:
 
   pathval@2.0.1: {}
 
+  pgsql-ast-parser@12.0.2:
+    dependencies:
+      moo: 0.5.3
+      nearley: 2.20.1
+
   piccolore@0.1.3: {}
 
   picocolors@1.1.1: {}
@@ -13584,6 +13714,13 @@ snapshots:
 
   radix3@1.1.2: {}
 
+  railroad-diagrams@1.0.0: {}
+
+  randexp@0.4.6:
+    dependencies:
+      discontinuous-range: 1.0.0
+      ret: 0.1.15
+
   react-day-picker@10.0.1(@types/react@19.2.17)(react@19.2.7):
     dependencies:
       '@date-fns/tz': 1.5.0
@@ -13682,6 +13819,10 @@ snapshots:
       tslib: 2.8.1
     optionalDependencies:
       '@types/react': 19.2.17
+
+  react@18.3.1:
+    dependencies:
+      loose-envify: 1.4.0
 
   react@19.2.7: {}
 
@@ -13876,6 +14017,8 @@ snapshots:
       is-core-module: 2.16.2
       path-parse: 1.0.7
       supports-preserve-symlinks-flag: 1.0.0
+
+  ret@0.1.15: {}
 
   retext-latin@4.0.0:
     dependencies:

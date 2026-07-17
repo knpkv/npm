@@ -31,20 +31,10 @@ export class DatabaseInitializationError extends Schema.TaggedErrorClass<Databas
     operation: Schema.Literals([
       "connect",
       "configure",
-      "migrate",
-      "verify-ledger",
-      "verify-pragmas"
+      "initialize-schema",
+      "verify-pragmas",
+      "verify-schema"
     ])
-  }
-) {}
-
-/** Raised when the migration ledger is not an exact supported prefix or final ledger. */
-export class MigrationLedgerError extends Schema.TaggedErrorClass<MigrationLedgerError>()(
-  "MigrationLedgerError",
-  {
-    actual: Schema.Array(Schema.String),
-    expected: Schema.Array(Schema.String),
-    phase: Schema.Literals(["before-migration", "after-migration"])
   }
 ) {}
 

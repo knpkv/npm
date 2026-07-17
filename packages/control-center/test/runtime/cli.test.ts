@@ -1,6 +1,4 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
-import * as LibsqlMigrator from "@effect/sql-libsql/LibsqlMigrator"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
 import * as Effect from "effect/Effect"
@@ -15,7 +13,6 @@ import { classifyControlCenterCliArguments } from "../../src/server/cliArguments
 import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "../../src/server/cliConfiguration.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
-import { migration0001Core } from "../../src/server/persistence/migrations/0001_core.js"
 
 const DATA_ROOT_MARKER_V1_CONTENT = "@knpkv/control-center:data-root:v1\n"
 const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
@@ -413,7 +410,7 @@ describe("Control Center CLI", () => {
       const prepared = yield* prepareControlCenterDataRoot(dataPaths)
       yield* Effect.gen(function*() {
         const database = yield* Database
-        yield* database.validateMigrationLedger
+        yield* database.validateSchema
       }).pipe(Effect.provide(databaseLayer(prepared.persistenceConfig)), Effect.scoped)
       const durableEntries = (yield* fileSystem.readDirectory(prepared.dataRoot))
         .filter((entry) => !entry.endsWith("-shm") && !entry.endsWith("-wal"))
@@ -1083,7 +1080,7 @@ describe("Control Center CLI", () => {
       const dataPaths = yield* decodeControlCenterDataPaths(root)
       yield* Effect.gen(function*() {
         const database = yield* Database
-        yield* database.validateMigrationLedger
+        yield* database.validateSchema
       }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
 
       yield* prepareControlCenterDataRoot(dataPaths)
@@ -1102,7 +1099,7 @@ describe("Control Center CLI", () => {
       const dataPaths = yield* decodeControlCenterDataPaths(root)
       yield* Effect.gen(function*() {
         const database = yield* Database
-        yield* database.validateMigrationLedger
+        yield* database.validateSchema
       }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
       const validPending = path.join(root, `.control-center-root.pending-${"5".repeat(32)}`)
       const invalidPending = path.join(root, `.control-center-root.pending-${"6".repeat(32)}`)
@@ -1120,11 +1117,11 @@ describe("Control Center CLI", () => {
       assert.isFalse(yield* fileSystem.exists(path.join(root, ".control-center-root")))
       yield* Effect.gen(function*() {
         const database = yield* Database
-        yield* database.validateMigrationLedger
+        yield* database.validateSchema
       }).pipe(Effect.provide(databaseLayer(dataPaths.persistenceConfig)), Effect.scoped)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects a SQLite database without the Control Center migration identity", () =>
+  it.effect("rejects a SQLite database without the exact Control Center schema", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -1138,7 +1135,7 @@ describe("Control Center CLI", () => {
       const sourcePaths = yield* decodeControlCenterDataPaths(sourceRoot)
       yield* Effect.gen(function*() {
         const database = yield* Database
-        yield* database.sql`DROP TABLE control_center_migrations`
+        yield* database.sql`DROP TABLE workspaces`
         yield* database.sql`PRAGMA wal_checkpoint(TRUNCATE)`
       }).pipe(Effect.provide(databaseLayer(sourcePaths.persistenceConfig)), Effect.scoped)
       const databasePath = path.join(root, "control-center.db")
@@ -1156,29 +1153,5 @@ describe("Control Center CLI", () => {
       assert.notInclude(yield* fileSystem.readDirectory(root), ".control-center-root")
       assert.deepStrictEqual((yield* fileSystem.readDirectory(root)).sort(), entriesBefore)
       assert.deepStrictEqual(yield* snapshotDatabaseFiles(fileSystem, path, root), databaseFilesBefore)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
-
-  it.effect("adopts a legacy database with an older supported migration prefix", () =>
-    Effect.gen(function*() {
-      const fileSystem = yield* FileSystem.FileSystem
-      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-prefix-" })
-      yield* fileSystem.chmod(root, 0o700)
-      const dataPaths = yield* decodeControlCenterDataPaths(root)
-      yield* LibsqlMigrator.run({
-        loader: LibsqlMigrator.fromRecord({ "0001_core_heads": migration0001Core }),
-        table: "control_center_migrations"
-      }).pipe(
-        Effect.provide(
-          LibsqlClient.layer({
-            concurrency: 1,
-            url: dataPaths.persistenceConfig.databaseUrl
-          })
-        ),
-        Effect.scoped
-      )
-
-      yield* prepareControlCenterDataRoot(dataPaths)
-
-      assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

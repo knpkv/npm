@@ -7,6 +7,7 @@
   },
   "references": [
     { "path": "./packages/rly/tsconfig.build.json" },
+    { "path": "./packages/control-center-sql/tsconfig.build.json" },
     { "path": "./packages/control-center/tsconfig.build.json" }
   ]
 }

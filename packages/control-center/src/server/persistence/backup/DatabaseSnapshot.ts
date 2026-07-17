@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 
-import { EXPECTED_MIGRATIONS, MIGRATION_LEDGER_TABLE } from "../migrations/index.js"
-import { BackupBlobEntryV1, BackupBoundaryV1, type BackupManifestV1, BackupMigrationEntry } from "./BackupManifest.js"
+import { CURRENT_SCHEMA_VERSION, validateCurrentSchema } from "../schema.js"
+import { BackupBlobEntryV1, BackupBoundaryV1, type BackupManifestV1 } from "./BackupManifest.js"
 import { BackupIntegrityError, BackupManifestError, BackupSqlError } from "./errors.js"
 
 const TableNameRow = Schema.Struct({ name: Schema.String })
@@ -16,7 +16,7 @@ const MaximumRow = Schema.Struct({
 export interface DatabaseSnapshotInventory {
   readonly blobs: ReadonlyArray<typeof BackupBlobEntryV1.Type>
   readonly boundary: typeof BackupBoundaryV1.Type
-  readonly migrations: ReadonlyArray<typeof BackupMigrationEntry.Type>
+  readonly schemaVersion: typeof CURRENT_SCHEMA_VERSION
 }
 
 const mapSql = <Value, Requirements>(
@@ -109,28 +109,14 @@ export const verifyDatabaseIntegrity = Effect.fn("BackupDatabase.verifyIntegrity
   }
 })
 
-/** Read and validate the exact supported migration prefix from a snapshot. */
-export const readSupportedMigrationLedger = Effect.fn("BackupDatabase.readMigrationLedger")(function*(
+/** Require the exact unstable schema from a snapshot. */
+export const readSupportedSchema = Effect.fn("BackupDatabase.readSupportedSchema")(function*(
   sql: SqlClient.SqlClient
 ) {
-  if (!(yield* tableExists(sql, MIGRATION_LEDGER_TABLE))) {
-    return yield* new BackupManifestError({ reason: "migration-ledger-mismatch" })
-  }
-  const rows = yield* mapSql(
-    "read-migration-ledger",
-    sql`SELECT migration_id AS migrationId, name
-      FROM ${sql(MIGRATION_LEDGER_TABLE)}
-      ORDER BY migration_id ASC`
-  ).pipe(
-    Effect.flatMap((value) => decodeRows(BackupMigrationEntry, value, "read-migration-ledger"))
+  yield* validateCurrentSchema(sql).pipe(
+    Effect.mapError(() => new BackupManifestError({ reason: "schema-mismatch" }))
   )
-  const isSupported = rows.length > 0 && rows.length <= EXPECTED_MIGRATIONS.length &&
-    rows.every((row, index) => {
-      const expected = EXPECTED_MIGRATIONS[index]
-      return expected !== undefined && row.migrationId === expected.id && row.name === expected.name
-    })
-  if (!isSupported) return yield* new BackupManifestError({ reason: "migration-ledger-mismatch" })
-  return rows
+  return CURRENT_SCHEMA_VERSION
 })
 
 const readBlobInventory = Effect.fn("BackupDatabase.readBlobInventory")(function*(
@@ -147,12 +133,12 @@ const readBlobInventory = Effect.fn("BackupDatabase.readBlobInventory")(function
   return rows
 })
 
-/** Read the authoritative migration, boundary, and blob inventory from one snapshot. */
+/** Read the authoritative schema, boundary, and blob inventory from one snapshot. */
 export const readDatabaseSnapshotInventory = Effect.fn("BackupDatabase.readSnapshotInventory")(function*(
   sql: SqlClient.SqlClient
 ): Effect.fn.Return<DatabaseSnapshotInventory, BackupIntegrityError | BackupManifestError | BackupSqlError> {
   yield* verifyDatabaseIntegrity(sql)
-  const migrations = yield* readSupportedMigrationLedger(sql)
+  const schemaVersion = yield* readSupportedSchema(sql)
   const blobs = yield* readBlobInventory(sql)
   const boundaryInput = {
     domainEventCursor: yield* maximumColumn(sql, "domain_events", "event_cursor"),
@@ -165,7 +151,7 @@ export const readDatabaseSnapshotInventory = Effect.fn("BackupDatabase.readSnaps
   const boundary = yield* Schema.decodeUnknownEffect(BackupBoundaryV1)(boundaryInput).pipe(
     Effect.mapError((cause) => new BackupSqlError({ cause, operation: "decode-boundary" }))
   )
-  return { blobs, boundary, migrations }
+  return { blobs, boundary, schemaVersion }
 })
 
 /** Create a transactionally consistent standalone SQLite database file. */
@@ -226,13 +212,7 @@ export const verifyManifestInventory = Effect.fn("BackupDatabase.verifyManifestI
   ) {
     return yield* new BackupManifestError({ reason: "boundary-mismatch" })
   }
-  const hasSameMigrations = manifest.migrations.length === inventory.migrations.length &&
-    manifest.migrations.every((migration, index) => {
-      const expected = inventory.migrations[index]
-      return expected !== undefined &&
-        migration.migrationId === expected.migrationId && migration.name === expected.name
-    })
-  if (!hasSameMigrations) {
-    return yield* new BackupManifestError({ reason: "migration-ledger-mismatch" })
+  if (manifest.schemaVersion !== inventory.schemaVersion) {
+    return yield* new BackupManifestError({ reason: "schema-mismatch" })
   }
 })

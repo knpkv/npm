@@ -50,7 +50,7 @@ const STAGING_PREFIX = ".control-center-backup-incoming-"
 /** Internal archive assembly contract; snapshot entry points own how the database file is produced. */
 export interface CreateVerifiedArchiveInput {
   readonly destination: string
-  readonly kind: "manual" | "pre-migration"
+  readonly kind: "manual"
   readonly persistenceConfig: PersistenceConfig
   readonly writeDatabase: (
     destination: string
@@ -748,7 +748,7 @@ export const createVerifiedArchive = Effect.fn("BackupArchive.create")(function*
     database: { byteLength: database.byteLength, digest: database.digest, relativePath: DATABASE_NAME },
     format: "@knpkv/control-center-backup",
     kind: input.kind,
-    migrations: inventory.migrations,
+    schemaVersion: inventory.schemaVersion,
     version: 1
   }
   const manifestSource = yield* Schema.encodeEffect(BackupManifestJsonV1)(manifest).pipe(

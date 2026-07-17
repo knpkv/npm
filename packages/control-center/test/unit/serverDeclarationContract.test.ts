@@ -109,7 +109,7 @@ describe("public server declaration contract", () => {
       inspectServerDeclarationContract({
         ...validDeclarations,
         backupArchive: `
-          // databaseSourceFile belongs only to the non-public pre-migration helper.
+          // databaseSourceFile belongs only to non-public archive assembly.
           interface InternalBackupInput { readonly databaseSourceFile: string }
           interface ManualBackupInput { readonly destination: string }
           export declare const createVerifiedBackup: (input: ManualBackupInput) => unknown;

@@ -41,6 +41,10 @@ const staleReleaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000007"
 const currentReleaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000008"
 const thirdAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000009"
 const pendingReleaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000010"
+const batchReleaseId = "01890f6f-6d6a-7cc0-98d2-400000000012"
+const batchEnvironmentId = "01890f6f-6d6a-7cc0-98d2-400000000013"
+const batchEnvironmentAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000014"
+const batchReleaseAssessmentId = "01890f6f-6d6a-7cc0-98d2-400000000015"
 const firstAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
 const secondAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:10:00.000Z")
 const thirdAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:20:00.000Z")
@@ -125,21 +129,30 @@ const withReadiness = <Success, Failure>(
     return yield* use.pipe(Effect.provide(Layer.merge(foundation, readiness)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
+const seedReleaseFoundations = Effect.fn("ReadinessRepositoryTest.seedReleaseFoundations")(function*(input: {
+  readonly releaseId: string
+  readonly environmentId: string
+}) {
+  const { sql } = yield* Database
+  const at = "2026-07-15T10:00:00.000Z"
+  yield* sql`INSERT INTO releases (
+    workspace_id, release_id, current_revision, created_at, updated_at
+  ) VALUES (${workspaceId}, ${input.releaseId}, 1, ${at}, ${at})`
+  yield* sql`INSERT INTO release_revisions (
+    workspace_id, release_id, revision, snapshot_json, snapshot_digest, created_at
+  ) VALUES (${workspaceId}, ${input.releaseId}, 1, '{}', ${"0".repeat(64)}, ${at})`
+  yield* sql`INSERT INTO release_targets (
+    workspace_id, release_id, environment_id, created_at
+  ) VALUES (${workspaceId}, ${input.releaseId}, ${input.environmentId}, ${at})`
+})
+
 const seedFoundations = Effect.gen(function*() {
   const { sql } = yield* Database
   const at = "2026-07-15T10:00:00.000Z"
   yield* sql`INSERT INTO workspaces (
     workspace_id, display_name, revision, created_at, updated_at
   ) VALUES (${workspaceId}, 'Readiness', 1, ${at}, ${at})`
-  yield* sql`INSERT INTO releases (
-    workspace_id, release_id, current_revision, created_at, updated_at
-  ) VALUES (${workspaceId}, ${releaseId}, 1, ${at}, ${at})`
-  yield* sql`INSERT INTO release_revisions (
-    workspace_id, release_id, revision, snapshot_json, snapshot_digest, created_at
-  ) VALUES (${workspaceId}, ${releaseId}, 1, '{}', ${"0".repeat(64)}, ${at})`
-  yield* sql`INSERT INTO release_targets (
-    workspace_id, release_id, environment_id, created_at
-  ) VALUES (${workspaceId}, ${releaseId}, ${environmentId}, ${at})`
+  yield* seedReleaseFoundations({ releaseId, environmentId })
   yield* sql`INSERT INTO evidence_items (
     workspace_id, evidence_id, schema_version, evidence_digest, origin_kind,
     plugin_connection_id, source_entity_id, source_entity_revision,
@@ -160,13 +173,17 @@ const makeAssessment = Effect.fn("ReadinessRepositoryTest.makeAssessment")(funct
   readonly previousAssessmentId: string | null
   readonly evaluatedAt: string
   readonly observations?: typeof observations
+  readonly releaseId?: string
+  readonly environmentId?: string
 }) {
   const selectedObservations = input.observations ?? observations
+  const selectedReleaseId = input.releaseId ?? releaseId
+  const selectedEnvironmentId = input.environmentId ?? environmentId
   const material = yield* Schema.decodeUnknownEffect(Schema.toType(EnvironmentReadinessCandidateMaterial))({
     workspaceId,
     releaseRevision: 1,
     artifactRevision: "git:abc123",
-    scope: { _tag: "environment", releaseId, environmentId },
+    scope: { _tag: "environment", releaseId: selectedReleaseId, environmentId: selectedEnvironmentId },
     complete: true,
     definitions: definitions.definitions,
     observations: selectedObservations
@@ -180,7 +197,7 @@ const makeAssessment = Effect.fn("ReadinessRepositoryTest.makeAssessment")(funct
       releaseRevision: 1,
       artifactRevision: "git:abc123",
       digest,
-      scope: { _tag: "environment", releaseId, environmentId }
+      scope: { _tag: "environment", releaseId: selectedReleaseId, environmentId: selectedEnvironmentId }
     },
     rule: {
       ruleId: definitions.ruleId,
@@ -201,6 +218,8 @@ const makeReleaseAssessment = Effect.fn("ReadinessRepositoryTest.makeReleaseAsse
   readonly environment: EnvironmentReadinessAssessment
   readonly previousAssessmentId?: string | null
 }) {
+  const releaseId = input.environment.candidate.scope.releaseId
+  const environmentId = input.environment.candidate.scope.environmentId
   const material = yield* Schema.decodeUnknownEffect(Schema.toType(ReleaseReadinessCandidateMaterial))({
     workspaceId,
     releaseRevision: 1,
@@ -446,6 +465,25 @@ describe("readiness repository", () => {
         })
         assert.strictEqual(currentRelease.record?.assessment.assessmentId, currentReleaseAssessmentId)
         assert.strictEqual(currentRelease.record?.authority, "authoritative")
+        assert.deepEqual(yield* readiness.readCurrentReleases({ workspaceId, releaseIds: [] }), [])
+        const currentReleases = yield* readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: ["01890f6f-6d6a-7cc0-98d2-400000000099", releaseId]
+        })
+        assert.strictEqual(currentReleases.length, 1)
+        assert.strictEqual(currentReleases[0]?.assessment.assessmentId, currentReleaseAssessmentId)
+        assert.strictEqual(currentReleases[0]?.authority, "authoritative")
+
+        const duplicateBatch = yield* readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: [releaseId, releaseId]
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(duplicateBatch))
+        if (Result.isFailure(duplicateBatch)) {
+          assert.instanceOf(duplicateBatch.failure, ReadinessInputError)
+          assert.strictEqual(duplicateBatch.failure.operation, "read-current-releases")
+          assert.strictEqual(duplicateBatch.failure.reason, "invalid-request")
+        }
 
         const history = yield* readiness.readHistory({
           _tag: "environment",
@@ -480,6 +518,11 @@ describe("readiness repository", () => {
         const pendingRelease = yield* readiness.readCurrent({ _tag: "release", workspaceId, releaseId })
         assert.strictEqual(pendingEnvironment.record?.authority, "pending")
         assert.strictEqual(pendingRelease.record?.authority, "pending")
+        const pendingReleaseBatch = yield* readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: [releaseId]
+        })
+        assert.strictEqual(pendingReleaseBatch[0]?.authority, "pending")
         const prematureRelease = yield* makeReleaseAssessment({
           assessmentId: pendingReleaseAssessmentId,
           environment: second,
@@ -509,6 +552,128 @@ describe("readiness repository", () => {
           limit: 10
         })
         assert.deepEqual(due, { enqueued: 1 })
+      })
+    ))
+
+  it.effect("batches multiple release heads and quarantines one corrupt materialization", () =>
+    withReadiness(
+      Effect.gen(function*() {
+        const readiness = yield* ReadinessRepository
+        const quarantine = yield* QuarantineRepository
+        const { sql } = yield* Database
+        yield* seedFoundations
+        yield* seedReleaseFoundations({ releaseId: batchReleaseId, environmentId: batchEnvironmentId })
+        const digest = yield* digestReadinessRule(definitions)
+        yield* readiness.registerRule({ workspaceId, material: definitions, digest, registeredAt: firstAt })
+
+        const firstEnvironment = yield* makeAssessment({
+          assessmentId: firstAssessmentId,
+          previousAssessmentId: null,
+          evaluatedAt: "2026-07-15T10:00:00.000Z"
+        })
+        const secondEnvironment = yield* makeAssessment({
+          assessmentId: batchEnvironmentAssessmentId,
+          previousAssessmentId: null,
+          evaluatedAt: "2026-07-15T10:00:00.000Z",
+          releaseId: batchReleaseId,
+          environmentId: batchEnvironmentId
+        })
+        yield* readiness.commitEnvironment({
+          expectedHeadRevision: null,
+          invalidation: null,
+          assessment: firstEnvironment
+        })
+        yield* readiness.commitEnvironment({
+          expectedHeadRevision: null,
+          invalidation: null,
+          assessment: secondEnvironment
+        })
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(secondAt))
+        const firstReleaseClaim = yield* readiness.claimInvalidation({
+          _tag: "release",
+          workspaceId,
+          releaseId,
+          expectedInvalidationRevision: 1,
+          leaseOwner: "batch-release-worker",
+          leaseExpiresAt: thirdAt
+        })
+        const secondReleaseClaim = yield* readiness.claimInvalidation({
+          _tag: "release",
+          workspaceId,
+          releaseId: batchReleaseId,
+          expectedInvalidationRevision: 1,
+          leaseOwner: "batch-release-worker",
+          leaseExpiresAt: thirdAt
+        })
+
+        const firstRelease = yield* makeReleaseAssessment({
+          assessmentId: currentReleaseAssessmentId,
+          environment: firstEnvironment
+        })
+        const secondRelease = yield* makeReleaseAssessment({
+          assessmentId: batchReleaseAssessmentId,
+          environment: secondEnvironment
+        })
+        yield* readiness.commitRelease({
+          expectedHeadRevision: null,
+          invalidation: {
+            invalidationRevision: 1,
+            leaseOwner: "batch-release-worker",
+            leaseToken: firstReleaseClaim?.lease?.token
+          },
+          assessment: firstRelease
+        })
+        yield* readiness.commitRelease({
+          expectedHeadRevision: null,
+          invalidation: {
+            invalidationRevision: 1,
+            leaseOwner: "batch-release-worker",
+            leaseToken: secondReleaseClaim?.lease?.token
+          },
+          assessment: secondRelease
+        })
+
+        let queryCount = 0
+        const queryTracer = Tracer.make({
+          span: (options) => {
+            if (options.name === "sql.execute") queryCount += 1
+            return new Tracer.NativeSpan(options)
+          }
+        })
+        const records = yield* readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: [batchReleaseId, releaseId]
+        }).pipe(Effect.provideService(Tracer.Tracer, queryTracer))
+        assert.deepEqual(
+          records.map(({ assessment }) => assessment.candidate.scope.releaseId),
+          [releaseId, batchReleaseId]
+        )
+        assert.strictEqual(queryCount, 4)
+
+        yield* sql`DROP TRIGGER readiness_assessment_evidence_no_delete`
+        yield* sql`DELETE FROM readiness_assessment_evidence
+          WHERE workspace_id = ${workspaceId} AND assessment_id = ${batchReleaseAssessmentId}`
+        const corruptedBatch = yield* readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: [releaseId, batchReleaseId]
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(corruptedBatch))
+        if (Result.isFailure(corruptedBatch)) {
+          assert.instanceOf(corruptedBatch.failure, PersistedRecordError)
+          assert.strictEqual(
+            corruptedBatch.failure.diagnosticCode,
+            "readiness-assessment-materialization-mismatch"
+          )
+          assert.strictEqual(corruptedBatch.failure.recordKey, batchReleaseAssessmentId)
+        }
+        const quarantined = yield* quarantine.list(workspaceId)
+        assert.isTrue(
+          quarantined.some((record) =>
+            record.recordKey === batchReleaseAssessmentId &&
+            record.diagnosticCode === "readiness-assessment-materialization-mismatch"
+          )
+        )
       })
     ))
 

@@ -46,8 +46,8 @@ Goal: prove recovery, security, accessibility, bounds, documentation, and reposi
 
 ## H07 — Retire prototype runtime and finalize operations guides
 
-- **Scope:** after parity evidence, remove prototype routes/runtime imports and unused prototype-only pages/styles while preserving approved screenshots/fixtures as non-runtime references; finalize pairing/LAN/TLS, backups/restore, retention, recovery, migration/upgrade and manual screen-reader guides.
-- **Tests:** prototype-boundary/import/dead-route checks, docs links/commands, migration smoke, visual comparison record.
+- **Scope:** after parity evidence, remove prototype routes/runtime imports and unused prototype-only pages/styles while preserving approved screenshots/fixtures as non-runtime references; finalize pairing/LAN/TLS, backups/restore, retention, recovery, the stable-schema migration policy, and manual screen-reader guides.
+- **Tests:** prototype-boundary/import/dead-route checks, docs links/commands, schema-lifecycle smoke, visual comparison record.
 - **Depends on:** H01–H06.
 - **Review focus:** no production behavior removed with fixture cleanup; preserved visual fixtures remain non-runtime.
 

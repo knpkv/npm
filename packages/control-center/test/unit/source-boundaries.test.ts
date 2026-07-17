@@ -133,33 +133,7 @@ describe("Control Center source boundaries", () => {
     ).toEqual([])
   })
 
-  it("reserves the quiescent backup helper for the database migration barrier owner", () => {
-    const internalImport = "./backup/QuiescentBackup.js"
-    expect(
-      inspectSourceBoundaries(
-        "src/server/persistence/Persistence.ts",
-        `import { createVerifiedPreMigrationBackup } from ${JSON.stringify(internalImport)}`
-      )
-    ).toContainEqual({
-      importPath: internalImport,
-      reason: "only Database can import the quiescent pre-migration backup helper",
-      sourcePath: "src/server/persistence/Persistence.ts"
-    })
-    expect(
-      inspectSourceBoundaries(
-        "src/server/persistence/Database.ts",
-        `import { createVerifiedPreMigrationBackup } from ${JSON.stringify(internalImport)}`
-      )
-    ).toEqual([])
-    expect(
-      inspectSourceBoundaries(
-        "src/server/persistence/backup/index.ts",
-        "export * from \"./QuiescentBackup.js\""
-      )
-    ).toHaveLength(1)
-  })
-
-  it("reserves archive assembly for the public and quiescent backup entry points", () => {
+  it("reserves archive assembly for the public backup entry point", () => {
     const internalImport = "./backup/BackupArchiveCore.js"
     expect(
       inspectSourceBoundaries(
@@ -177,14 +151,12 @@ describe("Control Center source boundaries", () => {
         "export * from \"./BackupArchiveCore.js\""
       )
     ).toHaveLength(1)
-    for (const entryPoint of ["BackupArchive", "QuiescentBackup"]) {
-      expect(
-        inspectSourceBoundaries(
-          `src/server/persistence/backup/${entryPoint}.ts`,
-          "import { createVerifiedArchive } from \"./BackupArchiveCore.js\""
-        )
-      ).toEqual([])
-    }
+    expect(
+      inspectSourceBoundaries(
+        "src/server/persistence/backup/BackupArchive.ts",
+        "import { createVerifiedArchive } from \"./BackupArchiveCore.js\""
+      )
+    ).toEqual([])
   })
 
   it("keeps CLI backup commands on the public backup barrel", () => {
@@ -192,7 +164,6 @@ describe("Control Center source boundaries", () => {
     const internalPaths = [
       "./persistence/backup/BackupArchive.js",
       "./persistence/backup/BackupArchiveCore.js",
-      "./persistence/backup/QuiescentBackup.js",
       "./persistence/backup/DatabaseSnapshot.js",
       "./persistence/Database.js"
     ]

@@ -14,6 +14,7 @@ import { evaluateFreshnessAt } from "../../domain/freshness.js"
 import type { Release } from "../../domain/release.js"
 import { ApplicationServiceUnavailable, PortfolioSnapshots } from "../api/ApplicationServices.js"
 import { Persistence, type PersistenceService } from "../persistence/Persistence.js"
+import type { CurrentReleaseReadinessAssessmentRecord } from "../persistence/repositories/readinessRepository.js"
 import { listPluginConnectionSummaries } from "./pluginAdministration.js"
 
 const MAXIMUM_PORTFOLIO_RELEASES = 200
@@ -63,17 +64,10 @@ const releaseCollaborators = Effect.fn("PortfolioSnapshots.releaseCollaborators"
   }
 })
 
-const releaseReadiness = Effect.fn("PortfolioSnapshots.releaseReadiness")(function*(
-  persistence: PersistenceService,
-  release: Release
-) {
-  const current = yield* persistence.readiness.readCurrent({
-    _tag: "release",
-    workspaceId: release.workspaceId,
-    releaseId: release.id
-  }).pipe(Effect.mapError(() => unavailable()))
-  if (current.record === null) return null
-  const { assessment, authority } = current.record
+const summarizeReleaseReadiness = (
+  current: CurrentReleaseReadinessAssessmentRecord
+): PortfolioReadinessSummary => {
+  const { assessment, authority } = current
   return {
     authority,
     verdict: assessment.verdict,
@@ -83,8 +77,8 @@ const releaseReadiness = Effect.fn("PortfolioSnapshots.releaseReadiness")(functi
     gapCount: assessment.gaps.length,
     primaryFinding: assessment.blockers[0] ?? assessment.gaps[0] ?? assessment.warnings[0] ?? null,
     evaluatedAt: assessment.evaluatedAt
-  } satisfies PortfolioReadinessSummary
-})
+  }
+}
 
 const releaseRelationships = Effect.fn("PortfolioSnapshots.releaseRelationships")(function*(
   persistence: PersistenceService,
@@ -112,10 +106,19 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
         const plugins = yield* listPluginConnectionSummaries(persistence, workspaceId)
         const { headCursor: eventCursor } = yield* persistence.events.streamState(workspaceId)
         const generatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+        const currentReadiness = yield* persistence.readiness.readCurrentReleases({
+          workspaceId,
+          releaseIds: releases.map(({ release }) => release.id)
+        }).pipe(Effect.mapError(() => unavailable()))
+        const readinessByReleaseId = new Map(
+          currentReadiness.map((record) => [
+            record.assessment.candidate.scope.releaseId,
+            summarizeReleaseReadiness(record)
+          ])
+        )
         const releaseSummaries = yield* Effect.forEach(releases, ({ release }) =>
           Effect.gen(function*() {
             const collaboratorProjection = yield* releaseCollaborators(persistence, release)
-            const readiness = yield* releaseReadiness(persistence, release)
             const relationships = yield* releaseRelationships(persistence, release)
             const freshness = yield* evaluateFreshnessAt(release.freshness, generatedAt).pipe(
               Effect.mapError(() => unavailable())
@@ -130,7 +133,7 @@ export const makePortfolioSnapshots = Effect.gen(function*() {
               targetEnvironmentIds: release.targetEnvironmentIds,
               collaborators: collaboratorProjection.collaborators,
               collaboratorCount: collaboratorProjection.collaboratorCount,
-              readiness,
+              readiness: readinessByReleaseId.get(release.id) ?? null,
               relationships,
               sourceRevisionCount: release.sourceRevisions.length,
               updatedAt: release.updatedAt

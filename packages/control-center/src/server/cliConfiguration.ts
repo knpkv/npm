@@ -274,8 +274,8 @@ const validateLegacyDataRoot = Effect.fn("ControlCenterCli.validateLegacyDataRoo
     !SQLITE_HEADER.every((byte, index) => header.value[index] === byte)
   ) return yield* configurationError()
 
-  // A non-empty exact migration prefix is the durable identity shared by
-  // pre-marker releases. Inspecting a scoped snapshot prevents SQLite journal
+  // The exact current schema is the durable identity shared by pre-marker
+  // builds. Inspecting a scoped snapshot prevents SQLite journal
   // recovery or WAL bookkeeping from mutating a root before it is adopted.
   yield* Effect.scoped(
     Effect.gen(function*() {

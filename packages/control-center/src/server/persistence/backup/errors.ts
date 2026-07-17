@@ -43,7 +43,7 @@ export class BackupManifestError extends Schema.TaggedErrorClass<BackupManifestE
       "boundary-mismatch",
       "duplicate-blob",
       "malformed",
-      "migration-ledger-mismatch",
+      "schema-mismatch",
       "unsorted-blob-inventory",
       "unsupported"
     ])
@@ -68,9 +68,9 @@ export class BackupIntegrityError extends Schema.TaggedErrorClass<BackupIntegrit
   }
 ) {}
 
-/** The scoped SQLite write barrier could not be acquired before migration. */
-export class MigrationWriteBarrierError extends Schema.TaggedErrorClass<MigrationWriteBarrierError>()(
-  "MigrationWriteBarrierError",
+/** The scoped SQLite write barrier could not be acquired for schema initialization. */
+export class SchemaWriteBarrierError extends Schema.TaggedErrorClass<SchemaWriteBarrierError>()(
+  "SchemaWriteBarrierError",
   { phase: Schema.Literals(["acquire", "verify"]) }
 ) {}
 

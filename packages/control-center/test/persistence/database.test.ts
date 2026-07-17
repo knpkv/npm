@@ -9,8 +9,8 @@ import {
   BUSY_TIMEOUT_MILLISECONDS,
   Database,
   databaseLayer,
-  sandboxMigrationTransaction,
-  withMigrationWriteBarrier
+  sandboxSchemaTransaction,
+  withSchemaWriteBarrier
 } from "../../src/server/persistence/Database.js"
 import { decodePersistenceConfig, PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 
@@ -34,27 +34,32 @@ describe("Database", () => {
         const foreignKeys = yield* database.sql<{ readonly foreignKeys: number }>`PRAGMA foreign_keys`
         const journalMode = yield* database.sql<{ readonly journalMode: string }>`PRAGMA journal_mode`
         const busyTimeout = yield* database.sql<{ readonly timeout: number }>`PRAGMA busy_timeout`
+        const migrationLedger = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM sqlite_schema
+          WHERE type = 'table' AND name = 'control_center_migrations'`
 
         return {
           busyTimeout: busyTimeout[0]?.timeout,
           foreignKeys: foreignKeys[0]?.foreignKeys,
-          journalMode: journalMode[0]?.journalMode
+          journalMode: journalMode[0]?.journalMode,
+          migrationLedger: migrationLedger[0]?.count
         }
       }).pipe(Effect.provide(databaseLayer(config)))
 
       assert.deepStrictEqual(result, {
         busyTimeout: BUSY_TIMEOUT_MILLISECONDS,
         foreignKeys: 1,
-        journalMode: "wal"
+        journalMode: "wal",
+        migrationLedger: 0
       })
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("serializes concurrent application migration acquisition", () =>
+  it.effect("serializes concurrent application schema acquisition", () =>
     Effect.gen(function*() {
       const config = yield* testConfig
       const acquire = Effect.gen(function*() {
         const database = yield* Database
-        yield* database.validateMigrationLedger
+        yield* database.validateSchema
       }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
 
       const exits = yield* Effect.all(
@@ -64,22 +69,33 @@ describe("Database", () => {
       assert.isTrue(exits.every((exit) => exit._tag === "Success"))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("does not create pre-migration archives for fresh or current schemas", () =>
+  it.effect("rejects an existing prototype database after schema drift", () =>
     Effect.gen(function*() {
-      const fileSystem = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
       const config = yield* testConfig
-      const acquire = Effect.gen(function*() {
-        yield* Database
-      }).pipe(Effect.provide(databaseLayer(config)), Effect.scoped)
-      yield* acquire
-      yield* acquire
-      const backupRoot = path.join(path.dirname(config.blobRoot), "backups", "pre-migration")
-      assert.isFalse(yield* fileSystem.exists(backupRoot))
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* database.sql`ALTER TABLE workspaces ADD COLUMN unsupported_drift TEXT`
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+
+      const reopened = yield* Effect.scoped(
+        Effect.gen(function*() {
+          yield* Database
+        }).pipe(Effect.provide(databaseLayer(config)))
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(reopened))
+      if (Result.isFailure(reopened)) {
+        assert.strictEqual(reopened.failure._tag, "DatabaseInitializationError")
+        if (reopened.failure._tag === "DatabaseInitializationError") {
+          assert.strictEqual(reopened.failure.operation, "verify-schema")
+        }
+      }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect(
-    "holds a cross-client writer barrier for the complete migration-critical section",
+    "holds a cross-client writer barrier for the complete schema-critical section",
     () =>
       Effect.gen(function*() {
         const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
@@ -104,7 +120,7 @@ describe("Database", () => {
         const acquired = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
         const barrier = yield* Effect.forkChild(
-          withMigrationWriteBarrier(
+          withSchemaWriteBarrier(
             first,
             databaseFile,
             Deferred.succeed(acquired, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -133,8 +149,8 @@ describe("Database", () => {
         Effect.catchCause(() => Effect.die("injected-rollback-failure"))
       )
       const exits = yield* Effect.all([
-        sandboxMigrationTransaction(controlledCommitFailure).pipe(Effect.exit),
-        sandboxMigrationTransaction(controlledRollbackFailure).pipe(Effect.exit)
+        sandboxSchemaTransaction(controlledCommitFailure).pipe(Effect.exit),
+        sandboxSchemaTransaction(controlledRollbackFailure).pipe(Effect.exit)
       ])
       for (const exit of exits) {
         assert.isTrue(Exit.isFailure(exit))
@@ -142,14 +158,14 @@ describe("Database", () => {
           assert.isFalse(Cause.hasDies(exit.cause))
           const failure = Cause.findErrorOption(exit.cause)
           assert.isTrue(Option.isSome(failure))
-          if (Option.isSome(failure)) assert.strictEqual(failure.value._tag, "MigrationWriteBarrierError")
+          if (Option.isSome(failure)) assert.strictEqual(failure.value._tag, "SchemaWriteBarrierError")
         }
       }
     }))
 
   it.effect("preserves a typed operation failure for the transaction rollback path", () =>
     Effect.gen(function*() {
-      const failure = yield* sandboxMigrationTransaction(Effect.fail("typed-operation-failure")).pipe(
+      const failure = yield* sandboxSchemaTransaction(Effect.fail("typed-operation-failure")).pipe(
         Effect.flip
       )
       assert.strictEqual(failure, "typed-operation-failure")
@@ -166,7 +182,7 @@ describe("Database", () => {
           '01890f6f-6d6a-7cc0-98d2-000000000091', 'Committed', 1,
           '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
         )`
-        yield* sandboxMigrationTransaction(database.transaction(successful))
+        yield* sandboxSchemaTransaction(database.transaction(successful))
         const outerInsert = database.sql`INSERT INTO workspaces (
           workspace_id, display_name, revision, created_at, updated_at
         ) VALUES (
@@ -179,7 +195,7 @@ describe("Database", () => {
           '01890f6f-6d6a-7cc0-98d2-000000000093', 'Nested rollback', 1,
           '2026-07-13T10:00:00.000Z', '2026-07-13T10:00:00.000Z'
         )`
-        yield* sandboxMigrationTransaction(
+        yield* sandboxSchemaTransaction(
           database.transaction(
             outerInsert.pipe(
               Effect.andThen(database.transaction(nestedInsert.pipe(Effect.andThen(Effect.fail("nested")))))

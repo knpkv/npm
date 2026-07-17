@@ -138,9 +138,6 @@ describe("restore backup", () => {
       yield* Effect.gen(function*() {
         yield* Database
       }).pipe(Effect.provide(databaseLayer(restarted.persistenceConfig)), Effect.scoped)
-      assert.isFalse(
-        yield* fileSystem.exists(path.join(restarted.dataRoot, "backups", "pre-migration"))
-      )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rejects an existing directory without changing its contents", () =>

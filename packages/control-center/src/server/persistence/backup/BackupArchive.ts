@@ -45,7 +45,7 @@ export interface CreateVerifiedBackupInput {
   readonly sql: SqlClient.SqlClient
 }
 
-/** Input for an offline backup that opens an existing database without running migrations. */
+/** Input for an offline backup that opens an existing database without changing its schema. */
 export interface CreateOfflineVerifiedBackupInput {
   readonly destination: string
   readonly persistenceConfig: PersistenceConfig
@@ -84,7 +84,7 @@ export const createVerifiedBackup = Effect.fn("BackupArchive.createManual")(func
   })
 })
 
-/** Create a verified backup from an existing, stopped data root without running migrations. */
+/** Create a verified backup from an existing, stopped data root without changing its schema. */
 export const createOfflineVerifiedBackup = Effect.fn("BackupArchive.createOffline")(function*(
   input: CreateOfflineVerifiedBackupInput
 ): Effect.fn.Return<
