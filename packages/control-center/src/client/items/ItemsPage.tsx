@@ -81,14 +81,15 @@ export const ItemsPage = (): ReactElement => {
     setSearchParams(next, { replace: true })
   }
 
-  const portfolioBoundary: PortfolioOverviewState | null = context.controller.state._tag !== "ready"
-    ? context.controller.state
-    : sessionKey === null
-    ? {
-      _tag: "session",
-      reason: browserSession.state._tag === "authenticated" ? "checking" : browserSession.state._tag
-    }
-    : null
+  const portfolioBoundary: PortfolioOverviewState | null =
+    context.controller.state._tag !== "ready"
+      ? context.controller.state
+      : sessionKey === null
+        ? {
+            _tag: "session",
+            reason: browserSession.state._tag === "authenticated" ? "checking" : browserSession.state._tag
+          }
+        : null
   if (portfolioBoundary?._tag === "loading") {
     return (
       <section aria-label="Loading delivery items" className={styles.page}>

@@ -30,13 +30,7 @@ const Harness = ({
   readonly releases: ReadonlyArray<PortfolioReleasePresentation>
   readonly transport: ReleaseWorksetTransport
 }): ReactElement => {
-  const controller = useWorkspaceItems(
-    WORKSET_WORKSPACE_ID,
-    releases,
-    "session-a",
-    ignoreSessionExpiry,
-    transport
-  )
+  const controller = useWorkspaceItems(WORKSET_WORKSPACE_ID, releases, "session-a", ignoreSessionExpiry, transport)
   return <span>{controller.state._tag}</span>
 }
 

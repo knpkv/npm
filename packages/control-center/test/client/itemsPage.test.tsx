@@ -39,7 +39,13 @@ const renderItems = async (controller: PortfolioOverviewController): Promise<HTM
   document.body.append(host)
   mountedRoot = createRoot(host)
   const router = createMemoryRouter(
-    [{ path: "/w/:workspaceId", element: <ItemsLayout controller={controller} />, children: [{ path: "items", element: <ItemsPage /> }] }],
+    [
+      {
+        path: "/w/:workspaceId",
+        element: <ItemsLayout controller={controller} />,
+        children: [{ path: "items", element: <ItemsPage /> }]
+      }
+    ],
     { initialEntries: [`/w/${WORKSET_WORKSPACE_ID}/items`] }
   )
   await act(async () => mountedRoot?.render(<RouterProvider router={router} />))
@@ -53,7 +59,9 @@ describe("ItemsPage boundaries", () => {
 
     expect(host.getAttribute("aria-label")).not.toBe("Loading delivery items")
     expect(host.textContent).toContain("Overview unavailable")
-    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent === "Try again")
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Try again"
+    )
     if (retry === undefined) throw new Error("Expected portfolio retry guidance")
     await act(async () => retry.click())
     expect(onRetry).toHaveBeenCalledOnce()
