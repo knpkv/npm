@@ -7,7 +7,11 @@ import { Link, useLocation } from "react-router"
 import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
-import { presentReleaseWorkset, selectReleaseWorksetObject } from "./presentReleaseWorkset.js"
+import {
+  presentReleaseWorkset,
+  selectReleaseWorksetObject,
+  type SelectedReleaseWorksetObject
+} from "./presentReleaseWorkset.js"
 import styles from "./ReleaseWorkset.module.css"
 import { useReleaseWorkset } from "./useReleaseWorkset.js"
 
@@ -16,6 +20,37 @@ const LoadingWorkset = (): ReactElement => (
     <Skeleton height="3rem" />
     <Skeleton height="15rem" />
   </div>
+)
+
+/** Inspectable destination for an Items result selected within its release context. */
+export const SelectedReleaseWorksetObjectPanel = ({
+  selectedObject
+}: {
+  readonly selectedObject: SelectedReleaseWorksetObject
+}): ReactElement => (
+  <section aria-label={`Selected ${selectedObject.kind} ${selectedObject.label}`} className={styles.selected}>
+    <div className={styles.selectedHeading}>
+      <ServiceMark service={selectedObject.service} size="compact" />
+      <Text as="p" variant="label">
+        {selectedObject.label}
+      </Text>
+      <StateLabel label={selectedObject.status} size="compact" tone={selectedObject.tone} />
+    </div>
+    <Text as="h3" variant="section-title">
+      {selectedObject.title}
+    </Text>
+    <Text tone="secondary" variant="meta">
+      {selectedObject.kind}
+    </Text>
+    <dl className={styles.selectedFacts}>
+      {selectedObject.facts.map((fact) => (
+        <div key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </section>
 )
 
 const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function ReleaseWorksetLink(
@@ -121,14 +156,7 @@ export const ReleaseWorkset = ({
         {workset.truncated ? (
           <StateLabel label="Bounded view · more records exist" size="compact" tone="caution" />
         ) : null}
-        {selectedObject === null ? null : (
-          <StateLabel
-            label={`Selected object · ${selectedObject.label}`}
-            size="compact"
-            title={`${selectedObject.title} · ${selectedObject.kind}`}
-            tone="progress"
-          />
-        )}
+        {selectedObject === null ? null : <SelectedReleaseWorksetObjectPanel selectedObject={selectedObject} />}
       </div>
       <LinkProvider component={ReleaseWorksetLink}>
         <WorksetCard

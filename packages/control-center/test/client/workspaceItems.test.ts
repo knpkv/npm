@@ -1,9 +1,12 @@
 import * as Schema from "effect/Schema"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import { filterWorkspaceItems, formatItemFreshness, itemsLocationWithSearch } from "../../src/client/items/ItemsPage.js"
 import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
+import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
@@ -111,15 +114,39 @@ describe("workspace items", () => {
       ]
     }
 
-    expect(selectReleaseWorksetObject(inspection, "01890f6f-6d6a-7cc0-98d3-000000000091")).toMatchObject({
+    const selectedDeployment = selectReleaseWorksetObject(inspection, "01890f6f-6d6a-7cc0-98d3-000000000091")
+    expect(selectedDeployment).toMatchObject({
+      facts: [
+        { label: "Environment", value: "01890f6f-6d6a-7cc0-98d2-000000000091" },
+        { label: "Revision", value: "capture-1842" }
+      ],
       kind: "deployment",
       label: "production/capture-1842",
-      title: "Capture production deployment"
+      service: "codepipeline",
+      status: "Deploying",
+      title: "Capture production deployment",
+      tone: "progress"
     })
+    if (selectedDeployment === null) throw new Error("Expected the selected deployment")
+    const selectedMarkup = renderToStaticMarkup(
+      createElement(SelectedReleaseWorksetObjectPanel, { selectedObject: selectedDeployment })
+    )
+    expect(selectedMarkup).toContain("production/capture-1842")
+    expect(selectedMarkup).toContain("Capture production deployment")
+    expect(selectedMarkup).toContain("Deploying")
+    expect(selectedMarkup).toContain("deployment")
+    expect(selectedMarkup).toContain("capture-1842")
     expect(selectReleaseWorksetObject(inspection, "01890f6f-6d6a-7cc0-98d3-000000000092")).toMatchObject({
+      facts: [
+        { label: "Duration", value: "45 minutes" },
+        { label: "Billing", value: "Billable" }
+      ],
       kind: "time-entry",
       label: "CLOCK-902",
-      title: "Release verification"
+      service: "clockify",
+      status: "Not Required",
+      title: "Release verification",
+      tone: "positive"
     })
     expect(selectReleaseWorksetObject(inspection, "not-an-entity")).toBeNull()
 
@@ -140,4 +167,37 @@ describe("workspace items", () => {
       )
     ).toEqual(["CLOCK-902"])
   })
+
+  it("treats superseded documentation as needing attention", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const page = (status: "current" | "superseded", suffix: string) =>
+      Schema.decodeUnknownSync(DeliveryEntityProjection)({
+        ...source.projection,
+        entityId: `01890f6f-6d6a-7cc0-98d3-0000000000${suffix}`,
+        entityType: "page",
+        displayKey: `RUN-${suffix}`,
+        title: `${titleCaseForTest(status)} runbook`,
+        details: { _tag: "page", revision: `rev-${suffix}`, spaceKey: "OPS", status }
+      })
+    const inspection = {
+      ...releaseWorksetFixture,
+      entityProjections: [
+        { recordedAt: source.recordedAt, projection: page("current", "94") },
+        { recordedAt: source.recordedAt, projection: page("superseded", "95") }
+      ]
+    }
+    const documentation = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [inspection])
+
+    expect(documentation.find(({ key }) => key === "RUN-94")).toMatchObject({
+      statusGroup: "done",
+      tone: "positive"
+    })
+    expect(documentation.find(({ key }) => key === "RUN-95")).toMatchObject({
+      statusGroup: "failed",
+      tone: "critical"
+    })
+  })
 })
+
+const titleCaseForTest = (value: string): string => `${value.charAt(0).toLocaleUpperCase("en-US")}${value.slice(1)}`

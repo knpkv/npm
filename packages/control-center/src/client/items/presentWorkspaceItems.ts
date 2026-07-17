@@ -60,7 +60,7 @@ const statusFor = (details: DeliveryEntityDetails): string => {
 const statusPresentation = (status: string): Pick<WorkspaceItemPresentation, "statusGroup" | "tone"> => {
   const value = status.toLocaleLowerCase("en-US")
   if (
-    ["blocked", "changes requested", "failed", "rejected", "rolled back", "stopped"].some((part) =>
+    ["blocked", "changes requested", "failed", "rejected", "rolled back", "stopped", "superseded"].some((part) =>
       value.includes(part)
     )
   ) return { statusGroup: "failed", tone: "critical" }

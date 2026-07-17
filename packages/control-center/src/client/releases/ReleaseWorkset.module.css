@@ -2,6 +2,8 @@
 .loading,
 .context,
 .contextGroup,
+.selected,
+.selectedFacts,
 .runbooks,
 .runbook {
   display: grid;
@@ -37,6 +39,48 @@
 
 .contextGroup h3 {
   margin: 0;
+}
+
+.selected {
+  grid-column: 1 / -1;
+  gap: var(--rly-space-12);
+  padding: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.selected h3,
+.selected p,
+.selectedFacts dd {
+  margin: 0;
+}
+
+.selectedHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+
+.selectedFacts {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--rly-space-12);
+  margin: 0;
+}
+
+.selectedFacts div {
+  min-width: 0;
+}
+
+.selectedFacts dt {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.selectedFacts dd {
+  overflow-wrap: anywhere;
 }
 
 .runbooks {

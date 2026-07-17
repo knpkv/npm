@@ -30,10 +30,14 @@ export interface ReleaseWorksetRunbook {
 }
 
 export interface SelectedReleaseWorksetObject {
+  readonly facts: ReadonlyArray<{ readonly label: string; readonly value: string }>
   readonly id: EntityId
   readonly kind: DeliveryEntityProjection["entityType"]
   readonly label: string
+  readonly service: RlyService
+  readonly status: string
   readonly title: string
+  readonly tone: RlyStateTone
 }
 
 export interface ReleaseWorksetPresentation {
@@ -51,34 +55,22 @@ const objectHref = (
   entityId: EntityId
 ): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
 
-/** Resolve any present normalized object, including kinds outside the three primary workset dimensions. */
-export const selectReleaseWorksetObject = (
-  inspection: ReleaseDeliveryGraphInspection,
-  selectedObjectId: string | null
-): SelectedReleaseWorksetObject | null => {
-  if (selectedObjectId === null) return null
-  const selected = inspection.entityProjections.find(
-    ({ projection }) => projection.entityState === "present" && projection.entityId === selectedObjectId
-  )?.projection
-  return selected === undefined
-    ? null
-    : { id: selected.entityId, kind: selected.entityType, label: selected.displayKey, title: selected.title }
-}
-
 const statusTone = (status: string): RlyStateTone => {
   const normalized = status.toLocaleLowerCase("en-US")
-  if (["blocked", "changes requested", "failed", "rejected", "stopped"].some((value) => normalized.includes(value))) {
+  if (
+    ["blocked", "changes requested", "failed", "rejected", "rolled back", "stopped", "superseded"].some(
+      (value) => normalized.includes(value)
+    )
+  ) {
     return "critical"
   }
   if (
-    ["approved", "closed", "done", "merged", "passed", "ready", "resolved", "succeeded"].some((value) =>
-      normalized.includes(value)
-    )
+    ["approved", "closed", "current", "done", "merged", "not required", "passed", "ready", "resolved", "succeeded"]
+      .some((value) => normalized.includes(value))
   ) return "positive"
   if (
-    ["in progress", "in review", "queued", "requested", "running", "verifying"].some((value) =>
-      normalized.includes(value)
-    )
+    ["deploying", "in progress", "in review", "pending", "queued", "requested", "running", "verifying"]
+      .some((value) => normalized.includes(value))
   ) return "progress"
   return "neutral"
 }
@@ -103,6 +95,103 @@ const reviewStateLabel = (
 const pipelineStateLabel = (
   state: Extract<DeliveryEntityDetails, { readonly _tag: "pipeline-execution" }>["status"]
 ): string => `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
+
+const titleCase = (value: string): string =>
+  value.split("-").map((part) => `${part.charAt(0).toLocaleUpperCase("en-US")}${part.slice(1)}`).join(" ")
+
+const selectedObjectService = (kind: DeliveryEntityProjection["entityType"]): RlyService => {
+  switch (kind) {
+    case "issue":
+      return "jira"
+    case "pull-request":
+      return "codecommit"
+    case "page":
+      return "confluence"
+    case "pipeline-execution":
+    case "deployment":
+      return "codepipeline"
+    case "time-entry":
+      return "clockify"
+  }
+}
+
+const selectedObjectStatus = (details: DeliveryEntityDetails): string => {
+  switch (details._tag) {
+    case "issue":
+      return details.status
+    case "pull-request":
+      return reviewStateLabel(details.reviewState)
+    case "page":
+    case "deployment":
+      return titleCase(details.status)
+    case "pipeline-execution":
+      return pipelineStateLabel(details.status)
+    case "time-entry":
+      return titleCase(details.approvalState)
+  }
+}
+
+const selectedObjectFacts = (
+  details: DeliveryEntityDetails
+): ReadonlyArray<{ readonly label: string; readonly value: string }> => {
+  switch (details._tag) {
+    case "issue":
+      return [
+        { label: "Priority", value: details.priority ?? "Not set" },
+        { label: "Estimate", value: details.estimatePoints === null ? "Not set" : `${details.estimatePoints} points` }
+      ]
+    case "pull-request":
+      return [
+        { label: "Repository", value: details.repository },
+        { label: "Branch", value: `${details.sourceBranch} → ${details.targetBranch}` },
+        { label: "Revision", value: details.headRevision }
+      ]
+    case "page":
+      return [
+        { label: "Space", value: details.spaceKey },
+        { label: "Revision", value: details.revision }
+      ]
+    case "pipeline-execution":
+      return [
+        { label: "Pipeline", value: details.pipelineName },
+        { label: "Execution", value: details.executionId },
+        { label: "Revision", value: details.triggerRevision }
+      ]
+    case "deployment":
+      return [
+        { label: "Environment", value: details.environmentId },
+        { label: "Revision", value: details.revision }
+      ]
+    case "time-entry":
+      return [
+        { label: "Duration", value: `${details.durationMinutes} minutes` },
+        { label: "Billing", value: details.billable ? "Billable" : "Non-billable" }
+      ]
+  }
+}
+
+/** Resolve every present normalized object into an inspectable selected-object surface. */
+export const selectReleaseWorksetObject = (
+  inspection: ReleaseDeliveryGraphInspection,
+  selectedObjectId: string | null
+): SelectedReleaseWorksetObject | null => {
+  if (selectedObjectId === null) return null
+  const selected = inspection.entityProjections.find(
+    ({ projection }) => projection.entityState === "present" && projection.entityId === selectedObjectId
+  )?.projection
+  if (selected === undefined) return null
+  const status = selectedObjectStatus(selected.details)
+  return {
+    facts: selectedObjectFacts(selected.details),
+    id: selected.entityId,
+    kind: selected.entityType,
+    label: selected.displayKey,
+    service: selectedObjectService(selected.entityType),
+    status,
+    title: selected.title,
+    tone: statusTone(status)
+  }
+}
 
 const currentRelationship = (relationship: DeliveryRelationship): boolean =>
   relationship.lifecycle._tag !== "missing" &&
