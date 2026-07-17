@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -23,7 +24,8 @@ import {
   PluginAdministration,
   PortfolioSnapshots,
   RelationshipRepairProposals,
-  ReleaseAgentTurns
+  ReleaseAgentTurns,
+  TimelineReads
 } from "./ApplicationServices.js"
 import {
   forbiddenApiError,
@@ -297,6 +299,43 @@ export const portfolioHandlersLayer = HttpApiBuilder.group(
           return yield* portfolio.snapshot(session.workspaceId).pipe(
             Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
           )
+        }))
+    })
+)
+
+/** Authenticated, default-redacted durable activity Timeline handler. */
+export const timelineHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "timeline",
+  (handlers) =>
+    Effect.gen(function*() {
+      const timeline = yield* TimelineReads
+      return handlers.handle("page", ({ query }) =>
+        Effect.gen(function*() {
+          const session = yield* CurrentSession
+          yield* requireWorkspaceRead(session)
+          const hasCursorKey = query.beforeEventKey !== undefined
+          const hasCursorTime = query.beforeOccurredAt !== undefined
+          if (hasCursorKey !== hasCursorTime) {
+            return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+          }
+          if (
+            query.from !== undefined &&
+            query.to !== undefined &&
+            DateTime.toEpochMillis(query.from) > DateTime.toEpochMillis(query.to)
+          ) {
+            return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+          }
+          return yield* timeline.page({
+            workspaceId: session.workspaceId,
+            actorKind: query.actor ?? null,
+            before: query.beforeEventKey === undefined || query.beforeOccurredAt === undefined
+              ? null
+              : { eventKey: query.beforeEventKey, occurredAt: query.beforeOccurredAt },
+            from: query.from ?? null,
+            limit: query.limit ?? 50,
+            to: query.to ?? null
+          }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
         }))
     })
 )

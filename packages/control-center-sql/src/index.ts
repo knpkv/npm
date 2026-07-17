@@ -1,11 +1,16 @@
 import { Casing, Column, Query } from "effect-qb"
 import * as Sqlite from "effect-qb/sqlite"
 
-/** SQL text and bound parameters ready for an Effect SQL client. */
-export interface RenderedSql {
-  readonly params: ReadonlyArray<unknown>
-  readonly sql: string
-}
+import type { RenderedSql } from "./types.js"
+
+export {
+  type RenderedTimelineQuery,
+  renderTimelineQueries,
+  type TimelineQueryCursor,
+  type TimelineQueryInput,
+  type TimelineSourceKind
+} from "./timeline.js"
+export type { RenderedSql } from "./types.js"
 
 /** Bounded current release-readiness query input. */
 export interface CurrentReleaseReadinessQueryInput {
