@@ -45,7 +45,7 @@ import {
 import {
   ConfluencePageAttributesV1,
   RawConfluencePage,
-  type RawConfluenceUser,
+  RawConfluenceUser,
   RawConfluenceUsers,
   type RawConfluenceVersion,
   RawConfluenceVersionPage,
@@ -401,13 +401,20 @@ export const makeConfluencePageAdapter = (
     descriptor: input.descriptor,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
+      const rawUser = yield* providerCall(input.client.getCurrentUser)
+      const user = yield* decodeProvider(
+        "confluence-current-user",
+        "confluence-current-user-invalid",
+        RawConfluenceUser,
+        rawUser
+      )
       const endpoint = yield* Schema.decodeUnknownEffect(SourceUrl)(
         new URL("/wiki/api/v2", input.configuration.siteBaseUrl).toString()
       ).pipe(Effect.mapError(() => malformed("confluence-discover", "confluence-endpoint-invalid")))
       return {
         account: {
-          providerImmutableId: input.configuration.siteId,
-          displayName: "Confluence site"
+          providerImmutableId: user.accountId,
+          displayName: user.displayName
         },
         workspace: {
           providerImmutableId: input.configuration.spaceId,

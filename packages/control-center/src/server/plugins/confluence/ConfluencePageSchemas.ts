@@ -62,7 +62,8 @@ export type RawConfluenceVersionPage = typeof RawConfluenceVersionPage.Type
 /** Decoded Confluence page version. @internal */
 export type RawConfluenceVersion = typeof RawConfluenceVersion.Type
 
-const RawUser = Schema.Struct({
+/** Bounded Confluence user returned by current-user and bulk-user reads. @internal */
+export const RawConfluenceUser = Schema.Struct({
   accountId: boundedString(512),
   displayName: boundedString(200),
   accountStatus: Schema.optionalKey(Schema.Literals(["active", "inactive", "closed", "unknown"])),
@@ -71,11 +72,11 @@ const RawUser = Schema.Struct({
 
 /** Decoded result from one bounded bulk user lookup. @internal */
 export const RawConfluenceUsers = Schema.Struct({
-  results: Schema.optionalKey(Schema.Array(RawUser).check(Schema.isMaxLength(250)))
+  results: Schema.optionalKey(Schema.Array(RawConfluenceUser).check(Schema.isMaxLength(250)))
 })
 
 /** Decoded Confluence user. @internal */
-export type RawConfluenceUser = typeof RawUser.Type
+export type RawConfluenceUser = typeof RawConfluenceUser.Type
 
 const NormalizedVersion = Schema.Struct({
   number: Schema.Int.check(Schema.isGreaterThan(0)),

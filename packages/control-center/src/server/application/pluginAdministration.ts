@@ -109,9 +109,8 @@ const requireConnection = (
 const identityLabel = (providerId: PluginConnectionRecord["providerId"]): string => {
   switch (providerId) {
     case "jira":
-      return "Atlassian user"
     case "confluence":
-      return "Atlassian account"
+      return "Atlassian user"
     case "codecommit":
     case "codepipeline":
       return "AWS account"

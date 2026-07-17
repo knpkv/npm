@@ -75,6 +75,11 @@ const converter = (
 })
 
 const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): ConfluencePageClientShape => ({
+  getCurrentUser: Effect.succeed({
+    accountId: "account-current-user",
+    displayName: "Avery Bell",
+    accountStatus: "active"
+  }),
   getPage: () => Effect.succeed(currentPage),
   getPageVersions: () => Effect.succeed({ results: [currentPage.version] }),
   getUsers: (accountIds) =>
@@ -146,6 +151,21 @@ const normalizedAttributes = (
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 describe("Confluence page adapter", () => {
+  it.effect("discovers the authenticated Confluence user and configured space", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient())
+      const discovery = yield* adapter.connection.discover
+
+      assert.deepStrictEqual(discovery.account, {
+        providerImmutableId: "account-current-user",
+        displayName: "Avery Bell"
+      })
+      assert.deepStrictEqual(discovery.workspace, {
+        providerImmutableId: "space-payments",
+        displayName: "Confluence space"
+      })
+    }))
+
   it.effect("normalizes current content, bounded history, contributors, and a same-origin source URL", () =>
     Effect.gen(function*() {
       const cursors: Array<string | null> = []
