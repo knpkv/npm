@@ -16,6 +16,10 @@ connected services, and Control Center itself into one compact chronology.
 - Provider marks: plugin sync activity retains its validated CodeCommit,
   CodePipeline, Jira, Confluence, or Clockify identity.
 - Access: workspace owners and approvers can read; watchers are rejected.
+- Downloads: authenticated CSV and JSON endpoints require an explicit event cap,
+  accept the same actor and UTC date filters, page through the stable Timeline
+  cursor, and stop at 1,000 default-redacted events. Responses are private,
+  non-sniffable attachments; JSON and response headers report truncation.
 - UI: large source totals, actor/date filters, incremental paging, deep links, and
   a Timeline-aware Relay entry.
 
@@ -27,8 +31,8 @@ database row before it enters the domain projection.
 
 These are intentionally outside this fast MVP and remain follow-up work:
 
-- governed CSV and JSON exports with explicit truncation, content disposition,
-  export audit events, and retention policy;
+- export audit events and export-artifact retention policy; the bounded MVP
+  streams the response directly and does not persist an artifact;
 - owner-only expansion for raw identifiers and agent job details;
 - provider provenance for action, relationship, and system rows when their source
   connection is indirect or absent;

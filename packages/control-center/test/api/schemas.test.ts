@@ -17,7 +17,9 @@ import {
   RelationshipRepairProposalDraft,
   ReleaseAgentTurnRequest,
   ReleaseAgentTurnResponse,
-  SessionListResponse
+  SessionListResponse,
+  TimelineExportLimitFromString,
+  TimelineExportResponseHeaders
 } from "../../src/api/index.js"
 import { PortfolioInvalidatedEventV1 } from "../../src/domain/domainEvent.js"
 import { ReleaseId } from "../../src/domain/identifiers.js"
@@ -165,6 +167,37 @@ describe("public API schemas", () => {
         })
       )
     )
+  })
+
+  it("requires bounded Timeline export limits and hardened download metadata", () => {
+    assert.deepStrictEqual(Schema.decodeUnknownResult(TimelineExportLimitFromString)("1"), Result.succeed(1))
+    assert.deepStrictEqual(Schema.decodeUnknownResult(TimelineExportLimitFromString)("1000"), Result.succeed(1_000))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(TimelineExportLimitFromString)("0")))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(TimelineExportLimitFromString)("1001")))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(TimelineExportLimitFromString)("01")))
+
+    const headers = {
+      "cache-control": "private, no-store",
+      "content-disposition": "attachment; filename=\"timeline-export.json\"",
+      "content-type": "application/json; charset=utf-8",
+      "x-content-type-options": "nosniff",
+      "x-timeline-export-count": "37",
+      "x-timeline-export-limit": "1000",
+      "x-timeline-export-truncated": "true"
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(TimelineExportResponseHeaders)(headers)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(TimelineExportResponseHeaders)({
+        ...headers,
+        "cache-control": "public, max-age=3600"
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(TimelineExportResponseHeaders)({
+        ...headers,
+        "x-timeline-export-limit": "1001"
+      })
+    ))
   })
 
   it("bounds session and plugin list responses", () => {

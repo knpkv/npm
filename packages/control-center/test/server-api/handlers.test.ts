@@ -739,6 +739,133 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("streams hardened CSV and JSON Timeline downloads with explicit truncation metadata", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+      const csvResponse = yield* client.timeline.exportCsv({
+        query: { actor: "agent", limit: 25 },
+        responseMode: "response-only"
+      })
+      const jsonResponse = yield* client.timeline.exportJson({
+        query: { limit: 25 },
+        responseMode: "response-only"
+      })
+      const csv = yield* csvResponse.stream.pipe(Stream.decodeText(), Stream.mkString)
+      const json = yield* jsonResponse.stream.pipe(Stream.decodeText(), Stream.mkString)
+
+      assert.strictEqual(csvResponse.headers["content-type"], "text/csv; charset=utf-8")
+      assert.strictEqual(
+        csv,
+        "event_key,occurred_at,actor_kind,actor_label,source_kind,service,event_type,title,href\r\n"
+      )
+      assert.strictEqual(jsonResponse.headers["content-type"], "application/json; charset=utf-8")
+      assert.deepStrictEqual(JSON.parse(json), {
+        metadata: { eventCount: 0, eventLimit: 25, truncated: false },
+        events: []
+      })
+    }).pipe(
+      Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        timelineHandlersTestLayer
+      ])
+    ))
+
+  it("applies Timeline download security and attachment headers to web responses", async () => {
+    const authentication = streamAuthentication
+    const plugins = PluginAdministration.of({
+      configuration: () => Effect.die("not used"),
+      configurationMetadata: () => Effect.die("not used"),
+      health: () => Effect.die("not used"),
+      list: () => Effect.succeed([]),
+      patchConfiguration: () => Effect.die("not used")
+    })
+    const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const bind = await Effect.runPromise(decodeBindConfig({}))
+    const requestContext = Context.empty().pipe(
+      Context.add(Auth, authentication),
+      Context.add(ApiBindConfiguration, bind),
+      Context.add(MediaReads, media),
+      Context.add(PluginAdministration, plugins),
+      Context.add(LiveEvents, liveEvents)
+    )
+    const webHandlerLayer = Layer.mergeAll(controlCenterApiLayer, HttpServer.layerServices).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(Auth, authentication),
+          Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(MediaReads, media),
+          Layer.succeed(PluginAdministration, plugins),
+          liveEventsLayer,
+          authorizedSharesLayer,
+          portfolioLayer,
+          timelineLayer,
+          deliveryGraphApplicationLayer,
+          agentLayer,
+          NodeHttpServer.layerHttpServices,
+          NodeServices.layer
+        )
+      )
+    )
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    const request = (format: "csv" | "json") =>
+      new Request(`http://127.0.0.1:4173/api/v1/timeline/export.${format}?limit=25`, {
+        headers: {
+          cookie: `cc_session=${"ab".repeat(32)}`,
+          host: "127.0.0.1:4173",
+          origin: "http://127.0.0.1:4173"
+        }
+      })
+    try {
+      const csvResponse = await webHandler.handler(request("csv"), requestContext)
+      const jsonResponse = await webHandler.handler(request("json"), requestContext)
+
+      assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
+      assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")
+      assert.strictEqual(csvResponse.headers.get("cache-control"), "private, no-store")
+      assert.strictEqual(csvResponse.headers.get("x-content-type-options"), "nosniff")
+      assert.strictEqual(csvResponse.headers.get("x-timeline-export-count"), "0")
+      assert.strictEqual(csvResponse.headers.get("x-timeline-export-limit"), "25")
+      assert.strictEqual(csvResponse.headers.get("x-timeline-export-truncated"), "false")
+      assert.strictEqual(jsonResponse.headers.get("content-type"), "application/json; charset=utf-8")
+      assert.strictEqual(
+        jsonResponse.headers.get("content-disposition"),
+        "attachment; filename=\"timeline-export.json\""
+      )
+      assert.deepStrictEqual(await jsonResponse.json(), {
+        metadata: { eventCount: 0, eventLimit: 25, truncated: false },
+        events: []
+      })
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
+  it.effect("rejects inverted Timeline export dates before application reads", () =>
+    Effect.gen(function*() {
+      const handler = timelineHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineReads, {
+          page: () => Effect.die("invalid export range reached Timeline application work")
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        return yield* client.timeline.exportJson({
+          query: { from: session.absoluteExpiresAt, limit: 10, to: session.createdAt }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "InvalidRequestApiError")
+    }))
+
   it.effect("rejects watcher Timeline reads before application work", () =>
     Effect.gen(function*() {
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
@@ -753,6 +880,30 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
         return yield* client.timeline.page({ query: {} }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      assertForbidden(result)
+    }))
+
+  it.effect("rejects watcher Timeline exports before application work", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = timelineHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineReads, {
+          page: () => Effect.die("watcher reached Timeline export application work")
+        }))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        return yield* client.timeline.exportCsv({ query: { limit: 10 } }).pipe(Effect.result)
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,

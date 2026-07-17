@@ -69,6 +69,24 @@ describe("ControlCenterApi contract", () => {
       ]
     )
 
+    const csvExportPath = specification.paths["/api/v1/timeline/export.csv"]
+    assert.isDefined(csvExportPath)
+    assert.isDefined(csvExportPath.get)
+    assert.isDefined(csvExportPath.get.responses["200"]?.content?.["text/csv; charset=utf-8"])
+    assert.deepStrictEqual(
+      csvExportPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
+      [
+        { location: "query", name: "actor", required: false },
+        { location: "query", name: "from", required: false },
+        { location: "query", name: "limit", required: true },
+        { location: "query", name: "to", required: false }
+      ]
+    )
+    const jsonExportPath = specification.paths["/api/v1/timeline/export.json"]
+    assert.isDefined(jsonExportPath)
+    assert.isDefined(jsonExportPath.get)
+    assert.isDefined(jsonExportPath.get.responses["200"]?.content?.["application/json; charset=utf-8"])
+
     const agentTurnPath = specification.paths["/api/v1/agent/releases/{releaseId}/turns"]
     assert.isDefined(agentTurnPath)
     assert.isDefined(agentTurnPath.post)
@@ -216,7 +234,11 @@ describe("ControlCenterApi contract", () => {
     )
     assert.deepStrictEqual(
       Object.entries(TimelineApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
-      [["page", "GET", "/api/v1/timeline"]]
+      [
+        ["page", "GET", "/api/v1/timeline"],
+        ["exportCsv", "GET", "/api/v1/timeline/export.csv"],
+        ["exportJson", "GET", "/api/v1/timeline/export.json"]
+      ]
     )
     assert.deepStrictEqual(
       Object.entries(AgentApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
@@ -275,7 +297,9 @@ describe("ControlCenterApi contract", () => {
       stream: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(TimelineApiGroup.endpoints), {
-      page: [SessionCookieAuth.key]
+      page: [SessionCookieAuth.key],
+      exportCsv: [SessionCookieAuth.key],
+      exportJson: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
       turn: [SessionCookieAuth.key, SessionMutationAuth.key]
@@ -320,6 +344,14 @@ describe("ControlCenterApi contract", () => {
       `https://control.example/api/v1/media/media_${"ab".repeat(32)}`
     )
     assert.strictEqual(urls.timeline.page({ query: {} }), "https://control.example/api/v1/timeline")
+    assert.strictEqual(
+      urls.timeline.exportCsv({ query: { actor: "human", limit: 1000 } }),
+      "https://control.example/api/v1/timeline/export.csv?actor=human&limit=1000"
+    )
+    assert.strictEqual(
+      urls.timeline.exportJson({ query: { limit: 25 } }),
+      "https://control.example/api/v1/timeline/export.json?limit=25"
+    )
     assert.strictEqual(
       urls.agent.turn({ params: { releaseId } }),
       "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/turns"
