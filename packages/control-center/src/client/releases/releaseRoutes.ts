@@ -8,14 +8,15 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
-import { releaseParentPath } from "./releasePaths.js"
+import { releaseParentPath, workspaceItemsPath } from "./releasePaths.js"
 
 export {
   releaseActiveWorkPath,
   releaseAgentPath,
   releaseFullPath,
   releaseParentPath,
-  releasePreviewPath
+  releasePreviewPath,
+  workspaceItemsPath
 } from "./releasePaths.js"
 
 /** Exact in-application location preserved while release routes are open. */
@@ -88,6 +89,9 @@ const isSearch = (search: string): boolean => search.length <= 2_048 && (search.
 
 const isHash = (hash: string): boolean => hash.length <= 1_024 && (hash.length === 0 || hash.startsWith("#"))
 
+const isRecognizedOriginPath = (pathname: string, workspaceId: WorkspaceIdType): boolean =>
+  pathname === releaseParentPath(workspaceId) || pathname === workspaceItemsPath(workspaceId)
+
 /** Construct bounded route state without retaining session or snapshot data. */
 export const makeReleaseRouteState = (
   workspaceId: WorkspaceIdType,
@@ -106,7 +110,7 @@ export const resolveReleaseOrigin = (
   if (Option.isNone(decoded)) return { isStored: false, origin: fallback }
   const routeState = decoded.value
   const isMatchingTarget = routeState.workspaceId === workspaceId && routeState.releaseId === releaseId
-  const isRecognizedOrigin = routeState.origin.pathname === releaseParentPath(workspaceId)
+  const isRecognizedOrigin = isRecognizedOriginPath(routeState.origin.pathname, workspaceId)
   return isMatchingTarget && isRecognizedOrigin && isSearch(routeState.origin.search) && isHash(routeState.origin.hash)
     ? { isStored: true, origin: routeState.origin }
     : { isStored: false, origin: fallback }

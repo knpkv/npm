@@ -1,0 +1,202 @@
+import { ServiceMark, type RlyService } from "@knpkv/rly/patterns"
+import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import type { ReactElement } from "react"
+import { Link, useLocation, useOutletContext, useSearchParams } from "react-router"
+
+import type { DeliveryEntityKind } from "../../domain/deliveryGraph.js"
+import { useBrowserSession } from "../BrowserSession.js"
+import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
+import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
+import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
+import type { WorkspaceItemPresentation, WorkspaceItemStatus } from "./presentWorkspaceItems.js"
+import { EMPTY_WORKSPACE_RELEASES, useWorkspaceItems } from "./useWorkspaceItems.js"
+import styles from "./ItemsPage.module.css"
+
+interface ItemFilters {
+  readonly query: string
+  readonly service: string
+  readonly status: WorkspaceItemStatus | "all"
+  readonly type: DeliveryEntityKind | "all"
+}
+
+const entityKinds: ReadonlyArray<DeliveryEntityKind> = [
+  "issue",
+  "pull-request",
+  "page",
+  "pipeline-execution",
+  "deployment",
+  "time-entry"
+]
+const services: ReadonlyArray<RlyService> = ["jira", "codecommit", "confluence", "codepipeline", "clockify"]
+
+const entityKind = (value: string | null): DeliveryEntityKind | "all" =>
+  entityKinds.find((candidate) => candidate === value) ?? "all"
+
+const itemStatus = (value: string | null): WorkspaceItemStatus | "all" =>
+  value === "active" || value === "done" || value === "failed" ? value : "all"
+
+const filtersFrom = (params: URLSearchParams): ItemFilters => ({
+  query: params.get("q")?.trim() ?? "",
+  service: services.find((candidate) => candidate === params.get("service")) ?? "all",
+  status: itemStatus(params.get("status")),
+  type: entityKind(params.get("type"))
+})
+
+export const filterWorkspaceItems = (
+  items: ReadonlyArray<WorkspaceItemPresentation>,
+  filters: ItemFilters
+): ReadonlyArray<WorkspaceItemPresentation> => {
+  const query = filters.query.toLocaleLowerCase("en-US")
+  return items.filter(
+    (item) =>
+      (query.length === 0 || `${item.key} ${item.title} ${item.status}`.toLocaleLowerCase("en-US").includes(query)) &&
+      (filters.service === "all" || item.service === filters.service) &&
+      (filters.status === "all" || item.statusGroup === filters.status) &&
+      (filters.type === "all" || item.kind === filters.type)
+  )
+}
+
+const labelForKind = (kind: DeliveryEntityKind): string =>
+  kind
+    .split("-")
+    .map((part) => `${part.charAt(0).toLocaleUpperCase("en-US")}${part.slice(1)}`)
+    .join(" ")
+
+/** Compact workspace-wide index of normalized delivery objects. */
+export const ItemsPage = (): ReactElement => {
+  const context = useOutletContext<WorkspaceReleaseOutletContext>()
+  const browserSession = useBrowserSession()
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const releases =
+    context.controller.state._tag === "ready" ? context.controller.state.portfolio.releases : EMPTY_WORKSPACE_RELEASES
+  const sessionKey = releaseWorksetSessionKey(browserSession.state)
+  const controller = useWorkspaceItems(context.workspaceId, releases, sessionKey, browserSession.invalidateSession)
+  const filters = filtersFrom(searchParams)
+  const update = (key: keyof ItemFilters, value: string): void => {
+    const next = new URLSearchParams(searchParams)
+    if (value.length === 0 || value === "all") next.delete(key === "query" ? "q" : key)
+    else next.set(key === "query" ? "q" : key, value)
+    setSearchParams(next, { replace: true })
+  }
+
+  if (
+    context.controller.state._tag !== "ready" ||
+    controller.state._tag === "idle" ||
+    controller.state._tag === "loading"
+  ) {
+    return (
+      <section aria-label="Loading delivery items" className={styles.page}>
+        <Skeleton height="8rem" variant="block" />
+        <Skeleton height="20rem" variant="block" />
+      </section>
+    )
+  }
+  if (controller.state._tag === "failed") {
+    return (
+      <StatePanel
+        action={<Button onClick={controller.retry}>Try again</Button>}
+        description="Control Center could not read the normalized delivery index. Saved source facts remain unchanged."
+        title="Items unavailable"
+        tone="caution"
+      />
+    )
+  }
+
+  const visibleItems = filterWorkspaceItems(controller.state.items, filters)
+  return (
+    <article className={styles.page}>
+      <header className={styles.hero}>
+        <Text as="p" tone="secondary" variant="label">
+          Items
+        </Text>
+        <Text as="h1" variant="verdict">
+          Find anything.
+        </Text>
+        <Text tone="secondary" variant="body-large">
+          One quiet index across tickets, pull requests, docs, pipelines, deployments, and time.
+        </Text>
+      </header>
+
+      <section aria-label="Item filters" className={styles.filters}>
+        <label className={styles.search}>
+          <span>Search</span>
+          <input
+            onChange={(event) => update("query", event.currentTarget.value)}
+            placeholder="Key, title, or status"
+            type="search"
+            value={filters.query}
+          />
+        </label>
+        <label>
+          <span>Service</span>
+          <select onChange={(event) => update("service", event.currentTarget.value)} value={filters.service}>
+            <option value="all">All services</option>
+            {services.map((service) => (
+              <option key={service} value={service}>
+                {service}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Type</span>
+          <select onChange={(event) => update("type", event.currentTarget.value)} value={filters.type}>
+            <option value="all">All types</option>
+            {entityKinds.map((kind) => (
+              <option key={kind} value={kind}>
+                {labelForKind(kind)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Status</span>
+          <select onChange={(event) => update("status", event.currentTarget.value)} value={filters.status}>
+            <option value="all">Any status</option>
+            <option value="active">Active</option>
+            <option value="done">Done</option>
+            <option value="failed">Needs attention</option>
+          </select>
+        </label>
+      </section>
+
+      <div className={styles.resultHeading}>
+        <Text as="h2" variant="section-title">
+          {visibleItems.length} of {controller.state.items.length} items
+        </Text>
+        {controller.state.truncated ? <StateLabel label="Bounded result" size="compact" tone="caution" /> : null}
+      </div>
+
+      {visibleItems.length === 0 ? (
+        <StatePanel
+          action={<Button onClick={() => setSearchParams({}, { replace: true })}>Clear filters</Button>}
+          description="Try a broader word, service, type, or status. No demo object is substituted."
+          title="No matching items"
+        />
+      ) : (
+        <div className={styles.items}>
+          {visibleItems.map((item) => (
+            <Surface as="article" className={styles.item} key={item.entityId} padding="none" tone="secondary">
+              <ServiceMark service={item.service} size="compact" />
+              <Link
+                className={styles.itemLink}
+                state={makeReleaseRouteState(context.workspaceId, item.releaseId, releaseOriginFromLocation(location))}
+                to={item.href}
+              >
+                <span>{item.key}</span>
+                <strong>{item.title}</strong>
+              </Link>
+              <div className={styles.meta}>
+                <StateLabel label={item.status} size="compact" tone={item.tone} />
+                <span>{labelForKind(item.kind)}</span>
+                <span>{item.owner}</span>
+                <time dateTime={item.freshness}>Synced</time>
+              </div>
+            </Surface>
+          ))}
+        </div>
+      )}
+    </article>
+  )
+}
