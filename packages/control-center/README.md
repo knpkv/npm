@@ -126,6 +126,14 @@ The first production CodeCommit slice exports an opaque `CodeCommitPluginDefinit
 
 This milestone is deliberately read-only. It does not negotiate diff content, comments, commits/history, checks, review state changes, approval, merge, or any governed mutation capability. CodeCommit's changed-file API does not report binary, generated, or oversized classification, so this slice leaves those inventory flags false until the owning package gains bounded blob/content inspection. The adapter definition is available for first-party runtime registration, but connection administration and the production runtime catalog remain later integration work.
 
+### AWS CodePipeline read adapter
+
+The server entry exports an opaque production CodePipeline plugin definition for one configured AWS profile, region, and pipeline. It negotiates `entity.read` and `sync.incremental` only. Direct `distilled-aws` CodePipeline and STS calls remain behind an injectable provider service; repository-owned Schemas decode every returned account, pipeline, execution, and action shape before it can become plugin data. Credential, authorization, throttling, timeout, malformed-response, outage, and not-found outcomes remain typed and redacted.
+
+Each execution provider page contains at most one execution, allowing its pipeline, execution, stage, and action events to fit one atomic plugin page and checkpoint. One synchronization invocation reads at most 20 execution pages. Action history requests at most 100 records per page, five pages, and 200 actions per execution; a truncated read is labeled instead of pretending to be complete. Discovery and execution snapshots use at most two concurrent provider calls. Provider cursors are opaque, replayable checkpoints, and repeated action cursors or mismatched identities fail closed.
+
+Normalized events carry the pipeline ARN, region, provider update/sample time, immutable execution/action identities, status, operator provenance, source revisions, and bounded stage/action summaries. Artifact metadata contains only names and S3 bucket/key coordinates marked `proxy-required`; resolved action configuration, provider artifact URLs, revision URLs, and external execution URLs are never exposed. Start, stop, manual approval, retry, log-content, and artifact-content operations remain unnegotiated until their governed authorization, receipt, proxy, and reconciliation paths are implemented.
+
 ## Persistence boundary
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. The MVP schema is intentionally unstable: a fresh database is created from one checked-in schema snapshot, and an existing database must match it exactly. Schema changes are breaking and require recreating local development data. Versioned migrations start only after the persistence model is declared stable and a released database file must remain readable by a newer build.

@@ -51,6 +51,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.engines.node !== ">=24") violations.push("Node 24 or newer must be required")
 
   const runtimeKeys = [
+    "@aws-sdk/credential-providers",
     "@effect/platform-browser",
     "@effect/platform-node",
     "@effect/sql-libsql",
@@ -59,6 +60,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/codecommit-core",
     "@knpkv/control-center-sql",
     "@knpkv/rly",
+    "distilled-aws",
     "effect",
     "react",
     "react-dom",
@@ -72,6 +74,12 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@knpkv/codecommit-core"] !== "workspace:^") {
     violations.push("@knpkv/codecommit-core must use workspace:^")
+  }
+  if (manifest.dependencies["distilled-aws"] !== "0.1.1") {
+    violations.push("distilled-aws must remain on the reviewed CodePipeline client version")
+  }
+  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1085.0") {
+    violations.push("AWS credential providers must remain on the reviewed runtime version")
   }
   const localAgentDependencies: ReadonlyArray<"@knpkv/ai-claude" | "@knpkv/ai-codex"> = [
     "@knpkv/ai-claude",
