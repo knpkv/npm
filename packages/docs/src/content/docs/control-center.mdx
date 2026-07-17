@@ -70,7 +70,7 @@ This slice does not yet register connections in the production runtime catalog o
 
 The server entry exports `makeJiraReadPluginRuntime`, a production `entity.read` adapter backed by the shared `@knpkv/jira-api-client`. Configure a root Jira web URL, activity page size, maximum pages, and per-request timeout; supply credentials only through the Jira client layer.
 
-Reads normalize the issue description, environment, workflow fields, versions, parent and subtasks, comments, changelog, and human collaborators into one bounded `jira.issue` event. Collaborators are deduplicated across assignee, reporter, creator, comment author, editor, and change author roles while preserving avatar URLs. Comments and history paginate independently, stop at their configured request limit, and expose explicit truncation metadata. Cancelling the scoped read interrupts the in-flight Jira request.
+Reads normalize the issue description, environment, workflow fields, versions, parent and subtasks, comments, changelog, and human collaborators into one bounded `jira.issue` event. Collaborators are deduplicated across assignee, reporter, creator, comment author, editor, and change author roles while preserving avatar URLs. Comments and history paginate independently, stop at their configured request limit, and expose explicit truncation metadata. Oversized fixed fields are omitted deterministically and named in `truncatedFields` rather than failing the read. Cancelling the scoped read interrupts the in-flight Jira request.
 
 This first production slice is read-only. Workspace JQL synchronization, separate `UpsertPerson` sync events, attachment content, and governed Jira mutations remain deferred rather than being represented as supported capabilities.
 

@@ -9,6 +9,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import { makeJiraReadPluginRuntimeFromProvider } from "../../src/server/plugins/jira/JiraReadPlugin.js"
@@ -151,6 +152,8 @@ const ExpectedAttributes = Schema.Struct({
   status: Schema.NullOr(Schema.Struct({ id: Schema.NullOr(Schema.String), name: Schema.NullOr(Schema.String) })),
   assigneeId: Schema.NullOr(Schema.String),
   reporterId: Schema.NullOr(Schema.String),
+  labels: Schema.Array(Schema.String),
+  truncatedFields: Schema.Array(Schema.String),
   comments: Schema.Array(Schema.Struct({
     id: Schema.String,
     authorId: Schema.NullOr(Schema.String),
@@ -209,6 +212,7 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(attributes.history.length, 2)
       assert.isFalse(attributes.commentsTruncated)
       assert.isFalse(attributes.historyTruncated)
+      assert.deepStrictEqual(attributes.truncatedFields, [])
       assert.deepStrictEqual(yield* Ref.get(commentStarts), [0, 2])
       assert.deepStrictEqual(yield* Ref.get(historyStarts), [0])
 
@@ -216,6 +220,50 @@ describe("JiraReadPlugin", () => {
       assert.deepStrictEqual(sam?.roles, ["change-author", "commenter", "creator", "reporter"])
       const ari = attributes.collaborators.find(({ providerPersonId }) => providerPersonId === "ari")
       assert.strictEqual(ari?.avatarUrl, "https://avatar.example/ari.png")
+    }))
+
+  it.effect("continues full comment and changelog pages when Jira omits total", () =>
+    Effect.gen(function*() {
+      const commentStarts = yield* Ref.make<ReadonlyArray<number>>([])
+      const historyStarts = yield* Ref.make<ReadonlyArray<number>>([])
+      const extendedChangelogs = [
+        ...changelogs,
+        { ...changelogs[0], id: "h3", created: "2026-07-17T10:00:00.000Z" }
+      ]
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Ref.update(commentStarts, (starts) => [...starts, request.startAt]).pipe(
+            Effect.as({
+              comments: comments.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults
+            })
+          ),
+        getChangelogs: (_issueId, request) =>
+          Ref.update(historyStarts, (starts) => [...starts, request.startAt]).pipe(
+            Effect.as({
+              values: extendedChangelogs.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(yield* Ref.get(commentStarts), [0, 2])
+      assert.deepStrictEqual(yield* Ref.get(historyStarts), [0, 2])
+      assert.strictEqual(attributes.commentTotal, comments.length)
+      assert.strictEqual(attributes.historyTotal, extendedChangelogs.length)
+      assert.lengthOf(attributes.comments, comments.length)
+      assert.lengthOf(attributes.history, extendedChangelogs.length)
+      assert.isFalse(attributes.commentsTruncated)
+      assert.isFalse(attributes.historyTruncated)
     }))
 
   it.effect("stops at the configured page bound and reports truncation", () =>
@@ -279,6 +327,52 @@ describe("JiraReadPlugin", () => {
       assert.isBelow(attributes.history.length, largeChangelogs.length)
       assert.isTrue(attributes.commentsTruncated)
       assert.isTrue(attributes.historyTruncated)
+      assert.deepStrictEqual(attributes.truncatedFields, [])
+    }))
+
+  it.effect("trims oversized fixed issue attributes with explicit field metadata", () =>
+    Effect.gen(function*() {
+      const oversizedUser = (accountId: string, marker: string) => ({
+        accountId,
+        active: true,
+        avatarUrls: { "48x48": `https://avatar.example/${marker.repeat(100_000)}` },
+        displayName: marker.repeat(32_768)
+      })
+      const oversizedIssue = {
+        ...issue,
+        fields: {
+          ...issue.fields,
+          assignee: oversizedUser("oversized-assignee", "a"),
+          reporter: oversizedUser("oversized-reporter", "r"),
+          creator: oversizedUser("oversized-creator", "c"),
+          labels: Array.from({ length: 9 }, (_, index) => `${index}${"l".repeat(32_767)}`)
+        }
+      }
+      const provider = baseProvider({
+        getIssue: () => Effect.succeed(Option.some(oversizedIssue)),
+        getComments: (_issueId, request) =>
+          Effect.succeed({ comments: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({ values: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 })
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.isAtMost(
+        new TextEncoder().encode(JSON.stringify(result.event.attributes)).byteLength,
+        MaximumPluginPayloadBytes
+      )
+      assert.deepStrictEqual(attributes.labels, [])
+      assert.deepStrictEqual(attributes.truncatedFields, ["collaborators", "labels"])
+      assert.isTrue(attributes.collaborators.every(({ avatarUrl }) => avatarUrl === null))
+      assert.isTrue(
+        attributes.collaborators.every(({ displayName, providerPersonId }) => displayName === providerPersonId)
+      )
     }))
 
   it.effect("reports an inconsistent empty provider page as truncated", () =>

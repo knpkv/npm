@@ -238,6 +238,34 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
 
   const retainedComments = [...comments]
   const retainedChangelogs = [...changelogs]
+  const retainedLabels = [...(issue.fields.labels ?? [])]
+  const retainedComponents = (issue.fields.components ?? []).map(namedValue)
+  const retainedFixVersions = (issue.fields.fixVersions ?? []).map((version) => ({
+    id: version.id ?? null,
+    name: version.name ?? null,
+    released: version.released ?? false,
+    releaseDate: version.releaseDate ?? null
+  }))
+  const retainedSubtasks = (issue.fields.subtasks ?? []).map(relatedIssue)
+  const truncatedFields = new Set<string>()
+  let compactCollaborators = false
+  let retainedDescription = normalizeRichText(issue.fields.description)
+  let retainedEnvironment = normalizeRichText(issue.fields.environment)
+  let retainedStatus = namedValue(issue.fields.status)
+  let retainedPriority = namedValue(issue.fields.priority)
+  let retainedIssueType = namedValue(issue.fields.issuetype)
+  let retainedProject = issue.fields.project === null || issue.fields.project === undefined
+    ? null
+    : {
+      id: issue.fields.project.id ?? null,
+      key: issue.fields.project.key ?? null,
+      name: issue.fields.project.name ?? null
+    }
+  let retainedResolution = namedValue(issue.fields.resolution)
+  let retainedCreatedAt: string | null = issue.fields.created ?? null
+  let retainedDueDate: string | null = issue.fields.duedate ?? null
+  let retainedResolvedAt: string | null = issue.fields.resolutiondate ?? null
+  let retainedParent = relatedIssue(issue.fields.parent)
   const makeAttributes = () => {
     const people = new Map<string, MutablePerson>()
     const assigneeId = addPerson(people, issue.fields.assignee, "assignee")
@@ -263,8 +291,8 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     }))
     const collaborators = Array.from(people.values()).map((person) => ({
       providerPersonId: person.providerPersonId,
-      displayName: person.displayName,
-      avatarUrl: person.avatarUrl,
+      displayName: compactCollaborators ? person.providerPersonId : person.displayName,
+      avatarUrl: compactCollaborators ? null : person.avatarUrl,
       active: person.active,
       roles: Array.from(person.roles).sort()
     }))
@@ -272,37 +300,27 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       schemaVersion: 1,
       key: issue.key,
       summary: issue.fields.summary,
-      description: normalizeRichText(issue.fields.description),
-      environment: normalizeRichText(issue.fields.environment),
-      status: namedValue(issue.fields.status),
-      priority: namedValue(issue.fields.priority),
-      issueType: namedValue(issue.fields.issuetype),
-      project: issue.fields.project === null || issue.fields.project === undefined
-        ? null
-        : {
-          id: issue.fields.project.id ?? null,
-          key: issue.fields.project.key ?? null,
-          name: issue.fields.project.name ?? null
-        },
-      resolution: namedValue(issue.fields.resolution),
-      labels: issue.fields.labels ?? [],
-      components: (issue.fields.components ?? []).map(namedValue),
-      fixVersions: (issue.fields.fixVersions ?? []).map((version) => ({
-        id: version.id ?? null,
-        name: version.name ?? null,
-        released: version.released ?? false,
-        releaseDate: version.releaseDate ?? null
-      })),
-      createdAt: issue.fields.created ?? null,
+      description: retainedDescription,
+      environment: retainedEnvironment,
+      status: retainedStatus,
+      priority: retainedPriority,
+      issueType: retainedIssueType,
+      project: retainedProject,
+      resolution: retainedResolution,
+      labels: retainedLabels,
+      components: retainedComponents,
+      fixVersions: retainedFixVersions,
+      createdAt: retainedCreatedAt,
       updatedAt: issue.fields.updated,
-      dueDate: issue.fields.duedate ?? null,
-      resolvedAt: issue.fields.resolutiondate ?? null,
-      parent: relatedIssue(issue.fields.parent),
-      subtasks: (issue.fields.subtasks ?? []).map(relatedIssue),
+      dueDate: retainedDueDate,
+      resolvedAt: retainedResolvedAt,
+      parent: retainedParent,
+      subtasks: retainedSubtasks,
       assigneeId,
       reporterId,
       creatorId,
       collaborators,
+      truncatedFields: Array.from(truncatedFields).sort(),
       comments: normalizedComments,
       commentTotal: input.comments.total,
       commentsTruncated: input.comments.truncated || retainedComments.length < comments.length,
@@ -330,6 +348,133 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       }
     }
     attributes = makeAttributes()
+  }
+
+  const clearValue = (field: string, clear: () => void, present: boolean): boolean => {
+    if (!present) return false
+    clear()
+    truncatedFields.add(field)
+    return true
+  }
+  const repeatedFieldTruncations: ReadonlyArray<{
+    readonly field: string
+    readonly removableBytes: () => number
+    readonly truncate: () => void
+  }> = [
+    {
+      field: "labels",
+      removableBytes: () => jsonByteLength(retainedLabels),
+      truncate: () => {
+        retainedLabels.length = 0
+      }
+    },
+    {
+      field: "components",
+      removableBytes: () => jsonByteLength(retainedComponents),
+      truncate: () => {
+        retainedComponents.length = 0
+      }
+    },
+    {
+      field: "fixVersions",
+      removableBytes: () => jsonByteLength(retainedFixVersions),
+      truncate: () => {
+        retainedFixVersions.length = 0
+      }
+    },
+    {
+      field: "subtasks",
+      removableBytes: () => jsonByteLength(retainedSubtasks),
+      truncate: () => {
+        retainedSubtasks.length = 0
+      }
+    },
+    {
+      field: "collaborators",
+      removableBytes: () => {
+        if (compactCollaborators) return 0
+        const compacted = attributes.collaborators.map(({ active, providerPersonId, roles }) => ({
+          providerPersonId,
+          displayName: providerPersonId,
+          avatarUrl: null,
+          active,
+          roles
+        }))
+        return Math.max(0, jsonByteLength(attributes.collaborators) - jsonByteLength(compacted))
+      },
+      truncate: () => {
+        compactCollaborators = true
+      }
+    }
+  ]
+  while (jsonByteLength(attributes) > MaximumPluginPayloadBytes) {
+    let selected: typeof repeatedFieldTruncations[number] | undefined
+    let selectedBytes = 0
+    for (const candidate of repeatedFieldTruncations) {
+      const removableBytes = candidate.removableBytes()
+      if (removableBytes > selectedBytes) {
+        selected = candidate
+        selectedBytes = removableBytes
+      }
+    }
+    if (selected === undefined || selectedBytes === 0) break
+    selected.truncate()
+    truncatedFields.add(selected.field)
+    attributes = makeAttributes()
+  }
+
+  const optionalFieldTruncations: ReadonlyArray<() => boolean> = [
+    () =>
+      clearValue("environment", () => {
+        retainedEnvironment = null
+      }, retainedEnvironment !== null),
+    () =>
+      clearValue("description", () => {
+        retainedDescription = null
+      }, retainedDescription !== null),
+    () =>
+      clearValue("parent", () => {
+        retainedParent = null
+      }, retainedParent !== null),
+    () =>
+      clearValue("project", () => {
+        retainedProject = null
+      }, retainedProject !== null),
+    () =>
+      clearValue("resolution", () => {
+        retainedResolution = null
+      }, retainedResolution !== null),
+    () =>
+      clearValue("priority", () => {
+        retainedPriority = null
+      }, retainedPriority !== null),
+    () =>
+      clearValue("issueType", () => {
+        retainedIssueType = null
+      }, retainedIssueType !== null),
+    () =>
+      clearValue("status", () => {
+        retainedStatus = null
+      }, retainedStatus !== null),
+    () =>
+      clearValue("dueDate", () => {
+        retainedDueDate = null
+      }, retainedDueDate !== null),
+    () =>
+      clearValue("createdAt", () => {
+        retainedCreatedAt = null
+      }, retainedCreatedAt !== null),
+    () =>
+      clearValue("resolvedAt", () => {
+        retainedResolvedAt = null
+      }, retainedResolvedAt !== null)
+  ]
+  for (
+    let step = 0;
+    jsonByteLength(attributes) > MaximumPluginPayloadBytes && step < optionalFieldTruncations.length;
+    step += 1
+  ) {
+    if (optionalFieldTruncations[step]?.()) attributes = makeAttributes()
   }
 
   const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({

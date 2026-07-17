@@ -142,6 +142,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
 }): Effect.fn.Return<JiraFetchedCollection<Value>, PluginFailure> {
   const values: Array<Value> = []
   let total = 0
+  let totalKnown = false
   let startAt = 0
   let exhausted = false
 
@@ -152,17 +153,28 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
       options.load({ startAt, maxResults: options.configuration.pageSize })
     )
     const pageValues = response.values ?? []
-    total = Math.max(response.total ?? pageValues.length, values.length + pageValues.length)
+    if (response.total !== undefined) {
+      totalKnown = true
+      total = Math.max(total, response.total)
+    }
     for (const value of pageValues) values.push(value)
+    total = Math.max(total, values.length)
     startAt += pageValues.length
-    if (startAt >= total) {
+    if (totalKnown && startAt >= total) {
       exhausted = true
       break
     }
-    if (pageValues.length === 0) break
+    if (pageValues.length === 0) {
+      if (!totalKnown) exhausted = true
+      break
+    }
+    if (!totalKnown && pageValues.length < options.configuration.pageSize) {
+      exhausted = true
+      break
+    }
   }
 
-  return { values, total, truncated: !exhausted && values.length < total }
+  return { values, total, truncated: !exhausted }
 })
 
 const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
