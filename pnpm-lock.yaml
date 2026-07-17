@@ -545,6 +545,9 @@ importers:
       '@knpkv/control-center-sql':
         specifier: workspace:^
         version: link:../control-center-sql
+      '@knpkv/jira-api-client':
+        specifier: workspace:^
+        version: link:../jira-api-client
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly

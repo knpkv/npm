@@ -14,3 +14,5 @@ export * from "./retryPolicy.js"
 export * from "./codecommit/index.js"
 /** Production AWS CodePipeline read adapter. */
 export * from "./codepipeline/index.js"
+/** Production, read-only Jira issue adapter. */
+export * from "./jira/index.js"

@@ -18,6 +18,7 @@ const validManifest = {
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
+    "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "distilled-aws": "0.1.1",
     effect: "4.0.0-beta.98",
@@ -112,6 +113,15 @@ describe("package contract", () => {
       "distilled-aws must remain on the reviewed CodePipeline client version",
       "AWS credential providers must remain on the reviewed runtime version"
     ]))
+  })
+
+  it("rejects a non-workspace Jira client dependency", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: { ...validManifest.dependencies, "@knpkv/jira-api-client": "^0.4.0" }
+      })
+    ).toContain("@knpkv/jira-api-client must use workspace:^")
   })
 
   it("rejects a CLI that bypasses the built server boundary", () => {
