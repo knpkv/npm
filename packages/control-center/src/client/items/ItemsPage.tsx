@@ -212,7 +212,7 @@ export const ItemsPage = (): ReactElement => {
         </label>
       </section>
 
-      <div className={styles.resultHeading}>
+      <div className={styles.resultHeading} id="results">
         <Text as="h2" variant="section-title">
           {visibleItems.length} of {controller.state.items.length} release-linked items
         </Text>

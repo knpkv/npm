@@ -8,6 +8,7 @@ import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceIt
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
 import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
+import { ReleaseId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 const items = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, releaseWorksetFixture])
@@ -202,21 +203,66 @@ describe("workspace items", () => {
   it("treats closed provider issues as completed", () => {
     const source = releaseWorksetFixture.entityProjections[0]
     if (source === undefined) throw new Error("Expected a source projection")
-    const closedIssue = Schema.decodeUnknownSync(DeliveryEntityProjection)({
-      ...source.projection,
-      entityId: "01890f6f-6d6a-7cc0-98d3-000000000096",
-      entityType: "issue",
-      displayKey: "OPS-496",
-      title: "Retired delivery task",
-      details: { _tag: "issue", estimatePoints: null, key: "OPS-496", priority: null, status: "Closed" }
-    })
+    const issue = (status: string, suffix: string) =>
+      Schema.decodeUnknownSync(DeliveryEntityProjection)({
+        ...source.projection,
+        entityId: `01890f6f-6d6a-7cc0-98d3-0000000000${suffix}`,
+        entityType: "issue",
+        displayKey: `OPS-4${suffix}`,
+        title: `Provider issue ${suffix}`,
+        details: { _tag: "issue", estimatePoints: null, key: `OPS-4${suffix}`, priority: null, status }
+      })
     const closed = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [{
       ...releaseWorksetFixture,
-      entityProjections: [{ recordedAt: source.recordedAt, projection: closedIssue }]
+      entityProjections: [
+        { recordedAt: source.recordedAt, projection: issue("Closed", "96") },
+        { recordedAt: source.recordedAt, projection: issue("Ready for review", "97") },
+        { recordedAt: source.recordedAt, projection: issue("Not done", "98") }
+      ]
     }])
 
-    expect(closed[0]).toMatchObject({ status: "Closed", statusGroup: "done", tone: "positive" })
+    expect(closed.find(({ status }) => status === "Closed")).toMatchObject({ statusGroup: "done", tone: "positive" })
+    expect(closed.find(({ status }) => status === "Ready for review")).toMatchObject({
+      statusGroup: "active",
+      tone: "progress"
+    })
+    expect(closed.find(({ status }) => status === "Not done")).toMatchObject({
+      statusGroup: "active",
+      tone: "progress"
+    })
     expect(items.find(({ key }) => key === "OPS-428")).toMatchObject({ statusGroup: "active", tone: "progress" })
+  })
+
+  it("chooses a canonical release route for entities linked to multiple releases", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    const unique = Schema.decodeUnknownSync(DeliveryEntityProjection)({
+      ...source.projection,
+      entityId: "01890f6f-6d6a-7cc0-98d3-000000000099",
+      displayKey: "OPS-499",
+      title: "Release-specific task",
+      details: { _tag: "issue", estimatePoints: null, key: "OPS-499", priority: null, status: "Open" }
+    })
+    const otherInspection = {
+      ...releaseWorksetFixture,
+      releaseId: otherReleaseId,
+      entityProjections: [
+        ...releaseWorksetFixture.entityProjections,
+        { recordedAt: source.recordedAt, projection: unique }
+      ]
+    }
+    const forward = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [releaseWorksetFixture, otherInspection])
+    const reverse = presentWorkspaceItems(WORKSET_WORKSPACE_ID, [otherInspection, releaseWorksetFixture])
+    const canonicalReleaseId = releaseWorksetFixture.releaseId.localeCompare(otherReleaseId) <= 0
+      ? releaseWorksetFixture.releaseId
+      : otherReleaseId
+
+    expect(forward.find(({ key }) => key === "OPS-428")?.href).toBe(
+      reverse.find(({ key }) => key === "OPS-428")?.href
+    )
+    expect(forward.find(({ key }) => key === "OPS-428")?.releaseId).toBe(canonicalReleaseId)
+    expect(forward.find(({ key }) => key === "OPS-499")?.releaseId).toBe(otherReleaseId)
   })
 })
 

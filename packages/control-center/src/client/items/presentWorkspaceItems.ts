@@ -57,7 +57,20 @@ const statusFor = (details: DeliveryEntityDetails): string => {
   }
 }
 
-const statusPresentation = (status: string): Pick<WorkspaceItemPresentation, "statusGroup" | "tone"> => {
+const issueStatusPresentation = (status: string): Pick<WorkspaceItemPresentation, "statusGroup" | "tone"> => {
+  const value = status.trim().toLocaleLowerCase("en-US")
+  if (value === "blocked" || value === "rejected") return { statusGroup: "failed", tone: "critical" }
+  if (value === "closed" || value === "done" || value === "resolved") {
+    return { statusGroup: "done", tone: "positive" }
+  }
+  return { statusGroup: "active", tone: "progress" }
+}
+
+const statusPresentation = (
+  kind: DeliveryEntityKind,
+  status: string
+): Pick<WorkspaceItemPresentation, "statusGroup" | "tone"> => {
+  if (kind === "issue") return issueStatusPresentation(status)
   const value = status.toLocaleLowerCase("en-US")
   if (
     ["blocked", "changes requested", "failed", "rejected", "rolled back", "stopped", "superseded"].some((part) =>
@@ -80,7 +93,8 @@ export const presentWorkspaceItems = (
   inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
 ): ReadonlyArray<WorkspaceItemPresentation> => {
   const items = new Map<EntityId, WorkspaceItemPresentation>()
-  for (const inspection of inspections) {
+  const canonicalInspections = [...inspections].sort((left, right) => left.releaseId.localeCompare(right.releaseId))
+  for (const inspection of canonicalInspections) {
     for (const entry of inspection.entityProjections) {
       const projection = entry.projection
       if (projection.entityState !== "present" || items.has(projection.entityId)) continue
@@ -95,7 +109,7 @@ export const presentWorkspaceItems = (
         releaseId: inspection.releaseId,
         service: serviceFor(projection.entityType),
         status,
-        ...statusPresentation(status),
+        ...statusPresentation(projection.entityType, status),
         title: projection.title
       })
     }
