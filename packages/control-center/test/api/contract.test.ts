@@ -236,6 +236,7 @@ describe("ControlCenterApi contract", () => {
       Object.entries(TimelineApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
         ["page", "GET", "/api/v1/timeline"],
+        ["detail", "GET", "/api/v1/timeline/events/:eventKey"],
         ["exportCsv", "GET", "/api/v1/timeline/export.csv"],
         ["exportJson", "GET", "/api/v1/timeline/export.json"]
       ]
@@ -298,6 +299,7 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(TimelineApiGroup.endpoints), {
       page: [SessionCookieAuth.key],
+      detail: [SessionCookieAuth.key],
       exportCsv: [SessionCookieAuth.key],
       exportJson: [SessionCookieAuth.key]
     })

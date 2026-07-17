@@ -33,12 +33,12 @@ const seedSystemEvents = Effect.gen(function*() {
     VALUES (${workspaceId}, 'Payments', 1, ${older}, ${newest})`
   yield* sql`INSERT INTO domain_events (
       workspace_id, event_cursor, event_id, schema_version, event_type, dedupe_key,
-      occurred_at, ingested_at, payload_json, payload_digest
+      job_id, occurred_at, ingested_at, payload_json, payload_digest
     ) VALUES
       (${workspaceId}, 1, ${olderEventId}, 1, 'release-indexed', 'older',
-        ${older}, ${older}, '{}', ${"a".repeat(64)}),
+        NULL, ${older}, ${older}, '{}', ${"a".repeat(64)}),
       (${workspaceId}, 2, ${newestEventId}, 1, 'release-evaluated', 'newest',
-        ${newest}, ${newest}, '{}', ${"b".repeat(64)})`
+        'agent-job-42', ${newest}, ${newest}, '{}', ${"b".repeat(64)})`
 })
 
 const seedCollidingLegacyPluginPageKeys = Effect.gen(function*() {
@@ -142,6 +142,31 @@ describe("TimelineRepository", () => {
         workspaceId
       })
       assert.deepStrictEqual(second.map(({ eventKey }) => eventKey), [`sync:${"1".repeat(64)}`])
+    })))
+
+  it.effect("resolves one exact workspace event with owner-visible attribution", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedSystemEvents
+      const repository = yield* TimelineRepository
+
+      const detail = yield* repository.detail({
+        eventKey: `domain:${newestEventId}`,
+        workspaceId
+      })
+      assert.strictEqual(detail?.agentJobId, "agent-job-42")
+      assert.strictEqual(detail?.eventType, "release-evaluated")
+
+      const missing = yield* repository.detail({
+        eventKey: "domain:missing",
+        workspaceId
+      })
+      assert.isNull(missing)
+
+      const otherWorkspace = yield* repository.detail({
+        eventKey: `domain:${newestEventId}`,
+        workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000199")
+      })
+      assert.isNull(otherWorkspace)
     })))
 
   it.effect("uses source-specific workspace-time indexes without temporary Timeline sorts", () =>

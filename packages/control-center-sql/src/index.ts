@@ -5,6 +5,7 @@ import type { RenderedSql } from "./types.js"
 
 export {
   type RenderedTimelineQuery,
+  renderTimelineDetailQueries,
   renderTimelineQueries,
   type TimelineQueryCursor,
   type TimelineQueryInput,

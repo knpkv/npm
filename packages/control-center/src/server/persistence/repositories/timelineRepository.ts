@@ -1,4 +1,4 @@
-import { renderTimelineQueries } from "@knpkv/control-center-sql"
+import { renderTimelineDetailQueries, renderTimelineQueries } from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -72,6 +72,31 @@ const compareRecords = (left: TimelineRecord, right: TimelineRecord): number => 
 const makeTimelineRepository = Effect.gen(function*() {
   const { sql } = yield* Database
 
+  const execute = Effect.fn("TimelineRepository.execute")(function*(
+    plans: ReturnType<typeof renderTimelineQueries>
+  ) {
+    const sourceRows = yield* Effect.forEach(plans, (plan) =>
+      sql.unsafe(plan.sql, [...plan.params]).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TimelineRow)))
+      ), { concurrency: 4 })
+    return yield* Effect.forEach(sourceRows.flat(), (row) =>
+      Effect.gen(function*() {
+        const occurredAt = yield* Schema.decodeUnknownEffect(
+          Schema.DateTimeUtcFromString
+        )(row.occurredAt)
+        const actorKind = yield* Schema.decodeUnknownEffect(
+          Schema.Literals(["agent", "human", "plugin", "system"])
+        )(row.actorKind)
+        const sourceKind = yield* Schema.decodeUnknownEffect(
+          Schema.Literals(["action", "plugin-sync", "relationship", "system"])
+        )(row.sourceKind)
+        const service = yield* Schema.decodeUnknownEffect(
+          Schema.NullOr(Schema.Literals(["codecommit", "codepipeline", "jira", "confluence", "clockify"]))
+        )(row.service)
+        return { ...row, actorKind, occurredAt, service, sourceKind } satisfies TimelineRecord
+      }))
+  })
+
   return {
     page: Effect.fn("TimelineRepository.page")(function*(input: ReadTimelinePageInput) {
       const sourceLimit = Math.min(Math.max(input.limit, 1), 100) + 1
@@ -85,28 +110,17 @@ const makeTimelineRepository = Effect.gen(function*() {
         to: input.to === null ? null : DateTime.formatIso(input.to),
         workspaceId: input.workspaceId
       })
-      const sourceRows = yield* Effect.forEach(plans, (plan) =>
-        sql.unsafe(plan.sql, [...plan.params]).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(TimelineRow)))
-        ), { concurrency: 4 })
-      const records = yield* Effect.forEach(sourceRows.flat(), (row) =>
-        Effect.gen(function*() {
-          const occurredAt = yield* Schema.decodeUnknownEffect(
-            Schema.DateTimeUtcFromString
-          )(row.occurredAt)
-          const actorKind = yield* Schema.decodeUnknownEffect(
-            Schema.Literals(["agent", "human", "plugin", "system"])
-          )(row.actorKind)
-          const sourceKind = yield* Schema.decodeUnknownEffect(
-            Schema.Literals(["action", "plugin-sync", "relationship", "system"])
-          )(row.sourceKind)
-          const service = yield* Schema.decodeUnknownEffect(
-            Schema.NullOr(Schema.Literals(["codecommit", "codepipeline", "jira", "confluence", "clockify"]))
-          )(row.service)
-          return { ...row, actorKind, occurredAt, service, sourceKind } satisfies TimelineRecord
-        }))
+      const records = yield* execute(plans)
       return records.sort(compareRecords).slice(0, sourceLimit)
-    }, mapPersistenceOperation("timeline.page"))
+    }, mapPersistenceOperation("timeline.page")),
+    detail: Effect.fn("TimelineRepository.detail")(function*(input: {
+      readonly workspaceId: WorkspaceId
+      readonly eventKey: string
+    }) {
+      const records = yield* execute(renderTimelineDetailQueries(input))
+      if (records.length > 1) return yield* Effect.die("Timeline event key resolved more than once")
+      return records[0] ?? null
+    }, mapPersistenceOperation("timeline.detail"))
   }
 })
 

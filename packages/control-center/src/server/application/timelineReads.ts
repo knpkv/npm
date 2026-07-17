@@ -2,8 +2,12 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
-import type { TimelineEvent, TimelinePage } from "../../domain/timeline.js"
-import { ApplicationServiceUnavailable, TimelineReads } from "../api/ApplicationServices.js"
+import type { TimelineEvent, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
+import {
+  ApplicationResourceNotFound,
+  ApplicationServiceUnavailable,
+  TimelineReads
+} from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import type { TimelineRecord } from "../persistence/repositories/timelineRepository.js"
 
@@ -61,6 +65,23 @@ export const presentTimelineEvent = (workspaceId: WorkspaceId, record: TimelineR
   href: eventHref(workspaceId, record)
 })
 
+/** Expand one exact Timeline event with owner-visible identifiers and agent attribution. */
+export const presentTimelineEventDetail = (
+  workspaceId: WorkspaceId,
+  record: TimelineRecord
+): TimelineEventDetail => ({
+  event: presentTimelineEvent(workspaceId, record),
+  identifiers: {
+    actorId: record.actorId,
+    actionId: record.actionId,
+    relationshipId: record.relationshipId,
+    pluginConnectionId: record.pluginConnectionId,
+    releaseId: record.releaseId,
+    entityId: record.entityId
+  },
+  agentJob: record.agentJobId === null ? null : { jobId: record.agentJobId }
+})
+
 /** Construct the durable activity projection from bounded persistence reads. */
 export const makeTimelineReads = Effect.gen(function*() {
   const persistence = yield* Persistence
@@ -75,6 +96,11 @@ export const makeTimelineReads = Effect.gen(function*() {
           ? { eventKey: last.eventKey, occurredAt: last.occurredAt }
           : null
       } satisfies TimelinePage
+    }),
+    detail: Effect.fn("TimelineReads.detail")(function*(input) {
+      const record = yield* persistence.timeline.detail(input).pipe(Effect.mapError(() => unavailable()))
+      if (record === null) return yield* new ApplicationResourceNotFound()
+      return presentTimelineEventDetail(input.workspaceId, record)
     })
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 
-import { renderTimelineQueries } from "../src/index.js"
+import { renderTimelineDetailQueries, renderTimelineQueries } from "../src/index.js"
 
 describe("renderTimelineQueries", () => {
   it("renders four independently bounded and parameterized source plans", () => {
@@ -66,5 +66,27 @@ describe("renderTimelineQueries", () => {
     })
 
     expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["action", "relationship", "system"])
+  })
+
+  it("renders exact owner-detail lookups without interpolating identifiers", () => {
+    const rendered = renderTimelineDetailQueries({
+      eventKey: "domain:event-42",
+      workspaceId: "workspace-1"
+    })
+
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]?.sourceKind).toBe("system")
+    for (const query of rendered) {
+      expect(query.sql).not.toContain("workspace-1")
+      expect(query.sql).not.toContain("event-42")
+      expect(query.params).toContain("workspace-1")
+      expect(query.params).toContain("event-42")
+      expect(query.params).toContain(1)
+    }
+  })
+
+  it("rejects unknown and empty detail-key namespaces before rendering SQL", () => {
+    expect(renderTimelineDetailQueries({ eventKey: "unknown:event-42", workspaceId: "workspace-1" })).toEqual([])
+    expect(renderTimelineDetailQueries({ eventKey: "domain:", workspaceId: "workspace-1" })).toEqual([])
   })
 })

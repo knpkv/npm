@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { presentTimelineEvent } from "../../src/server/application/timelineReads.js"
+import { presentTimelineEvent, presentTimelineEventDetail } from "../../src/server/application/timelineReads.js"
 import type { TimelineRecord } from "../../src/server/persistence/repositories/timelineRepository.js"
 
 const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000151")
@@ -42,5 +42,31 @@ describe("Timeline presentation", () => {
       })
     )
     assert.strictEqual(event.href, `/w/${workspaceId}/releases/release-7`)
+  })
+
+  it("expands raw identifiers only in the deliberate owner detail projection", () => {
+    const input = record({
+      actionId: "action-42",
+      actorId: "agent-7",
+      agentJobId: "job-9",
+      entityId: "entity-42",
+      pluginConnectionId: "connection-3",
+      releaseId: "release-7",
+      relationshipId: "relationship-5"
+    })
+
+    const redacted = presentTimelineEvent(workspaceId, input)
+    const detail = presentTimelineEventDetail(workspaceId, input)
+
+    assert.notProperty(redacted, "identifiers")
+    assert.deepStrictEqual(detail.identifiers, {
+      actorId: "agent-7",
+      actionId: "action-42",
+      relationshipId: "relationship-5",
+      pluginConnectionId: "connection-3",
+      releaseId: "release-7",
+      entityId: "entity-42"
+    })
+    assert.deepStrictEqual(detail.agentJob, { jobId: "job-9" })
   })
 })
