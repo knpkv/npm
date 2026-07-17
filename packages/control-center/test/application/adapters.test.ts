@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Result, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Result, Schema, Stream } from "effect"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -19,6 +19,7 @@ import {
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { NegotiatedPluginDescriptorV1 } from "../../src/domain/plugins/descriptor.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -32,6 +33,7 @@ import {
   makeDeliveryGraphInspection,
   makeMediaReads,
   makePluginAdministration,
+  makePluginAdministrationWithConnections,
   makePortfolioSnapshots,
   makeRelationshipRepairProposals,
   mapPersistenceReadError
@@ -40,6 +42,10 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
+import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
+import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
@@ -125,6 +131,11 @@ const descriptor = {
   ],
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }
+
+const negotiatedDescriptor = Schema.decodeUnknownSync(NegotiatedPluginDescriptorV1)({
+  descriptor,
+  capabilities: [{ capabilityId: "entity.read", version: 1 }]
+})
 
 const release = Schema.decodeSync(Release)({
   createdAt: "2026-07-14T10:00:00.000Z",
@@ -1344,6 +1355,82 @@ describe("application adapters", () => {
       if (Result.isFailure(keepMissing)) {
         assert.instanceOf(keepMissing.failure, ApplicationInvalidRequest)
       }
+    })))
+
+  it.effect("tests the scoped provider and returns its secret-free user identity", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "atlassian-account-123", displayName: "Avery Bell" },
+          workspace: { providerImmutableId: "site-456", displayName: "Payments Jira" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: ({ pluginConnectionId, workspaceId }) =>
+          pluginConnectionId === PLUGIN_ID && workspaceId === WORKSPACE_ID
+            ? Effect.succeed(Context.make(PluginConnection, connection))
+            : Effect.die("connection test crossed its requested scope"),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "healthy")
+      if (result._tag === "healthy") {
+        assert.deepStrictEqual(result.identity, {
+          kind: "user",
+          label: "Atlassian user",
+          displayName: "Avery Bell",
+          providerImmutableId: "atlassian-account-123"
+        })
+      }
+    })))
+
+  it.effect("redacts provider operation details when a connection test fails", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.die("discovery must not run after failed health"),
+        health: Effect.fail(
+          new PluginAuthenticationFailure({
+            operation: "Bearer secret-token-never-return"
+          })
+        ),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const result = yield* administration.testConnection({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID
+      })
+
+      assert.strictEqual(result._tag, "failed")
+      assert.strictEqual(result._tag === "failed" ? result.failureClass : null, "authentication")
+      assert.strictEqual(
+        result._tag === "failed" ? result.safeMessage : null,
+        "The provider rejected these credentials."
+      )
+      assert.notInclude(JSON.stringify(result), "secret-token-never-return")
     })))
 
   it.effect("caps compact collaborators deterministically while preserving the total count", () =>

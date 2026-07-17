@@ -1,3 +1,5 @@
+import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -10,12 +12,16 @@ import type {
   PluginConfiguration,
   PluginConfigurationMetadata,
   PluginConfigurationPatchValue,
+  PluginConnectionIdentity,
   PluginConnectionSummary,
+  PluginConnectionTestResult,
   RedactedPluginConfigurationValue
 } from "../../api/plugins.js"
 import { PluginConfigurationKey } from "../../api/plugins.js"
+import type { PluginHealth } from "../../domain/freshness.js"
 import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
+import type { PluginDiscoveryV1 } from "../../domain/plugins/discovery.js"
 import {
   ApplicationConflict,
   ApplicationInvalidRequest,
@@ -30,6 +36,9 @@ import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
+import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
+import { PluginConnection } from "../plugins/PluginConnection.js"
+import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
@@ -96,6 +105,140 @@ const requireConnection = (
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId
 ) => mapPersistenceRead(persistence.pluginConnections.get(workspaceId, pluginConnectionId))
+
+const identityLabel = (providerId: PluginConnectionRecord["providerId"]): string => {
+  switch (providerId) {
+    case "jira":
+      return "Atlassian user"
+    case "confluence":
+      return "Atlassian account"
+    case "codecommit":
+    case "codepipeline":
+      return "AWS account"
+    case "clockify":
+      return "Clockify user"
+  }
+}
+
+const failureMessage = (failure: PluginFailure): string => {
+  switch (failure._tag) {
+    case "PluginAuthenticationFailure":
+      return "The provider rejected these credentials."
+    case "PluginAuthorizationFailure":
+      return "These credentials cannot perform the connection check."
+    case "PluginRateLimitFailure":
+      return "The provider rate limit has been reached."
+    case "PluginTimeoutFailure":
+      return "The provider did not respond before the connection timed out."
+    case "PluginMalformedResponseFailure":
+      return "The provider returned an unexpected identity response."
+    case "PluginOutageFailure":
+      return "The provider is currently unavailable."
+    case "PluginCancellationFailure":
+      return "The connection check was interrupted."
+    case "PluginConflictFailure":
+    case "PluginUnsupportedCapabilityFailure":
+    case "PluginConfigurationFailure":
+    case "PluginUnknownOutcomeFailure":
+      return "The connection could not be verified."
+  }
+}
+
+const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number =>
+  Math.max(0, Number((finishedAt - startedAt) / 1_000_000n))
+
+type LiveConnectionTestOutcome =
+  | { readonly _tag: "reported-failure"; readonly health: PluginHealth }
+  | {
+    readonly _tag: "discovered"
+    readonly discovery: PluginDiscoveryV1
+    readonly health: Extract<PluginHealth, { readonly _tag: "healthy" }>
+  }
+
+const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(function*(
+  persistence: Persistence["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId
+) {
+  const record = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  if (pluginConnections === null) return yield* unavailable()
+
+  const startedAt = yield* Clock.currentTimeNanos
+  const outcome = yield* Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* pluginConnections.contextEffect({ workspaceId, pluginConnectionId })
+      const connection = Context.get(context, PluginConnection)
+      const health = yield* connection.health
+      if (health._tag !== "healthy") {
+        return { _tag: "reported-failure", health } satisfies LiveConnectionTestOutcome
+      }
+      const discovery = yield* connection.discover
+      return { _tag: "discovered", discovery, health } satisfies LiveConnectionTestOutcome
+    })
+  ).pipe(Effect.result)
+  const latencyMilliseconds = elapsedMilliseconds(startedAt, yield* Clock.currentTimeNanos)
+  const checkedAt = DateTime.makeUnsafe(yield* Clock.currentTimeMillis)
+
+  if (Result.isFailure(outcome)) {
+    const failure = outcome.failure
+    return {
+      _tag: "failed",
+      pluginConnectionId,
+      providerId: record.providerId,
+      checkedAt,
+      latencyMilliseconds,
+      failureClass: pluginFailureClass(failure),
+      retryAt: failure._tag === "PluginRateLimitFailure" ? failure.retryAt : null,
+      safeMessage: failureMessage(failure)
+    } satisfies PluginConnectionTestResult
+  }
+  if (outcome.success._tag === "reported-failure") {
+    const health = outcome.success.health
+    return {
+      _tag: "failed",
+      pluginConnectionId,
+      providerId: record.providerId,
+      checkedAt: health.checkedAt,
+      latencyMilliseconds,
+      failureClass: health._tag === "disabled" ? "unknown" : health.failureClass,
+      retryAt: health._tag === "disabled" ? null : health.retryAt,
+      safeMessage: health._tag === "disabled" ? "This connection is disabled." : health.safeMessage
+    } satisfies PluginConnectionTestResult
+  }
+
+  const discoveredIdentity = outcome.success.discovery.account ?? outcome.success.discovery.workspace
+  if (discoveredIdentity === null) {
+    return {
+      _tag: "failed",
+      pluginConnectionId,
+      providerId: record.providerId,
+      checkedAt: outcome.success.health.checkedAt,
+      latencyMilliseconds,
+      failureClass: "malformed-response",
+      retryAt: null,
+      safeMessage: "The provider did not return a usable account identity."
+    } satisfies PluginConnectionTestResult
+  }
+  const identity = {
+    kind: outcome.success.discovery.account === null
+      ? "workspace"
+      : record.providerId === "jira" || record.providerId === "clockify"
+      ? "user"
+      : "account",
+    label: identityLabel(record.providerId),
+    displayName: discoveredIdentity.displayName,
+    providerImmutableId: discoveredIdentity.providerImmutableId
+  } satisfies PluginConnectionIdentity
+  return {
+    _tag: "healthy",
+    pluginConnectionId,
+    providerId: record.providerId,
+    checkedAt: outcome.success.health.checkedAt,
+    latencyMilliseconds,
+    identity
+  } satisfies PluginConnectionTestResult
+})
 
 const metadata = Effect.fn("PluginAdministration.metadata")(function*(
   persistence: Persistence["Service"],
@@ -285,7 +428,9 @@ const canonicalValues = Effect.fn("PluginAdministration.canonicalValues")(functi
 })
 
 /** Construct the secret-free plugin administration adapter over durable host state. */
-export const makePluginAdministration = Effect.gen(function*() {
+export const makePluginAdministrationWithConnections = Effect.fn("PluginAdministration.makeWithConnections")(function*(
+  pluginConnections: PluginConnectionMapV1 | null
+) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
 
@@ -296,6 +441,8 @@ export const makePluginAdministration = Effect.gen(function*() {
       const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
       return { pluginConnectionId, health: runtime.health }
     }),
+    testConnection: ({ pluginConnectionId, workspaceId }) =>
+      testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
     configuration: ({ pluginConnectionId, workspaceId }) =>
@@ -334,8 +481,15 @@ export const makePluginAdministration = Effect.gen(function*() {
   } satisfies PluginAdministrationService
 })
 
+/** Construct administration reads when no provider runtime registry is configured. */
+export const makePluginAdministration = makePluginAdministrationWithConnections(null)
+
 /** Live plugin administration layer. */
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration)
+
+/** Live administration layer backed by the same scoped provider registry as synchronization. */
+export const pluginAdministrationLayerWithConnections = (pluginConnections: PluginConnectionMapV1) =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections))
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections

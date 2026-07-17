@@ -7,7 +7,9 @@ export { makeMediaReads, mediaReadsLayer } from "./mediaReads.js"
 export {
   listPluginConnectionSummaries,
   makePluginAdministration,
-  pluginAdministrationLayer
+  makePluginAdministrationWithConnections,
+  pluginAdministrationLayer,
+  pluginAdministrationLayerWithConnections
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
 export {

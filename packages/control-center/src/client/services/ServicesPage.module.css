@@ -1,0 +1,69 @@
+.page {
+  display: grid;
+  gap: var(--rly-space-40);
+}
+
+.heading {
+  display: grid;
+  max-inline-size: 48rem;
+  gap: var(--rly-space-12);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: var(--rly-space-16);
+}
+
+.card {
+  display: grid;
+  align-content: start;
+  gap: var(--rly-space-24);
+}
+
+.cardHeading,
+.cardAction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-16);
+}
+
+.connectionIdentity {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: var(--rly-space-12);
+}
+
+.testEvidence {
+  display: grid;
+  gap: var(--rly-space-12);
+  padding: var(--rly-space-16);
+  border-inline-start: 2px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-2);
+}
+
+.identity {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.identifier {
+  overflow-wrap: anywhere;
+}
+
+.textLink {
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+@media (max-width: 32rem) {
+  .cardHeading,
+  .cardAction {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

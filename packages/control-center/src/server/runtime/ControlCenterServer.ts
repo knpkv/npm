@@ -22,6 +22,7 @@ import {
   liveEventsLayer,
   mediaReadsLayer,
   pluginAdministrationLayer,
+  pluginAdministrationLayerWithConnections,
   portfolioSnapshotsLayer,
   relationshipRepairProposalsLayer,
   type ReleaseAgentRuntimeOptions,
@@ -44,6 +45,7 @@ import {
   persistenceLayerFromDatabase
 } from "../persistence/Persistence.js"
 import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
+import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
 import type { SecretStoreError } from "../secrets/SecretStoreError.js"
 import type { BindConfig } from "../security/BindConfig.js"
@@ -80,6 +82,8 @@ type ControlCenterCoreApplicationServices =
 export interface ControlCenterServerOptions<ApplicationError = never, ApplicationRequirements = never> {
   readonly bindConfig: BindConfig
   readonly persistenceConfig: PersistenceConfig
+  /** Scoped first-party provider runtimes used by live connection checks. */
+  readonly pluginConnections?: PluginConnectionMapV1 | null
   readonly secretRoot: SecretRoot
   readonly staticAssets: StaticAssetStoreOptions
   readonly bootstrap?: ControlCenterBootstrapOptions | null
@@ -105,20 +109,21 @@ export type ControlCenterServerError<ApplicationError = never> =
   | ServeError
   | StaticAssetStoreError
 
-const liveApplicationServices: Layer.Layer<
-  ControlCenterCoreApplicationServices,
-  never,
-  Persistence | SecretStore
-> = Layer.mergeAll(
-  authorizedSharesLayer,
-  pluginAdministrationLayer,
-  deliveryGraphInspectionLayer,
-  portfolioSnapshotsLayer,
-  timelineExportAuditsLayer,
-  timelineReadsLayer,
-  mediaReadsLayer,
-  relationshipRepairProposalsLayer
-)
+const liveApplicationServices = (
+  pluginConnections: PluginConnectionMapV1 | null
+): Layer.Layer<ControlCenterCoreApplicationServices, never, Persistence | SecretStore> =>
+  Layer.mergeAll(
+    authorizedSharesLayer,
+    pluginConnections === null
+      ? pluginAdministrationLayer
+      : pluginAdministrationLayerWithConnections(pluginConnections),
+    deliveryGraphInspectionLayer,
+    portfolioSnapshotsLayer,
+    timelineExportAuditsLayer,
+    timelineReadsLayer,
+    mediaReadsLayer,
+    relationshipRepairProposalsLayer
+  )
 
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
 const makeApplication = <ApplicationError = never, ApplicationRequirements = never>(
@@ -135,7 +140,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ControlCenterCoreApplicationServices,
     ApplicationError,
     ApplicationRequirements | Persistence | SecretStore
-  > = options.applicationServices ?? liveApplicationServices
+  > = options.applicationServices ?? liveApplicationServices(
+    options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null
+  )
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence)
   )

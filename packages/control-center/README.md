@@ -182,6 +182,8 @@ Provider credentials belong in `SecretStore`, never normal SQL rows. The store r
 
 The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, release-aware agent turns, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types. Agent turns are authenticated CSRF-protected mutations; the server derives workspace identity from the session and returns the exact bounded release projection and event cursor used for the answer.
 
+An owner can run a live connection test from the Services page. The CSRF-protected endpoint acquires the workspace-scoped provider runtime, calls its health and discovery operations, and returns only a normalized provider identity, checked time, latency, and safe failure classification. Credentials, headers, provider response bodies, and executor authority never enter the response. A server composition must supply `pluginConnections` (or reuse the release-synchronization connection map) for live tests; without a configured runtime registry the endpoint reports service unavailable.
+
 The authenticated Timeline merges bounded pages from governed-action audit events,
 plugin sync commits, relationship revisions, and domain events. Each source query
 is workspace-scoped, parameterized, newest-first, and capped before the server
