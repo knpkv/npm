@@ -12,6 +12,9 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
+import type { TimelineActorKind } from "../../domain/timeline.js"
+import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
@@ -54,6 +57,36 @@ const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
   session.permission === "workspace-owner" || session.permission === "workspace-approver"
     ? Effect.void
     : Effect.flatMap(forbiddenApiError, Effect.fail)
+
+interface TimelineExportQuery {
+  readonly actor?: TimelineActorKind | undefined
+  readonly from?: UtcTimestamp | undefined
+  readonly limit: number
+  readonly to?: UtcTimestamp | undefined
+}
+
+type TimelineExportFormat = "csv" | "json"
+
+const timelineRangeIsInverted = (query: Pick<TimelineExportQuery, "from" | "to">): boolean =>
+  query.from !== undefined &&
+  query.to !== undefined &&
+  DateTime.toEpochMillis(query.from) > DateTime.toEpochMillis(query.to)
+
+const appendTimelineExportHeaders = (
+  format: TimelineExportFormat,
+  metadata: { readonly eventCount: number; readonly eventLimit: number; readonly truncated: boolean }
+) =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeaders(response, {
+      "cache-control": "private, no-store",
+      "content-disposition": `attachment; filename="timeline-export.${format}"`,
+      "content-type": format === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8",
+      "x-content-type-options": "nosniff",
+      "x-timeline-export-count": String(metadata.eventCount),
+      "x-timeline-export-limit": String(metadata.eventLimit),
+      "x-timeline-export-truncated": String(metadata.truncated)
+    }))
+  )
 
 const revalidateSession = (
   auth: Auth["Service"],
@@ -310,33 +343,47 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const timeline = yield* TimelineReads
-      return handlers.handle("page", ({ query }) =>
-        Effect.gen(function*() {
+      const download = Effect.fn("Timeline.download")(
+        function*(query: TimelineExportQuery, format: TimelineExportFormat) {
           const session = yield* CurrentSession
           yield* requireWorkspaceRead(session)
-          const hasCursorKey = query.beforeEventKey !== undefined
-          const hasCursorTime = query.beforeOccurredAt !== undefined
-          if (hasCursorKey !== hasCursorTime) {
+          if (timelineRangeIsInverted(query)) {
             return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
           }
-          if (
-            query.from !== undefined &&
-            query.to !== undefined &&
-            DateTime.toEpochMillis(query.from) > DateTime.toEpochMillis(query.to)
-          ) {
-            return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
-          }
-          return yield* timeline.page({
+          const timelineExport = yield* collectTimelineExport(timeline, {
             workspaceId: session.workspaceId,
             actorKind: query.actor ?? null,
-            before: query.beforeEventKey === undefined || query.beforeOccurredAt === undefined
-              ? null
-              : { eventKey: query.beforeEventKey, occurredAt: query.beforeOccurredAt },
+            eventLimit: query.limit,
             from: query.from ?? null,
-            limit: query.limit ?? 50,
             to: query.to ?? null
           }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
-        }))
+          yield* appendTimelineExportHeaders(format, timelineExport.metadata)
+          return format === "csv" ? encodeTimelineCsv(timelineExport) : encodeTimelineJson(timelineExport)
+        }
+      )
+      return handlers
+        .handle("page", ({ query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const hasCursorKey = query.beforeEventKey !== undefined
+            const hasCursorTime = query.beforeOccurredAt !== undefined
+            if (hasCursorKey !== hasCursorTime || timelineRangeIsInverted(query)) {
+              return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+            }
+            return yield* timeline.page({
+              workspaceId: session.workspaceId,
+              actorKind: query.actor ?? null,
+              before: query.beforeEventKey === undefined || query.beforeOccurredAt === undefined
+                ? null
+                : { eventKey: query.beforeEventKey, occurredAt: query.beforeOccurredAt },
+              from: query.from ?? null,
+              limit: query.limit ?? 50,
+              to: query.to ?? null
+            }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
+          }))
+        .handle("exportCsv", ({ query }) => download(query, "csv"))
+        .handle("exportJson", ({ query }) => download(query, "json"))
     })
 )
 

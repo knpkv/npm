@@ -168,7 +168,11 @@ is workspace-scoped, parameterized, newest-first, and capped before the server
 performs one deterministic merge. The browser receives default-redacted actor
 labels, provider provenance when available, safe internal links, and a stable
 timestamp-plus-event-key cursor. Actor and UTC date filters execute at the source;
-watchers cannot read the Timeline.
+watchers cannot read the Timeline. CSV and JSON download endpoints reuse that
+default-redacted projection and stable cursor, require an explicit event limit,
+and cap every export at 1,000 events with explicit truncation metadata. Raw
+identifier or agent-detail expansion, export audit events, persisted artifacts,
+and retention mutations remain deferred.
 
 Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
 

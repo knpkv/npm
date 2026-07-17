@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { TimelineActorKind, TimelinePage } from "../domain/timeline.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
@@ -17,6 +17,52 @@ const TimelinePageSizeFromString = CanonicalNonNegativeIntegerFromString.pipe(
   Schema.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(100))
 )
 
+/** Hard caller-selected event bound for one Timeline download. */
+export const TimelineExportLimitFromString = CanonicalNonNegativeIntegerFromString.pipe(
+  Schema.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1_000))
+)
+
+/** Content types emitted by the bounded Timeline download endpoints. */
+export const TimelineExportContentType = Schema.Literals([
+  "application/json; charset=utf-8",
+  "text/csv; charset=utf-8"
+])
+
+/** Security, download, and truncation headers on a Timeline export response. */
+export const TimelineExportResponseHeaders = Schema.Struct({
+  "cache-control": Schema.Literal("private, no-store"),
+  "content-disposition": Schema.Literals([
+    "attachment; filename=\"timeline-export.csv\"",
+    "attachment; filename=\"timeline-export.json\""
+  ]),
+  "content-type": TimelineExportContentType,
+  "x-content-type-options": Schema.Literal("nosniff"),
+  "x-timeline-export-count": CanonicalNonNegativeIntegerFromString,
+  "x-timeline-export-limit": TimelineExportLimitFromString,
+  "x-timeline-export-truncated": Schema.Literals(["false", "true"])
+}).annotate({ identifier: "TimelineExportResponseHeaders" })
+
+const exportQuery = {
+  actor: Schema.optionalKey(TimelineActorKind),
+  from: Schema.optionalKey(UtcTimestamp),
+  limit: TimelineExportLimitFromString,
+  to: Schema.optionalKey(UtcTimestamp)
+}
+
+const timelineErrors: readonly [
+  typeof InvalidRequestApiError,
+  typeof UnauthorizedApiError,
+  typeof ForbiddenApiError,
+  typeof RequestTimedOutApiError,
+  typeof ServiceUnavailableApiError
+] = [
+  InvalidRequestApiError,
+  UnauthorizedApiError,
+  ForbiddenApiError,
+  RequestTimedOutApiError,
+  ServiceUnavailableApiError
+]
+
 const page = HttpApiEndpoint.get("page", "/api/v1/timeline", {
   query: {
     actor: Schema.optionalKey(TimelineActorKind),
@@ -27,14 +73,24 @@ const page = HttpApiEndpoint.get("page", "/api/v1/timeline", {
     to: Schema.optionalKey(UtcTimestamp)
   },
   success: TimelinePage,
-  error: [
-    InvalidRequestApiError,
-    UnauthorizedApiError,
-    ForbiddenApiError,
-    RequestTimedOutApiError,
-    ServiceUnavailableApiError
-  ]
+  error: timelineErrors
+}).middleware(SessionCookieAuth)
+
+const exportCsv = HttpApiEndpoint.get("exportCsv", "/api/v1/timeline/export.csv", {
+  query: exportQuery,
+  success: HttpApiSchema.StreamUint8Array({ contentType: "text/csv; charset=utf-8" }),
+  error: timelineErrors
+}).middleware(SessionCookieAuth)
+
+const exportJson = HttpApiEndpoint.get("exportJson", "/api/v1/timeline/export.json", {
+  query: exportQuery,
+  success: HttpApiSchema.StreamUint8Array({ contentType: "application/json; charset=utf-8" }),
+  error: timelineErrors
 }).middleware(SessionCookieAuth)
 
 /** Authenticated, workspace-scoped durable activity Timeline. */
-export class TimelineApiGroup extends HttpApiGroup.make("timeline").add(page) {}
+export class TimelineApiGroup extends HttpApiGroup.make("timeline")
+  .add(page)
+  .add(exportCsv)
+  .add(exportJson)
+{}
