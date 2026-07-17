@@ -134,6 +134,14 @@ Each execution provider page contains at most one execution, allowing its pipeli
 
 Normalized events carry the pipeline ARN, region, provider update/sample time, immutable execution/action identities, status, operator provenance, source revisions, and bounded stage/action summaries. Artifact metadata contains only names and S3 bucket/key coordinates marked `proxy-required`; resolved action configuration, provider artifact URLs, revision URLs, and external execution URLs are never exposed. Start, stop, manual approval, retry, log-content, and artifact-content operations remain unnegotiated until their governed authorization, receipt, proxy, and reconciliation paths are implemented.
 
+### Jira issue reader
+
+`makeJiraReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Jira adapter around the shared Schema-validated `JiraApiClient`. Its negotiated surface is deliberately limited to `entity.read` for `jira.issue`; provider mutations and workspace-wide JQL synchronization are not implied by this adapter.
+
+The secret-free runtime configuration requires a root `webBaseUrl`, an activity `pageSize` from 1 to 50, a `maximumPages` limit from 1 to 5, and a per-request `operationTimeoutMillis` from 1,000 to 120,000. Authentication remains in the externally supplied `JiraApiClient` layer, so tokens never enter plugin configuration.
+
+An issue read fetches the issue, comments, and changelog through interruptible Effect operations. Pagination stops at the configured bound and records explicit comment/history truncation flags. The normalized issue attributes include description and environment text, workflow metadata, release versions, parent and subtasks, comments, history, and deduplicated collaborators with roles and avatar URLs. OpenAPI, HTTP, timeout, authentication, authorization, rate-limit, outage, and adapter-schema failures are translated to the closed plugin failure taxonomy without retaining raw provider causes.
+
 ## Persistence boundary
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. The MVP schema is intentionally unstable: a fresh database is created from one checked-in schema snapshot, and an existing database must match it exactly. Schema changes are breaking and require recreating local development data. Versioned migrations start only after the persistence model is declared stable and a released database file must remain readable by a newer build.

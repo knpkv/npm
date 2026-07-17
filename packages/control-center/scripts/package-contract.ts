@@ -59,6 +59,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/ai-codex",
     "@knpkv/codecommit-core",
     "@knpkv/control-center-sql",
+    "@knpkv/jira-api-client",
     "@knpkv/rly",
     "distilled-aws",
     "effect",
@@ -80,6 +81,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1085.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")
+  }
+  if (manifest.dependencies["@knpkv/jira-api-client"] !== "workspace:^") {
+    violations.push("@knpkv/jira-api-client must use workspace:^")
   }
   const localAgentDependencies: ReadonlyArray<"@knpkv/ai-claude" | "@knpkv/ai-codex"> = [
     "@knpkv/ai-claude",
