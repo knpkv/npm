@@ -1,6 +1,6 @@
 import { ServiceMark, type RlyService } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import { type ReactElement, useMemo } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useSearchParams } from "react-router"
 
 import type { DeliveryEntityKind } from "../../domain/deliveryGraph.js"
@@ -10,7 +10,7 @@ import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceRelease
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
 import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
 import type { WorkspaceItemPresentation, WorkspaceItemStatus } from "./presentWorkspaceItems.js"
-import { EMPTY_WORKSPACE_RELEASES, useWorkspaceItems } from "./useWorkspaceItems.js"
+import { useWorkspaceItems } from "./useWorkspaceItems.js"
 import styles from "./ItemsPage.module.css"
 
 interface ItemFilters {
@@ -46,6 +46,20 @@ export const itemsLocationWithSearch = (
   search: params.size === 0 ? "" : `?${params.toString()}`
 })
 
+export const unlinkedItemLocation = (
+  pathname: string,
+  params: URLSearchParams,
+  entityId: string
+): { readonly hash: string; readonly pathname: string; readonly search: string } => {
+  const next = new URLSearchParams(params)
+  next.set("object", entityId)
+  return {
+    hash: "#item-details",
+    pathname,
+    search: `?${next.toString()}`
+  }
+}
+
 const entityKind = (value: string | null): DeliveryEntityKind | "all" =>
   entityKinds.find((candidate) => candidate === value) ?? "all"
 
@@ -73,6 +87,12 @@ export const filterWorkspaceItems = (
   )
 }
 
+export const selectWorkspaceItem = (
+  items: ReadonlyArray<WorkspaceItemPresentation>,
+  entityId: string | null
+): WorkspaceItemPresentation | null =>
+  entityId === null ? null : (items.find((item) => item.entityId === entityId) ?? null)
+
 const labelForKind = (kind: DeliveryEntityKind): string =>
   kind
     .split("-")
@@ -86,14 +106,14 @@ export const ItemsPage = (): ReactElement => {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const releases =
-    context.controller.state._tag === "ready" ? context.controller.state.portfolio.releases : EMPTY_WORKSPACE_RELEASES
+  const portfolio = context.controller.state._tag === "ready" ? context.controller.state.portfolio : null
+  const routableReleaseIds = useMemo(() => new Set(portfolio?.releases.map(({ id }) => id) ?? []), [portfolio])
   const refreshKey =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
   const sessionKey = releaseWorksetSessionKey(browserSession.state)
   const controller = useWorkspaceItems(
     context.workspaceId,
-    releases,
+    routableReleaseIds,
     refreshKey,
     sessionKey,
     browserSession.invalidateSession
@@ -155,17 +175,31 @@ export const ItemsPage = (): ReactElement => {
   }
 
   const visibleItems = filterWorkspaceItems(controller.state.items, filters)
+  const selectedEntityId = searchParams.get("object")
+  const selectedItem = selectWorkspaceItem(controller.state.items, selectedEntityId)
+  const clearSelection = (): void => {
+    const next = new URLSearchParams(searchParams)
+    next.delete("object")
+    navigate(
+      {
+        hash: "#results",
+        pathname: location.pathname,
+        search: next.size === 0 ? "" : `?${next.toString()}`
+      },
+      { replace: true }
+    )
+  }
   return (
     <article className={styles.page}>
       <header className={styles.hero}>
         <Text as="p" tone="secondary" variant="label">
-          Release-linked items
+          Workspace items
         </Text>
         <Text as="h1" variant="verdict">
           Find release work.
         </Text>
         <Text tone="secondary" variant="body-large">
-          One quiet index across release-linked tickets, pull requests, docs, pipelines, deployments, and time.
+          One quiet index across tickets, pull requests, docs, pipelines, deployments, and time.
         </Text>
       </header>
 
@@ -212,12 +246,56 @@ export const ItemsPage = (): ReactElement => {
         </label>
       </section>
 
+      {selectedEntityId === null ? null : selectedItem === null ? (
+        <div id="item-details">
+          <StatePanel
+            action={<Button onClick={clearSelection}>Back to items</Button>}
+            description="This item is not present in the current bounded workspace index. It may have been deleted or fall outside this result prefix."
+            title="Item unavailable"
+            tone="caution"
+          />
+        </div>
+      ) : (
+        <Surface as="section" className={styles.selection} id="item-details" padding="spacious" tone="secondary">
+          <div className={styles.selectionHeader}>
+            <ServiceMark service={selectedItem.service} size="compact" />
+            <StateLabel label={selectedItem.status} size="compact" tone={selectedItem.tone} />
+          </div>
+          <Text as="p" tone="secondary" variant="label">
+            {selectedItem.key} · {labelForKind(selectedItem.kind)}
+          </Text>
+          <Text as="h2" variant="section-title">
+            {selectedItem.title}
+          </Text>
+          <Text tone="secondary" variant="body-large">
+            {selectedItem.releaseId === null
+              ? "This current object is not linked to a release yet. Its provider-specific full view will remain available here when that integration is connected."
+              : "This object is linked to a release and can be opened in its complete delivery context."}
+          </Text>
+          <div className={styles.selectionActions}>
+            {selectedItem.releaseId === null ? null : (
+              <Link
+                state={makeReleaseRouteState(
+                  context.workspaceId,
+                  selectedItem.releaseId,
+                  releaseOriginFromLocation(location)
+                )}
+                to={selectedItem.href}
+              >
+                Open release context
+              </Link>
+            )}
+            <Button onClick={clearSelection}>Back to items</Button>
+          </div>
+        </Surface>
+      )}
+
       <div className={styles.resultHeading} id="results">
         <Text as="h2" variant="section-title">
-          {visibleItems.length} of {controller.state.items.length} release-linked items
+          {visibleItems.length} of {controller.state.items.length} workspace items
         </Text>
         <StateLabel
-          label={controller.state.truncated ? "Bounded release-linked result" : "Release-linked scope"}
+          label={controller.state.truncated ? "Bounded workspace result" : "Workspace scope"}
           size="compact"
           tone={controller.state.truncated ? "caution" : "neutral"}
         />
@@ -236,8 +314,16 @@ export const ItemsPage = (): ReactElement => {
               <ServiceMark service={item.service} size="compact" />
               <Link
                 className={styles.itemLink}
-                state={makeReleaseRouteState(context.workspaceId, item.releaseId, releaseOriginFromLocation(location))}
-                to={item.href}
+                state={
+                  item.releaseId === null
+                    ? undefined
+                    : makeReleaseRouteState(context.workspaceId, item.releaseId, releaseOriginFromLocation(location))
+                }
+                to={
+                  item.releaseId === null
+                    ? unlinkedItemLocation(location.pathname, searchParams, item.entityId)
+                    : item.href
+                }
               >
                 <span>{item.key}</span>
                 <strong>{item.title}</strong>

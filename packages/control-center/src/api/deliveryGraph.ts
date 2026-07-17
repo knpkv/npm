@@ -39,6 +39,7 @@ import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 
 export const MAXIMUM_RELEASE_SLICE_RECORDS = 500
+export const MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS = 500
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
 export const MAXIMUM_REPAIR_PROPOSALS = 128
@@ -66,6 +67,22 @@ export const ReleaseDeliveryGraphInspection = Schema.Struct({
 
 /** Decoded release delivery-graph inspection. */
 export type ReleaseDeliveryGraphInspection = typeof ReleaseDeliveryGraphInspection.Type
+
+/** One current workspace entity projection and its optional canonical release route. */
+export const WorkspaceEntityProjection = Schema.Struct({
+  canonicalReleaseId: Schema.NullOr(ReleaseId),
+  projection: DeliveryEntityProjection,
+  recordedAt: UtcTimestamp
+}).annotate({ identifier: "WorkspaceEntityProjection" })
+
+/** Bounded workspace-wide index of current present normalized entities. */
+export const WorkspaceEntityProjectionIndex = Schema.Struct({
+  truncated: Schema.Boolean,
+  items: boundedArray(WorkspaceEntityProjection, MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS)
+}).annotate({ identifier: "WorkspaceEntityProjectionIndex" })
+
+/** Decoded workspace-wide current entity index. */
+export type WorkspaceEntityProjectionIndex = typeof WorkspaceEntityProjectionIndex.Type
 
 /** Bounded immutable lifecycle history for one relationship, newest first. */
 export const RelationshipHistoryInspection = Schema.Struct({
@@ -185,6 +202,15 @@ const releaseSlice = HttpApiEndpoint.get("releaseSlice", "/api/v1/relationships/
   success: ReleaseDeliveryGraphInspection,
   error: readErrors
 }).middleware(SessionCookieAuth)
+
+const workspaceEntityProjections = HttpApiEndpoint.get(
+  "workspaceEntityProjections",
+  "/api/v1/items",
+  {
+    success: WorkspaceEntityProjectionIndex,
+    error: readErrors
+  }
+).middleware(SessionCookieAuth)
 
 const relationship = HttpApiEndpoint.get("relationship", "/api/v1/relationships/:relationshipId", {
   params: { relationshipId: RelationshipId },
@@ -315,6 +341,7 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 /** Authenticated, workspace-safe delivery relationship and evidence inspection. */
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
   .add(
+    workspaceEntityProjections,
     releaseSlice,
     repairCandidates,
     repairProposalDraft,

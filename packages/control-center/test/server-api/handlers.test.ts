@@ -113,6 +113,10 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
 })
 
 const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
+  workspaceEntityProjections: (requestedWorkspaceId) =>
+    requestedWorkspaceId === session.workspaceId
+      ? Effect.succeed({ truncated: false, items: [] })
+      : Effect.die("delivery graph handler crossed its workspace boundary"),
   releaseSlice: ({ environmentId, releaseId, workspaceId: requestedWorkspaceId }) =>
     requestedWorkspaceId === session.workspaceId && releaseId === inspectedReleaseId
       ? Effect.succeed({
@@ -197,6 +201,21 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("serves the authenticated workspace entity index", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+      const result = yield* client.deliveryGraph.workspaceEntityProjections({})
+
+      assert.deepStrictEqual(result, { truncated: false, items: [] })
+    }).pipe(
+      Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        deliveryGraphHandlersTestLayer
+      ])
+    ))
+
   it.effect("serves a workspace-scoped release relationship slice", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])

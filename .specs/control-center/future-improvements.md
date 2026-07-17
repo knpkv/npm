@@ -125,15 +125,16 @@ state-specific next action. Active work adds a release-scoped decision surface w
 relationship-repair review and rationale survive reload through the existing governed proposal ledger. Compact browser
 coverage proves the three dimensions remain complete without horizontal overflow.
 
-The first D07 Items slice adds a workspace route over the existing authenticated release-graph
-reads. It deduplicates normalized release-linked objects, maps their provider service and current status, bounds
-the client index to 500 results, and keeps text, service, type, and status filters in the URL. Every
-result opens the selected object in its canonical release workset and returns to the exact filtered
-Items origin. Empty, loading, read-failure, and bounded-result states remain explicit.
+The D07 Items route now reads one authenticated, workspace-scoped server index instead of composing
+release slices in the browser. The query returns at most 500 latest present projections, includes
+unlinked entities, excludes deleted or stale projection heads, and supplies an optional deterministic
+release route for linked objects. It maps provider service and current status and keeps text, service,
+type, and status filters in the URL. Empty, loading, read-failure, and bounded-result states remain
+explicit.
 
 ## Remaining roadmap
 
-- Complete D07 with server-side workspace search/counts, owner filtering, multi-release membership,
+- Complete D07 with server-side filtered search/counts, owner filtering, multi-release membership,
   delivery traces, command search, and exact-scope authorized shares. D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
@@ -199,18 +200,17 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - D06 verdict actions are state-specific navigation to the relevant decision/evidence surface, not
   remote mutations. Governed deploy, watch, notify, acknowledge, and trace-repair completion remain
   adapter-dependent action work and must reuse the D03 authority/idempotency boundary.
-- The first Items slice deliberately composes existing bounded per-release reads in the browser.
-  It reports normalized objects honestly, including `Unassigned` when the graph carries no owner,
-  but does not yet expose authoritative owner data or an owner filter. Replace it with one bounded
-  server query before large workspaces; return aggregate counts from that query instead of loading
-  every release slice.
-- Because release-slice reads follow relationship closure, the MVP index explicitly presents itself
-  as release-linked scope and does not count present entity projections with no relationship. The
-  dedicated workspace query must include unlinked present projections and exclude deleted heads
-  before the route can claim complete normalized workspace search.
-- Items currently deduplicates an object that appears in multiple release slices to its first stable
-  release route. The complete trace model must retain every release membership and require an
-  explicit release choice where context is ambiguous.
+- Items reports `Unassigned` when the graph carries no authoritative owner and does not yet expose
+  owner data or an owner filter. Search filters and aggregate counts also remain client-side over the
+  bounded 500-item prefix; move them into the query before supporting large workspaces.
+- The workspace query returns one deterministic canonical release route, not every release
+  membership. The complete trace model must retain every membership and require an explicit release
+  choice where context is ambiguous. Unlinked objects currently remain on the Items route until the
+  provider-specific S01–S07 full views exist.
+- The workspace projection query remains explicit Effect SQL. Local `effect-qb` cannot be adopted in
+  isolation because it introduces table definitions, rendering, and execution boundaries and version
+  `0.20.0` requires Effect `4.0.0-beta.98` while this workspace uses `beta.97`. Migrate repositories as
+  a deliberate version-aligned milestone rather than mixing two database abstractions in one read.
 - Delivery trace entry points, global command search, and authenticated share grants with exact
   scope, expiry, revocation, and grantee checks remain unfinished D07 work. No current Items control
   implies those capabilities.

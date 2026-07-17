@@ -3,8 +3,14 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { filterWorkspaceItems, formatItemFreshness, itemsLocationWithSearch } from "../../src/client/items/ItemsPage.js"
-import { presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
+import {
+  filterWorkspaceItems,
+  formatItemFreshness,
+  itemsLocationWithSearch,
+  selectWorkspaceItem,
+  unlinkedItemLocation
+} from "../../src/client/items/ItemsPage.js"
+import { presentWorkspaceEntityIndex, presentWorkspaceItems } from "../../src/client/items/presentWorkspaceItems.js"
 import { selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
 import { SelectedReleaseWorksetObjectPanel } from "../../src/client/releases/ReleaseWorkset.js"
 import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
@@ -36,6 +42,49 @@ describe("workspace items", () => {
     )
     expect(issue.freshness).toBe("2026-07-14T10:02:00.000Z")
     expect(formatItemFreshness(issue.freshness)).toBe("14 Jul 2026, 10:02")
+  })
+
+  it("keeps an unlinked current projection visible in the workspace index", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const [unlinked] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
+      truncated: false,
+      items: [{ ...source, canonicalReleaseId: null }]
+    })
+
+    expect(unlinked).toMatchObject({
+      entityId: source.projection.entityId,
+      releaseId: null,
+      title: source.projection.title
+    })
+    expect(unlinked?.href).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/items?object=${source.projection.entityId}#item-details`
+    )
+    expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], source.projection.entityId)).toBe(unlinked)
+    expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], "deleted-entity")).toBeNull()
+  })
+
+  it("does not advertise canonical releases outside the routable portfolio prefix", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const canonicalReleaseId = releaseWorksetFixture.releaseId
+    const index = {
+      truncated: false,
+      items: [{ ...source, canonicalReleaseId }]
+    }
+
+    expect(
+      presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, index, new Set([canonicalReleaseId]))[0]?.releaseId
+    ).toBe(canonicalReleaseId)
+    const portfolioPrefix = new Set(
+      Array.from({ length: 200 }, (_, index) =>
+        Schema.decodeUnknownSync(ReleaseId)(
+          `01890f6f-6d6a-7cc0-98d4-${String(index + 1).padStart(12, "0")}`
+        ))
+    )
+    const [outsidePrefix] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, index, portfolioPrefix)
+    expect(outsidePrefix).toMatchObject({ releaseId: null })
+    expect(outsidePrefix?.href).toContain(`/w/${WORKSET_WORKSPACE_ID}/items?object=`)
   })
 
   it("combines text, service, type, and status filters without substituting results", () => {
@@ -71,6 +120,17 @@ describe("workspace items", () => {
     expect(
       itemsLocationWithSearch({ hash: "", pathname: `/w/${WORKSET_WORKSPACE_ID}/items` }, new URLSearchParams())
     ).toEqual({ hash: "", pathname: `/w/${WORKSET_WORKSPACE_ID}/items`, search: "" })
+    expect(
+      unlinkedItemLocation(
+        `/w/${WORKSET_WORKSPACE_ID}/items`,
+        new URLSearchParams("q=OPS-428&service=jira"),
+        "unlinked-entity"
+      )
+    ).toEqual({
+      hash: "#item-details",
+      pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+      search: "?q=OPS-428&service=jira&object=unlinked-entity"
+    })
   })
 
   it("preserves selection for deployment and time-entry objects outside the primary workset dimensions", () => {

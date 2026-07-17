@@ -1,38 +1,25 @@
 // @vitest-environment happy-dom
 
-import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import {
-  MAXIMUM_WORKSPACE_RELEASES,
-  MAXIMUM_WORKSPACE_SLICE_REQUESTS,
-  useWorkspaceItems
-} from "../../src/client/items/useWorkspaceItems.js"
-import { presentPortfolio, type PortfolioReleasePresentation } from "../../src/client/portfolio/presentPortfolio.js"
-import type { ReleaseWorksetTransport } from "../../src/client/releases/useReleaseWorkset.js"
-import { EnvironmentId, ReleaseId } from "../../src/domain/identifiers.js"
+import type { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph.js"
+import { type WorkspaceItemsTransport, useWorkspaceItems } from "../../src/client/items/useWorkspaceItems.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
-import { makePortfolioSnapshot } from "./portfolioFixtures.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 let mountedRoot: Root | undefined
 const ignoreSessionExpiry = (): void => undefined
+const ROUTABLE_RELEASE_IDS = new Set([releaseWorksetFixture.releaseId])
 
-const deferred = <Value,>() => {
-  let resolveValue: ((value: Value) => void) | undefined
-  const promise = new Promise<Value>((resolve) => {
-    resolveValue = resolve
-  })
-  return {
-    promise,
-    resolve: (value: Value): void => {
-      if (resolveValue === undefined) throw new Error("Deferred resolution unavailable")
-      resolveValue(value)
-    }
-  }
+const index: WorkspaceEntityProjectionIndex = {
+  truncated: false,
+  items: releaseWorksetFixture.entityProjections.map((entry) => ({
+    ...entry,
+    canonicalReleaseId: releaseWorksetFixture.releaseId
+  }))
 }
 
 afterEach(async () => {
@@ -42,144 +29,81 @@ afterEach(async () => {
 })
 
 const Harness = ({
+  onSessionExpired = ignoreSessionExpiry,
   refreshKey = "snapshot-a",
-  releases,
   transport
 }: {
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly refreshKey?: string
-  readonly releases: ReadonlyArray<PortfolioReleasePresentation>
-  readonly transport: ReleaseWorksetTransport
+  readonly transport: WorkspaceItemsTransport
 }): ReactElement => {
   const controller = useWorkspaceItems(
     WORKSET_WORKSPACE_ID,
-    releases,
+    ROUTABLE_RELEASE_IDS,
     refreshKey,
     "session-a",
-    ignoreSessionExpiry,
+    onSessionExpired,
     transport
   )
   return (
     <span>
-      {controller.state._tag === "ready" ? `ready:${String(controller.state.truncated)}` : controller.state._tag}
+      {controller.state._tag === "ready"
+        ? `ready:${controller.state.items.length}:${String(controller.state.truncated)}`
+        : controller.state._tag}
     </span>
   )
 }
 
+const renderHarness = async (element: ReactElement): Promise<HTMLElement> => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  mountedRoot = createRoot(host)
+  await act(async () => mountedRoot?.render(element))
+  await act(async () => Promise.resolve())
+  return host
+}
+
 describe("useWorkspaceItems", () => {
-  it("does not refetch for a newly allocated but semantically identical release scope", async () => {
-    const release = presentPortfolio(makePortfolioSnapshot()).releases[0]
-    if (release === undefined) throw new Error("Expected one portfolio release")
-    const releases = [release]
+  it("loads the workspace index once and only refetches when its refresh key changes", async () => {
     const transport = {
-      load: vi.fn(() => Promise.resolve(releaseWorksetFixture))
-    } satisfies ReleaseWorksetTransport
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
+      load: vi.fn(() => Promise.resolve(index))
+    } satisfies WorkspaceItemsTransport
+    const host = await renderHarness(<Harness transport={transport} />)
 
-    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
+    expect(transport.load).toHaveBeenCalledOnce()
+    expect(host.textContent).toBe(`ready:${index.items.length}:false`)
+
+    await act(async () => mountedRoot?.render(<Harness transport={transport} />))
     await act(async () => Promise.resolve())
-    const initialLoads = 1 + release.targetEnvironmentIds.length
-    expect(transport.load).toHaveBeenCalledTimes(initialLoads)
-    expect(host.textContent).toBe("ready:false")
+    expect(transport.load).toHaveBeenCalledOnce()
 
-    const equivalent = [{ ...release, targetEnvironmentIds: [...release.targetEnvironmentIds] }]
-    await act(async () => mountedRoot?.render(<Harness releases={equivalent} transport={transport} />))
+    await act(async () => mountedRoot?.render(<Harness refreshKey="snapshot-b" transport={transport} />))
     await act(async () => Promise.resolve())
-    expect(transport.load).toHaveBeenCalledTimes(initialLoads)
-    expect(host.textContent).toBe("ready:false")
-
-    const extraEnvironment = Schema.decodeUnknownSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000099")
-    const changed = [{ ...release, targetEnvironmentIds: [...release.targetEnvironmentIds, extraEnvironment] }]
-    await act(async () => mountedRoot?.render(<Harness releases={changed} transport={transport} />))
-    await act(async () => Promise.resolve())
-    expect(transport.load).toHaveBeenCalledTimes(initialLoads + initialLoads + 1)
-    expect(host.textContent).toBe("ready:false")
-
-    await act(async () =>
-      mountedRoot?.render(<Harness refreshKey="snapshot-b" releases={changed} transport={transport} />)
-    )
-    await act(async () => Promise.resolve())
-    expect(transport.load).toHaveBeenCalledTimes(initialLoads + initialLoads + 1 + initialLoads + 1)
-    expect(host.textContent).toBe("ready:false")
-  })
-
-  it("bounds release fetch work before applying the item cap", async () => {
-    const source = presentPortfolio(makePortfolioSnapshot()).releases[0]
-    if (source === undefined) throw new Error("Expected one portfolio release")
-    const releases = Array.from({ length: MAXIMUM_WORKSPACE_RELEASES + 2 }, (_, index) => ({
-      ...source,
-      id: Schema.decodeUnknownSync(ReleaseId)(`01890f6f-6d6a-7cc0-98d2-${String(index + 1_000).padStart(12, "0")}`),
-      targetEnvironmentIds: []
-    }))
-    const transport = {
-      load: vi.fn(() => Promise.resolve(releaseWorksetFixture))
-    } satisfies ReleaseWorksetTransport
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
-
-    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
-    await act(async () => Promise.resolve())
-
-    expect(transport.load).toHaveBeenCalledTimes(MAXIMUM_WORKSPACE_RELEASES)
-    expect(host.textContent).toBe("ready:true")
-  })
-
-  it("bounds the total release and environment slice workload", async () => {
-    const source = presentPortfolio(makePortfolioSnapshot()).releases[0]
-    if (source === undefined) throw new Error("Expected one portfolio release")
-    const environments = Array.from({ length: 50 }, (_, index) =>
-      Schema.decodeUnknownSync(EnvironmentId)(`01890f6f-6d6a-7cc0-98d2-${String(index + 2_000).padStart(12, "0")}`)
-    )
-    const releases = Array.from({ length: MAXIMUM_WORKSPACE_RELEASES }, (_, index) => ({
-      ...source,
-      id: Schema.decodeUnknownSync(ReleaseId)(`01890f6f-6d6a-7cc0-98d2-${String(index + 3_000).padStart(12, "0")}`),
-      targetEnvironmentIds: environments
-    }))
-    const transport = {
-      load: vi.fn(() => Promise.resolve(releaseWorksetFixture))
-    } satisfies ReleaseWorksetTransport
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
-
-    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
-    await act(async () => Promise.resolve())
-
-    expect(transport.load).toHaveBeenCalledTimes(MAXIMUM_WORKSPACE_SLICE_REQUESTS)
-    expect(host.textContent).toBe("ready:true")
-  })
-
-  it("starts later release roots before the first release completes", async () => {
-    const source = presentPortfolio(makePortfolioSnapshot()).releases[0]
-    if (source === undefined) throw new Error("Expected one portfolio release")
-    const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000099")
-    const releases = [
-      { ...source, targetEnvironmentIds: [] },
-      { ...source, id: otherReleaseId, targetEnvironmentIds: [] }
-    ]
-    const first = deferred<typeof releaseWorksetFixture>()
-    const second = deferred<typeof releaseWorksetFixture>()
-    const transport = {
-      load: vi.fn((releaseId: ReleaseId) => (releaseId === source.id ? first.promise : second.promise))
-    } satisfies ReleaseWorksetTransport
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
-
-    await act(async () => mountedRoot?.render(<Harness releases={releases} transport={transport} />))
-    await act(async () => Promise.resolve())
-
     expect(transport.load).toHaveBeenCalledTimes(2)
-    expect(transport.load).toHaveBeenCalledWith(source.id, null, expect.any(AbortSignal))
-    expect(transport.load).toHaveBeenCalledWith(otherReleaseId, null, expect.any(AbortSignal))
+  })
 
-    await act(async () => {
-      first.resolve(releaseWorksetFixture)
-      second.resolve(releaseWorksetFixture)
-      await Promise.all([first.promise, second.promise])
+  it("propagates the authoritative server truncation flag", async () => {
+    const transport = {
+      load: () => Promise.resolve({ ...index, truncated: true })
+    } satisfies WorkspaceItemsTransport
+    const host = await renderHarness(<Harness transport={transport} />)
+
+    expect(host.textContent).toBe(`ready:${index.items.length}:true`)
+  })
+
+  it("does not commit a response after unmount aborts the request", async () => {
+    let resolveIndex: ((value: WorkspaceEntityProjectionIndex) => void) | undefined
+    const response = new Promise<WorkspaceEntityProjectionIndex>((resolve) => {
+      resolveIndex = resolve
     })
-    expect(host.textContent).toBe("ready:false")
+    const transport = { load: () => response } satisfies WorkspaceItemsTransport
+    const host = await renderHarness(<Harness transport={transport} />)
+
+    expect(host.textContent).toBe("loading")
+    await act(async () => mountedRoot?.unmount())
+    mountedRoot = undefined
+    resolveIndex?.(index)
+    await act(async () => response)
+    expect(host.textContent).toBe("")
   })
 })

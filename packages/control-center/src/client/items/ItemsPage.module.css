@@ -4,7 +4,8 @@
 .items,
 .item,
 .itemLink,
-.meta {
+.meta,
+.selection {
   display: grid;
 }
 
@@ -63,6 +64,32 @@
 
 .resultHeading h2 {
   margin: 0;
+}
+
+.selection {
+  gap: var(--rly-space-12);
+  scroll-margin-block-start: var(--rly-space-24);
+}
+
+.selection > * {
+  margin: 0;
+}
+
+.selectionHeader,
+.selectionActions {
+  display: flex;
+  align-items: center;
+  gap: var(--rly-space-12);
+}
+
+.selectionActions {
+  justify-content: space-between;
+}
+
+.selectionActions a {
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
 }
 
 .items {
