@@ -24,7 +24,16 @@ const DATA_ROOT_PROTOCOL_REASON =
   "only CLI configuration and the backup archive entry point can import the data-root protocol"
 const LOCAL_AGENT_ADAPTER_REASON = "only the release-agent application adapter can import local AI provider packages"
 const CONFLUENCE_ADAPTER_REASON = "only the isolated Confluence adapter can import Confluence provider packages"
+const CONFLUENCE_PROVIDER_PACKAGES: ReadonlyArray<string> = [
+  "@knpkv/confluence-api-client",
+  "@knpkv/confluence-to-markdown"
+]
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
+
+const isConfluenceProviderImport = (importPath: string): boolean =>
+  CONFLUENCE_PROVIDER_PACKAGES.some(
+    (packageName) => importPath === packageName || importPath.startsWith(`${packageName}/`)
+  )
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
   const normalizedSourcePath = sourcePath.toLowerCase()
@@ -185,7 +194,7 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     return LOCAL_AGENT_ADAPTER_REASON
   }
   if (
-    (importPath === "@knpkv/confluence-api-client" || importPath === "@knpkv/confluence-to-markdown") &&
+    isConfluenceProviderImport(importPath) &&
     !isWithin(normalizedSource, "src/server/plugins/confluence")
   ) {
     return CONFLUENCE_ADAPTER_REASON

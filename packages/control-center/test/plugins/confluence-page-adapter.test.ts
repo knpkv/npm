@@ -246,6 +246,45 @@ describe("Confluence page adapter", () => {
       assert.notInclude(attributes.content?.markdown, "onmouseover")
     }))
 
+  it.effect("preserves link-shaped literals in code while sanitizing prose", () =>
+    Effect.gen(function*() {
+      const markdown = [
+        "Ordinary [docs](https://example.test/docs)",
+        "Inline `[label](https://example.test)` example",
+        "| Code |",
+        "| --- |",
+        "| `[table](https://example.test/table)` |",
+        "```ts",
+        "const sample = \"[label](https://example.test)\"",
+        "```",
+        "<span onclick=\"alert(1)\">Unsafe prose</span>"
+      ].join("\n")
+      const adapter = yield* makeAdapter(defaultClient(), markdown)
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.strictEqual(
+        attributes.content?.markdown,
+        [
+          "Ordinary docs",
+          "Inline `[label](https://example.test)` example",
+          "| Code |",
+          "| --- |",
+          "| `[table](https://example.test/table)` |",
+          "```ts",
+          "const sample = \"[label](https://example.test)\"",
+          "```",
+          "Unsafe prose",
+          ""
+        ].join("\n")
+      )
+      assert.notInclude(attributes.content?.markdown, "Ordinary [docs]")
+      assert.notInclude(attributes.content?.markdown, "<span")
+      assert.notInclude(attributes.content?.markdown, "onclick")
+    }))
+
   it.effect("drops same-origin source URLs with userinfo while retaining relative links", () =>
     Effect.gen(function*() {
       const credentialedAdapter = yield* makeAdapter(defaultClient({
@@ -304,6 +343,54 @@ describe("Confluence page adapter", () => {
           { accountId: "account-creator", roles: ["contributor"] },
           { accountId: "account-editor", roles: ["author", "contributor"] },
           { accountId: "account-owner", roles: ["owner"] }
+        ]
+      )
+    }))
+
+  it.effect("marks missing and unknown user profiles unresolved and inactive", () =>
+    Effect.gen(function*() {
+      const client = defaultClient({
+        getPageVersions: () =>
+          Effect.succeed({
+            results: [
+              currentPage.version,
+              {
+                number: 2,
+                createdAt: "2026-07-15T08:00:00.000Z",
+                authorId: "account-missing"
+              }
+            ]
+          }),
+        getUsers: () =>
+          Effect.succeed({
+            results: [
+              {
+                accountId: "account-author",
+                displayName: "author",
+                accountStatus: "active",
+                isExternalCollaborator: false
+              },
+              {
+                accountId: "account-owner",
+                displayName: "owner",
+                accountStatus: "unknown",
+                isExternalCollaborator: false
+              }
+            ]
+          })
+      })
+      const adapter = yield* makeAdapter(client)
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.deepStrictEqual(
+        attributes.contributors.map(({ accountId, active, resolved }) => ({ accountId, active, resolved })),
+        [
+          { accountId: "account-author", active: true, resolved: true },
+          { accountId: "account-missing", active: false, resolved: false },
+          { accountId: "account-owner", active: false, resolved: false }
         ]
       )
     }))

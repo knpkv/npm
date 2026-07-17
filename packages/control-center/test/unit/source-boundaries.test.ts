@@ -60,8 +60,24 @@ describe("Control Center source boundaries", () => {
     ).toHaveLength(1)
     expect(
       inspectSourceBoundaries(
+        "src/server/application/pageRead.ts",
+        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client/ConfluenceApiClient\""
+      )
+    ).toContainEqual({
+      importPath: "@knpkv/confluence-api-client/ConfluenceApiClient",
+      reason,
+      sourcePath: "src/server/application/pageRead.ts"
+    })
+    expect(
+      inspectSourceBoundaries(
+        "src/client/ConfluencePage.tsx",
+        "import { MarkdownConverter } from \"@knpkv/confluence-to-markdown/MarkdownConverter\""
+      )
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
         "src/server/plugins/confluence/ConfluencePageClient.ts",
-        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client\""
+        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client/ConfluenceApiClient\""
       )
     ).toEqual([])
   })

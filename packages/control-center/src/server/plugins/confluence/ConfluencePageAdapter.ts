@@ -263,12 +263,13 @@ const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")
   const users = yield* readUsers(client, accountIds)
   return accountIds.map((accountId) => {
     const user = users.get(accountId)
+    const resolved = user !== undefined && user.accountStatus !== "unknown"
     return {
       accountId,
       displayName: user?.displayName ?? accountId,
-      active: user?.accountStatus !== "inactive" && user?.accountStatus !== "closed",
+      active: resolved && user.accountStatus === "active",
       external: user?.isExternalCollaborator ?? false,
-      resolved: user !== undefined,
+      resolved,
       roles: roleOrder.filter((role) => roles.get(accountId)?.has(role) ?? false)
     }
   })
