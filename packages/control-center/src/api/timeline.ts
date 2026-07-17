@@ -1,11 +1,12 @@
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
-import { TimelineActorKind, TimelinePage } from "../domain/timeline.js"
+import { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../domain/timeline.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
   InvalidRequestApiError,
+  NotFoundApiError,
   RequestTimedOutApiError,
   ServiceUnavailableApiError,
   UnauthorizedApiError
@@ -76,6 +77,19 @@ const page = HttpApiEndpoint.get("page", "/api/v1/timeline", {
   error: timelineErrors
 }).middleware(SessionCookieAuth)
 
+const detail = HttpApiEndpoint.get("detail", "/api/v1/timeline/events/:eventKey", {
+  params: { eventKey: TimelineCursor.fields.eventKey },
+  success: TimelineEventDetail,
+  error: [
+    InvalidRequestApiError,
+    UnauthorizedApiError,
+    ForbiddenApiError,
+    NotFoundApiError,
+    RequestTimedOutApiError,
+    ServiceUnavailableApiError
+  ]
+}).middleware(SessionCookieAuth)
+
 const exportCsv = HttpApiEndpoint.get("exportCsv", "/api/v1/timeline/export.csv", {
   query: exportQuery,
   success: HttpApiSchema.StreamUint8Array({ contentType: "text/csv; charset=utf-8" }),
@@ -91,6 +105,7 @@ const exportJson = HttpApiEndpoint.get("exportJson", "/api/v1/timeline/export.js
 /** Authenticated, workspace-scoped durable activity Timeline. */
 export class TimelineApiGroup extends HttpApiGroup.make("timeline")
   .add(page)
+  .add(detail)
   .add(exportCsv)
   .add(exportJson)
 {}

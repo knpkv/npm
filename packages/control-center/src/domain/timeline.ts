@@ -47,6 +47,39 @@ export const TimelineEvent = Schema.Struct({
 /** Decoded Timeline event. */
 export type TimelineEvent = typeof TimelineEvent.Type
 
+const TimelineRawIdentifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048))
+
+/** Owner-visible durable identifiers for one exact Timeline event. */
+export const TimelineEventIdentifiers = Schema.Struct({
+  actorId: Schema.NullOr(TimelineRawIdentifier),
+  actionId: Schema.NullOr(TimelineRawIdentifier),
+  relationshipId: Schema.NullOr(TimelineRawIdentifier),
+  pluginConnectionId: Schema.NullOr(TimelineRawIdentifier),
+  releaseId: Schema.NullOr(TimelineRawIdentifier),
+  entityId: Schema.NullOr(TimelineRawIdentifier)
+}).annotate({ identifier: "TimelineEventIdentifiers" })
+
+/** Decoded owner-visible Timeline identifiers. */
+export type TimelineEventIdentifiers = typeof TimelineEventIdentifiers.Type
+
+/** Owner-visible reference to the local agent job attributable to an event. */
+export const TimelineAgentJobDetail = Schema.Struct({
+  jobId: TimelineRawIdentifier
+}).annotate({ identifier: "TimelineAgentJobDetail" })
+
+/** Decoded Timeline agent-job reference. */
+export type TimelineAgentJobDetail = typeof TimelineAgentJobDetail.Type
+
+/** Deliberate owner-only expansion of one otherwise redacted Timeline event. */
+export const TimelineEventDetail = Schema.Struct({
+  event: TimelineEvent,
+  identifiers: TimelineEventIdentifiers,
+  agentJob: Schema.NullOr(TimelineAgentJobDetail)
+}).annotate({ identifier: "TimelineEventDetail" })
+
+/** Decoded owner-only Timeline event expansion. */
+export type TimelineEventDetail = typeof TimelineEventDetail.Type
+
 /** One bounded Timeline page. */
 export const TimelinePage = Schema.Struct({
   events: Schema.Array(TimelineEvent).check(

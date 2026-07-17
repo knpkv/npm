@@ -399,6 +399,20 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
               to: query.to ?? null
             }).pipe(Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable))
           }))
+        .handle("detail", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* timeline.detail({
+              workspaceId: session.workspaceId,
+              eventKey: params.eventKey
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("exportCsv", ({ query }) => download(query, "csv"))
         .handle("exportJson", ({ query }) => download(query, "json"))
     })

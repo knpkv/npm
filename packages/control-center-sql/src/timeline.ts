@@ -17,6 +17,8 @@ export interface TimelineQueryInput {
   readonly limit: number
   readonly to: string | null
   readonly workspaceId: string
+  /** Exact provider-local identity for detail reads; absent for paginated reads. */
+  readonly sourceId?: string
 }
 
 /** Durable source contributing rows to the merged Timeline. */
@@ -30,6 +32,12 @@ export interface RenderedTimelineQuery extends RenderedSql {
 const table = Casing.make({ tables: "snake_case", columns: "snake_case" }).table
 const renderer = Sqlite.Renderer.make().pipe(Casing.withCasing("snake_case"))
 const nullText = Query.cast(null, Query.type.text())
+const timelineDetailSources: ReadonlyArray<"audit" | "sync" | "relationship" | "domain"> = [
+  "audit",
+  "sync",
+  "relationship",
+  "domain"
+]
 
 const auditEvents = table("auditEvents", {
   workspaceId: Column.text(),
@@ -100,6 +108,9 @@ const domainEvents = table("domainEvents", {
 
 const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const eventKey = SqlFunction.concat("audit:", auditEvents.auditEventId)
+  const eventPredicate = input.sourceId === undefined
+    ? Query.eq(1, 1)
+    : Query.eq(auditEvents.auditEventId, input.sourceId)
   const actorPredicate = input.actorKind === null
     ? Query.eq(1, 1)
     : Query.eq(auditEvents.causeKind, input.actorKind)
@@ -148,6 +159,7 @@ const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
     Query.where(
       Query.and(
         Query.eq(auditEvents.workspaceId, input.workspaceId),
+        eventPredicate,
         actorPredicate,
         fromPredicate,
         toPredicate,
@@ -164,6 +176,9 @@ const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
 
 const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const eventKey = SqlFunction.concat("sync:", pluginSyncPages.timelineEventDigest)
+  const eventPredicate = input.sourceId === undefined
+    ? Query.eq(1, 1)
+    : Query.eq(pluginSyncPages.timelineEventDigest, input.sourceId)
   const fromPredicate = input.from === null
     ? Query.eq(1, 1)
     : Query.gte(pluginSyncPages.committedAt, input.from)
@@ -204,6 +219,7 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
     Query.where(
       Query.and(
         Query.eq(pluginSyncPages.workspaceId, input.workspaceId),
+        eventPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -219,6 +235,9 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
 
 const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const eventKey = SqlFunction.concat("relationship:", relationshipRevisions.revisionDigest)
+  const eventPredicate = input.sourceId === undefined
+    ? Query.eq(1, 1)
+    : Query.eq(relationshipRevisions.revisionDigest, input.sourceId)
   const actorPredicate = input.actorKind === null
     ? Query.eq(1, 1)
     : Query.eq(relationshipRevisions.recordedByKind, input.actorKind)
@@ -268,6 +287,7 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
     Query.where(
       Query.and(
         Query.eq(relationshipRevisions.workspaceId, input.workspaceId),
+        eventPredicate,
         actorPredicate,
         fromPredicate,
         toPredicate,
@@ -284,6 +304,9 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
 
 const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const eventKey = SqlFunction.concat("domain:", domainEvents.eventId)
+  const eventPredicate = input.sourceId === undefined
+    ? Query.eq(1, 1)
+    : Query.eq(domainEvents.eventId, input.sourceId)
   const fromPredicate = input.from === null ? Query.eq(1, 1) : Query.gte(domainEvents.occurredAt, input.from)
   const toPredicate = input.to === null ? Query.eq(1, 1) : Query.lte(domainEvents.occurredAt, input.to)
   const cursorPredicate = input.before === null
@@ -315,6 +338,7 @@ const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
     Query.where(
       Query.and(
         Query.eq(domainEvents.workspaceId, input.workspaceId),
+        eventPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -341,4 +365,34 @@ export const renderTimelineQueries = (input: TimelineQueryInput): ReadonlyArray<
     queries.push(systemQuery(input))
   }
   return queries
+}
+
+/** Render exact-key, workspace-scoped plans for one owner detail lookup. */
+export const renderTimelineDetailQueries = (input: {
+  readonly workspaceId: string
+  readonly eventKey: string
+}): ReadonlyArray<RenderedTimelineQuery> => {
+  const base = {
+    actorKind: null,
+    before: null,
+    from: null,
+    limit: 1,
+    to: null,
+    workspaceId: input.workspaceId
+  } satisfies TimelineQueryInput
+  const source = timelineDetailSources.find((prefix) => input.eventKey.startsWith(`${prefix}:`))
+  if (source === undefined) return []
+  const sourceId = input.eventKey.slice(source.length + 1)
+  if (sourceId.length === 0) return []
+  const exact = { ...base, sourceId }
+  switch (source) {
+    case "audit":
+      return [auditQuery(exact)]
+    case "sync":
+      return [syncQuery(exact)]
+    case "relationship":
+      return [relationshipQuery(exact)]
+    case "domain":
+      return [systemQuery(exact)]
+  }
 }

@@ -54,7 +54,7 @@ import type {
   WorkspaceId
 } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
-import type { TimelineActorKind, TimelineCursor, TimelinePage } from "../../domain/timeline.js"
+import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -144,6 +144,13 @@ export class TimelineReads extends Context.Service<TimelineReads, {
     readonly limit: number
     readonly to: UtcTimestamp | null
   }) => Effect.Effect<TimelinePage, ApplicationServiceUnavailable>
+  readonly detail: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly eventKey: string
+  }) => Effect.Effect<
+    TimelineEventDetail,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
 }>()("@knpkv/control-center/server/api/TimelineReads") {}
 
 /** Durable attribution boundary for successfully collected Timeline downloads. */

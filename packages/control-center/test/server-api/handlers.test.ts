@@ -29,6 +29,7 @@ import {
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
+import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
   ApplicationServiceUnavailable,
@@ -83,6 +84,27 @@ const snapshot = Schema.decodeSync(PortfolioSnapshot)({
   generatedAt: "2026-07-14T10:02:00.000Z",
   releases: [],
   plugins: []
+})
+const timelineDetail = Schema.decodeSync(TimelineEventDetail)({
+  event: {
+    eventKey: "domain:event-42",
+    occurredAt: "2026-07-14T10:02:00.000Z",
+    actor: { kind: "agent", label: "Release agent" },
+    sourceKind: "system",
+    service: null,
+    eventType: "agent-reviewed",
+    title: "Agent reviewed",
+    href: null
+  },
+  identifiers: {
+    actorId: "agent-7",
+    actionId: null,
+    relationshipId: null,
+    pluginConnectionId: null,
+    releaseId: null,
+    entityId: null
+  },
+  agentJob: { jobId: "job-9" }
 })
 const inspectedReleaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000004")
 const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
@@ -160,6 +182,10 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
 })
 
 const timelineLayer = Layer.succeed(TimelineReads, {
+  detail: ({ eventKey, workspaceId: requestedWorkspaceId }) =>
+    requestedWorkspaceId === session.workspaceId && eventKey === timelineDetail.event.eventKey
+      ? Effect.succeed(timelineDetail)
+      : Effect.die("timeline detail handler crossed a workspace or event boundary"),
   page: ({ workspaceId: requestedWorkspaceId }) =>
     requestedWorkspaceId === session.workspaceId
       ? Effect.succeed({ events: [], nextCursor: null })
@@ -755,6 +781,49 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("serves exact Timeline details to workspace owners", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+      const detail = yield* client.timeline.detail({
+        params: { eventKey: timelineDetail.event.eventKey }
+      })
+      assert.deepStrictEqual(detail, timelineDetail)
+    }).pipe(
+      Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        timelineHandlersTestLayer
+      ])
+    ))
+
+  it.effect("rejects Timeline details for workspace approvers before application work", () =>
+    Effect.gen(function*() {
+      const approverMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const approverLayer = timelineHandlersLayer.pipe(
+        Layer.provide(approverMiddlewareLayer),
+        Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("approver reached Timeline detail application work"),
+          page: () => Effect.die("approver reached Timeline page application work")
+        })),
+        Layer.provide(timelineExportAuditsLayer)
+      )
+      const denied = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
+        return yield* client.timeline.detail({
+          params: { eventKey: timelineDetail.event.eventKey }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddlewareLayer,
+        approverLayer
+      ]))
+      assertForbidden(denied)
+    }))
+
   it.effect("streams hardened CSV and JSON Timeline downloads with explicit truncation metadata", () =>
     Effect.gen(function*() {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
@@ -845,6 +914,7 @@ describe("Control Center API handlers", () => {
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("failed export collection reached Timeline detail work"),
           page: () => Effect.fail(new ApplicationServiceUnavailable({ retryAt: null }))
         })),
         Layer.provide(Layer.succeed(TimelineExportAudits, {
@@ -944,6 +1014,7 @@ describe("Control Center API handlers", () => {
           record: () => Ref.update(auditCount, (count) => count + 1)
         })),
         Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("invalid export range reached Timeline detail work"),
           page: () => Effect.die("invalid export range reached Timeline application work")
         }))
       )
@@ -973,6 +1044,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(timelineExportAuditsLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("watcher reached Timeline detail work"),
           page: () => Effect.die("watcher reached Timeline application work")
         }))
       )
@@ -1001,6 +1073,7 @@ describe("Control Center API handlers", () => {
           record: () => Ref.update(auditCount, (count) => count + 1)
         })),
         Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("watcher reached Timeline export detail work"),
           page: () => Effect.die("watcher reached Timeline export application work")
         }))
       )
@@ -1027,6 +1100,7 @@ describe("Control Center API handlers", () => {
       const handler = timelineHandlersLayer.pipe(
         Layer.provide(agentMiddlewareLayer),
         Layer.provide(Layer.succeed(TimelineReads, {
+          detail: () => Effect.die("agent owner reached Timeline detail application work"),
           page: () => Effect.die("agent owner reached Timeline export application work")
         })),
         Layer.provide(Layer.succeed(TimelineExportAudits, {

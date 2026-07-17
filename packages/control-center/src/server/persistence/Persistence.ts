@@ -334,6 +334,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("release.list", releases.list(...args))
     },
     timeline: {
+      detail: (...args: Parameters<TimelineRepositoryService["detail"]>) =>
+        publicOperation("timeline.detail", timeline.detail(...args)),
       page: (...args: Parameters<TimelineRepositoryService["page"]>) =>
         publicOperation("timeline.page", timeline.page(...args))
     },

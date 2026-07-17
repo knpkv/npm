@@ -42,6 +42,7 @@ describe("Timeline exports", () => {
     Effect.gen(function*() {
       const calls: Array<Parameters<TimelineReads["Service"]["page"]>[0]> = []
       const timeline: TimelineReads["Service"] = {
+        detail: () => Effect.die("Timeline export must not request event detail"),
         page: (input) => {
           calls.push(input)
           if (input.before === null) {
