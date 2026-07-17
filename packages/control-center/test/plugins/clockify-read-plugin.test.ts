@@ -406,6 +406,27 @@ describe("ClockifyReadPlugin", () => {
       if (Result.isFailure(mismatched)) {
         assert.strictEqual(mismatched.failure._tag, "PluginMalformedResponseFailure")
       }
+
+      const configuredUser = yield* withConnection(
+        baseProvider({
+          getTimeEntry: () => Effect.succeed(Option.some(timeEntry("entry-1", "user-1")))
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1")))),
+        { ...configuration, userIds: "user-1" }
+      )
+      assert.strictEqual(configuredUser._tag, "found")
+
+      const unconfiguredUser = yield* withConnection(
+        baseProvider({
+          getTimeEntry: () => Effect.succeed(Option.some(timeEntry("entry-1", "user-2")))
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1")))),
+        { ...configuration, userIds: "user-1" }
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(unconfiguredUser))
+      if (Result.isFailure(unconfiguredUser)) {
+        assert.strictEqual(unconfiguredUser.failure._tag, "PluginMalformedResponseFailure")
+      }
     }))
 
   it.effect("rejects backward completed intervals and accepts a running interval", () =>

@@ -39,6 +39,7 @@ const ClockifyTimeEntryResponse = Schema.Struct({
 type ClockifyTimeEntryEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 
 interface NormalizeClockifyTimeEntryInput {
+  readonly allowedUserIds?: ReadonlySet<string> | undefined
   readonly entry: unknown
   readonly expectedWorkspaceId: string
   readonly expectedUserId?: string | undefined
@@ -85,6 +86,9 @@ export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalizat
     return yield* malformed("clockify-time-entry-workspace-mismatch")
   }
   if (input.expectedUserId !== undefined && entry.userId !== input.expectedUserId) {
+    return yield* malformed("clockify-time-entry-user-mismatch")
+  }
+  if (input.allowedUserIds !== undefined && !input.allowedUserIds.has(entry.userId)) {
     return yield* malformed("clockify-time-entry-user-mismatch")
   }
 

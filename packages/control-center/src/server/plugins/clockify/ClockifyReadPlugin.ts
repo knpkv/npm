@@ -332,6 +332,7 @@ const streamSyncPages = (options: {
 const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   provider: ClockifyReadProvider,
   configuration: ClockifyReadPluginConfiguration,
+  userIds: ReadonlyArray<string>,
   request: ReadPluginEntityRequestV1
 ): Effect.fn.Return<ReadPluginEntityResultV1, PluginFailure, Crypto.Crypto> {
   if (request.entityType !== "clockify.time-entry") {
@@ -346,6 +347,7 @@ const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
     return { _tag: "missing", reference: request, observedAt: yield* DateTime.now }
   }
   const event = yield* normalizeClockifyTimeEntry({
+    allowedUserIds: new Set(userIds),
     entry: entry.value,
     expectedWorkspaceId: configuration.workspaceId
   })
@@ -423,7 +425,9 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
             )
           },
           readEntity: (request) =>
-            readTimeEntry(provider, decoded, request).pipe(Effect.provideService(Crypto.Crypto, cryptoService)),
+            readTimeEntry(provider, decoded, userIds, request).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService)
+            ),
           diff: Option.none(),
           proposeAction: () => Effect.fail(unsupported("action.propose"))
         }
