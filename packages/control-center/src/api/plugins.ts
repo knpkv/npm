@@ -27,6 +27,7 @@ import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
+const MAXIMUM_SECRET_VALUE_LENGTH = 16_384
 
 const isProviderHttpUrl = Schema.makeFilter((value: string) => {
   const decoded = Schema.decodeUnknownResult(Schema.URLFromString)(value)
@@ -154,15 +155,82 @@ export const PluginConnectionSummary = Schema.Struct({
 /** Decoded plugin connection summary. */
 export type PluginConnectionSummary = typeof PluginConnectionSummary.Type
 
-/** Bounded plugin-navigation and portfolio response. */
-export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
-  Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
-    expected: `at most ${MAXIMUM_PLUGIN_CONNECTIONS} plugin connections`
-  })
-)
+const CatalogFieldText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+
+/** Secret-free setup field shown before a first-party provider has runtime state. */
+export const PluginServiceCatalogField = Schema.Struct({
+  key: PluginConfigurationKey,
+  label: CatalogFieldText,
+  description: CatalogFieldText,
+  kind: Schema.Literals(["text", "url", "integer", "secret"]),
+  scope: Schema.Literals(["adapter", "credential"]),
+  required: Schema.Boolean,
+  defaultValue: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4_096))),
+  isReadOnly: Schema.Boolean,
+  minimum: Schema.NullOr(Schema.Int),
+  maximum: Schema.NullOr(Schema.Int)
+}).annotate({ identifier: "PluginServiceCatalogField" })
+
+/** Decoded safe setup metadata for one catalog field. */
+export type PluginServiceCatalogField = typeof PluginServiceCatalogField.Type
+
+/** One fixed first-party service available whether or not it is configured. */
+export const PluginServiceCatalogEntry = Schema.Struct({
+  providerId: ProviderId,
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  description: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  configurationFields: Schema.Array(PluginServiceCatalogField).check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((fields) => fields.length <= MAXIMUM_CONFIGURATION_VALUES, {
+      expected: `at most ${MAXIMUM_CONFIGURATION_VALUES} catalog configuration fields`
+    })
+  )
+}).annotate({ identifier: "PluginServiceCatalogEntry" })
+
+/** Decoded safe metadata for one fixed first-party service. */
+export type PluginServiceCatalogEntry = typeof PluginServiceCatalogEntry.Type
+
+/** Bounded plugin-navigation overview with the fixed catalog and durable connections. */
+export const PluginListResponse = Schema.Struct({
+  catalog: Schema.Array(PluginServiceCatalogEntry).check(
+    Schema.makeFilter((entries) => entries.length === 5, { expected: "the five first-party services" })
+  ),
+  connections: Schema.Array(PluginConnectionSummary).check(
+    Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
+      expected: `at most ${MAXIMUM_PLUGIN_CONNECTIONS} plugin connections`
+    })
+  )
+}).annotate({ identifier: "PluginListResponse" })
 
 /** Decoded bounded plugin list. */
 export type PluginListResponse = typeof PluginListResponse.Type
+
+const createValueFields = { key: PluginConfigurationKey }
+
+/** Typed setup input; only the secret variant carries transport-only secret text. */
+export const CreatePluginConnectionValue = Schema.Union([
+  Schema.TaggedStruct("text", { ...createValueFields, value: BoundedConfigurationText }),
+  Schema.TaggedStruct("url", { ...createValueFields, value: BoundedConfigurationUrl }),
+  Schema.TaggedStruct("integer", { ...createValueFields, value: Schema.Int }),
+  Schema.TaggedStruct("secret", {
+    ...createValueFields,
+    value: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_SECRET_VALUE_LENGTH))
+  })
+]).pipe(Schema.toTaggedUnion("_tag"))
+
+/** Decoded typed value for first-party connection setup. */
+export type CreatePluginConnectionValue = typeof CreatePluginConnectionValue.Type
+
+/** Bounded owner request to create, configure, enable, and immediately test a connection. */
+export const CreatePluginConnectionRequest = Schema.Struct({
+  pluginConnectionId: PluginConnectionId,
+  providerId: ProviderId,
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  values: boundedConfigurationValues(CreatePluginConnectionValue)
+}).annotate({ identifier: "CreatePluginConnectionRequest" })
+
+/** Decoded request for first-party connection setup. */
+export type CreatePluginConnectionRequest = typeof CreatePluginConnectionRequest.Type
 
 /** Current health for one authenticated plugin connection lookup. */
 export const PluginHealthResponse = Schema.Struct({
@@ -214,6 +282,16 @@ export const PluginConnectionTestResult = Schema.Union([
 /** Decoded live connection test result. */
 export type PluginConnectionTestResult = typeof PluginConnectionTestResult.Type
 
+/** Redacted result of durable setup and its immediate live identity check. */
+export const CreatePluginConnectionResponse = Schema.Struct({
+  connection: PluginConnectionSummary,
+  configuration: PluginConfiguration,
+  test: PluginConnectionTestResult
+}).annotate({ identifier: "CreatePluginConnectionResponse" })
+
+/** Decoded redacted first-party connection setup response. */
+export type CreatePluginConnectionResponse = typeof CreatePluginConnectionResponse.Type
+
 /** Secret-free configuration contract exposed to settings views. */
 export const PluginConfigurationMetadata = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
@@ -245,6 +323,14 @@ const list = HttpApiEndpoint.get("list", "/", {
   success: PluginListResponse,
   error: pluginReadErrors
 }).middleware(SessionCookieAuth)
+
+const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
+  payload: CreatePluginConnectionRequest,
+  success: CreatePluginConnectionResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
 
 const health = HttpApiEndpoint.get("health", "/:pluginConnectionId/health", {
   params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
@@ -287,6 +373,6 @@ const patchConfiguration = HttpApiEndpoint.patch("patchConfiguration", "/:plugin
 
 /** Authenticated plugin list, health, and secret-free configuration contract. */
 export class PluginsApiGroup extends HttpApiGroup.make("plugins")
-  .add(list, health, testConnection, configurationMetadata, configuration, patchConfiguration)
+  .add(list, createConnection, health, testConnection, configurationMetadata, configuration, patchConfiguration)
   .prefix("/api/v1/plugins")
 {}

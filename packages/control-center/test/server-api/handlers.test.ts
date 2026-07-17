@@ -8,7 +8,11 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
-import { PluginConnectionTestResult } from "../../src/api/plugins.js"
+import {
+  CreatePluginConnectionResponse,
+  PluginConfigurationKey,
+  PluginConnectionTestResult
+} from "../../src/api/plugins.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
   CurrentSession,
@@ -799,6 +803,82 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
         return yield* client.plugins.testConnection({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("runs owner connection setup through the session and CSRF-protected handler", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+        connection: {
+          pluginConnectionId,
+          providerId: "codecommit",
+          displayName: "Payments CodeCommit",
+          isEnabled: true,
+          health: null,
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        configuration: {
+          pluginConnectionId,
+          revision: 1,
+          values: [
+            { _tag: "text", key: "profile", value: "default" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments" }
+          ],
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        test: {
+          _tag: "healthy",
+          pluginConnectionId,
+          providerId: "codecommit",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          latencyMilliseconds: 24,
+          identity: {
+            kind: "account",
+            label: "AWS account",
+            displayName: "Production account",
+            providerImmutableId: "123456789012"
+          }
+        }
+      })
+      const plugins = PluginAdministration.of({
+        connectAndTest: ({ request, workspaceId }) =>
+          request.pluginConnectionId === pluginConnectionId && workspaceId === session.workspaceId
+            ? Effect.succeed(expected)
+            : Effect.die("connection setup crossed its authenticated scope"),
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.createConnection({
+          payload: {
+            pluginConnectionId,
+            providerId: "codecommit",
+            displayName: "Payments CodeCommit",
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          }
+        })
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -1770,6 +1850,7 @@ describe("Control Center API handlers", () => {
       revokeSession: () => Effect.die("not used")
     })
     const plugins = PluginAdministration.of({
+      connectAndTest: () => Effect.die("non-owner reached connection creation"),
       configuration: () => Effect.die("not used"),
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
@@ -1839,6 +1920,30 @@ describe("Control Center API handlers", () => {
         requestContext
       )
       assert.strictEqual(testResponse.status, 403)
+      const createResponse = await webHandler.handler(
+        new Request("http://127.0.0.1:4173/api/v1/plugins/connections", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({
+            pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000092",
+            providerId: "codecommit",
+            displayName: "Payments CodeCommit",
+            values: [
+              { _tag: "text", key: "profile", value: "default" },
+              { _tag: "text", key: "region", value: "eu-west-1" },
+              { _tag: "text", key: "repositoryName", value: "payments" }
+            ]
+          })
+        }),
+        requestContext
+      )
+      assert.strictEqual(createResponse.status, 403)
     } finally {
       await webHandler.dispose()
     }

@@ -8,6 +8,8 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import type {
+  CreatePluginConnectionRequest,
+  CreatePluginConnectionResponse,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
@@ -17,7 +19,7 @@ import type {
   PluginConnectionTestResult,
   RedactedPluginConfigurationValue
 } from "../../api/plugins.js"
-import { PluginConfigurationKey } from "../../api/plugins.js"
+import { CreatePluginConnectionValue, PluginConfigurationKey } from "../../api/plugins.js"
 import type { PluginHealth } from "../../domain/freshness.js"
 import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
@@ -31,12 +33,15 @@ import {
 } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import type { PluginConnectionRecord } from "../persistence/repositories/models.js"
+import { PluginConnectionDisplayName } from "../persistence/repositories/models.js"
 import type { StoredPluginConfigurationValue } from "../persistence/repositories/pluginConfigurationModels.js"
 import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
+import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
+import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { SecretRef } from "../secrets/SecretRef.js"
@@ -45,6 +50,7 @@ import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError }
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
+const secretEncoder = new TextEncoder()
 
 const decodeNegotiatedDescriptor = (descriptorJson: string) => {
   const json = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorJson)
@@ -263,16 +269,14 @@ const metadata = Effect.fn("PluginAdministration.metadata")(function*(
   pluginConnectionId: PluginConnectionId
 ) {
   yield* requireConnection(persistence, workspaceId, pluginConnectionId)
-  const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
-  const negotiated = decodeNegotiatedDescriptor(runtime.descriptorJson)
-  if (Result.isFailure(negotiated)) return yield* unavailable()
+  const negotiated = yield* negotiatedDescriptor(persistence, workspaceId, pluginConnectionId)
   return {
     pluginConnectionId,
-    pluginId: negotiated.success.descriptor.pluginId,
-    contractVersion: negotiated.success.descriptor.contractVersion,
-    adapterVersion: negotiated.success.descriptor.adapterVersion,
-    configurationFields: negotiated.success.descriptor.configurationFields,
-    capabilities: negotiated.success.capabilities
+    pluginId: negotiated.descriptor.pluginId,
+    contractVersion: negotiated.descriptor.contractVersion,
+    adapterVersion: negotiated.descriptor.adapterVersion,
+    configurationFields: negotiated.descriptor.configurationFields,
+    capabilities: negotiated.capabilities
   } satisfies PluginConfigurationMetadata
 })
 
@@ -281,10 +285,22 @@ const negotiatedDescriptor = Effect.fn("PluginAdministration.negotiatedDescripto
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId
 ) {
-  const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
-  const negotiated = decodeNegotiatedDescriptor(runtime.descriptorJson)
-  if (Result.isFailure(negotiated)) return yield* unavailable()
-  return negotiated.success
+  const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  const runtime = yield* persistence.pluginRuntime.getRuntime(workspaceId, pluginConnectionId).pipe(
+    Effect.map(Option.some),
+    Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none())),
+    Effect.mapError(() => unavailable())
+  )
+  if (Option.isSome(runtime)) {
+    const negotiated = decodeNegotiatedDescriptor(runtime.value.descriptorJson)
+    if (Result.isFailure(negotiated)) return yield* unavailable()
+    return negotiated.success
+  }
+  const catalog = firstPartyService(connection.providerId)
+  if (catalog === undefined) return yield* unavailable()
+  return yield* negotiatePluginDescriptorV1(catalog.rawDescriptor).pipe(
+    Effect.mapError(() => unavailable())
+  )
 })
 
 const redactValue = Effect.fn("PluginAdministration.redactValue")(function*(
@@ -444,6 +460,186 @@ const canonicalValues = Effect.fn("PluginAdministration.canonicalValues")(functi
   )
 })
 
+type FirstPartyCatalogEntry = NonNullable<ReturnType<typeof firstPartyService>>
+type FirstPartyCatalogField = FirstPartyCatalogEntry["metadata"]["configurationFields"][number]
+
+const valueMatchesCatalogField = (
+  field: FirstPartyCatalogField,
+  value: CreatePluginConnectionValue
+): boolean => {
+  if (field.key !== value.key || field.kind !== value._tag) return false
+  if (value._tag === "integer") {
+    return (field.minimum === null || value.value >= field.minimum) &&
+      (field.maximum === null || value.value <= field.maximum)
+  }
+  return true
+}
+
+const defaultSetupValue = Effect.fn("PluginAdministration.defaultSetupValue")(function*(
+  field: FirstPartyCatalogField
+) {
+  if (field.defaultValue === null) return yield* new ApplicationInvalidRequest()
+  const candidate = field.kind === "integer"
+    ? { _tag: "integer", key: field.key, value: Number(field.defaultValue) }
+    : field.kind === "secret"
+    ? null
+    : { _tag: field.kind, key: field.key, value: field.defaultValue }
+  if (candidate === null) return yield* new ApplicationInvalidRequest()
+  const decoded = yield* Schema.decodeUnknownEffect(CreatePluginConnectionValue)(candidate).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  if (!valueMatchesCatalogField(field, decoded)) return yield* new ApplicationInvalidRequest()
+  return decoded
+})
+
+const validateSetup = Effect.fn("PluginAdministration.validateSetup")(function*(
+  catalog: FirstPartyCatalogEntry,
+  request: CreatePluginConnectionRequest
+) {
+  yield* negotiatePluginDescriptorV1(catalog.rawDescriptor).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  yield* Schema.decodeUnknownEffect(PluginConnectionDisplayName)(request.displayName).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  const valuesByKey = new Map(request.values.map((value) => [value.key, value]))
+  if (request.values.some((value) => !catalog.metadata.configurationFields.some((field) => field.key === value.key))) {
+    return yield* new ApplicationInvalidRequest()
+  }
+  const values: Array<CreatePluginConnectionValue> = []
+  for (const field of catalog.metadata.configurationFields) {
+    const supplied = valuesByKey.get(field.key)
+    const value = supplied ?? (yield* defaultSetupValue(field))
+    if (!valueMatchesCatalogField(field, value)) return yield* new ApplicationInvalidRequest()
+    if (field.isReadOnly && field.defaultValue !== String(value.value)) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    values.push(value)
+  }
+  return values
+})
+
+const storeSetupValues = Effect.fn("PluginAdministration.storeSetupValues")(function*(
+  secrets: SecretStore["Service"],
+  values: ReadonlyArray<CreatePluginConnectionValue>,
+  createdSecretReferences: Array<SecretRef>
+) {
+  const stored: Array<StoredPluginConfigurationValue> = []
+  for (const value of values) {
+    const key = yield* Schema.decodeUnknownEffect(StoredPluginConfigurationKey)(value.key).pipe(
+      Effect.mapError(() => new ApplicationInvalidRequest())
+    )
+    if (value._tag === "secret") {
+      const ref = yield* secrets.create(secretEncoder.encode(value.value)).pipe(
+        Effect.mapError(() => unavailable())
+      )
+      createdSecretReferences.push(ref)
+      stored.push({ _tag: "secret-reference", key, ref })
+    } else {
+      stored.push({ ...value, key })
+    }
+  }
+  stored.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
+  return yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(stored).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+})
+
+const removeSetupSecrets = (
+  secrets: SecretStore["Service"],
+  references: ReadonlyArray<SecretRef>
+): Effect.Effect<void> =>
+  Effect.forEach(
+    references,
+    (reference) => secrets.remove(reference).pipe(Effect.catch(() => Effect.void)),
+    { discard: true }
+  )
+
+const disableAfterSetupFailure = (
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  connection: PluginConnectionRecord
+): Effect.Effect<void> =>
+  persistence.pluginConnections.updateMetadata(workspaceId, connection.pluginConnectionId, {
+    displayName: connection.displayName,
+    isEnabled: false,
+    expectedRevision: connection.revision,
+    updatedAt: connection.updatedAt
+  }).pipe(
+    Effect.asVoid,
+    Effect.catch(() => Effect.void)
+  )
+
+const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function*(
+  persistence: Persistence["Service"],
+  secrets: SecretStore["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  request: CreatePluginConnectionRequest
+) {
+  const catalog = firstPartyService(request.providerId)
+  if (catalog === undefined) return yield* new ApplicationInvalidRequest()
+  const setupValues = yield* validateSetup(catalog, request)
+  const displayName = yield* Schema.decodeUnknownEffect(PluginConnectionDisplayName)(request.displayName).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  const createdSecretReferences: Array<SecretRef> = []
+  let hasDurableConfiguration = false
+
+  return yield* Effect.gen(function*() {
+    const values = yield* storeSetupValues(secrets, setupValues, createdSecretReferences)
+    const createdAt = yield* DateTime.now
+    const draft = yield* persistence.pluginConnections.create(workspaceId, {
+      pluginConnectionId: request.pluginConnectionId,
+      providerId: request.providerId,
+      displayName,
+      isEnabled: false,
+      createdAt
+    }).pipe(Effect.mapError(mapPersistenceWriteError))
+    yield* persistence.pluginConfigurations.update(
+      workspaceId,
+      request.pluginConnectionId,
+      values,
+      0,
+      createdAt
+    ).pipe(Effect.mapError(mapPersistenceWriteError))
+    hasDurableConfiguration = true
+    yield* persistence.pluginRuntime.acceptPluginDescriptor(
+      workspaceId,
+      request.pluginConnectionId,
+      request.providerId,
+      catalog.rawDescriptor,
+      0,
+      createdAt
+    ).pipe(Effect.mapError(mapPersistenceWriteError))
+
+    if (pluginConnections === null) return yield* unavailable()
+    const enabled = yield* persistence.pluginConnections.updateMetadata(workspaceId, request.pluginConnectionId, {
+      displayName: draft.displayName,
+      isEnabled: true,
+      expectedRevision: draft.revision,
+      updatedAt: yield* DateTime.now
+    }).pipe(Effect.mapError(mapPersistenceWriteError))
+
+    return yield* Effect.gen(function*() {
+      yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: request.pluginConnectionId })
+      const test = yield* testPluginConnection(
+        persistence,
+        pluginConnections,
+        workspaceId,
+        request.pluginConnectionId
+      )
+      return {
+        connection: yield* connectionSummary(persistence, enabled),
+        configuration: yield* configuration(persistence, secrets, workspaceId, request.pluginConnectionId),
+        test
+      } satisfies CreatePluginConnectionResponse
+    }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, enabled)))
+  }).pipe(
+    Effect.tapError(() => hasDurableConfiguration ? Effect.void : removeSetupSecrets(secrets, createdSecretReferences))
+  )
+})
+
 /** Construct the secret-free plugin administration adapter over durable host state. */
 export const makePluginAdministrationWithConnections = Effect.fn("PluginAdministration.makeWithConnections")(function*(
   pluginConnections: PluginConnectionMapV1 | null
@@ -453,6 +649,8 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
+    connectAndTest: ({ request, workspaceId }) =>
+      connectAndTest(persistence, secrets, pluginConnections, workspaceId, request),
     health: Effect.fn("PluginAdministration.health")(function*({ pluginConnectionId, workspaceId }) {
       yield* requireConnection(persistence, workspaceId, pluginConnectionId)
       const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
@@ -520,3 +718,6 @@ export const pluginAdministrationLayerWithConnections = (pluginConnections: Plug
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections
+
+/** Secret-free fixed catalog projection consumed by the authenticated overview handler. */
+export const listFirstPartyServiceMetadata = () => firstPartyServiceCatalog.map(({ metadata }) => metadata)

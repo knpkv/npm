@@ -53,6 +53,9 @@ export {
 } from "./liveEvents.js"
 export { MediaApiGroup, MediaResponseHeaders, OpaqueMediaId, SafeMediaContentType } from "./media.js"
 export {
+  CreatePluginConnectionRequest,
+  CreatePluginConnectionResponse,
+  CreatePluginConnectionValue,
   OpaqueSecretReference,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
@@ -65,6 +68,8 @@ export {
   PluginHealthResponse,
   PluginListResponse,
   PluginsApiGroup,
+  PluginServiceCatalogEntry,
+  PluginServiceCatalogField,
   RedactedPluginConfigurationValue
 } from "./plugins.js"
 export {

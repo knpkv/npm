@@ -20,6 +20,8 @@ import type {
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
+  CreatePluginConnectionRequest,
+  CreatePluginConnectionResponse,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
@@ -98,6 +100,13 @@ export interface PluginAdministrationService {
   readonly list: (
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<PluginConnectionSummary>, ApplicationServiceUnavailable>
+  readonly connectAndTest?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly request: CreatePluginConnectionRequest
+  }) => Effect.Effect<
+    CreatePluginConnectionResponse,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly health: (input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId

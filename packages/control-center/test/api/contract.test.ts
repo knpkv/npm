@@ -185,6 +185,7 @@ describe("ControlCenterApi contract", () => {
       Object.entries(PluginsApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
         ["list", "GET", "/api/v1/plugins"],
+        ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
         ["configurationMetadata", "GET", "/api/v1/plugins/:pluginConnectionId/configuration-metadata"],
@@ -270,6 +271,7 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(PluginsApiGroup.endpoints), {
       list: [SessionCookieAuth.key],
+      createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       configurationMetadata: [SessionCookieAuth.key],

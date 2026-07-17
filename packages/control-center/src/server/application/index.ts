@@ -5,6 +5,7 @@ export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 export { liveEventsLayer, makeLiveEvents } from "./liveEvents.js"
 export { makeMediaReads, mediaReadsLayer } from "./mediaReads.js"
 export {
+  listFirstPartyServiceMetadata,
   listPluginConnectionSummaries,
   makePluginAdministration,
   makePluginAdministrationWithConnections,

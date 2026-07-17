@@ -1,12 +1,19 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
-import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Field, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
-import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router"
 
-import type { PluginConnectionSummary, PluginConnectionTestResult } from "../../api/plugins.js"
+import type {
+  CreatePluginConnectionValue,
+  PluginConnectionSummary,
+  PluginConnectionTestResult,
+  PluginListResponse,
+  PluginServiceCatalogEntry
+} from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
+import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import styles from "./ServicesPage.module.css"
@@ -20,7 +27,7 @@ type ConnectionsState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed" }
-  | { readonly _tag: "ready"; readonly connections: ReadonlyArray<PluginConnectionSummary> }
+  | { readonly _tag: "ready"; readonly overview: PluginListResponse }
 
 const statusFor = (
   connection: PluginConnectionSummary
@@ -128,7 +135,162 @@ const ConnectionCard = ({
   )
 }
 
-/** Manage connected providers and prove their current identity with a live, owner-only check. */
+const setupValue = (field: PluginServiceCatalogEntry["configurationFields"][number], value: string) => {
+  switch (field.kind) {
+    case "integer":
+      return { _tag: "integer", key: field.key, value: Number(value) } satisfies CreatePluginConnectionValue
+    case "secret":
+      return { _tag: "secret", key: field.key, value } satisfies CreatePluginConnectionValue
+    case "text":
+    case "url":
+      return { _tag: field.kind, key: field.key, value } satisfies CreatePluginConnectionValue
+  }
+}
+
+const SetupForm = ({
+  catalog,
+  isSubmitting,
+  onCancel,
+  onSubmit
+}: {
+  readonly catalog: PluginServiceCatalogEntry
+  readonly isSubmitting: boolean
+  readonly onCancel: () => void
+  readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
+}): ReactElement => {
+  const [displayName, setDisplayName] = useState(catalog.displayName)
+  const [setupError, setSetupError] = useState<string | null>(null)
+  const [values, setValues] = useState<ReadonlyMap<string, string>>(
+    new Map(catalog.configurationFields.map((field) => [field.key, field.defaultValue ?? ""]))
+  )
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    setSetupError(null)
+    const requestValues = catalog.configurationFields.map((field) => setupValue(field, values.get(field.key) ?? ""))
+    onSubmit(displayName, requestValues).then((didCreate) => {
+      if (!didCreate) {
+        setSetupError("Control Center could not create this connection. Check the fields and try again.")
+        return
+      }
+      setValues((current) => {
+        const cleared = new Map(current)
+        for (const field of catalog.configurationFields) {
+          if (field.kind === "secret") cleared.set(field.key, "")
+        }
+        return cleared
+      })
+    })
+  }
+
+  return (
+    <form className={styles.setupForm} onSubmit={submit}>
+      <Field label="Connection name" required size="compact">
+        {(controlProps) => (
+          <input
+            {...controlProps}
+            maxLength={200}
+            onChange={(event) => setDisplayName(event.currentTarget.value)}
+            value={displayName}
+          />
+        )}
+      </Field>
+      {catalog.configurationFields.map((field) => (
+        <Field
+          description={field.description}
+          key={field.key}
+          label={field.label}
+          required={field.required}
+          size="compact"
+        >
+          {(controlProps) => (
+            <input
+              {...controlProps}
+              autoComplete={field.kind === "secret" ? "off" : undefined}
+              disabled={field.isReadOnly}
+              max={field.maximum ?? undefined}
+              maxLength={field.kind === "integer" ? undefined : field.kind === "secret" ? 16_384 : 4_096}
+              min={field.minimum ?? undefined}
+              onChange={(event) => setValues((current) => new Map(current).set(field.key, event.currentTarget.value))}
+              type={
+                field.kind === "secret"
+                  ? "password"
+                  : field.kind === "integer"
+                    ? "number"
+                    : field.kind === "url"
+                      ? "url"
+                      : "text"
+              }
+              value={values.get(field.key) ?? ""}
+            />
+          )}
+        </Field>
+      ))}
+      {setupError === null ? null : (
+        <Text as="p" className={styles.setupError} role="alert" variant="body">
+          {setupError}
+        </Text>
+      )}
+      <div className={styles.setupActions}>
+        <Button disabled={isSubmitting} onClick={onCancel} type="button" variant="secondary">
+          Cancel
+        </Button>
+        <Button loading={isSubmitting} type="submit" variant="primary">
+          Connect and test
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+const CatalogCard = ({
+  canConfigure,
+  catalog,
+  isOpen,
+  isSubmitting,
+  onCancel,
+  onOpen,
+  onSubmit
+}: {
+  readonly canConfigure: boolean
+  readonly catalog: PluginServiceCatalogEntry
+  readonly isOpen: boolean
+  readonly isSubmitting: boolean
+  readonly onCancel: () => void
+  readonly onOpen: () => void
+  readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
+}): ReactElement => (
+  <Surface as="article" className={styles.card} padding="default" shape="grouped">
+    <div className={styles.cardHeading}>
+      <div className={styles.connectionIdentity}>
+        <ServiceMark service={catalog.providerId} size="compact" />
+        <Text as="h2" variant="card-title">
+          {catalog.displayName}
+        </Text>
+      </div>
+      <StateLabel label="Not configured" size="compact" tone="neutral" />
+    </div>
+    <Text tone="secondary" variant="body">
+      {catalog.description}
+    </Text>
+    {isOpen ? (
+      <SetupForm catalog={catalog} isSubmitting={isSubmitting} onCancel={onCancel} onSubmit={onSubmit} />
+    ) : (
+      <div className={styles.cardAction}>
+        <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
+          Configure
+        </Button>
+        {!canConfigure ? (
+          <Text tone="secondary" variant="meta">
+            Owner access is required.
+          </Text>
+        ) : null}
+      </div>
+    )}
+  </Surface>
+)
+
+/** Manage fixed first-party providers and prove configured identities with owner-only live checks. */
 export const ServicesPage = ({
   transport = browserConnectionTestTransport
 }: {
@@ -139,7 +301,10 @@ export const ServicesPage = ({
   const [requestRevision, setRequestRevision] = useState(0)
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
+  const [openProvider, setOpenProvider] = useState<ProviderId | null>(null)
+  const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
   const testRequests = useRef(new Map<PluginConnectionId, AbortController>())
+  const createRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -149,8 +314,8 @@ export const ServicesPage = ({
     const request = new AbortController()
     setConnectionsState({ _tag: "loading" })
     transport.list(request.signal).then(
-      (connections) => {
-        if (!request.signal.aborted) setConnectionsState({ _tag: "ready", connections })
+      (overview) => {
+        if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview })
       },
       (failure) => {
         if (request.signal.aborted) return
@@ -163,9 +328,12 @@ export const ServicesPage = ({
 
   useEffect(() => {
     setTestStates(new Map())
+    setOpenProvider(null)
     return () => {
       for (const request of testRequests.current.values()) request.abort()
       testRequests.current.clear()
+      createRequest.current?.abort()
+      createRequest.current = null
     }
   }, [sessionKey])
 
@@ -193,9 +361,62 @@ export const ServicesPage = ({
     [invalidateSession, sessionKey, transport]
   )
 
+  const createConnection = useCallback(
+    (
+      catalog: PluginServiceCatalogEntry,
+      displayName: string,
+      values: ReadonlyArray<CreatePluginConnectionValue>
+    ): Promise<boolean> => {
+      if (sessionKey === null) return Promise.resolve(false)
+      createRequest.current?.abort()
+      const request = new AbortController()
+      createRequest.current = request
+      setSubmittingProvider(catalog.providerId)
+      return transport
+        .makeConnectionId()
+        .then((pluginConnectionId) =>
+          transport.create({ pluginConnectionId, providerId: catalog.providerId, displayName, values }, request.signal)
+        )
+        .then(
+          (response) => {
+            if (request.signal.aborted) return false
+            createRequest.current = null
+            setConnectionsState((current) =>
+              current._tag === "ready"
+                ? {
+                    _tag: "ready",
+                    overview: {
+                      ...current.overview,
+                      connections: [...current.overview.connections, response.connection]
+                    }
+                  }
+                : current
+            )
+            setTestStates((current) =>
+              new Map(current).set(response.connection.pluginConnectionId, {
+                _tag: "result",
+                result: response.test
+              })
+            )
+            setOpenProvider(null)
+            setSubmittingProvider(null)
+            return true
+          },
+          (failure) => {
+            if (request.signal.aborted) return false
+            createRequest.current = null
+            if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+            setSubmittingProvider(null)
+            return false
+          }
+        )
+    },
+    [invalidateSession, sessionKey, transport]
+  )
+
   const session =
     sessionState._tag === "authenticated" || sessionState._tag === "storage-unavailable" ? sessionState.session : null
-  const canTest = sessionState._tag === "authenticated" && sessionState.session.permission === "workspace-owner"
+  const canConfigure = sessionState._tag === "authenticated" && sessionState.session.permission === "workspace-owner"
 
   return (
     <section aria-labelledby="services-title" className={styles.page}>
@@ -204,7 +425,7 @@ export const ServicesPage = ({
           Services
         </Text>
         <Text tone="secondary" variant="body-large">
-          Verify provider access and the exact account each connection represents.
+          Configure first-party providers and verify the exact account each connection represents.
         </Text>
       </header>
       {session === null ? (
@@ -218,29 +439,42 @@ export const ServicesPage = ({
           title="Connections stay private"
         />
       ) : connectionsState._tag === "loading" || connectionsState._tag === "idle" ? (
-        <StatePanel description="Reading the connections available to this workspace." title="Loading services" />
+        <StatePanel description="Reading the services available to this workspace." title="Loading services" />
       ) : connectionsState._tag === "failed" ? (
         <StatePanel
           action={<Button onClick={() => setRequestRevision((revision) => revision + 1)}>Try again</Button>}
-          description="Control Center could not load the connection list."
+          description="Control Center could not load the service catalog."
           title="Services unavailable"
-        />
-      ) : connectionsState.connections.length === 0 ? (
-        <StatePanel
-          description="Add a provider connection to verify its credentials and account identity here."
-          title="No services connected"
         />
       ) : (
         <div className={styles.grid}>
-          {connectionsState.connections.map((connection) => (
-            <ConnectionCard
-              canTest={canTest}
-              connection={connection}
-              key={connection.pluginConnectionId}
-              onTest={testConnection}
-              testState={testStates.get(connection.pluginConnectionId)}
-            />
-          ))}
+          {connectionsState.overview.catalog.flatMap((catalog) => {
+            const configured = connectionsState.overview.connections.filter(
+              (connection) => connection.providerId === catalog.providerId
+            )
+            return configured.length > 0
+              ? configured.map((connection) => (
+                  <ConnectionCard
+                    canTest={canConfigure}
+                    connection={connection}
+                    key={connection.pluginConnectionId}
+                    onTest={testConnection}
+                    testState={testStates.get(connection.pluginConnectionId)}
+                  />
+                ))
+              : [
+                  <CatalogCard
+                    canConfigure={canConfigure}
+                    catalog={catalog}
+                    isOpen={openProvider === catalog.providerId}
+                    isSubmitting={submittingProvider === catalog.providerId}
+                    key={catalog.providerId}
+                    onCancel={() => setOpenProvider(null)}
+                    onOpen={() => setOpenProvider(catalog.providerId)}
+                    onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
+                  />
+                ]
+          })}
         </div>
       )}
     </section>
