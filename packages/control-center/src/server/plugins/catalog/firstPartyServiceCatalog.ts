@@ -4,6 +4,11 @@ import {
   type PluginServiceCatalogField
 } from "../../../api/plugins.js"
 import type { ProviderId } from "../../../domain/sourceRevision.js"
+import { clockifyReadPluginDescriptor } from "../clockify/ClockifyReadPlugin.js"
+import { codeCommitPluginDefinition } from "../codecommit/CodeCommitPluginDefinition.js"
+import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
+import { confluencePagePluginDescriptor } from "../confluence/ConfluencePagePluginDefinition.js"
+import { jiraReadPluginDescriptor } from "../jira/JiraReadPlugin.js"
 
 interface FirstPartyServiceCatalogEntry {
   readonly metadata: PluginServiceCatalogEntry
@@ -33,52 +38,6 @@ const field = (
   isReadOnly: options.isReadOnly ?? false,
   minimum: options.minimum ?? null,
   maximum: options.maximum ?? null
-})
-
-const descriptor = (
-  pluginId: string,
-  displayName: string,
-  configurationFields: ReadonlyArray<PluginServiceCatalogField>,
-  capabilities: ReadonlyArray<string>
-): unknown => ({
-  contractId: "dev.knpkv.control-center.plugin",
-  contractVersion: { major: 1, minor: 0, patch: 0 },
-  pluginId,
-  adapterVersion: { major: 0, minor: 1, patch: 0 },
-  displayName,
-  configurationFields: configurationFields.map((configurationField) =>
-    configurationField.kind === "secret"
-      ? {
-        _tag: "secret-reference",
-        key: configurationField.key,
-        label: configurationField.label,
-        description: configurationField.description,
-        required: configurationField.required,
-        secretKind: "token"
-      }
-      : configurationField.kind === "integer"
-      ? {
-        _tag: "integer",
-        key: configurationField.key,
-        label: configurationField.label,
-        description: configurationField.description,
-        required: configurationField.required,
-        minimum: configurationField.minimum,
-        maximum: configurationField.maximum
-      }
-      : {
-        _tag: configurationField.kind,
-        key: configurationField.key,
-        label: configurationField.label,
-        description: configurationField.description,
-        required: configurationField.required
-      }
-  ),
-  capabilities: capabilities.map((capabilityId) => ({
-    capabilityId,
-    supportedVersions: [1],
-    requirement: "required"
-  }))
 })
 
 const codeCommitFields = [
@@ -185,47 +144,42 @@ const entry = (
   displayName: string,
   description: string,
   configurationFields: ReadonlyArray<PluginServiceCatalogField>,
-  pluginId: string,
-  capabilities: ReadonlyArray<string>
+  rawDescriptor: unknown
 ): FirstPartyServiceCatalogEntry => ({
   metadata: { providerId, displayName, description, configurationFields },
-  rawDescriptor: descriptor(pluginId, displayName, configurationFields, capabilities)
+  rawDescriptor
 })
 
-/** Fixed server-owned catalog; executable plugin definitions are intentionally absent. */
+/** Fixed server-owned catalog paired with each runtime's canonical descriptor. */
 export const firstPartyServiceCatalog: ReadonlyArray<FirstPartyServiceCatalogEntry> = [
   entry(
     "codecommit",
     "CodeCommit",
     "Read pull requests from one AWS CodeCommit repository.",
     codeCommitFields,
-    "dev.knpkv.codecommit",
-    ["entity.read", "sync.incremental", "diff.inventory"]
+    codeCommitPluginDefinition.rawDescriptor
   ),
   entry(
     "codepipeline",
     "CodePipeline",
     "Read pipeline and execution state from AWS CodePipeline.",
     codePipelineFields,
-    "dev.knpkv.aws-codepipeline",
-    ["entity.read", "sync.incremental"]
+    codePipelinePluginDefinition.rawDescriptor
   ),
-  entry("jira", "Jira", "Read delivery issues from Jira Cloud.", jiraFields, "dev.knpkv.jira.read", ["entity.read"]),
+  entry("jira", "Jira", "Read delivery issues from Jira Cloud.", jiraFields, jiraReadPluginDescriptor),
   entry(
     "confluence",
     "Confluence",
     "Read release documentation from Confluence Cloud.",
     confluenceFields,
-    "dev.knpkv.confluence",
-    ["entity.read"]
+    confluencePagePluginDescriptor
   ),
   entry(
     "clockify",
     "Clockify",
     "Read bounded time-entry evidence from Clockify.",
     clockifyFields,
-    "dev.knpkv.clockify.read",
-    ["entity.read", "sync.incremental"]
+    clockifyReadPluginDescriptor
   )
 ]
 

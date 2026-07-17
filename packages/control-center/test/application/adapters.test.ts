@@ -27,6 +27,7 @@ import {
 import { NegotiatedPluginDescriptorV1 } from "../../src/domain/plugins/descriptor.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
+import type { ProviderId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   ApplicationConflict,
@@ -38,6 +39,7 @@ import {
   listFirstPartyServiceMetadata,
   makeDeliveryGraphInspection,
   makeMediaReads,
+  makePluginAdministration,
   makePluginAdministrationWithConnections,
   makePortfolioSnapshots,
   makeRelationshipRepairProposals,
@@ -47,7 +49,9 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { firstPartyService } from "../../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
@@ -322,6 +326,24 @@ describe("application adapters", () => {
       ]
     )
   })
+
+  it.effect("keeps setup fields aligned with every canonical runtime descriptor", () =>
+    Effect.gen(function*() {
+      const providerIds: ReadonlyArray<ProviderId> = ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
+      for (const providerId of providerIds) {
+        const catalog = firstPartyService(providerId)
+        assert.isDefined(catalog)
+        if (catalog === undefined) continue
+        const descriptor = yield* negotiatePluginDescriptorV1(catalog.rawDescriptor)
+        assert.deepStrictEqual(
+          catalog.metadata.configurationFields.map(({ key, kind }) => ({ key, kind })),
+          descriptor.descriptor.configurationFields.map(({ _tag, key }) => ({
+            key,
+            kind: _tag === "secret-reference" ? "secret" : _tag
+          }))
+        )
+      }
+    }))
 
   it.effect("creates secrets, disabled metadata, canonical configuration, descriptor, enablement, and identity in order", () =>
     withApplication(Effect.gen(function*() {
