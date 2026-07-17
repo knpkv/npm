@@ -16,6 +16,35 @@ import {
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
+const withWriteAll = (
+  file: FileSystem.File,
+  writeAll: FileSystem.File["writeAll"]
+): FileSystem.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  read: file.read,
+  readAlloc: file.readAlloc,
+  seek: file.seek,
+  stat: file.stat,
+  sync: file.sync,
+  truncate: file.truncate,
+  write: file.write,
+  writeAll
+})
+
+const withSync = (file: FileSystem.File, sync: FileSystem.File["sync"]): FileSystem.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  read: file.read,
+  readAlloc: file.readAlloc,
+  seek: file.seek,
+  stat: file.stat,
+  sync,
+  truncate: file.truncate,
+  write: file.write,
+  writeAll: (bytes) => file.writeAll(bytes)
+})
+
 const withSecretStore = <A, E>(
   use: (
     store: SecretStore["Service"],
@@ -50,6 +79,35 @@ describe("SecretRef", () => {
 })
 
 describe("SecretStore", () => {
+  it.effect("initializes and stores values when descriptor path aliases are unavailable", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-portable-" })
+      const root = Schema.decodeSync(SecretRoot)(path.join(parent, "secrets"))
+      const portableFileSystem = FileSystem.make({
+        ...fs,
+        realPath: (target) =>
+          target.startsWith("/proc/self/fd/") || target.startsWith("/dev/fd/")
+            ? Effect.fail(
+              PlatformError.systemError({
+                _tag: "NotFound",
+                method: "realPath",
+                module: "FileSystem",
+                pathOrDescriptor: target
+              })
+            )
+            : fs.realPath(target)
+      })
+
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, portableFileSystem)
+      )
+      const ref = yield* store.create(encoder.encode("portable-secret"))
+
+      assert.strictEqual(yield* resolveString(store, ref), "portable-secret")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
   it.effect("creates and durably secures a missing root beneath a canonical parent", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
@@ -87,6 +145,7 @@ describe("SecretStore", () => {
   it.effect("copies caller-owned bytes before asynchronous publication", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-copy-" })
       const root = Schema.decodeSync(SecretRoot)(directory)
       const publicationStarted = yield* Deferred.make<void>()
@@ -94,7 +153,7 @@ describe("SecretStore", () => {
       const gatedFileSystem = FileSystem.FileSystem.of({
         ...fs,
         open: (target, options) =>
-          target.includes(".incoming-")
+          path.basename(target).startsWith("secret_") && options?.flag === "wx"
             ? Deferred.succeed(publicationStarted, undefined).pipe(
               Effect.andThen(Deferred.await(continuePublication)),
               Effect.andThen(fs.open(target, options))
@@ -113,6 +172,114 @@ describe("SecretStore", () => {
 
       const ref = yield* Fiber.join(createFiber)
       assert.strictEqual(yield* resolveString(store, ref), "owner-controlled-value")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("removes a partial generation after an ordinary write failure", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-write-failure-" })
+      const root = Schema.decodeSync(SecretRoot)(directory)
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (target, options) =>
+          fs.open(target, options).pipe(
+            Effect.map((opened) =>
+              path.basename(target).startsWith("secret_") && options?.flag === "wx"
+                ? withWriteAll(
+                  opened,
+                  (bytes) =>
+                    opened.writeAll(bytes.subarray(0, 4)).pipe(
+                      Effect.andThen(Effect.fail(PlatformError.systemError({
+                        _tag: "PermissionDenied",
+                        method: "write",
+                        module: "FileSystem"
+                      })))
+                    )
+                )
+                : opened
+            )
+          )
+      })
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, failingFileSystem)
+      )
+
+      const result = yield* store.create(encoder.encode("partial-secret")).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      assert.deepEqual((yield* fs.readDirectory(directory)).filter((entry) => entry.startsWith("secret_")), [])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("removes an unpublished generation after file sync fails", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-sync-failure-" })
+      const root = Schema.decodeSync(SecretRoot)(directory)
+      const failingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (target, options) =>
+          fs.open(target, options).pipe(
+            Effect.map((opened) =>
+              path.basename(target).startsWith("secret_") && options?.flag === "wx"
+                ? withSync(
+                  opened,
+                  Effect.fail(PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    method: "sync",
+                    module: "FileSystem"
+                  }))
+                )
+                : opened
+            )
+          )
+      })
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, failingFileSystem)
+      )
+
+      const result = yield* store.create(encoder.encode("unsynced-secret")).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      assert.deepEqual((yield* fs.readDirectory(directory)).filter((entry) => entry.startsWith("secret_")), [])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("removes a partial generation after publication is interrupted", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-write-interrupt-" })
+      const root = Schema.decodeSync(SecretRoot)(directory)
+      const writeStarted = yield* Deferred.make<void>()
+      const interruptingFileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (target, options) =>
+          fs.open(target, options).pipe(
+            Effect.map((opened) =>
+              path.basename(target).startsWith("secret_") && options?.flag === "wx"
+                ? withWriteAll(
+                  opened,
+                  (bytes) =>
+                    opened.writeAll(bytes.subarray(0, 4)).pipe(
+                      Effect.andThen(Deferred.succeed(writeStarted, undefined)),
+                      Effect.andThen(Effect.never)
+                    )
+                )
+                : opened
+            )
+          )
+      })
+      const store = yield* makeSecretStore({ secretRoot: root }).pipe(
+        Effect.provideService(FileSystem.FileSystem, interruptingFileSystem)
+      )
+      const fiber = yield* store.create(encoder.encode("partial-secret")).pipe(Effect.forkScoped)
+      yield* Deferred.await(writeStarted)
+
+      yield* Fiber.interrupt(fiber)
+      yield* Fiber.await(fiber)
+
+      assert.deepEqual((yield* fs.readDirectory(directory)).filter((entry) => entry.startsWith("secret_")), [])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("copies rotation bytes before validating the previous generation", () =>
@@ -391,20 +558,34 @@ describe("SecretStore", () => {
   it.effect("pins the root during an active same-UID path swap", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-swap-" })
       const outside = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-outside-" })
       const root = Schema.decodeSync(SecretRoot)(directory)
       const displaced = `${directory}-displaced`
       const swapped = yield* Ref.make(false)
+      const outsideWrites = yield* Ref.make<ReadonlyArray<string>>([])
       const faultingFileSystem = FileSystem.FileSystem.of({
         ...fs,
         open: (requestedPath, options) =>
           Effect.gen(function*() {
-            if (requestedPath.includes(".incoming-") && !(yield* Ref.getAndSet(swapped, true))) {
+            const swapRoot = path.basename(requestedPath).startsWith("secret_") &&
+              options?.flag === "wx" &&
+              !(yield* Ref.getAndSet(swapped, true))
+            if (swapRoot) {
               yield* fs.rename(directory, displaced)
               yield* fs.symlink(outside, directory)
             }
-            return yield* fs.open(requestedPath, options)
+            const opened = yield* fs.open(requestedPath, options)
+            return swapRoot
+              ? withWriteAll(
+                opened,
+                (bytes) =>
+                  Ref.update(outsideWrites, (writes) => [...writes, decoder.decode(bytes)]).pipe(
+                    Effect.andThen(opened.writeAll(bytes))
+                  )
+              )
+              : opened
           })
       })
       const store = yield* makeSecretStore({ secretRoot: root }).pipe(
@@ -414,28 +595,32 @@ describe("SecretStore", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, SecretProtectionError)
-      assert.deepEqual(yield* fs.readDirectory(outside), [])
+      assert.deepEqual(yield* Ref.get(outsideWrites), [])
+      const outsideEntries = yield* fs.readDirectory(outside)
+      assert.strictEqual(outsideEntries.length, 1)
+      assert.deepEqual(yield* fs.readFile(path.join(outside, outsideEntries[0] ?? "missing")), new Uint8Array())
       assert.deepEqual(yield* fs.readDirectory(displaced), [])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
   it.effect("keeps the previous generation when replacement publication fails", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "control-center-secret-rotate-" })
       const root = Schema.decodeSync(SecretRoot)(directory)
       const rejectPublication = yield* Ref.make(false)
       const faultingFileSystem = FileSystem.FileSystem.of({
         ...fs,
-        link: (fromPath, toPath) =>
+        open: (target, options) =>
           Ref.get(rejectPublication).pipe(
             Effect.flatMap((reject) =>
-              fromPath.includes(".incoming-") && reject
+              path.basename(target).startsWith("secret_") && options?.flag === "wx" && reject
                 ? Effect.fail(PlatformError.systemError({
                   _tag: "PermissionDenied",
                   module: "FileSystem",
-                  method: "link"
+                  method: "open"
                 }))
-                : fs.link(fromPath, toPath)
+                : fs.open(target, options)
             )
           )
       })

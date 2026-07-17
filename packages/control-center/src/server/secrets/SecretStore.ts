@@ -1,5 +1,5 @@
-import type { FileSystem as FileSystemType, Path as PathType, Scope } from "effect"
-import { Context, Crypto, Effect, FileSystem, Layer, Option, Path, Predicate, Result, Schema } from "effect"
+import type { FileSystem as FileSystemType, Scope } from "effect"
+import { Context, Crypto, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Result, Schema } from "effect"
 
 import { SecretRef } from "./SecretRef.js"
 import {
@@ -100,19 +100,14 @@ const decodeInput = <S extends Schema.ConstraintDecoder<unknown>>(
 
 const hex = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
 
-const descriptorAliases = (
-  path: PathType.Path,
-  descriptor: FileSystemType.File.Descriptor
-): ReadonlyArray<string> => [
-  path.join("/proc/self/fd", String(descriptor)),
-  path.join("/dev/fd", String(descriptor))
-]
-
 const sameIdentity = (left: FileSystemType.File.Info, right: FileSystemType.File.Info): boolean =>
   left.dev === right.dev &&
   Option.isSome(left.ino) &&
   Option.isSome(right.ino) &&
-  left.ino.value === right.ino.value
+  left.ino.value === right.ino.value &&
+  Option.isSome(left.uid) &&
+  Option.isSome(right.uid) &&
+  left.uid.value === right.uid.value
 
 const secureOwner = (info: FileSystemType.File.Info): number | undefined => Option.getOrUndefined(info.uid)
 
@@ -205,21 +200,6 @@ export const makeSecretStore: (
     yield* syncDirectory(path.dirname(canonicalRoot))
   }
 
-  const resolveAlias = Effect.fn("SecretStore.resolveDescriptorAlias")(function*(
-    descriptor: FileSystemType.File.Descriptor,
-    expectedPath: string,
-    operation: string
-  ) {
-    for (const alias of descriptorAliases(path, descriptor)) {
-      const resolved = yield* fs.realPath(alias).pipe(Effect.result)
-      if (Result.isSuccess(resolved) && resolved.success === expectedPath) return alias
-    }
-    return yield* new SecretProtectionError({
-      operation,
-      message: "opened descriptor did not match its expected contained path"
-    })
-  })
-
   const randomName = Effect.fn("SecretStore.randomName")(function*(prefix: string) {
     const random = yield* cryptoService.randomBytes(32).pipe(
       Effect.mapError((cause) => secretStoreIoError("generate opaque reference", cause))
@@ -234,22 +214,33 @@ export const makeSecretStore: (
     const info = yield* handle.stat.pipe(
       Effect.mapError((cause) => secretStoreIoError("inspect pinned secret root", cause))
     )
-    if (!sameIdentity(rootInfo, info) || !isSecureRootInfo(info)) {
+    const namedInfo = yield* fs.stat(canonicalRoot).pipe(
+      Effect.mapError((cause) => secretStoreIoError("inspect named secret root", cause))
+    )
+    if (
+      !sameIdentity(rootInfo, info) ||
+      !sameIdentity(info, namedInfo) ||
+      !isSecureRootInfo(info) ||
+      !isSecureRootInfo(namedInfo)
+    ) {
       return yield* new SecretProtectionError({
         operation: "pin secret root",
         message: "secretRoot identity changed"
       })
     }
-    const alias = yield* resolveAlias(handle.fd, canonicalRoot, "pin secret root")
     const assertIdentity = Effect.gen(function*() {
       const current = yield* handle.stat.pipe(Effect.result)
-      const resolved = yield* fs.realPath(alias).pipe(Effect.result)
+      const named = yield* fs.stat(canonicalRoot).pipe(Effect.result)
+      const resolved = yield* fs.realPath(canonicalRoot).pipe(Effect.result)
       if (
         Result.isFailure(current) ||
+        Result.isFailure(named) ||
         Result.isFailure(resolved) ||
         resolved.success !== canonicalRoot ||
         !sameIdentity(rootInfo, current.success) ||
-        !isSecureRootInfo(current.success)
+        !sameIdentity(current.success, named.success) ||
+        !isSecureRootInfo(current.success) ||
+        !isSecureRootInfo(named.success)
       ) {
         return yield* new SecretProtectionError({
           operation: "access secret root",
@@ -258,7 +249,7 @@ export const makeSecretStore: (
       }
     })
     return {
-      path: alias,
+      path: canonicalRoot,
       sync: handle.sync.pipe(
         Effect.mapError((cause) => secretStoreIoError("sync secret root", cause))
       ),
@@ -273,6 +264,7 @@ export const makeSecretStore: (
           const root = yield* pinRoot()
           for (let attempt = 0; attempt < PUBLICATION_ATTEMPTS; attempt += 1) {
             const probe = path.join(root.path, yield* randomName(".owner-probe-"))
+            yield* root.assertIdentity
             const opened = yield* fs.open(probe, { flag: "wx", mode: SECRET_FILE_MODE }).pipe(Effect.result)
             if (Result.isFailure(opened)) {
               if (opened.failure.reason._tag === "AlreadyExists") continue
@@ -342,9 +334,9 @@ export const makeSecretStore: (
     const info = yield* file.stat.pipe(
       Effect.mapError((cause) => secretStoreIoError("inspect secret file", cause))
     )
-    // The model explicitly trusts the store owner (same UID). A completed
-    // hard-link publication may retain its protected temporary name after a
-    // crash, so link count is not treated as a cross-UID protection signal.
+    // The model explicitly trusts the store owner (same UID). A crash may
+    // retain an unreturned opaque generation, so link count is not treated as
+    // a cross-UID protection signal.
     if (
       info.type !== "File" ||
       (info.mode & 0o777) !== SECRET_FILE_MODE ||
@@ -359,6 +351,53 @@ export const makeSecretStore: (
     return info
   })
 
+  const assertOpenedSecretBinding = Effect.fn("SecretStore.assertOpenedSecretBinding")(function*(
+    file: FileSystemType.File,
+    expected: string,
+    info: FileSystemType.File.Info,
+    operation: string
+  ) {
+    const currentInfo = yield* file.stat.pipe(Effect.result)
+    const namedInfo = yield* fs.stat(expected).pipe(Effect.result)
+    const resolved = yield* fs.realPath(expected).pipe(Effect.result)
+    if (
+      Result.isFailure(currentInfo) ||
+      Result.isFailure(namedInfo) ||
+      Result.isFailure(resolved) ||
+      resolved.success !== expected ||
+      !sameIdentity(info, currentInfo.success) ||
+      !sameIdentity(currentInfo.success, namedInfo.success)
+    ) {
+      return yield* new SecretProtectionError({
+        operation,
+        message: "opened secret no longer matches its expected contained path"
+      })
+    }
+  })
+
+  const removeOpenedSecretIfStillBound = Effect.fn("SecretStore.removeOpenedIfStillBound")(function*(
+    root: PinnedRoot,
+    file: FileSystemType.File,
+    expected: string
+  ) {
+    const rootBefore = yield* root.assertIdentity.pipe(Effect.result)
+    const descriptorInfo = yield* file.stat.pipe(Effect.result)
+    const namedInfo = yield* fs.stat(expected).pipe(Effect.result)
+    const resolved = yield* fs.realPath(expected).pipe(Effect.result)
+    if (
+      Result.isFailure(rootBefore) ||
+      Result.isFailure(descriptorInfo) ||
+      Result.isFailure(namedInfo) ||
+      Result.isFailure(resolved) ||
+      resolved.success !== expected ||
+      !sameIdentity(descriptorInfo.success, namedInfo.success)
+    ) return
+    const rootAfter = yield* root.assertIdentity.pipe(Effect.result)
+    if (Result.isFailure(rootAfter)) return
+    const removed = yield* fs.remove(expected).pipe(Effect.result)
+    if (Result.isSuccess(removed)) yield* root.sync.pipe(Effect.ignore)
+  })
+
   const openExisting = Effect.fn("SecretStore.openExisting")(function*(
     root: PinnedRoot,
     ref: SecretRef,
@@ -366,70 +405,80 @@ export const makeSecretStore: (
   ) {
     const expected = path.join(canonicalRoot, ref)
     const contained = path.join(root.path, ref)
+    yield* root.assertIdentity
     const opened = yield* fs.open(contained, { flag: "r" }).pipe(Effect.result)
     if (Result.isFailure(opened)) {
       if (opened.failure.reason._tag === "NotFound") return yield* new SecretNotFoundError({ ref })
       return yield* secretStoreIoError("open secret file", opened.failure)
     }
-    yield* resolveAlias(opened.success.fd, expected, operation)
     const info = yield* inspectSecretFile(opened.success, operation)
+    yield* assertOpenedSecretBinding(opened.success, expected, info, operation)
     yield* root.assertIdentity
     return { file: opened.success, info }
   })
 
-  const writeTemporary = Effect.fn("SecretStore.writeTemporary")(function*(
+  const writeOwnedReference = Effect.fn("SecretStore.writeOwnedReference")(function*(
     root: PinnedRoot,
+    ref: SecretRef,
     bytes: Uint8Array
   ) {
-    for (let attempt = 0; attempt < PUBLICATION_ATTEMPTS; attempt += 1) {
-      const name = yield* randomName(".incoming-")
-      const temporary = path.join(root.path, name)
-      const opened = yield* fs.open(temporary, { flag: "wx", mode: SECRET_FILE_MODE }).pipe(Effect.result)
-      if (Result.isFailure(opened)) {
-        if (opened.failure.reason._tag === "AlreadyExists") continue
-        return yield* secretStoreIoError("create temporary secret", opened.failure)
-      }
-      yield* Effect.addFinalizer(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
-      yield* fs.chmod(temporary, SECRET_FILE_MODE).pipe(
-        Effect.mapError((cause) => secretStoreIoError("secure temporary secret", cause))
+    const destination = path.join(root.path, ref)
+    yield* root.assertIdentity
+    const opened = yield* fs.open(destination, { flag: "wx", mode: SECRET_FILE_MODE }).pipe(Effect.result)
+    if (Result.isFailure(opened)) return opened
+
+    const retained = yield* Ref.make(false)
+    const cleanup = removeOpenedSecretIfStillBound(root, opened.success, destination).pipe(
+      Effect.catchCause(() => Effect.void)
+    )
+    yield* Effect.addFinalizer(() =>
+      Ref.get(retained).pipe(
+        Effect.flatMap((keep) => keep ? Effect.void : cleanup)
       )
+    )
+
+    return yield* Effect.gen(function*() {
+      // Opening by canonical path can race with a root substitution. Recheck the
+      // pinned directory before any caller-owned bytes reach the stable file handle.
+      // Cleanup removes a failed generation only while this same binding remains
+      // provable; ambiguous paths retain their opaque artifact fail closed.
+      yield* root.assertIdentity
+      yield* fs.chmod(destination, SECRET_FILE_MODE).pipe(
+        Effect.mapError((cause) => secretStoreIoError("secure secret generation", cause))
+      )
+      const info = yield* inspectSecretFile(opened.success, "publish secret")
+      yield* assertOpenedSecretBinding(opened.success, destination, info, "publish secret")
+      yield* root.assertIdentity
       yield* opened.success.writeAll(bytes).pipe(
-        Effect.mapError((cause) => secretStoreIoError("write temporary secret", cause))
+        Effect.mapError((cause) => secretStoreIoError("write secret generation", cause))
       )
       yield* opened.success.sync.pipe(
-        Effect.mapError((cause) => secretStoreIoError("sync temporary secret", cause))
+        Effect.mapError((cause) => secretStoreIoError("sync secret generation", cause))
       )
-      yield* inspectSecretFile(opened.success, "publish secret")
+      yield* assertOpenedSecretBinding(opened.success, destination, info, "publish secret")
       yield* root.assertIdentity
-      return temporary
-    }
-    return yield* secretStoreIoError("create temporary secret", "collision limit reached")
+      yield* root.sync
+      yield* Ref.set(retained, true)
+      return Result.succeed(undefined)
+    }).pipe(
+      Effect.onInterrupt(() => cleanup)
+    )
   })
 
   const publishOwnedBytes = Effect.fn("SecretStore.publishOwnedBytes")(function*(bytes: Uint8Array) {
     for (let attempt = 0; attempt < PUBLICATION_ATTEMPTS; attempt += 1) {
       const ref = yield* decodeRef("create secret reference", `secret_${yield* randomName("")}`)
-      const linked = yield* Effect.scoped(
+      const written = yield* Effect.scoped(
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function*() {
             const root = yield* pinRoot()
-            const temporary = yield* restore(writeTemporary(root, bytes))
-            const destination = path.join(root.path, ref)
-            const result = yield* fs.link(temporary, destination).pipe(Effect.result)
-            if (Result.isFailure(result)) return result
-            yield* root.sync
-            yield* fs.remove(temporary).pipe(
-              Effect.mapError((cause) => secretStoreIoError("remove temporary secret", cause))
-            )
-            yield* root.sync
-            yield* root.assertIdentity
-            return result
+            return yield* restore(writeOwnedReference(root, ref, bytes))
           })
         )
       )
-      if (Result.isSuccess(linked)) return ref
-      if (linked.failure.reason._tag !== "AlreadyExists") {
-        return yield* secretStoreIoError("publish secret", linked.failure)
+      if (Result.isSuccess(written)) return ref
+      if (written.failure.reason._tag !== "AlreadyExists") {
+        return yield* secretStoreIoError("publish secret", written.failure)
       }
     }
     return yield* secretStoreIoError("publish secret", "reference collision limit reached")
