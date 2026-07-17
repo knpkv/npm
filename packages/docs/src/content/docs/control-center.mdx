@@ -28,6 +28,12 @@ Control Center stores delivery traceability as a normalized graph rather than ma
 
 Directional relationships connect Jira work, pull requests, pipeline executions, deployments, pages, and time entries. Every relationship revision records lifecycle, confidence, provenance, actor, release or environment scope, and references to immutable evidence claims. Evidence observations have independent verification, validity, and retention metadata, so an expired observation can stop proving readiness without deleting its audit history.
 
+### CodePipeline adapter boundary
+
+The production AWS CodePipeline adapter is currently read-only. For one configured profile, region, and pipeline it Schema-decodes direct `distilled-aws` responses and emits stable pipeline, execution, stage, and action entities through the vendor-neutral plugin contract. Execution synchronization uses one provider execution per atomic plugin page, opaque replayable checkpoints, at most 20 pages per run, and no more than two concurrent provider calls. Action history is independently capped at 100 entries per provider page, five pages, and 200 actions per execution; truncated snapshots say so explicitly.
+
+Artifact observations contain only names plus S3 bucket/key metadata marked for a future authenticated proxy. Resolved action configuration and credential-bearing provider, revision, artifact, or external-execution URLs are discarded. Start, stop, manual approval, retry, log content, artifact content, receipts, cancellation, and reconciliation are not advertised by this first adapter slice.
+
 Server workflows use the durable module through two operations: a bounded atomic `write` and a tagged `read`. SQL rows, digests, table joins, and compatibility handling for older pipeline records remain private implementation details. Browser views consume later authenticated projections; they do not receive raw persistence access.
 
 Portfolio readiness uses a bounded `effect-qb` plan from `@knpkv/control-center-sql` to read all requested release heads in one transaction. The repository still Schema-decodes every row, verifies digest-bound materialization, and quarantines malformed persisted data before it reaches the application.

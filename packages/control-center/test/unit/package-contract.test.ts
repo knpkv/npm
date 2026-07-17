@@ -10,6 +10,7 @@ import { inspectPackageContract } from "../../scripts/package-contract.js"
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
+    "@aws-sdk/credential-providers": "^3.1085.0",
     "@effect/platform-browser": "4.0.0-beta.98",
     "@effect/platform-node": "4.0.0-beta.98",
     "@effect/sql-libsql": "4.0.0-beta.98",
@@ -18,6 +19,7 @@ const validManifest = {
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/rly": "workspace:^",
+    "distilled-aws": "0.1.1",
     effect: "4.0.0-beta.98",
     react: "^19.2.7",
     "react-dom": "^19.2.7",
@@ -94,6 +96,22 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@knpkv/codecommit-core": "^0.8.0" }
       })
     ).toContain("@knpkv/codecommit-core must use workspace:^")
+  })
+
+  it("rejects unreviewed AWS runtime versions", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: {
+          ...validManifest.dependencies,
+          "@aws-sdk/credential-providers": "latest",
+          "distilled-aws": "latest"
+        }
+      })
+    ).toEqual(expect.arrayContaining([
+      "distilled-aws must remain on the reviewed CodePipeline client version",
+      "AWS credential providers must remain on the reviewed runtime version"
+    ]))
   })
 
   it("rejects a CLI that bypasses the built server boundary", () => {

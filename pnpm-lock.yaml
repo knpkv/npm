@@ -521,6 +521,9 @@ importers:
 
   packages/control-center:
     dependencies:
+      '@aws-sdk/credential-providers':
+        specifier: ^3.1085.0
+        version: 3.1085.0
       '@effect/platform-browser':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)
@@ -545,6 +548,9 @@ importers:
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
+      distilled-aws:
+        specifier: 0.1.1
+        version: 0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98)
       effect:
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98

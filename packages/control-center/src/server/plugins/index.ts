@@ -12,3 +12,5 @@ export * from "./negotiation.js"
 export * from "./retryPolicy.js"
 /** Production CodeCommit read adapter. */
 export * from "./codecommit/index.js"
+/** Production AWS CodePipeline read adapter. */
+export * from "./codepipeline/index.js"
