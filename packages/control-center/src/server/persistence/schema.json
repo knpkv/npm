@@ -179,7 +179,7 @@
     {
       "type": "table",
       "name": "plugin_sync_pages",
-      "sql": "CREATE TABLE plugin_sync_pages (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL,\n    page_id TEXT NOT NULL CHECK(length(page_id) BETWEEN 1 AND 200),\n    expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),\n    page_digest TEXT NOT NULL CHECK(length(page_digest) = 64 AND page_digest NOT GLOB '*[^0-9a-f]*'),\n    checkpoint_digest TEXT NOT NULL CHECK(length(checkpoint_digest) = 64 AND checkpoint_digest NOT GLOB '*[^0-9a-f]*'),\n    event_count INTEGER NOT NULL CHECK(event_count >= 0),\n    committed_at TEXT NOT NULL, has_more INTEGER NOT NULL DEFAULT 0 CHECK(has_more IN (0, 1)), successful_health_json TEXT\n      CHECK(successful_health_json IS NULL OR length(successful_health_json) BETWEEN 2 AND 2048), successful_health_digest TEXT\n      CHECK(\n        (successful_health_digest IS NULL) = (successful_health_json IS NULL) AND\n        (successful_health_digest IS NULL OR (\n          length(successful_health_digest) = 64 AND successful_health_digest NOT GLOB '*[^0-9a-f]*'\n        ))\n      ),\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, page_id),\n    UNIQUE (workspace_id, plugin_connection_id, stream_key, expected_revision),\n    FOREIGN KEY (workspace_id, plugin_connection_id, stream_key)\n      REFERENCES plugin_sync_streams(workspace_id, plugin_connection_id, stream_key)\n  )"
+      "sql": "CREATE TABLE plugin_sync_pages (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL,\n    page_id TEXT NOT NULL CHECK(length(page_id) BETWEEN 1 AND 200),\n    expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),\n    page_digest TEXT NOT NULL CHECK(length(page_digest) = 64 AND page_digest NOT GLOB '*[^0-9a-f]*'),\n    checkpoint_digest TEXT NOT NULL CHECK(length(checkpoint_digest) = 64 AND checkpoint_digest NOT GLOB '*[^0-9a-f]*'),\n    timeline_event_digest TEXT NOT NULL CHECK(length(timeline_event_digest) = 64 AND timeline_event_digest NOT GLOB '*[^0-9a-f]*'),\n    event_count INTEGER NOT NULL CHECK(event_count >= 0),\n    committed_at TEXT NOT NULL, has_more INTEGER NOT NULL DEFAULT 0 CHECK(has_more IN (0, 1)), successful_health_json TEXT\n      CHECK(successful_health_json IS NULL OR length(successful_health_json) BETWEEN 2 AND 2048), successful_health_digest TEXT\n      CHECK(\n        (successful_health_digest IS NULL) = (successful_health_json IS NULL) AND\n        (successful_health_digest IS NULL OR (\n          length(successful_health_digest) = 64 AND successful_health_digest NOT GLOB '*[^0-9a-f]*'\n        ))\n      ),\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, page_id),\n    UNIQUE (workspace_id, plugin_connection_id, stream_key, expected_revision),\n    UNIQUE (workspace_id, timeline_event_digest),\n    FOREIGN KEY (workspace_id, plugin_connection_id, stream_key)\n      REFERENCES plugin_sync_streams(workspace_id, plugin_connection_id, stream_key)\n  )"
     },
     {
       "type": "table",
@@ -343,6 +343,11 @@
     },
     {
       "type": "index",
+      "name": "domain_events_timeline_idx",
+      "sql": "CREATE INDEX domain_events_timeline_idx\n    ON domain_events(workspace_id, occurred_at DESC, event_id DESC)"
+    },
+    {
+      "type": "index",
       "name": "entities_governed_action_scope_idx",
       "sql": "CREATE UNIQUE INDEX entities_governed_action_scope_idx\n    ON entities(workspace_id, entity_id, plugin_connection_id, provider_id)"
     },
@@ -385,6 +390,11 @@
       "type": "index",
       "name": "governed_action_audit_history_idx",
       "sql": "CREATE INDEX governed_action_audit_history_idx\n    ON audit_events(workspace_id, action_id, occurred_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "governed_action_audit_timeline_idx",
+      "sql": "CREATE INDEX governed_action_audit_timeline_idx\n    ON audit_events(workspace_id, occurred_at DESC, audit_event_id DESC)"
     },
     {
       "type": "index",
@@ -455,6 +465,11 @@
       "type": "index",
       "name": "plugin_secret_binding_scope_idx",
       "sql": "CREATE INDEX plugin_secret_binding_scope_idx\n    ON plugin_secret_bindings(workspace_id, plugin_connection_id, field_key)"
+    },
+    {
+      "type": "index",
+      "name": "plugin_sync_pages_timeline_idx",
+      "sql": "CREATE INDEX plugin_sync_pages_timeline_idx\n    ON plugin_sync_pages(workspace_id, committed_at DESC, timeline_event_digest DESC)"
     },
     {
       "type": "index",
@@ -530,6 +545,11 @@
       "type": "index",
       "name": "relationship_revision_target_idx",
       "sql": "CREATE INDEX relationship_revision_target_idx\n    ON relationship_revisions(workspace_id, target_node_id, kind, recorded_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "relationship_revision_timeline_idx",
+      "sql": "CREATE INDEX relationship_revision_timeline_idx\n    ON relationship_revisions(workspace_id, recorded_at DESC, revision_digest DESC)"
     },
     {
       "type": "index",

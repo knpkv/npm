@@ -154,6 +154,14 @@ Provider credentials belong in `SecretStore`, never normal SQL rows. The store r
 
 The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` contract, generated client constructor, and URL builder. It covers browser pairing and session management, plugin metadata/health/configuration, the persisted portfolio snapshot, release-aware agent turns, and authenticated media reads. The browser uses this generated client rather than handwritten paths or response types. Agent turns are authenticated CSRF-protected mutations; the server derives workspace identity from the session and returns the exact bounded release projection and event cursor used for the answer.
 
+The authenticated Timeline merges bounded pages from governed-action audit events,
+plugin sync commits, relationship revisions, and domain events. Each source query
+is workspace-scoped, parameterized, newest-first, and capped before the server
+performs one deterministic merge. The browser receives default-redacted actor
+labels, provider provenance when available, safe internal links, and a stable
+timestamp-plus-event-key cursor. Actor and UTC date filters execute at the source;
+watchers cannot read the Timeline.
+
 Plugin configuration updates are full replacements guarded by the current optimistic revision. Secret values never enter the configuration document: callers submit scoped opaque secret references, and reads return redacted reference state only. Media URLs contain an opaque `media_` identifier derived from the persisted content digest; the server does not fetch arbitrary URLs or expose storage paths.
 
 The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.

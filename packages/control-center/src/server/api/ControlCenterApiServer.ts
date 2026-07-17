@@ -11,7 +11,8 @@ import {
   pluginHandlersLayer,
   portfolioHandlersLayer,
   sessionHandlersLayer,
-  shareHandlersLayer
+  shareHandlersLayer,
+  timelineHandlersLayer
 } from "./Handlers.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
@@ -27,6 +28,7 @@ export const controlCenterApiHandlersLayer = Layer.mergeAll(
   shareHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,
+  timelineHandlersLayer,
   deliveryGraphHandlersLayer,
   agentHandlersLayer,
   mediaHandlersLayer,

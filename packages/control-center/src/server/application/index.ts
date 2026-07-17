@@ -34,3 +34,4 @@ export type {
   ReleaseSynchronizationInput,
   ReleaseSynchronizationOutcome
 } from "./releaseSynchronization.js"
+export { makeTimelineReads, timelineReadsLayer } from "./timelineReads.js"

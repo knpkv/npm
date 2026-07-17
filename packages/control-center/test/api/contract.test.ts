@@ -18,7 +18,8 @@ import {
   SessionCookieAuth,
   SessionId,
   SessionMutationAuth,
-  SharesApiGroup
+  SharesApiGroup,
+  TimelineApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -130,7 +131,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the eight API groups and endpoint routes explicit", () => {
+  it("keeps the nine API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -140,6 +141,7 @@ describe("ControlCenterApi contract", () => {
       "deliveryGraph",
       "media",
       "liveEvents",
+      "timeline",
       "agent"
     ])
 
@@ -213,6 +215,10 @@ describe("ControlCenterApi contract", () => {
       [["stream", "GET", "/api/v1/events"]]
     )
     assert.deepStrictEqual(
+      Object.entries(TimelineApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
+      [["page", "GET", "/api/v1/timeline"]]
+    )
+    assert.deepStrictEqual(
       Object.entries(AgentApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"]]
     )
@@ -268,6 +274,9 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(LiveEventsApiGroup.endpoints), {
       stream: [SessionCookieAuth.key]
     })
+    assert.deepStrictEqual(middlewareByEndpoint(TimelineApiGroup.endpoints), {
+      page: [SessionCookieAuth.key]
+    })
     assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
       turn: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
@@ -310,6 +319,7 @@ describe("ControlCenterApi contract", () => {
       urls.media.read({ params: { mediaId } }),
       `https://control.example/api/v1/media/media_${"ab".repeat(32)}`
     )
+    assert.strictEqual(urls.timeline.page({ query: {} }), "https://control.example/api/v1/timeline")
     assert.strictEqual(
       urls.agent.turn({ params: { releaseId } }),
       "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/turns"

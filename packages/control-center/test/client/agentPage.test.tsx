@@ -108,6 +108,17 @@ describe("AgentPage context", () => {
     expect(workMarkup).toContain(`href="${workPath.replaceAll("&", "&amp;")}"`)
   })
 
+  it("preserves an exact Timeline context for Relay", () => {
+    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+    const timelinePath = `/w/${workspaceId}/timeline?actor=plugin&amp;from=2026-07-01`
+    const markup = renderAgentPage(timelinePath.replace("&amp;", "&"))
+
+    expect(markup).toContain("Workspace timeline")
+    expect(markup).toContain("Attributable delivery activity")
+    expect(markup).toContain(`href="${timelinePath}"`)
+    expect(markup).not.toContain("Context unavailable")
+  })
+
   it("rejects external and unknown contexts instead of falling back to Overview", () => {
     const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
     for (const path of [

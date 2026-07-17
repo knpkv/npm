@@ -54,6 +54,7 @@ import type {
   WorkspaceId
 } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
+import type { TimelineActorKind, TimelineCursor, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
@@ -132,6 +133,18 @@ export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {
     workspaceId: WorkspaceId
   ) => Effect.Effect<PortfolioSnapshot, ApplicationServiceUnavailable>
 }>()("@knpkv/control-center/server/api/PortfolioSnapshots") {}
+
+/** Injectable, default-redacted workspace Timeline read boundary. */
+export class TimelineReads extends Context.Service<TimelineReads, {
+  readonly page: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly actorKind: TimelineActorKind | null
+    readonly before: TimelineCursor | null
+    readonly from: UtcTimestamp | null
+    readonly limit: number
+    readonly to: UtcTimestamp | null
+  }) => Effect.Effect<TimelinePage, ApplicationServiceUnavailable>
+}>()("@knpkv/control-center/server/api/TimelineReads") {}
 
 /** Exact-entity authenticated share creation, resolution, and revocation boundary. */
 export class AuthorizedShares extends Context.Service<AuthorizedShares, {

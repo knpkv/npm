@@ -54,6 +54,8 @@ import {
   type RelationshipRepairProposalRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
+  TimelineRepository,
+  type TimelineRepositoryService,
   WorkspaceRepository,
   type WorkspaceRepositoryService
 } from "./repositories/index.js"
@@ -150,6 +152,7 @@ const makePersistence = Effect.gen(function*() {
   const readiness = yield* ReadinessRepository
   const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
+  const timeline = yield* TimelineRepository
   const workspaces = yield* WorkspaceRepository
 
   return {
@@ -324,6 +327,10 @@ const makePersistence = Effect.gen(function*() {
       list: (...args: Parameters<ReleaseRepositoryService["list"]>) =>
         publicOperation("release.list", releases.list(...args))
     },
+    timeline: {
+      page: (...args: Parameters<TimelineRepositoryService["page"]>) =>
+        publicOperation("timeline.page", timeline.page(...args))
+    },
     workspaces: {
       create: (...args: Parameters<WorkspaceRepositoryService["create"]>) =>
         publicOperation("workspace.create", workspaces.create(...args)),
@@ -372,6 +379,7 @@ export const persistenceLayerFromDatabase = (
         const readiness = ReadinessRepository.layer.pipe(Layer.provide(foundation))
         const relationshipRepairProposals = RelationshipRepairProposalRepository.layer
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
+        const timeline = TimelineRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
         const content = ContentStore.layer.pipe(
@@ -392,6 +400,7 @@ export const persistenceLayerFromDatabase = (
           readiness,
           relationshipRepairProposals,
           release,
+          timeline,
           content,
           workspaces
         )

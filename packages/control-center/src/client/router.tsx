@@ -52,6 +52,11 @@ const itemsRoute = async () => {
   return { Component: module.ItemsPage }
 }
 
+const timelineRoute = async () => {
+  const module = await import("./timeline/TimelinePage.js")
+  return { Component: module.TimelinePage }
+}
+
 const authorizedShareRoute = async () => {
   const module = await import("./items/AuthorizedSharePage.js")
   return { Component: module.AuthorizedSharePage }
@@ -75,6 +80,7 @@ export const router = createBrowserRouter([
           { path: "overview", lazy: workspaceOverviewRoute },
           { path: "work", lazy: activeWorkRoute },
           { path: "items", lazy: itemsRoute },
+          { path: "timeline", lazy: timelineRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
           { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },

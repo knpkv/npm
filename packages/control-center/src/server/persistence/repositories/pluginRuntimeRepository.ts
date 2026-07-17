@@ -505,6 +505,9 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       })
     )
     const checkpointDigest = yield* digestText(page.checkpointJson)
+    const timelineEventDigest = yield* digestText(
+      yield* serialize([workspaceId, pluginConnectionId, page.streamKey, page.pageId])
+    )
     const successfulHealthJson = yield* serialize(yield* Schema.encodeEffect(PluginHealth)(page.successfulHealth))
     const successfulHealthDigest = yield* digestText(successfulHealthJson)
     const committedAt = encodeTimestamp(page.committedAt)
@@ -552,11 +555,11 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
 
         yield* sql`INSERT INTO plugin_sync_pages (
           workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
-          page_digest, checkpoint_digest, event_count, committed_at, has_more,
+          page_digest, checkpoint_digest, timeline_event_digest, event_count, committed_at, has_more,
           successful_health_json, successful_health_digest
         ) VALUES (
           ${workspaceId}, ${pluginConnectionId}, ${page.streamKey}, ${page.pageId}, ${page.expectedRevision},
-          ${pageDigest}, ${checkpointDigest}, ${page.events.length}, ${committedAt}, ${page.hasMore},
+          ${pageDigest}, ${checkpointDigest}, ${timelineEventDigest}, ${page.events.length}, ${committedAt}, ${page.hasMore},
           ${successfulHealthJson}, ${successfulHealthDigest}
         )`
 

@@ -95,3 +95,4 @@ export {
   CreateAuthorizedShareRequest,
   SharesApiGroup
 } from "./shares.js"
+export { TimelineApiGroup } from "./timeline.js"
