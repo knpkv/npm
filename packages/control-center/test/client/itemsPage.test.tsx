@@ -10,7 +10,10 @@ import type { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { AuthorizedShareSummary } from "../../src/api/shares.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
-import type { AuthorizedShareTransport } from "../../src/client/items/authorizedShareTransport.js"
+import type {
+  AuthorizedShareTransport,
+  CreateAuthorizedShareTransportInput
+} from "../../src/client/items/authorizedShareTransport.js"
 import { ItemsPage } from "../../src/client/items/ItemsPage.js"
 import type { WorkspaceItemsTransport } from "../../src/client/items/useWorkspaceItems.js"
 import type { PortfolioOverviewController } from "../../src/client/portfolio/PortfolioOverview.js"
@@ -244,7 +247,15 @@ describe("ItemsPage boundaries", () => {
     })
     const shareTransport = {
       create: vi.fn(() => Promise.resolve(share)),
-      makeShareId: vi.fn(() => Promise.resolve(selectedShareId)),
+      prepareCreate: vi.fn(() =>
+        Promise.resolve({
+          entityId: source.projection.entityId,
+          expiresAt: share.expiresAt,
+          granteePersonId: granteeId,
+          lifetime: "day",
+          shareId: selectedShareId
+        } satisfies CreateAuthorizedShareTransportInput)
+      ),
       resolve: vi.fn(() => Promise.reject(new Error("not used"))),
       revoke: vi.fn(() => Promise.resolve())
     } satisfies AuthorizedShareTransport
@@ -287,6 +298,7 @@ describe("ItemsPage boundaries", () => {
     expect(shareTransport.create).toHaveBeenCalledWith(
       {
         entityId: source.projection.entityId,
+        expiresAt: share.expiresAt,
         granteePersonId: granteeId,
         lifetime: "day",
         shareId: selectedShareId

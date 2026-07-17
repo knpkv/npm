@@ -9,16 +9,22 @@ import { makeControlCenterApiClient } from "../../api/client.js"
 import type { AuthorizedShareResolution, AuthorizedShareSummary } from "../../api/shares.js"
 import type { EntityId, PersonId, ShareId, WorkspaceId } from "../../domain/identifiers.js"
 import { ShareId as ShareIdSchema } from "../../domain/identifiers.js"
+import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
 export type AuthorizedShareLifetime = "hour" | "day" | "week"
 
 /** Exact share creation intent supplied to the generated browser transport. */
-export interface CreateAuthorizedShareTransportInput {
-  readonly shareId: ShareId
+export interface PrepareAuthorizedShareTransportInput {
   readonly entityId: EntityId
   readonly granteePersonId: PersonId
   readonly lifetime: AuthorizedShareLifetime
+}
+
+/** Retry-stable share creation intent, including its original identity and expiry. */
+export interface CreateAuthorizedShareTransportInput extends PrepareAuthorizedShareTransportInput {
+  readonly expiresAt: UtcTimestamp
+  readonly shareId: ShareId
 }
 
 const expiresAtFor = Effect.fn("AuthorizedShareTransport.expiresAtFor")(function*(lifetime: AuthorizedShareLifetime) {
@@ -38,7 +44,9 @@ export interface AuthorizedShareTransport {
     input: CreateAuthorizedShareTransportInput,
     signal: AbortSignal
   ) => Promise<AuthorizedShareSummary>
-  readonly makeShareId: () => Promise<ShareId>
+  readonly prepareCreate: (
+    input: PrepareAuthorizedShareTransportInput
+  ) => Promise<CreateAuthorizedShareTransportInput>
   readonly resolve: (
     workspaceId: WorkspaceId,
     shareId: ShareId,
@@ -53,17 +61,26 @@ const makeShareId = Effect.gen(function*() {
   return yield* Schema.decodeUnknownEffect(ShareIdSchema)(uuid)
 })
 
+const prepareCreate = Effect.fn("AuthorizedShareTransport.prepareCreate")(function*(
+  input: PrepareAuthorizedShareTransportInput
+) {
+  return {
+    ...input,
+    expiresAt: yield* expiresAtFor(input.lifetime),
+    shareId: yield* makeShareId
+  }
+})
+
 /** Generated-client transport for exact-scope authenticated entity shares. */
 export const browserAuthorizedShareTransport: AuthorizedShareTransport = {
   create: (input, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
-        const expiresAt = yield* expiresAtFor(input.lifetime)
         return yield* client.shares.create({
           payload: {
             entityId: input.entityId,
-            expiresAt,
+            expiresAt: input.expiresAt,
             granteePersonId: input.granteePersonId,
             shareId: input.shareId
           }
@@ -71,7 +88,7 @@ export const browserAuthorizedShareTransport: AuthorizedShareTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  makeShareId: () => Effect.runPromise(makeShareId.pipe(Effect.provide(BrowserCrypto.layer))),
+  prepareCreate: (input) => Effect.runPromise(prepareCreate(input).pipe(Effect.provide(BrowserCrypto.layer))),
   resolve: (workspaceId, shareId, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

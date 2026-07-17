@@ -100,7 +100,7 @@ describe("AuthorizedSharePage", () => {
     })
     const transport = {
       create: vi.fn(() => Promise.reject(new Error("not used"))),
-      makeShareId: vi.fn(() => Promise.resolve(shareId)),
+      prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
       resolve: vi.fn(() => Promise.resolve(resolution)),
       revoke: vi.fn(() => Promise.reject(new Error("not used")))
     } satisfies AuthorizedShareTransport
@@ -137,7 +137,7 @@ describe("AuthorizedSharePage", () => {
     })
     const transport = {
       create: vi.fn(() => Promise.reject(new Error("not used"))),
-      makeShareId: vi.fn(() => Promise.resolve(shareId)),
+      prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
       resolve: vi.fn(() => Promise.resolve(resolution)),
       revoke: vi.fn(() => Promise.reject(new Error("not used")))
     } satisfies AuthorizedShareTransport
@@ -159,7 +159,7 @@ describe("AuthorizedSharePage", () => {
   it("rejects a share URL scoped to another workspace before resolving its identifier", async () => {
     const transport = {
       create: vi.fn(() => Promise.reject(new Error("not used"))),
-      makeShareId: vi.fn(() => Promise.resolve(shareId)),
+      prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
       resolve: vi.fn(() => Promise.reject(new Error("must not resolve"))),
       revoke: vi.fn(() => Promise.reject(new Error("not used")))
     } satisfies AuthorizedShareTransport
@@ -177,7 +177,7 @@ describe("AuthorizedSharePage", () => {
   it("shows one recoverable unavailable state for mismatch, expiry, revoke, or deletion", async () => {
     const transport = {
       create: vi.fn(() => Promise.reject(new Error("not used"))),
-      makeShareId: vi.fn(() => Promise.resolve(shareId)),
+      prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
       resolve: vi.fn(() => Promise.reject({ _tag: "NotFoundApiError" })),
       revoke: vi.fn(() => Promise.reject(new Error("not used")))
     } satisfies AuthorizedShareTransport
@@ -210,7 +210,7 @@ describe("AuthorizedSharePage", () => {
       })
       const transport = {
         create: vi.fn(() => Promise.reject(new Error("not used"))),
-        makeShareId: vi.fn(() => Promise.resolve(shareId)),
+        prepareCreate: vi.fn(() => Promise.reject(new Error("not used"))),
         resolve: vi.fn().mockResolvedValueOnce(resolution).mockRejectedValueOnce({ _tag: "NotFoundApiError" }),
         revoke: vi.fn(() => Promise.reject(new Error("not used")))
       } satisfies AuthorizedShareTransport

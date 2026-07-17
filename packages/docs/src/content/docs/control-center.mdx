@@ -48,7 +48,7 @@ Workspace owners can open an item on the **Items** route and create an authentic
 
 Opening `/shares/<workspace-id>/<share-id>` first recovers the browser session, including cookie-authenticated reads when mutation-proof browser storage is unavailable, then rechecks the URL workspace, grantee, expiry, revocation, and current target projection in one server-side snapshot. A valid link returns only that current item projection. The share page removes ordinary workspace navigation, and watcher sessions cannot read the owner-only workspace item index. Release membership, relationships, evidence, and adjacent entities are not included and cannot expand the grant. A mismatched workspace or person, expired or revoked grant, deleted target, or stale target projection shows a recoverable unavailable state without substituting another workspace or demo data.
 
-The current Items control offers one-hour, one-day, and seven-day expiries and can revoke the newly created link immediately. Broader share administration and release-scoped grants remain future work.
+The current Items control offers one-hour, one-day, and seven-day expiries and can revoke the newly created link immediately. If a create response is lost, retry preserves the original share identifier and expiry so the durable grant remains idempotent. Broader share administration and release-scoped grants remain future work.
 
 ## Configure local providers
 

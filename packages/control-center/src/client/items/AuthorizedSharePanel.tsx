@@ -9,20 +9,14 @@ import { PersonId } from "../../domain/identifiers.js"
 import {
   browserAuthorizedShareTransport,
   type AuthorizedShareLifetime,
-  type AuthorizedShareTransport
+  type AuthorizedShareTransport,
+  type CreateAuthorizedShareTransportInput
 } from "./authorizedShareTransport.js"
 import styles from "./ItemsPage.module.css"
 
 interface ShareGrantee {
   readonly displayName: string
   readonly personId: PersonId
-}
-
-interface ShareCreateIntent {
-  readonly entityId: EntityId
-  readonly granteePersonId: PersonId
-  readonly lifetime: AuthorizedShareLifetime
-  readonly shareId: ShareId
 }
 
 type AuthorizedSharePanelState =
@@ -67,7 +61,7 @@ export const AuthorizedSharePanel = ({
   const [granteePersonId, setGranteePersonId] = useState<PersonId>(options[0]?.personId ?? currentPersonId)
   const [lifetime, setLifetime] = useState<AuthorizedShareLifetime>("day")
   const [state, setState] = useState<AuthorizedSharePanelState>({ _tag: "idle" })
-  const createIntent = useRef<ShareCreateIntent | null>(null)
+  const createIntent = useRef<CreateAuthorizedShareTransportInput | null>(null)
   const currentRequest = useRef<AbortController | null>(null)
   const statusRegion = useRef<HTMLElement | null>(null)
 
@@ -89,8 +83,7 @@ export const AuthorizedSharePanel = ({
       existingIntent.granteePersonId === granteePersonId &&
       existingIntent.lifetime === lifetime
         ? Promise.resolve(existingIntent)
-        : transport.makeShareId().then((shareId): ShareCreateIntent => {
-            const nextIntent = { entityId, granteePersonId, lifetime, shareId }
+        : transport.prepareCreate({ entityId, granteePersonId, lifetime }).then((nextIntent) => {
             createIntent.current = nextIntent
             return nextIntent
           })
