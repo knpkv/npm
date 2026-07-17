@@ -7,10 +7,15 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
+import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 
 import { classifyControlCenterCliArguments } from "../../src/server/cliArguments.js"
-import { decodeControlCenterDataPaths, prepareControlCenterDataRoot } from "../../src/server/cliConfiguration.js"
+import {
+  claimFreshControlCenterDataRoot,
+  decodeControlCenterDataPaths,
+  prepareControlCenterDataRoot
+} from "../../src/server/cliConfiguration.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
 
@@ -77,6 +82,22 @@ const withForeignOwner = (file: FileSystemType.File): FileSystemType.File => ({
   truncate: file.truncate,
   write: file.write,
   writeAll: file.writeAll
+})
+
+const withWriteAll = (
+  file: FileSystemType.File,
+  writeAll: FileSystemType.File["writeAll"]
+): FileSystemType.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  read: file.read,
+  readAlloc: file.readAlloc,
+  seek: file.seek,
+  stat: file.stat,
+  sync: file.sync,
+  truncate: file.truncate,
+  write: file.write,
+  writeAll
 })
 
 describe("Control Center CLI", () => {
@@ -209,6 +230,86 @@ describe("Control Center CLI", () => {
 
       assert.strictEqual(path.join(parent, yield* fileSystem.readLink(root)), prepared.dataRoot)
       assert.include(yield* fileSystem.readDirectory(root), ".control-center-root")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("does not write initializer bytes through a substituted staging path", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-stage-swap-" })
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-stage-outside-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+      const swapped = yield* Ref.make(false)
+      const outsideWrites = yield* Ref.make<ReadonlyArray<string>>([])
+      const swappingFileSystem = FileSystem.make({
+        ...fileSystem,
+        open: (target, options) =>
+          Effect.gen(function*() {
+            const swapStage = path.basename(target) === "initializer-canary" &&
+              options?.flag === "wx" &&
+              !(yield* Ref.getAndSet(swapped, true))
+            if (swapStage) {
+              yield* fileSystem.rename(path.dirname(target), `${path.dirname(target)}-displaced`)
+              yield* fileSystem.symlink(outside, path.dirname(target))
+            }
+            const opened = yield* fileSystem.open(target, options)
+            return swapStage
+              ? withWriteAll(
+                opened,
+                (bytes) =>
+                  Ref.update(outsideWrites, (writes) => [...writes, new TextDecoder().decode(bytes)]).pipe(
+                    Effect.andThen(opened.writeAll(bytes))
+                  )
+              )
+              : opened
+          }),
+        writeFile: (target, bytes, options) =>
+          Effect.gen(function*() {
+            const swapStage = path.basename(target) === "initializer-canary" &&
+              !(yield* Ref.getAndSet(swapped, true))
+            if (swapStage) {
+              yield* fileSystem.rename(path.dirname(target), `${path.dirname(target)}-displaced`)
+              yield* fileSystem.symlink(outside, path.dirname(target))
+              yield* Ref.update(outsideWrites, (writes) => [...writes, new TextDecoder().decode(bytes)])
+            }
+            yield* fileSystem.writeFile(target, bytes, options)
+          })
+      })
+
+      const claimed = yield* claimFreshControlCenterDataRoot(
+        dataPaths,
+        (writer) => writer.writeFile(["initializer-canary"], new TextEncoder().encode("stage-swap-canary"))
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, swappingFileSystem),
+        Effect.result
+      )
+
+      assert.isTrue(yield* Ref.get(swapped))
+      assert.isTrue(Result.isFailure(claimed))
+      assert.deepStrictEqual(yield* Ref.get(outsideWrites), [])
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("publishes multiple initializer files through the constrained staging writer", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-cli-stage-writer-" })
+      const root = path.join(parent, "data")
+      const dataPaths = yield* decodeControlCenterDataPaths(root)
+
+      const claimed = yield* claimFreshControlCenterDataRoot(
+        dataPaths,
+        (writer) =>
+          writer.writeFile(["first"], new TextEncoder().encode("one")).pipe(
+            Effect.andThen(writer.writeFile(["nested", "second"], new TextEncoder().encode("two")))
+          )
+      )
+
+      assert.strictEqual(yield* fileSystem.readFileString(path.join(claimed.dataRoot, "first")), "one")
+      assert.strictEqual(yield* fileSystem.readFileString(path.join(claimed.dataRoot, "nested", "second")), "two")
+      assert.strictEqual((yield* fileSystem.stat(path.join(claimed.dataRoot, "nested"))).mode & 0o777, 0o700)
+      assert.strictEqual((yield* fileSystem.stat(path.join(claimed.dataRoot, "nested", "second"))).mode & 0o777, 0o600)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("does not replace an empty root that appears during atomic publication", () =>

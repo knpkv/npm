@@ -47,17 +47,21 @@ const withStat = (file: FileSystem.File, stat: FileSystem.File["stat"]): FileSys
   writeAll: file.writeAll
 })
 
-const restoreStagingRoot = (
-  fileSystem: FileSystem.FileSystem,
-  path: Path.Path,
-  destination: string
-) =>
-  fileSystem.realPath(path.dirname(destination)).pipe(
-    Effect.map((root) =>
-      path.basename(root).startsWith(".control-center-incoming-") ? Option.some(root) : Option.none()
-    ),
-    Effect.orElseSucceed(() => Option.none<string>())
-  )
+const withWriteAll = (
+  file: FileSystem.File,
+  writeAll: FileSystem.File["writeAll"]
+): FileSystem.File => ({
+  [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+  fd: file.fd,
+  read: file.read,
+  readAlloc: file.readAlloc,
+  seek: file.seek,
+  stat: file.stat,
+  sync: file.sync,
+  truncate: file.truncate,
+  write: file.write,
+  writeAll
+})
 
 describe("restore backup", () => {
   it.effect("publishes a fresh relative-symlink claim without exposing its physical paths", () =>
@@ -402,23 +406,27 @@ describe("restore backup", () => {
       assert.deepStrictEqual(yield* fileSystem.readDirectory(root), before)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("removes unclaimed restore staging when interrupted during database copy", () =>
+  it.effect("removes unclaimed restore staging when interrupted while reading verified database bytes", () =>
     Effect.gen(function*() {
       const { archiveRoot, root } = yield* makeEmptyVerifiedArchive("control-center-restore-copy-interrupt-")
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const target = path.join(root, "restored")
       const started = yield* Deferred.make<void>()
+      const databaseFile = path.join(archiveRoot, "control-center.db")
+      const databaseReads = yield* Ref.make(0)
       const interrupting = FileSystem.make({
         ...fileSystem,
-        copyFile: (source, destination) =>
-          restoreStagingRoot(fileSystem, path, destination).pipe(
-            Effect.flatMap((staging) =>
-              Option.isSome(staging) && destination.endsWith("control-center.db")
-                ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                : fileSystem.copyFile(source, destination)
+        readFile: (source) =>
+          source === databaseFile
+            ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1
+                  ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+                  : fileSystem.readFile(source)
+              )
             )
-          )
+            : fileSystem.readFile(source)
       })
       const fiber = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
         Effect.provideService(FileSystem.FileSystem, interrupting),
@@ -441,24 +449,29 @@ describe("restore backup", () => {
       const path = yield* Path.Path
       const target = path.join(root, "restored")
       const started = yield* Deferred.make<void>()
+      const databaseFile = path.join(archiveRoot, "control-center.db")
+      const databaseReads = yield* Ref.make(0)
       const failing = FileSystem.make({
         ...fileSystem,
-        copyFile: (source, destination) =>
-          restoreStagingRoot(fileSystem, path, destination).pipe(
-            Effect.flatMap((staging) =>
-              Option.isSome(staging) && destination.endsWith("control-center.db")
-                ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                : fileSystem.copyFile(source, destination)
-            )
-          ),
         open: (opened, options) =>
           fileSystem.open(opened, options).pipe(
-            Effect.map((handle) =>
-              opened === root
-                ? withSync(handle, fileSystem.stat(path.join(root, "missing-cleanup-sync")).pipe(Effect.asVoid))
-                : handle
+            Effect.map((handle) => {
+              if (opened === root) {
+                return withSync(handle, fileSystem.stat(path.join(root, "missing-cleanup-sync")).pipe(Effect.asVoid))
+              }
+              return handle
+            })
+          ),
+        readFile: (source) =>
+          source === databaseFile
+            ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === 1
+                  ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+                  : fileSystem.readFile(source)
+              )
             )
-          )
+            : fileSystem.readFile(source)
       })
       const fiber = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
         Effect.provideService(FileSystem.FileSystem, failing),
@@ -789,18 +802,18 @@ describe("restore backup", () => {
       const before = yield* fileSystem.readDirectory(root)
       const substitution = FileSystem.make({
         ...fileSystem,
-        copyFile: (source, destination) =>
-          restoreStagingRoot(fileSystem, path, destination).pipe(
-            Effect.flatMap((staging) =>
-              Option.isSome(staging) && destination.endsWith("control-center.db")
-                ? fileSystem.rename(staging.value, path.join(root, "displaced-owned-stage")).pipe(
-                  Effect.andThen(fileSystem.makeDirectory(staging.value, { mode: 0o700 })),
-                  Effect.andThen(fileSystem.writeFileString(path.join(staging.value, "racer-owned"), "preserve me")),
-                  Effect.andThen(fileSystem.copyFile(path.join(root, "missing-source"), destination))
-                )
-                : fileSystem.copyFile(source, destination)
+        open: (destination, options) =>
+          destination.includes(".control-center-incoming-") &&
+            destination.endsWith("control-center.db") &&
+            options?.flag === "wx"
+            ? fileSystem.rename(path.dirname(destination), path.join(root, "displaced-owned-stage")).pipe(
+              Effect.andThen(fileSystem.makeDirectory(path.dirname(destination), { mode: 0o700 })),
+              Effect.andThen(
+                fileSystem.writeFileString(path.join(path.dirname(destination), "racer-owned"), "preserve me")
+              ),
+              Effect.andThen(fileSystem.open(destination, options))
             )
-          )
+            : fileSystem.open(destination, options)
       })
       const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
         Effect.provideService(FileSystem.FileSystem, substitution),
@@ -822,26 +835,28 @@ describe("restore backup", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects a database copy changed before claim publication", () =>
+  it.effect("rejects database source bytes changed between verification and staging write", () =>
     Effect.gen(function*() {
       const { archiveRoot, root } = yield* makeContentVerifiedArchive("control-center-restore-db-tamper-")
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const target = path.join(root, "restored")
+      const databaseFile = path.join(archiveRoot, "control-center.db")
+      const databaseReads = yield* Ref.make(0)
       const tampering = FileSystem.make({
         ...fileSystem,
-        copyFile: (source, destination) =>
-          restoreStagingRoot(fileSystem, path, destination).pipe(
-            Effect.flatMap((staging) =>
-              fileSystem.copyFile(source, destination).pipe(
-                Effect.andThen(
-                  Option.isSome(staging) && destination.endsWith("control-center.db")
-                    ? fileSystem.writeFileString(destination, "tampered", { mode: 0o600 })
-                    : Effect.void
+        readFile: (source) =>
+          source === databaseFile
+            ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                fileSystem.readFile(source).pipe(
+                  Effect.map((bytes) =>
+                    count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+                  )
                 )
               )
             )
-          )
+            : fileSystem.readFile(source)
       })
       const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
         Effect.provideService(FileSystem.FileSystem, tampering),
@@ -855,24 +870,82 @@ describe("restore backup", () => {
       assert.isFalse(yield* fileSystem.exists(target))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects a durable-blob copy changed before claim publication", () =>
+  it.effect("transfers the verified database buffer to staging without a second full clone", () =>
+    Effect.gen(function*() {
+      const { archiveRoot, root } = yield* makeEmptyVerifiedArchive("control-center-restore-buffer-transfer-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const databaseFile = path.join(archiveRoot, "control-center.db")
+      const databaseReads = yield* Ref.make(0)
+      const restoreBuffer = yield* Ref.make<Option.Option<Uint8Array>>(Option.none())
+      const preservedIdentity = yield* Ref.make<Option.Option<boolean>>(Option.none())
+      const observing = FileSystem.make({
+        ...fileSystem,
+        open: (target, options) =>
+          fileSystem.open(target, options).pipe(
+            Effect.map((opened) =>
+              target.includes(".control-center-incoming-") &&
+                target.endsWith("control-center.db") &&
+                options?.flag === "wx"
+                ? withWriteAll(
+                  opened,
+                  (bytes) =>
+                    Ref.get(restoreBuffer).pipe(
+                      Effect.flatMap((source) =>
+                        Ref.set(preservedIdentity, Option.some(Option.isSome(source) && source.value === bytes))
+                      ),
+                      Effect.andThen(opened.writeAll(bytes))
+                    )
+                )
+                : opened
+            )
+          ),
+        readFile: (source) =>
+          source === databaseFile
+            ? Ref.getAndUpdate(databaseReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                fileSystem.readFile(source).pipe(
+                  Effect.tap((bytes) => count === 1 ? Ref.set(restoreBuffer, Option.some(bytes)) : Effect.void)
+                )
+              )
+            )
+            : fileSystem.readFile(source)
+      })
+
+      yield* restoreBackup({ archiveRoot, configuredDataRoot: path.join(root, "restored") }).pipe(
+        Effect.provideService(FileSystem.FileSystem, observing)
+      )
+
+      assert.deepEqual(yield* Ref.get(preservedIdentity), Option.some(true))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects blob source bytes changed between verification and staging write", () =>
     Effect.gen(function*() {
       const { archiveRoot, digests, root } = yield* makeContentVerifiedArchive("control-center-restore-blob-tamper-")
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const target = path.join(root, "restored")
+      const durableFile = blobPath(
+        path,
+        path.join(archiveRoot, "blobs"),
+        fixtureWorkspaceIds.alpha,
+        digests.durable
+      ).file
+      const durableReads = yield* Ref.make(0)
       const tampering = FileSystem.make({
         ...fileSystem,
-        copyFile: (source, destination) =>
-          fileSystem
-            .copyFile(source, destination)
-            .pipe(
-              Effect.andThen(
-                path.basename(destination) === digests.durable
-                  ? fileSystem.writeFileString(destination, "tampered", { mode: 0o600 })
-                  : Effect.void
+        readFile: (source) =>
+          source === durableFile
+            ? Ref.getAndUpdate(durableReads, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                fileSystem.readFile(source).pipe(
+                  Effect.map((bytes) =>
+                    count === 1 ? bytes.map((byte, index) => index === 0 ? byte ^ 0xff : byte) : bytes
+                  )
+                )
               )
             )
+            : fileSystem.readFile(source)
       })
       const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(
         Effect.provideService(FileSystem.FileSystem, tampering),
@@ -967,7 +1040,10 @@ describe("restore backup", () => {
           record(`copy:${destination}`).pipe(Effect.andThen(fileSystem.copyFile(source, destination))),
         makeDirectory: (directory, options) =>
           record(`mkdir:${directory}`).pipe(Effect.andThen(fileSystem.makeDirectory(directory, options))),
-        open: (opened, options) => record(`open:${opened}`).pipe(Effect.andThen(fileSystem.open(opened, options))),
+        open: (opened, options) =>
+          record(`${options?.flag === "wx" ? "create" : "open"}:${opened}`).pipe(
+            Effect.andThen(fileSystem.open(opened, options))
+          ),
         rename: (source, destination) =>
           record(`rename:${destination}`).pipe(Effect.andThen(fileSystem.rename(source, destination))),
         symlink: (source, destination) =>
@@ -982,12 +1058,18 @@ describe("restore backup", () => {
         return path.basename(event.slice("symlink:".length)) === path.basename(target)
       })
       const marker = all.findIndex((event) => event.endsWith("/.control-center-root"))
-      const databaseCopy = all.findIndex((event) => event.startsWith("copy:") && event.endsWith("/control-center.db"))
-      const durableCopy = all.findIndex((event) => event.endsWith(`/${digests.durable}`))
+      const databaseWrite = all.findIndex((event) =>
+        event.startsWith("create:") && event.endsWith("/control-center.db")
+      )
+      const durableWrite = all.findIndex((event) =>
+        event.startsWith("create:") && event.endsWith(`/${digests.durable}`)
+      )
       assert.isAtLeast(claim, 0)
       assert.isAtLeast(marker, 0)
-      assert.isBelow(databaseCopy, marker)
-      assert.isBelow(durableCopy, marker)
+      assert.isAtLeast(databaseWrite, 0)
+      assert.isAtLeast(durableWrite, 0)
+      assert.isBelow(databaseWrite, marker)
+      assert.isBelow(durableWrite, marker)
       assert.isBelow(marker, claim)
       const prepared = yield* prepareControlCenterDataRoot(
         yield* decodeControlCenterDataPaths(restored.configuredDataRoot)
@@ -1025,11 +1107,14 @@ describe("restore backup", () => {
       yield* fileSystem.remove(
         blobPath(path, path.join(archiveRoot, "blobs"), fixtureWorkspaceIds.alpha, digests.durable).file
       )
-      const before = yield* fileSystem.readDirectory(root)
+      const stableEntries = (entries: ReadonlyArray<string>) =>
+        entries.filter((entry) => entry !== "control-center.db-shm" && entry !== "control-center.db-wal")
+      const before = stableEntries(yield* fileSystem.readDirectory(root))
       const target = path.join(root, "restored")
       const result = yield* restoreBackup({ archiveRoot, configuredDataRoot: target }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(result))
       assert.isFalse(yield* fileSystem.exists(target))
-      assert.deepStrictEqual(yield* fileSystem.readDirectory(root), before)
+      assert.deepStrictEqual(stableEntries(yield* fileSystem.readDirectory(root)), before)
+      assert.deepStrictEqual(yield* stagingEntries(fileSystem, root, ".control-center-incoming-"), [])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

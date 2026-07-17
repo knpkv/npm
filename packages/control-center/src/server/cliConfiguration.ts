@@ -24,6 +24,7 @@ import {
   inspectFreshDataRootClaim,
   publishDataRootMarker,
   publishFreshDataRootClaim,
+  type StagedDataRootWriter,
   syncDataRootPath
 } from "./DataRootProtocol.js"
 import { validateExistingControlCenterDatabase } from "./persistence/Database.js"
@@ -594,7 +595,7 @@ export const claimFreshControlCenterDataRoot = Effect.fn("claimFreshControlCente
 >(
   dataPaths: ControlCenterDataPaths,
   initialize: (
-    operationalPaths: ControlCenterDataPaths
+    writer: StagedDataRootWriter
   ) => Effect.Effect<void, Failure, Requirements>
 ): Effect.fn.Return<
   ControlCenterDataPaths,

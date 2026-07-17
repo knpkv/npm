@@ -256,12 +256,10 @@ export const restoreBackup = Effect.fn("BackupArchive.restore")(function*(
     restore(publishFreshDataRootClaim(
       location,
       true,
-      (operational, canonical) =>
+      (writer) =>
         restoreVerifiedArchiveInto(
           archiveRoot,
-          operational.dataRoot,
-          canonical.dataRoot,
-          operational.persistenceConfig,
+          writer,
           verification
         )
     )).pipe(Effect.mapError((failure) => {

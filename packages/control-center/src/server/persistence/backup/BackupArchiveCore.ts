@@ -62,6 +62,13 @@ interface FileDigest {
   readonly digest: BlobDigest
 }
 
+interface RestoreArchiveWriter<Failure, Requirements> {
+  readonly writeTransferredFile: (
+    pathSegments: ReadonlyArray<string>,
+    bytes: Uint8Array
+  ) => Effect.Effect<void, Failure, Requirements>
+}
+
 const storageError = (operation: string, cause: unknown): BackupStorageError =>
   new BackupStorageError({ cause, operation })
 
@@ -193,6 +200,31 @@ const digestFile = Effect.fn("BackupArchive.digestFile")(function*(
   return { byteLength, digest }
 })
 
+const readArtifactBytes = Effect.fn("BackupArchive.readArtifactBytes")(function*(
+  file: string,
+  artifact: "blob" | "database",
+  maximumBytes: number,
+  expectedCanonicalFile: string = file
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const cryptoService = yield* Crypto.Crypto
+  const byteLength = yield* fileSize(file, artifact, maximumBytes, expectedCanonicalFile)
+  const bytes = yield* mapStorage("read-for-restore", fileSystem.readFile(file))
+  if (bytes.byteLength !== byteLength) {
+    return yield* storageError("restore-source-size-changed", {
+      _tag: "BackupInvariant",
+      actualByteLength: bytes.byteLength,
+      expectedByteLength: byteLength,
+      reason: "file-size-changed"
+    })
+  }
+  const digestBytes = yield* mapStorage("digest-restore-source", cryptoService.digest("SHA-256", bytes))
+  const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Encoding.encodeHex(digestBytes)).pipe(
+    Effect.mapError((cause) => storageError("decode-restore-digest", cause))
+  )
+  return { bytes, digest: { byteLength, digest } }
+})
+
 const inspectSnapshotDatabase = Effect.fn("BackupArchive.inspectSnapshotDatabase")(function*(
   databaseFile: string
 ) {
@@ -229,49 +261,31 @@ const inspectSnapshotDatabase = Effect.fn("BackupArchive.inspectSnapshotDatabase
   )
 })
 
-const ensureRestoredBlobAncestry = Effect.fn("BackupArchive.ensureRestoredBlobAncestry")(function*(
-  blobRoot: string,
-  canonicalBlobRoot: string,
-  workspaceId: BackupManifestV1["blobs"][number]["workspaceId"],
-  digest: BackupManifestV1["blobs"][number]["digest"]
-) {
-  const path = yield* Path.Path
-  const derived = blobPath(path, blobRoot, workspaceId, digest)
-  const shaRoot = path.join(derived.workspaceDirectory, "sha256")
-  for (
-    const directory of [
-      blobRoot,
-      path.join(blobRoot, "objects"),
-      derived.workspaceDirectory,
-      shaRoot,
-      path.join(shaRoot, digest.slice(0, 2)),
-      derived.objectDirectory
-    ]
-  ) {
-    yield* ensurePrivateArchiveDirectory(
-      directory,
-      path.join(canonicalBlobRoot, path.relative(blobRoot, directory))
-    )
-  }
-})
-
-/** Populate and revalidate an unclaimed physical data root from a verified archive. */
-export const restoreVerifiedArchiveInto = Effect.fn("BackupArchive.restoreInto")(function*(
+/** Populate an unclaimed data root only from bytes revalidated against the verified archive. */
+export const restoreVerifiedArchiveInto = Effect.fn("BackupArchive.restoreInto")(function*<
+  WriterFailure,
+  WriterRequirements
+>(
   configuredArchiveRoot: string,
-  dataRoot: string,
-  canonicalDataRoot: string,
-  persistenceConfig: PersistenceConfig,
+  writer: RestoreArchiveWriter<WriterFailure, WriterRequirements>,
   verification: BackupVerification
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const archiveRoot = yield* mapStorage("resolve-restore-archive", fileSystem.realPath(configuredArchiveRoot))
-  const databaseFile = path.join(dataRoot, DATABASE_NAME)
-  const canonicalDatabaseFile = path.join(canonicalDataRoot, DATABASE_NAME)
   const archiveDatabaseFile = path.join(archiveRoot, DATABASE_NAME)
-  yield* mapStorage("copy-restored-database", fileSystem.copyFile(archiveDatabaseFile, databaseFile))
-  yield* mapStorage("secure-restored-database", fileSystem.chmod(databaseFile, BACKUP_FILE_MODE))
-  yield* syncPath(databaseFile)
+  const database = yield* readArtifactBytes(archiveDatabaseFile, "database", MAXIMUM_DATABASE_BYTES)
+  if (
+    database.digest.digest !== verification.manifest.database.digest ||
+    database.digest.byteLength !== verification.manifest.database.byteLength
+  ) {
+    return yield* new BackupIntegrityError({
+      digest: verification.manifest.database.digest,
+      reason: "database-digest-mismatch",
+      workspaceId: null
+    })
+  }
+  yield* writer.writeTransferredFile([DATABASE_NAME], database.bytes)
 
   const gapKeys = new Set(
     verification.reproducibleBlobGaps.map((gap) => `${gap.workspaceId}:${gap.digest}`)
@@ -280,55 +294,24 @@ export const restoreVerifiedArchiveInto = Effect.fn("BackupArchive.restoreInto")
   for (const blob of verification.manifest.blobs) {
     if (gapKeys.has(`${blob.workspaceId}:${blob.digest}`)) continue
     const source = blobPath(path, archiveBlobRoot, blob.workspaceId, blob.digest).file
-    const destination = blobPath(path, persistenceConfig.blobRoot, blob.workspaceId, blob.digest).file
-    yield* ensureRestoredBlobAncestry(
-      persistenceConfig.blobRoot,
-      path.join(canonicalDataRoot, "blobs"),
-      blob.workspaceId,
-      blob.digest
-    )
-    yield* mapStorage("copy-restored-blob", fileSystem.copyFile(source, destination))
-    yield* mapStorage("secure-restored-blob", fileSystem.chmod(destination, BACKUP_FILE_MODE))
-    yield* syncPath(destination)
-    yield* syncPath(path.dirname(destination))
-  }
-
-  const restoredDatabaseDigest = yield* digestFile(
-    databaseFile,
-    "database",
-    MAXIMUM_DATABASE_BYTES,
-    canonicalDatabaseFile
-  )
-  if (
-    restoredDatabaseDigest.digest !== verification.manifest.database.digest ||
-    restoredDatabaseDigest.byteLength !== verification.manifest.database.byteLength
-  ) {
-    return yield* new BackupIntegrityError({
-      digest: verification.manifest.database.digest,
-      reason: "database-digest-mismatch",
-      workspaceId: null
-    })
-  }
-  const inventory = yield* Effect.scoped(inspectSnapshotDatabase(databaseFile))
-  yield* verifyManifestInventory(verification.manifest, inventory)
-  for (const blob of verification.manifest.blobs) {
-    if (gapKeys.has(`${blob.workspaceId}:${blob.digest}`)) continue
-    const restored = blobPath(path, persistenceConfig.blobRoot, blob.workspaceId, blob.digest).file
-    const digest = yield* digestFile(
-      restored,
-      "blob",
-      MAXIMUM_BLOB_BYTES,
-      path.join(canonicalDataRoot, path.relative(dataRoot, restored))
-    )
-    if (digest.digest !== blob.digest || digest.byteLength !== blob.byteLength) {
+    const restored = yield* readArtifactBytes(source, "blob", MAXIMUM_BLOB_BYTES)
+    if (restored.digest.digest !== blob.digest || restored.digest.byteLength !== blob.byteLength) {
       return yield* new BackupIntegrityError({
         digest: blob.digest,
         reason: "blob-corrupt",
         workspaceId: blob.workspaceId
       })
     }
+    yield* writer.writeTransferredFile([
+      "blobs",
+      "objects",
+      blob.workspaceId,
+      "sha256",
+      blob.digest.slice(0, 2),
+      blob.digest.slice(2, 4),
+      blob.digest
+    ], restored.bytes)
   }
-  yield* syncPath(dataRoot)
 })
 
 const readManifest = Effect.fn("BackupArchive.readManifest")(function*(archiveRoot: string) {

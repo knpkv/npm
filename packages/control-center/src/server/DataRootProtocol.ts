@@ -8,6 +8,8 @@ import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 
 import { PersistenceConfigError } from "./persistence/errors.js"
 import { decodePersistenceConfig, type PersistenceConfig } from "./persistence/PersistenceConfig.js"
@@ -27,6 +29,8 @@ export const DATA_ROOT_MARKER_V2_PREFIX = "@knpkv/control-center:data-root:v2\nc
 export const DATA_ROOT_MARKER_MAX_BYTES = 8_192
 export const DATA_ROOT_PENDING_MARKER_PREFIX = `${DATA_ROOT_MARKER_NAME}.pending-`
 export const DATA_ROOT_STAGING_PREFIX = ".control-center-incoming-"
+const STAGED_FILE_MODE = 0o600
+const MAXIMUM_STAGED_PATH_DEPTH = 16
 
 const hasNoControlCharacters = (value: string): boolean =>
   Array.from(value).every((character) => {
@@ -40,6 +44,14 @@ const ConfiguredDataRoot = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
   Schema.isMaxLength(4_096)
+)
+const StagedPathSegment = Schema.String.check(
+  Schema.isMaxLength(255),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, { expected: "a portable relative path segment" })
+)
+const StagedFilePath = Schema.Array(StagedPathSegment).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAXIMUM_STAGED_PATH_DEPTH)
 )
 
 export const dataRootConfigurationError = (): PersistenceConfigError =>
@@ -88,6 +100,23 @@ export interface DataRootClaimLocation {
   readonly parentInfo: FileSystem.File.Info
 }
 
+/** Constrained writer for files owned by one unclaimed data-root staging tree. */
+export interface StagedDataRootWriter {
+  readonly writeFile: (
+    pathSegments: ReadonlyArray<string>,
+    bytes: Uint8Array
+  ) => Effect.Effect<void, DataRootProtocolError>
+}
+
+/** Internal writer variant for a caller that relinquishes an already-owned buffer. */
+export interface TransferringStagedDataRootWriter extends StagedDataRootWriter {
+  /** The caller must not read or mutate `bytes` after invoking this operation. */
+  readonly writeTransferredFile: (
+    pathSegments: ReadonlyArray<string>,
+    bytes: Uint8Array
+  ) => Effect.Effect<void, DataRootProtocolError>
+}
+
 const protocolError = (reason: DataRootProtocolError["reason"]): DataRootProtocolError =>
   new DataRootProtocolError({ reason })
 
@@ -127,6 +156,186 @@ interface UnidentifiedStage {
 interface StagingLease {
   readonly state: Ref.Ref<PinnedStage | UnidentifiedStage>
 }
+
+interface PinnedStageDirectory {
+  readonly handle: FileSystem.File
+  readonly info: FileSystem.File.Info
+  readonly path: string
+  readonly assertIdentity: Effect.Effect<void, DataRootProtocolError>
+}
+
+const makeStagedDataRootWriter = Effect.fn("DataRootProtocol.makeStagedWriter")(function*(
+  root: PinnedStage,
+  assertRootIdentity: Effect.Effect<void, DataRootProtocolError>
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const scope = yield* Scope.Scope
+  const lock = yield* Semaphore.make(1)
+  const rootOwner = Option.getOrUndefined(root.info.uid)
+  const directories = new Map<string, PinnedStageDirectory>()
+
+  const isPrivateDirectory = (info: FileSystem.File.Info): boolean =>
+    info.type === "Directory" &&
+    info.dev === root.info.dev &&
+    (info.mode & 0o777) === DATA_ROOT_DIRECTORY_MODE &&
+    Option.getOrUndefined(info.uid) === rootOwner &&
+    Option.isSome(info.ino)
+
+  const isPrivateFile = (info: FileSystem.File.Info): boolean =>
+    info.type === "File" &&
+    info.dev === root.info.dev &&
+    (info.mode & 0o777) === STAGED_FILE_MODE &&
+    Option.getOrUndefined(info.uid) === rootOwner &&
+    Option.isSome(info.ino) &&
+    Option.isSome(info.nlink) &&
+    info.nlink.value === 1
+
+  if (rootOwner === undefined) return yield* protocolError("cleanup-uncertain")
+
+  const rootDirectory = {
+    assertIdentity: assertRootIdentity.pipe(
+      Effect.andThen(mapProtocolStorage(root.handle.stat)),
+      Effect.flatMap((info) => isPrivateDirectory(info) ? Effect.void : protocolError("cleanup-uncertain"))
+    ),
+    handle: root.handle,
+    info: root.info,
+    path: root.canonicalPath
+  } satisfies PinnedStageDirectory
+  directories.set("", rootDirectory)
+
+  const pinCreatedDirectory = Effect.fn("DataRootProtocol.pinCreatedDirectory")(function*(
+    parent: PinnedStageDirectory,
+    childPath: string
+  ) {
+    yield* parent.assertIdentity
+    const created = yield* fileSystem.makeDirectory(childPath, { mode: DATA_ROOT_DIRECTORY_MODE }).pipe(Effect.result)
+    if (Result.isFailure(created)) {
+      return yield* protocolError(created.failure.reason._tag === "AlreadyExists" ? "cleanup-uncertain" : "storage")
+    }
+    yield* mapProtocolStorage(fileSystem.chmod(childPath, DATA_ROOT_DIRECTORY_MODE))
+    const handle = yield* mapProtocolStorage(
+      fileSystem.open(childPath, { flag: "r" }).pipe(Effect.provideService(Scope.Scope, scope))
+    )
+    const info = yield* mapProtocolStorage(handle.stat)
+    const assertIdentity = Effect.gen(function*() {
+      yield* assertRootIdentity
+      yield* parent.assertIdentity
+      const descriptorInfo = yield* handle.stat.pipe(Effect.result)
+      const namedInfo = yield* fileSystem.stat(childPath).pipe(Effect.result)
+      const canonical = yield* fileSystem.realPath(childPath).pipe(Effect.result)
+      if (
+        Result.isFailure(descriptorInfo) ||
+        Result.isFailure(namedInfo) ||
+        Result.isFailure(canonical) ||
+        canonical.success !== childPath ||
+        !sameIdentity(info, descriptorInfo.success) ||
+        !sameIdentity(descriptorInfo.success, namedInfo.success) ||
+        !isPrivateDirectory(descriptorInfo.success) ||
+        !isPrivateDirectory(namedInfo.success)
+      ) return yield* protocolError("cleanup-uncertain")
+      yield* parent.assertIdentity
+      yield* assertRootIdentity
+    })
+    yield* assertIdentity
+    yield* mapProtocolStorage(handle.sync)
+    yield* mapProtocolStorage(parent.handle.sync)
+    return {
+      assertIdentity,
+      handle,
+      info,
+      path: childPath
+    } satisfies PinnedStageDirectory
+  })
+
+  const ensureDirectory = Effect.fn("DataRootProtocol.ensureStagedDirectory")(function*(
+    segments: ReadonlyArray<string>
+  ) {
+    let parent = rootDirectory
+    const traversed: Array<string> = []
+    for (const segment of segments) {
+      traversed.push(segment)
+      const key = traversed.join("/")
+      const existing = directories.get(key)
+      if (existing !== undefined) {
+        yield* existing.assertIdentity
+        parent = existing
+        continue
+      }
+      const created = yield* pinCreatedDirectory(parent, path.join(parent.path, segment))
+      directories.set(key, created)
+      parent = created
+    }
+    return parent
+  })
+
+  const writeOwnedFile = Effect.fn("DataRootProtocol.writeOwnedFile")(function*(
+    segments: ReadonlyArray<string>,
+    bytes: Uint8Array
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(StagedFilePath)(segments).pipe(
+      Effect.mapError(() => protocolError("invalid-path"))
+    )
+    const parent = yield* ensureDirectory(decoded.slice(0, -1))
+    const name = decoded[decoded.length - 1]
+    if (name === undefined) return yield* protocolError("invalid-path")
+    const destination = path.join(parent.path, name)
+    yield* assertRootIdentity
+    yield* parent.assertIdentity
+    const opened = yield* fileSystem.open(destination, { flag: "wx", mode: STAGED_FILE_MODE }).pipe(
+      Effect.provideService(Scope.Scope, scope),
+      Effect.result
+    )
+    if (Result.isFailure(opened)) {
+      return yield* protocolError(opened.failure.reason._tag === "AlreadyExists" ? "cleanup-uncertain" : "storage")
+    }
+
+    // The pathname open may have crossed a concurrent stage substitution. No
+    // bytes reach the stable handle until every opened and named identity has
+    // been rebound to the pinned root and parent after that open.
+    yield* assertRootIdentity
+    yield* parent.assertIdentity
+    yield* mapProtocolStorage(fileSystem.chmod(destination, STAGED_FILE_MODE))
+    const info = yield* mapProtocolStorage(opened.success.stat)
+    const assertFileIdentity = Effect.gen(function*() {
+      yield* assertRootIdentity
+      yield* parent.assertIdentity
+      const descriptorInfo = yield* opened.success.stat.pipe(Effect.result)
+      const namedInfo = yield* fileSystem.stat(destination).pipe(Effect.result)
+      const canonical = yield* fileSystem.realPath(destination).pipe(Effect.result)
+      if (
+        Result.isFailure(descriptorInfo) ||
+        Result.isFailure(namedInfo) ||
+        Result.isFailure(canonical) ||
+        canonical.success !== destination ||
+        !sameIdentity(info, descriptorInfo.success) ||
+        !sameIdentity(descriptorInfo.success, namedInfo.success) ||
+        !isPrivateFile(descriptorInfo.success) ||
+        !isPrivateFile(namedInfo.success)
+      ) return yield* protocolError("cleanup-uncertain")
+      yield* parent.assertIdentity
+      yield* assertRootIdentity
+    })
+    yield* assertFileIdentity
+    yield* mapProtocolStorage(opened.success.writeAll(bytes))
+    yield* mapProtocolStorage(opened.success.sync)
+    yield* assertFileIdentity
+    yield* mapProtocolStorage(parent.handle.sync)
+  })
+
+  const writePreparedFile = (segments: ReadonlyArray<string>, bytes: Uint8Array) => {
+    const ownedSegments = Array.from(segments)
+    return lock.withPermit(writeOwnedFile(ownedSegments, bytes))
+  }
+
+  return {
+    writeFile: (segments, bytes) => writePreparedFile(segments, Uint8Array.from(bytes)),
+    writeTransferredFile: (segments, bytes) => {
+      const ownedSegments = Array.from(segments)
+      return lock.withPermit(writeOwnedFile(ownedSegments, bytes))
+    }
+  } satisfies TransferringStagedDataRootWriter
+})
 
 /** Bracket whose release starts masked even when use observes a pending interrupt. */
 const acquireUseReleaseMasked = Effect.fn("DataRootProtocol.acquireUseReleaseMasked")(function*<
@@ -313,8 +522,7 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
   location: DataRootClaimLocation,
   rejectExistingClaim: boolean,
   initialize: (
-    operationalPaths: ControlCenterDataPaths,
-    canonicalPaths: ControlCenterDataPaths
+    writer: TransferringStagedDataRootWriter
   ) => Effect.Effect<void, Failure, Requirements>
 ): Effect.fn.Return<
   ControlCenterDataPaths,
@@ -450,9 +658,6 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
               )
             )
             yield* mapProtocolStorage(fileSystem.chmod(lease.accessPath, DATA_ROOT_DIRECTORY_MODE))
-            const pinnedPaths = yield* decodeOperationalDataPaths(lease.accessPath).pipe(
-              Effect.mapError(() => protocolError("storage"))
-            )
             const canonicalPaths = yield* decodeOperationalDataPaths(lease.canonicalPath).pipe(
               Effect.mapError(() => protocolError("storage"))
             )
@@ -469,7 +674,8 @@ export const publishFreshDataRootClaim = Effect.fn("DataRootProtocol.publishFres
                 !sameIdentity(namedInfo.success, lease.info)
               ) return yield* protocolError("cleanup-uncertain")
             })
-            yield* Effect.interruptible(initialize(pinnedPaths, canonicalPaths))
+            const writer = yield* makeStagedDataRootWriter(lease, assertPinnedStageBinding)
+            yield* Effect.interruptible(initialize(writer))
             yield* Effect.uninterruptible(Effect.gen(function*() {
               yield* assertPinnedParent
               yield* publishDataRootMarker(
