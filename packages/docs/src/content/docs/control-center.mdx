@@ -36,6 +36,8 @@ The **Items** route searches current Jira work, pull requests, Confluence pages,
 
 Filters remain in the URL for refresh and Back navigation. An item linked to one visible release opens that complete delivery context directly. Items linked to multiple releases retain every bounded current membership and ask you to choose the exact release; current unlinked items stay visible in the workspace index.
 
+Inside the chosen release, the selected object includes a compact delivery trace centered on that exact Jira issue, pull request, page, pipeline execution, deployment, or time entry. The trace distinguishes incoming and outgoing relationships and shows the connected object, lifecycle, confidence, and immutable evidence count from the bounded current release slice.
+
 ## Configure local providers
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:

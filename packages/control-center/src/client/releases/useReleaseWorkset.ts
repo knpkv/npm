@@ -13,72 +13,93 @@ import {
 
 export const MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS = MAXIMUM_RELEASE_SLICE_RECORDS
 
-interface BoundedDistinct<Value> {
-  readonly truncated: boolean
-  readonly values: ReadonlyArray<Value>
-}
-
-const boundedDistinct = <Source, Value>(
-  sources: ReadonlyArray<Source>,
-  values: (source: Source) => ReadonlyArray<Value>,
-  key: (value: Value) => string
-): BoundedDistinct<Value> => {
-  const seen = new Set<string>()
-  const unique: Array<Value> = []
-  for (const source of sources) {
-    for (const value of values(source)) {
-      const identity = key(value)
-      if (seen.has(identity)) continue
-      if (unique.length === MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS) {
-        return { truncated: true, values: unique }
-      }
-      seen.add(identity)
-      unique.push(value)
-    }
-  }
-  return { truncated: false, values: unique }
-}
-
-/** Combine release and environment slices without duplicating shared graph material. */
+/** Combine release and environment slices while retaining complete relationship closure. */
 export const aggregateReleaseWorksetInspections = (
   releaseId: ReleaseId,
   inspections: ReadonlyArray<ReleaseDeliveryGraphInspection>
 ): ReleaseDeliveryGraphInspection => {
-  const nodes = boundedDistinct(inspections, ({ nodes }) => nodes, ({ nodeId }) => nodeId)
-  const entityProjections = boundedDistinct(
-    inspections,
-    ({ entityProjections }) => entityProjections,
-    ({ projection }) => projection.entityId
-  )
-  const relationships = boundedDistinct(
-    inspections,
-    ({ relationships }) => relationships,
-    ({ relationshipId, revision }) => `${relationshipId}:${revision}`
-  )
-  const evidenceClaims = boundedDistinct(
-    inspections,
-    ({ evidenceClaims }) => evidenceClaims,
-    ({ evidenceClaimId }) => evidenceClaimId
-  )
-  const evidenceItems = boundedDistinct(
-    inspections,
-    ({ evidenceItems }) => evidenceItems,
-    ({ evidenceId }) => evidenceId
-  )
+  type Inspection = ReleaseDeliveryGraphInspection
+  const availableNodes = new Map<string, Inspection["nodes"][number]>()
+  const availableProjections = new Map<string, Inspection["entityProjections"][number]>()
+  const availableClaims = new Map<string, Inspection["evidenceClaims"][number]>()
+  const availableEvidence = new Map<string, Inspection["evidenceItems"][number]>()
+  for (const inspection of inspections) {
+    for (const node of inspection.nodes) availableNodes.set(node.nodeId, node)
+    for (const entry of inspection.entityProjections) {
+      availableProjections.set(entry.projection.entityId, entry)
+    }
+    for (const claim of inspection.evidenceClaims) availableClaims.set(claim.evidenceClaimId, claim)
+    for (const item of inspection.evidenceItems) availableEvidence.set(item.evidenceId, item)
+  }
+  const nodes = new Map<string, Inspection["nodes"][number]>()
+  const entityProjections = new Map<string, Inspection["entityProjections"][number]>()
+  const relationships = new Map<string, Inspection["relationships"][number]>()
+  const evidenceClaims = new Map<string, Inspection["evidenceClaims"][number]>()
+  const evidenceItems = new Map<string, Inspection["evidenceItems"][number]>()
+  let truncated = inspections.some((inspection) => inspection.truncated)
+
+  for (const relationship of inspections.flatMap(({ relationships }) => relationships)) {
+    const relationshipKey = `${relationship.relationshipId}:${String(relationship.revision)}`
+    if (relationships.has(relationshipKey)) continue
+    const requiredNodes = [
+      availableNodes.get(relationship.sourceNodeId),
+      availableNodes.get(relationship.targetNodeId)
+    ]
+    if (requiredNodes.some((node) => node === undefined)) {
+      truncated = true
+      continue
+    }
+    const presentNodes = requiredNodes.filter((node) => node !== undefined)
+    const entityNodes = presentNodes.filter(
+      (node) => node.resolution._tag === "resolved" && node.resolution.target._tag === "entity"
+    )
+    const requiredProjections = entityNodes.flatMap((node) => {
+      if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") return []
+      const projection = availableProjections.get(node.resolution.target.entityId)
+      return projection === undefined ? [] : [projection]
+    })
+    const requiredClaims = relationship.evidenceClaimIds.flatMap((claimId) => {
+      const claim = availableClaims.get(claimId)
+      return claim === undefined ? [] : [claim]
+    })
+    const evidenceIds = new Set(requiredClaims.map(({ evidenceId }) => evidenceId))
+    const requiredEvidence = [...evidenceIds].flatMap((evidenceId) => {
+      const evidence = availableEvidence.get(evidenceId)
+      return evidence === undefined ? [] : [evidence]
+    })
+    const closureMissing = requiredProjections.length !== entityNodes.length ||
+      requiredClaims.length !== relationship.evidenceClaimIds.length ||
+      requiredEvidence.length !== evidenceIds.size
+    const newNodeCount = presentNodes.filter(({ nodeId }) => !nodes.has(nodeId)).length
+    const newProjectionCount = requiredProjections.filter(({ projection }) =>
+      !entityProjections.has(projection.entityId)
+    ).length
+    const newClaimCount = requiredClaims.filter(({ evidenceClaimId }) => !evidenceClaims.has(evidenceClaimId)).length
+    const newEvidenceCount = requiredEvidence.filter(({ evidenceId }) => !evidenceItems.has(evidenceId)).length
+    const closureExceedsBound = relationships.size === MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS ||
+      nodes.size + newNodeCount > MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS ||
+      entityProjections.size + newProjectionCount > MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS ||
+      evidenceClaims.size + newClaimCount > MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS ||
+      evidenceItems.size + newEvidenceCount > MAXIMUM_AGGREGATED_RELEASE_WORKSET_RECORDS
+    if (closureMissing || closureExceedsBound) {
+      truncated = true
+      continue
+    }
+    relationships.set(relationshipKey, relationship)
+    for (const node of presentNodes) nodes.set(node.nodeId, node)
+    for (const entry of requiredProjections) entityProjections.set(entry.projection.entityId, entry)
+    for (const claim of requiredClaims) evidenceClaims.set(claim.evidenceClaimId, claim)
+    for (const item of requiredEvidence) evidenceItems.set(item.evidenceId, item)
+  }
   return {
     releaseId,
     environmentId: null,
-    truncated: inspections.some(({ truncated }) => truncated) ||
-      nodes.truncated ||
-      entityProjections.truncated ||
-      relationships.truncated ||
-      evidenceClaims.truncated ||
-      evidenceItems.truncated,
-    nodes: nodes.values,
-    entityProjections: entityProjections.values,
-    relationships: relationships.values,
-    evidenceClaims: evidenceClaims.values,
-    evidenceItems: evidenceItems.values
+    truncated,
+    nodes: [...nodes.values()],
+    entityProjections: [...entityProjections.values()],
+    relationships: [...relationships.values()],
+    evidenceClaims: [...evidenceClaims.values()],
+    evidenceItems: [...evidenceItems.values()]
   }
 }
 

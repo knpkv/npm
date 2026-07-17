@@ -14,7 +14,7 @@ import type {
   DeliveryEntityProjection,
   DeliveryRelationship
 } from "../../domain/deliveryGraph.js"
-import type { EntityId, GraphNodeId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import type { EntityId, GraphNodeId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 
 type Projection = ReleaseDeliveryGraphInspection["entityProjections"][number]["projection"]
 type ProjectionWithDetails<Tag extends DeliveryEntityDetails["_tag"]> = Projection & {
@@ -38,6 +38,30 @@ export interface SelectedReleaseWorksetObject {
   readonly status: string
   readonly title: string
   readonly tone: RlyStateTone
+}
+
+export interface SelectedReleaseWorksetTraceConnection {
+  readonly href: string | null
+  readonly kind: string
+  readonly label: string
+  readonly service: RlyService | null
+  readonly title: string
+}
+
+export interface SelectedReleaseWorksetTraceRelationship {
+  readonly confidence: string
+  readonly direction: "incoming" | "outgoing"
+  readonly evidenceCount: number
+  readonly id: RelationshipId
+  readonly kind: DeliveryRelationship["kind"]
+  readonly lifecycle: string
+  readonly other: SelectedReleaseWorksetTraceConnection
+  readonly tone: RlyStateTone
+}
+
+export interface SelectedReleaseWorksetTrace {
+  readonly relationships: ReadonlyArray<SelectedReleaseWorksetTraceRelationship>
+  readonly truncated: boolean
 }
 
 export interface ReleaseWorksetPresentation {
@@ -170,16 +194,7 @@ const selectedObjectFacts = (
   }
 }
 
-/** Resolve every present normalized object into an inspectable selected-object surface. */
-export const selectReleaseWorksetObject = (
-  inspection: ReleaseDeliveryGraphInspection,
-  selectedObjectId: string | null
-): SelectedReleaseWorksetObject | null => {
-  if (selectedObjectId === null) return null
-  const selected = inspection.entityProjections.find(
-    ({ projection }) => projection.entityState === "present" && projection.entityId === selectedObjectId
-  )?.projection
-  if (selected === undefined) return null
+const presentSelectedObject = (selected: DeliveryEntityProjection): SelectedReleaseWorksetObject => {
   const status = selectedObjectStatus(selected.details)
   return {
     facts: selectedObjectFacts(selected.details),
@@ -191,6 +206,19 @@ export const selectReleaseWorksetObject = (
     title: selected.title,
     tone: statusTone(status)
   }
+}
+
+/** Resolve every present normalized object into an inspectable selected-object surface. */
+export const selectReleaseWorksetObject = (
+  inspection: ReleaseDeliveryGraphInspection,
+  selectedObjectId: string | null
+): SelectedReleaseWorksetObject | null => {
+  if (selectedObjectId === null) return null
+  const selected = inspection.entityProjections.find(
+    ({ projection }) => projection.entityState === "present" && projection.entityId === selectedObjectId
+  )?.projection
+  if (selected === undefined) return null
+  return presentSelectedObject(selected)
 }
 
 const currentRelationship = (relationship: DeliveryRelationship): boolean =>
@@ -231,6 +259,128 @@ const entityProjectionByNode = (
       return projection === undefined ? [] : [[node.nodeId, projection]]
     })
   )
+}
+
+const relationshipLifecycleTone = (lifecycle: DeliveryRelationship["lifecycle"]["_tag"]): RlyStateTone => {
+  switch (lifecycle) {
+    case "missing":
+    case "rejected":
+      return "critical"
+    case "governed":
+    case "verified":
+      return "positive"
+    case "inferred":
+    case "proposed":
+      return "progress"
+    case "superseded":
+      return "neutral"
+  }
+}
+
+const relationshipConfidenceLabel = (confidence: DeliveryRelationship["confidence"]): string => {
+  switch (confidence._tag) {
+    case "confirmed":
+      return "Confirmed"
+    case "inferred":
+      return `Inferred ${String(Math.round(confidence.score * 100))}%`
+    case "unknown":
+      return "Confidence unknown"
+  }
+}
+
+const traceConnection = (
+  inspection: ReleaseDeliveryGraphInspection,
+  workspaceId: WorkspaceId,
+  nodeId: GraphNodeId,
+  projections: ReadonlyMap<GraphNodeId, DeliveryEntityProjection>
+): SelectedReleaseWorksetTraceConnection => {
+  const projection = projections.get(nodeId)
+  if (projection !== undefined) {
+    const selected = presentSelectedObject(projection)
+    return {
+      href: projection.entityState === "present"
+        ? objectHref(workspaceId, inspection.releaseId, projection.entityId)
+        : null,
+      kind: selected.kind,
+      label: selected.label,
+      service: selected.service,
+      title: projection.entityState === "present" ? selected.title : `${selected.title} · Deleted`
+    }
+  }
+  const node = inspection.nodes.find((candidate) => candidate.nodeId === nodeId)
+  if (node?.resolution._tag === "missing") {
+    return {
+      href: null,
+      kind: node.endpointKind,
+      label: node.resolution.missingKey,
+      service: null,
+      title: `Missing ${titleCase(node.endpointKind)}`
+    }
+  }
+  if (node?.resolution._tag === "resolved" && node.resolution.target._tag === "release") {
+    const isCurrentRelease = node.resolution.target.releaseId === inspection.releaseId
+    return {
+      href: null,
+      kind: "release",
+      label: `Release ${node.resolution.target.releaseId.slice(-6)}`,
+      service: null,
+      title: isCurrentRelease ? "Current release context" : "Connected release"
+    }
+  }
+  if (node?.resolution._tag === "resolved" && node.resolution.target._tag === "environment") {
+    return {
+      href: null,
+      kind: "environment",
+      label: `Environment ${node.resolution.target.environmentId.slice(-6)}`,
+      service: null,
+      title: "Delivery environment"
+    }
+  }
+  return { href: null, kind: "unknown", label: nodeId.slice(-6), service: null, title: "Unresolved graph node" }
+}
+
+/** Center the bounded current release graph on one selected normalized object. */
+export const selectReleaseWorksetTrace = (
+  inspection: ReleaseDeliveryGraphInspection,
+  workspaceId: WorkspaceId,
+  selectedObjectId: string | null
+): SelectedReleaseWorksetTrace | null => {
+  if (selectReleaseWorksetObject(inspection, selectedObjectId) === null || selectedObjectId === null) return null
+  const selectedNodeIds = new Set(
+    inspection.nodes.flatMap((node): ReadonlyArray<GraphNodeId> =>
+      node.resolution._tag === "resolved" &&
+        node.resolution.target._tag === "entity" &&
+        node.resolution.target.entityId === selectedObjectId
+        ? [node.nodeId]
+        : []
+    )
+  )
+  const projections = entityProjectionByNode(inspection)
+  const relationships = inspection.relationships.flatMap(
+    (relationship): ReadonlyArray<SelectedReleaseWorksetTraceRelationship> => {
+      const direction = selectedNodeIds.has(relationship.sourceNodeId)
+        ? "outgoing"
+        : selectedNodeIds.has(relationship.targetNodeId)
+        ? "incoming"
+        : null
+      if (direction === null) return []
+      const otherNodeId = direction === "outgoing" ? relationship.targetNodeId : relationship.sourceNodeId
+      return [{
+        confidence: relationshipConfidenceLabel(relationship.confidence),
+        direction,
+        evidenceCount: relationship.evidenceClaimIds.length,
+        id: relationship.relationshipId,
+        kind: relationship.kind,
+        lifecycle: titleCase(relationship.lifecycle._tag),
+        other: traceConnection(inspection, workspaceId, otherNodeId, projections),
+        tone: relationshipLifecycleTone(relationship.lifecycle._tag)
+      }]
+    }
+  ).sort((left, right) =>
+    left.kind.localeCompare(right.kind) || left.other.label.localeCompare(right.other.label) ||
+    left.id.localeCompare(right.id)
+  )
+  return { relationships, truncated: inspection.truncated }
 }
 
 const releaseRunbookEntityIds = (
