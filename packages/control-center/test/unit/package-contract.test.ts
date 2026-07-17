@@ -17,6 +17,8 @@ const validManifest = {
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
+    "@knpkv/confluence-api-client": "workspace:^",
+    "@knpkv/confluence-to-markdown": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
@@ -122,6 +124,15 @@ describe("package contract", () => {
         dependencies: { ...validManifest.dependencies, "@knpkv/jira-api-client": "^0.4.0" }
       })
     ).toContain("@knpkv/jira-api-client must use workspace:^")
+  })
+
+  it("rejects a registry dependency that bypasses its workspace package", () => {
+    expect(
+      inspectPackageContract({
+        ...validManifest,
+        dependencies: { ...validManifest.dependencies, "@knpkv/confluence-api-client": "^0.4.0" }
+      })
+    ).toContain("@knpkv/confluence-api-client must use workspace:^")
   })
 
   it("rejects a CLI that bypasses the built server boundary", () => {

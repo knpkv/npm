@@ -40,6 +40,32 @@ describe("Control Center source boundaries", () => {
     ).toEqual([])
   })
 
+  it("keeps Confluence provider packages behind the isolated adapter", () => {
+    const reason = "only the isolated Confluence adapter can import Confluence provider packages"
+    expect(
+      inspectSourceBoundaries(
+        "src/server/application/pageRead.ts",
+        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client\""
+      )
+    ).toContainEqual({
+      importPath: "@knpkv/confluence-api-client",
+      reason,
+      sourcePath: "src/server/application/pageRead.ts"
+    })
+    expect(
+      inspectSourceBoundaries(
+        "src/client/ConfluencePage.tsx",
+        "import { MarkdownConverter } from \"@knpkv/confluence-to-markdown\""
+      )
+    ).toHaveLength(1)
+    expect(
+      inspectSourceBoundaries(
+        "src/server/plugins/confluence/ConfluencePageClient.ts",
+        "import { ConfluenceApiClient } from \"@knpkv/confluence-api-client\""
+      )
+    ).toEqual([])
+  })
+
   it("rejects browser and API imports of server code", () => {
     expect(inspectSourceBoundaries("src/client/page.tsx", "import \"../server/main.js\"")).toEqual([
       {

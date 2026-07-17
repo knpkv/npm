@@ -69,6 +69,8 @@
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
+    "@knpkv/confluence-api-client": "workspace:^",
+    "@knpkv/confluence-to-markdown": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",

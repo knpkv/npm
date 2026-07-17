@@ -23,6 +23,7 @@ const CLI_BACKUP_BOUNDARY_REASON = "the CLI must use the public backup barrel in
 const DATA_ROOT_PROTOCOL_REASON =
   "only CLI configuration and the backup archive entry point can import the data-root protocol"
 const LOCAL_AGENT_ADAPTER_REASON = "only the release-agent application adapter can import local AI provider packages"
+const CONFLUENCE_ADAPTER_REASON = "only the isolated Confluence adapter can import Confluence provider packages"
 const SCRIPT_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/iu
 
 const scriptKindForSourcePath = (sourcePath: string): ts.ScriptKind => {
@@ -182,6 +183,12 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
     normalizedSource !== "src/server/application/releaseAgent"
   ) {
     return LOCAL_AGENT_ADAPTER_REASON
+  }
+  if (
+    (importPath === "@knpkv/confluence-api-client" || importPath === "@knpkv/confluence-to-markdown") &&
+    !isWithin(normalizedSource, "src/server/plugins/confluence")
+  ) {
+    return CONFLUENCE_ADAPTER_REASON
   }
   if (importPath === NON_LITERAL_DYNAMIC_IMPORT) return "production dynamic imports must use a literal module path"
   if (

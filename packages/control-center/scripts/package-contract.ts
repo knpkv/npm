@@ -58,6 +58,8 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
     "@knpkv/codecommit-core",
+    "@knpkv/confluence-api-client",
+    "@knpkv/confluence-to-markdown",
     "@knpkv/control-center-sql",
     "@knpkv/jira-api-client",
     "@knpkv/rly",
@@ -73,23 +75,28 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
   }
-  if (manifest.dependencies["@knpkv/codecommit-core"] !== "workspace:^") {
-    violations.push("@knpkv/codecommit-core must use workspace:^")
-  }
   if (manifest.dependencies["distilled-aws"] !== "0.1.1") {
     violations.push("distilled-aws must remain on the reviewed CodePipeline client version")
   }
   if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1085.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")
   }
-  if (manifest.dependencies["@knpkv/jira-api-client"] !== "workspace:^") {
-    violations.push("@knpkv/jira-api-client must use workspace:^")
-  }
-  const localAgentDependencies: ReadonlyArray<"@knpkv/ai-claude" | "@knpkv/ai-codex"> = [
+  const workspaceDependencies: ReadonlyArray<
+    | "@knpkv/ai-claude"
+    | "@knpkv/ai-codex"
+    | "@knpkv/codecommit-core"
+    | "@knpkv/confluence-api-client"
+    | "@knpkv/confluence-to-markdown"
+    | "@knpkv/jira-api-client"
+  > = [
     "@knpkv/ai-claude",
-    "@knpkv/ai-codex"
+    "@knpkv/ai-codex",
+    "@knpkv/codecommit-core",
+    "@knpkv/confluence-api-client",
+    "@knpkv/confluence-to-markdown",
+    "@knpkv/jira-api-client"
   ]
-  for (const dependency of localAgentDependencies) {
+  for (const dependency of workspaceDependencies) {
     if (manifest.dependencies[dependency] !== "workspace:^") {
       violations.push(`${dependency} must use workspace:^`)
     }
