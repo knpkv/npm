@@ -262,71 +262,72 @@ const readWorkspaceContext = Effect.fn("ClockifyReadPlugin.readWorkspaceContext"
   return { user, workspace }
 })
 
-const collectSyncPages = Effect.fn("ClockifyReadPlugin.collectSyncPages")(function*(options: {
+const streamSyncPages = (options: {
   readonly provider: ClockifyReadProvider
   readonly configuration: ClockifyReadPluginConfiguration
   readonly userIds: ReadonlyArray<string>
   readonly syncScopeDigest: string
   readonly startPage: number
-}): Effect.fn.Return<ReadonlyArray<typeof PluginSyncPageV1.Type>, PluginFailure, Crypto.Crypto> {
-  const output: Array<typeof PluginSyncPageV1.Type> = []
-
-  for (let page = options.startPage; page <= options.configuration.maximumPages; page += 1) {
-    const userPages = yield* Effect.forEach(
-      options.userIds,
-      (userId) =>
-        withTimeout(
-          "clockify-get-time-entries",
-          options.configuration.operationTimeoutMillis,
-          options.provider.getTimeEntries(options.configuration.workspaceId, userId, {
-            page,
-            pageSize: options.configuration.pageSize
-          })
-        ).pipe(
-          Effect.flatMap((raw) =>
-            decodeProvider("clockify-sync", "clockify-time-entry-page-shape-invalid", ClockifyTimeEntryPage, raw)
+}): Stream.Stream<typeof PluginSyncPageV1.Type, PluginFailure, Crypto.Crypto> =>
+  Stream.paginate(
+    options.startPage,
+    Effect.fn("ClockifyReadPlugin.streamSyncPages")(function*(page) {
+      const userPages = yield* Effect.forEach(
+        options.userIds,
+        (userId) =>
+          withTimeout(
+            "clockify-get-time-entries",
+            options.configuration.operationTimeoutMillis,
+            options.provider.getTimeEntries(options.configuration.workspaceId, userId, {
+              page,
+              pageSize: options.configuration.pageSize
+            })
+          ).pipe(
+            Effect.flatMap((raw) =>
+              decodeProvider("clockify-sync", "clockify-time-entry-page-shape-invalid", ClockifyTimeEntryPage, raw)
+            ),
+            Effect.flatMap((entries) =>
+              entries.length > options.configuration.pageSize
+                ? Effect.fail(malformed("clockify-sync", "clockify-time-entry-page-limit-exceeded"))
+                : Effect.succeed({ entries, userId })
+            )
           ),
-          Effect.flatMap((entries) =>
-            entries.length > options.configuration.pageSize
-              ? Effect.fail(malformed("clockify-sync", "clockify-time-entry-page-limit-exceeded"))
-              : Effect.succeed({ entries, userId })
-          )
-        ),
-      { concurrency: options.configuration.maximumConcurrency }
-    )
-    const providerHasMore = userPages.some(({ entries }) => entries.length === options.configuration.pageSize)
-    const reachedBound = page === options.configuration.maximumPages && providerHasMore
-    const entries = userPages.flatMap(({ entries, userId }) => entries.map((entry) => ({ entry, userId })))
-    const events = yield* Effect.forEach(
-      entries,
-      ({ entry, userId }) =>
-        normalizeClockifyTimeEntry({
-          entry,
-          expectedWorkspaceId: options.configuration.workspaceId,
-          expectedUserId: userId
-        }),
-      { concurrency: options.configuration.maximumConcurrency }
-    )
-    if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
-      return yield* malformed("clockify-sync", "clockify-time-entry-identity-duplicate")
-    }
-    const hasMore = providerHasMore && !reachedBound
-    const checkpointAfterPage = hasMore
-      ? `next:${page + 1}:${options.syncScopeDigest}`
-      : reachedBound
-      ? `bounded:${page}:${options.syncScopeDigest}`
-      : `complete:${options.syncScopeDigest}`
-    const normalized = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
-      events,
-      checkpointAfterPage,
-      hasMore
-    }).pipe(Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid")))
-    output.push(normalized)
-    if (!hasMore) break
-  }
-
-  return output
-})
+        { concurrency: options.configuration.maximumConcurrency }
+      )
+      const providerHasMore = userPages.some(({ entries }) => entries.length === options.configuration.pageSize)
+      const reachedBound = page === options.configuration.maximumPages && providerHasMore
+      const entries = userPages.flatMap(({ entries, userId }) => entries.map((entry) => ({ entry, userId })))
+      const events = yield* Effect.forEach(
+        entries,
+        ({ entry, userId }) =>
+          normalizeClockifyTimeEntry({
+            entry,
+            expectedWorkspaceId: options.configuration.workspaceId,
+            expectedUserId: userId
+          }),
+        { concurrency: options.configuration.maximumConcurrency }
+      )
+      if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
+        return yield* malformed("clockify-sync", "clockify-time-entry-identity-duplicate")
+      }
+      const hasMore = providerHasMore && !reachedBound
+      const checkpointAfterPage = hasMore
+        ? `next:${page + 1}:${options.syncScopeDigest}`
+        : reachedBound
+        ? `bounded:${page}:${options.syncScopeDigest}`
+        : `complete:${options.syncScopeDigest}`
+      const normalized = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+        events,
+        checkpointAfterPage,
+        hasMore
+      }).pipe(Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid")))
+      const result: readonly [
+        ReadonlyArray<typeof PluginSyncPageV1.Type>,
+        Option.Option<number>
+      ] = [[normalized], hasMore ? Option.some(page + 1) : Option.none<number>()]
+      return result
+    })
+  )
 
 const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   provider: ClockifyReadProvider,
@@ -409,16 +410,15 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
             }
             return Stream.unwrap(
               startPageFromCheckpoint(request.checkpoint, decoded.maximumPages, syncScopeDigest).pipe(
-                Effect.flatMap((startPage) =>
-                  collectSyncPages({
+                Effect.map((startPage) =>
+                  streamSyncPages({
                     provider,
                     configuration: decoded,
                     userIds,
                     syncScopeDigest,
                     startPage
-                  }).pipe(Effect.provideService(Crypto.Crypto, cryptoService))
-                ),
-                Effect.map(Stream.fromIterable)
+                  }).pipe(Stream.provideService(Crypto.Crypto, cryptoService))
+                )
               )
             )
           },

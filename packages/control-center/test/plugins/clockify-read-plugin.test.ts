@@ -14,6 +14,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
@@ -22,7 +23,7 @@ import { makeClockifyReadPluginRuntimeFromProvider } from "../../src/server/plug
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
-import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { PluginAuthenticationFailure, PluginOutageFailure } from "../../src/server/plugins/failures.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
 const configuration = {
@@ -195,6 +196,44 @@ describe("ClockifyReadPlugin", () => {
       assert.isTrue(attributes.billable)
       assert.strictEqual(attributes.interval.duration, "PT1H")
       assert.strictEqual(attributes.freshness.sourceObservedAt, "2026-07-17T09:00:00.000Z")
+    }))
+
+  it.effect("emits a completed page before a later provider page fails", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make<ReadonlyArray<number>>([])
+      const observedPages = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        getTimeEntries: (_workspaceId, _userId, request) =>
+          Ref.update(calls, (current) => [...current, request.page]).pipe(
+            Effect.andThen(
+              request.page === 1
+                ? Effect.succeed([timeEntry("entry-1")])
+                : Effect.fail(new PluginOutageFailure({ operation: "clockify-get-time-entries" }))
+            )
+          )
+      })
+      const fiber = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            connection.sync(syncRequest()).pipe(
+              Stream.tap((page) => Ref.update(observedPages, (current) => [...current, page.checkpointAfterPage])),
+              Stream.runDrain
+            )
+          )
+        ),
+        { ...configuration, userIds: "user-1", pageSize: 1, maximumConcurrency: 1 }
+      ).pipe(Effect.result, Effect.forkChild)
+
+      yield* TestClock.adjust("1 second")
+      const outcome = yield* Fiber.join(fiber)
+      const observed = yield* Ref.get(observedPages)
+      const providerCalls = yield* Ref.get(calls)
+
+      assert.isTrue(Result.isFailure(outcome))
+      assert.lengthOf(observed, 1)
+      assert.match(observed[0] ?? "", /^next:2:[0-9a-f]{64}$/u)
+      assert.strictEqual(providerCalls.filter((page) => page === 1).length, 1)
     }))
 
   it.effect("marks a full final provider page as bounded instead of claiming exhaustion", () =>
