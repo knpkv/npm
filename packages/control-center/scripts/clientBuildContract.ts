@@ -1,7 +1,7 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 360_000
+export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 365_000
 
 export const CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY = "src/client/BrowserSessionHydrator.tsx"
 

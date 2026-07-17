@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   type ClientBuildManifest,
   CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY,
+  CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES,
   decodeClientBuildManifest,
   initialJavaScriptArtifacts,
   inspectClientBuildContract
@@ -80,11 +81,11 @@ describe("client build contract", () => {
     const artifactSizes = new Map([
       ["assets/index.mjs", 200_000],
       ["assets/runtime.mjs", 8_000],
-      ["assets/ui.mjs", 153_000]
+      ["assets/ui.mjs", 158_000]
     ])
 
     expect(inspectClientBuildContract(validMjsManifest(), artifactSizes)).toContain(
-      "initial JavaScript closure is 361000 bytes; budget is 360000 bytes"
+      `initial JavaScript closure is 366000 bytes; budget is ${CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES} bytes`
     )
   })
 

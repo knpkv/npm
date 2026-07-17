@@ -108,16 +108,31 @@ const contextFor = (path: string | null): AgentPageContext => {
   const routeKind = routeSegments[3]
   const releaseId = decodeReleaseRouteId(routeSegments[4])
   const releaseSuffix = routeSegments[5]
+  const isWorkspaceCollectionRoute = routeSegments[1] === "w" && routeSegments[4] === undefined
   const isReleaseRoute =
     routeSegments[1] === "w" &&
     workspaceId !== null &&
     routeKind === "releases" &&
     releaseId !== null &&
     (releaseSuffix === undefined || releaseSuffix === "preview" || releaseSuffix === "agent")
-  if (workspaceId !== null && routeKind === "overview" && releaseId === null) {
+  if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "overview" && releaseId === null) {
     return {
       description: `Workspace ${workspaceId} release readiness, people, source health, and agent work.`,
       label: "Workspace overview",
+      path: safePath
+    }
+  }
+  if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "items" && releaseId === null) {
+    return {
+      description: `Current normalized delivery items in workspace ${workspaceId}, including the exact active filters and selection.`,
+      label: "Workspace items",
+      path: safePath
+    }
+  }
+  if (isWorkspaceCollectionRoute && workspaceId !== null && routeKind === "work" && releaseId === null) {
+    return {
+      description: `Active release decisions in workspace ${workspaceId}, including the exact selected release and filters.`,
+      label: "Active work",
       path: safePath
     }
   }
