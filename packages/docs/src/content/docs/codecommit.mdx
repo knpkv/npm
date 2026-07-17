@@ -15,6 +15,8 @@ It has three surfaces:
 
 The CLI entrypoint runs on Bun. The core services live in `@knpkv/codecommit-core` and are shared by the TUI and web UI.
 
+Integrations can use the supported `@knpkv/codecommit-core/ReadClient.js` entry. Its real distilled-aws provider boundary returns unknown responses to a Schema-decoding client, which exposes immutable pull request revisions plus lazy, cancellable pagination over changed-file inventory. Changed files preserve both paths, blob IDs, file modes, provider cursors, and the requested provider page limit.
+
 Inside this workspace:
 
 ```bash
@@ -127,5 +129,6 @@ When no CodeCommit config exists, the core config service provides defaults. Acc
 | Cross-account filter orchestration | `packages/codecommit/src/FilterService.ts` |
 | TUI                                | `packages/codecommit/src/tui`              |
 | Shared domain/services             | `packages/codecommit-core/src`             |
+| Integration read boundary          | `packages/codecommit-core/src/ReadClient`  |
 | Web UI and server                  | `packages/codecommit-web/src`              |
 | CLI help test                      | `packages/codecommit/test/bin.test.ts`     |

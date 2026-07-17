@@ -1,0 +1,29 @@
+/** Typed failures produced by the CodeCommit read boundary. @module */
+import { Schema } from "effect"
+
+import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"
+
+const OperationName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+
+/** Untrusted provider output failed Schema decoding. */
+export class CodeCommitMalformedResponseError extends Schema.TaggedErrorClass<CodeCommitMalformedResponseError>()(
+  "CodeCommitMalformedResponseError",
+  {
+    operation: OperationName,
+    diagnosticCode: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+  }
+) {}
+
+/** The requested CodeCommit object does not exist in the configured account. */
+export class CodeCommitReadNotFoundError extends Schema.TaggedErrorClass<CodeCommitReadNotFoundError>()(
+  "CodeCommitReadNotFoundError",
+  { operation: OperationName }
+) {}
+
+/** Closed error union for CodeCommit read operations. */
+export type CodeCommitReadError =
+  | AwsCredentialError
+  | AwsThrottleError
+  | AwsApiError
+  | CodeCommitMalformedResponseError
+  | CodeCommitReadNotFoundError

@@ -120,6 +120,12 @@ Adapters emit bounded pages of Schema-decoded `UpsertEntity`, `TombstoneEntity`,
 
 The exported `PluginConnection` service contains reads, health, sync, complete-diff access, and governed-action proposals only. Every proposal carries its canonical payload digest, and authorization must preserve that digest. Adapters implement a tag-free executor shape; plugin composition seals it behind a non-exported live service that only the governed-action engine may obtain. Source-boundary validation prevents adapters, browser code, and agent code from importing that authority. Safe reads and explicitly idempotent writes use at most three attempts with capped full jitter and decoded `Retry-After`; a stream is retried only before its first emitted page, and excessive `Retry-After` values fail instead of retaining a fiber. Unsafe or ambiguous mutations are reconciled rather than replayed.
 
+### CodeCommit read adapter
+
+The first production CodeCommit slice exports an opaque `CodeCommitPluginDefinition` from `@knpkv/control-center/server`. One connection configures an AWS profile, region, and repository name. It negotiates `entity.read@1`, `sync.incremental@1`, and `diff.inventory@1`, then normalizes open pull requests with immutable PR/base/head revisions and complete cursor-based changed-file pages. Provider output is decoded by `@knpkv/codecommit-core` before it enters the vendor-neutral plugin contract; raw AWS types and causes do not cross the adapter.
+
+This milestone is deliberately read-only. It does not negotiate diff content, comments, commits/history, checks, review state changes, approval, merge, or any governed mutation capability. CodeCommit's changed-file API does not report binary, generated, or oversized classification, so this slice leaves those inventory flags false until the owning package gains bounded blob/content inspection. The adapter definition is available for first-party runtime registration, but connection administration and the production runtime catalog remain later integration work.
+
 ## Persistence boundary
 
 The server entry owns one scoped libSQL client and an owner-only content-addressed object directory. The MVP schema is intentionally unstable: a fresh database is created from one checked-in schema snapshot, and an existing database must match it exactly. Schema changes are breaking and require recreating local development data. Versioned migrations start only after the persistence model is declared stable and a released database file must remain readable by a newer build.

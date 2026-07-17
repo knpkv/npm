@@ -19,6 +19,33 @@ export const getPullRequest = (params: GetPullRequestParams) =>
 
 Methods: `getPullRequests`, `getPullRequest`, `createPullRequest`, `updatePullRequestTitle`, `updatePullRequestDescription`, `getCommentsForPullRequest`, `listBranches`, `getCallerIdentity`.
 
+### ReadClient
+
+The supported `@knpkv/codecommit-core/ReadClient.js` entry exposes a production read boundary for integrations. `CodeCommitReadProviderLive` performs real distilled-aws calls, while `CodeCommitReadClient.layer` Schema-decodes the unknown responses into immutable pull request revisions and bounded changed-file pages.
+
+```typescript
+import { ReadClient } from "@knpkv/codecommit-core"
+import { Effect, Stream } from "effect"
+
+declare const account: ReadClient.CodeCommitReadAccount
+declare const baseCommit: string
+declare const headCommit: string
+
+const program = Effect.gen(function* () {
+  const client = yield* ReadClient.CodeCommitReadClient
+  return yield* client
+    .streamChangedFiles({
+      account,
+      repositoryName: "payments-api",
+      beforeCommitSpecifier: baseCommit,
+      afterCommitSpecifier: headCommit
+    })
+    .pipe(Stream.runCollect)
+})
+```
+
+The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. Streams request every page lazily and inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, and malformed responses remain typed.
+
 ### CacheService (SQLite)
 
 Local SQLite cache via `@effect/sql-libsql`. Stores PRs, comments, notifications, and subscriptions for instant search and offline access.
@@ -57,6 +84,7 @@ Client-side code must use deep imports to avoid pulling in server-only deps:
 ```typescript
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { AppStatus } from "@knpkv/codecommit-core/Domain.js"
+import { CodeCommitReadClient } from "@knpkv/codecommit-core/ReadClient.js"
 ```
 
 The `.js` suffix is required — see package.json exports field.
