@@ -54,10 +54,7 @@ const RawPullRequestResponse = Schema.Struct({
     description: Schema.optional(Schema.String),
     authorArn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
     pullRequestStatus: Schema.Literals(["OPEN", "CLOSED"]),
-    pullRequestTargets: Schema.Array(RawPullRequestTarget).check(
-      Schema.isNonEmpty(),
-      Schema.isMaxLength(PROVIDER_PAGE_LIMIT)
-    ),
+    pullRequestTargets: Schema.Array(RawPullRequestTarget).check(Schema.isLengthBetween(1, 1)),
     creationDate: Schema.Date,
     lastActivityDate: Schema.Date
   })

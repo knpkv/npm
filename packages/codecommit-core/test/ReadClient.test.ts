@@ -166,6 +166,42 @@ describe("CodeCommitReadClient", () => {
       })
     ))
 
+  it.effect("rejects multi-target pull requests before selecting a partial revision", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: () =>
+          Effect.succeed({
+            pullRequest: {
+              ...pullRequestResponse().pullRequest,
+              pullRequestTargets: [
+                {
+                  repositoryName: "payments-api",
+                  sourceReference: "refs/heads/feature/read-adapter",
+                  destinationReference: "refs/heads/main",
+                  sourceCommit: "head-commit-17",
+                  destinationCommit: "base-commit-17",
+                  mergeBase: "merge-base-17"
+                },
+                {
+                  repositoryName: "payments-api",
+                  sourceReference: "refs/heads/feature/read-adapter",
+                  destinationReference: "refs/heads/release",
+                  sourceCommit: "release-head-commit-17",
+                  destinationCommit: "release-base-commit-17",
+                  mergeBase: "release-merge-base-17"
+                }
+              ]
+            }
+          })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getPullRequest({ account, pullRequestId: "17" }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
+      })
+    ))
+
   it.effect("retains repository absence as a typed not-found read failure", () =>
     runWithProvider(
       baseProvider({
