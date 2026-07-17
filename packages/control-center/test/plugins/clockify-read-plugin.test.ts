@@ -21,6 +21,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import {
   MaximumPluginSyncPageBytes,
+  PluginSyncPageV1,
   PluginSyncRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
@@ -181,7 +182,7 @@ describe("ClockifyReadPlugin", () => {
       const pages = yield* Fiber.join(fiber)
 
       assert.strictEqual(pages.length, 2)
-      assert.match(pages[0]?.checkpointAfterPage ?? "", /^next:2:[0-9a-f]{64}$/u)
+      assert.match(pages[0]?.checkpointAfterPage ?? "", /^restart:[0-9a-f]{64}$/u)
       assert.isTrue(pages[0]?.hasMore)
       assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.isFalse(pages[1]?.hasMore)
@@ -237,7 +238,7 @@ describe("ClockifyReadPlugin", () => {
 
       assert.isTrue(Result.isFailure(outcome))
       assert.lengthOf(observed, 1)
-      assert.match(observed[0] ?? "", /^next:2:[0-9a-f]{64}$/u)
+      assert.match(observed[0] ?? "", /^restart:[0-9a-f]{64}$/u)
       assert.strictEqual(providerCalls.filter((page) => page === 1).length, 1)
     }))
 
@@ -251,9 +252,7 @@ describe("ClockifyReadPlugin", () => {
               timeEntry("entry-1", "user-1", { description: "Second version" })
             ])
         }),
-        PluginConnection.pipe(
-          Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))
-        ),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
         { ...configuration, userIds: "user-1", maximumPages: 1 }
       ).pipe(Effect.result)
 
@@ -278,7 +277,7 @@ describe("ClockifyReadPlugin", () => {
       assert.isFalse(pages[0]?.hasMore)
     }))
 
-  it.effect("resumes a scoped checkpoint only for the unchanged ordered user set", () =>
+  it.effect("restarts a scoped checkpoint from page one", () =>
     Effect.gen(function*() {
       const initialConfiguration = { ...configuration, userIds: "user-1,user-2" }
       const initialPages = yield* withConnection(
@@ -300,7 +299,7 @@ describe("ClockifyReadPlugin", () => {
         ),
         initialConfiguration
       )
-      assert.deepEqual([...(yield* Ref.get(unchangedCalls))].sort(), ["user-1:2", "user-2:2"])
+      assert.deepEqual([...(yield* Ref.get(unchangedCalls))].sort(), ["user-1:1", "user-2:1"])
 
       const changedCalls = yield* Ref.make<ReadonlyArray<string>>([])
       yield* withConnection(
@@ -314,6 +313,59 @@ describe("ClockifyReadPlugin", () => {
         { ...configuration, userIds: "user-1,user-2,user-3" }
       )
       assert.deepEqual([...(yield* Ref.get(changedCalls))].sort(), ["user-1:1", "user-2:1", "user-3:1"])
+    }))
+
+  it.effect("restarts after list mutation without skipping original entries", () =>
+    Effect.gen(function*() {
+      const entries = yield* Ref.make<ReadonlyArray<ReturnType<typeof timeEntry>>>([
+        timeEntry("entry-1"),
+        timeEntry("entry-2"),
+        timeEntry("entry-3")
+      ])
+      const calls = yield* Ref.make<ReadonlyArray<number>>([])
+      const provider = baseProvider({
+        getTimeEntries: (_workspaceId, _userId, request) =>
+          Effect.all([Ref.get(entries), Ref.update(calls, (current) => [...current, request.page])]).pipe(
+            Effect.map(([current]) => {
+              const offset = (request.page - 1) * request.pageSize
+              return current.slice(offset, offset + request.pageSize)
+            })
+          )
+      })
+      const configured = {
+        ...configuration,
+        userIds: "user-1",
+        pageSize: 2,
+        maximumPages: 3,
+        maximumConcurrency: 1
+      }
+      const first = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.take(1), Stream.runCollect))
+        ),
+        configured
+      )
+      const checkpoint = first[0]?.checkpointAfterPage
+      if (checkpoint === undefined) return assert.fail("expected a restart checkpoint")
+      assert.match(checkpoint, /^restart:[0-9a-f]{64}$/u)
+
+      yield* Ref.update(entries, (current) => [timeEntry("entry-new"), ...current])
+      yield* Ref.set(calls, [])
+      const resumed = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => connection.sync(syncRequest(checkpoint)).pipe(Stream.runCollect))
+        ),
+        configured
+      )
+      const resumedIds = resumed.flatMap(({ events }) =>
+        events.flatMap((event) => event._tag === "UpsertEntity" ? [event.vendorImmutableId] : [])
+      )
+
+      assert.strictEqual((yield* Ref.get(calls))[0], 1)
+      assert.sameMembers(resumedIds, ["entry-new", "entry-1", "entry-2", "entry-3"])
+      assert.match(resumed.at(-1)?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
     }))
 
   it.effect("applies one global concurrency bound to multi-user normalization", () =>
@@ -372,7 +424,7 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(yield* Ref.get(digestCalls), 7)
     }))
 
-  it.effect("rejects configuration that could exceed one normalized sync page", () =>
+  it.effect("rejects configuration above the 100-entry provider aggregate", () =>
     Effect.gen(function*() {
       const outcome = yield* withConnection(
         baseProvider(),
@@ -390,10 +442,7 @@ describe("ClockifyReadPlugin", () => {
 
   it.effect("keeps the maximum configured Clockify page below the atomic payload cap", () =>
     Effect.gen(function*() {
-      const tagIds = Array.from(
-        { length: 100 },
-        (_, index) => `tag-${String(index).padStart(3, "0")}`.padEnd(512, "x")
-      )
+      const tagIds = Array.from({ length: 100 }, (_, index) => `tag-${String(index).padStart(3, "0")}`.padEnd(512, "x"))
       const entries = Array.from({ length: 10 }, (_, index) =>
         timeEntry(`entry-${index + 1}`, "user-1", {
           description: "d".repeat(4_000),
@@ -412,10 +461,69 @@ describe("ClockifyReadPlugin", () => {
 
       assert.lengthOf(pages, 1)
       assert.lengthOf(pages[0]?.events ?? [], 10)
-      assert.isAtMost(
-        new TextEncoder().encode(JSON.stringify(pages[0])).byteLength,
-        MaximumPluginSyncPageBytes
+      assert.isAtMost(new TextEncoder().encode(JSON.stringify(pages[0])).byteLength, MaximumPluginSyncPageBytes)
+    }))
+
+  it.effect("splits a 100-entry Unicode aggregate into UTF-8-bounded pages", () =>
+    Effect.gen(function*() {
+      const tagIds = Array.from({ length: 100 }, (_, index) => `tag-${String(index).padStart(3, "0")}`.padEnd(512, "€"))
+      const provider = baseProvider({
+        getTimeEntries: (_workspaceId, userId) =>
+          Effect.succeed(
+            Array.from({ length: 50 }, (_, index) =>
+              timeEntry(`${userId}-entry-${index + 1}`, userId, {
+                description: "€".repeat(4_000),
+                tagIds
+              }))
+          )
+      })
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        {
+          ...configuration,
+          userIds: "user-1,user-2",
+          pageSize: 50,
+          maximumPages: 1
+        }
       )
+
+      assert.isAbove(pages.length, 1)
+      assert.strictEqual(
+        pages.reduce((count, page) => count + page.events.length, 0),
+        100
+      )
+      for (const page of pages) {
+        Schema.decodeUnknownSync(Schema.toType(PluginSyncPageV1))(page)
+        assert.isAtMost(new TextEncoder().encode(JSON.stringify(page)).byteLength, MaximumPluginSyncPageBytes)
+      }
+      for (const page of pages.slice(0, -1)) {
+        assert.isTrue(page.hasMore)
+        assert.match(page.checkpointAfterPage, /^restart:[0-9a-f]{64}$/u)
+      }
+      assert.isFalse(pages.at(-1)?.hasMore)
+      assert.match(pages.at(-1)?.checkpointAfterPage ?? "", /^bounded:1:[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("rejects an entry with more than 100 tags", () =>
+    Effect.gen(function*() {
+      const outcome = yield* withConnection(
+        baseProvider({
+          getTimeEntries: () =>
+            Effect.succeed([
+              timeEntry("entry-1", "user-1", {
+                tagIds: Array.from({ length: 101 }, (_, index) => `tag-${index}`)
+              })
+            ])
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", pageSize: 1, maximumPages: 1 }
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
     }))
 
   it.effect("returns missing and rejects malformed or mismatched provider identities", () =>

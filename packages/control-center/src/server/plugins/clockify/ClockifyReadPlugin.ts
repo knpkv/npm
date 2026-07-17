@@ -163,10 +163,11 @@ const ClockifyCheckpointScopeDigest = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 sync-scope digest" })
 )
 const ClockifyCheckpoint = Schema.Union([
-  Schema.TemplateLiteralParser(["next:", ClockifyCheckpointPage, ":", ClockifyCheckpointScopeDigest]),
+  Schema.TemplateLiteralParser(["restart:", ClockifyCheckpointScopeDigest]),
   Schema.TemplateLiteralParser(["bounded:", ClockifyCheckpointPage, ":", ClockifyCheckpointScopeDigest]),
   Schema.TemplateLiteralParser(["complete:", ClockifyCheckpointScopeDigest])
 ])
+type ClockifySyncEvent = (typeof PluginSyncPageV1.Type)["events"][number]
 
 const malformed = (operation: string, diagnosticCode: string) =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
@@ -205,7 +206,6 @@ const decodeUserIds = (text: string): Effect.Effect<ReadonlyArray<string>, Plugi
 
 const startPageFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"],
-  maximumPages: number,
   syncScopeDigest: string
 ): Effect.Effect<number, PluginConfigurationFailure> =>
   checkpoint === null
@@ -218,18 +218,52 @@ const startPageFromCheckpoint = (
           })
       ),
       Effect.flatMap((decoded) => {
-        const checkpointScopeDigest = decoded[0] === "complete:" ? decoded[1] : decoded[3]
+        const checkpointScopeDigest = decoded[0] === "bounded:" ? decoded[3] : decoded[1]
         if (checkpointScopeDigest !== syncScopeDigest) return Effect.succeed(1)
-        if (decoded[0] !== "next:") return Effect.succeed(1)
-        return decoded[1] <= maximumPages
-          ? Effect.succeed(decoded[1])
-          : Effect.fail(
-            new PluginConfigurationFailure({
-              diagnosticCode: "clockify-sync-checkpoint-invalid"
-            })
-          )
+        return Effect.succeed(1)
       })
     )
+
+const splitSyncPage = Effect.fn("ClockifyReadPlugin.splitSyncPage")(function*(options: {
+  readonly events: ReadonlyArray<ClockifySyncEvent>
+  readonly logicalCheckpoint: string
+  readonly logicalHasMore: boolean
+  readonly restartCheckpoint: string
+}) {
+  const capacityCheckpoint = options.logicalCheckpoint.length > options.restartCheckpoint.length
+    ? options.logicalCheckpoint
+    : options.restartCheckpoint
+  const chunks: Array<Array<ClockifySyncEvent>> = []
+  let current: Array<ClockifySyncEvent> = []
+  for (const event of options.events) {
+    const candidate = [...current, event]
+    if (
+      Option.isSome(
+        Schema.decodeUnknownOption(Schema.toType(PluginSyncPageV1))({
+          events: candidate,
+          checkpointAfterPage: capacityCheckpoint,
+          hasMore: false
+        })
+      )
+    ) {
+      current = candidate
+      continue
+    }
+    if (current.length === 0) return yield* malformed("clockify-sync", "clockify-sync-page-invalid")
+    chunks.push(current)
+    current = [event]
+  }
+  chunks.push(current)
+
+  return yield* Effect.forEach(chunks, (events, index) => {
+    const isLast = index === chunks.length - 1
+    return Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+      events,
+      checkpointAfterPage: isLast ? options.logicalCheckpoint : options.restartCheckpoint,
+      hasMore: isLast ? options.logicalHasMore : true
+    }).pipe(Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid")))
+  })
+})
 
 interface DecodedWorkspaceContext {
   readonly user: typeof ClockifyUser.Type
@@ -311,28 +345,25 @@ const streamSyncPages = (options: {
         return yield* malformed("clockify-sync", "clockify-time-entry-identity-duplicate")
       }
       const hasMore = providerHasMore && !reachedBound
+      const restartCheckpoint = `restart:${options.syncScopeDigest}`
       const checkpointAfterPage = hasMore
-        ? `next:${page + 1}:${options.syncScopeDigest}`
+        ? restartCheckpoint
         : reachedBound
         ? `bounded:${page}:${options.syncScopeDigest}`
         : `complete:${options.syncScopeDigest}`
-      const normalized = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+      const normalized = yield* splitSyncPage({
         events,
-        checkpointAfterPage,
-        hasMore
-      }).pipe(Effect.mapError(() => malformed("clockify-sync", "clockify-sync-page-invalid")))
-      const result: readonly [
-        ReadonlyArray<typeof PluginSyncPageV1.Type>,
-        Option.Option<number>
-      ] = [[normalized], hasMore ? Option.some(page + 1) : Option.none<number>()]
+        logicalCheckpoint: checkpointAfterPage,
+        logicalHasMore: hasMore,
+        restartCheckpoint
+      })
+      const result: readonly [ReadonlyArray<typeof PluginSyncPageV1.Type>, Option.Option<number>] = [
+        normalized,
+        hasMore ? Option.some(page + 1) : Option.none<number>()
+      ]
       return result
     })
   )
-
-// Clockify's accepted entry shape is below 64 KiB at its longest description
-// and 100 longest tag IDs. Ten such events leave ample room below the host's
-// 1 MiB atomic sync-page envelope without introducing partial-page checkpoints.
-const MAXIMUM_CLOCKIFY_EVENTS_PER_SYNC_PAGE = 10
 
 const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   provider: ClockifyReadProvider,
@@ -373,7 +404,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const userIds = yield* decodeUserIds(decoded.userIds)
-        if (userIds.length * decoded.pageSize > MAXIMUM_CLOCKIFY_EVENTS_PER_SYNC_PAGE) {
+        if (userIds.length * decoded.pageSize > 100) {
           return yield* new PluginConfigurationFailure({
             diagnosticCode: "clockify-sync-page-capacity-exceeded"
           })
@@ -416,7 +447,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
               return Stream.fail(new PluginConfigurationFailure({ diagnosticCode: "clockify-sync-stream-unsupported" }))
             }
             return Stream.unwrap(
-              startPageFromCheckpoint(request.checkpoint, decoded.maximumPages, syncScopeDigest).pipe(
+              startPageFromCheckpoint(request.checkpoint, syncScopeDigest).pipe(
                 Effect.map((startPage) =>
                   streamSyncPages({
                     provider,
