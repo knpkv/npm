@@ -95,8 +95,29 @@ describe("AgentPage context", () => {
     expect(markup).not.toContain("The workspace-wide view")
   })
 
+  it("preserves Items and Active work query context for legacy Relay entry", () => {
+    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+    const itemsPath = `/w/${workspaceId}/items?q=OPS-428&object=issue#item-details`
+    const itemsMarkup = renderAgentPage(itemsPath)
+    expect(itemsMarkup).toContain("Workspace items")
+    expect(itemsMarkup).toContain(`href="${itemsPath.replaceAll("&", "&amp;")}"`)
+
+    const workPath = `/w/${workspaceId}/work?release=01890f6f-6d6a-7cc0-98d2-000000000011`
+    const workMarkup = renderAgentPage(workPath)
+    expect(workMarkup).toContain("Active work")
+    expect(workMarkup).toContain(`href="${workPath.replaceAll("&", "&amp;")}"`)
+  })
+
   it("rejects external and unknown contexts instead of falling back to Overview", () => {
-    for (const path of ["https://example.com/release", "/api/v1/portfolio/snapshot", "/w/not-an-id/overview"]) {
+    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+    for (const path of [
+      "https://example.com/release",
+      "/api/v1/portfolio/snapshot",
+      "/w/not-an-id/overview",
+      `/x/${workspaceId}/items`,
+      `/w/${workspaceId}/items/not-a-route`,
+      `/w/${workspaceId}/work?release=invalid`
+    ]) {
       const markup = renderAgentPage(path)
       expect(markup).toContain("Context unavailable")
       expect(markup).toContain("No fallback workspace or entity is substituted.")

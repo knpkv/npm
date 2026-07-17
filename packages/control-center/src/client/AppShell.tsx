@@ -1,38 +1,28 @@
-import type { ReactElement } from "react"
+import { lazy, type ReactElement, Suspense } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
-import type { ReleaseId, WorkspaceId } from "../domain/identifiers.js"
-import { releaseAgentPath } from "./releases/releasePaths.js"
+import type { WorkspaceId } from "../domain/identifiers.js"
+import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
 import styles from "./AppShell.module.css"
 
-const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
-
-const isWorkspaceId = (value: string | undefined): value is WorkspaceId =>
-  value !== undefined && CANONICAL_ID.test(value)
-
-const isReleaseId = (value: string | undefined): value is ReleaseId => value !== undefined && CANONICAL_ID.test(value)
+const CommandSearch = lazy(async () => {
+  const module = await import("./command/CommandSearch.js")
+  return { default: module.CommandSearch }
+})
 
 const workspaceOverviewPath = (pathname: string): string => {
   const workspaceId = pathname.split("/")[2]
-  return isWorkspaceId(workspaceId) ? `/w/${workspaceId}/overview` : "/"
+  return isWorkspaceRouteId(workspaceId) ? `/w/${workspaceId}/overview` : "/"
 }
 
-const contextualAgentPath = (pathname: string, search: string): string => {
+const workspaceIdFromPathname = (pathname: string): WorkspaceId | null => {
   const segments = pathname.split("/")
   const workspaceId = segments[2]
-  const releaseId = segments[4]
-  if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "releases" && isReleaseId(releaseId)) {
-    return releaseAgentPath(workspaceId, releaseId)
-  }
-  const activeWorkReleaseId = new URLSearchParams(search).get("release") ?? undefined
-  if (segments[1] === "w" && isWorkspaceId(workspaceId) && segments[3] === "work" && isReleaseId(activeWorkReleaseId)) {
-    return releaseAgentPath(workspaceId, activeWorkReleaseId)
-  }
-  return `/agent?from=${encodeURIComponent(`${pathname}${search}`)}`
+  return segments[1] === "w" && isWorkspaceRouteId(workspaceId) ? workspaceId : null
 }
 
 const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => {
   const workspaceId = overviewPath.split("/")[2]
-  return isWorkspaceId(workspaceId)
+  return isWorkspaceRouteId(workspaceId)
     ? [
         { label: "Overview", to: overviewPath },
         { label: "Active work", to: `/w/${workspaceId}/work` },
@@ -69,7 +59,8 @@ const PrimaryNavigation = ({
 export const AppShell = (): ReactElement => {
   const location = useLocation()
   const overviewPath = workspaceOverviewPath(location.pathname)
-  const agentDestination = contextualAgentPath(location.pathname, location.search)
+  const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
+  const workspaceId = workspaceIdFromPathname(location.pathname)
 
   return (
     <div className={styles.root}>
@@ -81,9 +72,16 @@ export const AppShell = (): ReactElement => {
           <span className={styles.brandName}>Control Center</span>
         </NavLink>
         <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
-        <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
-          Ask Relay
-        </NavLink>
+        <div className={styles.actions}>
+          {workspaceId === null ? null : (
+            <Suspense fallback={null}>
+              <CommandSearch workspaceId={workspaceId} />
+            </Suspense>
+          )}
+          <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
+            Ask Relay
+          </NavLink>
+        </div>
         <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
       </header>
       <main className={styles.main}>

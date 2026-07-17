@@ -136,8 +136,10 @@ explicit. Those filters now execute against the complete current workspace proje
 
 ## Remaining roadmap
 
-- Complete D07 with owner filtering, command search, and
-  exact-scope authorized shares. D08–D09 retain timeline and
+- Complete D07 with owner filtering and exact-scope authorized shares. The workspace command search
+  now combines the authenticated release portfolio and Items index with deterministic ranking,
+  keyboard navigation, exact destinations, and contextual Relay access.
+  D08–D09 retain timeline and
   exports, graceful drain, and startup reconciliation. D05 performance refinement remains recorded
   below.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
@@ -178,6 +180,13 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - The interactive shell exposes Node 24, but its installed `pnpm` launcher is backed by Node 22.
   Direct local validation therefore invokes test tools with Node 24; PR CI remains the authoritative
   Node 24 workspace check.
+- The authenticated command trigger increased the raw initial JavaScript closure from the saturated
+  360 KB budget to about 362 KB. The explicit cap is now 365 KB; the generated API client, portfolio
+  presenter, and command implementation remain lazy. Recover shell headroom before adding another
+  always-mounted capability.
+- Command search currently reads one bounded portfolio snapshot when opened because the shared live
+  portfolio controller sits below the application shell. Hoist a session-scoped read cache before
+  adding more shell consumers; do not introduce a second live stream.
 - The private startup smoke executes an authorized fake-provider action while proving that the
   public server discards execution authority. A production runtime registry remains intentionally
   disabled pending production adapter and policy integration.
@@ -219,12 +228,13 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
   opens a URL-addressable detail sheet that reads its immutable revision ledger and only the evidence
   observations referenced by the selected revision. The existing history and evidence endpoints cap
   results at 200 records without an explicit truncation flag; add that contract before histories can
-  exceed the current fixture scale. Global command search and authenticated share grants with exact
-  scope, expiry, revocation, and grantee checks remain unfinished D07 work.
+  exceed the current fixture scale. Authenticated share grants with exact scope, expiry, revocation,
+  and grantee checks remain unfinished D07 work. Command search intentionally routes ambiguous and
+  unlinked objects through Items until provider-specific full views exist.
 
 ## Recommended next session
 
-Complete D07 authorized shares and global command search around the Items checkpoint, then return to
+Complete D07 authorized shares and owner filtering around the Items checkpoint, then return to
 the recorded D05 readiness batch optimization before the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

@@ -18,6 +18,21 @@ export type BrowserSessionState =
   | { readonly _tag: "storage-unavailable"; readonly session: SessionSummary | null }
   | { readonly _tag: "unavailable" }
 
+/** Cookie-authenticated reads remain available when only mutation-proof storage failed. */
+export const browserReadableSessionKey = (state: BrowserSessionState): string | null => {
+  switch (state._tag) {
+    case "authenticated":
+      return state.session.sessionId
+    case "storage-unavailable":
+      return state.session?.sessionId ?? null
+    case "anonymous":
+    case "blocked":
+    case "checking":
+    case "unavailable":
+      return null
+  }
+}
+
 interface BrowserSessionContextValue {
   readonly beginHydration: () => symbol
   readonly completeHydration: (attempt: symbol, result: BrowserSessionHydrationResult) => void

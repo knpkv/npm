@@ -4,7 +4,7 @@ import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primi
 import { forwardRef, type ReactElement } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 
-import { type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
+import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import {
@@ -131,20 +131,8 @@ const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function 
   return <Link {...props} ref={ref} state={location.state} to={href} />
 })
 
-/** Cookie-authenticated reads remain available when only mutation-proof storage failed. */
-export const releaseWorksetSessionKey = (state: BrowserSessionState): string | null => {
-  switch (state._tag) {
-    case "authenticated":
-      return state.session.sessionId
-    case "storage-unavailable":
-      return state.session?.sessionId ?? null
-    case "anonymous":
-    case "blocked":
-    case "checking":
-    case "unavailable":
-      return null
-  }
-}
+/** Compatibility name retained for release-workset callers of the shared readable-session policy. */
+export const releaseWorksetSessionKey = browserReadableSessionKey
 
 /** Render one server-backed release graph without substituting demo relationships. */
 export const ReleaseWorkset = ({
