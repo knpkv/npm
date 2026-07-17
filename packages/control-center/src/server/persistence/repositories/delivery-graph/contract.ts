@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema"
 
+import { Role } from "../../../../domain/actors.js"
 import {
   DeliveryEntityKind,
   DeliveryEntityProjection,
@@ -16,12 +17,22 @@ import {
   EnvironmentId,
   EvidenceId,
   GraphNodeId,
+  PersonId,
   RelationshipId,
   ReleaseId
 } from "../../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 
 const MAXIMUM_BATCH_RECORDS = 500
+const MAXIMUM_WORKSPACE_ENTITY_OWNERS = 20
+const MAXIMUM_WORKSPACE_OWNER_OPTIONS = 200
+
+const WorkspaceEntityOwner = Schema.Struct({
+  avatarFallback: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4)),
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  personId: PersonId,
+  roles: Schema.Array(Role).check(Schema.isMinLength(1), Schema.isMaxLength(16))
+})
 
 export const EntityProjectionWrite = Schema.Struct({
   projection: DeliveryEntityProjection,
@@ -78,6 +89,7 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
   },
   workspaceEntityProjections: {
+    owner: Schema.NullOr(PersonId),
     query: Schema.NullOr(
       Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
     ),
@@ -132,6 +144,8 @@ const WorkspaceEntityReleaseIds = Schema.Array(ReleaseId).check(
 
 const WorkspaceEntityProjection = Schema.Struct({
   canonicalReleaseId: Schema.NullOr(ReleaseId),
+  owners: Schema.Array(WorkspaceEntityOwner).check(Schema.isMaxLength(MAXIMUM_WORKSPACE_ENTITY_OWNERS)),
+  ownersTruncated: Schema.Boolean,
   releaseIds: WorkspaceEntityReleaseIds,
   releaseMembershipsTruncated: Schema.Boolean,
   projection: DeliveryEntityProjection,
@@ -145,15 +159,27 @@ const WorkspaceEntityProjection = Schema.Struct({
     ({ releaseIds, releaseMembershipsTruncated }) =>
       !releaseMembershipsTruncated || releaseIds.length === MAXIMUM_WORKSPACE_ENTITY_RELEASES,
     { expected: "truncated workspace release memberships to contain the complete bounded prefix" }
+  ),
+  Schema.makeFilter(
+    ({ owners, ownersTruncated }) => !ownersTruncated || owners.length === MAXIMUM_WORKSPACE_ENTITY_OWNERS,
+    { expected: "truncated workspace owners to contain the complete bounded prefix" }
   )
 )
 
 const WorkspaceEntityProjections = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ownerOptions: Schema.Array(WorkspaceEntityOwner).check(Schema.isMaxLength(MAXIMUM_WORKSPACE_OWNER_OPTIONS)),
+  ownerOptionsTruncated: Schema.Boolean,
   totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
   items: Schema.Array(WorkspaceEntityProjection)
-})
+}).check(
+  Schema.makeFilter(
+    ({ ownerOptions, ownerOptionsTruncated }) =>
+      !ownerOptionsTruncated || ownerOptions.length === MAXIMUM_WORKSPACE_OWNER_OPTIONS,
+    { expected: "truncated workspace owner options to contain the complete bounded prefix" }
+  )
+)
 
 const ReleaseRelationshipSummary = Schema.Struct({
   issues: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),

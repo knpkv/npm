@@ -23,7 +23,7 @@
 }
 
 .filters {
-  grid-template-columns: minmax(16rem, 2fr) repeat(3, minmax(9rem, 1fr));
+  grid-template-columns: minmax(16rem, 2fr) repeat(4, minmax(9rem, 1fr));
   gap: var(--rly-space-12);
   align-items: end;
 }
@@ -133,6 +133,22 @@
 
 .itemLink span,
 .meta {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.owners {
+  min-inline-size: max-content;
+}
+
+.ownerGroup {
+  display: grid;
+  gap: var(--rly-space-4);
+  min-inline-size: 0;
+}
+
+.ownerLimit {
   color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);

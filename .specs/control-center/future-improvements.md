@@ -130,13 +130,14 @@ release slices in the browser. The query returns at most 500 latest present proj
 unlinked entities, excludes deleted or stale projection heads, and retains up to 500 sorted current
 release memberships per object. A unique visible membership routes directly; ambiguous membership
 requires an exact release choice. It maps provider service and current status and keeps text, service,
-type, and status filters in the URL. Empty, loading, read-failure, and bounded-result states remain
+type, status, and canonical human-owner filters in the URL. Active entity-scoped owner assignments
+provide bounded names and avatar fallbacks without inventing an owner for unassigned work. Empty, loading, read-failure, and bounded-result states remain
 explicit. Those filters now execute against the complete current workspace projection set before the
 500-item response bound, and the response reports authoritative matched and total counts.
 
 ## Remaining roadmap
 
-- Complete D07 with owner filtering and exact-scope authorized shares. The workspace command search
+- Complete D07 with exact-scope authorized shares. The workspace command search
   now combines the authenticated release portfolio and Items index with deterministic ranking,
   keyboard navigation, exact destinations, and contextual Relay access.
   D08–D09 retain timeline and
@@ -211,8 +212,11 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 - D06 verdict actions are state-specific navigation to the relevant decision/evidence surface, not
   remote mutations. Governed deploy, watch, notify, acknowledge, and trace-repair completion remain
   adapter-dependent action work and must reuse the D03 authority/idempotency boundary.
-- Items reports `Unassigned` when the graph carries no authoritative owner and does not yet expose
-  owner data or an owner filter. Text, service, type, and status filters plus aggregate counts are
+- Items reports `Unassigned` when the graph carries no authoritative owner. Active human entity
+  assignments in ownership roles now provide server-authoritative owner data and filtering. Each
+  object retains at most 20 ordered owners and the workspace picker retains at most 200 ordered
+  people with explicit truncation flags; agent-owned work and role-specific filter facets remain a
+  later extension. Text, owner, service, type, and status filters plus aggregate counts are
   server-authoritative; provider-specific full-text indexes remain a later scale optimization.
 - The workspace query retains every current release membership up to an explicit per-object bound of 500. The first sorted membership remains the compatibility canonical identifier, while the client
   requires an exact choice whenever more than one membership exists. Memberships outside the current
@@ -234,7 +238,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Complete D07 authorized shares and owner filtering around the Items checkpoint, then return to
+Complete D07 authorized shares around the Items checkpoint, then return to
 the recorded D05 readiness batch optimization before the large-fixture performance gate.
 Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
 high-impact, mechanically enforceable findings into static rules or repository instructions.

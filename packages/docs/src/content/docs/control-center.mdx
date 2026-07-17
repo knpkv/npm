@@ -32,7 +32,7 @@ Server workflows use the durable module through two operations: a bounded atomic
 
 ## Find workspace items
 
-The **Items** route searches current Jira work, pull requests, Confluence pages, pipeline executions, deployments, and time entries across the authenticated workspace. Text, service, type, and lifecycle filters run on the server before the 500-item response bound, so a match cannot be hidden behind an unrelated client-side prefix. The response includes authoritative matched and workspace totals plus an explicit truncation flag.
+The **Items** route searches current Jira work, pull requests, Confluence pages, pipeline executions, deployments, and time entries across the authenticated workspace. Text, owner, service, type, and lifecycle filters run on the server before the 500-item response bound, so a match cannot be hidden behind an unrelated client-side prefix. Active entity-scoped human ownership assignments provide canonical names and avatar fallbacks; genuinely unassigned work remains labeled **Unassigned**. The response includes authoritative matched and workspace totals plus explicit result and owner-facet truncation flags.
 
 Press **⌘K** on macOS or **Ctrl+K** elsewhere from any workspace page to combine the authenticated release portfolio and current item index in one compact command search. Six deterministically ranked matches remain keyboard-selectable, while **Open item results** continues on the URL-backed Items route and **Ask Relay from here** preserves the calling page or opens its exact release thread.
 

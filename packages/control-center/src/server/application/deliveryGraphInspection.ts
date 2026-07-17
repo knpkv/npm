@@ -123,6 +123,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
     workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(input) {
       const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
         _tag: "workspaceEntityProjections",
+        owner: input.owner,
         query: input.query,
         service: input.service,
         status: input.status,

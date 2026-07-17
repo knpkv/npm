@@ -237,6 +237,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
             const session = yield* CurrentSession
             return yield* inspection.workspaceEntityProjections({
               workspaceId: session.workspaceId,
+              owner: query.owner ?? null,
               query: query.q ?? null,
               service: query.service ?? null,
               status: query.status ?? null,

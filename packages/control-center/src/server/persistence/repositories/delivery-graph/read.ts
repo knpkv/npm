@@ -1,9 +1,10 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import { derivePersonInitials, PersonAvatar, Role } from "../../../../domain/actors.js"
 import { LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
-import { EvidenceClaimId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
+import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
 import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
@@ -27,6 +28,48 @@ const WorkspaceProjectionCountRow = Schema.Struct({
 })
 
 const WorkspaceProjectionReleaseIds = Schema.fromJsonString(Schema.Array(ReleaseId))
+const WorkspaceOwnerIdentity = Schema.Struct({
+  avatarJson: Schema.String,
+  displayName: Schema.String,
+  personId: PersonId,
+  rolesCsv: Schema.String
+})
+const WorkspaceOwnerIdentities = Schema.fromJsonString(Schema.Array(WorkspaceOwnerIdentity))
+const WorkspaceOwnerOptionRow = WorkspaceOwnerIdentity
+const PersonAvatarJson = Schema.fromJsonString(PersonAvatar)
+const WorkspaceOwnerDisplayName = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200)
+)
+const WorkspaceOwnerRoles = Schema.Array(Role).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(16),
+  Schema.isUnique()
+)
+
+const decodeWorkspaceOwner = Effect.fn("DeliveryGraphRepository.decodeWorkspaceOwner")(function*(
+  workspaceId: WorkspaceId,
+  owner: typeof WorkspaceOwnerIdentity.Type
+) {
+  const displayName = yield* Schema.decodeUnknownEffect(WorkspaceOwnerDisplayName)(owner.displayName).pipe(
+    Effect.mapError(() => graphRecordError(workspaceId, "person", owner.personId, "person-schema-invalid"))
+  )
+  const avatar = yield* Schema.decodeUnknownEffect(PersonAvatarJson)(owner.avatarJson).pipe(
+    Effect.mapError(() => graphRecordError(workspaceId, "person-avatar", owner.personId, "schema-decode-failed"))
+  )
+  const roles = yield* Schema.decodeUnknownEffect(WorkspaceOwnerRoles)(
+    owner.rolesCsv.split(",").sort()
+  ).pipe(
+    Effect.mapError(() => graphRecordError(workspaceId, "person", owner.personId, "person-schema-invalid"))
+  )
+  return {
+    avatarFallback: avatar._tag === "initials" ? avatar.text : derivePersonInitials(displayName),
+    displayName,
+    personId: owner.personId,
+    roles
+  }
+})
 
 export const makeDeliveryGraphReader = Effect.gen(function*() {
   const database = yield* Database
@@ -412,6 +455,15 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       }
       case "workspaceEntityProjections": {
         const rowLimit = query.limit + 1
+        const ownerRole = sql`assignment.role IN (
+          'change-owner', 'issue-owner', 'issue-assignee', 'page-owner', 'author', 'operator'
+        )`
+        const activeOwner = sql`assignment.workspace_id = projection.workspace_id
+          AND assignment.entity_id = projection.entity_id
+          AND assignment.scope_kind = 'entity'
+          AND assignment.actor_kind = 'human'
+          AND assignment.lifecycle_kind = 'active'
+          AND ${ownerRole}`
         const entityType = sql`CASE entity.entity_type
           WHEN 'pipeline' THEN 'pipeline-execution'
           ELSE entity.entity_type
@@ -482,7 +534,17 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           ) > 0)
           AND (${query.service} IS NULL OR ${service} = ${query.service})
           AND (${query.status} IS NULL OR ${statusGroup} = ${query.status})
-          AND (${query.type} IS NULL OR ${entityType} = ${query.type})`
+          AND (${query.type} IS NULL OR ${entityType} = ${query.type})
+          AND (${query.owner} IS NULL OR EXISTS (
+            SELECT 1
+            FROM role_assignments assignment
+            INNER JOIN persons person
+              ON person.workspace_id = assignment.workspace_id
+             AND person.person_id = assignment.person_id
+             AND person.is_active = 1
+            WHERE ${activeOwner}
+              AND assignment.person_id = ${query.owner}
+          ))`
         // The repository executes this reader in one transaction, so counts and rows share a snapshot.
         const countRows = yield* sql`SELECT
             COUNT(CASE WHEN ${matchesFilters} THEN 1 END) AS matchedCount,
@@ -508,6 +570,28 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             projection.extension_json AS extensionJson,
             projection.extension_digest AS extensionDigest,
             projection.recorded_at AS recordedAt,
+            COALESCE((
+              SELECT json_group_array(json_object(
+                'avatarJson', owner.avatar_json,
+                'displayName', owner.display_name,
+                'personId', owner.person_id,
+                'rolesCsv', owner.roles_csv
+              ))
+              FROM (
+                SELECT person.person_id, person.display_name, person.avatar_json,
+                  group_concat(DISTINCT assignment.role) AS roles_csv
+                FROM role_assignments assignment
+                INNER JOIN persons person
+                  ON person.workspace_id = assignment.workspace_id
+                 AND person.person_id = assignment.person_id
+                 AND person.is_active = 1
+                WHERE ${activeOwner}
+                GROUP BY person.person_id, person.display_name, person.avatar_json
+                ORDER BY CASE WHEN person.person_id = ${query.owner} THEN 0 ELSE 1 END,
+                  person.display_name, person.person_id
+                LIMIT 21
+              ) owner
+            ), '[]') AS ownerIdentitiesJson,
             COALESCE((
               SELECT json_group_array(current_release.release_id)
               FROM (
@@ -562,22 +646,79 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
                 captureMalformedDeliveryGraphRow(row)
               )
             const boundedReleaseIds = releaseIds.slice(0, 500)
+            const ownerIdentities = yield* Schema.decodeUnknownEffect(WorkspaceOwnerIdentities)(
+              row.ownerIdentitiesJson
+            ).pipe(
+              Effect.mapError(() =>
+                graphRecordError(
+                  workspaceId,
+                  "person",
+                  row.entityId,
+                  "person-schema-invalid"
+                )
+              ),
+              captureMalformedDeliveryGraphRow(row)
+            )
+            const owners = yield* Effect.forEach(
+              ownerIdentities.slice(0, 20),
+              (owner) => decodeWorkspaceOwner(workspaceId, owner).pipe(captureMalformedDeliveryGraphRow(owner))
+            )
             const { projection, recordedAt } = yield* decodeProjectionRow(row).pipe(
               captureMalformedDeliveryGraphRow(row)
             )
             return {
               canonicalReleaseId: boundedReleaseIds[0] ?? null,
+              owners,
+              ownersTruncated: ownerIdentities.length > 20,
               releaseIds: boundedReleaseIds,
               releaseMembershipsTruncated: releaseIds.length > 500,
               projection,
               recordedAt
             }
           }))
+        const ownerOptionRows = yield* sql`SELECT
+            person.person_id AS personId,
+            person.display_name AS displayName,
+            person.avatar_json AS avatarJson,
+            group_concat(DISTINCT assignment.role) AS rolesCsv
+          FROM role_assignments assignment
+          INNER JOIN persons person
+            ON person.workspace_id = assignment.workspace_id
+           AND person.person_id = assignment.person_id
+           AND person.is_active = 1
+          INNER JOIN entity_projection_revisions projection
+            ON projection.workspace_id = assignment.workspace_id
+           AND projection.entity_id = assignment.entity_id
+          INNER JOIN entities entity
+            ON entity.workspace_id = projection.workspace_id
+           AND entity.entity_id = projection.entity_id
+          WHERE ${activeOwner}
+            AND ${isCurrent}
+          GROUP BY person.person_id, person.display_name, person.avatar_json
+          ORDER BY person.display_name, person.person_id
+          LIMIT 201`
+        const decodedOwnerOptions = yield* decodeRows(WorkspaceOwnerOptionRow, ownerOptionRows).pipe(
+          Effect.mapError(() =>
+            graphRecordError(
+              workspaceId,
+              "person",
+              workspaceId,
+              "person-schema-invalid"
+            )
+          ),
+          captureMalformedDeliveryGraphRow(ownerOptionRows)
+        )
+        const ownerOptions = yield* Effect.forEach(
+          decodedOwnerOptions.slice(0, 200),
+          (owner) => decodeWorkspaceOwner(workspaceId, owner).pipe(captureMalformedDeliveryGraphRow(owner))
+        )
         return DeliveryGraphReadResult.make({
           _tag: "workspaceEntityProjections",
           value: {
             items,
             matchedCount: counts.matchedCount,
+            ownerOptions,
+            ownerOptionsTruncated: decodedOwnerOptions.length > 200,
             totalCount: counts.totalCount,
             truncated: decoded.length > query.limit
           }

@@ -64,6 +64,8 @@ const session = Schema.decodeSync(SessionSummary)({
   absoluteExpiresAt: "2026-08-13T10:00:00.000Z",
   revokedAt: null
 })
+if (session.actor._tag !== "human") throw new Error("Expected a human handler fixture")
+const sessionPersonId = session.actor.personId
 
 const snapshot = Schema.decodeSync(PortfolioSnapshot)({
   workspaceId,
@@ -114,6 +116,7 @@ const portfolioLayer = Layer.succeed(PortfolioSnapshots, {
 
 const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
   workspaceEntityProjections: ({
+    owner,
     query,
     service,
     status,
@@ -122,7 +125,15 @@ const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
   }) =>
     requestedWorkspaceId === session.workspaceId
       ? Effect.succeed({
-        matchedCount: query === "refunds" && service === "jira" && status === "active" && type === "issue" ? 1 : 0,
+        matchedCount: query === "refunds" &&
+            owner === sessionPersonId &&
+            service === "jira" &&
+            status === "active" &&
+            type === "issue"
+          ? 1
+          : 0,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
         totalCount: 1,
         truncated: false,
         items: []
@@ -217,12 +228,26 @@ describe("Control Center API handlers", () => {
       const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
       const result = yield* client.deliveryGraph.workspaceEntityProjections({ query: {} })
 
-      assert.deepStrictEqual(result, { matchedCount: 0, totalCount: 1, truncated: false, items: [] })
+      assert.deepStrictEqual(result, {
+        matchedCount: 0,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
+        totalCount: 1,
+        truncated: false,
+        items: []
+      })
 
       const filtered = yield* client.deliveryGraph.workspaceEntityProjections({
-        query: { q: "refunds", service: "jira", status: "active", type: "issue" }
+        query: { owner: sessionPersonId, q: "refunds", service: "jira", status: "active", type: "issue" }
       })
-      assert.deepStrictEqual(filtered, { matchedCount: 1, totalCount: 1, truncated: false, items: [] })
+      assert.deepStrictEqual(filtered, {
+        matchedCount: 1,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
+        totalCount: 1,
+        truncated: false,
+        items: []
+      })
     }).pipe(
       Effect.provide([
         NodeHttpServer.layerHttpServices,

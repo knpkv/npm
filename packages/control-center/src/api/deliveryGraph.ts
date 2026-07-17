@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
+import { Role } from "../domain/actors.js"
 import {
   DeliveryEntityKind,
   DeliveryEntityProjection,
@@ -15,6 +16,7 @@ import {
 import {
   EnvironmentId,
   EvidenceId,
+  PersonId,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
@@ -44,6 +46,9 @@ import { CanonicalNonNegativeIntegerFromString } from "./wire.js"
 export const MAXIMUM_RELEASE_SLICE_RECORDS = 500
 export const MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS = 500
 export const MAXIMUM_WORKSPACE_ENTITY_RELEASES = 500
+export const MAXIMUM_WORKSPACE_ENTITY_OWNERS = 20
+export const MAXIMUM_WORKSPACE_OWNER_OPTIONS = 200
+export const MAXIMUM_WORKSPACE_OWNER_ROLES = 16
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
 export const MAXIMUM_REPAIR_PROPOSALS = 128
@@ -85,9 +90,25 @@ const WorkspaceEntityReleaseIds = Schema.Array(ReleaseId).check(
   )
 )
 
+/** Compact canonical human identity assigned to one current workspace entity. */
+export const WorkspaceEntityOwner = Schema.Struct({
+  avatarFallback: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4)),
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  personId: PersonId,
+  roles: boundedArray(Role, MAXIMUM_WORKSPACE_OWNER_ROLES).check(Schema.isMinLength(1))
+}).annotate({ identifier: "WorkspaceEntityOwner" })
+
+/** Decoded entity owner identity. */
+export type WorkspaceEntityOwner = typeof WorkspaceEntityOwner.Type
+
+const WorkspaceEntityOwners = boundedArray(WorkspaceEntityOwner, MAXIMUM_WORKSPACE_ENTITY_OWNERS)
+const WorkspaceOwnerOptions = boundedArray(WorkspaceEntityOwner, MAXIMUM_WORKSPACE_OWNER_OPTIONS)
+
 /** One current workspace entity projection and every bounded current release membership. */
 export const WorkspaceEntityProjection = Schema.Struct({
   canonicalReleaseId: Schema.NullOr(ReleaseId),
+  owners: WorkspaceEntityOwners,
+  ownersTruncated: Schema.Boolean,
   releaseIds: WorkspaceEntityReleaseIds,
   releaseMembershipsTruncated: Schema.Boolean,
   projection: DeliveryEntityProjection,
@@ -101,16 +122,28 @@ export const WorkspaceEntityProjection = Schema.Struct({
     ({ releaseIds, releaseMembershipsTruncated }) =>
       !releaseMembershipsTruncated || releaseIds.length === MAXIMUM_WORKSPACE_ENTITY_RELEASES,
     { expected: "truncated workspace release memberships to contain the complete bounded prefix" }
+  ),
+  Schema.makeFilter(
+    ({ owners, ownersTruncated }) => !ownersTruncated || owners.length === MAXIMUM_WORKSPACE_ENTITY_OWNERS,
+    { expected: "truncated workspace owners to contain the complete bounded prefix" }
   )
 ).annotate({ identifier: "WorkspaceEntityProjection" })
 
 /** Bounded workspace-wide index of current present normalized entities. */
 export const WorkspaceEntityProjectionIndex = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  ownerOptions: WorkspaceOwnerOptions,
+  ownerOptionsTruncated: Schema.Boolean,
   totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
   items: boundedArray(WorkspaceEntityProjection, MAXIMUM_WORKSPACE_ENTITY_PROJECTIONS)
-}).annotate({ identifier: "WorkspaceEntityProjectionIndex" })
+}).check(
+  Schema.makeFilter(
+    ({ ownerOptions, ownerOptionsTruncated }) =>
+      !ownerOptionsTruncated || ownerOptions.length === MAXIMUM_WORKSPACE_OWNER_OPTIONS,
+    { expected: "truncated workspace owner options to contain the complete bounded prefix" }
+  )
+).annotate({ identifier: "WorkspaceEntityProjectionIndex" })
 
 /** Decoded workspace-wide current entity index. */
 export type WorkspaceEntityProjectionIndex = typeof WorkspaceEntityProjectionIndex.Type
@@ -242,6 +275,7 @@ const workspaceEntityProjections = HttpApiEndpoint.get(
       q: Schema.optionalKey(
         Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
       ),
+      owner: Schema.optionalKey(PersonId),
       service: Schema.optionalKey(DeliveryEntityService),
       status: Schema.optionalKey(DeliveryEntityStatusGroup),
       type: Schema.optionalKey(DeliveryEntityKind)

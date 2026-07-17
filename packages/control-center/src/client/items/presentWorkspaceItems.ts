@@ -2,7 +2,12 @@ import type { RlyService } from "@knpkv/rly/patterns"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 
-import type { ReleaseDeliveryGraphInspection, WorkspaceEntityProjectionIndex } from "../../api/deliveryGraph.js"
+import type {
+  ReleaseDeliveryGraphInspection,
+  WorkspaceEntityOwner,
+  WorkspaceEntityProjectionIndex
+} from "../../api/deliveryGraph.js"
+import type { Role } from "../../domain/actors.js"
 import type {
   DeliveryEntityDetails,
   DeliveryEntityKind,
@@ -19,6 +24,8 @@ export interface WorkspaceItemPresentation {
   readonly key: string
   readonly kind: DeliveryEntityKind
   readonly owner: string
+  readonly owners: ReadonlyArray<WorkspaceItemOwnerPresentation>
+  readonly ownersTruncated: boolean
   readonly releaseId: ReleaseId | null
   readonly releaseIds: ReadonlyArray<ReleaseId>
   readonly releaseMembershipsTruncated: boolean
@@ -28,6 +35,31 @@ export interface WorkspaceItemPresentation {
   readonly statusGroup: WorkspaceItemStatus
   readonly title: string
   readonly tone: RlyStateTone
+}
+
+export interface WorkspaceItemOwnerPresentation {
+  readonly avatarFallback: string
+  readonly id: string
+  readonly name: string
+  readonly role: string
+  readonly roles: ReadonlyArray<Role>
+}
+
+const collaboratorRoleLabel = (role: Role): string => {
+  switch (role) {
+    case "change-owner":
+    case "issue-owner":
+    case "page-owner":
+      return "Owner"
+    case "issue-assignee":
+      return "Assignee"
+    case "author":
+      return "Author"
+    case "operator":
+      return "Operator"
+    default:
+      return titleCase(role)
+  }
 }
 
 const serviceFor = (kind: DeliveryEntityKind): RlyService => {
@@ -104,7 +136,13 @@ const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId | null, entityI
 
 const presentProjection = (
   workspaceId: WorkspaceId,
-  entry: WorkspaceEntityProjectionIndex["items"][number],
+  entry: ReleaseDeliveryGraphInspection["entityProjections"][number] & {
+    readonly canonicalReleaseId: ReleaseId | null
+    readonly owners?: ReadonlyArray<WorkspaceEntityOwner>
+    readonly ownersTruncated?: boolean
+    readonly releaseIds: ReadonlyArray<ReleaseId>
+    readonly releaseMembershipsTruncated: boolean
+  },
   routableReleaseIds?: ReadonlySet<ReleaseId>
 ): WorkspaceItemPresentation => {
   const projection = entry.projection
@@ -115,13 +153,27 @@ const presentProjection = (
   const releaseId = entry.releaseIds.length === 1 && !entry.releaseMembershipsTruncated
     ? (routableMemberships[0] ?? null)
     : null
+  const owners: ReadonlyArray<WorkspaceItemOwnerPresentation> = (entry.owners ?? []).map(({
+    avatarFallback,
+    displayName,
+    personId,
+    roles
+  }) => ({
+    avatarFallback,
+    id: personId,
+    name: displayName,
+    role: [...new Set(roles.map(collaboratorRoleLabel))].join(" · "),
+    roles
+  }))
   return {
     entityId: projection.entityId,
     freshness: DateTime.formatIso(entry.recordedAt),
     href: itemHref(workspaceId, releaseId, projection.entityId),
     key: projection.displayKey,
     kind: projection.entityType,
-    owner: "Unassigned",
+    owner: owners.length === 0 ? "Unassigned" : owners.map(({ name }) => name).join(", "),
+    owners,
+    ownersTruncated: entry.ownersTruncated ?? false,
     releaseId,
     releaseIds: entry.releaseIds,
     releaseMembershipsTruncated: entry.releaseMembershipsTruncated,

@@ -1,9 +1,12 @@
-import { ServiceMark } from "@knpkv/rly/patterns"
+import { PeopleStrip, ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useMemo } from "react"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import { type ReactElement, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useSearchParams } from "react-router"
 
 import type { DeliveryEntityKind, DeliveryEntityService } from "../../domain/deliveryGraph.js"
+import { PersonId } from "../../domain/identifiers.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio/PortfolioOverview.js"
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
@@ -14,14 +17,19 @@ import {
   type WorkspaceItemStatus,
   workspaceItemReleaseHref
 } from "./presentWorkspaceItems.js"
-import { useWorkspaceItems } from "./useWorkspaceItems.js"
+import { browserWorkspaceItemsTransport, useWorkspaceItems, type WorkspaceItemsTransport } from "./useWorkspaceItems.js"
 import styles from "./ItemsPage.module.css"
 
 interface ItemFilters {
   readonly query: string
+  readonly owner: PersonId | "all"
   readonly service: DeliveryEntityService | "all"
   readonly status: WorkspaceItemStatus | "all"
   readonly type: DeliveryEntityKind | "all"
+}
+
+export interface ItemsPageProps {
+  readonly transport?: WorkspaceItemsTransport
 }
 
 const entityKinds: ReadonlyArray<DeliveryEntityKind> = [
@@ -70,7 +78,13 @@ const entityKind = (value: string | null): DeliveryEntityKind | "all" =>
 const itemStatus = (value: string | null): WorkspaceItemStatus | "all" =>
   value === "active" || value === "done" || value === "failed" ? value : "all"
 
+const itemOwner = (value: string | null): PersonId | "all" => {
+  const decoded = Schema.decodeUnknownOption(PersonId)(value)
+  return Option.isSome(decoded) ? decoded.value : "all"
+}
+
 const filtersFrom = (params: URLSearchParams): ItemFilters => ({
+  owner: itemOwner(params.get("owner")),
   query: params.get("q")?.trim() ?? "",
   service: services.find((candidate) => candidate === params.get("service")) ?? "all",
   status: itemStatus(params.get("status")),
@@ -86,8 +100,28 @@ export const filterWorkspaceItems = (
     (item) =>
       (query.length === 0 || `${item.key} ${item.title} ${item.status}`.toLocaleLowerCase("en-US").includes(query)) &&
       (filters.service === "all" || item.service === filters.service) &&
+      (filters.owner === "all" || item.owners.some(({ id }) => id === filters.owner)) &&
       (filters.status === "all" || item.statusGroup === filters.status) &&
       (filters.type === "all" || item.kind === filters.type)
+  )
+}
+
+const ItemOwners = ({ item }: { readonly item: WorkspaceItemPresentation }): ReactElement => {
+  const [expanded, setExpanded] = useState(false)
+  if (item.owners.length === 0) return <span>Unassigned</span>
+  return (
+    <span className={styles.ownerGroup}>
+      <PeopleStrip
+        aria-label={`${item.key} collaborators${item.ownersTruncated ? ", more collaborators not shown" : ""}`}
+        className={styles.owners}
+        expanded={expanded}
+        limit={2}
+        onExpandedChange={setExpanded}
+        people={item.owners}
+        size="compact"
+      />
+      {item.ownersTruncated ? <span className={styles.ownerLimit}>20+ people · More not shown</span> : null}
+    </span>
   )
 }
 
@@ -117,7 +151,7 @@ export const workspaceItemMembershipDescription = (item: WorkspaceItemPresentati
 }
 
 /** Compact workspace-wide index of normalized delivery objects. */
-export const ItemsPage = (): ReactElement => {
+export const ItemsPage = ({ transport = browserWorkspaceItemsTransport }: ItemsPageProps = {}): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const browserSession = useBrowserSession()
   const location = useLocation()
@@ -139,7 +173,8 @@ export const ItemsPage = (): ReactElement => {
     filters,
     refreshKey,
     sessionKey,
-    browserSession.invalidateSession
+    browserSession.invalidateSession,
+    transport
   )
   const replaceSearch = (next: URLSearchParams): void => {
     navigate(itemsLocationWithSearch(location, next), { replace: true })
@@ -197,6 +232,12 @@ export const ItemsPage = (): ReactElement => {
   }
 
   const visibleItems = controller.state.items
+  const hasSelectedOwnerOption =
+    filters.owner === "all" || controller.state.ownerOptions.some(({ personId }) => personId === filters.owner)
+  const selectedOwner =
+    filters.owner === "all"
+      ? undefined
+      : controller.state.items.flatMap(({ owners }) => owners).find(({ id }) => id === filters.owner)
   const selectedEntityId = searchParams.get("object")
   const selectedItem = selectWorkspaceItem(controller.state.items, selectedEntityId)
   const clearSelection = (): void => {
@@ -248,6 +289,21 @@ export const ItemsPage = (): ReactElement => {
           </select>
         </label>
         <label>
+          <span>Owner</span>
+          <select onChange={(event) => update("owner", event.currentTarget.value)} value={filters.owner}>
+            <option value="all">Anyone</option>
+            {filters.owner !== "all" && !hasSelectedOwnerOption ? (
+              <option value={filters.owner}>{selectedOwner?.name ?? `Owner …${filters.owner.slice(-6)}`}</option>
+            ) : null}
+            {controller.state.ownerOptions.map((owner) => (
+              <option key={owner.personId} value={owner.personId}>
+                {owner.displayName}
+              </option>
+            ))}
+            {controller.state.ownerOptionsTruncated ? <option disabled>More owners not shown</option> : null}
+          </select>
+        </label>
+        <label>
           <span>Type</span>
           <select onChange={(event) => update("type", event.currentTarget.value)} value={filters.type}>
             <option value="all">All types</option>
@@ -293,6 +349,7 @@ export const ItemsPage = (): ReactElement => {
           <Text tone="secondary" variant="body-large">
             {workspaceItemMembershipDescription(selectedItem)}
           </Text>
+          <ItemOwners item={selectedItem} />
           <div className={styles.selectionActions}>
             <div className={styles.membershipChoices}>
               {selectedItem.routableReleaseIds.map((releaseId) => {
@@ -334,7 +391,7 @@ export const ItemsPage = (): ReactElement => {
       {visibleItems.length === 0 ? (
         <StatePanel
           action={<Button onClick={() => replaceSearch(new URLSearchParams())}>Clear filters</Button>}
-          description="Try a broader word, service, type, or status. No demo object is substituted."
+          description="Try a broader word, owner, service, type, or status. No demo object is substituted."
           title="No matching items"
         />
       ) : (
@@ -366,7 +423,7 @@ export const ItemsPage = (): ReactElement => {
                     ? "Unlinked"
                     : `${item.releaseIds.length}${item.releaseMembershipsTruncated ? "+" : ""} release${item.releaseIds.length === 1 ? "" : "s"}`}
                 </span>
-                <span>{item.owner}</span>
+                <ItemOwners item={item} />
                 <time dateTime={item.freshness} title={`Synchronized ${item.freshness}`}>
                   {formatItemFreshness(item.freshness)}
                 </time>

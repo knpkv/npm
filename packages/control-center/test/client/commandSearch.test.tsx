@@ -8,6 +8,7 @@ import { createMemoryRouter, RouterProvider } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
+import type { WorkspaceEntityProjectionIndex } from "../../src/api/deliveryGraph.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { CommandSearch, commandSearchResults } from "../../src/client/command/CommandSearch.js"
 import { commandSearchItemHref, commandSearchItemsHref } from "../../src/client/command/commandSearchRoutes.js"
@@ -35,12 +36,18 @@ const session = Schema.decodeSync(SessionSummary)({
   workspaceId: WORKSET_WORKSPACE_ID
 })
 const csrfToken = Schema.decodeSync(CsrfToken)("ab".repeat(32))
+const ownerFields = {
+  ownerOptions: [],
+  ownerOptionsTruncated: false
+} satisfies Pick<WorkspaceEntityProjectionIndex, "ownerOptions" | "ownerOptionsTruncated">
 const issueEntries = releaseWorksetFixture.entityProjections
   .filter(({ projection }) => projection.entityType === "issue")
   .slice(0, 2)
   .map((entry) => ({
     ...entry,
     canonicalReleaseId: releaseWorksetFixture.releaseId,
+    owners: [],
+    ownersTruncated: false,
     releaseIds: [releaseWorksetFixture.releaseId],
     releaseMembershipsTruncated: false
   }))
@@ -120,6 +127,7 @@ describe("command search", () => {
     const transport = {
       load: vi.fn((_signal: AbortSignal, _query) =>
         Promise.resolve({
+          ...ownerFields,
           items: issueEntries,
           matchedCount: issueEntries.length,
           totalCount: 12,
@@ -174,6 +182,7 @@ describe("command search", () => {
     await act(async () => Promise.resolve())
 
     expect(transport.load).toHaveBeenCalledWith(expect.any(AbortSignal), {
+      owner: "all",
       query: "OPS",
       service: "all",
       status: "all",
@@ -208,7 +217,7 @@ describe("command search", () => {
   it("finds a release codename and opens its exact full view", async () => {
     const transport = {
       load: vi.fn((_signal: AbortSignal, _query) =>
-        Promise.resolve({ items: [], matchedCount: 0, totalCount: 12, truncated: false })
+        Promise.resolve({ ...ownerFields, items: [], matchedCount: 0, totalCount: 12, truncated: false })
       )
     } satisfies WorkspaceItemsTransport
     const host = document.createElement("div")
@@ -306,7 +315,7 @@ describe("command search", () => {
   it("keeps cookie-authenticated search available when mutation-proof storage fails", async () => {
     const transport = {
       load: vi.fn((_signal: AbortSignal, _query) =>
-        Promise.resolve({ items: [], matchedCount: 0, totalCount: 0, truncated: false })
+        Promise.resolve({ ...ownerFields, items: [], matchedCount: 0, totalCount: 0, truncated: false })
       )
     } satisfies WorkspaceItemsTransport
     const storageWrite = vi.spyOn(sessionStorage, "setItem").mockImplementation(() => {
