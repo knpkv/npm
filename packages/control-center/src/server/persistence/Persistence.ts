@@ -46,6 +46,9 @@ import {
   type PluginConnectionRepositoryService,
   PluginRuntimeRepository,
   type PluginRuntimeRepositoryService,
+  type ProviderAccountInputError,
+  ProviderAccountRepository,
+  type ProviderAccountRepositoryService,
   QuarantineRepository,
   type ReadinessInputError,
   ReadinessRepository,
@@ -74,6 +77,7 @@ export type PersistenceOperationFailure =
   | GovernedActionInputError
   | PersistedRecordError
   | PluginConnectionLimitError
+  | ProviderAccountInputError
   | PersistenceOperationError
   | QuarantineWriteError
   | ReadinessInputError
@@ -100,6 +104,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "GovernedActionInputError",
   "PersistedRecordError",
   "PluginConnectionLimitError",
+  "ProviderAccountInputError",
   "PersistenceOperationError",
   "QuarantineWriteError",
   "ReadinessInputError",
@@ -157,6 +162,7 @@ const makePersistence = Effect.gen(function*() {
   const pluginConnections = yield* PluginConnectionRepository
   const pluginConfigurations = yield* PluginConfigurationRepository
   const pluginRuntime = yield* PluginRuntimeRepository
+  const providerAccounts = yield* ProviderAccountRepository
   const readiness = yield* ReadinessRepository
   const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
@@ -288,6 +294,24 @@ const makePersistence = Effect.gen(function*() {
       recordHealth: (...args: Parameters<PluginRuntimeRepositoryService["recordHealth"]>) =>
         publicOperation("plugin-runtime.record-health", pluginRuntime.recordHealth(...args))
     },
+    providerAccounts: {
+      create: (...args: Parameters<ProviderAccountRepositoryService["create"]>) =>
+        publicOperation("provider-account.create", providerAccounts.create(...args)),
+      followResource: (...args: Parameters<ProviderAccountRepositoryService["followResource"]>) =>
+        publicOperation("provider-account.follow-resource", providerAccounts.followResource(...args)),
+      get: (...args: Parameters<ProviderAccountRepositoryService["get"]>) =>
+        publicOperation("provider-account.get", providerAccounts.get(...args)),
+      getResource: (...args: Parameters<ProviderAccountRepositoryService["getResource"]>) =>
+        publicOperation("provider-account.get-resource", providerAccounts.getResource(...args)),
+      list: (...args: Parameters<ProviderAccountRepositoryService["list"]>) =>
+        publicOperation("provider-account.list", providerAccounts.list(...args)),
+      listResources: (...args: Parameters<ProviderAccountRepositoryService["listResources"]>) =>
+        publicOperation("provider-account.list-resources", providerAccounts.listResources(...args)),
+      updateMetadata: (...args: Parameters<ProviderAccountRepositoryService["updateMetadata"]>) =>
+        publicOperation("provider-account.update", providerAccounts.updateMetadata(...args)),
+      updateResourceMetadata: (...args: Parameters<ProviderAccountRepositoryService["updateResourceMetadata"]>) =>
+        publicOperation("provider-account.update-resource", providerAccounts.updateResourceMetadata(...args))
+    },
     readiness: {
       claimInvalidation: (...args: Parameters<ReadinessRepositoryService["claimInvalidation"]>) =>
         publicOperation("readiness.claim-invalidation", readiness.claimInvalidation(...args)),
@@ -401,6 +425,7 @@ export const persistenceLayerFromDatabase = (
         const pluginConnections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
         const pluginConfigurations = PluginConfigurationRepository.layer.pipe(Layer.provide(foundation))
         const pluginRuntime = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
+        const providerAccounts = ProviderAccountRepository.layer.pipe(Layer.provide(foundation))
         const readiness = ReadinessRepository.layer.pipe(Layer.provide(foundation))
         const relationshipRepairProposals = RelationshipRepairProposalRepository.layer
         const release = ReleaseRepository.layer.pipe(Layer.provide(foundation))
@@ -423,6 +448,7 @@ export const persistenceLayerFromDatabase = (
           pluginConnections,
           pluginConfigurations,
           pluginRuntime,
+          providerAccounts,
           readiness,
           relationshipRepairProposals,
           release,

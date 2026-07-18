@@ -58,6 +58,18 @@ export const PluginConnectionId = canonicalUuid7("PluginConnectionId")
 /** Decoded plugin-connection identifier. */
 export type PluginConnectionId = typeof PluginConnectionId.Type
 
+/** Canonical identifier of one external provider account followed by a workspace. */
+export const ProviderAccountId = canonicalUuid7("ProviderAccountId")
+
+/** Decoded provider-account identifier. */
+export type ProviderAccountId = typeof ProviderAccountId.Type
+
+/** Canonical identifier of one repository, pipeline, site, or workspace being followed. */
+export const FollowedResourceId = canonicalUuid7("FollowedResourceId")
+
+/** Decoded followed-resource identifier. */
+export type FollowedResourceId = typeof FollowedResourceId.Type
+
 /** Canonical identifier of a collaborator role assignment. */
 export const RoleAssignmentId = canonicalUuid7("RoleAssignmentId")
 
