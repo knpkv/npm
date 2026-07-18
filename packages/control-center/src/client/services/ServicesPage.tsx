@@ -17,7 +17,9 @@ import type { PluginConnectionId } from "../../domain/identifiers.js"
 import { firstPartyServiceIdentities, type FirstPartyServiceIdentity } from "../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
+import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
+import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
 import { selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
 import styles from "./ServicesPage.module.css"
 
@@ -179,28 +181,12 @@ const ConnectionCard = ({
   )
 }
 
-const setupValue = (field: PluginServiceCatalogEntry["configurationFields"][number], value: string) => {
-  switch (field.kind) {
-    case "integer":
-      return { _tag: "integer", key: field.key, value: Number(value) } satisfies CreatePluginConnectionValue
-    case "secret":
-      return { _tag: "secret", key: field.key, value } satisfies CreatePluginConnectionValue
-    case "text":
-    case "url":
-      return { _tag: field.kind, key: field.key, value } satisfies CreatePluginConnectionValue
-  }
-}
-
 const SetupForm = ({
-  awsProfiles,
-  awsProfilesState,
   catalog,
   isSubmitting,
   onCancel,
   onSubmit
 }: {
-  readonly awsProfiles: AwsProfileDiscoveryResponse
-  readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly catalog: PluginServiceCatalogEntry
   readonly isSubmitting: boolean
   readonly onCancel: () => void
@@ -211,21 +197,14 @@ const SetupForm = ({
   const [values, setValues] = useState<ReadonlyMap<string, string>>(
     new Map(catalog.configurationFields.map((field) => [field.key, field.defaultValue ?? ""]))
   )
-  const selectedAwsProfile = values.get("profile")
-
-  useEffect(() => {
-    const detectedRegion = awsProfiles.find(({ profile }) => profile === selectedAwsProfile)?.region
-    if (detectedRegion === null || detectedRegion === undefined) return
-    setValues((current) =>
-      current.get("region") === detectedRegion ? current : new Map(current).set("region", detectedRegion)
-    )
-  }, [awsProfiles, selectedAwsProfile])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     setSetupError(null)
-    const requestValues = catalog.configurationFields.map((field) => setupValue(field, values.get(field.key) ?? ""))
-    onSubmit(displayName, requestValues).then((didCreate) => {
+    const requestValues = catalog.configurationFields.map((field) =>
+      serviceSetupValue(field, values.get(field.key) ?? "")
+    )
+    void onSubmit(displayName, requestValues).then((didCreate) => {
       if (!didCreate) {
         setSetupError("Control Center could not create this connection. Check the fields and try again.")
         return
@@ -256,17 +235,6 @@ const SetupForm = ({
           />
         )}
       </Field>
-      {catalog.providerId === "codecommit" || catalog.providerId === "codepipeline" ? (
-        <Text tone="secondary" variant="meta">
-          {awsProfilesState === "loading"
-            ? "Discovering local AWS profiles…"
-            : awsProfilesState === "ready"
-              ? `${awsProfiles.length} local AWS ${awsProfiles.length === 1 ? "profile" : "profiles"} detected`
-              : awsProfilesState === "failed"
-                ? "Profile discovery unavailable. Enter a profile manually."
-                : "AWS profiles are discovered locally by the Control Center server."}
-        </Text>
-      ) : null}
       {catalog.configurationFields.map((field) => (
         <Field
           description={field.description}
@@ -283,9 +251,6 @@ const SetupForm = ({
               max={field.maximum ?? undefined}
               maxLength={field.kind === "integer" ? undefined : field.kind === "secret" ? 16_384 : 4_096}
               min={field.minimum ?? undefined}
-              list={
-                field.key === "profile" && awsProfiles.length > 0 ? `${catalog.providerId}-aws-profiles` : undefined
-              }
               onChange={(event) => updateValue(field.key, event.currentTarget.value)}
               type={
                 field.kind === "secret"
@@ -301,13 +266,6 @@ const SetupForm = ({
           )}
         </Field>
       ))}
-      {awsProfiles.length > 0 ? (
-        <datalist id={`${catalog.providerId}-aws-profiles`}>
-          {awsProfiles.map(({ profile, region }) => (
-            <option key={profile} label={region ?? "Region not configured"} value={profile} />
-          ))}
-        </datalist>
-      ) : null}
       {setupError === null ? null : (
         <Text as="p" className={styles.setupError} role="alert" variant="body">
           {setupError}
@@ -330,64 +288,75 @@ const CatalogCard = ({
   awsProfilesState,
   canConfigure,
   catalog,
+  catalogs,
   isOpen,
   isRecovery,
   isSubmitting,
   onCancel,
   onOpen,
-  onSubmit
+  onSubmit,
+  onSubmitAws
 }: {
   readonly awsProfiles: AwsProfileDiscoveryResponse
   readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly canConfigure: boolean
   readonly catalog: PluginServiceCatalogEntry
+  readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isOpen: boolean
   readonly isSubmitting: boolean
   readonly isRecovery: boolean
   readonly onCancel: () => void
   readonly onOpen: () => void
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
-}): ReactElement => (
-  <Surface as="article" className={styles.card} padding="default" shape="grouped">
-    <div className={styles.cardHeading}>
-      <div className={styles.connectionIdentity}>
-        <ServiceMark service={catalog.providerId} size="compact" />
-        <Text as="h2" variant="card-title">
-          {catalog.displayName}
-        </Text>
-      </div>
-      <StateLabel
-        label={isRecovery ? "Needs correction" : "Not configured"}
-        size="compact"
-        tone={isRecovery ? "critical" : "neutral"}
-      />
-    </div>
-    <Text tone="secondary" variant="body">
-      {catalog.description}
-    </Text>
-    {isOpen ? (
-      <SetupForm
-        awsProfiles={awsProfiles}
-        awsProfilesState={awsProfilesState}
-        catalog={catalog}
-        isSubmitting={isSubmitting}
-        onCancel={onCancel}
-        onSubmit={onSubmit}
-      />
-    ) : (
-      <div className={styles.cardAction}>
-        <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
-          Enable service
-        </Button>
-        {!canConfigure ? (
-          <Text tone="secondary" variant="meta">
-            Owner access is required.
+  readonly onSubmitAws: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
+}): ReactElement => {
+  const isAws = catalog.providerId === "codecommit" || catalog.providerId === "codepipeline"
+  return (
+    <Surface as="article" className={styles.card} padding="default" shape="grouped">
+      <div className={styles.cardHeading}>
+        <div className={styles.connectionIdentity}>
+          <ServiceMark service={catalog.providerId} size="compact" />
+          <Text as="h2" variant="card-title">
+            {catalog.displayName}
           </Text>
-        ) : null}
+        </div>
+        <StateLabel
+          label={isRecovery ? "Needs correction" : "Not configured"}
+          size="compact"
+          tone={isRecovery ? "critical" : "neutral"}
+        />
       </div>
-    )}
-  </Surface>
-)
+      <Text tone="secondary" variant="body">
+        {catalog.description}
+      </Text>
+      {isOpen ? (
+        isAws ? (
+          <AwsAccountSetupForm
+            awsProfiles={awsProfiles}
+            awsProfilesState={awsProfilesState}
+            catalogs={catalogs}
+            isSubmitting={isSubmitting}
+            onCancel={onCancel}
+            onSubmit={onSubmitAws}
+          />
+        ) : (
+          <SetupForm catalog={catalog} isSubmitting={isSubmitting} onCancel={onCancel} onSubmit={onSubmit} />
+        )
+      ) : (
+        <div className={styles.cardAction}>
+          <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
+            {isAws ? "Configure AWS account" : "Enable service"}
+          </Button>
+          {!canConfigure ? (
+            <Text tone="secondary" variant="meta">
+              Owner access is required.
+            </Text>
+          ) : null}
+        </div>
+      )}
+    </Surface>
+  )
+}
 
 const ServicePreviewCard = ({
   actionLabel = "Pair to enable",
@@ -552,57 +521,68 @@ export const ServicesPage = ({
     [invalidateSession, sessionKey, transport]
   )
 
+  const createConnections = useCallback(
+    async (drafts: ReadonlyArray<ServiceConnectionDraft>, originProvider: ProviderId): Promise<boolean> => {
+      if (sessionKey === null) return false
+      createRequest.current?.abort()
+      const request = new AbortController()
+      createRequest.current = request
+      setSubmittingProvider(originProvider)
+      let hasFailedTest = false
+      try {
+        for (const draft of drafts) {
+          const pluginConnectionId = await transport.makeConnectionId()
+          const response = await transport.create(
+            {
+              pluginConnectionId,
+              providerId: draft.catalog.providerId,
+              displayName: draft.displayName,
+              values: draft.values
+            },
+            request.signal
+          )
+          if (request.signal.aborted) return false
+          hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
+          setConnectionsState((current) =>
+            current._tag === "ready"
+              ? {
+                  _tag: "ready",
+                  overview: {
+                    ...current.overview,
+                    connections: [...current.overview.connections, response.connection]
+                  }
+                }
+              : current
+          )
+          setTestStates((current) =>
+            new Map(current).set(response.connection.pluginConnectionId, {
+              _tag: "result",
+              result: response.test
+            })
+          )
+        }
+        createRequest.current = null
+        setOpenProvider(hasFailedTest ? originProvider : null)
+        setSubmittingProvider(null)
+        return true
+      } catch (failure: unknown) {
+        if (request.signal.aborted) return false
+        createRequest.current = null
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        setSubmittingProvider(null)
+        return false
+      }
+    },
+    [invalidateSession, sessionKey, transport]
+  )
+
   const createConnection = useCallback(
     (
       catalog: PluginServiceCatalogEntry,
       displayName: string,
       values: ReadonlyArray<CreatePluginConnectionValue>
-    ): Promise<boolean> => {
-      if (sessionKey === null) return Promise.resolve(false)
-      createRequest.current?.abort()
-      const request = new AbortController()
-      createRequest.current = request
-      setSubmittingProvider(catalog.providerId)
-      return transport
-        .makeConnectionId()
-        .then((pluginConnectionId) =>
-          transport.create({ pluginConnectionId, providerId: catalog.providerId, displayName, values }, request.signal)
-        )
-        .then(
-          (response) => {
-            if (request.signal.aborted) return false
-            createRequest.current = null
-            setConnectionsState((current) =>
-              current._tag === "ready"
-                ? {
-                    _tag: "ready",
-                    overview: {
-                      ...current.overview,
-                      connections: [...current.overview.connections, response.connection]
-                    }
-                  }
-                : current
-            )
-            setTestStates((current) =>
-              new Map(current).set(response.connection.pluginConnectionId, {
-                _tag: "result",
-                result: response.test
-              })
-            )
-            setOpenProvider(response.test._tag === "healthy" ? null : catalog.providerId)
-            setSubmittingProvider(null)
-            return true
-          },
-          (failure) => {
-            if (request.signal.aborted) return false
-            createRequest.current = null
-            if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
-            setSubmittingProvider(null)
-            return false
-          }
-        )
-    },
-    [invalidateSession, sessionKey, transport]
+    ): Promise<boolean> => createConnections([{ catalog, displayName, values }], catalog.providerId),
+    [createConnections]
   )
 
   const setConnectionEnabled = useCallback(
@@ -751,6 +731,7 @@ export const ServicesPage = ({
                 awsProfilesState={awsProfilesState._tag}
                 canConfigure={canConfigure}
                 catalog={catalog}
+                catalogs={connectionsState.overview.catalog}
                 isOpen={openProvider === catalog.providerId}
                 isRecovery={configured.length > 0}
                 isSubmitting={submittingProvider === catalog.providerId}
@@ -758,6 +739,7 @@ export const ServicesPage = ({
                 onCancel={() => setOpenProvider(null)}
                 onOpen={() => setOpenProvider(catalog.providerId)}
                 onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
+                onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
               />
             ]
           })}
