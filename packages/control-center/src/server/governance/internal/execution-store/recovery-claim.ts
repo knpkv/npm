@@ -25,7 +25,8 @@ const RecoveryLeaseRow = Schema.Struct({
 const LatestRecoveryClaimRow = Schema.Struct({
   claimSequence: Schema.Int.check(Schema.isGreaterThan(0)),
   claimTokenDigest: GovernedActionRecoveryTokenDigest,
-  leaseExpiresAt: UtcTimestamp
+  leaseExpiresAt: UtcTimestamp,
+  expiredAt: Schema.NullOr(UtcTimestamp)
 })
 
 const storeFailure = (failure: unknown): GovernedActionExecutionStoreError => {
@@ -74,19 +75,28 @@ export const makeGovernedActionExecutionRecoveryClaim = Effect.gen(function*() {
     if (DateTime.Order(observedAt, lease.recoveryEligibleAt) < 0) return null
 
     const claimRows = yield* sql`SELECT
-      claim_sequence AS claimSequence,
-      claim_token_digest AS claimTokenDigest,
-      lease_expires_at AS leaseExpiresAt
-    FROM governed_action_recovery_claims
-    WHERE workspace_id = ${record.envelope.workspaceId}
-      AND action_id = ${record.envelope.actionId}
-    ORDER BY claim_sequence DESC
+      claim.claim_sequence AS claimSequence,
+      claim.claim_token_digest AS claimTokenDigest,
+      claim.lease_expires_at AS leaseExpiresAt,
+      expiration.expired_at AS expiredAt
+    FROM governed_action_recovery_claims claim
+    LEFT JOIN governed_action_recovery_claim_expirations expiration
+      ON expiration.workspace_id = claim.workspace_id
+      AND expiration.action_id = claim.action_id
+      AND expiration.claim_sequence = claim.claim_sequence
+    WHERE claim.workspace_id = ${record.envelope.workspaceId}
+      AND claim.action_id = ${record.envelope.actionId}
+    ORDER BY claim.claim_sequence DESC
     LIMIT 1`
     const claims = yield* Schema.decodeUnknownEffect(Schema.Array(LatestRecoveryClaimRow))(claimRows).pipe(
       Effect.mapError(invalidRecord)
     )
     const latest = claims[0]
-    if (latest !== undefined && DateTime.Order(observedAt, latest.leaseExpiresAt) < 0) return null
+    if (
+      latest !== undefined &&
+      latest.expiredAt === null &&
+      DateTime.Order(observedAt, latest.leaseExpiresAt) < 0
+    ) return null
 
     const issued = yield* issueGovernedActionRecoveryToken().pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),

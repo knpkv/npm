@@ -37,6 +37,7 @@ export class GovernedActionExecutionStoreError extends Schema.TaggedErrorClass<G
     operation: Schema.Literals([
       "inspect",
       "list-recovery",
+      "expire-recovery-claims",
       "begin",
       "block",
       "record-dispatch",

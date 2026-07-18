@@ -1,15 +1,18 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
-import { PluginActionDispatchResultV1 } from "../../src/domain/plugins/actions.js"
+import { PluginActionDispatchResultV1, PluginActionReconciliationResultV1 } from "../../src/domain/plugins/actions.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
 import { makeGovernedActionExecutionRecordDispatch } from "../../src/server/governance/internal/execution-store/record-dispatch.js"
+import { makeGovernedActionExecutionRecordReconciliation } from "../../src/server/governance/internal/execution-store/record-reconciliation.js"
 import { makeGovernedActionRecoveryCandidates } from "../../src/server/governance/internal/execution-store/recovery-candidates.js"
+import { makeGovernedActionRecoveryClaimExpiry } from "../../src/server/governance/internal/execution-store/recovery-claim-expiry.js"
 import { Database } from "../../src/server/persistence/Database.js"
 import {
   ACTION,
@@ -107,6 +110,54 @@ describe("governed action recovery claims", () => {
           leaseExpiresAt: DateTime.formatIso(DateTime.add(second.reconciliationDeadline, { seconds: 30 }))
         }
       ])
+    })))
+
+  it.effect("durably expires live claims and permits immediate recovery takeover", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const first = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(first._tag, "reconcile")
+      if (first._tag !== "reconcile") return yield* Effect.die("expected recovery claim")
+
+      const expiry = yield* makeGovernedActionRecoveryClaimExpiry(WORKSPACE)
+      assert.strictEqual(yield* expiry.expire(recoveryEligibleAt), 1)
+      assert.strictEqual(yield* expiry.expire(recoveryEligibleAt), 0)
+
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const late = yield* recorder.recordReconciliation({
+        recoveryToken: first.recoveryToken,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "pending",
+          checkedAt: DateTime.formatIso(recoveryEligibleAt)
+        }),
+        observedAt: recoveryEligibleAt
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(late))
+      if (Result.isFailure(late)) assert.strictEqual(late.failure.reason, "conflict")
+
+      const candidates = yield* makeGovernedActionRecoveryCandidates(WORKSPACE)
+      assert.deepStrictEqual(yield* candidates.recoveryCandidates, [{
+        workspaceId: WORKSPACE,
+        actionId: ACTION
+      }])
+
+      const second = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(second._tag, "reconcile")
+      const { sql } = yield* Database
+      const expirations = yield* sql<{
+        readonly claimSequence: number
+        readonly expiredAt: string
+        readonly reason: string
+      }>`SELECT claim_sequence AS claimSequence, expired_at AS expiredAt, reason
+        FROM governed_action_recovery_claim_expirations`
+      assert.deepStrictEqual(expirations, [{
+        claimSequence: 1,
+        expiredAt: DateTime.formatIso(recoveryEligibleAt),
+        reason: "shutdown"
+      }])
     })))
 
   it.effect("recovers accepted work through its provider reconciliation key", () =>

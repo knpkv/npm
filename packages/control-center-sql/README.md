@@ -18,8 +18,9 @@ without expanding one deeply coupled SQL statement.
 
 The governed-action recovery plan selects one bounded, stable startup batch for
 an explicit workspace after the recovery safety interval. It excludes actions
-with a live recovery claim and returns identities only; claim acquisition and
-reconciliation remain inside the transactional Control Center execution store.
+with a live recovery claim unless that claim has an immutable explicit expiry,
+and returns identities only; claim acquisition and reconciliation remain inside
+the transactional Control Center execution store.
 
 This package does not own database initialization or migrations. During the MVP,
 Control Center uses one exact unstable schema snapshot; versioned migrations begin
