@@ -148,6 +148,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   readonly executeNever?: boolean
   readonly inspectFails?: boolean
   readonly pauseBegin?: boolean
+  readonly reconcileDefectOnce?: boolean
   readonly leaseRuntimeAuthorityToken?: PluginRuntimeAuthorityToken
   readonly recoveryCandidates?: ReadonlyArray<GovernedActionExecutionReference>
 }) {
@@ -157,6 +158,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   const beginEntered = yield* Deferred.make<void>()
   const releaseBegin = yield* Deferred.make<void>()
   const executeEntered = yield* Deferred.make<void>()
+  const reconciliationCalls = yield* Ref.make(0)
   const record = (event: string) => Ref.update(events, (current) => [...current, event])
   const plan = options?.plan ?? dispatchPlan
   const begin = options?.begin ?? permitted
@@ -207,10 +209,16 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
         return confirmedDispatch
       }),
     requestCancellation: () => Effect.die("cancellation is outside this test"),
-    reconcile: (request) => {
-      assert.deepStrictEqual(request, reconciliationRequest)
-      return record("reconcile").pipe(Effect.as(pendingReconciliation))
-    }
+    reconcile: (request) =>
+      Effect.gen(function*() {
+        assert.deepStrictEqual(request, reconciliationRequest)
+        yield* record("reconcile")
+        const call = yield* Ref.getAndUpdate(reconciliationCalls, (current) => current + 1)
+        if (options?.reconcileDefectOnce === true && call === 0) {
+          return yield* Effect.die("injected-reconciliation-defect")
+        }
+        return pendingReconciliation
+      })
   }
   const lease = {
     context: Context.make(AuthorizedPluginExecutor, executor),
@@ -398,6 +406,39 @@ describe("governed action execution engine", () => {
         failed: 2
       })
       assert.deepStrictEqual(yield* Ref.get(recovery.events), ["inspect", "inspect"])
+    }))
+
+  it.effect("continues the bounded startup batch after one provider defect", () =>
+    Effect.gen(function*() {
+      const recovery = yield* makeHarness({
+        reconcileDefectOnce: true,
+        recoveryCandidates: [
+          { workspaceId, actionId },
+          { workspaceId, actionId: secondaryActionId }
+        ],
+        plan: {
+          _tag: "reconcile",
+          recoveryToken,
+          runtimeAuthorityToken,
+          reconciliationDeadline,
+          scope: { workspaceId, pluginConnectionId: connectionId },
+          request: reconciliationRequest
+        }
+      })
+
+      assert.deepStrictEqual(yield* recoverEligible(recovery.layer), {
+        attempted: 2,
+        advanced: 1,
+        inactive: 0,
+        failed: 1
+      })
+      assert.deepStrictEqual(yield* Ref.get(recovery.events), [
+        "inspect",
+        "reconcile",
+        "inspect",
+        "reconcile",
+        "record-reconciliation"
+      ])
     }))
 
   it.effect("does not call reconciliation after the durable recovery deadline", () =>

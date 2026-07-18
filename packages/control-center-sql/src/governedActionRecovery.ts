@@ -7,6 +7,7 @@ import type { RenderedSql } from "./types.js"
 export interface GovernedActionRecoveryQueryInput {
   readonly limit: number
   readonly observedAt: string
+  readonly workspaceId: string
 }
 
 const table = Casing.make({ tables: "snake_case", columns: "snake_case" }).table
@@ -58,6 +59,7 @@ export const renderGovernedActionRecoveryQuery = (
     ),
     Query.where(
       Query.and(
+        Query.eq(governedActions.workspaceId, input.workspaceId),
         Query.in(
           governedActions.state,
           "started",

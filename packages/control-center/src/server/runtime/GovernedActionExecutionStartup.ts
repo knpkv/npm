@@ -2,6 +2,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
+import type { WorkspaceId } from "../../domain/identifiers.js"
 import { governedActionExecutionStoreLayer } from "../governance/internal/execution-store/live.js"
 import {
   GovernedActionExecutionEngine,
@@ -23,6 +24,7 @@ import { type ServerDraining, ServerLifecycle } from "./ServerLifecycle.js"
 /** Server-owned runtime factories; this grants no route or agent an execution handle. */
 export interface GovernedActionExecutionStartupOptions {
   readonly pluginRuntimes: PluginRuntimeRegistryV1
+  readonly workspaceId: WorkspaceId
 }
 
 /** Failures that can prevent the private governed worker from being constructed. */
@@ -61,7 +63,7 @@ const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
   const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
   const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
   const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
-  const store = governedActionExecutionStoreLayer.pipe(
+  const store = governedActionExecutionStoreLayer(options.workspaceId).pipe(
     Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
     Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
     Layer.provideMerge(QuarantineRepository.layer)

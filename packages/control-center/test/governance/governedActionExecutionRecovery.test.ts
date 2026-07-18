@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
+import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginActionDispatchResultV1 } from "../../src/domain/plugins/actions.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
@@ -19,13 +20,15 @@ import {
   WORKSPACE
 } from "./fixtures/governedActionExecution.js"
 
+const SECONDARY_WORKSPACE = Schema.decodeUnknownSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-440000000099")
+
 describe("governed action recovery claims", () => {
   it.effect("lists an eligible action until one recovery claim is active", () =>
     withBegin(Effect.gen(function*() {
       const permitted = yield* beginAuthorizedDispatch()
       const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
       yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
-      const candidates = yield* makeGovernedActionRecoveryCandidates
+      const candidates = yield* makeGovernedActionRecoveryCandidates(WORKSPACE)
 
       assert.deepStrictEqual(yield* candidates.recoveryCandidates, [{
         workspaceId: WORKSPACE,
@@ -35,6 +38,16 @@ describe("governed action recovery claims", () => {
       const inspect = yield* makeGovernedActionExecutionInspect
       const recovery = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
       assert.strictEqual(recovery._tag, "reconcile")
+      assert.deepStrictEqual(yield* candidates.recoveryCandidates, [])
+    })))
+
+  it.effect("excludes eligible actions from another workspace", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
+      const candidates = yield* makeGovernedActionRecoveryCandidates(SECONDARY_WORKSPACE)
+
       assert.deepStrictEqual(yield* candidates.recoveryCandidates, [])
     })))
 

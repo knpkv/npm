@@ -24,7 +24,9 @@ const listFailure = (failure: unknown): GovernedActionExecutionStoreError =>
   })
 
 /** Read one stable, bounded startup batch without claiming or executing any action. */
-export const makeGovernedActionRecoveryCandidates = Effect.gen(function*() {
+export const makeGovernedActionRecoveryCandidates = Effect.fn(
+  "GovernedActionRecoveryCandidates.make"
+)(function*(workspaceId: WorkspaceId) {
   const { sql } = yield* Database
   const clock = yield* Clock.Clock
 
@@ -32,7 +34,8 @@ export const makeGovernedActionRecoveryCandidates = Effect.gen(function*() {
     const observedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
     const rendered = renderGovernedActionRecoveryQuery({
       limit: RECOVERY_CANDIDATE_LIMIT,
-      observedAt: DateTime.formatIso(observedAt)
+      observedAt: DateTime.formatIso(observedAt),
+      workspaceId
     })
     const rows = yield* sql.unsafe(rendered.sql, [...rendered.params])
     return yield* Schema.decodeUnknownEffect(

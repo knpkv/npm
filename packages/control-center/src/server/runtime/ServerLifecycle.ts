@@ -61,22 +61,25 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     phase: "accepting"
   })
   const drainStarted = yield* Deferred.make<void>()
+  const mutationsDrained = yield* Deferred.make<void>()
   const workDrained = yield* Deferred.make<void>()
 
   const hasActiveWork = (current: ServerLifecycleState): boolean =>
     current.activeMutations > 0 || current.activeBackgroundJobs > 0
 
   const beginDrain = Ref.modify(state, (current) => {
-    if (current.phase === "draining") return [!hasActiveWork(current), current]
+    const barriers = {
+      mutationBarrierReady: current.activeMutations === 0,
+      workBarrierReady: !hasActiveWork(current)
+    }
+    if (current.phase === "draining") return [barriers, current]
     const draining: ServerLifecycleState = { ...current, phase: "draining" }
-    return [
-      !hasActiveWork(current),
-      draining
-    ]
+    return [barriers, draining]
   }).pipe(
-    Effect.flatMap((alreadyDrained) =>
+    Effect.flatMap(({ mutationBarrierReady, workBarrierReady }) =>
       Deferred.succeed(drainStarted, undefined).pipe(
-        Effect.andThen(alreadyDrained ? Deferred.succeed(workDrained, undefined) : Effect.void)
+        Effect.andThen(mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
+        Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
       )
     ),
     Effect.asVoid
@@ -109,9 +112,16 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         activeMutationFiberIds,
         activeMutations: current.activeMutations - 1
       }
-      return [next.phase === "draining" && !hasActiveWork(next), next]
+      return [{
+        mutationBarrierReady: next.phase === "draining" && next.activeMutations === 0,
+        workBarrierReady: next.phase === "draining" && !hasActiveWork(next)
+      }, next]
     }).pipe(
-      Effect.flatMap((drained) => (drained ? Deferred.succeed(workDrained, undefined) : Effect.void)),
+      Effect.flatMap(({ mutationBarrierReady, workBarrierReady }) =>
+        (mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void).pipe(
+          Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
+        )
+      ),
       Effect.asVoid
     )
 
@@ -154,7 +164,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   return {
     beginDrain,
     awaitDrain: Deferred.await(drainStarted),
-    awaitMutationsDrained: Deferred.await(workDrained),
+    awaitMutationsDrained: Deferred.await(mutationsDrained),
     awaitWorkDrained: Deferred.await(workDrained),
     drainWithin,
     phase: Ref.get(state).pipe(Effect.map((current) => current.phase)),

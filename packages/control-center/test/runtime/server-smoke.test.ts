@@ -542,6 +542,7 @@ describe("Control Center closed runtime", () => {
           pluginConnections
         },
         governedActionExecution: {
+          workspaceId: WORKSPACE_ID,
           pluginRuntimes: {
             layer: () =>
               Layer.merge(
@@ -560,6 +561,7 @@ describe("Control Center closed runtime", () => {
       assert.isTrue(Option.isNone(governedExecution))
       const internalWorker = yield* Layer.build(
         governedActionExecutionStartupLayer({
+          workspaceId: WORKSPACE_ID,
           pluginRuntimes: {
             layer: () =>
               Layer.merge(
