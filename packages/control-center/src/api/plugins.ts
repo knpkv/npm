@@ -181,7 +181,7 @@ export const FollowedResourceSummary = Schema.Struct({
   followedResourceId: FollowedResourceId,
   providerId: ProviderId,
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
-  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
   isEnabled: Schema.Boolean
 }).annotate({ identifier: "FollowedResourceSummary" })
 
@@ -193,7 +193,7 @@ export const ProviderAccountSummary = Schema.Struct({
   providerAccountId: ProviderAccountId,
   providerFamily: Schema.Literals(["aws", "atlassian", "clockify"]),
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
-  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
   resources: Schema.Array(FollowedResourceSummary).check(
     Schema.makeFilter((resources) => resources.length <= MAXIMUM_FOLLOWED_RESOURCES, {
       expected: `at most ${MAXIMUM_FOLLOWED_RESOURCES} followed resources per provider account`

@@ -107,6 +107,11 @@ export const ProviderAccountCard = ({
                     {connection.isEnabled ? "Disable" : "Enable"}
                   </Button>
                 </div>
+                {enablementState === "request-failed" ? (
+                  <Text as="p" className={styles.setupError} role="alert" variant="body">
+                    Control Center could not change this service. Refresh and try again.
+                  </Text>
+                ) : null}
               </>
             )}
           </div>

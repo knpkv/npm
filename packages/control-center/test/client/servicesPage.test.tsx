@@ -396,6 +396,72 @@ describe("ServicesPage connection tests", () => {
     )
   })
 
+  it("surfaces failed enablement for a resource inside an AWS account", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000176")
+    const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000177")
+    const connectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000178")
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: connectionId,
+          providerAccountId: accountId,
+          followedResourceId: resourceId,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          resources: [
+            {
+              followedResourceId: resourceId,
+              providerId: "codecommit",
+              displayName: "payments-api",
+              providerImmutableId: "eu-west-1:payments-api",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const setEnabled = vi.fn().mockRejectedValue(new Error("conflict"))
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connectionId),
+      setEnabled,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const accountCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("AWS account 123456789012")
+    )
+    const disable = [...(accountCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent === "Disable"
+    )
+
+    await act(async () => disable?.click())
+
+    expect(setEnabled).toHaveBeenCalledWith(connectionId, false, expect.any(AbortSignal))
+    expect(accountCard?.querySelector('[role="alert"]')?.textContent).toContain("could not change this service")
+    expect(disable?.disabled).toBe(false)
+  })
+
   it("refreshes an existing AWS account after following another resource", async () => {
     const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000181")
     const paymentsId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000182")
