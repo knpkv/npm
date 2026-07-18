@@ -809,6 +809,115 @@ describe("application adapters", () => {
       assert.strictEqual(metadata.pluginId, "dev.knpkv.codecommit")
     })))
 
+  it.effect("reuses one discovered AWS account across independently followed repositories and pipelines", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const awsConnection = (
+        workspace: { readonly providerImmutableId: string; readonly displayName: string }
+      ): PluginConnectionV1 => ({
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "123456789012", displayName: "123456789012" },
+          workspace,
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      })
+      const repositoryConnection = awsConnection({
+        providerImmutableId: "payments",
+        displayName: "payments"
+      })
+      const pipelineConnection = awsConnection({
+        providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
+        displayName: "payments-release"
+      })
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: ({ pluginConnectionId, workspaceId }) =>
+          workspaceId !== WORKSPACE_ID
+            ? Effect.die("AWS setup crossed its requested workspace")
+            : pluginConnectionId === PROVISIONED_PLUGIN_ID
+            ? Effect.succeed(Context.make(PluginConnection, repositoryConnection))
+            : pluginConnectionId === CODEPIPELINE_PLUGIN_ID
+            ? Effect.succeed(Context.make(PluginConnection, pipelineConnection))
+            : Effect.die("AWS setup crossed its requested connection"),
+        invalidate: () => Effect.void
+      })
+      const connect = administration.connectAndTest
+      assert.isDefined(connect)
+
+      const repository = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: PROVISIONED_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      })
+      const pipeline = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          displayName: "Payments release pipeline",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("pipelineName"), value: "payments-release" }
+          ]
+        }
+      })
+
+      if (
+        repository.connection.providerAccountId === null ||
+        repository.connection.followedResourceId === null ||
+        pipeline.connection.providerAccountId === null ||
+        pipeline.connection.followedResourceId === null
+      ) return assert.fail("healthy AWS setup did not materialize its account and resource ownership")
+      assert.strictEqual(repository.connection.providerAccountId, pipeline.connection.providerAccountId)
+      assert.notStrictEqual(repository.connection.followedResourceId, pipeline.connection.followedResourceId)
+
+      const persistence = yield* Persistence
+      const accounts = yield* persistence.providerAccounts.list(WORKSPACE_ID)
+      assert.lengthOf(accounts, 1)
+      assert.strictEqual(accounts[0]?.providerFamily, "aws")
+      assert.strictEqual(accounts[0]?.vendorAccountId, "123456789012")
+      const resources = yield* persistence.providerAccounts.listResources(
+        WORKSPACE_ID,
+        repository.connection.providerAccountId
+      )
+      assert.lengthOf(resources, 2)
+      assert.deepStrictEqual(
+        resources.map(({ providerId, vendorResourceId }) => ({ providerId, vendorResourceId })),
+        [
+          { providerId: "codecommit", vendorResourceId: "payments" },
+          {
+            providerId: "codepipeline",
+            vendorResourceId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release"
+          }
+        ]
+      )
+      assert.deepInclude(repository.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("profile"),
+        value: "delivery"
+      })
+      assert.deepInclude(pipeline.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("profile"),
+        value: "delivery"
+      })
+    })))
+
   it.effect("rejects missing and unknown catalog fields before creating metadata", () =>
     withApplication(Effect.gen(function*() {
       yield* setup
@@ -1225,7 +1334,7 @@ describe("application adapters", () => {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
           account: { providerImmutableId: "account-100", displayName: "Connection 100" },
-          workspace: null,
+          workspace: { providerImmutableId: "payments", displayName: "payments" },
           endpoints: [],
           discoveredAt: T0
         }),

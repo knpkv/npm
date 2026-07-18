@@ -54,6 +54,7 @@ import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
+import { materializeAwsConnectionOwnership } from "./awsConnectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
@@ -330,6 +331,16 @@ type LiveConnectionTestOutcome =
     readonly health: Extract<PluginHealth, { readonly _tag: "healthy" }>
   }
 
+interface ConnectionTestWithDiscovery {
+  readonly test: PluginConnectionTestResult
+  readonly discovery: PluginDiscoveryV1 | null
+}
+
+const connectionTestWithDiscovery = (
+  test: PluginConnectionTestResult,
+  discovery: PluginDiscoveryV1 | null = null
+): ConnectionTestWithDiscovery => ({ test, discovery })
+
 const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(function*(
   persistence: Persistence["Service"],
   pluginConnections: PluginConnectionMapV1 | null,
@@ -339,7 +350,7 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
   const record = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
   const startedAt = yield* Clock.currentTimeNanos
   if (!record.isEnabled) {
-    return {
+    return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,
       providerId: record.providerId,
@@ -348,7 +359,7 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
       failureClass: "unknown",
       retryAt: null,
       safeMessage: "This connection is disabled."
-    } satisfies PluginConnectionTestResult
+    })
   }
   if (pluginConnections === null) return yield* unavailable()
 
@@ -369,7 +380,7 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
 
   if (Result.isFailure(outcome)) {
     const failure = outcome.failure
-    return {
+    return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,
       providerId: record.providerId,
@@ -378,11 +389,11 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
       failureClass: pluginFailureClass(failure),
       retryAt: failure._tag === "PluginRateLimitFailure" ? failure.retryAt : null,
       safeMessage: failureMessage(failure)
-    } satisfies PluginConnectionTestResult
+    })
   }
   if (outcome.success._tag === "reported-failure") {
     const health = outcome.success.health
-    return {
+    return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,
       providerId: record.providerId,
@@ -393,12 +404,12 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
       safeMessage: health._tag === "disabled"
         ? "This connection is disabled."
         : boundedConnectionTestMessage(health.safeMessage)
-    } satisfies PluginConnectionTestResult
+    })
   }
 
   const discoveredIdentity = outcome.success.discovery.account ?? outcome.success.discovery.workspace
   if (discoveredIdentity === null) {
-    return {
+    return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,
       providerId: record.providerId,
@@ -407,7 +418,7 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
       failureClass: "malformed-response",
       retryAt: null,
       safeMessage: "The provider did not return a usable account identity."
-    } satisfies PluginConnectionTestResult
+    }, outcome.success.discovery)
   }
   const identity = {
     kind: outcome.success.discovery.account === null
@@ -419,14 +430,14 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
     displayName: discoveredIdentity.displayName,
     providerImmutableId: discoveredIdentity.providerImmutableId
   } satisfies PluginConnectionIdentity
-  return {
+  return connectionTestWithDiscovery({
     _tag: "healthy",
     pluginConnectionId,
     providerId: record.providerId,
     checkedAt: outcome.success.health.checkedAt,
     latencyMilliseconds,
     identity
-  } satisfies PluginConnectionTestResult
+  }, outcome.success.discovery)
 })
 
 const metadata = Effect.fn("PluginAdministration.metadata")(function*(
@@ -885,24 +896,27 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
 
     return yield* Effect.gen(function*() {
       yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: request.pluginConnectionId })
-      const test = yield* testPluginConnection(
+      const tested = yield* testPluginConnection(
         persistence,
         pluginConnections,
         workspaceId,
         request.pluginConnectionId
       )
+      const bound = tested.test._tag === "healthy"
+        ? yield* materializeAwsConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
+        : enabled
       yield* persistSetupTestHealth(
         persistence,
         cryptoService,
         wakeups,
         workspaceId,
         request.pluginConnectionId,
-        test
+        tested.test
       )
       return {
-        connection: yield* connectionSummary(persistence, enabled),
+        connection: yield* connectionSummary(persistence, bound),
         configuration: yield* configuration(persistence, secrets, workspaceId, request.pluginConnectionId),
-        test
+        test: tested.test
       } satisfies CreatePluginConnectionResponse
     }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, enabled)))
   }).pipe(
@@ -992,7 +1006,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     }),
     testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
       const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
-      const test = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
+      const tested = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
       if (connection.isEnabled) {
         yield* persistSetupTestHealth(
           persistence,
@@ -1000,12 +1014,12 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
           wakeups,
           workspaceId,
           pluginConnectionId,
-          test
+          tested.test
         ).pipe(
           Effect.mapError(() => unavailable())
         )
       }
-      return test
+      return tested.test
     }),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
