@@ -958,6 +958,19 @@ describe("application adapters", () => {
           }
         ]
       )
+      const readAccounts = administration.accounts
+      assert.isDefined(readAccounts)
+      const accountOverview = yield* readAccounts(WORKSPACE_ID)
+      assert.lengthOf(accountOverview, 1)
+      assert.strictEqual(accountOverview[0]?.providerImmutableId, "123456789012")
+      assert.deepStrictEqual(
+        accountOverview[0]?.resources.map(({ displayName, providerId }) => ({ displayName, providerId })),
+        [
+          { displayName: "payments", providerId: "codecommit" },
+          { displayName: "payments", providerId: "codecommit" },
+          { displayName: "payments-release", providerId: "codepipeline" }
+        ]
+      )
       assert.deepInclude(repository.configuration.values, {
         _tag: "text",
         key: PluginConfigurationKey.make("profile"),

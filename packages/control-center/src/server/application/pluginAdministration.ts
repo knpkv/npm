@@ -23,6 +23,7 @@ import type {
   PluginConnectionIdentity,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  ProviderAccountSummary,
   RedactedPluginConfigurationValue
 } from "../../api/plugins.js"
 import { CreatePluginConnectionValue, PluginConfigurationKey } from "../../api/plugins.js"
@@ -59,6 +60,8 @@ import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError }
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_PROVIDER_ACCOUNTS = 100
+const MAXIMUM_FOLLOWED_RESOURCES = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
@@ -227,6 +230,40 @@ const listPluginConnections = Effect.fn("PluginAdministration.listConnections")(
     summaries.push(yield* connectionSummary(persistence, connection))
   }
   return summaries
+})
+
+const listProviderAccounts = Effect.fn("PluginAdministration.listProviderAccounts")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId
+) {
+  const accounts = yield* persistence.providerAccounts.list(workspaceId).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (accounts.length > MAXIMUM_PROVIDER_ACCOUNTS) return yield* unavailable()
+  const summaries: Array<ProviderAccountSummary> = []
+  for (const account of accounts) {
+    const resources = yield* persistence.providerAccounts.listResources(
+      workspaceId,
+      account.providerAccountId
+    ).pipe(Effect.mapError(() => unavailable()))
+    if (resources.length > MAXIMUM_FOLLOWED_RESOURCES) return yield* unavailable()
+    summaries.push({
+      providerAccountId: account.providerAccountId,
+      providerFamily: account.providerFamily,
+      displayName: account.displayName,
+      providerImmutableId: account.vendorAccountId,
+      resources: resources
+        .map((resource) => ({
+          followedResourceId: resource.followedResourceId,
+          providerId: resource.providerId,
+          displayName: resource.displayName,
+          providerImmutableId: resource.vendorResourceId,
+          isEnabled: resource.isEnabled
+        }))
+        .sort((left, right) => left.displayName.localeCompare(right.displayName))
+    })
+  }
+  return summaries.sort((left, right) => left.displayName.localeCompare(right.displayName))
 })
 
 const requireConnection = (
@@ -947,6 +984,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
+    accounts: (workspaceId) => listProviderAccounts(persistence, workspaceId),
     discoverAwsProfiles: Effect.fn("PluginAdministration.discoverAwsProfiles")(function*() {
       const home = yield* Config.string("HOME").pipe(
         Config.orElse(() => Config.string("USERPROFILE")),

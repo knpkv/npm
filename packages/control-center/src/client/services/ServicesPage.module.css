@@ -15,6 +15,62 @@
   gap: var(--rly-space-16);
 }
 
+.accounts,
+.accountCard,
+.accountIdentity,
+.resourceList,
+.resource,
+.sectionHeading {
+  display: grid;
+}
+
+.accounts,
+.accountCard {
+  gap: var(--rly-space-20);
+}
+
+.sectionHeading,
+.accountIdentity,
+.resource,
+.resourceList {
+  gap: var(--rly-space-8);
+}
+
+.accountGrid {
+  display: grid;
+  gap: var(--rly-space-16);
+}
+
+.accountHeading,
+.resourceHeading,
+.accountActions,
+.resourceActions {
+  display: flex;
+  align-items: center;
+  gap: var(--rly-space-12);
+}
+
+.accountHeading,
+.resourceHeading {
+  justify-content: space-between;
+}
+
+.accountActions,
+.resourceActions {
+  flex-wrap: wrap;
+}
+
+.accountActions {
+  padding-block-start: var(--rly-space-4);
+}
+
+.resource {
+  padding: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-2);
+}
+
 .card {
   display: grid;
   align-content: start;
@@ -72,7 +128,9 @@
 
 @media (max-width: 32rem) {
   .cardHeading,
-  .cardAction {
+  .cardAction,
+  .accountHeading,
+  .resourceHeading {
     align-items: flex-start;
     flex-direction: column;
   }

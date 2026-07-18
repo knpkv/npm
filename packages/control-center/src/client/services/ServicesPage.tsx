@@ -1,6 +1,5 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, Field, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
-import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router"
@@ -10,7 +9,6 @@ import type {
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionValue,
   PluginConnectionSummary,
-  PluginConnectionTestResult,
   PluginOverviewResponse,
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
@@ -20,17 +18,13 @@ import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { AtlassianAccountSetupForm, type AtlassianSetupIntent } from "./AtlassianAccountSetupForm.js"
 import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
+import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
+import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
+import { ProviderAccountCard } from "./ProviderAccountCard.js"
 import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
 import { selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
 import styles from "./ServicesPage.module.css"
-
-type ConnectionTestState =
-  | { readonly _tag: "testing" }
-  | { readonly _tag: "result"; readonly result: PluginConnectionTestResult }
-  | { readonly _tag: "request-failed" }
-
-type ConnectionEnablementState = "changing" | "request-failed"
 
 type AwsProfilesState =
   | { readonly _tag: "idle" }
@@ -61,75 +55,6 @@ const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnect
   return providers.length === 0 ? allAtlassianProductsIntent : { providers }
 }
 
-const statusFor = (
-  connection: PluginConnectionSummary,
-  testState: ConnectionTestState | undefined
-): { readonly label: string; readonly tone: "neutral" | "positive" | "critical" | "caution" | "progress" } => {
-  if (!connection.isEnabled) return { label: "Disabled", tone: "neutral" }
-  if (testState?._tag === "testing") return { label: "Checking", tone: "progress" }
-  if (testState?._tag === "result") {
-    return testState.result._tag === "healthy"
-      ? { label: "Healthy", tone: "positive" }
-      : { label: "Unavailable", tone: "critical" }
-  }
-  if (connection.health === null) return { label: "Not checked", tone: "neutral" }
-  switch (connection.health._tag) {
-    case "healthy":
-      return { label: "Healthy", tone: "positive" }
-    case "degraded":
-      return { label: "Degraded", tone: "caution" }
-    case "unavailable":
-      return { label: "Unavailable", tone: "critical" }
-    case "disabled":
-      return { label: "Not checked", tone: "neutral" }
-  }
-}
-
-const checkedAt = (result: PluginConnectionTestResult): string => DateTime.formatIso(result.checkedAt)
-
-const TestEvidence = ({ state }: { readonly state: ConnectionTestState | undefined }): ReactElement | null => {
-  if (state === undefined || state._tag === "testing") return null
-  if (state._tag === "request-failed") {
-    return (
-      <div aria-live="polite" className={styles.testEvidence} role="status">
-        <StateLabel label="Test failed" tone="critical" />
-        <Text tone="secondary" variant="body">
-          Control Center could not complete the test. Check the server and try again.
-        </Text>
-      </div>
-    )
-  }
-  const result = state.result
-  return (
-    <div aria-live="polite" className={styles.testEvidence} role="status">
-      <StateLabel
-        label={result._tag === "healthy" ? "Connection healthy" : "Test failed"}
-        tone={result._tag === "healthy" ? "positive" : "critical"}
-      />
-      {result._tag === "healthy" ? (
-        <div className={styles.identity}>
-          <Text tone="secondary" variant="meta">
-            {result.identity.label}
-          </Text>
-          <Text as="span" variant="card-title">
-            {result.identity.displayName}
-          </Text>
-          <Text className={styles.identifier} tone="secondary" variant="body">
-            {result.identity.providerImmutableId}
-          </Text>
-        </div>
-      ) : (
-        <Text tone="secondary" variant="body">
-          {result.safeMessage}
-        </Text>
-      )}
-      <Text tone="secondary" variant="meta">
-        Checked <time dateTime={checkedAt(result)}>{checkedAt(result)}</time> · {result.latencyMilliseconds} ms
-      </Text>
-    </div>
-  )
-}
-
 const ConnectionCard = ({
   canConfigure,
   canTest,
@@ -152,7 +77,7 @@ const ConnectionCard = ({
   const isTesting = testState?._tag === "testing"
   const hasTested = testState !== undefined && testState._tag !== "testing"
   const isChanging = enablementState === "changing"
-  const status = statusFor(connection, testState)
+  const status = connectionStatus(connection, testState)
   return (
     <Surface as="article" className={styles.card} padding="default" shape="grouped">
       <div className={styles.cardHeading}>
@@ -164,7 +89,7 @@ const ConnectionCard = ({
         </div>
         <StateLabel label={status.label} size="compact" tone={status.tone} />
       </div>
-      <TestEvidence state={testState} />
+      <ConnectionTestEvidence state={testState} />
       <div className={styles.cardAction}>
         <Button
           disabled={!canTest || isChanging || isTesting || !connection.isEnabled}
@@ -785,65 +710,100 @@ export const ServicesPage = ({
           </div>
         </>
       ) : (
-        <div className={styles.grid}>
-          {connectionsState.overview.catalog.flatMap((catalog) => {
-            const configured = connectionsState.overview.connections.filter(
-              (connection) => connection.providerId === catalog.providerId
-            )
-            const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
-            const cards = configured.map((connection) => (
-              <ConnectionCard
-                canConfigure={canConfigure}
-                canTest={canConfigure}
-                connection={connection}
-                enablementState={enablementStates.get(connection.pluginConnectionId)}
-                key={connection.pluginConnectionId}
-                onConfigure={() => {
-                  if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
-                    setAtlassianSetupIntent(allAtlassianProductsIntent)
-                  }
-                  setOpenProvider(catalog.providerId)
-                }}
-                onSetEnabled={setConnectionEnabled}
-                onTest={testConnection}
-                testState={testStates.get(connection.pluginConnectionId)}
-              />
-            ))
-            if (configured.length > 0 && openProvider !== catalog.providerId) return cards
-            return [
-              ...cards,
-              <CatalogCard
-                atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
-                atlassianProfilesState={atlassianProfilesState._tag}
-                atlassianSetupIntent={atlassianSetupIntent ?? missingAtlassianIntent}
-                awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
-                awsProfilesState={awsProfilesState._tag}
-                canConfigure={canConfigure}
-                catalog={catalog}
-                catalogs={connectionsState.overview.catalog}
-                isOpen={openProvider === catalog.providerId}
-                isRecovery={configured.length > 0}
-                isSubmitting={submittingProvider === catalog.providerId}
-                key={`${catalog.providerId}-catalog`}
-                onCancel={() => {
-                  completedBatchDrafts.current.delete(catalog.providerId)
-                  setAtlassianSetupIntent(null)
-                  setOpenProvider(null)
-                }}
-                onOpen={() => {
-                  completedBatchDrafts.current.delete(catalog.providerId)
-                  if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
-                    setAtlassianSetupIntent(missingAtlassianIntent)
-                  }
-                  setOpenProvider(catalog.providerId)
-                }}
-                onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
-                onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}
-                onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
-              />
-            ]
-          })}
-        </div>
+        <>
+          {connectionsState.overview.accounts.length === 0 ? null : (
+            <section aria-labelledby="connected-accounts-title" className={styles.accounts}>
+              <div className={styles.sectionHeading}>
+                <Text as="h2" id="connected-accounts-title" variant="section-title">
+                  Connected accounts
+                </Text>
+                <Text tone="secondary" variant="body">
+                  One provider identity can own several repositories and pipelines.
+                </Text>
+              </div>
+              <div className={styles.accountGrid}>
+                {connectionsState.overview.accounts.map((account) => (
+                  <ProviderAccountCard
+                    account={account}
+                    canConfigure={canConfigure}
+                    connections={connectionsState.overview.connections}
+                    enablementStates={enablementStates}
+                    key={account.providerAccountId}
+                    onAdd={(providerId) => setOpenProvider(providerId)}
+                    onSetEnabled={setConnectionEnabled}
+                    onTest={testConnection}
+                    testStates={testStates}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+          <div className={styles.grid}>
+            {connectionsState.overview.catalog.flatMap((catalog) => {
+              const configured = connectionsState.overview.connections.filter(
+                (connection) => connection.providerId === catalog.providerId
+              )
+              const groupedAccountIds = new Set(
+                connectionsState.overview.accounts.map(({ providerAccountId }) => providerAccountId)
+              )
+              const standaloneConnections = configured.filter(
+                ({ providerAccountId }) => providerAccountId === null || !groupedAccountIds.has(providerAccountId)
+              )
+              const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
+              const cards = standaloneConnections.map((connection) => (
+                <ConnectionCard
+                  canConfigure={canConfigure}
+                  canTest={canConfigure}
+                  connection={connection}
+                  enablementState={enablementStates.get(connection.pluginConnectionId)}
+                  key={connection.pluginConnectionId}
+                  onConfigure={() => {
+                    if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
+                      setAtlassianSetupIntent(allAtlassianProductsIntent)
+                    }
+                    setOpenProvider(catalog.providerId)
+                  }}
+                  onSetEnabled={setConnectionEnabled}
+                  onTest={testConnection}
+                  testState={testStates.get(connection.pluginConnectionId)}
+                />
+              ))
+              if (configured.length > 0 && openProvider !== catalog.providerId) return cards
+              return [
+                ...cards,
+                <CatalogCard
+                  atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
+                  atlassianProfilesState={atlassianProfilesState._tag}
+                  atlassianSetupIntent={atlassianSetupIntent ?? missingAtlassianIntent}
+                  awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
+                  awsProfilesState={awsProfilesState._tag}
+                  canConfigure={canConfigure}
+                  catalog={catalog}
+                  catalogs={connectionsState.overview.catalog}
+                  isOpen={openProvider === catalog.providerId}
+                  isRecovery={configured.length > 0}
+                  isSubmitting={submittingProvider === catalog.providerId}
+                  key={`${catalog.providerId}-catalog`}
+                  onCancel={() => {
+                    completedBatchDrafts.current.delete(catalog.providerId)
+                    setAtlassianSetupIntent(null)
+                    setOpenProvider(null)
+                  }}
+                  onOpen={() => {
+                    completedBatchDrafts.current.delete(catalog.providerId)
+                    if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
+                      setAtlassianSetupIntent(missingAtlassianIntent)
+                    }
+                    setOpenProvider(catalog.providerId)
+                  }}
+                  onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
+                  onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}
+                  onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
+                />
+              ]
+            })}
+          </div>
+        </>
       )}
     </section>
   )

@@ -16,7 +16,13 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
 import { ServicesPage } from "../../src/client/services/ServicesPage.js"
-import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  FollowedResourceId,
+  PersonId,
+  PluginConnectionId,
+  ProviderAccountId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -307,6 +313,87 @@ describe("ServicesPage connection tests", () => {
     }
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+  })
+
+  it("groups repositories and pipelines under their verified AWS account", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000171")
+    const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000172")
+    const pipelineId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000174")
+    const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000175")
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: repositoryConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: repositoryId,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: pipelineConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: pipelineId,
+          providerId: "codepipeline",
+          displayName: "Payments pipeline",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          resources: [
+            {
+              followedResourceId: repositoryId,
+              providerId: "codecommit",
+              displayName: "payments",
+              providerImmutableId: "eu-west-1:payments",
+              isEnabled: true
+            },
+            {
+              followedResourceId: pipelineId,
+              providerId: "codepipeline",
+              displayName: "payments-release",
+              providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Connected accounts")
+    expect(host.textContent).toContain("AWS account 123456789012")
+    expect(host.textContent).toContain("Verified identity · 123456789012")
+    expect(host.textContent).toContain("payments")
+    expect(host.textContent).toContain("payments-release")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
+      expect.arrayContaining(["Add repository", "Add pipeline"])
+    )
   })
 
   it("prefers one discovered OAuth profile for both Jira and Confluence", async () => {
