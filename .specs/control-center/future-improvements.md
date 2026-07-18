@@ -142,8 +142,9 @@ explicit. Those filters now execute against the complete current workspace proje
   keyboard navigation, exact destinations, and contextual Relay access. Authorized links resolve
   one current item projection only after grantee, expiry, revocation, workspace, and target checks.
   D08 timeline, event detail, bounded exports, and export audit are complete. D09 now has the shared
-  HTTP/SSE graceful-drain boundary; background claim admission, subsystem flush hooks, and startup
-  reconciliation remain. The D05 bounded readiness batch refinement is complete.
+  HTTP/SSE/background graceful-drain boundary, stable subsystem hook snapshots, SQLite WAL flush,
+  and bounded governed-action startup recovery. Fake sync-state reconciliation and explicit durable
+  claim expiry remain. The D05 bounded readiness batch refinement is complete.
 - I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
   webhooks, configuration, and policy integration.
 - S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
