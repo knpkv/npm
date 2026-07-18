@@ -3,7 +3,7 @@ import { Button, Field, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly
 import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useState } from "react"
-import { Link } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 
 import type {
   CreatePluginConnectionValue,
@@ -13,9 +13,11 @@ import type {
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
+import { firstPartyServiceIdentities, type FirstPartyServiceIdentity } from "../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
+import { selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
 import styles from "./ServicesPage.module.css"
 
 type ConnectionTestState =
@@ -331,12 +333,42 @@ const CatalogCard = ({
   </Surface>
 )
 
+const ServicePreviewCard = ({
+  onEnable,
+  service
+}: {
+  readonly onEnable: () => void
+  readonly service: FirstPartyServiceIdentity
+}): ReactElement => (
+  <Surface as="article" className={styles.card} padding="default" shape="grouped">
+    <div className={styles.cardHeading}>
+      <div className={styles.connectionIdentity}>
+        <ServiceMark service={service.providerId} size="compact" />
+        <Text as="h2" variant="card-title">
+          {service.displayName}
+        </Text>
+      </div>
+      <StateLabel label="Available" size="compact" tone="positive" />
+    </div>
+    <Text tone="secondary" variant="body">
+      {service.description}
+    </Text>
+    <div className={styles.cardAction}>
+      <Button onClick={onEnable} variant="primary">
+        Pair to enable
+      </Button>
+    </div>
+  </Surface>
+)
+
 /** Manage fixed first-party providers and prove configured identities with owner-only live checks. */
 export const ServicesPage = ({
   transport = browserConnectionTestTransport
 }: {
   readonly transport?: ConnectionTestTransport
 } = {}): ReactElement => {
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { invalidateSession, state: sessionState } = useBrowserSession()
   const sessionKey = browserReadableSessionKey(sessionState)
   const [requestRevision, setRequestRevision] = useState(0)
@@ -385,6 +417,23 @@ export const ServicesPage = ({
       enablementRequests.current.clear()
     }
   }, [sessionKey])
+
+  useEffect(() => {
+    if (
+      connectionsState._tag !== "ready" ||
+      sessionState._tag !== "authenticated" ||
+      sessionState.session.permission !== "workspace-owner"
+    ) {
+      return
+    }
+    const requestedProvider = selectedServiceProvider(searchParams, "enable")
+    if (requestedProvider === null) return
+    if (!connectionsState.overview.catalog.some(({ providerId }) => providerId === requestedProvider)) return
+    setOpenProvider(requestedProvider)
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.delete("enable")
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [connectionsState, searchParams, sessionState, setSearchParams])
 
   const testConnection = useCallback(
     (pluginConnectionId: PluginConnectionId): void => {
@@ -533,21 +582,21 @@ export const ServicesPage = ({
           Services
         </Text>
         <Text tone="secondary" variant="body-large">
-          {connectionsState._tag === "ready" && connectionsState.overview.connections.length === 0
+          {session === null || (connectionsState._tag === "ready" && connectionsState.overview.connections.length === 0)
             ? "Choose a service below. Control Center will enable it and verify the exact account before using it."
             : "Configure first-party providers and verify the exact account each connection represents."}
         </Text>
       </header>
-      {session === null ? (
-        <StatePanel
-          action={
-            <Link className={styles.textLink} to="/pair">
-              Pair this browser
-            </Link>
-          }
-          description="Connection details are available after this browser is paired."
-          title="Connections stay private"
-        />
+      {session === null && sessionState._tag !== "checking" ? (
+        <div className={styles.grid}>
+          {firstPartyServiceIdentities.map((service) => (
+            <ServicePreviewCard
+              key={service.providerId}
+              onEnable={() => navigate(servicePairingPath(service.providerId))}
+              service={service}
+            />
+          ))}
+        </div>
       ) : connectionsState._tag === "loading" || connectionsState._tag === "idle" ? (
         <StatePanel description="Reading the services available to this workspace." title="Loading services" />
       ) : connectionsState._tag === "failed" ? (

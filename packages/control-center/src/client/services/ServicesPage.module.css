@@ -70,12 +70,6 @@
   overflow-wrap: anywhere;
 }
 
-.textLink {
-  color: var(--rly-color-text-1);
-  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-    var(--rly-type-label-font);
-}
-
 @media (max-width: 32rem) {
   .cardHeading,
   .cardAction {
