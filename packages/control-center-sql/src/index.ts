@@ -5,6 +5,12 @@ import type { RenderedSql } from "./types.js"
 
 export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
 export {
+  type OpenPluginSyncAttemptsQueryInput,
+  type PluginSyncAttemptsQueryInput,
+  renderOpenPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptsQuery
+} from "./pluginSyncAttempts.js"
+export {
   type RenderedTimelineQuery,
   renderTimelineDetailQueries,
   renderTimelineQueries,

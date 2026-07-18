@@ -28,6 +28,7 @@ export {
 } from "./releaseAgent.js"
 export {
   reconcileFakeReleaseProjection,
+  reconcileFakeReleaseSyncAttempts,
   recoverFakeReleaseProjection,
   synchronizeFakeRelease,
   synchronizeFakeReleaseFromMap

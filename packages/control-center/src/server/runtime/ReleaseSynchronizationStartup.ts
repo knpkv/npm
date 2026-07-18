@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 
 import type { ReleaseId } from "../../domain/identifiers.js"
 import {
+  reconcileFakeReleaseSyncAttempts,
   recoverFakeReleaseProjection,
   type ReleaseSynchronizationFailure,
   type ReleaseSynchronizationInput,
@@ -37,8 +38,12 @@ export class ReleaseSynchronizationStartupConfigurationError extends Schema.Tagg
 /** Startup synchronization state retained for diagnostics and runtime tests. */
 export type ReleaseSynchronizationStartupState =
   | { readonly _tag: "disabled" }
-  | { readonly _tag: "connection-disabled" }
-  | { readonly _tag: "completed"; readonly outcome: ReleaseSynchronizationOutcome }
+  | { readonly _tag: "connection-disabled"; readonly reconciledAttempts: number }
+  | {
+    readonly _tag: "completed"
+    readonly outcome: ReleaseSynchronizationOutcome
+    readonly reconciledAttempts: number
+  }
 
 /** Startup synchronization result, available only inside the server composition. */
 export class ReleaseSynchronizationStartup extends Context.Service<
@@ -73,14 +78,15 @@ const makeReleaseSynchronizationStartup = Effect.fn(
       options.input.workspaceId,
       options.input.pluginConnectionId
     )
+    const reconciledAttempts = yield* reconcileFakeReleaseSyncAttempts(options.input)
     if (!connection.isEnabled) {
       yield* recoverFakeReleaseProjection(options.input)
-      return { _tag: "connection-disabled" } satisfies ReleaseSynchronizationStartupState
+      return { _tag: "connection-disabled", reconciledAttempts } satisfies ReleaseSynchronizationStartupState
     }
     const outcome = yield* synchronizeFakeReleaseFromMap(options.input).pipe(
       Effect.provideService(PluginConnectionMap, options.pluginConnections)
     )
-    return { _tag: "completed", outcome } satisfies ReleaseSynchronizationStartupState
+    return { _tag: "completed", outcome, reconciledAttempts } satisfies ReleaseSynchronizationStartupState
   }))
 })
 

@@ -453,6 +453,25 @@ export const recoverFakeReleaseProjection = Effect.fn(
   )
 })
 
+/** Close crash-left fake synchronization work as interrupted before startup continues. */
+export const reconcileFakeReleaseSyncAttempts = Effect.fn(
+  "ReleaseSynchronization.reconcileFakeReleaseSyncAttempts"
+)(function*(
+  input: ReleaseSynchronizationInput
+): Effect.fn.Return<number, ReleaseSynchronizationFailure, Persistence> {
+  const persistence = yield* Persistence
+  const boundInput = yield* bindProvider(input)
+  const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(input.streamKey)
+  const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+  return yield* persistence.pluginRuntime.reconcileSyncAttempts(
+    input.workspaceId,
+    input.pluginConnectionId,
+    boundInput.providerId,
+    streamKey,
+    completedAt
+  )
+})
+
 /** Synchronize and materialize one fake release without widening the page transaction boundary. */
 export const synchronizeFakeRelease = Effect.fn("ReleaseSynchronization.synchronizeFakeRelease")(function*(
   input: ReleaseSynchronizationInput
@@ -592,7 +611,17 @@ export const synchronizeFakeReleaseFromMap = Effect.fn(
   Crypto.Crypto | DomainEventWakeups | Persistence | PluginConnectionMap
 > {
   yield* recoverFakeReleaseProjection(input)
+  const persistence = yield* Persistence
   const boundInput = yield* bindProvider(input)
+  const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(input.streamKey)
+  const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+  const attempt = yield* persistence.pluginRuntime.beginSyncAttempt(
+    input.workspaceId,
+    input.pluginConnectionId,
+    boundInput.providerId,
+    streamKey,
+    startedAt
+  )
   const connections = yield* PluginConnectionMap
   const synchronized = yield* Effect.result(Effect.scoped(
     Effect.flatMap(
@@ -603,11 +632,23 @@ export const synchronizeFakeReleaseFromMap = Effect.fn(
       (context) => synchronizeFakeRelease(input).pipe(Effect.provide(context))
     )
   ))
-  if (Result.isSuccess(synchronized)) return synchronized.success
-  if (!isPluginFailure(synchronized.failure)) return yield* Effect.fail(synchronized.failure)
-  const failedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-  const unavailable = yield* failureHealth(synchronized.failure, failedAt)
-  yield* persistHealth(boundInput, unavailable, true)
-  const releaseId = yield* reconcileLastValidProjection(boundInput, unavailable, failedAt, "cache")
-  return { _tag: "source-unavailable", releaseId }
+  const outcome = yield* Effect.gen(function*() {
+    if (Result.isSuccess(synchronized)) return synchronized.success
+    if (!isPluginFailure(synchronized.failure)) return yield* Effect.fail(synchronized.failure)
+    const failedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+    const unavailable = yield* failureHealth(synchronized.failure, failedAt)
+    yield* persistHealth(boundInput, unavailable, true)
+    const releaseId = yield* reconcileLastValidProjection(boundInput, unavailable, failedAt, "cache")
+    return { _tag: "source-unavailable", releaseId } satisfies ReleaseSynchronizationOutcome
+  })
+  const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+  yield* persistence.pluginRuntime.completeSyncAttempt(
+    input.workspaceId,
+    input.pluginConnectionId,
+    streamKey,
+    attempt.attemptSequence,
+    outcome._tag,
+    completedAt
+  )
+  return outcome
 })

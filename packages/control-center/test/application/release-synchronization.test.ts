@@ -350,6 +350,45 @@ describe("fake release synchronization", () => {
       assert.strictEqual((yield* persistence.events.streamState(WORKSPACE_ID)).headCursor, 0)
     })))
 
+  it.effect("leaves a failed post-begin synchronization open until restart reconciliation interrupts it", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      const appendFailure = new PersistenceOperationError({ operation: "test.sync-attempt-event-append" })
+      const failingPersistence = Persistence.of({
+        ...persistence,
+        events: {
+          ...persistence.events,
+          append: () => Effect.fail(appendFailure)
+        }
+      })
+
+      const attempted = yield* runScenarioFromMap(scenario(success(releasePage()))).pipe(
+        Effect.provideService(Persistence, failingPersistence),
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(attempted))
+      if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure, appendFailure)
+      const open = yield* persistence.pluginRuntime.listSyncAttempts(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.lengthOf(open, 1)
+      assert.strictEqual(open[0]?.outcome, null)
+
+      assert.strictEqual(
+        yield* persistence.pluginRuntime.reconcileSyncAttempts(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          STREAM,
+          Schema.decodeSync(UtcTimestamp)(RECENT_FAILURE_AT)
+        ),
+        1
+      )
+      const reconciled = yield* persistence.pluginRuntime.listSyncAttempts(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.strictEqual(reconciled[0]?.outcome, "interrupted")
+      assert.strictEqual(reconciled[0]?.endingRevision, 0)
+      assert.strictEqual(reconciled[0]?.pagesCommitted, 0)
+    })))
+
   it.effect("rolls back projected people and release when their invalidation cannot be appended", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* setup
@@ -776,6 +815,40 @@ describe("fake release synchronization", () => {
         }).pipe(Effect.provide(releaseServices(config)))
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("marks a crash-left attempt interrupted before a restarted synchronization succeeds", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SYNCHRONIZED_AT))
+      const openAttempt = yield* persistence.pluginRuntime.beginSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        "jira",
+        STREAM,
+        Schema.decodeSync(UtcTimestamp)(SYNCHRONIZED_AT)
+      )
+      assert.strictEqual(openAttempt.attemptSequence, 1)
+
+      const outcome = yield* runScenarioFromMap(scenario(success(releasePage())))
+      assert.deepStrictEqual(outcome, {
+        _tag: "synchronized",
+        pagesCommitted: 1,
+        releaseId: RELEASE_ID
+      })
+      const attempts = yield* persistence.pluginRuntime.listSyncAttempts(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.deepStrictEqual(
+        attempts.map(({ attemptSequence, endingRevision, outcome, pagesCommitted }) => ({
+          attemptSequence,
+          endingRevision,
+          outcome,
+          pagesCommitted
+        })),
+        [
+          { attemptSequence: 1, endingRevision: 0, outcome: "interrupted", pagesCommitted: 0 },
+          { attemptSequence: 2, endingRevision: 1, outcome: "synchronized", pagesCommitted: 1 }
+        ]
+      )
+    })))
 
   it.effect("keeps the last-valid projection when a resumed provider page is malformed", () =>
     withPersistence(Effect.gen(function*() {
