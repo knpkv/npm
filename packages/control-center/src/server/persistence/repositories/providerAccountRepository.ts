@@ -278,7 +278,12 @@ const makeProviderAccountRepository = Effect.gen(function*() {
       )
       const records: Array<ProviderAccountRecord> = []
       for (const row of rows) {
-        records.push(yield* decodeProviderAccount(workspaceId, workspaceId, row))
+        const record = yield* decodeProviderAccount(
+          workspaceId,
+          typeof row.providerAccountId === "string" ? row.providerAccountId : workspaceId,
+          row
+        ).pipe(Effect.catchTag("PersistedRecordError", () => Effect.succeed(null)))
+        if (record !== null) records.push(record)
       }
       return records
     }),
@@ -339,7 +344,12 @@ const makeProviderAccountRepository = Effect.gen(function*() {
       )
       const records: Array<FollowedResourceRecord> = []
       for (const row of rows) {
-        records.push(yield* decodeFollowedResource(workspaceId, workspaceId, row))
+        const record = yield* decodeFollowedResource(
+          workspaceId,
+          typeof row.followedResourceId === "string" ? row.followedResourceId : workspaceId,
+          row
+        ).pipe(Effect.catchTag("PersistedRecordError", () => Effect.succeed(null)))
+        if (record !== null) records.push(record)
       }
       return records
     }),

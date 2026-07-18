@@ -4,8 +4,7 @@ import { Effect, FileSystem, Layer, Result, Schema } from "effect"
 
 import { FollowedResourceId, ProviderAccountId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import type { Database } from "../../src/server/persistence/Database.js"
-import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { RecordAlreadyExistsError, RevisionConflictError } from "../../src/server/persistence/errors.js"
 import {
   FollowedResourceDisplayName,
@@ -188,6 +187,65 @@ describe("provider account repository", () => {
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(stale))
         if (Result.isFailure(stale)) assert.instanceOf(stale.failure, RevisionConflictError)
+      })
+    ))
+
+  it.effect("quarantines malformed list rows while returning healthy accounts and resources", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspace
+        yield* createAwsAccount
+        const accounts = yield* ProviderAccountRepository
+        const database = yield* Database
+        const quarantine = yield* QuarantineRepository
+
+        yield* accounts.create(WORKSPACE_A, {
+          providerAccountId: SECOND_ACCOUNT_ID,
+          providerFamily: "aws",
+          vendorAccountId: VendorAccountId.make("210987654321"),
+          displayName: ProviderAccountDisplayName.make("Sandbox AWS"),
+          createdAt: CREATED_AT
+        })
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: REPOSITORY_ID,
+          providerAccountId: AWS_ACCOUNT_ID,
+          providerId: "codecommit",
+          vendorResourceId: VendorResourceId.make("payments-api"),
+          displayName: FollowedResourceDisplayName.make("Payments API"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: PIPELINE_ID,
+          providerAccountId: AWS_ACCOUNT_ID,
+          providerId: "codepipeline",
+          vendorResourceId: VendorResourceId.make("payments-release"),
+          displayName: FollowedResourceDisplayName.make("Payments release"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+
+        yield* database.sql`PRAGMA ignore_check_constraints = ON`
+        yield* database.sql`UPDATE provider_accounts
+          SET display_name = ''
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND provider_account_id = ${SECOND_ACCOUNT_ID}`
+        yield* database.sql`UPDATE followed_resources
+          SET display_name = ''
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND followed_resource_id = ${PIPELINE_ID}`
+        yield* database.sql`PRAGMA ignore_check_constraints = OFF`
+
+        const listedAccounts = yield* accounts.list(WORKSPACE_A)
+        const listedResources = yield* accounts.listResources(WORKSPACE_A, AWS_ACCOUNT_ID)
+        const quarantined = yield* quarantine.list(WORKSPACE_A)
+
+        assert.deepStrictEqual(listedAccounts.map(({ providerAccountId }) => providerAccountId), [AWS_ACCOUNT_ID])
+        assert.deepStrictEqual(listedResources.map(({ followedResourceId }) => followedResourceId), [REPOSITORY_ID])
+        assert.sameMembers(
+          quarantined.map(({ recordKey }) => recordKey),
+          [SECOND_ACCOUNT_ID, PIPELINE_ID]
+        )
       })
     ))
 })
