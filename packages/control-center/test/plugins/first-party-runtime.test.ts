@@ -54,6 +54,121 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
+  it.effect("loads legacy text and current secret-backed Atlassian emails", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-email-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const dependencies = Layer.mergeAll(
+        persistence,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        const cases: ReadonlyArray<{
+          readonly providerId: "jira" | "confluence"
+          readonly email: "legacy-text" | "secret-reference" | "malformed-secret-reference"
+        }> = [
+          { providerId: "jira", email: "legacy-text" },
+          { providerId: "confluence", email: "legacy-text" },
+          { providerId: "jira", email: "secret-reference" },
+          { providerId: "confluence", email: "secret-reference" },
+          { providerId: "jira", email: "malformed-secret-reference" },
+          { providerId: "confluence", email: "malformed-secret-reference" }
+        ]
+
+        for (const [index, testCase] of cases.entries()) {
+          const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+          const emailRef = yield* secretStore.create(
+            new TextEncoder().encode(
+              testCase.email === "malformed-secret-reference" ? "malformed-email" : "owner@example.com"
+            )
+          )
+          const pluginConnectionId = PluginConnectionId.make(
+            `01890f6f-6d6a-7cc0-98d2-${(200 + index).toString().padStart(12, "0")}`
+          )
+          yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+            pluginConnectionId,
+            providerId: testCase.providerId,
+            displayName: PluginConnectionDisplayName.make(`Atlassian ${index}`),
+            isEnabled: true,
+            createdAt: CREATED_AT
+          })
+          const email = testCase.email === "legacy-text"
+            ? { _tag: "text", key: "email", value: "owner@example.com" }
+            : {
+              _tag: "secret-reference",
+              key: "email",
+              ref: emailRef
+            }
+          const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+            testCase.providerId === "jira"
+              ? [
+                { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                email,
+                { _tag: "integer", key: "maximumPages", value: 3 },
+                { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+                { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+              ]
+              : [
+                { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                email,
+                { _tag: "text", key: "probePageId", value: "page-1" },
+                { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
+                { _tag: "text", key: "siteId", value: "site-1" },
+                { _tag: "text", key: "spaceId", value: "space-1" }
+              ]
+          )
+          yield* persistenceService.pluginConfigurations.update(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            configuration,
+            0,
+            CREATED_AT
+          )
+          yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            testCase.providerId,
+            testCase.providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor,
+            0,
+            CREATED_AT
+          )
+
+          const connections = yield* PluginConnectionMap
+          const outcome = yield* Effect.result(
+            connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
+          )
+          if (testCase.email === "malformed-secret-reference") {
+            assert.strictEqual(outcome._tag, "Failure")
+            if (outcome._tag === "Failure") {
+              assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+              if (outcome.failure._tag === "PluginConfigurationFailure") {
+                assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-schema-invalid")
+              }
+            }
+          } else {
+            assert.strictEqual(outcome._tag, "Success")
+            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+          }
+        }
+        assert.lengthOf(requests, 0)
+      }).pipe(
+        Effect.provide(firstPartyPluginConnectionMapLayer),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("rejects non-tenant Atlassian origins before credentials or HTTP are used", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-origin-")
@@ -87,6 +202,7 @@ describe("first-party plugin runtime", () => {
 
         for (const [index, invalid] of cases.entries()) {
           const missingSecretRef = SecretRef.make(`secret_${index.toString(16).repeat(64)}`)
+          const missingEmailRef = SecretRef.make(`secret_${(index + 8).toString(16).repeat(64)}`)
           const pluginConnectionId = PluginConnectionId.make(
             `01890f6f-6d6a-7cc0-98d2-${(100 + index).toString().padStart(12, "0")}`
           )
@@ -101,7 +217,7 @@ describe("first-party plugin runtime", () => {
             invalid.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
-                { _tag: "text", key: "email", value: "owner@example.com" },
+                { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
@@ -109,7 +225,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
-                { _tag: "text", key: "email", value: "owner@example.com" },
+                { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: invalid.webBaseUrl },
                 { _tag: "text", key: "siteId", value: "site-1" },

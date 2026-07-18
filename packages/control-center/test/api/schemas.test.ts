@@ -4,6 +4,7 @@ import { Result, Schema } from "effect"
 import {
   ControlCenterLiveEvent,
   CorrelationResponseHeaders,
+  CreatePluginConnectionRequest,
   CurrentSessionResponse,
   EventCursorFromString,
   MediaResponseHeaders,
@@ -11,6 +12,7 @@ import {
   PairingCode,
   PatchPluginConfigurationRequest,
   PluginListResponse,
+  PluginOverviewResponse,
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
@@ -57,6 +59,30 @@ const encodedPlugin = {
   health: null,
   updatedAt: timestamp
 }
+const encodedCatalogEntry = (providerId: string) => ({
+  providerId,
+  displayName: providerId,
+  description: `Configure ${providerId}.`,
+  configurationFields: [{
+    key: "profile",
+    label: "Profile",
+    description: "Local configuration value.",
+    kind: "text",
+    scope: "adapter",
+    required: true,
+    defaultValue: "default",
+    isReadOnly: false,
+    minimum: null,
+    maximum: null
+  }]
+})
+const encodedCatalog = [
+  encodedCatalogEntry("codecommit"),
+  encodedCatalogEntry("codepipeline"),
+  encodedCatalogEntry("jira"),
+  encodedCatalogEntry("confluence"),
+  encodedCatalogEntry("clockify")
+]
 
 describe("public API schemas", () => {
   it("exports and decodes relationship repair proposal drafts", () => {
@@ -200,7 +226,7 @@ describe("public API schemas", () => {
     ))
   })
 
-  it("bounds session and plugin list responses", () => {
+  it("bounds session, plugin list, and plugin overview responses", () => {
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(SessionListResponse)([encodedSession])))
     assert.isTrue(
       Result.isFailure(
@@ -209,8 +235,46 @@ describe("public API schemas", () => {
     )
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginListResponse)([encodedPlugin])))
     assert.isTrue(
-      Result.isFailure(Schema.decodeUnknownResult(PluginListResponse)(Array.from({ length: 101 }, () => encodedPlugin)))
+      Result.isFailure(
+        Schema.decodeUnknownResult(PluginListResponse)(Array.from({ length: 101 }, () => encodedPlugin))
+      )
     )
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(PluginOverviewResponse)({
+        catalog: encodedCatalog,
+        connections: [encodedPlugin]
+      })
+    ))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PluginOverviewResponse)({
+          catalog: encodedCatalog,
+          connections: Array.from({ length: 101 }, () => encodedPlugin)
+        })
+      )
+    )
+  })
+
+  it("bounds setup values and rejects duplicate keys without exposing a secret response field", () => {
+    const request = {
+      pluginConnectionId,
+      providerId: "jira",
+      displayName: "Delivery Jira",
+      values: [{ _tag: "secret", key: "apiToken", value: "secret-value" }]
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(CreatePluginConnectionRequest)(request)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(CreatePluginConnectionRequest)({
+        ...request,
+        values: [request.values[0], request.values[0]]
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(CreatePluginConnectionRequest)({
+        ...request,
+        values: [{ ...request.values[0], value: "x".repeat(16_385) }]
+      })
+    ))
   })
 
   it("bounds named release collaborators and requires explicit release roles", () => {

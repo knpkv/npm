@@ -22,7 +22,8 @@ export const mapPersistenceWriteError = (
 ): ApplicationConflict | ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable =>
   error._tag === "RevisionConflictError" || error._tag === "RecordAlreadyExistsError"
     ? new ApplicationConflict()
-    : error._tag === "SecretReferenceScopeConflictError" ||
+    : error._tag === "PluginConnectionLimitError" ||
+        error._tag === "SecretReferenceScopeConflictError" ||
         error._tag === "AuthorizedShareInputError" ||
         error._tag === "DeliveryGraphInputError" ||
         error._tag === "GovernedActionInputError" ||

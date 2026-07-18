@@ -6,7 +6,12 @@ import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { PluginConnectionSummary, PluginConnectionTestResult } from "../../src/api/plugins.js"
+import {
+  CreatePluginConnectionResponse,
+  PluginConnectionSummary,
+  PluginConnectionTestResult,
+  PluginOverviewResponse
+} from "../../src/api/plugins.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
@@ -23,6 +28,35 @@ const connection = Schema.decodeSync(PluginConnectionSummary)({
   isEnabled: true,
   health: null,
   updatedAt: "2026-07-14T10:00:00.000Z"
+})
+const catalogEntry = (providerId: "codecommit" | "codepipeline" | "jira" | "confluence" | "clockify") => ({
+  providerId,
+  displayName: providerId,
+  description: `Configure ${providerId}.`,
+  configurationFields: [
+    {
+      key: "profile",
+      label: "Profile",
+      description: "Local configuration value.",
+      kind: "text",
+      scope: "adapter",
+      required: true,
+      defaultValue: "default",
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    }
+  ]
+})
+const overview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+  catalog: [
+    catalogEntry("codecommit"),
+    catalogEntry("codepipeline"),
+    catalogEntry("jira"),
+    catalogEntry("confluence"),
+    catalogEntry("clockify")
+  ],
+  connections: [Schema.encodeSync(PluginConnectionSummary)(connection)]
 })
 const session = Schema.decodeSync(SessionSummary)({
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000143",
@@ -74,6 +108,182 @@ const renderServices = async (transport: ConnectionTestTransport): Promise<HTMLE
 }
 
 describe("ServicesPage connection tests", () => {
+  it("renders the fresh five, opens setup, submits, and shows the immediate identity", async () => {
+    const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: {
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        displayName: "Payments CodeCommit",
+        isEnabled: true,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 1,
+        values: [{ _tag: "text", key: "profile", value: "default" }],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: {
+        _tag: "healthy",
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 42,
+        identity: {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Production account",
+          providerImmutableId: "123456789012"
+        }
+      }
+    })
+    const create = vi.fn().mockResolvedValue(created)
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    expect(host.querySelectorAll("article")).toHaveLength(5)
+
+    const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configure?.click())
+    const name = host.querySelector<HTMLInputElement>('input[aria-labelledby*="label"]')
+    expect(name).not.toBeNull()
+    if (name !== null) {
+      await act(async () => {
+        name.value = "Payments CodeCommit"
+        name.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    }
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    await act(async () => submit?.click())
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(host.textContent).toContain("Production account")
+    expect(host.textContent).toContain("123456789012")
+  })
+
+  it("keeps a correction form visible when the initial connection test fails", async () => {
+    const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: {
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        displayName: "Rejected CodeCommit",
+        isEnabled: true,
+        health: {
+          _tag: "unavailable",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          failureClass: "authentication",
+          retryAt: null,
+          safeMessage: "The provider rejected these credentials."
+        },
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 1,
+        values: [{ _tag: "text", key: "profile", value: "default" }],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: {
+        _tag: "failed",
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 42,
+        failureClass: "authentication",
+        retryAt: null,
+        safeMessage: "The provider rejected these credentials."
+      }
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn().mockResolvedValue(created),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configure?.click())
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    await act(async () => submit?.click())
+
+    expect(host.textContent).toContain("The provider rejected these credentials.")
+    expect(host.textContent).toContain("Needs correction")
+    expect(host.textContent).toContain("Connect and test")
+    expect(host.querySelector("form")).not.toBeNull()
+  })
+
+  it("keeps setup open and announces an inline error when creation fails", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn().mockRejectedValue(new Error("unavailable")),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configure?.click())
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    await act(async () => submit?.click())
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("could not create")
+    expect(host.textContent).toContain("Connect and test")
+  })
+
+  it("aborts an in-flight setup request when the browser session changes", async () => {
+    let setupSignal: AbortSignal | undefined
+    const transport: ConnectionTestTransport = {
+      create: (_request, signal) => {
+        setupSignal = signal
+        return new Promise(() => undefined)
+      },
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configure?.click())
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    await act(async () => submit?.click())
+    await act(async () => undefined)
+    expect(setupSignal?.aborted).toBe(false)
+    await act(async () => sessionControls?.invalidateSession(session.sessionId))
+    expect(setupSignal?.aborted).toBe(true)
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    await act(async () => undefined)
+    const configureAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configureAfterReconnect?.click())
+    const submitAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    expect(submitAfterReconnect?.disabled).toBe(false)
+  })
+
   it("shows testing, failure, retry, and the provider identity returned by success", async () => {
     const failed = Schema.decodeSync(PluginConnectionTestResult)({
       _tag: "failed",
@@ -107,7 +317,9 @@ describe("ServicesPage connection tests", () => {
       .mockImplementationOnce(() => first)
       .mockResolvedValueOnce(healthy)
     const transport: ConnectionTestTransport = {
-      list: () => Promise.resolve([connection]),
+      create: vi.fn(),
+      overview: () => Promise.resolve(overview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       test
     }
     const host = await renderServices(transport)

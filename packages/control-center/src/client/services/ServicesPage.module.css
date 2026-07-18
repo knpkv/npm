@@ -50,6 +50,22 @@
   gap: var(--rly-space-4);
 }
 
+.setupForm {
+  display: grid;
+  gap: var(--rly-space-16);
+}
+
+.setupActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rly-space-8);
+}
+
+.setupError {
+  color: var(--rly-color-blocked-ink);
+}
+
 .identifier {
   overflow-wrap: anywhere;
 }

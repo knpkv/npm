@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -27,6 +27,7 @@ import {
 import { NegotiatedPluginDescriptorV1 } from "../../src/domain/plugins/descriptor.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
+import type { ProviderId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   ApplicationConflict,
@@ -35,8 +36,10 @@ import {
   ApplicationServiceUnavailable
 } from "../../src/server/api/ApplicationServices.js"
 import {
+  listFirstPartyServiceMetadata,
   makeDeliveryGraphInspection,
   makeMediaReads,
+  makePluginAdministration,
   makePluginAdministrationWithConnections,
   makePortfolioSnapshots,
   makeRelationshipRepairProposals,
@@ -46,10 +49,14 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import { firstPartyService } from "../../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
+import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
@@ -59,6 +66,9 @@ const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2
 const UNREADY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000074")
 const CONFLUENCE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008b")
 const CODEPIPELINE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008c")
+const PROVISIONED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008d")
+const INVALID_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008e")
+const FAILED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008f")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
@@ -305,6 +315,647 @@ const setup = Effect.gen(function*() {
 })
 
 describe("application adapters", () => {
+  it("exposes the fixed five first-party services before any connection exists", () => {
+    assert.deepStrictEqual(
+      listFirstPartyServiceMetadata().map(({ displayName, providerId }) => ({ displayName, providerId })),
+      [
+        { displayName: "CodeCommit", providerId: "codecommit" },
+        { displayName: "CodePipeline", providerId: "codepipeline" },
+        { displayName: "Jira", providerId: "jira" },
+        { displayName: "Confluence", providerId: "confluence" },
+        { displayName: "Clockify", providerId: "clockify" }
+      ]
+    )
+  })
+
+  it.effect("keeps setup fields aligned with every canonical runtime descriptor", () =>
+    Effect.gen(function*() {
+      const providerIds: ReadonlyArray<ProviderId> = ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
+      for (const providerId of providerIds) {
+        const catalog = firstPartyService(providerId)
+        assert.isDefined(catalog)
+        if (catalog === undefined) continue
+        const descriptor = yield* negotiatePluginDescriptorV1(catalog.rawDescriptor)
+        assert.deepStrictEqual(
+          catalog.metadata.configurationFields.map(({ key, kind }) => ({ key, kind })),
+          descriptor.descriptor.configurationFields.map(({ _tag, key }) => ({
+            key,
+            kind: _tag === "secret-reference" ? "secret" : _tag
+          }))
+        )
+      }
+    }))
+
+  it.effect("creates secrets, disabled metadata, canonical configuration, descriptor, enablement, and identity in order", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const invalidations = yield* Ref.make(0)
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "atlassian-account-789", displayName: "Provisioned Owner" },
+          workspace: { providerImmutableId: "site-789", displayName: "Provisioned Jira" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: ({ pluginConnectionId, workspaceId }) =>
+          workspaceId === WORKSPACE_ID && [
+              PROVISIONED_PLUGIN_ID,
+              CONFLUENCE_PLUGIN_ID,
+              CODEPIPELINE_PLUGIN_ID
+            ].includes(pluginConnectionId)
+            ? Effect.succeed(Context.make(PluginConnection, connection))
+            : Effect.die("provisioning crossed its requested scope"),
+        invalidate: () => Ref.update(invalidations, (count) => count + 1)
+      }
+      const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const response = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: PROVISIONED_PLUGIN_ID,
+          providerId: "jira",
+          displayName: "Provisioned Jira",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "plaintext-token-canary" }
+          ]
+        }
+      })
+
+      assert.isTrue(response.connection.isEnabled)
+      assert.strictEqual(response.connection.providerId, "jira")
+      assert.strictEqual(response.configuration.revision, 1)
+      assert.deepInclude(response.configuration.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("apiToken"),
+        state: "configured"
+      })
+      assert.deepInclude(response.configuration.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(response.configuration.values, {
+        _tag: "url",
+        key: PluginConfigurationKey.make("webBaseUrl"),
+        value: "https://knpkv.atlassian.net/"
+      })
+      assert.strictEqual(response.test._tag, "healthy")
+      if (response.test._tag === "healthy") {
+        assert.strictEqual(response.test.identity.displayName, "Provisioned Owner")
+        assert.strictEqual(response.test.identity.providerImmutableId, "atlassian-account-789")
+      }
+      assert.strictEqual(yield* Ref.get(invalidations), 1)
+
+      const persistence = yield* Persistence
+      const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.isTrue(record.isEnabled)
+      assert.strictEqual(record.revision, 2)
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.include(runtime.descriptorJson, "apiToken")
+      const database = yield* Database
+      const rows = yield* database.sql<{ readonly configurationJson: string }>`SELECT
+        configuration_json AS configurationJson
+        FROM plugin_configurations
+        WHERE workspace_id = ${WORKSPACE_ID} AND plugin_connection_id = ${PROVISIONED_PLUGIN_ID}`
+      assert.lengthOf(rows, 1)
+      assert.notInclude(rows[0]?.configurationJson ?? "", "plaintext-token-canary")
+      assert.notInclude(rows[0]?.configurationJson ?? "", "owner@example.com")
+      assert.notInclude(JSON.stringify(response), "plaintext-token-canary")
+      assert.notInclude(JSON.stringify(response), "owner@example.com")
+      assert.notMatch(JSON.stringify(response), /secret_[0-9a-f]{64}/u)
+
+      const roundTripped = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        patch: {
+          expectedRevision: response.configuration.revision,
+          values: [
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("email"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 49 },
+            {
+              _tag: "url",
+              key: PluginConfigurationKey.make("webBaseUrl"),
+              value: "https://knpkv.atlassian.net/"
+            }
+          ]
+        }
+      })
+      assert.strictEqual(roundTripped.revision, 2)
+      assert.deepInclude(roundTripped.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(roundTripped.values, {
+        _tag: "integer",
+        key: PluginConfigurationKey.make("pageSize"),
+        value: 49
+      })
+
+      const plaintextCredentialPatch = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        patch: {
+          expectedRevision: roundTripped.revision,
+          values: [
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "plaintext@example.com" },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 49 },
+            {
+              _tag: "url",
+              key: PluginConfigurationKey.make("webBaseUrl"),
+              value: "https://knpkv.atlassian.net/"
+            }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(plaintextCredentialPatch))
+      if (Result.isFailure(plaintextCredentialPatch)) {
+        assert.instanceOf(plaintextCredentialPatch.failure, ApplicationInvalidRequest)
+      }
+
+      const currentConfiguration = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.isTrue(Option.isSome(currentConfiguration))
+      if (Option.isSome(currentConfiguration)) {
+        assert.notInclude(JSON.stringify(currentConfiguration.value), "plaintext@example.com")
+        const legacyConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+          currentConfiguration.value.values.map((value) =>
+            value.key === "email"
+              ? { _tag: "text", key: "email", value: "legacy-owner@example.com" }
+              : value
+          )
+        )
+        yield* persistence.pluginConfigurations.update(
+          WORKSPACE_ID,
+          PROVISIONED_PLUGIN_ID,
+          legacyConfiguration,
+          currentConfiguration.value.revision,
+          T0
+        )
+        const legacyRead = yield* administration.configuration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PROVISIONED_PLUGIN_ID
+        })
+        assert.deepInclude(legacyRead.values, {
+          _tag: "secret-reference",
+          key: PluginConfigurationKey.make("email"),
+          state: "configured"
+        })
+        assert.notInclude(JSON.stringify(legacyRead), "legacy-owner@example.com")
+      }
+
+      const confluence = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+          providerId: "confluence",
+          displayName: "Provisioned Confluence",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("siteBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "docs@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "confluence-token-canary" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-1" }
+          ]
+        }
+      })
+      assert.deepInclude(confluence.configuration.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(confluence.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("spaceId"),
+        value: "space-1"
+      })
+      assert.notInclude(JSON.stringify(confluence), "docs@example.com")
+
+      const codeCommit = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Provisioned CodeCommit",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      })
+      assert.deepInclude(codeCommit.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("profile"),
+        value: "delivery"
+      })
+      assert.strictEqual(yield* Ref.get(invalidations), 4)
+    })))
+
+  it.effect("retains a visible disabled durable draft when no runtime map is installed", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const administration = yield* makePluginAdministration
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const result = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: PROVISIONED_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Draft CodeCommit",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationServiceUnavailable)
+
+      const persistence = yield* Persistence
+      const draft = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.isFalse(draft.isEnabled)
+      assert.isTrue(Option.isSome(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)))
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.strictEqual(runtime.health._tag, "disabled")
+      const listed = yield* administration.list(WORKSPACE_ID)
+      assert.strictEqual(
+        listed.find(({ pluginConnectionId }) => pluginConnectionId === PROVISIONED_PLUGIN_ID)?.health?._tag,
+        "disabled"
+      )
+      const metadata = yield* administration.configurationMetadata({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID
+      })
+      assert.strictEqual(metadata.pluginId, "dev.knpkv.codecommit")
+    })))
+
+  it.effect("rejects missing and unknown catalog fields before creating metadata", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const administration = yield* makePluginAdministration
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const missing = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: INVALID_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Invalid CodeCommit",
+          values: [{ _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" }]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) assert.instanceOf(missing.failure, ApplicationInvalidRequest)
+
+      const unknown = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: INVALID_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Invalid CodeCommit",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" },
+            { _tag: "text", key: PluginConfigurationKey.make("unknown"), value: "unexpected" }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(unknown))
+      if (Result.isFailure(unknown)) assert.instanceOf(unknown.failure, ApplicationInvalidRequest)
+
+      const invalidProviderValues: ReadonlyArray<{
+        readonly email: string
+        readonly webBaseUrl: string
+      }> = [
+        { webBaseUrl: "https://example.com/", email: "owner@example.com" },
+        { webBaseUrl: "https://knpkv.atlassian.net/", email: "malformed-email" }
+      ]
+      for (const invalid of invalidProviderValues) {
+        const providerInvalid = yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: INVALID_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Invalid Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: invalid.webBaseUrl },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: invalid.email },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "must-not-be-persisted" }
+            ]
+          }
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(providerInvalid))
+        if (Result.isFailure(providerInvalid)) {
+          assert.instanceOf(providerInvalid.failure, ApplicationInvalidRequest)
+        }
+      }
+
+      const persistence = yield* Persistence
+      assert.isTrue(Result.isFailure(
+        yield* persistence.pluginConnections.get(WORKSPACE_ID, INVALID_PLUGIN_ID).pipe(Effect.result)
+      ))
+      assert.isTrue(Option.isNone(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)
+      ))
+    })))
+
+  it.effect("keeps a provider-authentication test failure as an enabled usable connection", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.die("discovery must not run after failed health"),
+        health: Effect.fail(new PluginAuthenticationFailure({ operation: "jira-health" })),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      })
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const response = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: FAILED_PLUGIN_ID,
+          providerId: "jira",
+          displayName: "Rejected Jira",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "rejected-token-canary" }
+          ]
+        }
+      })
+      assert.strictEqual(response.test._tag, "failed")
+      assert.isTrue(response.connection.isEnabled)
+      assert.strictEqual(response.connection.health?._tag, "unavailable")
+      assert.notInclude(JSON.stringify(response), "rejected-token-canary")
+      const persistence = yield* Persistence
+      assert.isTrue((yield* persistence.pluginConnections.get(WORKSPACE_ID, FAILED_PLUGIN_ID)).isEnabled)
+      const listed = yield* administration.list(WORKSPACE_ID)
+      assert.strictEqual(
+        listed.find(({ pluginConnectionId }) => pluginConnectionId === FAILED_PLUGIN_ID)?.health?._tag,
+        "unavailable"
+      )
+    })))
+
+  it.effect("admits only one of two concurrent hundredth connections", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* Effect.forEach(
+        Array.from({ length: 97 }, (_, index) => index),
+        (index) =>
+          persistence.pluginConnections.create(WORKSPACE_ID, {
+            pluginConnectionId: PluginConnectionId.make(
+              `01890f6f-6d6a-7cc0-98d2-${(300 + index).toString().padStart(12, "0")}`
+            ),
+            providerId: "codecommit",
+            displayName: PluginConnectionDisplayName.make(`Existing ${index}`),
+            isEnabled: false,
+            createdAt: T0
+          }),
+        { discard: true }
+      )
+      const hundredthId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000090")
+      const rejectedId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "account-100", displayName: "Connection 100" },
+          workspace: null,
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      })
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const requests = [hundredthId, rejectedId].map((pluginConnectionId, index) =>
+        operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId,
+            providerId: "codecommit",
+            displayName: `Connection ${100 + index}`,
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          }
+        }).pipe(Effect.result)
+      )
+      const results = yield* Effect.all(requests, { concurrency: "unbounded" })
+      const accepted = results.filter(Result.isSuccess)
+      const rejected = results.filter(Result.isFailure)
+
+      assert.lengthOf(accepted, 1)
+      assert.lengthOf(rejected, 1)
+      if (rejected[0] !== undefined) {
+        assert.instanceOf(rejected[0].failure, ApplicationInvalidRequest)
+      }
+      assert.lengthOf(yield* administration.list(WORKSPACE_ID), 100)
+      const configurations = yield* Effect.all([
+        persistence.pluginConfigurations.get(WORKSPACE_ID, hundredthId),
+        persistence.pluginConfigurations.get(WORKSPACE_ID, rejectedId)
+      ])
+      assert.strictEqual(configurations.filter(Option.isSome).length, 1)
+    })))
+
+  it.effect("removes setup secrets when interrupted before durable configuration", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const firstCreated = yield* Deferred.make<SecretRef>()
+      const creates = yield* Ref.make(0)
+      const removals = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const reference = SecretRef.make(`secret_${"b".repeat(64)}`)
+      const instrumentedSecrets = SecretStore.of({
+        create: () =>
+          Ref.getAndUpdate(creates, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 0
+                ? Effect.succeed(reference)
+                : Deferred.succeed(firstCreated, reference).pipe(Effect.andThen(Effect.never))
+            )
+          ),
+        remove: (removed) => Ref.update(removals, (references) => [...references, removed]),
+        resolve: () => Effect.die("interrupted setup must not resolve a secret"),
+        rotate: () => Effect.die("interrupted setup must not rotate a secret")
+      })
+
+      const fiber = yield* Effect.gen(function*() {
+        const administration = yield* makePluginAdministration
+        const operation = administration.connectAndTest
+        assert.isDefined(operation)
+        return yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: FAILED_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Interrupted Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "temporary-token" }
+            ]
+          }
+        })
+      }).pipe(
+        Effect.provideService(SecretStore, instrumentedSecrets),
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* Deferred.await(firstCreated)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(yield* Ref.get(removals), [reference])
+      const persistence = yield* Persistence
+      assert.isTrue(Option.isNone(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)))
+    })))
+
+  it.effect("retains setup secrets when interruption follows the durable configuration commit", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const configurationCommitted = yield* Deferred.make<void>()
+      const creates = yield* Ref.make(0)
+      const removals = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const instrumentedPersistence = Persistence.of({
+        ...persistence,
+        pluginConfigurations: {
+          ...persistence.pluginConfigurations,
+          update: (workspaceId, pluginConnectionId, values, expectedRevision, updatedAt) =>
+            persistence.pluginConfigurations.update(
+              workspaceId,
+              pluginConnectionId,
+              values,
+              expectedRevision,
+              updatedAt
+            ).pipe(
+              Effect.tap(() => Deferred.succeed(configurationCommitted, undefined)),
+              Effect.andThen(Effect.never)
+            )
+        }
+      })
+      const instrumentedSecrets = SecretStore.of({
+        create: () =>
+          Ref.getAndUpdate(creates, (count) => count + 1).pipe(
+            Effect.map((count) => SecretRef.make(`secret_${count.toString(16).padStart(64, "0")}`))
+          ),
+        remove: (removed) => Ref.update(removals, (references) => [...references, removed]),
+        resolve: () => Effect.die("interrupted setup must not resolve a secret"),
+        rotate: () => Effect.die("interrupted setup must not rotate a secret")
+      })
+      const fiber = yield* Effect.gen(function*() {
+        const administration = yield* makePluginAdministration
+        const operation = administration.connectAndTest
+        assert.isDefined(operation)
+        return yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: FAILED_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Committed Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "durable-token" }
+            ]
+          }
+        })
+      }).pipe(
+        Effect.provideService(Persistence, instrumentedPersistence),
+        Effect.provideService(SecretStore, instrumentedSecrets),
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* Deferred.await(configurationCommitted)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(yield* Ref.get(removals), [])
+      assert.isTrue(Option.isSome(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      ))
+    })))
+
+  it.effect("removes newly-created secrets when metadata creation fails before durable configuration", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const creates = yield* Ref.make(0)
+      const removals = yield* Ref.make(0)
+      const reference = SecretRef.make(`secret_${"a".repeat(64)}`)
+      const instrumentedSecrets = SecretStore.of({
+        create: () => Ref.update(creates, (count) => count + 1).pipe(Effect.as(reference)),
+        remove: () => Ref.update(removals, (count) => count + 1),
+        resolve: () => Effect.die("precommit cleanup test must not resolve a secret"),
+        rotate: () => Effect.die("precommit cleanup test must not rotate a secret")
+      })
+      const result = yield* Effect.gen(function*() {
+        const administration = yield* makePluginAdministration
+        const operation = administration.connectAndTest
+        assert.isDefined(operation)
+        return yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Duplicate Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "temporary-token" }
+            ]
+          }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provideService(SecretStore, instrumentedSecrets))
+
+      assert.isTrue(Result.isFailure(result))
+      assert.strictEqual(yield* Ref.get(creates), 2)
+      assert.strictEqual(yield* Ref.get(removals), 2)
+    })))
+
   it.effect("inspects only a workspace-owned release graph without substituting demo data", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
@@ -1339,12 +1990,14 @@ describe("application adapters", () => {
       if (Result.isFailure(conflict)) assert.instanceOf(conflict.failure, ApplicationConflict)
       assert.lengthOf(yield* Ref.get(invalidations), 2)
 
-      const unavailable = yield* administration.configurationMetadata({
+      const draftMetadata = yield* administration.configurationMetadata({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: UNREADY_PLUGIN_ID
-      }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(unavailable))
-      if (Result.isFailure(unavailable)) assert.instanceOf(unavailable.failure, ApplicationServiceUnavailable)
+      })
+      assert.strictEqual(draftMetadata.pluginId, "dev.knpkv.jira.read")
+      assert.isTrue(
+        draftMetadata.configurationFields.some((field) => field._tag === "secret-reference" && field.key === "apiToken")
+      )
 
       yield* secrets.remove(storedSecretReference)
       const externallyRemoved = yield* administration.configuration({

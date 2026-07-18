@@ -11,6 +11,7 @@ import {
   type PersistedRecordError,
   type PersistenceConfigError,
   PersistenceOperationError,
+  type PluginConnectionLimitError,
   type QuarantineWriteError,
   type RecordAlreadyExistsError,
   type RecordNotFoundError,
@@ -72,6 +73,7 @@ export type PersistenceOperationFailure =
   | DeliveryGraphInputError
   | GovernedActionInputError
   | PersistedRecordError
+  | PluginConnectionLimitError
   | PersistenceOperationError
   | QuarantineWriteError
   | ReadinessInputError
@@ -97,6 +99,7 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "DeliveryGraphInputError",
   "GovernedActionInputError",
   "PersistedRecordError",
+  "PluginConnectionLimitError",
   "PersistenceOperationError",
   "QuarantineWriteError",
   "ReadinessInputError",
@@ -241,6 +244,8 @@ const makePersistence = Effect.gen(function*() {
     pluginConnections: {
       create: (...args: Parameters<PluginConnectionRepositoryService["create"]>) =>
         publicOperation("plugin-connection.create", pluginConnections.create(...args)),
+      createBounded: (...args: Parameters<PluginConnectionRepositoryService["createBounded"]>) =>
+        publicOperation("plugin-connection.create-bounded", pluginConnections.createBounded(...args)),
       get: (...args: Parameters<PluginConnectionRepositoryService["get"]>) =>
         publicOperation("plugin-connection.get", pluginConnections.get(...args)),
       list: (...args: Parameters<PluginConnectionRepositoryService["list"]>) =>

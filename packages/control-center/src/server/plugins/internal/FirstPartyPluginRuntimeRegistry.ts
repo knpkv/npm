@@ -23,6 +23,7 @@ import type { StoredPluginConfiguration } from "../../persistence/repositories/p
 import type { PluginRuntimeRecord } from "../../persistence/repositories/pluginRuntimeModels.js"
 import type { SecretRef } from "../../secrets/SecretRef.js"
 import { SecretStore } from "../../secrets/SecretStore.js"
+import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
   ClockifyReadPluginConfiguration,
   clockifyReadPluginDescriptor,
@@ -55,12 +56,6 @@ import {
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "./PluginRuntimeRegistry.js"
 
 const CLOCKIFY_API_ORIGIN = "https://api.clockify.me/api"
-const AtlassianEmail = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(320)
-)
-
 const readOnlyExecutorLayer = Layer.succeed(AuthorizedPluginExecutor, {
   preflight: () =>
     Effect.fail(
@@ -175,6 +170,20 @@ const decodeSecret = Effect.fn("FirstPartyPluginRuntime.decodeSecret")(function*
   )
 })
 
+const credentialTextValue = Effect.fn("FirstPartyPluginRuntime.credentialTextValue")(function*(
+  configuration: Configuration,
+  key: string
+) {
+  const value = findValue(configuration, key)
+  if (value?._tag === "text") {
+    return { generation: "legacy-text", value: value.value }
+  }
+  if (value?._tag === "secret-reference") {
+    return { generation: value.ref, value: yield* decodeSecret(value.ref) }
+  }
+  return yield* configurationFailure(`plugin-configuration-${key}-invalid`)
+})
+
 const decodeDescriptor = (
   runtime: PluginRuntimeRecord
 ): Effect.Effect<NegotiatedPluginDescriptorV1, PluginConfigurationFailure> =>
@@ -282,9 +291,6 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     "webBaseUrl"
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const email = yield* Schema.decodeUnknownEffect(AtlassianEmail)(
-    yield* textValue(loaded.configuration, "email")
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const configurationInput = {
     webBaseUrl: yield* textValue(loaded.configuration, "webBaseUrl", "url"),
     pageSize: yield* integerValue(loaded.configuration, "pageSize"),
@@ -294,6 +300,10 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const configuration = yield* Schema.decodeUnknownEffect(JiraReadPluginConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
+  const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
+  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
+    emailCredential.value
+  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
   const apiToken = yield* decodeSecret(apiTokenRef)
   const client = JiraApiClient.layer.pipe(
@@ -305,7 +315,7 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const plugin = Layer.unwrap(
     makeJiraReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
   ).pipe(Layer.provide(client))
-  return { credentialGeneration: apiTokenRef, layer: plugin }
+  return { credentialGeneration: `${emailCredential.generation}\0${apiTokenRef}`, layer: plugin }
 })
 
 const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(function*(loaded: LoadedRuntime) {
@@ -351,9 +361,6 @@ const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(functio
 const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(function*(loaded: LoadedRuntime) {
   const expectedKeys = new Set(["apiToken", "email", "probePageId", "siteBaseUrl", "siteId", "spaceId"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const email = yield* Schema.decodeUnknownEffect(AtlassianEmail)(
-    yield* textValue(loaded.configuration, "email")
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const configurationInput = {
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
@@ -363,6 +370,10 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
+  const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
+  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
+    emailCredential.value
+  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
   const apiToken = yield* decodeSecret(apiTokenRef)
   const apiClient = ConfluenceApiClient.layer.pipe(
@@ -378,7 +389,7 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const plugin = buildPluginDefinitionLayer(confluencePagePluginDefinition, configurationInput).pipe(
     Layer.provide(Layer.merge(pageClient, converter))
   )
-  return { credentialGeneration: apiTokenRef, layer: plugin }
+  return { credentialGeneration: `${emailCredential.generation}\0${apiTokenRef}`, layer: plugin }
 })
 
 const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(loaded: LoadedRuntime) {

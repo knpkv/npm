@@ -56,7 +56,7 @@ test.describe("repository-managed real runtime", () => {
     ).toBe("37px")
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
     await expect(
-      page.getByText("Verify provider access and the exact account each connection represents.")
+      page.getByText("Configure first-party providers and verify the exact account each connection represents.")
     ).toBeVisible()
 
     await realRuntime.pairThroughUi(page)
@@ -73,6 +73,12 @@ test.describe("repository-managed real runtime", () => {
     await page.getByRole("link", { name: "Services" }).click()
     await expect(page).toHaveURL(`${realRuntime.origin}/services`)
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
+    await expect(page.getByRole("article")).toHaveCount(5)
+    for (const service of ["CodeCommit", "CodePipeline", "Runtime Jira", "Confluence", "Clockify"]) {
+      await expect(page.getByRole("heading", { level: 2, name: service })).toBeVisible()
+    }
+    await expect(page.getByRole("button", { name: "Configure" })).toHaveCount(4)
+    await expect(page.getByRole("button", { name: "Test connection" })).toBeVisible()
     await page.getByRole("link", { name: "Overview" }).click()
     await expect(page).toHaveURL(`${realRuntime.origin}/w/${REAL_WORKSPACE_ID}/overview`)
 

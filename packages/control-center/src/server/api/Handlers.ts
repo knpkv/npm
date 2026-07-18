@@ -14,6 +14,7 @@ import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
 import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
@@ -258,6 +259,36 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             return yield* plugins.list(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
+          }))
+        .handle("overview", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const connections = yield* plugins.list(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+            return { catalog: listFirstPartyServiceMetadata(), connections }
+          }))
+        .handle("createConnection", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const connectAndTest = plugins.connectAndTest
+            if (connectAndTest === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* connectAndTest({
+              request: payload,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
         .handle("health", ({ params }) =>
           Effect.gen(function*() {

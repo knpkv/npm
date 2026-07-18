@@ -8,7 +8,13 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
-import { PluginConnectionTestResult } from "../../src/api/plugins.js"
+import {
+  CreatePluginConnectionResponse,
+  PluginConfiguration,
+  PluginConfigurationKey,
+  PluginConnectionSummary,
+  PluginConnectionTestResult
+} from "../../src/api/plugins.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
   CurrentSession,
@@ -111,6 +117,12 @@ const timelineDetail = Schema.decodeSync(TimelineEventDetail)({
 })
 const inspectedReleaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000004")
 const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000010")
+const confluencePluginConnectionId = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000011"
+)
+const codeCommitPluginConnectionId = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000012"
+)
 const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
   "01890f6f-6d6a-7cc0-98d2-000000000005"
 )
@@ -807,6 +819,214 @@ describe("Control Center API handlers", () => {
       ]))
 
       assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("keeps the v1 plugin list and serves the catalog overview separately", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        pluginConnectionId,
+        providerId: "jira",
+        displayName: "Delivery Jira",
+        isEnabled: true,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: (requestedWorkspaceId) =>
+          requestedWorkspaceId === session.workspaceId
+            ? Effect.succeed([expected])
+            : Effect.die("plugin list crossed its authenticated workspace"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return {
+          list: yield* client.plugins.list(),
+          overview: yield* client.plugins.overview()
+        }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.list, [expected])
+      assert.deepStrictEqual(result.overview.connections, [expected])
+      assert.deepStrictEqual(
+        result.overview.catalog.map(({ providerId }) => providerId),
+        ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
+      )
+    }))
+
+  it.effect("runs owner connection setup through the session and CSRF-protected handler", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+        connection: {
+          pluginConnectionId,
+          providerId: "codecommit",
+          displayName: "Payments CodeCommit",
+          isEnabled: true,
+          health: null,
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        configuration: {
+          pluginConnectionId,
+          revision: 1,
+          values: [
+            { _tag: "text", key: "profile", value: "default" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments" }
+          ],
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        test: {
+          _tag: "healthy",
+          pluginConnectionId,
+          providerId: "codecommit",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          latencyMilliseconds: 24,
+          identity: {
+            kind: "account",
+            label: "AWS account",
+            displayName: "Production account",
+            providerImmutableId: "123456789012"
+          }
+        }
+      })
+      const plugins = PluginAdministration.of({
+        connectAndTest: ({ request, workspaceId }) =>
+          request.pluginConnectionId === pluginConnectionId && workspaceId === session.workspaceId
+            ? Effect.succeed(expected)
+            : Effect.die("connection setup crossed its authenticated scope"),
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.createConnection({
+          payload: {
+            pluginConnectionId,
+            providerId: "codecommit",
+            displayName: "Payments CodeCommit",
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("serves credential-scoped emails as redacted references while adapter values remain readable", () =>
+    Effect.gen(function*() {
+      const configuredAt = "2026-07-14T10:03:00.000Z"
+      const jira = Schema.decodeUnknownSync(PluginConfiguration)({
+        pluginConnectionId,
+        revision: 1,
+        values: [
+          { _tag: "secret-reference", key: "email", state: "configured" },
+          { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+        ],
+        updatedAt: configuredAt
+      })
+      const confluence = Schema.decodeUnknownSync(PluginConfiguration)({
+        pluginConnectionId: confluencePluginConnectionId,
+        revision: 1,
+        values: [
+          { _tag: "secret-reference", key: "email", state: "configured" },
+          { _tag: "text", key: "spaceId", value: "space-1" }
+        ],
+        updatedAt: configuredAt
+      })
+      const codeCommit = Schema.decodeUnknownSync(PluginConfiguration)({
+        pluginConnectionId: codeCommitPluginConnectionId,
+        revision: 1,
+        values: [{ _tag: "text", key: "profile", value: "delivery" }],
+        updatedAt: configuredAt
+      })
+      const configurations = new Map([
+        [pluginConnectionId, jira],
+        [confluencePluginConnectionId, confluence],
+        [codeCommitPluginConnectionId, codeCommit]
+      ])
+      const plugins = PluginAdministration.of({
+        configuration: ({ pluginConnectionId: requestedId, workspaceId: requestedWorkspaceId }) => {
+          const configured = configurations.get(requestedId)
+          return requestedWorkspaceId === session.workspaceId && configured !== undefined
+            ? Effect.succeed(configured)
+            : Effect.die("configuration read crossed its authenticated workspace")
+        },
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return {
+          jira: yield* client.plugins.configuration({ params: { pluginConnectionId } }),
+          confluence: yield* client.plugins.configuration({
+            params: { pluginConnectionId: confluencePluginConnectionId }
+          }),
+          codeCommit: yield* client.plugins.configuration({
+            params: { pluginConnectionId: codeCommitPluginConnectionId }
+          })
+        }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepInclude(result.jira.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(result.confluence.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(result.codeCommit.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("profile"),
+        value: "delivery"
+      })
     }))
 
   it.effect("serves a bounded Timeline and rejects half a stable cursor", () =>
@@ -1770,6 +1990,7 @@ describe("Control Center API handlers", () => {
       revokeSession: () => Effect.die("not used")
     })
     const plugins = PluginAdministration.of({
+      connectAndTest: () => Effect.die("non-owner reached connection creation"),
       configuration: () => Effect.die("not used"),
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
@@ -1839,6 +2060,30 @@ describe("Control Center API handlers", () => {
         requestContext
       )
       assert.strictEqual(testResponse.status, 403)
+      const createResponse = await webHandler.handler(
+        new Request("http://127.0.0.1:4173/api/v1/plugins/connections", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({
+            pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000092",
+            providerId: "codecommit",
+            displayName: "Payments CodeCommit",
+            values: [
+              { _tag: "text", key: "profile", value: "default" },
+              { _tag: "text", key: "region", value: "eu-west-1" },
+              { _tag: "text", key: "repositoryName", value: "payments" }
+            ]
+          })
+        }),
+        requestContext
+      )
+      assert.strictEqual(createResponse.status, 403)
     } finally {
       await webHandler.dispose()
     }

@@ -57,7 +57,8 @@ interface SyncCursor {
   readonly nextToken: string | null
 }
 
-const CodeCommitPluginConfiguration = Schema.Struct({
+/** Secret-free production adapter configuration. @internal */
+export const CodeCommitPluginConfiguration = Schema.Struct({
   profile: Domain.AwsProfileName,
   region: Domain.AwsRegion,
   repositoryName: Domain.RepositoryName
