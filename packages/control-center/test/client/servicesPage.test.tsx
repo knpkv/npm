@@ -16,7 +16,7 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
 import { ServicesPage } from "../../src/client/services/ServicesPage.js"
-import { PersonId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -137,6 +137,16 @@ const renderAnonymousServices = async (transport: ConnectionTestTransport): Prom
   return host
 }
 
+const setControlValue = async (control: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> => {
+  const prototype = control.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  const setValue = Object.getOwnPropertyDescriptor(prototype, "value")?.set
+  if (setValue === undefined) throw new Error("Expected the control value setter")
+  await act(async () => {
+    setValue.call(control, value)
+    control.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
+
 describe("ServicesPage connection tests", () => {
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
@@ -243,21 +253,240 @@ describe("ServicesPage connection tests", () => {
 
     expect(discoverAwsProfiles).toHaveBeenCalledWith(expect.any(AbortSignal))
     expect(host.querySelectorAll("datalist option")).toHaveLength(2)
-    const profile = host.querySelector<HTMLInputElement>('input[list="codecommit-aws-profiles"]')
+    const profile = host.querySelector<HTMLInputElement>('input[list="aws-account-profiles"]')
     expect(profile).not.toBeNull()
     if (profile !== null) {
-      const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
-      if (setInputValue === undefined) throw new Error("Expected the input value setter")
-      await act(async () => {
-        setInputValue.call(profile, "production")
-        profile.dispatchEvent(new Event("input", { bubbles: true }))
-      })
+      await setControlValue(profile, "production")
     }
-    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toEqual([
+    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
+    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+  })
+
+  it("connects several repositories and pipelines through one AWS account form", async () => {
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000151"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000152"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000153")
+    ]
+    const field = (key: string, defaultValue: string | null = null) => ({
+      key,
+      label: key,
+      description: `Configure ${key}.`,
+      kind: "text",
+      scope: "adapter",
+      required: true,
+      defaultValue,
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    })
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        {
+          ...catalogEntry("codecommit"),
+          configurationFields: [field("profile", "default"), field("region"), field("repositoryName")]
+        },
+        {
+          ...catalogEntry("codepipeline"),
+          configurationFields: [field("profile", "default"), field("region"), field("pipelineName")]
+        },
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: []
+    })
+    const createImplementation: ConnectionTestTransport["create"] = (request) =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+          connection: {
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            displayName: request.displayName,
+            isEnabled: true,
+            health: null,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          configuration: {
+            pluginConnectionId: request.pluginConnectionId,
+            revision: 1,
+            values: request.values,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          test: {
+            _tag: "healthy",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            identity: {
+              kind: "account",
+              label: "AWS account",
+              displayName: "Production account",
+              providerImmutableId: "123456789012"
+            }
+          }
+        })
+      )
+    const create = vi.fn(createImplementation)
+    const makeConnectionId = vi
+      .fn()
+      .mockResolvedValueOnce(connectionIds[0])
+      .mockResolvedValueOnce(connectionIds[1])
+      .mockResolvedValueOnce(connectionIds[2])
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
+    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
+    if (textareas[1] !== undefined) await setControlValue(textareas[1], "payments-production")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+
+    expect(create).toHaveBeenCalledTimes(3)
+    expect(create.mock.calls.map(([request]) => request.providerId)).toEqual([
       "codecommit",
-      "production",
-      "eu-west-1"
+      "codecommit",
+      "codepipeline"
     ])
+    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+      "Payments production · payments-api",
+      "Payments production · risk-engine",
+      "Payments production · payments-production"
+    ])
+    expect(
+      create.mock.calls.map(
+        ([request]) => request.values.find(({ key }) => key === "repositoryName" || key === "pipelineName")?.value
+      )
+    ).toEqual(["payments-api", "risk-engine", "payments-production"])
+  })
+
+  it("retries only AWS drafts that did not create successfully", async () => {
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000171"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000172"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    ]
+    let creationAttempt = 0
+    const create = vi.fn<ConnectionTestTransport["create"]>((request) => {
+      creationAttempt += 1
+      if (creationAttempt === 2) return Promise.reject(new Error("temporary provider failure"))
+      return Promise.resolve(
+        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+          connection: {
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            displayName: request.displayName,
+            isEnabled: true,
+            health: null,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          configuration: {
+            pluginConnectionId: request.pluginConnectionId,
+            revision: 1,
+            values: request.values,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          test: {
+            _tag: "healthy",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            identity: {
+              kind: "account",
+              label: "AWS account",
+              displayName: "Production account",
+              providerImmutableId: "123456789012"
+            }
+          }
+        })
+      )
+    })
+    const makeConnectionId = vi
+      .fn()
+      .mockResolvedValueOnce(connectionIds[0])
+      .mockResolvedValueOnce(connectionIds[1])
+      .mockResolvedValueOnce(connectionIds[2])
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[2] !== undefined) await setControlValue(inputs[2], "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api\nrisk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+
+    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+      "Payments production · payments-api",
+      "Payments production · risk-engine"
+    ])
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("could not be connected")
+
+    await act(async () => submit?.click())
+
+    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+      "Payments production · payments-api",
+      "Payments production · risk-engine",
+      "Payments production · risk-engine"
+    ])
+    expect(
+      create.mock.calls.filter(([request]) => request.displayName === "Payments production · payments-api")
+    ).toHaveLength(1)
+  })
+
+  it("rejects an oversized AWS resource list instead of silently dropping resources", async () => {
+    const create = vi.fn()
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) {
+      await setControlValue(
+        repositories,
+        Array.from({ length: 21 }, (_, index) => `repository-${index + 1}`).join("\n")
+      )
+    }
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+
+    expect(create).not.toHaveBeenCalled()
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Follow at most 20 repositories")
   })
 
   it("does not present stale disabled health as current for an enabled connection", async () => {
@@ -328,19 +557,18 @@ describe("ServicesPage connection tests", () => {
     expect(host.querySelectorAll("article")).toHaveLength(5)
 
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Enable service")
+      textContent?.includes("Configure AWS account")
     )
     await act(async () => configure?.click())
-    const name = host.querySelector<HTMLInputElement>('input[aria-labelledby*="label"]')
+    const name = host.querySelectorAll<HTMLInputElement>("input")[0]
     expect(name).not.toBeNull()
-    if (name !== null) {
-      await act(async () => {
-        name.value = "Payments CodeCommit"
-        name.dispatchEvent(new Event("input", { bubbles: true }))
-      })
-    }
+    if (name !== undefined) await setControlValue(name, "Payments")
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Enable and test")
+      textContent?.includes("Connect AWS account")
     )
     await act(async () => submit?.click())
     expect(create).toHaveBeenCalledTimes(1)
@@ -391,17 +619,21 @@ describe("ServicesPage connection tests", () => {
     const host = await renderServices(transport)
     await act(async () => undefined)
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Enable service")
+      textContent?.includes("Configure AWS account")
     )
     await act(async () => configure?.click())
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Enable and test")
+      textContent?.includes("Connect AWS account")
     )
     await act(async () => submit?.click())
 
     expect(host.textContent).toContain("The provider rejected these credentials.")
     expect(host.textContent).toContain("Needs correction")
-    expect(host.textContent).toContain("Enable and test")
+    expect(host.textContent).toContain("Connect AWS account")
     expect(host.querySelector("form")).not.toBeNull()
   })
 
