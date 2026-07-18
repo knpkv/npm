@@ -14,7 +14,8 @@ import {
   PluginConfiguration,
   PluginConfigurationKey,
   PluginConnectionSummary,
-  PluginConnectionTestResult
+  PluginConnectionTestResult,
+  ProviderAccountSummary
 } from "../../src/api/plugins.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
@@ -29,7 +30,9 @@ import {
   AgentId,
   EntityId,
   EventCursor,
+  FollowedResourceId,
   PluginConnectionId,
+  ProviderAccountId,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
@@ -125,6 +128,8 @@ const confluencePluginConnectionId = Schema.decodeSync(PluginConnectionId)(
 const codeCommitPluginConnectionId = Schema.decodeSync(PluginConnectionId)(
   "01890f6f-6d6a-7cc0-98d2-000000000012"
 )
+const providerAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000013")
+const followedResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000014")
 const inspectedRelationshipId = Schema.decodeSync(RelationshipId)(
   "01890f6f-6d6a-7cc0-98d2-000000000005"
 )
@@ -883,7 +888,26 @@ describe("Control Center API handlers", () => {
         health: null,
         updatedAt: "2026-07-14T10:03:00.000Z"
       })
+      const expectedAccounts = [
+        Schema.decodeUnknownSync(ProviderAccountSummary)({
+          providerAccountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          resources: [{
+            followedResourceId,
+            providerId: "codecommit",
+            displayName: "payments",
+            providerImmutableId: "eu-west-1:payments",
+            isEnabled: true
+          }]
+        })
+      ]
       const plugins = PluginAdministration.of({
+        accounts: (requestedWorkspaceId) =>
+          requestedWorkspaceId === session.workspaceId
+            ? Effect.succeed(expectedAccounts)
+            : Effect.die("provider account list crossed its authenticated workspace"),
         configuration: () => Effect.die("not used"),
         configurationMetadata: () => Effect.die("not used"),
         health: () => Effect.die("not used"),
@@ -914,6 +938,7 @@ describe("Control Center API handlers", () => {
 
       assert.deepStrictEqual(result.list, [expected])
       assert.deepStrictEqual(result.overview.connections, [expected])
+      assert.deepStrictEqual(result.overview.accounts, expectedAccounts)
       assert.deepStrictEqual(
         result.overview.catalog.map(({ providerId }) => providerId),
         ["codecommit", "codepipeline", "jira", "confluence", "clockify"]

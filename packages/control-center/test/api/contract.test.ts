@@ -73,7 +73,8 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
     description: `Configure ${providerId}.`,
     configurationFields: [pluginCatalogFieldCompatibilityFixture]
   })),
-  connections: v1PluginListCompatibilityFixture
+  connections: v1PluginListCompatibilityFixture,
+  accounts: []
 }
 
 describe("ControlCenterApi contract", () => {

@@ -958,6 +958,33 @@ describe("application adapters", () => {
           }
         ]
       )
+      const readAccounts = administration.accounts
+      assert.isDefined(readAccounts)
+      const accountOverview = yield* readAccounts(WORKSPACE_ID)
+      assert.lengthOf(accountOverview, 1)
+      assert.strictEqual(accountOverview[0]?.providerImmutableId, "123456789012")
+      assert.isTrue(accountOverview[0]?.resources.every(({ isEnabled }) => isEnabled) ?? false)
+      assert.deepStrictEqual(
+        accountOverview[0]?.resources.map(({ displayName, providerId }) => ({ displayName, providerId })),
+        [
+          { displayName: "payments", providerId: "codecommit" },
+          { displayName: "payments", providerId: "codecommit" },
+          { displayName: "payments-release", providerId: "codepipeline" }
+        ]
+      )
+      const setEnabled = administration.setConnectionEnabled
+      assert.isDefined(setEnabled)
+      yield* setEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        isEnabled: false
+      })
+      const disabledAccountOverview = yield* readAccounts(WORKSPACE_ID)
+      assert.isFalse(
+        disabledAccountOverview[0]?.resources.find(
+          ({ followedResourceId }) => followedResourceId === repository.connection.followedResourceId
+        )?.isEnabled
+      )
       assert.deepInclude(repository.configuration.values, {
         _tag: "text",
         key: PluginConfigurationKey.make("profile"),
@@ -1020,10 +1047,14 @@ describe("application adapters", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationServiceUnavailable)
-      const record = yield* (yield* Persistence).pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      const persistence = yield* Persistence
+      const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.isFalse(record.isEnabled)
       assert.isNotNull(record.providerAccountId)
       assert.isNotNull(record.followedResourceId)
+      if (record.followedResourceId === null) return assert.fail("setup rollback lost its resource binding")
+      const resource = yield* persistence.providerAccounts.getResource(WORKSPACE_ID, record.followedResourceId)
+      assert.isFalse(resource.isEnabled)
     })))
 
   it.effect("rejects missing and unknown catalog fields before creating metadata", () =>

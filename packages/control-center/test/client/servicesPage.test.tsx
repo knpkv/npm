@@ -16,7 +16,13 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
 import { ServicesPage } from "../../src/client/services/ServicesPage.js"
-import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  FollowedResourceId,
+  PersonId,
+  PluginConnectionId,
+  ProviderAccountId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -194,6 +200,43 @@ const successfulCreate: ConnectionTestTransport["create"] = (request) =>
     })
   )
 
+const successfulAwsCreate = (
+  request: Parameters<ConnectionTestTransport["create"]>[0],
+  providerAccountId: ProviderAccountId,
+  followedResourceId: FollowedResourceId
+) =>
+  Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+    connection: {
+      pluginConnectionId: request.pluginConnectionId,
+      providerAccountId,
+      followedResourceId,
+      providerId: request.providerId,
+      displayName: request.displayName,
+      isEnabled: true,
+      health: null,
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    },
+    configuration: {
+      pluginConnectionId: request.pluginConnectionId,
+      revision: 1,
+      values: request.values,
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    },
+    test: {
+      _tag: "healthy",
+      pluginConnectionId: request.pluginConnectionId,
+      providerId: request.providerId,
+      checkedAt: "2026-07-14T10:03:00.000Z",
+      latencyMilliseconds: 20,
+      identity: {
+        kind: "account",
+        label: "AWS account",
+        displayName: "Production account",
+        providerImmutableId: "123456789012"
+      }
+    }
+  })
+
 describe("ServicesPage connection tests", () => {
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
@@ -307,6 +350,401 @@ describe("ServicesPage connection tests", () => {
     }
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+  })
+
+  it("groups repositories and pipelines under their verified AWS account", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000171")
+    const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000172")
+    const pipelineId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000174")
+    const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000175")
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: repositoryConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: repositoryId,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: pipelineConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: pipelineId,
+          providerId: "codepipeline",
+          displayName: "Payments pipeline",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          resources: [
+            {
+              followedResourceId: repositoryId,
+              providerId: "codecommit",
+              displayName: "payments",
+              providerImmutableId: "eu-west-1:payments",
+              isEnabled: true
+            },
+            {
+              followedResourceId: pipelineId,
+              providerId: "codepipeline",
+              displayName: "payments-release",
+              providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Connected accounts")
+    expect(host.textContent).toContain("AWS account 123456789012")
+    expect(host.textContent).toContain("Verified identity · 123456789012")
+    expect(host.textContent).toContain("payments")
+    expect(host.textContent).toContain("payments-release")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
+      expect.arrayContaining(["Add repository", "Add pipeline"])
+    )
+  })
+
+  it("surfaces failed enablement for a resource inside an AWS account", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000176")
+    const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000177")
+    const connectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000178")
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: connectionId,
+          providerAccountId: accountId,
+          followedResourceId: resourceId,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          resources: [
+            {
+              followedResourceId: resourceId,
+              providerId: "codecommit",
+              displayName: "payments-api",
+              providerImmutableId: "eu-west-1:payments-api",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const setEnabled = vi.fn().mockRejectedValue(new Error("conflict"))
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connectionId),
+      setEnabled,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const accountCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("AWS account 123456789012")
+    )
+    const disable = [...(accountCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent === "Disable"
+    )
+
+    await act(async () => disable?.click())
+
+    expect(setEnabled).toHaveBeenCalledWith(connectionId, false, expect.any(AbortSignal))
+    expect(accountCard?.querySelector('[role="alert"]')?.textContent).toContain("could not change this service")
+    expect(disable?.disabled).toBe(false)
+  })
+
+  it("refreshes an existing AWS account after following another resource", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000181")
+    const paymentsId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000182")
+    const riskId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000183")
+    const paymentsConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000184")
+    const riskConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000185")
+    const textFieldKind: "text" = "text"
+    const adapterScope: "adapter" = "adapter"
+    const field = (key: string, defaultValue: string | null = null) => ({
+      key,
+      label: key,
+      description: `Configure ${key}.`,
+      kind: textFieldKind,
+      scope: adapterScope,
+      required: true,
+      defaultValue,
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    })
+    const codeCommit = catalogEntry("codecommit")
+    const codePipeline = catalogEntry("codepipeline")
+    const catalog = [
+      {
+        ...codeCommit,
+        configurationFields: [field("profile", "default"), field("region"), field("repositoryName")]
+      },
+      {
+        ...codePipeline,
+        configurationFields: [field("profile", "default"), field("region"), field("pipelineName")]
+      },
+      catalogEntry("jira"),
+      catalogEntry("confluence"),
+      catalogEntry("clockify")
+    ]
+    const paymentsConnection = {
+      pluginConnectionId: paymentsConnectionId,
+      providerAccountId: accountId,
+      followedResourceId: paymentsId,
+      providerId: "codecommit",
+      displayName: "Payments · payments-api",
+      isEnabled: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    }
+    const riskConnection = {
+      pluginConnectionId: riskConnectionId,
+      providerAccountId: accountId,
+      followedResourceId: riskId,
+      providerId: "codecommit",
+      displayName: "Payments · risk-engine",
+      isEnabled: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" },
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    }
+    const account = {
+      providerAccountId: accountId,
+      providerFamily: "aws",
+      displayName: "123456789012",
+      providerImmutableId: "123456789012"
+    }
+    const paymentsResource = {
+      followedResourceId: paymentsId,
+      providerId: "codecommit",
+      displayName: "payments-api",
+      providerImmutableId: "eu-west-1:payments-api",
+      isEnabled: true
+    }
+    const riskResource = {
+      followedResourceId: riskId,
+      providerId: "codecommit",
+      displayName: "risk-engine",
+      providerImmutableId: "eu-west-1:risk-engine",
+      isEnabled: true
+    }
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog,
+      connections: [paymentsConnection],
+      accounts: [{ ...account, resources: [paymentsResource] }]
+    })
+    const refreshedOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog,
+      connections: [paymentsConnection, riskConnection],
+      accounts: [{ ...account, resources: [paymentsResource, riskResource] }]
+    })
+    const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: riskConnection,
+      configuration: {
+        pluginConnectionId: riskConnectionId,
+        revision: 1,
+        values: [
+          { _tag: "text", key: "profile", value: "default" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "risk-engine" }
+        ],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: {
+        _tag: "healthy",
+        pluginConnectionId: riskConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 20,
+        identity: {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Production account",
+          providerImmutableId: "123456789012"
+        }
+      }
+    })
+    const loadOverview = vi.fn().mockResolvedValueOnce(initialOverview).mockResolvedValue(refreshedOverview)
+    const transport: ConnectionTestTransport = {
+      create: vi.fn().mockResolvedValue(created),
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(riskConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    const addRepository = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Add repository"
+    )
+    await act(async () => addRepository?.click())
+    expect(host.textContent).not.toContain("Needs correction")
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "risk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      submit?.click()
+      await Promise.resolve()
+    })
+
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    const accountCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("AWS account 123456789012")
+    )
+    expect(accountCard?.textContent).toContain("payments-api")
+    expect(accountCard?.textContent).toContain("risk-engine")
+    expect(accountCard?.textContent?.match(/Healthy/gu)).toHaveLength(2)
+  })
+
+  it("does not let an aborted account refresh clear a newer create flow", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000186")
+    const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000187")
+    const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000188")
+    const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000189")
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({ ...overview, connections: [] })
+    let overviewCall = 0
+    const loadOverview = vi.fn((_signal: AbortSignal): Promise<PluginOverviewResponse> => {
+      overviewCall += 1
+      if (overviewCall === 1) return Promise.resolve(initialOverview)
+      return new Promise((_resolve, reject) => {
+        _signal.addEventListener("abort", () => reject(new Error("aborted refresh")), { once: true })
+      })
+    })
+    let createCall = 0
+    const create = vi.fn<ConnectionTestTransport["create"]>((request) => {
+      createCall += 1
+      if (createCall === 1) return Promise.resolve(successfulAwsCreate(request, accountId, repositoryId))
+      return new Promise(() => undefined)
+    })
+    const connectionIds = [repositoryConnectionId, pipelineConnectionId]
+    let connectionIdIndex = 0
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(connectionIds[connectionIdIndex++] ?? pipelineConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
+    const firstSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      firstSubmit?.click()
+      await Promise.resolve()
+    })
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+
+    const configurePipeline = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Configure AWS account"
+    )
+    await act(async () => configurePipeline?.click())
+    const nextRegion = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (nextRegion !== undefined) await setControlValue(nextRegion, "eu-west-1")
+    const pipelines = host.querySelectorAll<HTMLTextAreaElement>("textarea")[1]
+    if (pipelines !== undefined) await setControlValue(pipelines, "payments-release")
+    const secondSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      secondSubmit?.click()
+      await Promise.resolve()
+    })
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(host.querySelector("form")).not.toBeNull()
+    expect(host.textContent).toContain("Connect AWS account")
+  })
+
+  it("keeps an optimistic account connection when its refresh fails", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000190")
+    const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000191")
+    const connectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000192")
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({ ...overview, connections: [] })
+    const loadOverview = vi
+      .fn()
+      .mockResolvedValueOnce(initialOverview)
+      .mockRejectedValueOnce(new Error("refresh unavailable"))
+    const transport: ConnectionTestTransport = {
+      create: (request) => Promise.resolve(successfulAwsCreate(request, accountId, resourceId)),
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(connectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      submit?.click()
+      await Promise.resolve()
+    })
+
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    expect(host.querySelector("form")).toBeNull()
+    expect(host.textContent).toContain("AWS account · payments-api")
   })
 
   it("prefers one discovered OAuth profile for both Jira and Confluence", async () => {

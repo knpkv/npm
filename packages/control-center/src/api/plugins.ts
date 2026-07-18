@@ -28,6 +28,8 @@ import {
 import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_PROVIDER_ACCOUNTS = 100
+const MAXIMUM_FOLLOWED_RESOURCES = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
@@ -174,6 +176,34 @@ export const PluginConnectionSummary = Schema.Struct({
 /** Decoded plugin connection summary. */
 export type PluginConnectionSummary = typeof PluginConnectionSummary.Type
 
+/** Secret-free provider resource shown inside its owning account. */
+export const FollowedResourceSummary = Schema.Struct({
+  followedResourceId: FollowedResourceId,
+  providerId: ProviderId,
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  isEnabled: Schema.Boolean
+}).annotate({ identifier: "FollowedResourceSummary" })
+
+/** Decoded followed-resource overview. */
+export type FollowedResourceSummary = typeof FollowedResourceSummary.Type
+
+/** One provider account and the resources this workspace follows within it. */
+export const ProviderAccountSummary = Schema.Struct({
+  providerAccountId: ProviderAccountId,
+  providerFamily: Schema.Literals(["aws", "atlassian", "clockify"]),
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  resources: Schema.Array(FollowedResourceSummary).check(
+    Schema.makeFilter((resources) => resources.length <= MAXIMUM_FOLLOWED_RESOURCES, {
+      expected: `at most ${MAXIMUM_FOLLOWED_RESOURCES} followed resources per provider account`
+    })
+  )
+}).annotate({ identifier: "ProviderAccountSummary" })
+
+/** Decoded provider-account overview. */
+export type ProviderAccountSummary = typeof ProviderAccountSummary.Type
+
 const CatalogFieldText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
 
 /** Secret-free setup field shown before a first-party provider has runtime state. */
@@ -263,6 +293,12 @@ export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
 /** Decoded bounded plugin list. */
 export type PluginListResponse = typeof PluginListResponse.Type
 
+const ProviderAccountSummaries = Schema.Array(ProviderAccountSummary).check(
+  Schema.makeFilter((accounts) => accounts.length <= MAXIMUM_PROVIDER_ACCOUNTS, {
+    expected: `at most ${MAXIMUM_PROVIDER_ACCOUNTS} provider accounts`
+  })
+)
+
 /** Bounded Services overview with the fixed catalog and durable connections. */
 export const PluginOverviewResponse = Schema.Struct({
   catalog: Schema.Array(PluginServiceCatalogEntry).check(
@@ -271,6 +307,12 @@ export const PluginOverviewResponse = Schema.Struct({
   connections: Schema.Array(PluginConnectionSummary).check(
     Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
       expected: `at most ${MAXIMUM_PLUGIN_CONNECTIONS} plugin connections`
+    })
+  ),
+  accounts: Schema.optional(ProviderAccountSummaries).pipe(
+    Schema.decodeTo(Schema.toType(ProviderAccountSummaries), {
+      decode: SchemaGetter.withDefault(Effect.succeed<typeof ProviderAccountSummaries.Type>([])),
+      encode: SchemaGetter.required()
     })
   )
 }).annotate({ identifier: "PluginOverviewResponse" })

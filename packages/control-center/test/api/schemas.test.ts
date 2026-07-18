@@ -255,6 +255,50 @@ describe("public API schemas", () => {
     )
   })
 
+  it("preserves provider account and resource identifiers up to the persistence boundary", () => {
+    const providerAccountId = "01890f6f-6d6a-7cc0-98d2-000000000032"
+    const followedResourceId = "01890f6f-6d6a-7cc0-98d2-000000000033"
+    const account = {
+      providerAccountId,
+      providerFamily: "aws",
+      displayName: "Production",
+      providerImmutableId: "a".repeat(512),
+      resources: [
+        {
+          followedResourceId,
+          providerId: "codecommit",
+          displayName: "payments-api",
+          providerImmutableId: "r".repeat(512),
+          isEnabled: true
+        }
+      ]
+    }
+    const response = { catalog: encodedCatalog, connections: [], accounts: [account] }
+
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginOverviewResponse)(response)))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PluginOverviewResponse)({
+          ...response,
+          accounts: [{ ...account, providerImmutableId: "a".repeat(513) }]
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PluginOverviewResponse)({
+          ...response,
+          accounts: [
+            {
+              ...account,
+              resources: [{ ...account.resources[0], providerImmutableId: "r".repeat(513) }]
+            }
+          ]
+        })
+      )
+    )
+  })
+
   it("bounds setup values and rejects duplicate keys without exposing a secret response field", () => {
     const request = {
       pluginConnectionId,

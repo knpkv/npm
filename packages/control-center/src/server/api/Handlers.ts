@@ -276,7 +276,12 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             const connections = yield* plugins.list(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
-            return { catalog: listFirstPartyServiceMetadata(), connections }
+            const accounts = plugins.accounts === undefined
+              ? []
+              : yield* plugins.accounts(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+            return { catalog: listFirstPartyServiceMetadata(), connections, accounts }
           }))
         .handle("discoverAwsProfiles", () =>
           Effect.gen(function*() {

@@ -29,7 +29,8 @@ import type {
   PluginConfigurationMetadata,
   PluginConnectionSummary,
   PluginConnectionTestResult,
-  PluginHealthResponse
+  PluginHealthResponse,
+  ProviderAccountSummary
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
 import type {
@@ -102,6 +103,9 @@ export interface PluginAdministrationService {
   readonly list: (
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<PluginConnectionSummary>, ApplicationServiceUnavailable>
+  readonly accounts?: (
+    workspaceId: WorkspaceId
+  ) => Effect.Effect<ReadonlyArray<ProviderAccountSummary>, ApplicationServiceUnavailable>
   readonly discoverAwsProfiles?: () => Effect.Effect<AwsProfileDiscoveryResponse, ApplicationServiceUnavailable>
   readonly discoverAtlassianProfiles?: () => Effect.Effect<
     AtlassianProfileDiscoveryResponse,

@@ -23,6 +23,7 @@ import type {
   PluginConnectionIdentity,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  ProviderAccountSummary,
   RedactedPluginConfigurationValue
 } from "../../api/plugins.js"
 import { CreatePluginConnectionValue, PluginConfigurationKey } from "../../api/plugins.js"
@@ -59,6 +60,8 @@ import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError }
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_PROVIDER_ACCOUNTS = 100
+const MAXIMUM_FOLLOWED_RESOURCES = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
@@ -229,11 +232,63 @@ const listPluginConnections = Effect.fn("PluginAdministration.listConnections")(
   return summaries
 })
 
+const listProviderAccounts = Effect.fn("PluginAdministration.listProviderAccounts")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId
+) {
+  const accounts = yield* persistence.providerAccounts.list(workspaceId).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (accounts.length > MAXIMUM_PROVIDER_ACCOUNTS) return yield* unavailable()
+  const summaries: Array<ProviderAccountSummary> = []
+  for (const account of accounts) {
+    const resources = yield* persistence.providerAccounts.listResources(
+      workspaceId,
+      account.providerAccountId
+    ).pipe(Effect.mapError(() => unavailable()))
+    if (resources.length > MAXIMUM_FOLLOWED_RESOURCES) return yield* unavailable()
+    summaries.push({
+      providerAccountId: account.providerAccountId,
+      providerFamily: account.providerFamily,
+      displayName: account.displayName,
+      providerImmutableId: account.vendorAccountId,
+      resources: resources
+        .map((resource) => ({
+          followedResourceId: resource.followedResourceId,
+          providerId: resource.providerId,
+          displayName: resource.displayName,
+          providerImmutableId: resource.vendorResourceId,
+          isEnabled: resource.isEnabled
+        }))
+        .sort((left, right) => left.displayName.localeCompare(right.displayName))
+    })
+  }
+  return summaries.sort((left, right) => left.displayName.localeCompare(right.displayName))
+})
+
 const requireConnection = (
   persistence: Persistence["Service"],
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId
 ) => mapPersistenceRead(persistence.pluginConnections.get(workspaceId, pluginConnectionId))
+
+const setBoundResourceEnabled = Effect.fn("PluginAdministration.setBoundResourceEnabled")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  followedResourceId: PluginConnectionRecord["followedResourceId"],
+  isEnabled: boolean,
+  updatedAt: PluginConnectionRecord["updatedAt"]
+) {
+  if (followedResourceId === null) return
+  const resource = yield* persistence.providerAccounts.getResource(workspaceId, followedResourceId)
+  if (resource.isEnabled === isEnabled) return
+  yield* persistence.providerAccounts.updateResourceMetadata(workspaceId, followedResourceId, {
+    displayName: resource.displayName,
+    isEnabled,
+    expectedRevision: resource.revision,
+    updatedAt
+  })
+})
 
 const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnabled")(function*(
   persistence: Persistence["Service"],
@@ -256,6 +311,7 @@ const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnable
         expectedRevision: current.revision,
         updatedAt
       })
+      yield* setBoundResourceEnabled(persistence, workspaceId, current.followedResourceId, isEnabled, updatedAt)
       yield* appendPortfolioInvalidation({
         workspaceId,
         pluginConnectionId,
@@ -780,12 +836,21 @@ const disableAfterSetupFailure = (
   workspaceId: WorkspaceId,
   connection: PluginConnectionRecord
 ): Effect.Effect<void> =>
-  persistence.pluginConnections.updateMetadata(workspaceId, connection.pluginConnectionId, {
-    displayName: connection.displayName,
-    isEnabled: false,
-    expectedRevision: connection.revision,
-    updatedAt: connection.updatedAt
-  }).pipe(
+  persistence.transact(Effect.gen(function*() {
+    yield* persistence.pluginConnections.updateMetadata(workspaceId, connection.pluginConnectionId, {
+      displayName: connection.displayName,
+      isEnabled: false,
+      expectedRevision: connection.revision,
+      updatedAt: connection.updatedAt
+    })
+    yield* setBoundResourceEnabled(
+      persistence,
+      workspaceId,
+      connection.followedResourceId,
+      false,
+      connection.updatedAt
+    )
+  })).pipe(
     Effect.asVoid,
     Effect.catch(() => Effect.void)
   )
@@ -947,6 +1012,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
+    accounts: (workspaceId) => listProviderAccounts(persistence, workspaceId),
     discoverAwsProfiles: Effect.fn("PluginAdministration.discoverAwsProfiles")(function*() {
       const home = yield* Config.string("HOME").pipe(
         Config.orElse(() => Config.string("USERPROFILE")),
