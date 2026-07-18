@@ -12,6 +12,7 @@ describe("governed action recovery query", () => {
 
     expect(rendered.sql).toContain("from \"governed_actions\"")
     expect(rendered.sql).toContain("inner join \"governed_action_execution_leases\"")
+    expect(rendered.sql).toContain("from \"governed_action_recovery_claim_expirations\"")
     expect(rendered.sql).toContain("not exists (select")
     expect(rendered.sql).toContain("\"governed_actions\".\"workspace_id\" = ?")
     expect(rendered.sql).toContain("\"state\" in (?, ?, ?, ?)")

@@ -28,20 +28,38 @@ const executionLeases = table("governedActionExecutionLeases", {
 const recoveryClaims = table("governedActionRecoveryClaims", {
   workspaceId: Column.text(),
   actionId: Column.text(),
+  claimSequence: Column.int(),
   leaseExpiresAt: Column.text()
+})
+
+const recoveryClaimExpirations = table("governedActionRecoveryClaimExpirations", {
+  workspaceId: Column.text(),
+  actionId: Column.text(),
+  claimSequence: Column.int()
 })
 
 /** Render a stable, bounded scan for recoverable actions without a live recovery claim. */
 export const renderGovernedActionRecoveryQuery = (
   input: GovernedActionRecoveryQueryInput
 ): RenderedSql => {
+  const explicitExpiry = Query.select({ actionId: recoveryClaimExpirations.actionId }).pipe(
+    Query.from(recoveryClaimExpirations),
+    Query.where(
+      Query.and(
+        Query.eq(recoveryClaimExpirations.workspaceId, recoveryClaims.workspaceId),
+        Query.eq(recoveryClaimExpirations.actionId, recoveryClaims.actionId),
+        Query.eq(recoveryClaimExpirations.claimSequence, recoveryClaims.claimSequence)
+      )
+    )
+  )
   const liveClaim = Query.select({ actionId: recoveryClaims.actionId }).pipe(
     Query.from(recoveryClaims),
     Query.where(
       Query.and(
         Query.eq(recoveryClaims.workspaceId, governedActions.workspaceId),
         Query.eq(recoveryClaims.actionId, governedActions.actionId),
-        Query.gt(recoveryClaims.leaseExpiresAt, input.observedAt)
+        Query.gt(recoveryClaims.leaseExpiresAt, input.observedAt),
+        Query.not(Query.exists(explicitExpiry))
       )
     )
   )

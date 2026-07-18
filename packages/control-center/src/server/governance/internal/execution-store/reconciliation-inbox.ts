@@ -43,6 +43,7 @@ const RecoveryClaimRow = Schema.Struct({
   claimSequence: Schema.Int.check(Schema.isGreaterThan(0)),
   claimedAt: UtcTimestamp,
   leaseExpiresAt: UtcTimestamp,
+  expiredAt: Schema.NullOr(UtcTimestamp),
   latestClaimSequence: Schema.Int.check(Schema.isGreaterThan(0))
 })
 
@@ -119,11 +120,16 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
       claim.claim_sequence AS claimSequence,
       claim.claimed_at AS claimedAt,
       claim.lease_expires_at AS leaseExpiresAt,
+      expiration.expired_at AS expiredAt,
       (SELECT MAX(latest.claim_sequence)
         FROM governed_action_recovery_claims latest
         WHERE latest.workspace_id = claim.workspace_id
           AND latest.action_id = claim.action_id) AS latestClaimSequence
     FROM governed_action_recovery_claims claim
+    LEFT JOIN governed_action_recovery_claim_expirations expiration
+      ON expiration.workspace_id = claim.workspace_id
+      AND expiration.action_id = claim.action_id
+      AND expiration.claim_sequence = claim.claim_sequence
     WHERE claim.claim_token_digest = ${recoveryTokenDigest}
     LIMIT 2`
     const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(RecoveryClaimRow))(rows).pipe(
@@ -203,6 +209,7 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
           DateTime.Order(input.receivedAt, now) > 0 ||
           DateTime.Order(outcomeObservedAt, input.receivedAt) > 0 ||
           DateTime.Order(outcomeObservedAt, claim.claimedAt) < 0 ||
+          claim.expiredAt !== null ||
           DateTime.Order(input.receivedAt, claim.leaseExpiresAt) >= 0 ||
           claim.claimSequence !== claim.latestClaimSequence
         ) return yield* storeError(input.operation, "conflict")

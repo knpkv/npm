@@ -1,9 +1,11 @@
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { governedActionExecutionStoreLayer } from "../governance/internal/execution-store/live.js"
+import { makeGovernedActionRecoveryClaimExpiry } from "../governance/internal/execution-store/recovery-claim-expiry.js"
 import {
   GovernedActionExecutionEngine,
   type GovernedActionExecutionEngineService,
@@ -53,6 +55,24 @@ const makeReadyStartup = Effect.gen(function*() {
   } satisfies GovernedActionExecutionStartupState
 })
 
+/** Register governed-action recovery-claim expiry behind the shared drain barrier. */
+export const governedActionRecoveryClaimDrainLayer = (workspaceId: WorkspaceId) =>
+  Layer.effectDiscard(
+    Effect.gen(function*() {
+      const expiry = yield* makeGovernedActionRecoveryClaimExpiry(workspaceId)
+      const lifecycle = yield* ServerLifecycle
+
+      yield* lifecycle.registerDrainHook({
+        hookId: "governance.recovery-claim-expiry",
+        run: DateTime.now.pipe(
+          Effect.flatMap(expiry.expire),
+          Effect.asVoid,
+          Effect.orDie
+        )
+      })
+    })
+  )
+
 /** Private worker composition result retained only by the server runtime. */
 export class GovernedActionExecutionStartup extends Context.Service<
   GovernedActionExecutionStartup,
@@ -72,8 +92,11 @@ const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
     Layer.provide(store),
     Layer.provide(executors)
   )
-  return Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
-    Layer.provide(engine)
+  return Layer.merge(
+    Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
+      Layer.provide(engine)
+    ),
+    governedActionRecoveryClaimDrainLayer(options.workspaceId)
   )
 }
 
