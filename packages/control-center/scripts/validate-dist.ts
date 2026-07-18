@@ -23,10 +23,19 @@ class DistValidationError extends Data.TaggedError("DistValidationError")<{
 const formatTypeScriptDiagnostic = (diagnostic: ts.Diagnostic): string =>
   ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
 
-const isKnownEffectDeclarationDiagnostic = (diagnostic: ts.Diagnostic): boolean =>
-  diagnostic.code === 2304 &&
-  diagnostic.file?.fileName.replaceAll("\\", "/").includes("/effect/dist/internal/schema/schema.d.ts") === true &&
-  formatTypeScriptDiagnostic(diagnostic).includes("SchemaErrorTypeId")
+const isKnownEffectDeclarationDiagnostic = (diagnostic: ts.Diagnostic): boolean => {
+  const fileName = diagnostic.file?.fileName.replaceAll("\\", "/") ?? ""
+  const message = formatTypeScriptDiagnostic(diagnostic)
+  return (
+    (diagnostic.code === 2304 &&
+      fileName.includes("/effect/dist/internal/schema/schema.d.ts") &&
+      message.includes("SchemaErrorTypeId")) ||
+    (diagnostic.code === 2305 &&
+      fileName.includes("/effect/dist/unstable/http/HttpEffect.d.ts") &&
+      message.includes("appendPreResponseHandlerUnsafe") &&
+      message.includes("./internal/preResponseHandler.ts"))
+  )
+}
 
 const filesWithin: (
   fs: FileSystem.FileSystem,

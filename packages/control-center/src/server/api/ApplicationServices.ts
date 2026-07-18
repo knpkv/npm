@@ -23,6 +23,7 @@ import type {
   AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
@@ -118,6 +119,7 @@ export interface PluginAdministrationService {
   readonly startAtlassianOAuthGrant?: (input: {
     readonly workspaceId: WorkspaceId
     readonly sessionId: SessionId
+    readonly providers: AtlassianOAuthProviderIntent
   }) => Effect.Effect<
     AtlassianOAuthGrantStartResponse,
     ApplicationConflict | ApplicationServiceUnavailable

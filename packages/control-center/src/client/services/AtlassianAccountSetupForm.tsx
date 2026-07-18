@@ -3,6 +3,7 @@ import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "
 
 import type {
   AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   DiscoveredAtlassianProfile,
   PluginServiceCatalogEntry
@@ -11,10 +12,8 @@ import styles from "./AtlassianAccountSetupForm.module.css"
 import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupValues.js"
 
 type AuthenticationMode = "oauth" | "api-token"
-type AtlassianProviderId = "confluence" | "jira"
-
 export interface AtlassianSetupIntent {
-  readonly providers: ReadonlyArray<AtlassianProviderId>
+  readonly providers: AtlassianOAuthProviderIntent
 }
 
 const selectedProfile = (
@@ -46,7 +45,10 @@ export const AtlassianAccountSetupForm = ({
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isSubmitting: boolean
   readonly onCancel: () => void
-  readonly onStartOAuth: (signal: AbortSignal) => Promise<AtlassianOAuthGrantStartResponse>
+  readonly onStartOAuth: (
+    providers: AtlassianOAuthProviderIntent,
+    signal: AbortSignal
+  ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
   readonly profilesState: "failed" | "idle" | "loading" | "ready"
@@ -168,7 +170,7 @@ export const AtlassianAccountSetupForm = ({
     startRequest.current?.abort()
     const request = new AbortController()
     startRequest.current = request
-    void onStartOAuth(request.signal).then(
+    void onStartOAuth(setupIntent.providers, request.signal).then(
       (result) => {
         if (request.signal.aborted) return
         if (result._tag === "configuration-required") {
@@ -237,7 +239,7 @@ export const AtlassianAccountSetupForm = ({
           </Button>
           {oauthCallbackUrl === null ? null : (
             <Text as="p" tone="secondary" variant="meta">
-              Add <code>{oauthCallbackUrl}</code> as the callback URL, then run <code>jira auth configure</code> or
+              Add <code>{oauthCallbackUrl}</code> as the callback URL, then run <code>jira auth configure</code> and
               <code> confluence auth configure</code> on this machine.
             </Text>
           )}

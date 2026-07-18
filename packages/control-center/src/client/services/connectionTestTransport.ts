@@ -9,6 +9,7 @@ import type {
   AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
@@ -26,7 +27,10 @@ export interface ConnectionTestTransport {
   /** Optional only for injected legacy/test transports; the browser transport always discovers profiles. */
   readonly discoverAwsProfiles?: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly discoverAtlassianProfiles?: (signal: AbortSignal) => Promise<AtlassianProfileDiscoveryResponse>
-  readonly startAtlassianOAuthGrant?: (signal: AbortSignal) => Promise<AtlassianOAuthGrantStartResponse>
+  readonly startAtlassianOAuthGrant?: (
+    providers: AtlassianOAuthProviderIntent,
+    signal: AbortSignal
+  ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly exchangeAtlassianOAuthGrant?: (
     grantId: AtlassianOAuthGrantId,
     code: string,
@@ -53,11 +57,11 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
-  startAtlassianOAuthGrant: (signal) =>
+  startAtlassianOAuthGrant: (providers, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
-        return yield* client.plugins.createAtlassianOAuthGrant()
+        return yield* client.plugins.createAtlassianOAuthGrant({ payload: { providers } })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),

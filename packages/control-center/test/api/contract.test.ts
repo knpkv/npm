@@ -5,6 +5,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import {
   AgentApiGroup,
   ControlCenterApi,
+  CreateAtlassianOAuthGrantRequest,
   DeliveryGraphApiGroup,
   LiveEventsApiGroup,
   makeControlCenterApiClient,
@@ -78,6 +79,17 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
 }
 
 describe("ControlCenterApi contract", () => {
+  it("accepts only one or both distinct Atlassian OAuth providers", () => {
+    const isCreateGrantRequest = Schema.is(CreateAtlassianOAuthGrantRequest)
+
+    assert.isTrue(isCreateGrantRequest({ providers: ["jira"] }))
+    assert.isTrue(isCreateGrantRequest({ providers: ["confluence"] }))
+    assert.isTrue(isCreateGrantRequest({ providers: ["jira", "confluence"] }))
+    assert.isFalse(isCreateGrantRequest({ providers: [] }))
+    assert.isFalse(isCreateGrantRequest({ providers: ["jira", "jira"] }))
+    assert.isFalse(isCreateGrantRequest({ providers: ["jira", "bitbucket"] }))
+  })
+
   it("publishes stable error discriminators and HTTP statuses", () => {
     const specification = OpenApi.fromApi(ControlCenterApi)
     const configurationPath = specification.paths["/api/v1/plugins/{pluginConnectionId}/configuration"]

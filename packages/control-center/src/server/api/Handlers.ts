@@ -311,7 +311,7 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
           }))
-        .handle("createAtlassianOAuthGrant", () =>
+        .handle("createAtlassianOAuthGrant", ({ payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
             if (session.permission !== "workspace-owner") {
@@ -323,7 +323,8 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             }
             return yield* startAtlassianOAuthGrant({
               workspaceId: session.workspaceId,
-              sessionId: session.sessionId
+              sessionId: session.sessionId,
+              providers: payload.providers
             }).pipe(Effect.catchTags({
               ApplicationConflict: mapApplicationConflict,
               ApplicationServiceUnavailable: mapApplicationUnavailable

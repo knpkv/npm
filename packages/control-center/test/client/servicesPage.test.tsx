@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   type AtlassianOAuthGrantStartResponse,
+  type AtlassianOAuthProviderIntent,
   CreatePluginConnectionResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
@@ -48,6 +49,31 @@ const confluenceConnection = Schema.decodeSync(PluginConnectionSummary)({
   health: null,
   updatedAt: "2026-07-14T10:00:00.000Z"
 })
+const atlassianOAuthStartCases: ReadonlyArray<{
+  readonly connections: ReadonlyArray<PluginConnectionSummary>
+  readonly label: string
+  readonly providers: AtlassianOAuthProviderIntent
+  readonly route: string
+}> = [
+  {
+    connections: [confluenceConnection],
+    label: "Jira only",
+    providers: ["jira"],
+    route: "/services?enable=jira"
+  },
+  {
+    connections: [connection],
+    label: "Confluence only",
+    providers: ["confluence"],
+    route: "/services?enable=confluence"
+  },
+  {
+    connections: [],
+    label: "Jira and Confluence",
+    providers: ["jira", "confluence"],
+    route: "/services?enable=jira"
+  }
+]
 const catalogEntry = (providerId: "codecommit" | "codepipeline" | "jira" | "confluence" | "clockify") => ({
   providerId,
   displayName: providerId,
@@ -932,38 +958,45 @@ describe("ServicesPage connection tests", () => {
     expect(create.mock.calls[0]?.[0].providerId).toBe("confluence")
   })
 
-  it("starts OAuth from the Atlassian form and reports the exact callback setup", async () => {
-    const startAtlassianOAuthGrant = vi.fn().mockResolvedValue({
-      _tag: "configuration-required",
-      callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
-    })
-    const transport: ConnectionTestTransport = {
-      create: vi.fn(),
-      discoverAtlassianProfiles: () => Promise.resolve([]),
-      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
-      overview: () => Promise.resolve(overview),
-      setEnabled: vi.fn(),
-      startAtlassianOAuthGrant,
-      test: vi.fn()
+  it.each(atlassianOAuthStartCases)(
+    "starts OAuth for $label and reports the exact callback setup",
+    async ({ connections, providers, route }) => {
+      const startAtlassianOAuthGrant = vi
+        .fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>()
+        .mockResolvedValue({
+          _tag: "configuration-required",
+          callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+        })
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        discoverAtlassianProfiles: () => Promise.resolve([]),
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        overview: () => Promise.resolve({ ...overview, connections }),
+        setEnabled: vi.fn(),
+        startAtlassianOAuthGrant,
+        test: vi.fn()
+      }
+      const host = await renderServices(transport, route)
+      await act(async () => undefined)
+      const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes("Sign in with Atlassian")
+      )
+
+      await act(async () => signIn?.click())
+
+      expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
+      expect(startAtlassianOAuthGrant.mock.calls[0]?.[0]).toEqual(providers)
+      expect(startAtlassianOAuthGrant.mock.calls[0]?.[1]).toBeInstanceOf(AbortSignal)
+      expect(host.textContent).toContain("OAuth needs a one-time local client configuration")
+      expect(host.textContent).toContain("http://127.0.0.1:4173/services/oauth/atlassian/callback")
     }
-    const host = await renderServices(transport, "/services?enable=confluence")
-    await act(async () => undefined)
-    const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Sign in with Atlassian")
-    )
-
-    await act(async () => signIn?.click())
-
-    expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
-    expect(host.textContent).toContain("OAuth needs a one-time local client configuration")
-    expect(host.textContent).toContain("http://127.0.0.1:4173/services/oauth/atlassian/callback")
-  })
+  )
 
   it("cancels a pending OAuth start when the setup form closes", async () => {
     let resolveStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined
     let startSignal: AbortSignal | undefined
     const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
-      (signal) => {
+      (_providers, signal) => {
         startSignal = signal
         return new Promise((resolve) => {
           resolveStart = resolve
@@ -1007,7 +1040,7 @@ describe("ServicesPage connection tests", () => {
     const previousLocation = window.location.href
     const authorizationUrl = new URL("#atlassian-oauth-ready", previousLocation).href
     const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
-      (signal) => {
+      (_providers, signal) => {
         if (firstStartSignal === undefined) {
           firstStartSignal = signal
           return new Promise((resolve) => {

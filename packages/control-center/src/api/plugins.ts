@@ -307,6 +307,32 @@ export const AtlassianOAuthGrantId = Schema.String.check(
 /** Decoded single-use Atlassian OAuth grant identifier. */
 export type AtlassianOAuthGrantId = typeof AtlassianOAuthGrantId.Type
 
+/** Atlassian product requested by one browser OAuth grant. */
+export const AtlassianOAuthProvider = Schema.Literals(["jira", "confluence"])
+
+/** Decoded Atlassian product requested by OAuth. */
+export type AtlassianOAuthProvider = typeof AtlassianOAuthProvider.Type
+
+/** One or both distinct Atlassian products requested by an OAuth grant. */
+export const AtlassianOAuthProviderIntent = Schema.Array(AtlassianOAuthProvider).check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((providers) => providers.length <= 2, { expected: "at most two Atlassian OAuth providers" }),
+  Schema.makeFilter((providers) => new Set(providers).size === providers.length, {
+    expected: "distinct Atlassian OAuth providers"
+  })
+)
+
+/** Decoded one- or two-product Atlassian OAuth intent. */
+export type AtlassianOAuthProviderIntent = typeof AtlassianOAuthProviderIntent.Type
+
+/** Owner request to start OAuth for the products currently being configured. */
+export const CreateAtlassianOAuthGrantRequest = Schema.Struct({
+  providers: AtlassianOAuthProviderIntent
+}).annotate({ identifier: "CreateAtlassianOAuthGrantRequest" })
+
+/** Decoded owner request to start OAuth for the products currently being configured. */
+export type CreateAtlassianOAuthGrantRequest = typeof CreateAtlassianOAuthGrantRequest.Type
+
 /** Safe result of preparing the browser authorization redirect. */
 export const AtlassianOAuthGrantStartResponse = Schema.Union([
   Schema.TaggedStruct("ready", {
@@ -539,6 +565,7 @@ const createAtlassianOAuthGrant = HttpApiEndpoint.post(
   "createAtlassianOAuthGrant",
   "/oauth/atlassian/grants",
   {
+    payload: CreateAtlassianOAuthGrantRequest,
     success: AtlassianOAuthGrantStartResponse,
     error: [...pluginReadErrors, InvalidRequestApiError, ConflictApiError]
   }

@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Crypto from "effect/Crypto"
@@ -1144,7 +1145,7 @@ describe("application adapters", () => {
           access_token: "oauth-access-token",
           refresh_token: "oauth-refresh-token",
           expires_at: expiresAt,
-          scope: "read:me offline_access",
+          scope: Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).join(" "),
           cloud_id: "cloud-1",
           site_url: "https://knpkv.atlassian.net/",
           user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
@@ -1211,7 +1212,7 @@ describe("application adapters", () => {
       assert.isTrue(Result.isFailure(expired))
       if (Result.isFailure(expired)) assert.instanceOf(expired.failure, ApplicationInvalidRequest)
 
-      yield* writeStore("jira-cli", [profile(4_102_444_800_000)])
+      yield* writeStore("control-center", [profile(4_102_444_800_000)])
       const connected = yield* operation({ workspaceId: WORKSPACE_ID, request }).pipe(
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
