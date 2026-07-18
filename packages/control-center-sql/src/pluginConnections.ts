@@ -156,7 +156,9 @@ export const renderBindPluginConnectionQuery = (input: BindPluginConnectionQuery
         Query.and(
           Query.eq(pluginConnections.workspaceId, input.workspaceId),
           Query.eq(pluginConnections.pluginConnectionId, input.pluginConnectionId),
-          Query.eq(pluginConnections.revision, input.expectedRevision)
+          Query.eq(pluginConnections.revision, input.expectedRevision),
+          Query.isNull(pluginConnections.providerAccountId),
+          Query.isNull(pluginConnections.followedResourceId)
         )
       )
     )

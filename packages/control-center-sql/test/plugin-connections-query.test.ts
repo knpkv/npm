@@ -58,6 +58,8 @@ describe("plugin connection query plans", () => {
     })
 
     assert.match(bound.sql, /^update "plugin_connections"/u)
+    assert.include(bound.sql, "\"provider_account_id\" is null")
+    assert.include(bound.sql, "\"followed_resource_id\" is null")
     assert.deepStrictEqual(bound.params, [
       "account-a",
       "resource-a",

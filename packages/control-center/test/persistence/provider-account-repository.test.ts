@@ -34,6 +34,7 @@ const SECOND_ACCOUNT_ID = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7c
 const REPOSITORY_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000005")
 const PIPELINE_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000006")
 const JIRA_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000007")
+const SECOND_REPOSITORY_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-00000000000b")
 const REPOSITORY_CONNECTION_ID = Schema.decodeSync(PluginConnectionId)(
   "01890f6f-6d6a-7cc0-98d2-000000000008"
 )
@@ -222,6 +223,26 @@ describe("provider account repository", () => {
           expectedRevision: RecordRevision.make(1),
           updatedAt: UPDATED_AT
         })
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: SECOND_REPOSITORY_ID,
+          providerAccountId: AWS_ACCOUNT_ID,
+          providerId: "codecommit",
+          vendorResourceId: VendorResourceId.make("risk-engine"),
+          displayName: FollowedResourceDisplayName.make("Risk engine"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const rebound = yield* connections.bindResource(WORKSPACE_A, REPOSITORY_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: SECOND_REPOSITORY_ID,
+          expectedRevision: RecordRevision.make(2),
+          updatedAt: UPDATED_AT
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(rebound))
+        if (Result.isFailure(rebound)) assert.instanceOf(rebound.failure, RevisionConflictError)
+        const stillBound = yield* connections.get(WORKSPACE_A, REPOSITORY_CONNECTION_ID)
+        assert.strictEqual(stillBound.followedResourceId, REPOSITORY_ID)
+        assert.strictEqual(stillBound.revision, 2)
         yield* connections.create(WORKSPACE_A, {
           pluginConnectionId: SECOND_REPOSITORY_CONNECTION_ID,
           providerId: "codecommit",
