@@ -396,6 +396,153 @@ describe("ServicesPage connection tests", () => {
     )
   })
 
+  it("refreshes an existing AWS account after following another resource", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000181")
+    const paymentsId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000182")
+    const riskId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000183")
+    const paymentsConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000184")
+    const riskConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000185")
+    const textFieldKind: "text" = "text"
+    const adapterScope: "adapter" = "adapter"
+    const field = (key: string, defaultValue: string | null = null) => ({
+      key,
+      label: key,
+      description: `Configure ${key}.`,
+      kind: textFieldKind,
+      scope: adapterScope,
+      required: true,
+      defaultValue,
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    })
+    const codeCommit = catalogEntry("codecommit")
+    const codePipeline = catalogEntry("codepipeline")
+    const catalog = [
+      {
+        ...codeCommit,
+        configurationFields: [field("profile", "default"), field("region"), field("repositoryName")]
+      },
+      {
+        ...codePipeline,
+        configurationFields: [field("profile", "default"), field("region"), field("pipelineName")]
+      },
+      catalogEntry("jira"),
+      catalogEntry("confluence"),
+      catalogEntry("clockify")
+    ]
+    const paymentsConnection = {
+      pluginConnectionId: paymentsConnectionId,
+      providerAccountId: accountId,
+      followedResourceId: paymentsId,
+      providerId: "codecommit",
+      displayName: "Payments · payments-api",
+      isEnabled: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    }
+    const riskConnection = {
+      pluginConnectionId: riskConnectionId,
+      providerAccountId: accountId,
+      followedResourceId: riskId,
+      providerId: "codecommit",
+      displayName: "Payments · risk-engine",
+      isEnabled: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" },
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    }
+    const account = {
+      providerAccountId: accountId,
+      providerFamily: "aws",
+      displayName: "123456789012",
+      providerImmutableId: "123456789012"
+    }
+    const paymentsResource = {
+      followedResourceId: paymentsId,
+      providerId: "codecommit",
+      displayName: "payments-api",
+      providerImmutableId: "eu-west-1:payments-api",
+      isEnabled: true
+    }
+    const riskResource = {
+      followedResourceId: riskId,
+      providerId: "codecommit",
+      displayName: "risk-engine",
+      providerImmutableId: "eu-west-1:risk-engine",
+      isEnabled: true
+    }
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog,
+      connections: [paymentsConnection],
+      accounts: [{ ...account, resources: [paymentsResource] }]
+    })
+    const refreshedOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog,
+      connections: [paymentsConnection, riskConnection],
+      accounts: [{ ...account, resources: [paymentsResource, riskResource] }]
+    })
+    const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: riskConnection,
+      configuration: {
+        pluginConnectionId: riskConnectionId,
+        revision: 1,
+        values: [
+          { _tag: "text", key: "profile", value: "default" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "risk-engine" }
+        ],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: {
+        _tag: "healthy",
+        pluginConnectionId: riskConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 20,
+        identity: {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Production account",
+          providerImmutableId: "123456789012"
+        }
+      }
+    })
+    const loadOverview = vi.fn().mockResolvedValueOnce(initialOverview).mockResolvedValue(refreshedOverview)
+    const transport: ConnectionTestTransport = {
+      create: vi.fn().mockResolvedValue(created),
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(riskConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    const addRepository = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Add repository"
+    )
+    await act(async () => addRepository?.click())
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "risk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      submit?.click()
+      await Promise.resolve()
+    })
+
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    const accountCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("AWS account 123456789012")
+    )
+    expect(accountCard?.textContent).toContain("payments-api")
+    expect(accountCard?.textContent).toContain("risk-engine")
+    expect(accountCard?.textContent?.match(/Healthy/gu)).toHaveLength(2)
+  })
+
   it("prefers one discovered OAuth profile for both Jira and Confluence", async () => {
     const field = (
       key: string,

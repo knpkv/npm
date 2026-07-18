@@ -528,6 +528,7 @@ export const ServicesPage = ({
       createRequest.current = request
       setSubmittingProvider(originProvider)
       let hasFailedTest = false
+      let shouldRefreshOverview = false
       const completed = completedBatchDrafts.current.get(originProvider) ?? new Set<string>()
       completedBatchDrafts.current.set(originProvider, completed)
       try {
@@ -547,6 +548,7 @@ export const ServicesPage = ({
           if (request.signal.aborted) return false
           completed.add(draftKey)
           hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
+          shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
           setConnectionsState((current) =>
             current._tag === "ready"
               ? {
@@ -564,6 +566,14 @@ export const ServicesPage = ({
               result: response.test
             })
           )
+        }
+        if (shouldRefreshOverview) {
+          try {
+            const refreshedOverview = await transport.overview(request.signal)
+            if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview: refreshedOverview })
+          } catch (failure: unknown) {
+            if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+          }
         }
         completedBatchDrafts.current.delete(originProvider)
         createRequest.current = null
@@ -743,11 +753,13 @@ export const ServicesPage = ({
               const configured = connectionsState.overview.connections.filter(
                 (connection) => connection.providerId === catalog.providerId
               )
-              const groupedAccountIds = new Set(
-                connectionsState.overview.accounts.map(({ providerAccountId }) => providerAccountId)
+              const groupedResourceIds = new Set(
+                connectionsState.overview.accounts.flatMap(({ resources }) =>
+                  resources.map(({ followedResourceId }) => followedResourceId)
+                )
               )
               const standaloneConnections = configured.filter(
-                ({ providerAccountId }) => providerAccountId === null || !groupedAccountIds.has(providerAccountId)
+                ({ followedResourceId }) => followedResourceId === null || !groupedResourceIds.has(followedResourceId)
               )
               const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
               const cards = standaloneConnections.map((connection) => (
