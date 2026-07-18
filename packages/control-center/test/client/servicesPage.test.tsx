@@ -374,6 +374,91 @@ describe("ServicesPage connection tests", () => {
     ).toEqual(["payments-api", "risk-engine", "payments-production"])
   })
 
+  it("retries only AWS drafts that did not create successfully", async () => {
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000171"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000172"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    ]
+    let creationAttempt = 0
+    const create = vi.fn<ConnectionTestTransport["create"]>((request) => {
+      creationAttempt += 1
+      if (creationAttempt === 2) return Promise.reject(new Error("temporary provider failure"))
+      return Promise.resolve(
+        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+          connection: {
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            displayName: request.displayName,
+            isEnabled: true,
+            health: null,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          configuration: {
+            pluginConnectionId: request.pluginConnectionId,
+            revision: 1,
+            values: request.values,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          test: {
+            _tag: "healthy",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            identity: {
+              kind: "account",
+              label: "AWS account",
+              displayName: "Production account",
+              providerImmutableId: "123456789012"
+            }
+          }
+        })
+      )
+    })
+    const makeConnectionId = vi
+      .fn()
+      .mockResolvedValueOnce(connectionIds[0])
+      .mockResolvedValueOnce(connectionIds[1])
+      .mockResolvedValueOnce(connectionIds[2])
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[2] !== undefined) await setControlValue(inputs[2], "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api\nrisk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+
+    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+      "Payments production · payments-api",
+      "Payments production · risk-engine"
+    ])
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("could not be connected")
+
+    await act(async () => submit?.click())
+
+    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+      "Payments production · payments-api",
+      "Payments production · risk-engine",
+      "Payments production · risk-engine"
+    ])
+    expect(
+      create.mock.calls.filter(([request]) => request.displayName === "Payments production · payments-api")
+    ).toHaveLength(1)
+  })
+
   it("rejects an oversized AWS resource list instead of silently dropping resources", async () => {
     const create = vi.fn()
     const transport: ConnectionTestTransport = {

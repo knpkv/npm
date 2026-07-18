@@ -42,6 +42,8 @@ type ConnectionsState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly overview: PluginOverviewResponse }
 
+const setupDraftKey = (draft: ServiceConnectionDraft): string => `${draft.catalog.providerId}\0${draft.displayName}`
+
 const statusFor = (
   connection: PluginConnectionSummary,
   testState: ConnectionTestState | undefined
@@ -415,6 +417,7 @@ export const ServicesPage = ({
   const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
   const testRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const createRequest = useRef<AbortController | null>(null)
+  const completedBatchDrafts = useRef(new Map<ProviderId, Set<string>>())
   const enablementRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const awsProfileRequest = useRef<AbortController | null>(null)
 
@@ -468,6 +471,7 @@ export const ServicesPage = ({
     setOpenProvider(null)
     setSubmittingProvider(null)
     setAwsProfilesState({ _tag: "idle" })
+    completedBatchDrafts.current.clear()
     return () => {
       for (const request of testRequests.current.values()) request.abort()
       testRequests.current.clear()
@@ -529,8 +533,12 @@ export const ServicesPage = ({
       createRequest.current = request
       setSubmittingProvider(originProvider)
       let hasFailedTest = false
+      const completed = completedBatchDrafts.current.get(originProvider) ?? new Set<string>()
+      completedBatchDrafts.current.set(originProvider, completed)
       try {
         for (const draft of drafts) {
+          const draftKey = setupDraftKey(draft)
+          if (completed.has(draftKey)) continue
           const pluginConnectionId = await transport.makeConnectionId()
           const response = await transport.create(
             {
@@ -542,6 +550,7 @@ export const ServicesPage = ({
             request.signal
           )
           if (request.signal.aborted) return false
+          completed.add(draftKey)
           hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
           setConnectionsState((current) =>
             current._tag === "ready"
@@ -561,6 +570,7 @@ export const ServicesPage = ({
             })
           )
         }
+        completedBatchDrafts.current.delete(originProvider)
         createRequest.current = null
         setOpenProvider(hasFailedTest ? originProvider : null)
         setSubmittingProvider(null)
@@ -736,8 +746,14 @@ export const ServicesPage = ({
                 isRecovery={configured.length > 0}
                 isSubmitting={submittingProvider === catalog.providerId}
                 key={`${catalog.providerId}-catalog`}
-                onCancel={() => setOpenProvider(null)}
-                onOpen={() => setOpenProvider(catalog.providerId)}
+                onCancel={() => {
+                  completedBatchDrafts.current.delete(catalog.providerId)
+                  setOpenProvider(null)
+                }}
+                onOpen={() => {
+                  completedBatchDrafts.current.delete(catalog.providerId)
+                  setOpenProvider(catalog.providerId)
+                }}
                 onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
                 onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
               />
