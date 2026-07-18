@@ -123,13 +123,22 @@ const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnable
   const current = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
   if (current.isEnabled === isEnabled) return yield* connectionSummary(persistence, current)
   if (isEnabled && pluginConnections === null) return yield* unavailable()
-  const updated = yield* persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
-    displayName: current.displayName,
-    isEnabled,
-    expectedRevision: current.revision,
-    updatedAt: yield* DateTime.now
-  }).pipe(Effect.mapError(mapPersistenceWriteError))
-  if (pluginConnections !== null) yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+  const updatedAt = yield* DateTime.now
+  const updated = yield* Effect.uninterruptible(
+    persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
+      displayName: current.displayName,
+      isEnabled,
+      expectedRevision: current.revision,
+      updatedAt
+    }).pipe(
+      Effect.mapError(mapPersistenceWriteError),
+      Effect.tap(() =>
+        pluginConnections === null
+          ? Effect.void
+          : pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      )
+    )
+  )
   return yield* connectionSummary(persistence, updated)
 })
 
@@ -762,8 +771,16 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
       return { pluginConnectionId, health: runtime.health }
     }),
-    testConnection: ({ pluginConnectionId, workspaceId }) =>
-      testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId),
+    testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
+      const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const test = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
+      if (connection.isEnabled) {
+        yield* persistSetupTestHealth(persistence, workspaceId, pluginConnectionId, test).pipe(
+          Effect.mapError(() => unavailable())
+        )
+      }
+      return test
+    }),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
     configuration: ({ pluginConnectionId, workspaceId }) =>

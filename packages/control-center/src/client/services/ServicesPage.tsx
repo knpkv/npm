@@ -51,7 +51,7 @@ const statusFor = (
     case "unavailable":
       return { label: "Unavailable", tone: "critical" }
     case "disabled":
-      return { label: "Disabled", tone: "neutral" }
+      return { label: "Not checked", tone: "neutral" }
   }
 }
 
@@ -469,6 +469,11 @@ export const ServicesPage = ({
       if (!isEnabled) {
         testRequests.current.get(pluginConnectionId)?.abort()
         testRequests.current.delete(pluginConnectionId)
+        setTestStates((current) => {
+          const next = new Map(current)
+          next.delete(pluginConnectionId)
+          return next
+        })
       }
       enablementRequests.current.get(pluginConnectionId)?.abort()
       const request = new AbortController()

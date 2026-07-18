@@ -381,6 +381,47 @@ describe("application adapters", () => {
       assert.isFalse((yield* persistence.pluginConnections.get(WORKSPACE_ID, UNREADY_PLUGIN_ID)).isEnabled)
     })))
 
+  it.effect("finishes runtime invalidation when enablement is interrupted after its metadata commit", () =>
+    withApplication(
+      Effect.gen(function*() {
+        yield* setup
+        yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+        const invalidationStarted = yield* Deferred.make<void>()
+        const releaseInvalidation = yield* Deferred.make<void>()
+        const invalidations = yield* Ref.make(0)
+        const administration = yield* makePluginAdministrationWithConnections({
+          contextEffect: () => Effect.die("enablement does not acquire a provider client"),
+          invalidate: () =>
+            Deferred.succeed(invalidationStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseInvalidation)),
+              Effect.andThen(Ref.update(invalidations, (count) => count + 1))
+            )
+        })
+        const setEnabled = administration.setConnectionEnabled
+        assert.isDefined(setEnabled)
+        const enablementFiber = yield* setEnabled({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          isEnabled: false
+        }).pipe(Effect.forkScoped)
+        yield* Deferred.await(invalidationStarted)
+
+        const interruptFinished = yield* Deferred.make<void>()
+        const interruptFiber = yield* Fiber.interrupt(enablementFiber).pipe(
+          Effect.andThen(Deferred.succeed(interruptFinished, undefined)),
+          Effect.forkScoped
+        )
+        yield* Effect.yieldNow
+        assert.isFalse(yield* Deferred.isDone(interruptFinished))
+
+        yield* Deferred.succeed(releaseInvalidation, undefined)
+        yield* Fiber.join(interruptFiber)
+        assert.strictEqual(yield* Ref.get(invalidations), 1)
+        const persistence = yield* Persistence
+        assert.isFalse((yield* persistence.pluginConnections.get(WORKSPACE_ID, PLUGIN_ID)).isEnabled)
+      }).pipe(Effect.scoped)
+    ))
+
   it.effect("keeps setup fields aligned with every canonical runtime descriptor", () =>
     Effect.gen(function*() {
       const providerIds: ReadonlyArray<ProviderId> = ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
@@ -2098,6 +2139,14 @@ describe("application adapters", () => {
         isEnabled: true,
         createdAt: T0
       })
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CONFLUENCE_PLUGIN_ID,
+        "confluence",
+        descriptor,
+        0,
+        T0
+      )
       yield* persistence.pluginConnections.create(WORKSPACE_ID, {
         pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
         providerId: "codepipeline",
@@ -2105,6 +2154,14 @@ describe("application adapters", () => {
         isEnabled: true,
         createdAt: T0
       })
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        "codepipeline",
+        descriptor,
+        0,
+        T0
+      )
       const connection: PluginConnectionV1 = {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
@@ -2130,6 +2187,17 @@ describe("application adapters", () => {
         invalidate: () => Effect.void
       }
       const administration = yield* makePluginAdministrationWithConnections(pluginConnections)
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+      const currentJira = yield* persistence.pluginConnections.get(WORKSPACE_ID, PLUGIN_ID)
+      yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, PLUGIN_ID, {
+        displayName: currentJira.displayName,
+        isEnabled: false,
+        expectedRevision: currentJira.revision,
+        updatedAt: SNAPSHOT_AT
+      })
+      const setEnabled = administration.setConnectionEnabled
+      assert.isDefined(setEnabled)
+      yield* setEnabled({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID, isEnabled: true })
       const result = yield* administration.testConnection({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID
@@ -2144,6 +2212,11 @@ describe("application adapters", () => {
           providerImmutableId: "atlassian-account-123"
         })
       }
+      assert.strictEqual(
+        (yield* administration.list(WORKSPACE_ID)).find(({ pluginConnectionId }) => pluginConnectionId === PLUGIN_ID)
+          ?.health?._tag,
+        "healthy"
+      )
 
       const confluenceResult = yield* administration.testConnection({
         workspaceId: WORKSPACE_ID,
