@@ -16,6 +16,7 @@ import { Persistence, type PersistenceOperationFailure } from "../persistence/Pe
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "./Bootstrap.js"
 import type { DomainEventWakeups } from "./DomainEventWakeups.js"
+import { type ServerDraining, ServerLifecycle } from "./ServerLifecycle.js"
 
 /** Explicit configured startup synchronization; absent options keep normal runtime startup inert. */
 export interface ReleaseSynchronizationStartupOptions {
@@ -48,35 +49,39 @@ export class ReleaseSynchronizationStartup extends Context.Service<
 export type ReleaseSynchronizationStartupError =
   | PersistenceOperationFailure
   | ReleaseSynchronizationFailure
+  | ServerDraining
   | ReleaseSynchronizationStartupConfigurationError
 
 const makeReleaseSynchronizationStartup = Effect.fn(
   "ReleaseSynchronizationStartup.make"
 )(function*(options: ReleaseSynchronizationStartupOptions) {
-  const bootstrap = yield* ControlCenterBootstrap
-  if (bootstrap._tag === "disabled") {
-    return yield* new ReleaseSynchronizationStartupConfigurationError({
-      diagnosticCode: "bootstrap-disabled"
-    })
-  }
-  if (bootstrap.workspaceId !== options.input.workspaceId) {
-    return yield* new ReleaseSynchronizationStartupConfigurationError({
-      diagnosticCode: "workspace-mismatch"
-    })
-  }
-  const persistence = yield* Persistence
-  const connection = yield* persistence.pluginConnections.get(
-    options.input.workspaceId,
-    options.input.pluginConnectionId
-  )
-  if (!connection.isEnabled) {
-    yield* recoverFakeReleaseProjection(options.input)
-    return { _tag: "connection-disabled" } satisfies ReleaseSynchronizationStartupState
-  }
-  const outcome = yield* synchronizeFakeReleaseFromMap(options.input).pipe(
-    Effect.provideService(PluginConnectionMap, options.pluginConnections)
-  )
-  return { _tag: "completed", outcome } satisfies ReleaseSynchronizationStartupState
+  const lifecycle = yield* ServerLifecycle
+  return yield* lifecycle.runBackground(Effect.gen(function*() {
+    const bootstrap = yield* ControlCenterBootstrap
+    if (bootstrap._tag === "disabled") {
+      return yield* new ReleaseSynchronizationStartupConfigurationError({
+        diagnosticCode: "bootstrap-disabled"
+      })
+    }
+    if (bootstrap.workspaceId !== options.input.workspaceId) {
+      return yield* new ReleaseSynchronizationStartupConfigurationError({
+        diagnosticCode: "workspace-mismatch"
+      })
+    }
+    const persistence = yield* Persistence
+    const connection = yield* persistence.pluginConnections.get(
+      options.input.workspaceId,
+      options.input.pluginConnectionId
+    )
+    if (!connection.isEnabled) {
+      yield* recoverFakeReleaseProjection(options.input)
+      return { _tag: "connection-disabled" } satisfies ReleaseSynchronizationStartupState
+    }
+    const outcome = yield* synchronizeFakeReleaseFromMap(options.input).pipe(
+      Effect.provideService(PluginConnectionMap, options.pluginConnections)
+    )
+    return { _tag: "completed", outcome } satisfies ReleaseSynchronizationStartupState
+  }))
 })
 
 /** Build the ordered optional startup service after workspace bootstrap. */
@@ -85,7 +90,7 @@ export const releaseSynchronizationStartupLayer = (
 ): Layer.Layer<
   ReleaseSynchronizationStartup,
   ReleaseSynchronizationStartupError,
-  ControlCenterBootstrap | Crypto.Crypto | DomainEventWakeups | Persistence
+  ControlCenterBootstrap | Crypto.Crypto | DomainEventWakeups | Persistence | ServerLifecycle
 > =>
   options === null
     ? Layer.succeed(ReleaseSynchronizationStartup, { _tag: "disabled" })

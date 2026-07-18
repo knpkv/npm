@@ -3,6 +3,7 @@ import * as Sqlite from "effect-qb/sqlite"
 
 import type { RenderedSql } from "./types.js"
 
+export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
 export {
   type RenderedTimelineQuery,
   renderTimelineDetailQueries,

@@ -16,6 +16,11 @@ every returned row, and performs a stable merge in application memory. This keep
 query count constant while allowing new durable activity sources to be added
 without expanding one deeply coupled SQL statement.
 
+The governed-action recovery plan selects one bounded, stable startup batch after
+the recovery safety interval. It excludes actions with a live recovery claim and
+returns identities only; claim acquisition and reconciliation remain inside the
+transactional Control Center execution store.
+
 This package does not own database initialization or migrations. During the MVP,
 Control Center uses one exact unstable schema snapshot; versioned migrations begin
 only after that persistence model is stable and released databases need upgrades.

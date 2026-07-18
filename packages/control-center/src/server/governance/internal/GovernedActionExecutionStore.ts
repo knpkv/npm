@@ -36,6 +36,7 @@ export class GovernedActionExecutionStoreError extends Schema.TaggedErrorClass<G
   {
     operation: Schema.Literals([
       "inspect",
+      "list-recovery",
       "begin",
       "block",
       "record-dispatch",
@@ -114,6 +115,11 @@ export type GovernedActionBeginResult = GovernedActionInactiveExecution | Govern
  * stranded `started` work, using a null reconciliation key to recover by idempotency identity.
  */
 export interface GovernedActionExecutionStoreV1 {
+  /** Stable bounded identities whose recovery safety interval has elapsed. */
+  readonly recoveryCandidates: Effect.Effect<
+    ReadonlyArray<GovernedActionExecutionReference>,
+    GovernedActionExecutionStoreError
+  >
   readonly inspect: (
     reference: GovernedActionExecutionReference
   ) => Effect.Effect<GovernedActionExecutionPlan, GovernedActionExecutionStoreError>

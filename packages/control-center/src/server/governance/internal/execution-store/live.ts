@@ -9,6 +9,7 @@ import { makeGovernedActionExecutionRecordDispatch } from "./record-dispatch.js"
 import { makeGovernedActionExecutionRecordReconciliation } from "./record-reconciliation.js"
 import { makeGovernedActionExecutionRecordRecoveryUnavailable } from "./record-recovery-unavailable.js"
 import { makeGovernedActionExecutionRecordUnknown } from "./record-unknown.js"
+import { makeGovernedActionRecoveryCandidates } from "./recovery-candidates.js"
 
 const makeGovernedActionExecutionStore = Effect.gen(function*() {
   const inspect = yield* makeGovernedActionExecutionInspect
@@ -18,8 +19,10 @@ const makeGovernedActionExecutionStore = Effect.gen(function*() {
   const unknown = yield* makeGovernedActionExecutionRecordUnknown
   const unavailable = yield* makeGovernedActionExecutionRecordRecoveryUnavailable
   const reconciliation = yield* makeGovernedActionExecutionRecordReconciliation
+  const recoveryCandidates = yield* makeGovernedActionRecoveryCandidates
 
   return {
+    recoveryCandidates: recoveryCandidates.recoveryCandidates,
     inspect: inspect.inspect,
     begin: begin.begin,
     recordBlocked: blocked.recordBlocked,

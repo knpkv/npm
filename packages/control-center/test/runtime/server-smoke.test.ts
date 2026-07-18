@@ -567,11 +567,20 @@ describe("Control Center closed runtime", () => {
                 Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
               )
           }
-        }).pipe(Layer.provide(databaseLayer(persistenceConfig)))
+        }).pipe(
+          Layer.provide(databaseLayer(persistenceConfig)),
+          Layer.provide(ServerLifecycle.layer)
+        )
       )
       const privateExecution = Context.get(internalWorker, GovernedActionExecutionStartup)
       assert.strictEqual(privateExecution._tag, "ready")
       if (privateExecution._tag === "ready") {
+        assert.deepStrictEqual(privateExecution.recovery, {
+          attempted: 0,
+          advanced: 0,
+          inactive: 0,
+          failed: 0
+        })
         const missing = yield* privateExecution.advance({
           workspaceId: WORKSPACE_ID,
           actionId: MISSING_ACTION_ID

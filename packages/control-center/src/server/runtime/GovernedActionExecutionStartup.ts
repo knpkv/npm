@@ -5,8 +5,10 @@ import * as Layer from "effect/Layer"
 import { governedActionExecutionStoreLayer } from "../governance/internal/execution-store/live.js"
 import {
   GovernedActionExecutionEngine,
-  type GovernedActionExecutionEngineService
+  type GovernedActionExecutionEngineService,
+  type GovernedActionRecoverySweepResult
 } from "../governance/internal/GovernedActionExecutionEngine.js"
+import type { GovernedActionExecutionStoreError } from "../governance/internal/GovernedActionExecutionStore.js"
 import {
   type GovernedActionPolicyCatalogInvalid,
   GovernedActionPolicyEvaluator
@@ -16,6 +18,7 @@ import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPlugi
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginRuntimeMap } from "../plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/internal/PluginRuntimeRegistry.js"
+import { type ServerDraining, ServerLifecycle } from "./ServerLifecycle.js"
 
 /** Server-owned runtime factories; this grants no route or agent an execution handle. */
 export interface GovernedActionExecutionStartupOptions {
@@ -23,7 +26,10 @@ export interface GovernedActionExecutionStartupOptions {
 }
 
 /** Failures that can prevent the private governed worker from being constructed. */
-export type GovernedActionExecutionStartupError = GovernedActionPolicyCatalogInvalid
+export type GovernedActionExecutionStartupError =
+  | GovernedActionExecutionStoreError
+  | GovernedActionPolicyCatalogInvalid
+  | ServerDraining
 
 /** Private worker state; import boundaries keep `advance` out of APIs and agent adapters. */
 export type GovernedActionExecutionStartupState =
@@ -31,13 +37,17 @@ export type GovernedActionExecutionStartupState =
   | {
     readonly _tag: "ready"
     readonly advance: GovernedActionExecutionEngineService["run"]
+    readonly recovery: GovernedActionRecoverySweepResult
   }
 
 const makeReadyStartup = Effect.gen(function*() {
   const engine = yield* GovernedActionExecutionEngine
+  const lifecycle = yield* ServerLifecycle
+  const recovery = yield* lifecycle.runBackground(engine.recoverEligible())
   return {
     _tag: "ready",
-    advance: engine.run
+    advance: engine.run,
+    recovery
   } satisfies GovernedActionExecutionStartupState
 })
 

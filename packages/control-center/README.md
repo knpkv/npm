@@ -28,7 +28,9 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
-`SIGINT` and `SIGTERM` begin graceful drain before scoped runtime resources close. The server rejects new authenticated mutations and live-event streams with a retryable `503`, closes existing live-event streams, and gives already-admitted mutations up to ten seconds to finish. It prints `Control Center drained.` when that barrier clears or reports the hard deadline on standard error before shutdown continues. Background sync claims, durable action recovery, and subsystem-specific flush/reconciliation hooks are the next D09 slice and must join this same lifecycle boundary.
+`SIGINT` and `SIGTERM` begin graceful drain before scoped runtime resources close. The server rejects new authenticated mutations and live-event streams with a retryable `503`, closes existing live-event streams, and gives already-admitted mutations or startup background jobs up to ten seconds to finish. It prints `Control Center drained.` when that barrier clears or reports the hard deadline on standard error before shutdown continues. Startup release synchronization and governed-action recovery share this admission barrier; subsystem-specific flush hooks remain a later D09 extension.
+
+When the private governed worker is enabled, startup selects at most 64 actions whose recovery safety interval has elapsed. The `effect-qb` query uses stable lease/workspace/action order and excludes live recovery claims. Each candidate enters the existing inspect-and-reconcile path sequentially, so startup never redispatches an ambiguous provider mutation. A candidate-list failure prevents the worker from becoming ready; individual reconciliation failures are counted in the secret-free startup summary while the remaining bounded batch continues.
 
 ### Local release agent
 

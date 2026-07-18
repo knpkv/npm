@@ -8,6 +8,7 @@ import { PluginActionDispatchResultV1 } from "../../src/domain/plugins/actions.j
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeGovernedActionExecutionInspect } from "../../src/server/governance/internal/execution-store/inspect.js"
 import { makeGovernedActionExecutionRecordDispatch } from "../../src/server/governance/internal/execution-store/record-dispatch.js"
+import { makeGovernedActionRecoveryCandidates } from "../../src/server/governance/internal/execution-store/recovery-candidates.js"
 import { Database } from "../../src/server/persistence/Database.js"
 import {
   ACTION,
@@ -19,6 +20,24 @@ import {
 } from "./fixtures/governedActionExecution.js"
 
 describe("governed action recovery claims", () => {
+  it.effect("lists an eligible action until one recovery claim is active", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const recoveryEligibleAt = DateTime.add(permitted.leaseExpiresAt, { seconds: 60 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(recoveryEligibleAt))
+      const candidates = yield* makeGovernedActionRecoveryCandidates
+
+      assert.deepStrictEqual(yield* candidates.recoveryCandidates, [{
+        workspaceId: WORKSPACE,
+        actionId: ACTION
+      }])
+
+      const inspect = yield* makeGovernedActionExecutionInspect
+      const recovery = yield* inspect.inspect({ workspaceId: WORKSPACE, actionId: ACTION })
+      assert.strictEqual(recovery._tag, "reconcile")
+      assert.deepStrictEqual(yield* candidates.recoveryCandidates, [])
+    })))
+
   it.effect("issues one expiring idempotency claim and renews only after expiry", () =>
     withBegin(Effect.gen(function*() {
       const permitted = yield* beginAuthorizedDispatch()
