@@ -624,7 +624,8 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(persistedRuntime.health._tag, "healthy")
       assert.deepStrictEqual(synchronizationState, {
         _tag: "completed",
-        outcome: { _tag: "synchronized", pagesCommitted: 1, releaseId: RELEASE_ID }
+        outcome: { _tag: "synchronized", pagesCommitted: 1, releaseId: RELEASE_ID },
+        reconciledAttempts: 0
       })
       if (bootstrapState._tag !== "pairing-issued") return
 
@@ -711,6 +712,13 @@ describe("Control Center closed runtime", () => {
             FIXTURE_TIME,
             healthy
           )
+          yield* persistence.pluginRuntime.beginSyncAttempt(
+            WORKSPACE_ID,
+            PLUGIN_ID,
+            "jira",
+            RELEASE_STREAM,
+            FIXTURE_TIME
+          )
           const missingProjection = yield* persistence.releases.get(
             WORKSPACE_ID,
             RELEASE_ID
@@ -748,7 +756,7 @@ describe("Control Center closed runtime", () => {
       const runtimePersistence = Context.get(runtime, Persistence)
       const release = yield* runtimePersistence.releases.get(WORKSPACE_ID, RELEASE_ID)
 
-      assert.deepStrictEqual(synchronizationState, { _tag: "connection-disabled" })
+      assert.deepStrictEqual(synchronizationState, { _tag: "connection-disabled", reconciledAttempts: 1 })
       assert.strictEqual(yield* Ref.get(providerAcquisitions), 0)
       assert.strictEqual(release.release.id, RELEASE_ID)
       assert.strictEqual(release.release.freshness._tag, "stale")

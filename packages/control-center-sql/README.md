@@ -22,6 +22,11 @@ with a live recovery claim unless that claim has an immutable explicit expiry,
 and returns identities only; claim acquisition and reconciliation remain inside
 the transactional Control Center execution store.
 
+Plugin synchronization plans expose open attempts through an anti-join and
+complete attempt history through one ordered left join. Attempt starts and
+completions remain immutable persistence records; the Control Center repository
+owns exact revision boundaries, outcome validation, and startup reconciliation.
+
 This package does not own database initialization or migrations. During the MVP,
 Control Center uses one exact unstable schema snapshot; versioned migrations begin
 only after that persistence model is stable and released databases need upgrades.

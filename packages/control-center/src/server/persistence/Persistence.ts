@@ -262,8 +262,12 @@ const makePersistence = Effect.gen(function*() {
     pluginRuntime: {
       acceptPluginDescriptor: (...args: Parameters<PluginRuntimeRepositoryService["acceptPluginDescriptor"]>) =>
         publicOperation("plugin-runtime.accept-plugin-descriptor", pluginRuntime.acceptPluginDescriptor(...args)),
+      beginSyncAttempt: (...args: Parameters<PluginRuntimeRepositoryService["beginSyncAttempt"]>) =>
+        publicOperation("plugin-runtime.begin-sync-attempt", pluginRuntime.beginSyncAttempt(...args)),
       commitNormalizedPage: (...args: Parameters<PluginRuntimeRepositoryService["commitNormalizedPage"]>) =>
         publicOperation("plugin-runtime.commit-normalized-page", pluginRuntime.commitNormalizedPage(...args)),
+      completeSyncAttempt: (...args: Parameters<PluginRuntimeRepositoryService["completeSyncAttempt"]>) =>
+        publicOperation("plugin-runtime.complete-sync-attempt", pluginRuntime.completeSyncAttempt(...args)),
       getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>
         publicOperation("plugin-runtime.get-cache", pluginRuntime.getCache(...args)),
       getLastSuccessfulHealth: (...args: Parameters<PluginRuntimeRepositoryService["getLastSuccessfulHealth"]>) =>
@@ -277,6 +281,10 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.get-stream", pluginRuntime.getStream(...args)),
       listEvidence: (...args: Parameters<PluginRuntimeRepositoryService["listEvidence"]>) =>
         publicOperation("plugin-runtime.list-evidence", pluginRuntime.listEvidence(...args)),
+      listSyncAttempts: (...args: Parameters<PluginRuntimeRepositoryService["listSyncAttempts"]>) =>
+        publicOperation("plugin-runtime.list-sync-attempts", pluginRuntime.listSyncAttempts(...args)),
+      reconcileSyncAttempts: (...args: Parameters<PluginRuntimeRepositoryService["reconcileSyncAttempts"]>) =>
+        publicOperation("plugin-runtime.reconcile-sync-attempts", pluginRuntime.reconcileSyncAttempts(...args)),
       recordHealth: (...args: Parameters<PluginRuntimeRepositoryService["recordHealth"]>) =>
         publicOperation("plugin-runtime.record-health", pluginRuntime.recordHealth(...args))
     },

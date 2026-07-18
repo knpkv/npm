@@ -178,6 +178,16 @@
     },
     {
       "type": "table",
+      "name": "plugin_sync_attempt_completions",
+      "sql": "CREATE TABLE plugin_sync_attempt_completions (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL CHECK(length(stream_key) BETWEEN 1 AND 100),\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence >= 1),\n    outcome TEXT NOT NULL CHECK(outcome IN ('synchronized', 'source-unavailable', 'interrupted')),\n    ending_revision INTEGER NOT NULL CHECK(ending_revision >= 0),\n    pages_committed INTEGER NOT NULL CHECK(pages_committed >= 0),\n    completed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, attempt_sequence),\n    FOREIGN KEY (workspace_id, plugin_connection_id, stream_key, attempt_sequence)\n      REFERENCES plugin_sync_attempts(workspace_id, plugin_connection_id, stream_key, attempt_sequence)\n  )"
+    },
+    {
+      "type": "table",
+      "name": "plugin_sync_attempts",
+      "sql": "CREATE TABLE plugin_sync_attempts (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL CHECK(length(stream_key) BETWEEN 1 AND 100),\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence >= 1),\n    started_revision INTEGER NOT NULL CHECK(started_revision >= 0),\n    started_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, attempt_sequence),\n    FOREIGN KEY (workspace_id, plugin_connection_id, provider_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id, provider_id)\n  )"
+    },
+    {
+      "type": "table",
       "name": "plugin_sync_evidence",
       "sql": "CREATE TABLE plugin_sync_evidence (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL,\n    page_id TEXT NOT NULL,\n    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),\n    event_id TEXT NOT NULL CHECK(length(event_id) BETWEEN 1 AND 512),\n    event_digest TEXT NOT NULL CHECK(length(event_digest) = 64 AND event_digest NOT GLOB '*[^0-9a-f]*'),\n    event_kind TEXT NOT NULL CHECK(event_kind IN ('upsert', 'tombstone')),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 700),\n    source_revision TEXT NOT NULL CHECK(length(source_revision) BETWEEN 1 AND 512),\n    payload_json TEXT NOT NULL CHECK(length(payload_json) BETWEEN 2 AND 524288),\n    observed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, page_id, ordinal),\n    UNIQUE (workspace_id, plugin_connection_id, stream_key, event_id),\n    FOREIGN KEY (workspace_id, plugin_connection_id, stream_key, page_id)\n      REFERENCES plugin_sync_pages(workspace_id, plugin_connection_id, stream_key, page_id),\n    CHECK(length(payload_json) >= 2)\n  )"
     },
@@ -1000,6 +1010,36 @@
       "type": "trigger",
       "name": "plugin_runtime_state_no_delete_after_authority",
       "sql": "CREATE TRIGGER plugin_runtime_state_no_delete_after_authority\n    BEFORE DELETE ON plugin_runtime_state\n    WHEN EXISTS (\n      SELECT 1\n      FROM plugin_runtime_authority_generations authority\n      WHERE authority.workspace_id = OLD.workspace_id\n        AND authority.plugin_connection_id = OLD.plugin_connection_id\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'authorized plugin runtime state cannot be recreated');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempt_completion_exact_insert",
+      "sql": "CREATE TRIGGER plugin_sync_attempt_completion_exact_insert\n    BEFORE INSERT ON plugin_sync_attempt_completions\n    WHEN NOT EXISTS (\n      SELECT 1 FROM plugin_sync_attempts attempt\n      WHERE attempt.workspace_id = NEW.workspace_id\n        AND attempt.plugin_connection_id = NEW.plugin_connection_id\n        AND attempt.stream_key = NEW.stream_key\n        AND attempt.attempt_sequence = NEW.attempt_sequence\n        AND attempt.started_at <= NEW.completed_at\n        AND attempt.started_revision <= NEW.ending_revision\n        AND NEW.pages_committed = NEW.ending_revision - attempt.started_revision\n    ) OR NEW.ending_revision <> COALESCE((\n      SELECT stream.revision FROM plugin_sync_streams stream\n      WHERE stream.workspace_id = NEW.workspace_id\n        AND stream.plugin_connection_id = NEW.plugin_connection_id\n        AND stream.stream_key = NEW.stream_key\n    ), 0)\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync completion must match its attempt and current stream revision');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempt_completions_no_delete",
+      "sql": "CREATE TRIGGER plugin_sync_attempt_completions_no_delete\n    BEFORE DELETE ON plugin_sync_attempt_completions\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync attempt completions are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempt_completions_no_update",
+      "sql": "CREATE TRIGGER plugin_sync_attempt_completions_no_update\n    BEFORE UPDATE ON plugin_sync_attempt_completions\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync attempt completions are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempt_exact_insert",
+      "sql": "CREATE TRIGGER plugin_sync_attempt_exact_insert\n    BEFORE INSERT ON plugin_sync_attempts\n    WHEN NEW.started_revision <> COALESCE((\n      SELECT stream.revision FROM plugin_sync_streams stream\n      WHERE stream.workspace_id = NEW.workspace_id\n        AND stream.plugin_connection_id = NEW.plugin_connection_id\n        AND stream.stream_key = NEW.stream_key\n    ), 0) OR NEW.attempt_sequence <> COALESCE((\n      SELECT MAX(attempt.attempt_sequence) FROM plugin_sync_attempts attempt\n      WHERE attempt.workspace_id = NEW.workspace_id\n        AND attempt.plugin_connection_id = NEW.plugin_connection_id\n        AND attempt.stream_key = NEW.stream_key\n    ), 0) + 1 OR EXISTS (\n      SELECT 1 FROM plugin_sync_attempts attempt\n      WHERE attempt.workspace_id = NEW.workspace_id\n        AND attempt.plugin_connection_id = NEW.plugin_connection_id\n        AND attempt.stream_key = NEW.stream_key\n        AND NOT EXISTS (\n          SELECT 1 FROM plugin_sync_attempt_completions completion\n          WHERE completion.workspace_id = attempt.workspace_id\n            AND completion.plugin_connection_id = attempt.plugin_connection_id\n            AND completion.stream_key = attempt.stream_key\n            AND completion.attempt_sequence = attempt.attempt_sequence\n        )\n    ) OR EXISTS (\n      SELECT 1 FROM plugin_sync_attempt_completions completion\n      WHERE completion.workspace_id = NEW.workspace_id\n        AND completion.plugin_connection_id = NEW.plugin_connection_id\n        AND completion.stream_key = NEW.stream_key\n        AND completion.completed_at > NEW.started_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync attempts must be chronological, contiguous, and begin at the current revision');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempts_no_delete",
+      "sql": "CREATE TRIGGER plugin_sync_attempts_no_delete\n    BEFORE DELETE ON plugin_sync_attempts\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync attempts are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_sync_attempts_no_update",
+      "sql": "CREATE TRIGGER plugin_sync_attempts_no_update\n    BEFORE UPDATE ON plugin_sync_attempts\n    BEGIN\n      SELECT RAISE(ABORT, 'plugin sync attempts are immutable');\n    END"
     },
     {
       "type": "trigger",

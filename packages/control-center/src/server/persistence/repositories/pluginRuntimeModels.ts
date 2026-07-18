@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -115,6 +116,40 @@ export const PluginStreamRecord = Schema.Struct({
   )
 )
 export type PluginStreamRecord = typeof PluginStreamRecord.Type
+
+/** Durable terminal classification for one fake-plugin synchronization attempt. */
+export const PluginSyncAttemptOutcome = Schema.Literals(["synchronized", "source-unavailable", "interrupted"])
+export type PluginSyncAttemptOutcome = typeof PluginSyncAttemptOutcome.Type
+
+/** Terminal outcome that a normal synchronization invocation may record directly. */
+export const PluginSyncCompletionOutcome = Schema.Literals(["synchronized", "source-unavailable"])
+export type PluginSyncCompletionOutcome = typeof PluginSyncCompletionOutcome.Type
+
+/** Append-only synchronization attempt with its optional immutable completion. */
+export const PluginSyncAttemptRecord = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  providerId: ProviderId,
+  streamKey: PluginStreamKey,
+  attemptSequence: Schema.Int.check(Schema.isGreaterThan(0)),
+  startedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  startedAt: UtcTimestamp,
+  outcome: Schema.NullOr(PluginSyncAttemptOutcome),
+  endingRevision: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  pagesCommitted: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  completedAt: Schema.NullOr(UtcTimestamp)
+}).check(
+  Schema.makeFilter(
+    ({ completedAt, endingRevision, outcome, pagesCommitted, startedAt, startedRevision }) =>
+      outcome === null
+        ? endingRevision === null && pagesCommitted === null && completedAt === null
+        : endingRevision !== null && pagesCommitted !== null && completedAt !== null &&
+          endingRevision >= startedRevision && pagesCommitted === endingRevision - startedRevision &&
+          DateTime.Order(completedAt, startedAt) >= 0,
+    { expected: "coherent open or completed synchronization attempt" }
+  )
+)
+export type PluginSyncAttemptRecord = typeof PluginSyncAttemptRecord.Type
 
 export const PluginCacheRecord = Schema.Struct({
   workspaceId: WorkspaceId,

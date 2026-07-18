@@ -145,6 +145,88 @@ const upsertPage = {
 }
 
 describe("plugin runtime persistence", () => {
+  it.effect("reconciles crash-left sync attempts once and preserves immutable completion boundaries", () =>
+    withRuntime(Effect.gen(function*() {
+      const database = yield* Database
+      const runtime = yield* PluginRuntimeRepository
+      yield* setup
+
+      const interrupted = yield* runtime.beginSyncAttempt(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T0)
+      assert.strictEqual(interrupted.attemptSequence, 1)
+      assert.strictEqual(interrupted.startedRevision, 0)
+      assert.strictEqual(yield* runtime.reconcileSyncAttempts(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T1), 1)
+      assert.strictEqual(yield* runtime.reconcileSyncAttempts(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T1), 0)
+
+      const synchronized = yield* runtime.beginSyncAttempt(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T1)
+      assert.strictEqual(synchronized.attemptSequence, 2)
+      yield* runtime.commitPage(WORKSPACE_ID, PLUGIN_ID, upsertPage)
+      const completion = yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        synchronized.attemptSequence,
+        "synchronized",
+        T2
+      )
+      assert.strictEqual(completion.endingRevision, 1)
+      assert.strictEqual(completion.pagesCommitted, 1)
+
+      const replay = yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        synchronized.attemptSequence,
+        "synchronized",
+        T2
+      )
+      assert.deepStrictEqual(replay, completion)
+      const changedOutcome = yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        synchronized.attemptSequence,
+        "source-unavailable",
+        T2
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(changedOutcome))
+      if (Result.isFailure(changedOutcome)) assert.instanceOf(changedOutcome.failure, SourceIdentityMismatchError)
+
+      const history = yield* runtime.listSyncAttempts(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.deepStrictEqual(
+        history.map(({ attemptSequence, endingRevision, outcome, pagesCommitted, startedRevision }) => ({
+          attemptSequence,
+          endingRevision,
+          outcome,
+          pagesCommitted,
+          startedRevision
+        })),
+        [
+          {
+            attemptSequence: 1,
+            endingRevision: 0,
+            outcome: "interrupted",
+            pagesCommitted: 0,
+            startedRevision: 0
+          },
+          {
+            attemptSequence: 2,
+            endingRevision: 1,
+            outcome: "synchronized",
+            pagesCommitted: 1,
+            startedRevision: 0
+          }
+        ]
+      )
+
+      const mutations = yield* Effect.all([
+        database.sql`UPDATE plugin_sync_attempts SET started_revision = 1`.pipe(Effect.result),
+        database.sql`DELETE FROM plugin_sync_attempts`.pipe(Effect.result),
+        database.sql`UPDATE plugin_sync_attempt_completions SET outcome = 'interrupted'`.pipe(Effect.result),
+        database.sql`DELETE FROM plugin_sync_attempt_completions`.pipe(Effect.result)
+      ])
+      assert.isTrue(mutations.every(Result.isFailure))
+    })))
+
   it.effect("accepts a last-valid descriptor, records health, and redacts malformed candidates", () =>
     withRuntime(Effect.gen(function*() {
       const runtime = yield* PluginRuntimeRepository

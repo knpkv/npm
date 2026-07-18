@@ -1,3 +1,4 @@
+import { renderOpenPluginSyncAttemptsQuery, renderPluginSyncAttemptsQuery } from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -33,6 +34,8 @@ import {
   PluginEvidenceRecord,
   PluginRuntimeRecord,
   PluginStreamRecord,
+  PluginSyncAttemptRecord,
+  PluginSyncCompletionOutcome,
   PluginSyncPage
 } from "./pluginRuntimeModels.js"
 import { QuarantineRepository } from "./quarantineRepository.js"
@@ -467,6 +470,173 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       })
     }
     return decoded.success
+  })
+
+  const currentStreamRevision = Effect.fn("PluginRuntimeRepository.currentStreamRevision")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rows = yield* sql<{ readonly revision: number }>`SELECT revision
+      FROM plugin_sync_streams
+      WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
+        AND stream_key = ${streamKey}`
+    return rows[0]?.revision ?? 0
+  })
+
+  const openSyncAttempts = Effect.fn("PluginRuntimeRepository.openSyncAttempts")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rendered = renderOpenPluginSyncAttemptsQuery({ workspaceId, pluginConnectionId, streamKey })
+    return yield* sql.unsafe<{
+      readonly attemptSequence: number
+      readonly startedRevision: number
+    }>(rendered.sql, [...rendered.params])
+  })
+
+  const reconcileOpenSyncAttempts = Effect.fn("PluginRuntimeRepository.reconcileOpenSyncAttempts")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    completedAt: UtcTimestamp
+  ) {
+    const attempts = yield* openSyncAttempts(workspaceId, pluginConnectionId, streamKey)
+    const endingRevision = yield* currentStreamRevision(workspaceId, pluginConnectionId, streamKey)
+    for (const attempt of attempts) {
+      yield* sql`INSERT INTO plugin_sync_attempt_completions (
+        workspace_id, plugin_connection_id, stream_key, attempt_sequence, outcome,
+        ending_revision, pages_committed, completed_at
+      ) VALUES (
+        ${workspaceId}, ${pluginConnectionId}, ${streamKey}, ${attempt.attemptSequence}, 'interrupted',
+        ${endingRevision}, ${endingRevision - attempt.startedRevision}, ${encodeTimestamp(completedAt)}
+      )`
+    }
+    return attempts.length
+  })
+
+  const reconcileSyncAttempts = Effect.fn("PluginRuntimeRepository.reconcileSyncAttempts")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    providerId: typeof ProviderId.Type,
+    streamKey: PluginStreamKey,
+    completedAt: UtcTimestamp
+  ) {
+    return yield* database.transaction(Effect.gen(function*() {
+      yield* verifyProvider(workspaceId, pluginConnectionId, providerId)
+      return yield* reconcileOpenSyncAttempts(workspaceId, pluginConnectionId, streamKey, completedAt)
+    })).pipe(mapPersistenceOperation("plugin-runtime.reconcile-sync-attempts"))
+  })
+
+  const beginSyncAttempt = Effect.fn("PluginRuntimeRepository.beginSyncAttempt")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    providerId: typeof ProviderId.Type,
+    streamKey: PluginStreamKey,
+    startedAt: UtcTimestamp
+  ) {
+    return yield* database.transaction(Effect.gen(function*() {
+      yield* verifyProvider(workspaceId, pluginConnectionId, providerId)
+      yield* reconcileOpenSyncAttempts(workspaceId, pluginConnectionId, streamKey, startedAt)
+      const startedRevision = yield* currentStreamRevision(workspaceId, pluginConnectionId, streamKey)
+      const sequences = yield* sql<{ readonly nextSequence: number }>`SELECT
+        COALESCE(MAX(attempt_sequence), 0) + 1 AS nextSequence
+        FROM plugin_sync_attempts
+        WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
+          AND stream_key = ${streamKey}`
+      const attemptSequence = sequences[0]?.nextSequence ?? 1
+      yield* sql`INSERT INTO plugin_sync_attempts (
+        workspace_id, plugin_connection_id, provider_id, stream_key,
+        attempt_sequence, started_revision, started_at
+      ) VALUES (
+        ${workspaceId}, ${pluginConnectionId}, ${providerId}, ${streamKey},
+        ${attemptSequence}, ${startedRevision}, ${encodeTimestamp(startedAt)}
+      )`
+      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncAttemptRecord))({
+        workspaceId,
+        pluginConnectionId,
+        providerId,
+        streamKey,
+        attemptSequence,
+        startedRevision,
+        startedAt,
+        outcome: null,
+        endingRevision: null,
+        pagesCommitted: null,
+        completedAt: null
+      })
+    })).pipe(mapPersistenceOperation("plugin-runtime.begin-sync-attempt"))
+  })
+
+  const listSyncAttempts = Effect.fn("PluginRuntimeRepository.listSyncAttempts")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rendered = renderPluginSyncAttemptsQuery({ workspaceId, pluginConnectionId, streamKey })
+    const rows = yield* sql.unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+    return yield* Schema.decodeUnknownEffect(Schema.Array(PluginSyncAttemptRecord))(rows)
+  })
+
+  const completeSyncAttempt = Effect.fn("PluginRuntimeRepository.completeSyncAttempt")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    attemptSequence: number,
+    outcome: typeof PluginSyncCompletionOutcome.Type,
+    completedAt: UtcTimestamp
+  ) {
+    return yield* database.transaction(Effect.gen(function*() {
+      const decodedOutcome = yield* Schema.decodeUnknownEffect(PluginSyncCompletionOutcome)(outcome)
+      const attempts = yield* sql<{ readonly startedRevision: number }>`SELECT
+        started_revision AS startedRevision FROM plugin_sync_attempts
+        WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
+          AND stream_key = ${streamKey} AND attempt_sequence = ${attemptSequence}`
+      const attempt = attempts[0]
+      if (attempt === undefined) {
+        return yield* new RecordNotFoundError({
+          workspaceId,
+          recordKind: "plugin-sync-attempt",
+          recordKey: `${pluginConnectionId}/${streamKey}/${attemptSequence}`
+        })
+      }
+      const existingRecords = yield* listSyncAttempts(workspaceId, pluginConnectionId, streamKey)
+      const existing = existingRecords.find((record) => record.attemptSequence === attemptSequence)
+      if (existing !== undefined && existing.outcome !== null) {
+        if (existing.outcome !== decodedOutcome) {
+          return yield* new SourceIdentityMismatchError({
+            workspaceId,
+            recordKind: "plugin-sync-attempt",
+            recordKey: `${pluginConnectionId}/${streamKey}/${attemptSequence}`
+          })
+        }
+        return existing
+      }
+      const endingRevision = yield* currentStreamRevision(workspaceId, pluginConnectionId, streamKey)
+      yield* sql`INSERT INTO plugin_sync_attempt_completions (
+        workspace_id, plugin_connection_id, stream_key, attempt_sequence, outcome,
+        ending_revision, pages_committed, completed_at
+      ) VALUES (
+        ${workspaceId}, ${pluginConnectionId}, ${streamKey}, ${attemptSequence}, ${decodedOutcome},
+        ${endingRevision}, ${endingRevision - attempt.startedRevision}, ${encodeTimestamp(completedAt)}
+      )`
+      const records = yield* listSyncAttempts(workspaceId, pluginConnectionId, streamKey)
+      const completed = records.find((record) => record.attemptSequence === attemptSequence)
+      if (
+        completed === undefined ||
+        completed.outcome !== decodedOutcome ||
+        completed.endingRevision !== endingRevision ||
+        completed.pagesCommitted !== endingRevision - attempt.startedRevision
+      ) {
+        return yield* new SourceIdentityMismatchError({
+          workspaceId,
+          recordKind: "plugin-sync-attempt",
+          recordKey: `${pluginConnectionId}/${streamKey}/${attemptSequence}`
+        })
+      }
+      return completed
+    })).pipe(mapPersistenceOperation("plugin-runtime.complete-sync-attempt"))
   })
 
   const commitPage = Effect.fn("PluginRuntimeRepository.commitPage")(function*(
@@ -1002,13 +1172,17 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
 
   return {
     acceptPluginDescriptor,
+    beginSyncAttempt,
     commitNormalizedPage,
     commitPage,
+    completeSyncAttempt,
     getCache,
     getLastSuccessfulHealth,
     getRuntime,
     getStream,
     listEvidence,
+    listSyncAttempts,
+    reconcileSyncAttempts,
     recordHealth
   }
 })
