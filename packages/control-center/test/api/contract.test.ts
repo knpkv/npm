@@ -12,6 +12,8 @@ import {
   MediaApiGroup,
   MutationCsrf,
   OpaqueMediaId,
+  PluginListResponse,
+  PluginOverviewResponse,
   PluginsApiGroup,
   PortfolioApiGroup,
   SessionApiGroup,
@@ -34,6 +36,43 @@ import {
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
   Array.from(middlewares, ({ key }) => key)
+
+const v1PluginListCompatibilityFixture: typeof PluginListResponse.Encoded = [{
+  pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000098",
+  providerId: "jira",
+  displayName: "Delivery Jira",
+  isEnabled: true,
+  health: null,
+  updatedAt: "2026-07-14T10:00:00.000Z"
+}]
+
+const pluginCatalogFieldCompatibilityFixture:
+  (typeof PluginOverviewResponse.Encoded)["catalog"][number]["configurationFields"][number] = {
+    key: "profile",
+    label: "Profile",
+    description: "Local configuration value.",
+    kind: "text",
+    scope: "adapter",
+    required: true,
+    defaultValue: "default",
+    isReadOnly: false,
+    minimum: null,
+    maximum: null
+  }
+
+const firstPartyProviderIds: ReadonlyArray<
+  (typeof PluginOverviewResponse.Encoded)["catalog"][number]["providerId"]
+> = ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
+
+const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded = {
+  catalog: firstPartyProviderIds.map((providerId) => ({
+    providerId,
+    displayName: providerId,
+    description: `Configure ${providerId}.`,
+    configurationFields: [pluginCatalogFieldCompatibilityFixture]
+  })),
+  connections: v1PluginListCompatibilityFixture
+}
 
 describe("ControlCenterApi contract", () => {
   it("publishes stable error discriminators and HTTP statuses", () => {
@@ -185,6 +224,7 @@ describe("ControlCenterApi contract", () => {
       Object.entries(PluginsApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
         ["list", "GET", "/api/v1/plugins"],
+        ["overview", "GET", "/api/v1/plugins/overview"],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
@@ -249,6 +289,25 @@ describe("ControlCenterApi contract", () => {
     )
   })
 
+  it("preserves the v1 plugin-list payload and exposes the catalog overview additively", () => {
+    assert.deepStrictEqual(
+      Schema.encodeSync(PluginListResponse)(
+        Schema.decodeUnknownSync(PluginListResponse)(v1PluginListCompatibilityFixture)
+      ),
+      v1PluginListCompatibilityFixture
+    )
+    assert.deepStrictEqual(
+      Schema.encodeSync(PluginOverviewResponse)(
+        Schema.decodeUnknownSync(PluginOverviewResponse)(pluginOverviewCompatibilityFixture)
+      ),
+      pluginOverviewCompatibilityFixture
+    )
+
+    const specification = OpenApi.fromApi(ControlCenterApi)
+    assert.isDefined(specification.paths["/api/v1/plugins"]?.get)
+    assert.isDefined(specification.paths["/api/v1/plugins/overview"]?.get)
+  })
+
   it("requires cookie auth for private reads and separate CSRF proof for mutations", () => {
     const middlewareByEndpoint = (
       endpoints: Readonly<Record<string, { readonly middlewares: ReadonlySet<{ readonly key: string }> }>>
@@ -271,6 +330,7 @@ describe("ControlCenterApi contract", () => {
     })
     assert.deepStrictEqual(middlewareByEndpoint(PluginsApiGroup.endpoints), {
       list: [SessionCookieAuth.key],
+      overview: [SessionCookieAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
@@ -345,6 +405,8 @@ describe("ControlCenterApi contract", () => {
       urls.plugins.health({ params: { pluginConnectionId } }),
       "https://control.example/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/health"
     )
+    assert.strictEqual(urls.plugins.list(), "https://control.example/api/v1/plugins")
+    assert.strictEqual(urls.plugins.overview(), "https://control.example/api/v1/plugins/overview")
     assert.strictEqual(
       urls.media.read({ params: { mediaId } }),
       `https://control.example/api/v1/media/media_${"ab".repeat(32)}`

@@ -9,14 +9,14 @@ import type {
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   PluginConnectionTestResult,
-  PluginListResponse
+  PluginOverviewResponse
 } from "../../api/index.js"
 import { PluginConnectionId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
 /** Browser boundary for connection administration reads and live tests. */
 export interface ConnectionTestTransport {
-  readonly list: (signal: AbortSignal) => Promise<PluginListResponse>
+  readonly overview: (signal: AbortSignal) => Promise<PluginOverviewResponse>
   readonly create: (
     request: CreatePluginConnectionRequest,
     signal: AbortSignal
@@ -27,11 +27,11 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
-  list: (signal) =>
+  overview: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
-        return yield* client.plugins.list()
+        return yield* client.plugins.overview()
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),

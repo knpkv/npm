@@ -12,6 +12,7 @@ import {
   PairingCode,
   PatchPluginConfigurationRequest,
   PluginListResponse,
+  PluginOverviewResponse,
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
@@ -225,22 +226,28 @@ describe("public API schemas", () => {
     ))
   })
 
-  it("bounds session and plugin list responses", () => {
+  it("bounds session, plugin list, and plugin overview responses", () => {
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(SessionListResponse)([encodedSession])))
     assert.isTrue(
       Result.isFailure(
         Schema.decodeUnknownResult(SessionListResponse)(Array.from({ length: 101 }, () => encodedSession))
       )
     )
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginListResponse)([encodedPlugin])))
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PluginListResponse)(Array.from({ length: 101 }, () => encodedPlugin))
+      )
+    )
     assert.isTrue(Result.isSuccess(
-      Schema.decodeUnknownResult(PluginListResponse)({
+      Schema.decodeUnknownResult(PluginOverviewResponse)({
         catalog: encodedCatalog,
         connections: [encodedPlugin]
       })
     ))
     assert.isTrue(
       Result.isFailure(
-        Schema.decodeUnknownResult(PluginListResponse)({
+        Schema.decodeUnknownResult(PluginOverviewResponse)({
           catalog: encodedCatalog,
           connections: Array.from({ length: 101 }, () => encodedPlugin)
         })

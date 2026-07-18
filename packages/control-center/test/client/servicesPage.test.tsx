@@ -10,7 +10,7 @@ import {
   CreatePluginConnectionResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
-  PluginListResponse
+  PluginOverviewResponse
 } from "../../src/api/plugins.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
@@ -48,7 +48,7 @@ const catalogEntry = (providerId: "codecommit" | "codepipeline" | "jira" | "conf
     }
   ]
 })
-const overview = Schema.decodeUnknownSync(PluginListResponse)({
+const overview = Schema.decodeUnknownSync(PluginOverviewResponse)({
   catalog: [
     catalogEntry("codecommit"),
     catalogEntry("codepipeline"),
@@ -141,7 +141,7 @@ describe("ServicesPage connection tests", () => {
     const create = vi.fn().mockResolvedValue(created)
     const transport: ConnectionTestTransport = {
       create,
-      list: () => Promise.resolve({ ...overview, connections: [] }),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       test: vi.fn()
     }
@@ -173,7 +173,7 @@ describe("ServicesPage connection tests", () => {
   it("keeps setup open and announces an inline error when creation fails", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn().mockRejectedValue(new Error("unavailable")),
-      list: () => Promise.resolve({ ...overview, connections: [] }),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       test: vi.fn()
     }
@@ -198,7 +198,7 @@ describe("ServicesPage connection tests", () => {
         setupSignal = signal
         return new Promise(() => undefined)
       },
-      list: () => Promise.resolve({ ...overview, connections: [] }),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       test: vi.fn()
     }
@@ -216,6 +216,16 @@ describe("ServicesPage connection tests", () => {
     expect(setupSignal?.aborted).toBe(false)
     await act(async () => sessionControls?.invalidateSession(session.sessionId))
     expect(setupSignal?.aborted).toBe(true)
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    await act(async () => undefined)
+    const configureAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configureAfterReconnect?.click())
+    const submitAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    expect(submitAfterReconnect?.disabled).toBe(false)
   })
 
   it("shows testing, failure, retry, and the provider identity returned by success", async () => {
@@ -252,7 +262,7 @@ describe("ServicesPage connection tests", () => {
       .mockResolvedValueOnce(healthy)
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
-      list: () => Promise.resolve(overview),
+      overview: () => Promise.resolve(overview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       test
     }

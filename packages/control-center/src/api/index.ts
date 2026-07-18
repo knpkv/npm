@@ -67,6 +67,7 @@ export {
   PluginConnectionTestResult,
   PluginHealthResponse,
   PluginListResponse,
+  PluginOverviewResponse,
   PluginsApiGroup,
   PluginServiceCatalogEntry,
   PluginServiceCatalogField,

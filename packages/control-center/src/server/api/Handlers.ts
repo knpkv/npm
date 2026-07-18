@@ -256,6 +256,14 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
+            return yield* plugins.list(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+          }))
+        .handle("overview", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
             const connections = yield* plugins.list(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )

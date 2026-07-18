@@ -1,18 +1,96 @@
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import {
+  type CreatePluginConnectionValue,
   PluginConfigurationKey,
   type PluginServiceCatalogEntry,
   type PluginServiceCatalogField
 } from "../../../api/plugins.js"
 import type { ProviderId } from "../../../domain/sourceRevision.js"
-import { clockifyReadPluginDescriptor } from "../clockify/ClockifyReadPlugin.js"
-import { codeCommitPluginDefinition } from "../codecommit/CodeCommitPluginDefinition.js"
-import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
+import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
+import { ClockifyReadPluginConfiguration, clockifyReadPluginDescriptor } from "../clockify/ClockifyReadPlugin.js"
+import { CodeCommitPluginConfiguration, codeCommitPluginDefinition } from "../codecommit/CodeCommitPluginDefinition.js"
+import {
+  CodePipelinePluginConfiguration,
+  codePipelinePluginDefinition
+} from "../codepipeline/CodePipelinePluginDefinition.js"
+import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
 import { confluencePagePluginDescriptor } from "../confluence/ConfluencePagePluginDefinition.js"
-import { jiraReadPluginDescriptor } from "../jira/JiraReadPlugin.js"
+import { JiraReadPluginConfiguration, jiraReadPluginDescriptor } from "../jira/JiraReadPlugin.js"
 
 interface FirstPartyServiceCatalogEntry {
   readonly metadata: PluginServiceCatalogEntry
   readonly rawDescriptor: unknown
+  readonly validatesSetup: (values: ReadonlyArray<CreatePluginConnectionValue>) => boolean
+}
+
+const setupValues = (values: ReadonlyArray<CreatePluginConnectionValue>): ReadonlyMap<string, string | number> =>
+  new Map(values.map((value) => [value.key, value.value]))
+
+const jiraSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
+  const configured = setupValues(values)
+  return Result.isSuccess(
+    Schema.decodeUnknownResult(JiraReadPluginConfiguration)({
+      webBaseUrl: configured.get("webBaseUrl"),
+      pageSize: configured.get("pageSize"),
+      maximumPages: configured.get("maximumPages"),
+      operationTimeoutMillis: configured.get("operationTimeoutMillis")
+    })
+  ) && Schema.is(AtlassianBasicAuthEmail)(configured.get("email"))
+}
+
+const confluenceSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
+  const configured = setupValues(values)
+  return Result.isSuccess(
+    Schema.decodeUnknownResult(ConfluencePageAdapterConfiguration)({
+      siteBaseUrl: configured.get("siteBaseUrl"),
+      siteId: configured.get("siteId"),
+      spaceId: configured.get("spaceId"),
+      probePageId: configured.get("probePageId")
+    })
+  ) && Schema.is(AtlassianBasicAuthEmail)(configured.get("email"))
+}
+
+const clockifySetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
+  const configured = setupValues(values)
+  return Result.isSuccess(
+    Schema.decodeUnknownResult(ClockifyReadPluginConfiguration)({
+      webBaseUrl: configured.get("webBaseUrl"),
+      workspaceId: configured.get("workspaceId"),
+      userIds: configured.get("userIds"),
+      pageSize: configured.get("pageSize"),
+      maximumPages: configured.get("maximumPages"),
+      maximumConcurrency: configured.get("maximumConcurrency"),
+      operationTimeoutMillis: configured.get("operationTimeoutMillis")
+    })
+  )
+}
+
+const codeCommitSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
+  const configured = setupValues(values)
+  return Result.isSuccess(
+    Schema.decodeUnknownResult(CodeCommitPluginConfiguration)({
+      profile: configured.get("profile"),
+      region: configured.get("region"),
+      repositoryName: configured.get("repositoryName")
+    })
+  )
+}
+
+const codePipelineSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
+  const configured = setupValues(values)
+  return Result.isSuccess(
+    Schema.decodeUnknownResult(CodePipelinePluginConfiguration)({
+      profile: configured.get("profile"),
+      region: configured.get("region"),
+      pipelineName: configured.get("pipelineName"),
+      maximumExecutionPages: configured.get("maximumExecutionPages"),
+      actionPageSize: configured.get("actionPageSize"),
+      maximumActionPages: configured.get("maximumActionPages"),
+      maximumActionsPerExecution: configured.get("maximumActionsPerExecution"),
+      operationTimeoutMillis: configured.get("operationTimeoutMillis")
+    })
+  )
 }
 
 const field = (
@@ -144,10 +222,12 @@ const entry = (
   displayName: string,
   description: string,
   configurationFields: ReadonlyArray<PluginServiceCatalogField>,
-  rawDescriptor: unknown
+  rawDescriptor: unknown,
+  validatesSetup: FirstPartyServiceCatalogEntry["validatesSetup"]
 ): FirstPartyServiceCatalogEntry => ({
   metadata: { providerId, displayName, description, configurationFields },
-  rawDescriptor
+  rawDescriptor,
+  validatesSetup
 })
 
 /** Fixed server-owned catalog paired with each runtime's canonical descriptor. */
@@ -157,29 +237,40 @@ export const firstPartyServiceCatalog: ReadonlyArray<FirstPartyServiceCatalogEnt
     "CodeCommit",
     "Read pull requests from one AWS CodeCommit repository.",
     codeCommitFields,
-    codeCommitPluginDefinition.rawDescriptor
+    codeCommitPluginDefinition.rawDescriptor,
+    codeCommitSetupIsValid
   ),
   entry(
     "codepipeline",
     "CodePipeline",
     "Read pipeline and execution state from AWS CodePipeline.",
     codePipelineFields,
-    codePipelinePluginDefinition.rawDescriptor
+    codePipelinePluginDefinition.rawDescriptor,
+    codePipelineSetupIsValid
   ),
-  entry("jira", "Jira", "Read delivery issues from Jira Cloud.", jiraFields, jiraReadPluginDescriptor),
+  entry(
+    "jira",
+    "Jira",
+    "Read delivery issues from Jira Cloud.",
+    jiraFields,
+    jiraReadPluginDescriptor,
+    jiraSetupIsValid
+  ),
   entry(
     "confluence",
     "Confluence",
     "Read release documentation from Confluence Cloud.",
     confluenceFields,
-    confluencePagePluginDescriptor
+    confluencePagePluginDescriptor,
+    confluenceSetupIsValid
   ),
   entry(
     "clockify",
     "Clockify",
     "Read bounded time-entry evidence from Clockify.",
     clockifyFields,
-    clockifyReadPluginDescriptor
+    clockifyReadPluginDescriptor,
+    clockifySetupIsValid
   )
 ]
 

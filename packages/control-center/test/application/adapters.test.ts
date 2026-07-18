@@ -365,7 +365,11 @@ describe("application adapters", () => {
       }
       const pluginConnections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId, workspaceId }) =>
-          pluginConnectionId === PROVISIONED_PLUGIN_ID && workspaceId === WORKSPACE_ID
+          workspaceId === WORKSPACE_ID && [
+              PROVISIONED_PLUGIN_ID,
+              CONFLUENCE_PLUGIN_ID,
+              CODEPIPELINE_PLUGIN_ID
+            ].includes(pluginConnectionId)
             ? Effect.succeed(Context.make(PluginConnection, connection))
             : Effect.die("provisioning crossed its requested scope"),
         invalidate: () => Ref.update(invalidations, (count) => count + 1)
@@ -395,6 +399,16 @@ describe("application adapters", () => {
         key: PluginConfigurationKey.make("apiToken"),
         state: "configured"
       })
+      assert.deepInclude(response.configuration.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(response.configuration.values, {
+        _tag: "url",
+        key: PluginConfigurationKey.make("webBaseUrl"),
+        value: "https://knpkv.atlassian.net/"
+      })
       assert.strictEqual(response.test._tag, "healthy")
       if (response.test._tag === "healthy") {
         assert.strictEqual(response.test.identity.displayName, "Provisioned Owner")
@@ -415,8 +429,58 @@ describe("application adapters", () => {
         WHERE workspace_id = ${WORKSPACE_ID} AND plugin_connection_id = ${PROVISIONED_PLUGIN_ID}`
       assert.lengthOf(rows, 1)
       assert.notInclude(rows[0]?.configurationJson ?? "", "plaintext-token-canary")
+      assert.notInclude(rows[0]?.configurationJson ?? "", "owner@example.com")
       assert.notInclude(JSON.stringify(response), "plaintext-token-canary")
+      assert.notInclude(JSON.stringify(response), "owner@example.com")
       assert.notMatch(JSON.stringify(response), /secret_[0-9a-f]{64}/u)
+
+      const confluence = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+          providerId: "confluence",
+          displayName: "Provisioned Confluence",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("siteBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "docs@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "confluence-token-canary" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-1" }
+          ]
+        }
+      })
+      assert.deepInclude(confluence.configuration.values, {
+        _tag: "secret-reference",
+        key: PluginConfigurationKey.make("email"),
+        state: "configured"
+      })
+      assert.deepInclude(confluence.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("spaceId"),
+        value: "space-1"
+      })
+      assert.notInclude(JSON.stringify(confluence), "docs@example.com")
+
+      const codeCommit = yield* operation({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Provisioned CodeCommit",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      })
+      assert.deepInclude(codeCommit.configuration.values, {
+        _tag: "text",
+        key: PluginConfigurationKey.make("profile"),
+        value: "delivery"
+      })
+      assert.strictEqual(yield* Ref.get(invalidations), 3)
     })))
 
   it.effect("retains a visible disabled durable draft when no runtime map is installed", () =>
@@ -487,9 +551,39 @@ describe("application adapters", () => {
       assert.isTrue(Result.isFailure(unknown))
       if (Result.isFailure(unknown)) assert.instanceOf(unknown.failure, ApplicationInvalidRequest)
 
+      const invalidProviderValues: ReadonlyArray<{
+        readonly email: string
+        readonly webBaseUrl: string
+      }> = [
+        { webBaseUrl: "https://example.com/", email: "owner@example.com" },
+        { webBaseUrl: "https://knpkv.atlassian.net/", email: "malformed-email" }
+      ]
+      for (const invalid of invalidProviderValues) {
+        const providerInvalid = yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: INVALID_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Invalid Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: invalid.webBaseUrl },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: invalid.email },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "must-not-be-persisted" }
+            ]
+          }
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(providerInvalid))
+        if (Result.isFailure(providerInvalid)) {
+          assert.instanceOf(providerInvalid.failure, ApplicationInvalidRequest)
+        }
+      }
+
       const persistence = yield* Persistence
       assert.isTrue(Result.isFailure(
         yield* persistence.pluginConnections.get(WORKSPACE_ID, INVALID_PLUGIN_ID).pipe(Effect.result)
+      ))
+      assert.isTrue(Option.isNone(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)
       ))
     })))
 
@@ -563,8 +657,8 @@ describe("application adapters", () => {
       }).pipe(Effect.provideService(SecretStore, instrumentedSecrets))
 
       assert.isTrue(Result.isFailure(result))
-      assert.strictEqual(yield* Ref.get(creates), 1)
-      assert.strictEqual(yield* Ref.get(removals), 1)
+      assert.strictEqual(yield* Ref.get(creates), 2)
+      assert.strictEqual(yield* Ref.get(removals), 2)
     })))
 
   it.effect("inspects only a workspace-owned release graph without substituting demo data", () =>

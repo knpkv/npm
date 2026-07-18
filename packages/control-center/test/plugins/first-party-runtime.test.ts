@@ -87,6 +87,7 @@ describe("first-party plugin runtime", () => {
 
         for (const [index, invalid] of cases.entries()) {
           const missingSecretRef = SecretRef.make(`secret_${index.toString(16).repeat(64)}`)
+          const missingEmailRef = SecretRef.make(`secret_${(index + 8).toString(16).repeat(64)}`)
           const pluginConnectionId = PluginConnectionId.make(
             `01890f6f-6d6a-7cc0-98d2-${(100 + index).toString().padStart(12, "0")}`
           )
@@ -101,7 +102,7 @@ describe("first-party plugin runtime", () => {
             invalid.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
-                { _tag: "text", key: "email", value: "owner@example.com" },
+                { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
@@ -109,7 +110,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
-                { _tag: "text", key: "email", value: "owner@example.com" },
+                { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: invalid.webBaseUrl },
                 { _tag: "text", key: "siteId", value: "site-1" },

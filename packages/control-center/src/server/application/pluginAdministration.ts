@@ -330,8 +330,13 @@ const configuration = Effect.fn("PluginAdministration.configuration")(function*(
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId
 ) {
-  yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
   const descriptor = yield* negotiatedDescriptor(persistence, workspaceId, pluginConnectionId)
+  const credentialKeys = new Set<string>(
+    firstPartyService(connection.providerId)?.metadata.configurationFields
+      .filter(({ scope }) => scope === "credential")
+      .map(({ key }) => key) ?? []
+  )
   const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
     Effect.mapError(mapPersistenceReadError)
   )
@@ -344,13 +349,20 @@ const configuration = Effect.fn("PluginAdministration.configuration")(function*(
   const values: Array<RedactedPluginConfigurationValue> = []
   for (const field of descriptor.descriptor.configurationFields) {
     const stored = valuesByKey.get(field.key)
-    if (stored !== undefined && stored._tag === field._tag) {
+    if (
+      stored !== undefined &&
+      (stored._tag === field._tag || (credentialKeys.has(field.key) && stored._tag === "secret-reference"))
+    ) {
       values.push(stored)
-    } else if (field._tag === "secret-reference") {
+    } else if (field._tag === "secret-reference" || credentialKeys.has(field.key)) {
       const key = yield* Schema.decodeUnknownEffect(PluginConfigurationKey)(field.key).pipe(
         Effect.mapError(() => unavailable())
       )
-      values.push({ _tag: "secret-reference", key, state: "missing" })
+      values.push({
+        _tag: "secret-reference",
+        key,
+        state: stored === undefined ? "missing" : "configured"
+      })
     }
   }
   if (Option.isNone(current)) {
@@ -516,11 +528,13 @@ const validateSetup = Effect.fn("PluginAdministration.validateSetup")(function*(
     }
     values.push(value)
   }
+  if (!catalog.validatesSetup(values)) return yield* new ApplicationInvalidRequest()
   return values
 })
 
 const storeSetupValues = Effect.fn("PluginAdministration.storeSetupValues")(function*(
   secrets: SecretStore["Service"],
+  catalog: FirstPartyCatalogEntry,
   values: ReadonlyArray<CreatePluginConnectionValue>,
   createdSecretReferences: Array<SecretRef>
 ) {
@@ -529,7 +543,10 @@ const storeSetupValues = Effect.fn("PluginAdministration.storeSetupValues")(func
     const key = yield* Schema.decodeUnknownEffect(StoredPluginConfigurationKey)(value.key).pipe(
       Effect.mapError(() => new ApplicationInvalidRequest())
     )
-    if (value._tag === "secret") {
+    const field = catalog.metadata.configurationFields.find((candidate) => candidate.key === value.key)
+    if (field === undefined) return yield* new ApplicationInvalidRequest()
+    if (value._tag === "secret" || field.scope === "credential") {
+      if (typeof value.value !== "string") return yield* new ApplicationInvalidRequest()
       const ref = yield* secrets.create(secretEncoder.encode(value.value)).pipe(
         Effect.mapError(() => unavailable())
       )
@@ -587,7 +604,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
   let hasDurableConfiguration = false
 
   return yield* Effect.gen(function*() {
-    const values = yield* storeSetupValues(secrets, setupValues, createdSecretReferences)
+    const values = yield* storeSetupValues(secrets, catalog, setupValues, createdSecretReferences)
     const createdAt = yield* DateTime.now
     const draft = yield* persistence.pluginConnections.create(workspaceId, {
       pluginConnectionId: request.pluginConnectionId,

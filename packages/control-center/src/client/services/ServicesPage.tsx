@@ -9,7 +9,7 @@ import type {
   CreatePluginConnectionValue,
   PluginConnectionSummary,
   PluginConnectionTestResult,
-  PluginListResponse,
+  PluginOverviewResponse,
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
@@ -27,7 +27,7 @@ type ConnectionsState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed" }
-  | { readonly _tag: "ready"; readonly overview: PluginListResponse }
+  | { readonly _tag: "ready"; readonly overview: PluginOverviewResponse }
 
 const statusFor = (
   connection: PluginConnectionSummary
@@ -313,7 +313,7 @@ export const ServicesPage = ({
     }
     const request = new AbortController()
     setConnectionsState({ _tag: "loading" })
-    transport.list(request.signal).then(
+    transport.overview(request.signal).then(
       (overview) => {
         if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview })
       },
@@ -329,6 +329,7 @@ export const ServicesPage = ({
   useEffect(() => {
     setTestStates(new Map())
     setOpenProvider(null)
+    setSubmittingProvider(null)
     return () => {
       for (const request of testRequests.current.values()) request.abort()
       testRequests.current.clear()

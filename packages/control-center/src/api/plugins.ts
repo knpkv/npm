@@ -190,8 +190,18 @@ export const PluginServiceCatalogEntry = Schema.Struct({
 /** Decoded safe metadata for one fixed first-party service. */
 export type PluginServiceCatalogEntry = typeof PluginServiceCatalogEntry.Type
 
-/** Bounded plugin-navigation overview with the fixed catalog and durable connections. */
-export const PluginListResponse = Schema.Struct({
+/** Bounded plugin-navigation and portfolio response retained for v1 clients. */
+export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
+  Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
+    expected: `at most ${MAXIMUM_PLUGIN_CONNECTIONS} plugin connections`
+  })
+)
+
+/** Decoded bounded plugin list. */
+export type PluginListResponse = typeof PluginListResponse.Type
+
+/** Bounded Services overview with the fixed catalog and durable connections. */
+export const PluginOverviewResponse = Schema.Struct({
   catalog: Schema.Array(PluginServiceCatalogEntry).check(
     Schema.makeFilter((entries) => entries.length === 5, { expected: "the five first-party services" })
   ),
@@ -200,10 +210,10 @@ export const PluginListResponse = Schema.Struct({
       expected: `at most ${MAXIMUM_PLUGIN_CONNECTIONS} plugin connections`
     })
   )
-}).annotate({ identifier: "PluginListResponse" })
+}).annotate({ identifier: "PluginOverviewResponse" })
 
-/** Decoded bounded plugin list. */
-export type PluginListResponse = typeof PluginListResponse.Type
+/** Decoded bounded Services overview. */
+export type PluginOverviewResponse = typeof PluginOverviewResponse.Type
 
 const createValueFields = { key: PluginConfigurationKey }
 
@@ -324,6 +334,11 @@ const list = HttpApiEndpoint.get("list", "/", {
   error: pluginReadErrors
 }).middleware(SessionCookieAuth)
 
+const overview = HttpApiEndpoint.get("overview", "/overview", {
+  success: PluginOverviewResponse,
+  error: pluginReadErrors
+}).middleware(SessionCookieAuth)
+
 const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
   payload: CreatePluginConnectionRequest,
   success: CreatePluginConnectionResponse,
@@ -373,6 +388,15 @@ const patchConfiguration = HttpApiEndpoint.patch("patchConfiguration", "/:plugin
 
 /** Authenticated plugin list, health, and secret-free configuration contract. */
 export class PluginsApiGroup extends HttpApiGroup.make("plugins")
-  .add(list, createConnection, health, testConnection, configurationMetadata, configuration, patchConfiguration)
+  .add(
+    list,
+    overview,
+    createConnection,
+    health,
+    testConnection,
+    configurationMetadata,
+    configuration,
+    patchConfiguration
+  )
   .prefix("/api/v1/plugins")
 {}

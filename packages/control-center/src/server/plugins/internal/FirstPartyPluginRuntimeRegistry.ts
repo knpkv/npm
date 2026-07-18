@@ -23,6 +23,7 @@ import type { StoredPluginConfiguration } from "../../persistence/repositories/p
 import type { PluginRuntimeRecord } from "../../persistence/repositories/pluginRuntimeModels.js"
 import type { SecretRef } from "../../secrets/SecretRef.js"
 import { SecretStore } from "../../secrets/SecretStore.js"
+import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
   ClockifyReadPluginConfiguration,
   clockifyReadPluginDescriptor,
@@ -55,12 +56,6 @@ import {
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "./PluginRuntimeRegistry.js"
 
 const CLOCKIFY_API_ORIGIN = "https://api.clockify.me/api"
-const AtlassianEmail = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(320)
-)
-
 const readOnlyExecutorLayer = Layer.succeed(AuthorizedPluginExecutor, {
   preflight: () =>
     Effect.fail(
@@ -282,9 +277,6 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     "webBaseUrl"
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const email = yield* Schema.decodeUnknownEffect(AtlassianEmail)(
-    yield* textValue(loaded.configuration, "email")
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const configurationInput = {
     webBaseUrl: yield* textValue(loaded.configuration, "webBaseUrl", "url"),
     pageSize: yield* integerValue(loaded.configuration, "pageSize"),
@@ -294,6 +286,10 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const configuration = yield* Schema.decodeUnknownEffect(JiraReadPluginConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
+  const emailRef = yield* secretValue(loaded.configuration, "email")
+  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
+    yield* decodeSecret(emailRef)
+  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
   const apiToken = yield* decodeSecret(apiTokenRef)
   const client = JiraApiClient.layer.pipe(
@@ -305,7 +301,7 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const plugin = Layer.unwrap(
     makeJiraReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
   ).pipe(Layer.provide(client))
-  return { credentialGeneration: apiTokenRef, layer: plugin }
+  return { credentialGeneration: `${emailRef}\0${apiTokenRef}`, layer: plugin }
 })
 
 const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(function*(loaded: LoadedRuntime) {
@@ -351,9 +347,6 @@ const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(functio
 const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(function*(loaded: LoadedRuntime) {
   const expectedKeys = new Set(["apiToken", "email", "probePageId", "siteBaseUrl", "siteId", "spaceId"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const email = yield* Schema.decodeUnknownEffect(AtlassianEmail)(
-    yield* textValue(loaded.configuration, "email")
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const configurationInput = {
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
@@ -363,6 +356,10 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
+  const emailRef = yield* secretValue(loaded.configuration, "email")
+  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
+    yield* decodeSecret(emailRef)
+  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
   const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
   const apiToken = yield* decodeSecret(apiTokenRef)
   const apiClient = ConfluenceApiClient.layer.pipe(
@@ -378,7 +375,7 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const plugin = buildPluginDefinitionLayer(confluencePagePluginDefinition, configurationInput).pipe(
     Layer.provide(Layer.merge(pageClient, converter))
   )
-  return { credentialGeneration: apiTokenRef, layer: plugin }
+  return { credentialGeneration: `${emailRef}\0${apiTokenRef}`, layer: plugin }
 })
 
 const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(loaded: LoadedRuntime) {
