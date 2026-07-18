@@ -7,6 +7,7 @@ import { useNavigate, useSearchParams } from "react-router"
 import { AtlassianOAuthGrantId, type AtlassianOAuthGrantExchangeResponse } from "../../api/plugins.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
+import { atlassianOAuthSetupPath } from "./serviceOnboarding.js"
 import styles from "./AtlassianOAuthCallbackPage.module.css"
 
 const AuthorizationCode = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
@@ -83,8 +84,8 @@ export const AtlassianOAuthCallbackPage = ({
     saveRequest.current = request
     setState({ _tag: "saving", grant, cloudId })
     void save(grant.grantId, cloudId, request.signal).then(
-      () => {
-        if (!request.signal.aborted) navigate("/services?enable=jira", { replace: true })
+      (profile) => {
+        if (!request.signal.aborted) navigate(atlassianOAuthSetupPath(profile.providers), { replace: true })
       },
       () => {
         if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })

@@ -74,6 +74,31 @@ const atlassianOAuthStartCases: ReadonlyArray<{
     route: "/services?enable=jira"
   }
 ]
+const atlassianOAuthCallbackCases: ReadonlyArray<{
+  readonly heading: string
+  readonly label: string
+  readonly providers: AtlassianOAuthProviderIntent
+  readonly route: string
+}> = [
+  {
+    heading: "Connect Confluence with your Atlassian identity.",
+    label: "Confluence-only",
+    providers: ["confluence"],
+    route: "/services?enable=confluence&atlassianProvider=confluence"
+  },
+  {
+    heading: "Connect Jira with your Atlassian identity.",
+    label: "Jira-only",
+    providers: ["jira"],
+    route: "/services?enable=jira&atlassianProvider=jira"
+  },
+  {
+    heading: "One identity. Jira and Confluence together.",
+    label: "combined Jira and Confluence",
+    providers: ["jira", "confluence"],
+    route: "/services?enable=jira&atlassianProvider=jira&atlassianProvider=confluence"
+  }
+]
 const catalogEntry = (providerId: "codecommit" | "codepipeline" | "jira" | "confluence" | "clockify") => ({
   providerId,
   displayName: providerId,
@@ -957,6 +982,41 @@ describe("ServicesPage connection tests", () => {
     expect(create).toHaveBeenCalledTimes(1)
     expect(create.mock.calls[0]?.[0].providerId).toBe("confluence")
   })
+
+  it.each(atlassianOAuthCallbackCases)(
+    "restores the $label OAuth callback intent and selects its completed profile",
+    async ({ heading, providers, route }) => {
+      const profileId = "account-1@cloud-1"
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        discoverAtlassianProfiles: () =>
+          Promise.resolve([
+            {
+              profileId,
+              name: "Avery Bell @ team.atlassian.net",
+              siteUrl: "https://team.atlassian.net/",
+              cloudId: "cloud-1",
+              accountName: "Avery Bell",
+              accountEmail: "avery@example.com",
+              status: "valid",
+              providers
+            }
+          ]),
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        overview: () => Promise.resolve({ ...overview, connections: [] }),
+        setEnabled: vi.fn(),
+        test: vi.fn()
+      }
+      const host = await renderServices(transport, route)
+      await act(async () => undefined)
+
+      expect(host.textContent).toContain(heading)
+      const profile = [...host.querySelectorAll<HTMLOptionElement>("option")].find(({ value }) => value === profileId)
+      expect(profile?.disabled).toBe(false)
+      expect(profile?.selected).toBe(true)
+      expect(currentLocation).toBe("/services")
+    }
+  )
 
   it.each(atlassianOAuthStartCases)(
     "starts OAuth for $label and reports the exact callback setup",

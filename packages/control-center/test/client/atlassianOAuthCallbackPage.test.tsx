@@ -6,7 +6,11 @@ import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../../src/api/plugins.js"
+import {
+  AtlassianOAuthGrantExchangeResponse,
+  type AtlassianOAuthProviderIntent,
+  DiscoveredAtlassianProfile
+} from "../../src/api/plugins.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { AtlassianOAuthCallbackPage } from "../../src/client/services/AtlassianOAuthCallbackPage.js"
@@ -35,6 +39,27 @@ const completedProfile = Schema.decodeSync(DiscoveredAtlassianProfile)({
   status: "valid",
   providers: ["jira", "confluence"]
 })
+const callbackReturnCases: ReadonlyArray<{
+  readonly destination: string
+  readonly label: string
+  readonly providers: AtlassianOAuthProviderIntent
+}> = [
+  {
+    destination: "/services?enable=confluence&atlassianProvider=confluence",
+    label: "Confluence-only",
+    providers: ["confluence"]
+  },
+  {
+    destination: "/services?enable=jira&atlassianProvider=jira",
+    label: "Jira-only",
+    providers: ["jira"]
+  },
+  {
+    destination: "/services?enable=jira&atlassianProvider=jira&atlassianProvider=confluence",
+    label: "combined Jira and Confluence",
+    providers: ["jira", "confluence"]
+  }
+]
 const session = Schema.decodeSync(SessionSummary)({
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000143",
   workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000141"),
@@ -137,6 +162,40 @@ describe("AtlassianOAuthCallbackPage", () => {
     expect(currentLocation).toBe(initialEntry)
     expect(host.textContent).toContain("Atlassian sign-in did not finish")
   })
+
+  it.each(callbackReturnCases)(
+    "returns to the $label setup preserved by the completed profile",
+    async ({ destination, providers }) => {
+      const complete = vi
+        .fn<NonNullable<ConnectionTestTransport["completeAtlassianOAuthGrant"]>>()
+        .mockResolvedValue({ ...completedProfile, providers })
+      const transport: CallbackTransport = {
+        completeAtlassianOAuthGrant: complete,
+        exchangeAtlassianOAuthGrant: () => Promise.resolve(exchangeResponse)
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      root = createRoot(host)
+
+      await act(async () => {
+        root?.render(
+          <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+            <BrowserSessionProvider>
+              <Harness transport={transport} />
+            </BrowserSessionProvider>
+          </MemoryRouter>
+        )
+      })
+      await act(async () => sessionControls?.establishSession(csrfToken, session))
+      const useSite = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes("Use this site")
+      )
+      await act(async () => useSite?.click())
+
+      expect(complete).toHaveBeenCalledOnce()
+      expect(currentLocation).toBe(destination)
+    }
+  )
 
   it("keeps exactly one grant exchange alive across StrictMode effect replay", async () => {
     let resolveExchange: ((value: AtlassianOAuthGrantExchangeResponse) => void) | undefined

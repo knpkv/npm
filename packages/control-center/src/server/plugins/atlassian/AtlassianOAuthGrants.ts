@@ -428,9 +428,9 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
       const safeSites = yield* decodeSites(supportedSites)
       return { safeSites, sites: supportedSites, tokenExchangeAtMilliseconds, tokens, user }
     }).pipe(Effect.tapError(() => removeExchange(grants, grantId, pending.createdAtMilliseconds)))
-    const createdAtMilliseconds = yield* Clock.currentTimeMillis
+    const nowMilliseconds = yield* Clock.currentTimeMillis
     const didTransition = yield* Ref.modify(grants, (current): readonly [boolean, PendingGrants] => {
-      const active = activeGrants(current, createdAtMilliseconds)
+      const active = activeGrants(current, nowMilliseconds)
       const reserved = active.get(grantId)
       if (
         reserved?._tag !== "exchange" ||
@@ -441,7 +441,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         _tag: "site-selection",
         ...owner,
         config: pending.config,
-        createdAtMilliseconds,
+        createdAtMilliseconds: pending.createdAtMilliseconds,
         providers: pending.providers,
         sites: exchanged.sites,
         tokenExpiresAtMilliseconds: exchanged.tokenExchangeAtMilliseconds + exchanged.tokens.expires_in * 1_000,
@@ -451,7 +451,6 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
       return [true, active]
     })
     if (!didTransition) return yield* new ApplicationResourceNotFound()
-    yield* scheduleExpiry(grantId, createdAtMilliseconds)
     const accountEmail = exchanged.user.email.trim()
     return {
       grantId,

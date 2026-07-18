@@ -25,7 +25,7 @@ import { browserConnectionTestTransport, type ConnectionTestTransport } from "./
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import { ProviderAccountCard } from "./ProviderAccountCard.js"
 import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
-import { selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
+import { selectedAtlassianOAuthProviders, selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
 import styles from "./ServicesPage.module.css"
 
 type AwsProfilesState =
@@ -496,11 +496,17 @@ export const ServicesPage = ({
     if (requestedProvider === null) return
     if (!connectionsState.overview.catalog.some(({ providerId }) => providerId === requestedProvider)) return
     if (requestedProvider === "jira" || requestedProvider === "confluence") {
-      setAtlassianSetupIntent(missingAtlassianProductsIntent(connectionsState.overview.connections))
+      const callbackProviders = selectedAtlassianOAuthProviders(searchParams)
+      setAtlassianSetupIntent(
+        callbackProviders === null
+          ? missingAtlassianProductsIntent(connectionsState.overview.connections)
+          : { providers: callbackProviders }
+      )
     }
     setOpenProvider(requestedProvider)
     const nextSearchParams = new URLSearchParams(searchParams)
     nextSearchParams.delete("enable")
+    nextSearchParams.delete("atlassianProvider")
     setSearchParams(nextSearchParams, { replace: true })
   }, [connectionsState, searchParams, sessionState, setSearchParams])
 
