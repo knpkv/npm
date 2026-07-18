@@ -23,6 +23,8 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000141")
 const connection = Schema.decodeSync(PluginConnectionSummary)({
   pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000142",
+  providerAccountId: null,
+  followedResourceId: null,
   providerId: "jira",
   displayName: "Payments Jira",
   isEnabled: true,
@@ -31,6 +33,8 @@ const connection = Schema.decodeSync(PluginConnectionSummary)({
 })
 const confluenceConnection = Schema.decodeSync(PluginConnectionSummary)({
   pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000145",
+  providerAccountId: null,
+  followedResourceId: null,
   providerId: "confluence",
   displayName: "Payments Confluence",
   isEnabled: true,

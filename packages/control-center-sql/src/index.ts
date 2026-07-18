@@ -14,6 +14,18 @@ export {
 } from "./followedResources.js"
 export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
 export {
+  type BindPluginConnectionQueryInput,
+  type CreatePluginConnectionQueryInput,
+  type PluginConnectionQueryInput,
+  renderBindPluginConnectionQuery,
+  renderCreatePluginConnectionQuery,
+  renderPluginConnectionCountQuery,
+  renderPluginConnectionQuery,
+  renderPluginConnectionsQuery,
+  renderUpdatePluginConnectionQuery,
+  type UpdatePluginConnectionQueryInput
+} from "./pluginConnections.js"
+export {
   type OpenPluginSyncAttemptsQueryInput,
   type PluginSyncAttemptsQueryInput,
   renderOpenPluginSyncAttemptsQuery,

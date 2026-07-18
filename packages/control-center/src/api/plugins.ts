@@ -1,9 +1,11 @@
+import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { PluginFailureClass, PluginHealth } from "../domain/freshness.js"
-import { PluginConnectionId } from "../domain/identifiers.js"
+import { FollowedResourceId, PluginConnectionId, ProviderAccountId } from "../domain/identifiers.js"
 import {
   NegotiatedPluginCapabilityV1,
   PluginConfigurationFieldV1,
@@ -145,8 +147,23 @@ export const PatchPluginConfigurationRequest = Schema.Struct({
 export type PatchPluginConfigurationRequest = typeof PatchPluginConfigurationRequest.Type
 
 /** Secret-free plugin connection row used by navigation and portfolio views. */
+const NullableProviderAccountId = Schema.NullOr(ProviderAccountId)
+const NullableFollowedResourceId = Schema.NullOr(FollowedResourceId)
+
 export const PluginConnectionSummary = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
+  providerAccountId: Schema.optional(NullableProviderAccountId).pipe(
+    Schema.decodeTo(Schema.toType(NullableProviderAccountId), {
+      decode: SchemaGetter.withDefault(Effect.succeed<typeof NullableProviderAccountId.Type>(null)),
+      encode: SchemaGetter.required()
+    })
+  ),
+  followedResourceId: Schema.optional(NullableFollowedResourceId).pipe(
+    Schema.decodeTo(Schema.toType(NullableFollowedResourceId), {
+      decode: SchemaGetter.withDefault(Effect.succeed<typeof NullableFollowedResourceId.Type>(null)),
+      encode: SchemaGetter.required()
+    })
+  ),
   providerId: ProviderId,
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   isEnabled: Schema.Boolean,

@@ -184,6 +184,8 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
   if (!connection.isEnabled) {
     return {
       pluginConnectionId: connection.pluginConnectionId,
+      providerAccountId: connection.providerAccountId,
+      followedResourceId: connection.followedResourceId,
       providerId: connection.providerId,
       displayName: connection.displayName,
       isEnabled: false,
@@ -201,6 +203,8 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
   )
   return {
     pluginConnectionId: connection.pluginConnectionId,
+    providerAccountId: connection.providerAccountId,
+    followedResourceId: connection.followedResourceId,
     providerId: connection.providerId,
     displayName: connection.displayName,
     isEnabled: connection.isEnabled,

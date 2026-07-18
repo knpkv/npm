@@ -151,6 +151,8 @@ export type PluginConnectionDisplayName = typeof PluginConnectionDisplayName.Typ
 export const PluginConnectionRecord = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
+  providerAccountId: Schema.NullOr(ProviderAccountId),
+  followedResourceId: Schema.NullOr(FollowedResourceId),
   providerId: ProviderId,
   displayName: PluginConnectionDisplayName,
   isEnabled: Schema.Boolean,

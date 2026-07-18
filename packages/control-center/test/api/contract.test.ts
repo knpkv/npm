@@ -39,6 +39,8 @@ const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): Rea
 
 const v1PluginListCompatibilityFixture: typeof PluginListResponse.Encoded = [{
   pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000098",
+  providerAccountId: null,
+  followedResourceId: null,
   providerId: "jira",
   displayName: "Delivery Jira",
   isEnabled: true,

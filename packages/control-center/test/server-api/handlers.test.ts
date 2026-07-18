@@ -829,6 +829,8 @@ describe("Control Center API handlers", () => {
     Effect.gen(function*() {
       const expected = Schema.decodeSync(PluginConnectionSummary)({
         pluginConnectionId,
+        providerAccountId: null,
+        followedResourceId: null,
         providerId: "jira",
         displayName: "Delivery Jira",
         isEnabled: true,
@@ -873,6 +875,8 @@ describe("Control Center API handlers", () => {
     Effect.gen(function*() {
       const expected = Schema.decodeUnknownSync(PluginConnectionSummary)({
         pluginConnectionId,
+        providerAccountId: null,
+        followedResourceId: null,
         providerId: "jira",
         displayName: "Delivery Jira",
         isEnabled: true,
