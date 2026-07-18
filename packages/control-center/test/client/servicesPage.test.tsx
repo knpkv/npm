@@ -401,6 +401,94 @@ describe("ServicesPage connection tests", () => {
     }
   })
 
+  it("adds only the missing Atlassian product for an existing account", async () => {
+    const create = vi.fn<ConnectionTestTransport["create"]>().mockRejectedValue(new Error("stop after request"))
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      overview: () => Promise.resolve(overview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=confluence")
+    await act(async () => undefined)
+
+    const useApiToken = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Use API token instead")
+    )
+    await act(async () => useApiToken?.click())
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    const values = [
+      "Atlassian workspace",
+      "avery@example.com",
+      "api-token",
+      "https://team.atlassian.net/",
+      "cloud-1",
+      "space-1",
+      "page-1"
+    ]
+    for (const [index, value] of values.entries()) {
+      const input = inputs[index]
+      if (input !== undefined) await setControlValue(input, value)
+    }
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect Atlassian")
+    )
+    await act(async () => submit?.click())
+
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(create.mock.calls[0]?.[0].providerId).toBe("confluence")
+  })
+
+  it("keeps API-token site fields when OAuth discovery finishes later", async () => {
+    let resolveProfiles:
+      | ((profiles: Awaited<ReturnType<NonNullable<ConnectionTestTransport["discoverAtlassianProfiles"]>>>) => void)
+      | undefined
+    const profiles = new Promise<
+      Awaited<ReturnType<NonNullable<ConnectionTestTransport["discoverAtlassianProfiles"]>>>
+    >((resolve) => {
+      resolveProfiles = resolve
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => profiles,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=jira")
+    const useApiToken = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Use API token instead")
+    )
+    await act(async () => useApiToken?.click())
+    const siteUrl = host.querySelector<HTMLInputElement>('input[type="url"]')
+    const siteId = host.querySelectorAll<HTMLInputElement>("input")[4]
+    expect(siteUrl).not.toBeNull()
+    expect(siteId).toBeDefined()
+    if (siteUrl !== null) await setControlValue(siteUrl, "https://manual.atlassian.net/")
+    if (siteId !== undefined) await setControlValue(siteId, "manual-cloud")
+
+    await act(async () =>
+      resolveProfiles?.([
+        {
+          profileId: "account-1@discovered-cloud",
+          name: "Discovered account",
+          siteUrl: "https://discovered.atlassian.net/",
+          cloudId: "discovered-cloud",
+          accountName: "Avery Bell",
+          accountEmail: "avery@example.com",
+          status: "valid",
+          providers: ["jira", "confluence"]
+        }
+      ])
+    )
+
+    expect(siteUrl?.value).toBe("https://manual.atlassian.net/")
+    expect(siteId?.value).toBe("manual-cloud")
+  })
+
   it("connects several repositories and pipelines through one AWS account form", async () => {
     const connectionIds = [
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000151"),

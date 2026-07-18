@@ -810,7 +810,17 @@ export const ServicesPage = ({
                   setOpenProvider(catalog.providerId)
                 }}
                 onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
-                onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}
+                onSubmitAtlassian={(drafts) =>
+                  createConnections(
+                    drafts.filter(
+                      (draft) =>
+                        !connectionsState.overview.connections.some(
+                          (connection) => connection.providerId === draft.catalog.providerId
+                        )
+                    ),
+                    catalog.providerId
+                  )
+                }
                 onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
               />
             ]

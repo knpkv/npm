@@ -56,17 +56,18 @@ export const AtlassianAccountSetupForm = ({
   const [setupError, setSetupError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (profileId.length > 0) return
+    if (authenticationMode !== "oauth" || profileId.length > 0) return
     const firstSharedProfile = profiles.find(isSharedUsableProfile)
     if (firstSharedProfile !== undefined) setProfileId(firstSharedProfile.profileId)
-  }, [profileId, profiles])
+  }, [authenticationMode, profileId, profiles])
 
   useEffect(() => {
+    if (authenticationMode !== "oauth") return
     const profile = selectedProfile(profiles, profileId)
     if (profile === undefined) return
     setSiteUrl(profile.siteUrl)
     setSiteId(profile.cloudId)
-  }, [profileId, profiles])
+  }, [authenticationMode, profileId, profiles])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
