@@ -12,6 +12,7 @@ import type {
   AuthPersistenceError,
   CredentialRejectedError
 } from "../auth/errors.js"
+import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import {
   authorizeAuthenticatedMutation,
   authorizeAuthenticatedRead,
@@ -24,7 +25,8 @@ import {
   mapAuthenticationFailures,
   mapMutationSecurityFailure,
   mapPairingSecurityFailure,
-  mapReadSecurityFailure
+  mapReadSecurityFailure,
+  serviceUnavailableApiError
 } from "./ErrorMapping.js"
 
 const requestShape = (request: HttpServerRequest.HttpServerRequest) => ({
@@ -71,20 +73,28 @@ export const sessionCookieAuthLayer = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* Auth
     const config = yield* ApiBindConfiguration
+    const lifecycle = yield* ServerLifecycle
     return {
       sessionCookie: (effect, { credential, endpoint, group }) =>
-        Effect.gen(function*() {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
-            yield* authorizeAuthenticatedRead({
-              capability: capabilityFor(group.identifier, endpoint.identifier),
-              config,
-              request: requestShape(request)
-            }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
-          }
-          const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
-          return yield* Effect.provideService(effect, CurrentSession, session)
-        })
+        lifecycle.runMutation(
+          Effect.gen(function*() {
+            const request = yield* HttpServerRequest.HttpServerRequest
+            if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
+              yield* authorizeAuthenticatedRead({
+                capability: capabilityFor(group.identifier, endpoint.identifier),
+                config,
+                request: requestShape(request)
+              }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
+            }
+            const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
+            return yield* Effect.provideService(effect, CurrentSession, session)
+          })
+        ).pipe(
+          Effect.catchTag(
+            "ServerDraining",
+            () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+          )
+        )
     }
   })
 )
@@ -99,31 +109,39 @@ export const mutationCsrfLayer = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* Auth
     const config = yield* ApiBindConfiguration
+    const lifecycle = yield* ServerLifecycle
     return {
       csrfToken: (effect, { credential, endpoint, group }) =>
-        Effect.gen(function*() {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          const sessionToken = Redacted.make(request.cookies.cc_session ?? "")
-          yield* authorizeAuthenticatedMutation(
-            {
-              capability: capabilityFor(group.identifier, endpoint.identifier),
-              config,
-              request: {
-                ...requestShape(request),
-                csrfToken: Redacted.value(credential)
-              }
-            },
-            (csrfToken) =>
-              auth.authorizeMutation(sessionToken, csrfToken).pipe(
-                Effect.catchTags({
-                  AuthCryptoError: mapMutationAuthenticationFailure,
-                  AuthPersistenceError: mapMutationAuthenticationFailure,
-                  CredentialRejectedError: mapMutationAuthenticationFailure
-                })
-              )
-          ).pipe(Effect.catchTag("RequestSecurityError", mapMutationSecurityFailure))
-          return yield* effect
-        })
+        lifecycle.runMutation(
+          Effect.gen(function*() {
+            const request = yield* HttpServerRequest.HttpServerRequest
+            const sessionToken = Redacted.make(request.cookies.cc_session ?? "")
+            yield* authorizeAuthenticatedMutation(
+              {
+                capability: capabilityFor(group.identifier, endpoint.identifier),
+                config,
+                request: {
+                  ...requestShape(request),
+                  csrfToken: Redacted.value(credential)
+                }
+              },
+              (csrfToken) =>
+                auth.authorizeMutation(sessionToken, csrfToken).pipe(
+                  Effect.catchTags({
+                    AuthCryptoError: mapMutationAuthenticationFailure,
+                    AuthPersistenceError: mapMutationAuthenticationFailure,
+                    CredentialRejectedError: mapMutationAuthenticationFailure
+                  })
+                )
+            ).pipe(Effect.catchTag("RequestSecurityError", mapMutationSecurityFailure))
+            return yield* effect
+          })
+        ).pipe(
+          Effect.catchTag(
+            "ServerDraining",
+            () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+          )
+        )
     }
   })
 )

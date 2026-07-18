@@ -110,7 +110,7 @@ export class SessionCookieAuth extends HttpApiMiddleware.Service<
 export class SessionMutationAuth extends HttpApiMiddleware.Service<SessionMutationAuth>()(
   "@knpkv/control-center/api/SessionMutationAuth",
   {
-    error: [InvalidRequestApiError, ForbiddenApiError],
+    error: [InvalidRequestApiError, ForbiddenApiError, ServiceUnavailableApiError],
     security: {
       csrfToken: HttpApiSecurity.apiKey({ in: "header", key: "x-csrf-token" })
     }

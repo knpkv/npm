@@ -17,6 +17,7 @@ import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
 import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
+import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
@@ -132,19 +133,27 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
       const auth = yield* Auth
       const config = yield* ApiBindConfiguration
       const cookie = sessionCookiePolicy(config)
+      const lifecycle = yield* ServerLifecycle
       return handlers
         .handle("pair", ({ payload }) =>
-          Effect.gen(function*() {
-            yield* authorizePairingRequest()
-            const issued = yield* mapCredentialAuthenticationFailures(
-              auth.consumePairingCode(Redacted.make(payload.pairingCode))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              yield* authorizePairingRequest()
+              const issued = yield* mapCredentialAuthenticationFailures(
+                auth.consumePairingCode(Redacted.make(payload.pairingCode))
+              )
+              yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
+              return {
+                csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
+                session: issued.session
+              }
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
-            yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
-            return {
-              csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
-              session: issued.session
-            }
-          }))
+          ))
         .handle("current", ({ request }) =>
           Effect.gen(function*() {
             const recovered = yield* mapAuthenticationFailures(
@@ -716,10 +725,17 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
       const events = yield* LiveEvents
       const auth = yield* Auth
       const admission = yield* LiveStreamAdmission
+      const lifecycle = yield* ServerLifecycle
       return handlers.handle("stream", ({ headers, query, request }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
           yield* requireWorkspaceRead(session)
+          yield* lifecycle.acquireStream.pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          )
           const queryCursor = query.after
           const headerCursor = headers["last-event-id"]
           if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
@@ -742,7 +758,9 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
             }))
           )
           const token = currentSessionToken(request)
-          return eventStream.pipe(Stream.interruptWhen(awaitSessionEnd(auth, token, session)))
+          return eventStream.pipe(
+            Stream.interruptWhen(Effect.race(awaitSessionEnd(auth, token, session), lifecycle.awaitDrain))
+          )
         }))
     })
 )

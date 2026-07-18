@@ -15,6 +15,7 @@ export {
 export {
   controlCenterApiHandlersLayer,
   controlCenterApiLayer,
+  controlCenterApiLayerWithLifecycle,
   controlCenterApiMiddlewareLayer
 } from "./ControlCenterApiServer.js"
 export {
