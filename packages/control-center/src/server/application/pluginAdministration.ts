@@ -384,9 +384,12 @@ const configuration = Effect.fn("PluginAdministration.configuration")(function*(
 
 const matchesField = (
   field: typeof NegotiatedPluginDescriptorV1.Type["descriptor"]["configurationFields"][number],
-  value: PluginConfigurationPatchValue
+  value: PluginConfigurationPatchValue,
+  credentialKeys: ReadonlySet<string>
 ): boolean => {
-  if (field.key !== value.key || field._tag !== value._tag) return false
+  if (field.key !== value.key) return false
+  if (credentialKeys.has(field.key) && value._tag === "secret-reference") return true
+  if (field._tag !== value._tag) return false
   if (field._tag === "integer" && value._tag === "integer") {
     return (field.minimum === null || value.value >= field.minimum) &&
       (field.maximum === null || value.value <= field.maximum)
@@ -399,7 +402,8 @@ const matchesField = (
 
 const validatePatch = Effect.fn("PluginAdministration.validatePatch")(function*(
   descriptor: typeof NegotiatedPluginDescriptorV1.Type,
-  patch: PatchPluginConfigurationRequest
+  patch: PatchPluginConfigurationRequest,
+  credentialKeys: ReadonlySet<string>
 ) {
   const valuesByKey = new Map<string, PluginConfigurationPatchValue>(
     patch.values.map((value) => [value.key, value])
@@ -412,7 +416,7 @@ const validatePatch = Effect.fn("PluginAdministration.validatePatch")(function*(
     if (
       (field.required && value === undefined) ||
       clearsRequiredSecret ||
-      (value !== undefined && !matchesField(field, value))
+      (value !== undefined && !matchesField(field, value, credentialKeys))
     ) {
       return yield* new ApplicationInvalidRequest()
     }
@@ -427,7 +431,8 @@ const validatePatch = Effect.fn("PluginAdministration.validatePatch")(function*(
 const storeValue = Effect.fn("PluginAdministration.storeValue")(function*(
   secrets: SecretStore["Service"],
   currentValues: ReadonlyMap<string, StoredPluginConfigurationValue>,
-  value: PluginConfigurationPatchValue
+  value: PluginConfigurationPatchValue,
+  credentialKeys: ReadonlySet<string>
 ) {
   const key = yield* Schema.decodeUnknownEffect(StoredPluginConfigurationKey)(value.key).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
@@ -439,6 +444,7 @@ const storeValue = Effect.fn("PluginAdministration.storeValue")(function*(
     candidateReference = value.operation.reference
   } else {
     const currentValue = currentValues.get(value.key)
+    if (currentValue?._tag === "text" && credentialKeys.has(value.key)) return currentValue
     if (currentValue?._tag !== "secret-reference") {
       return yield* new ApplicationInvalidRequest()
     }
@@ -460,11 +466,12 @@ const storeValue = Effect.fn("PluginAdministration.storeValue")(function*(
 const canonicalValues = Effect.fn("PluginAdministration.canonicalValues")(function*(
   secrets: SecretStore["Service"],
   currentValues: ReadonlyMap<string, StoredPluginConfigurationValue>,
-  values: PatchPluginConfigurationRequest["values"]
+  values: PatchPluginConfigurationRequest["values"],
+  credentialKeys: ReadonlySet<string>
 ) {
   const stored: Array<StoredPluginConfigurationValue> = []
   for (const value of values) {
-    const candidate = yield* storeValue(secrets, currentValues, value)
+    const candidate = yield* storeValue(secrets, currentValues, value, credentialKeys)
     if (candidate !== null) stored.push(candidate)
   }
   stored.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
@@ -588,6 +595,31 @@ const disableAfterSetupFailure = (
     Effect.catch(() => Effect.void)
   )
 
+const persistSetupTestHealth = Effect.fn("PluginAdministration.persistSetupTestHealth")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  test: PluginConnectionTestResult
+) {
+  const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
+  const health: PluginHealth = test._tag === "healthy"
+    ? { _tag: "healthy", checkedAt: test.checkedAt }
+    : {
+      _tag: "unavailable",
+      checkedAt: test.checkedAt,
+      failureClass: test.failureClass,
+      retryAt: test.retryAt,
+      safeMessage: test.safeMessage
+    }
+  yield* persistence.pluginRuntime.recordHealth(
+    workspaceId,
+    pluginConnectionId,
+    runtime.revision,
+    health,
+    test._tag === "healthy" ? 0 : runtime.consecutiveFailures + 1
+  ).pipe(Effect.mapError(mapPersistenceWriteError))
+})
+
 const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function*(
   persistence: Persistence["Service"],
   secrets: SecretStore["Service"],
@@ -597,6 +629,12 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
 ) {
   const catalog = firstPartyService(request.providerId)
   if (catalog === undefined) return yield* new ApplicationInvalidRequest()
+  const existingConnections = yield* persistence.pluginConnections.list(workspaceId).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (existingConnections.length >= MAXIMUM_PLUGIN_CONNECTIONS) {
+    return yield* new ApplicationInvalidRequest()
+  }
   const setupValues = yield* validateSetup(catalog, request)
   const displayName = yield* Schema.decodeUnknownEffect(PluginConnectionDisplayName)(request.displayName).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
@@ -647,6 +685,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         workspaceId,
         request.pluginConnectionId
       )
+      yield* persistSetupTestHealth(persistence, workspaceId, request.pluginConnectionId, test)
       return {
         connection: yield* connectionSummary(persistence, enabled),
         configuration: yield* configuration(persistence, secrets, workspaceId, request.pluginConnectionId),
@@ -654,7 +693,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       } satisfies CreatePluginConnectionResponse
     }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, enabled)))
   }).pipe(
-    Effect.tapError(() => hasDurableConfiguration ? Effect.void : removeSetupSecrets(secrets, createdSecretReferences))
+    Effect.onExit(() => hasDurableConfiguration ? Effect.void : removeSetupSecrets(secrets, createdSecretReferences))
   )
 })
 
@@ -685,9 +724,14 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       pluginConnectionId,
       workspaceId
     }) {
-      yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const credentialKeys = new Set<string>(
+        firstPartyService(connection.providerId)?.metadata.configurationFields
+          .filter(({ scope }) => scope === "credential")
+          .map(({ key }) => key) ?? []
+      )
       const descriptor = yield* negotiatedDescriptor(persistence, workspaceId, pluginConnectionId)
-      yield* validatePatch(descriptor, patch)
+      yield* validatePatch(descriptor, patch, credentialKeys)
       const current = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
         Effect.mapError(mapPersistenceReadError)
       )
@@ -701,7 +745,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       // PATCH is a full replacement: all required descriptor fields must be present.
       // Keep operations resolve only the reference stored at the expected revision. The
       // repository CAS then prevents that reference from surviving a concurrent replacement.
-      const values = yield* canonicalValues(secrets, currentValues, patch.values)
+      const values = yield* canonicalValues(secrets, currentValues, patch.values, credentialKeys)
       const updatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
       yield* Effect.uninterruptible(
         persistence.pluginConfigurations.update(
