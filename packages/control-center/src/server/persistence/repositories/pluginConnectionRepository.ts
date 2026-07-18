@@ -1,3 +1,12 @@
+import {
+  renderBindPluginConnectionQuery,
+  renderCreatePluginConnectionQuery,
+  type RenderedSql,
+  renderPluginConnectionCountQuery,
+  renderPluginConnectionQuery,
+  renderPluginConnectionsQuery,
+  renderUpdatePluginConnectionQuery
+} from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -8,7 +17,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 
-import { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
+import { FollowedResourceId, PluginConnectionId, ProviderAccountId, WorkspaceId } from "../../../domain/identifiers.js"
 import { ProviderId } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -27,6 +36,8 @@ import { QuarantineRepository } from "./quarantineRepository.js"
 const PluginConnectionRow = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
+  providerAccountId: Schema.NullOr(ProviderAccountId),
+  followedResourceId: Schema.NullOr(FollowedResourceId),
   providerId: ProviderId,
   displayName: PluginConnectionDisplayName,
   isEnabled: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 1 })),
@@ -50,11 +61,6 @@ const CreatePluginConnectionRequest = Schema.Struct({
   createdAt: UtcTimestamp
 })
 
-const CreateBoundedPluginConnectionRequest = Schema.Struct({
-  ...CreatePluginConnectionRequest.fields,
-  maximum: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
-})
-
 const UpdatePluginConnectionRequest = Schema.Struct({
   ...PluginConnectionKey.fields,
   displayName: PluginConnectionDisplayName,
@@ -62,6 +68,16 @@ const UpdatePluginConnectionRequest = Schema.Struct({
   expectedRevision: RecordRevision,
   updatedAt: UtcTimestamp
 })
+
+const BindPluginConnectionRequest = Schema.Struct({
+  ...PluginConnectionKey.fields,
+  providerAccountId: ProviderAccountId,
+  followedResourceId: FollowedResourceId,
+  expectedRevision: RecordRevision,
+  updatedAt: UtcTimestamp
+})
+
+const PluginConnectionCountRow = Schema.Struct({ connectionCount: Schema.Number })
 
 const decodeRecord = Effect.fn("PluginConnectionRepository.decodeRecord")(function*(
   row: typeof PluginConnectionRow.Type
@@ -78,27 +94,7 @@ const makePluginConnectionRepository = Effect.gen(function*() {
   const quarantine = yield* QuarantineRepository
   const quarantineRow = makePersistedRowQuarantine(cryptoService, quarantine)
   const sql = database.sql
-
-  const selectColumns = sql`SELECT
-    workspace_id AS workspaceId,
-    plugin_connection_id AS pluginConnectionId,
-    provider_id AS providerId,
-    display_name AS displayName,
-    is_enabled AS isEnabled,
-    revision,
-    created_at AS createdAt,
-    updated_at AS updatedAt
-  FROM plugin_connections`
-
-  const findRows = ({ pluginConnectionId, workspaceId }: typeof PluginConnectionKey.Type) =>
-    sql<Record<string, unknown>>`${selectColumns}
-      WHERE workspace_id = ${workspaceId}
-        AND plugin_connection_id = ${pluginConnectionId}`
-
-  const listRows = (workspaceId: WorkspaceId) =>
-    sql<Record<string, unknown>>`${selectColumns}
-      WHERE workspace_id = ${workspaceId}
-      ORDER BY display_name, plugin_connection_id`
+  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
 
   const quarantineMalformed = Effect.fn("PluginConnectionRepository.quarantineMalformed")(function*(
     workspaceId: WorkspaceId,
@@ -122,7 +118,7 @@ const makePluginConnectionRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId
   ) {
-    const rows = yield* findRows({ workspaceId, pluginConnectionId }).pipe(
+    const rows = yield* run(renderPluginConnectionQuery({ workspaceId, pluginConnectionId })).pipe(
       mapPersistenceOperation("plugin-connection.get")
     )
     if (rows.length === 0) {
@@ -145,44 +141,36 @@ const makePluginConnectionRepository = Effect.gen(function*() {
 
   const insert = SqlSchema.void({
     Request: CreatePluginConnectionRequest,
-    execute: ({ createdAt, displayName, isEnabled, pluginConnectionId, providerId, workspaceId }) =>
-      sql`INSERT INTO plugin_connections (
-            workspace_id, plugin_connection_id, provider_id, display_name,
-            revision, is_enabled, created_at, updated_at
-          ) VALUES (
-            ${workspaceId}, ${pluginConnectionId}, ${providerId}, ${displayName},
-            1, ${isEnabled ? 1 : 0}, ${createdAt}, ${createdAt}
-          )`
-  })
-
-  const boundedInsert = SqlSchema.void({
-    Request: CreateBoundedPluginConnectionRequest,
-    execute: ({ createdAt, displayName, isEnabled, maximum, pluginConnectionId, providerId, workspaceId }) =>
-      sql`INSERT INTO plugin_connections (
-            workspace_id, plugin_connection_id, provider_id, display_name,
-            revision, is_enabled, created_at, updated_at
-          )
-          SELECT
-            ${workspaceId}, ${pluginConnectionId}, ${providerId}, ${displayName},
-            1, ${isEnabled ? 1 : 0}, ${createdAt}, ${createdAt}
-          WHERE (
-            SELECT COUNT(*) FROM plugin_connections
-            WHERE workspace_id = ${workspaceId}
-          ) < ${maximum}`
+    execute: (request) => run(renderCreatePluginConnectionQuery(request))
   })
 
   const update = SqlSchema.void({
     Request: UpdatePluginConnectionRequest,
-    execute: ({ displayName, expectedRevision, isEnabled, pluginConnectionId, updatedAt, workspaceId }) =>
-      sql`UPDATE plugin_connections
-          SET display_name = ${displayName},
-              is_enabled = ${isEnabled ? 1 : 0},
-              revision = revision + 1,
-              updated_at = ${updatedAt}
-          WHERE workspace_id = ${workspaceId}
-            AND plugin_connection_id = ${pluginConnectionId}
-            AND revision = ${expectedRevision}`
+    execute: (request) => run(renderUpdatePluginConnectionQuery(request))
   })
+
+  const bind = SqlSchema.void({
+    Request: BindPluginConnectionRequest,
+    execute: (request) => run(renderBindPluginConnectionQuery(request))
+  })
+
+  const resolveMutationFailure = (
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    expectedRevision: RecordRevision
+  ) =>
+    resolveCasFailure({
+      workspaceId,
+      recordKind: "plugin-connection",
+      recordKey: pluginConnectionId,
+      expectedRevision,
+      findActualRevision: revisionLookup(() =>
+        sql`SELECT revision
+            FROM plugin_connections
+            WHERE workspace_id = ${workspaceId}
+              AND plugin_connection_id = ${pluginConnectionId}`
+      )
+    })
 
   return {
     create: Effect.fn("PluginConnectionRepository.create")(function*(
@@ -218,10 +206,14 @@ const makePluginConnectionRepository = Effect.gen(function*() {
     ) {
       yield* database.transaction(
         Effect.gen(function*() {
-          yield* boundedInsert({ workspaceId, ...input })
-          if ((yield* readChanges(sql)) === 0) {
+          const countRows = yield* run(renderPluginConnectionCountQuery(workspaceId))
+          const [{ connectionCount }] = yield* Schema.decodeUnknownEffect(
+            Schema.Tuple([PluginConnectionCountRow])
+          )(countRows)
+          if (connectionCount >= input.maximum) {
             return yield* new PluginConnectionLimitError({ workspaceId, maximum: input.maximum })
           }
+          yield* insert({ workspaceId, ...input })
         })
       ).pipe(
         mapAlreadyExists({
@@ -235,7 +227,7 @@ const makePluginConnectionRepository = Effect.gen(function*() {
     }),
     get,
     list: Effect.fn("PluginConnectionRepository.list")(function*(workspaceId: WorkspaceId) {
-      const rows = yield* listRows(workspaceId).pipe(
+      const rows = yield* run(renderPluginConnectionsQuery(workspaceId)).pipe(
         mapPersistenceOperation("plugin-connection.list")
       )
       const records: Array<PluginConnectionRecord> = []
@@ -264,21 +256,25 @@ const makePluginConnectionRepository = Effect.gen(function*() {
           yield* update({ workspaceId, pluginConnectionId, ...input })
           const changes = yield* readChanges(sql)
           if (changes === 0) {
-            return yield* resolveCasFailure({
-              workspaceId,
-              recordKind: "plugin-connection",
-              recordKey: pluginConnectionId,
-              expectedRevision: input.expectedRevision,
-              findActualRevision: revisionLookup(() =>
-                sql`SELECT revision
-                    FROM plugin_connections
-                    WHERE workspace_id = ${workspaceId}
-                      AND plugin_connection_id = ${pluginConnectionId}`
-              )
-            })
+            return yield* resolveMutationFailure(workspaceId, pluginConnectionId, input.expectedRevision)
           }
         })
       ).pipe(mapPersistenceOperation("plugin-connection.update"))
+      return yield* get(workspaceId, pluginConnectionId)
+    }),
+    bindResource: Effect.fn("PluginConnectionRepository.bindResource")(function*(
+      workspaceId: WorkspaceId,
+      pluginConnectionId: PluginConnectionId,
+      input: Omit<typeof BindPluginConnectionRequest.Type, "workspaceId" | "pluginConnectionId">
+    ) {
+      yield* database.transaction(
+        Effect.gen(function*() {
+          yield* bind({ workspaceId, pluginConnectionId, ...input })
+          if ((yield* readChanges(sql)) === 0) {
+            return yield* resolveMutationFailure(workspaceId, pluginConnectionId, input.expectedRevision)
+          }
+        })
+      ).pipe(mapPersistenceOperation("plugin-connection.bind-resource"))
       return yield* get(workspaceId, pluginConnectionId)
     })
   }

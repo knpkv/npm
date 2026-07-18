@@ -2,18 +2,24 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Result, Schema } from "effect"
 
-import { FollowedResourceId, ProviderAccountId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { FollowedResourceId, PluginConnectionId, ProviderAccountId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { RecordAlreadyExistsError, RevisionConflictError } from "../../src/server/persistence/errors.js"
+import {
+  PersistenceOperationError,
+  RecordAlreadyExistsError,
+  RevisionConflictError
+} from "../../src/server/persistence/errors.js"
 import {
   FollowedResourceDisplayName,
+  PluginConnectionDisplayName,
   ProviderAccountDisplayName,
   RecordRevision,
   VendorAccountId,
   VendorResourceId,
   WorkspaceName
 } from "../../src/server/persistence/repositories/models.js"
+import { PluginConnectionRepository } from "../../src/server/persistence/repositories/pluginConnectionRepository.js"
 import {
   ProviderAccountInputError,
   ProviderAccountRepository
@@ -28,6 +34,15 @@ const SECOND_ACCOUNT_ID = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7c
 const REPOSITORY_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000005")
 const PIPELINE_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000006")
 const JIRA_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000007")
+const REPOSITORY_CONNECTION_ID = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000008"
+)
+const PIPELINE_CONNECTION_ID = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000009"
+)
+const SECOND_REPOSITORY_CONNECTION_ID = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-00000000000a"
+)
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
 const UPDATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T11:00:00.000Z")
 
@@ -46,7 +61,11 @@ const withRepositories = <Success, Failure>(
   use: Effect.Effect<
     Success,
     Failure,
-    Database | ProviderAccountRepository | QuarantineRepository | WorkspaceRepository
+    | Database
+    | PluginConnectionRepository
+    | ProviderAccountRepository
+    | QuarantineRepository
+    | WorkspaceRepository
   >
 ) =>
   Effect.gen(function*() {
@@ -54,8 +73,9 @@ const withRepositories = <Success, Failure>(
     const database = databaseLayer(config)
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const accounts = ProviderAccountRepository.layer.pipe(Layer.provide(foundation))
+    const connections = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
     const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
-    return yield* use.pipe(Effect.provide(Layer.mergeAll(foundation, accounts, workspaces)))
+    return yield* use.pipe(Effect.provide(Layer.mergeAll(foundation, accounts, connections, workspaces)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 const createWorkspace = Effect.gen(function*() {
@@ -83,6 +103,7 @@ describe("provider account repository", () => {
       Effect.gen(function*() {
         yield* createWorkspace
         const accounts = yield* ProviderAccountRepository
+        const connections = yield* PluginConnectionRepository
         const account = yield* createAwsAccount
 
         assert.strictEqual(account.vendorAccountId, "123456789012")
@@ -105,6 +126,42 @@ describe("provider account repository", () => {
           createdAt: CREATED_AT
         })
 
+        const repositoryConnection = yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId: REPOSITORY_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Payments API"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const pipelineConnection = yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId: PIPELINE_CONNECTION_ID,
+          providerId: "codepipeline",
+          displayName: PluginConnectionDisplayName.make("Payments release"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        assert.isNull(repositoryConnection.providerAccountId)
+        assert.isNull(repositoryConnection.followedResourceId)
+        assert.isNull(pipelineConnection.providerAccountId)
+        assert.isNull(pipelineConnection.followedResourceId)
+
+        const boundRepository = yield* connections.bindResource(WORKSPACE_A, REPOSITORY_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: REPOSITORY_ID,
+          expectedRevision: RecordRevision.make(1),
+          updatedAt: UPDATED_AT
+        })
+        const boundPipeline = yield* connections.bindResource(WORKSPACE_A, PIPELINE_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: PIPELINE_ID,
+          expectedRevision: RecordRevision.make(1),
+          updatedAt: UPDATED_AT
+        })
+        assert.strictEqual(boundRepository.providerAccountId, AWS_ACCOUNT_ID)
+        assert.strictEqual(boundRepository.followedResourceId, REPOSITORY_ID)
+        assert.strictEqual(boundRepository.revision, 2)
+        assert.strictEqual(boundPipeline.providerAccountId, AWS_ACCOUNT_ID)
+        assert.strictEqual(boundPipeline.followedResourceId, PIPELINE_ID)
         const resources = yield* accounts.listResources(WORKSPACE_A, AWS_ACCOUNT_ID)
         assert.deepStrictEqual(resources.map(({ providerId }) => providerId), ["codecommit", "codepipeline"])
         assert.isTrue(resources.every(({ providerAccountId }) => providerAccountId === AWS_ACCOUNT_ID))
@@ -117,6 +174,69 @@ describe("provider account repository", () => {
         })
         assert.strictEqual(updated.revision, 2)
         assert.isFalse(updated.isEnabled)
+      })
+    ))
+
+  it.effect("rejects a service mismatch and a second connection for the same resource", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspace
+        yield* createAwsAccount
+        const accounts = yield* ProviderAccountRepository
+        const connections = yield* PluginConnectionRepository
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: REPOSITORY_ID,
+          providerAccountId: AWS_ACCOUNT_ID,
+          providerId: "codecommit",
+          vendorResourceId: VendorResourceId.make("payments-api"),
+          displayName: FollowedResourceDisplayName.make("Payments API"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId: PIPELINE_CONNECTION_ID,
+          providerId: "codepipeline",
+          displayName: PluginConnectionDisplayName.make("Wrong service"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const mismatch = yield* connections.bindResource(WORKSPACE_A, PIPELINE_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: REPOSITORY_ID,
+          expectedRevision: RecordRevision.make(1),
+          updatedAt: UPDATED_AT
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(mismatch))
+        if (Result.isFailure(mismatch)) assert.instanceOf(mismatch.failure, PersistenceOperationError)
+
+        yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId: REPOSITORY_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Primary repository"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* connections.bindResource(WORKSPACE_A, REPOSITORY_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: REPOSITORY_ID,
+          expectedRevision: RecordRevision.make(1),
+          updatedAt: UPDATED_AT
+        })
+        yield* connections.create(WORKSPACE_A, {
+          pluginConnectionId: SECOND_REPOSITORY_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Duplicate repository"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const duplicate = yield* connections.bindResource(WORKSPACE_A, SECOND_REPOSITORY_CONNECTION_ID, {
+          providerAccountId: AWS_ACCOUNT_ID,
+          followedResourceId: REPOSITORY_ID,
+          expectedRevision: RecordRevision.make(1),
+          updatedAt: UPDATED_AT
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(duplicate))
+        if (Result.isFailure(duplicate)) assert.instanceOf(duplicate.failure, PersistenceOperationError)
       })
     ))
 

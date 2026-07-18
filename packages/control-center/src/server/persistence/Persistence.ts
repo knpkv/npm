@@ -252,6 +252,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-connection.create", pluginConnections.create(...args)),
       createBounded: (...args: Parameters<PluginConnectionRepositoryService["createBounded"]>) =>
         publicOperation("plugin-connection.create-bounded", pluginConnections.createBounded(...args)),
+      bindResource: (...args: Parameters<PluginConnectionRepositoryService["bindResource"]>) =>
+        publicOperation("plugin-connection.bind-resource", pluginConnections.bindResource(...args)),
       get: (...args: Parameters<PluginConnectionRepositoryService["get"]>) =>
         publicOperation("plugin-connection.get", pluginConnections.get(...args)),
       list: (...args: Parameters<PluginConnectionRepositoryService["list"]>) =>
