@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 
 import type { GovernedActionUnknownOutcome } from "../../src/domain/governedAction/index.js"
-import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   AuthorizedPluginActionV1,
   PluginActionDispatchResultV1,
@@ -30,7 +30,9 @@ import { GovernedActionExecutionEngine } from "../../src/server/governance/inter
 import {
   type GovernedActionBeginResult,
   type GovernedActionExecutionPlan,
+  type GovernedActionExecutionReference,
   GovernedActionExecutionStore,
+  GovernedActionExecutionStoreError,
   type GovernedActionExecutionStoreV1
 } from "../../src/server/governance/internal/GovernedActionExecutionStore.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
@@ -46,11 +48,14 @@ const ACTION_ID = "01890f00-0000-7000-8000-000000000502"
 const CONNECTION_ID = "01890f00-0000-7000-8000-000000000503"
 const SECONDARY_WORKSPACE_ID = "01890f00-0000-7000-8000-000000000504"
 const SECONDARY_CONNECTION_ID = "01890f00-0000-7000-8000-000000000505"
+const SECONDARY_ACTION_ID = "01890f00-0000-7000-8000-000000000506"
 const OBSERVED_AT = "2026-07-15T10:00:00.000Z"
 const workspaceId = Schema.decodeUnknownSync(WorkspaceId)(WORKSPACE_ID)
+const actionId = Schema.decodeUnknownSync(GovernedActionId)(ACTION_ID)
 const connectionId = Schema.decodeUnknownSync(PluginConnectionId)(CONNECTION_ID)
 const secondaryWorkspaceId = Schema.decodeUnknownSync(WorkspaceId)(SECONDARY_WORKSPACE_ID)
 const secondaryConnectionId = Schema.decodeUnknownSync(PluginConnectionId)(SECONDARY_CONNECTION_ID)
+const secondaryActionId = Schema.decodeUnknownSync(GovernedActionId)(SECONDARY_ACTION_ID)
 const runtimeAuthorityToken = PluginRuntimeAuthorityToken.make(`sha256:${"a".repeat(64)}`)
 const rotatedRuntimeAuthorityToken = PluginRuntimeAuthorityToken.make(`sha256:${"b".repeat(64)}`)
 const preparationToken = Schema.decodeUnknownSync(GovernedActionPreparationToken)("1".repeat(64))
@@ -141,8 +146,11 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   readonly preflightBlocked?: boolean
   readonly executeDefect?: boolean
   readonly executeNever?: boolean
+  readonly inspectFails?: boolean
   readonly pauseBegin?: boolean
+  readonly reconcileDefectOnce?: boolean
   readonly leaseRuntimeAuthorityToken?: PluginRuntimeAuthorityToken
+  readonly recoveryCandidates?: ReadonlyArray<GovernedActionExecutionReference>
 }) {
   const events = yield* Ref.make<ReadonlyArray<string>>([])
   const unknowns = yield* Ref.make<ReadonlyArray<GovernedActionUnknownOutcome>>([])
@@ -150,13 +158,27 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   const beginEntered = yield* Deferred.make<void>()
   const releaseBegin = yield* Deferred.make<void>()
   const executeEntered = yield* Deferred.make<void>()
+  const reconciliationCalls = yield* Ref.make(0)
   const record = (event: string) => Ref.update(events, (current) => [...current, event])
   const plan = options?.plan ?? dispatchPlan
   const begin = options?.begin ?? permitted
   const leaseRuntimeAuthorityToken = options?.leaseRuntimeAuthorityToken ?? runtimeAuthorityToken
 
   const store: GovernedActionExecutionStoreV1 = {
-    inspect: () => record("inspect").pipe(Effect.as(plan)),
+    recoveryCandidates: Effect.succeed(options?.recoveryCandidates ?? []),
+    inspect: () =>
+      record("inspect").pipe(
+        Effect.andThen(
+          options?.inspectFails === true
+            ? Effect.fail(
+              new GovernedActionExecutionStoreError({
+                operation: "inspect",
+                reason: "persistence-unavailable"
+              })
+            )
+            : Effect.succeed(plan)
+        )
+      ),
     begin: (input) =>
       Ref.update(beginInputs, (current) => [...current, input]).pipe(
         Effect.andThen(record("begin")),
@@ -187,10 +209,16 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
         return confirmedDispatch
       }),
     requestCancellation: () => Effect.die("cancellation is outside this test"),
-    reconcile: (request) => {
-      assert.deepStrictEqual(request, reconciliationRequest)
-      return record("reconcile").pipe(Effect.as(pendingReconciliation))
-    }
+    reconcile: (request) =>
+      Effect.gen(function*() {
+        assert.deepStrictEqual(request, reconciliationRequest)
+        yield* record("reconcile")
+        const call = yield* Ref.getAndUpdate(reconciliationCalls, (current) => current + 1)
+        if (options?.reconcileDefectOnce === true && call === 0) {
+          return yield* Effect.die("injected-reconciliation-defect")
+        }
+        return pendingReconciliation
+      })
   }
   const lease = {
     context: Context.make(AuthorizedPluginExecutor, executor),
@@ -223,6 +251,12 @@ const run = (layer: Layer.Layer<GovernedActionExecutionEngine>) =>
   Effect.flatMap(
     GovernedActionExecutionEngine,
     (engine) => engine.run({ workspaceId: WORKSPACE_ID, actionId: ACTION_ID })
+  ).pipe(Effect.provide(layer))
+
+const recoverEligible = (layer: Layer.Layer<GovernedActionExecutionEngine>) =>
+  Effect.flatMap(
+    GovernedActionExecutionEngine,
+    (engine) => engine.recoverEligible()
   ).pipe(Effect.provide(layer))
 
 describe("governed action execution engine", () => {
@@ -322,6 +356,85 @@ describe("governed action execution engine", () => {
       })
       assert.deepStrictEqual(yield* run(recovery.layer), { _tag: "advanced", state: "unknown" })
       assert.deepStrictEqual(yield* Ref.get(recovery.events), [
+        "inspect",
+        "reconcile",
+        "record-reconciliation"
+      ])
+    }))
+
+  it.effect("reconciles the bounded startup batch sequentially without redispatch", () =>
+    Effect.gen(function*() {
+      const recovery = yield* makeHarness({
+        recoveryCandidates: [{ workspaceId, actionId }],
+        plan: {
+          _tag: "reconcile",
+          recoveryToken,
+          runtimeAuthorityToken,
+          reconciliationDeadline,
+          scope: { workspaceId, pluginConnectionId: connectionId },
+          request: reconciliationRequest
+        }
+      })
+
+      assert.deepStrictEqual(yield* recoverEligible(recovery.layer), {
+        attempted: 1,
+        advanced: 1,
+        inactive: 0,
+        failed: 0
+      })
+      assert.deepStrictEqual(yield* Ref.get(recovery.events), [
+        "inspect",
+        "reconcile",
+        "record-reconciliation"
+      ])
+    }))
+
+  it.effect("continues the bounded startup batch after one candidate fails", () =>
+    Effect.gen(function*() {
+      const recovery = yield* makeHarness({
+        inspectFails: true,
+        recoveryCandidates: [
+          { workspaceId, actionId },
+          { workspaceId, actionId: secondaryActionId }
+        ]
+      })
+
+      assert.deepStrictEqual(yield* recoverEligible(recovery.layer), {
+        attempted: 2,
+        advanced: 0,
+        inactive: 0,
+        failed: 2
+      })
+      assert.deepStrictEqual(yield* Ref.get(recovery.events), ["inspect", "inspect"])
+    }))
+
+  it.effect("continues the bounded startup batch after one provider defect", () =>
+    Effect.gen(function*() {
+      const recovery = yield* makeHarness({
+        reconcileDefectOnce: true,
+        recoveryCandidates: [
+          { workspaceId, actionId },
+          { workspaceId, actionId: secondaryActionId }
+        ],
+        plan: {
+          _tag: "reconcile",
+          recoveryToken,
+          runtimeAuthorityToken,
+          reconciliationDeadline,
+          scope: { workspaceId, pluginConnectionId: connectionId },
+          request: reconciliationRequest
+        }
+      })
+
+      assert.deepStrictEqual(yield* recoverEligible(recovery.layer), {
+        attempted: 2,
+        advanced: 1,
+        inactive: 0,
+        failed: 1
+      })
+      assert.deepStrictEqual(yield* Ref.get(recovery.events), [
+        "inspect",
+        "reconcile",
         "inspect",
         "reconcile",
         "record-reconciliation"

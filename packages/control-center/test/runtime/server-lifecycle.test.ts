@@ -82,6 +82,40 @@ describe("server lifecycle", () => {
       yield* lifecycle.awaitMutationsDrained
     }).pipe(Effect.provide(ServerLifecycle.layer)))
 
+  it.effect("stops new background jobs and includes admitted jobs in the drain barrier", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const backgroundJob = yield* lifecycle.runBackground(
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(entered)
+      yield* lifecycle.beginDrain
+
+      const mutationsWaiting = yield* lifecycle.awaitMutationsDrained.pipe(Effect.forkChild)
+      const waiting = yield* lifecycle.awaitWorkDrained.pipe(Effect.forkChild)
+      const drain = yield* lifecycle.drainWithin(Duration.seconds(10)).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.isDefined(mutationsWaiting.pollUnsafe())
+      assert.isUndefined(waiting.pollUnsafe())
+
+      yield* TestClock.adjust(Duration.seconds(10))
+      assert.isFalse(yield* Fiber.join(drain))
+
+      const rejected = yield* lifecycle.runBackground(Effect.void).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.instanceOf(rejected.failure, ServerDraining)
+      }
+
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(mutationsWaiting)
+      yield* Fiber.join(backgroundJob)
+      yield* Fiber.join(waiting)
+    }).pipe(Effect.provide(ServerLifecycle.layer)))
+
   it.effect("honors the hard drain deadline without abandoning lifecycle accounting", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle

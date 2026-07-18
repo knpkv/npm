@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -46,6 +47,14 @@ class GovernedActionReconciliationDeadlineExceeded
 export type GovernedActionExecutionResult =
   | { readonly _tag: "inactive"; readonly state: GovernedActionState }
   | { readonly _tag: "advanced"; readonly state: GovernedActionState }
+
+/** Bounded process-start reconciliation outcome without action payloads or provider data. */
+export interface GovernedActionRecoverySweepResult {
+  readonly advanced: number
+  readonly attempted: number
+  readonly failed: number
+  readonly inactive: number
+}
 
 const manualUnknown = (
   observedAt: UtcTimestamp,
@@ -256,7 +265,26 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
     }
   })
 
-  return { run }
+  const recoverEligible = Effect.fn("GovernedActionExecutionEngine.recoverEligible")(function*() {
+    const references = yield* store.recoveryCandidates
+    const results = yield* Effect.forEach(
+      references,
+      (reference) =>
+        run(reference).pipe(
+          Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(cause)),
+          Effect.result
+        ),
+      { concurrency: 1 }
+    )
+    return {
+      attempted: references.length,
+      advanced: results.filter(Result.isSuccess).filter(({ success }) => success._tag === "advanced").length,
+      inactive: results.filter(Result.isSuccess).filter(({ success }) => success._tag === "inactive").length,
+      failed: results.filter(Result.isFailure).length
+    } satisfies GovernedActionRecoverySweepResult
+  })
+
+  return { recoverEligible, run }
 })
 
 /** Internal execution engine service; only private worker composition may consume this tag. */

@@ -18,6 +18,7 @@ export class ServerDraining extends Schema.TaggedErrorClass<ServerDraining>()(
 ) {}
 
 interface ServerLifecycleState {
+  readonly activeBackgroundJobs: number
   readonly activeMutationFiberIds: ReadonlySet<number>
   readonly activeMutations: number
   readonly activeStreams: number
@@ -33,6 +34,8 @@ interface ServerLifecycleService {
   readonly awaitDrain: Effect.Effect<void>
   /** Complete after drain begins and every admitted mutation has finished. */
   readonly awaitMutationsDrained: Effect.Effect<void>
+  /** Complete after drain begins and every admitted mutation or background job has finished. */
+  readonly awaitWorkDrained: Effect.Effect<void>
   /** Begin drain and report whether admitted mutations finished before the deadline. */
   readonly drainWithin: (duration: Duration.Input) => Effect.Effect<boolean>
   /** Current lifecycle phase for diagnostics and deterministic tests. */
@@ -41,12 +44,17 @@ interface ServerLifecycleService {
   readonly runMutation: <A, E, R>(
     effect: Effect.Effect<A, E, R>
   ) => Effect.Effect<A, E | ServerDraining, R>
+  /** Reject new background jobs after drain, while retaining admitted jobs until they exit. */
+  readonly runBackground: <A, E, R>(
+    effect: Effect.Effect<A, E, R>
+  ) => Effect.Effect<A, E | ServerDraining, R>
   /** Atomically retain a long-lived stream only while the process is accepting work. */
   readonly acquireStream: Effect.Effect<void, ServerDraining, Scope.Scope>
 }
 
 const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   const state = yield* Ref.make<ServerLifecycleState>({
+    activeBackgroundJobs: 0,
     activeMutationFiberIds: new Set(),
     activeMutations: 0,
     activeStreams: 0,
@@ -54,18 +62,24 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   })
   const drainStarted = yield* Deferred.make<void>()
   const mutationsDrained = yield* Deferred.make<void>()
+  const workDrained = yield* Deferred.make<void>()
+
+  const hasActiveWork = (current: ServerLifecycleState): boolean =>
+    current.activeMutations > 0 || current.activeBackgroundJobs > 0
 
   const beginDrain = Ref.modify(state, (current) => {
-    if (current.phase === "draining") return [current.activeMutations === 0, current]
+    const barriers = {
+      mutationBarrierReady: current.activeMutations === 0,
+      workBarrierReady: !hasActiveWork(current)
+    }
+    if (current.phase === "draining") return [barriers, current]
     const draining: ServerLifecycleState = { ...current, phase: "draining" }
-    return [
-      current.activeMutations === 0,
-      draining
-    ]
+    return [barriers, draining]
   }).pipe(
-    Effect.flatMap((alreadyDrained) =>
+    Effect.flatMap(({ mutationBarrierReady, workBarrierReady }) =>
       Deferred.succeed(drainStarted, undefined).pipe(
-        Effect.andThen(alreadyDrained ? Deferred.succeed(mutationsDrained, undefined) : Effect.void)
+        Effect.andThen(mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
+        Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
       )
     ),
     Effect.asVoid
@@ -98,11 +112,36 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         activeMutationFiberIds,
         activeMutations: current.activeMutations - 1
       }
-      return [next.phase === "draining" && next.activeMutations === 0, next]
+      return [{
+        mutationBarrierReady: next.phase === "draining" && next.activeMutations === 0,
+        workBarrierReady: next.phase === "draining" && !hasActiveWork(next)
+      }, next]
     }).pipe(
-      Effect.flatMap((drained) => (drained ? Deferred.succeed(mutationsDrained, undefined) : Effect.void)),
+      Effect.flatMap(({ mutationBarrierReady, workBarrierReady }) =>
+        (mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void).pipe(
+          Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
+        )
+      ),
       Effect.asVoid
     )
+
+  const acquireBackgroundJob = Ref.modify(state, (current) => {
+    if (current.phase === "draining") return [false, current]
+    return [true, { ...current, activeBackgroundJobs: current.activeBackgroundJobs + 1 }]
+  }).pipe(
+    Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new ServerDraining()))
+  )
+
+  const releaseBackgroundJob = Ref.modify(state, (current) => {
+    const next = {
+      ...current,
+      activeBackgroundJobs: current.activeBackgroundJobs - 1
+    }
+    return [next.phase === "draining" && !hasActiveWork(next), next]
+  }).pipe(
+    Effect.flatMap((drained) => drained ? Deferred.succeed(workDrained, undefined) : Effect.void),
+    Effect.asVoid
+  )
 
   const acquireStreamPermit = Ref.modify(state, (current) => {
     if (current.phase === "draining") return [false, current]
@@ -118,7 +157,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
 
   const drainWithin = (duration: Duration.Input) =>
     beginDrain.pipe(
-      Effect.andThen(Deferred.await(mutationsDrained).pipe(Effect.timeoutOption(duration))),
+      Effect.andThen(Deferred.await(workDrained).pipe(Effect.timeoutOption(duration))),
       Effect.map(Option.isSome)
     )
 
@@ -126,6 +165,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     beginDrain,
     awaitDrain: Deferred.await(drainStarted),
     awaitMutationsDrained: Deferred.await(mutationsDrained),
+    awaitWorkDrained: Deferred.await(workDrained),
     drainWithin,
     phase: Ref.get(state).pipe(Effect.map((current) => current.phase)),
     runMutation: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -135,6 +175,12 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
           () => effect,
           (acquired) => (acquired ? releaseMutation(fiber.id) : Effect.void)
         )
+      ),
+    runBackground: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        acquireBackgroundJob,
+        () => effect,
+        () => releaseBackgroundJob
       ),
     acquireStream: Effect.acquireRelease(acquireStreamPermit, () => releaseStream)
   } satisfies ServerLifecycleService
