@@ -1,10 +1,13 @@
-import { ReleaseRow, StageRail, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
+import { ReleaseRow, ServiceMark, StageRail, type RlyReleaseTransitionNames } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import { Link, Navigate, useLocation, useViewTransitionState } from "react-router"
 
+import { firstPartyServiceIdentities } from "../../domain/firstPartyServices.js"
 import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
+import { releaseParentPath, releaseTransitionNames } from "../releases/releaseRoutes.js"
+import { serviceSetupPath } from "../services/serviceOnboarding.js"
 import { presentPortfolio, type PortfolioPresentation, type PortfolioReleasePresentation } from "./presentPortfolio.js"
 import {
   filterPortfolioReleases,
@@ -20,7 +23,6 @@ import {
   type PortfolioSnapshotLoadState,
   usePortfolioSnapshot
 } from "./usePortfolioSnapshot.js"
-import { releaseParentPath, releaseTransitionNames } from "../releases/releaseRoutes.js"
 import styles from "./PortfolioOverview.module.css"
 
 export type PortfolioOverviewState =
@@ -96,16 +98,29 @@ const PortfolioLiveStatus = ({
 }
 
 const EmptyPortfolio = (): ReactElement => (
-  <StatePanel
-    action={
-      <Link className={styles.pairAction} to="/services">
-        Enable a service
-      </Link>
-    }
-    className={styles.statePanel}
-    description="Enable and verify a service. Its first normalized release will appear here with people and source facts."
-    title="No releases yet"
-  />
+  <section aria-labelledby="first-service-title" className={styles.firstService}>
+    <div className={styles.firstServiceCopy}>
+      <Text as="h2" id="first-service-title" variant="page-title">
+        Choose your first service
+      </Text>
+      <Text tone="secondary" variant="body-large">
+        Enable and verify one source. Its releases, people, and delivery evidence will appear here automatically.
+      </Text>
+    </div>
+    <nav aria-label="Services available to enable" className={styles.serviceLauncher}>
+      {firstPartyServiceIdentities.map((service) => (
+        <Link
+          className={styles.serviceChoice}
+          data-service={service.providerId}
+          key={service.providerId}
+          to={serviceSetupPath(service.providerId)}
+        >
+          <ServiceMark service={service.providerId} />
+          <span className={styles.serviceAction}>Enable</span>
+        </Link>
+      ))}
+    </nav>
+  </section>
 )
 
 const LoadingPortfolio = (): ReactElement => (
