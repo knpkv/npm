@@ -44,7 +44,9 @@ const program = Effect.gen(function* () {
 })
 ```
 
-The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. Streams request every page lazily and inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, and malformed responses remain typed.
+The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. `getBlob` reads one immutable blob through the same injectable provider and Schema boundary, retains at most 1 MiB, and distinguishes the provider's file limit from the read client's exact observed byte limit. Streams and blob reads inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, malformed responses, and blob size limits remain typed.
+
+Binary/generated classification, commit history, and comment reads remain later I01 slices; callers must not infer those facts merely from a successful inventory read.
 
 ### CacheService (SQLite)
 

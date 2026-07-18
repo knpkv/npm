@@ -75,6 +75,13 @@ const baseReadClient = (
         arn: "arn:aws:sts::123456789012:assumed-role/Developer/alice"
       })
     ),
+  getBlob: () =>
+    Effect.succeed(
+      new ReadClient.CodeCommitBlobContent({
+        blobId: ReadClient.CodeCommitBlobId.make("blob-head"),
+        bytes: new Uint8Array([1, 2, 3])
+      })
+    ),
   listPullRequestsPage: () =>
     Effect.succeed(
       new ReadClient.CodeCommitPullRequestPage({

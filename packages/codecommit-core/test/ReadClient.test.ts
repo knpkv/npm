@@ -3,6 +3,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -10,7 +11,12 @@ import * as Stream from "effect/Stream"
 
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
-import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../src/ReadClient/errors.js"
+import {
+  CodeCommitBlobTooLargeError,
+  CodeCommitMalformedResponseError,
+  CodeCommitReadNotFoundError
+} from "../src/ReadClient/errors.js"
+import { CODECOMMIT_BLOB_MAXIMUM_BYTES } from "../src/ReadClient/models.js"
 import { CodeCommitReadClient } from "../src/ReadClient/ReadClient.js"
 import { CodeCommitReadProvider, type CodeCommitReadProviderService } from "../src/ReadClient/ReadProvider.js"
 
@@ -56,6 +62,7 @@ const baseProvider = (overrides: Partial<CodeCommitReadProviderService> = {}): C
       Account: "123456789012",
       Arn: "arn:aws:sts::123456789012:assumed-role/Developer/alice"
     }),
+  getBlob: () => Effect.succeed({ content: new Uint8Array([1, 2, 3]) }),
   listPullRequestsPage: () => Effect.succeed({ pullRequestIds: ["17"], nextToken: "next-pr-page" }),
   getPullRequest: ({ pullRequestId }) => Effect.succeed(pullRequestResponse(pullRequestId)),
   getDifferencesPage: () => Effect.succeed({ differences: [] }),
@@ -63,6 +70,123 @@ const baseProvider = (overrides: Partial<CodeCommitReadProviderService> = {}): C
 })
 
 describe("CodeCommitReadClient", () => {
+  it.effect("reads one immutable blob through the bounded public model", () =>
+    runWithProvider(
+      baseProvider(),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const blob = yield* client.getBlob({
+          account,
+          repositoryName: "payments-api",
+          blobId: "blob-head"
+        })
+
+        assert.strictEqual(blob.blobId, "blob-head")
+        assert.strictEqual(blob.byteLength, 3)
+        assert.deepStrictEqual(blob.bytes, new Uint8Array([1, 2, 3]))
+      })
+    ))
+
+  it.effect("rejects blob bytes above the read-client bound with exact metadata", () =>
+    runWithProvider(
+      baseProvider({
+        getBlob: () => Effect.succeed({ content: new Uint8Array(CODECOMMIT_BLOB_MAXIMUM_BYTES + 1) })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getBlob({
+          account,
+          repositoryName: "payments-api",
+          blobId: "blob-oversized"
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, CodeCommitBlobTooLargeError)
+          if (Predicate.isTagged(result.failure, "CodeCommitBlobTooLargeError")) {
+            assert.strictEqual(result.failure.source, "read-client")
+            assert.strictEqual(result.failure.actualBytes, CODECOMMIT_BLOB_MAXIMUM_BYTES + 1)
+          }
+        }
+      })
+    ))
+
+  it.effect("preserves the provider blob limit as a typed size outcome", () =>
+    runWithProvider(
+      baseProvider({
+        getBlob: () =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "getBlob",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "FileTooLargeException" }
+            })
+          )
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getBlob({
+          account,
+          repositoryName: "payments-api",
+          blobId: "blob-provider-limited"
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, CodeCommitBlobTooLargeError)
+          if (Predicate.isTagged(result.failure, "CodeCommitBlobTooLargeError")) {
+            assert.strictEqual(result.failure.source, "provider")
+            assert.strictEqual(result.failure.actualBytes, null)
+          }
+        }
+      })
+    ))
+
+  it.effect("rejects malformed blob content before it reaches callers", () =>
+    runWithProvider(
+      baseProvider({ getBlob: () => Effect.succeed({ content: "not-bytes" }) }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.getBlob({
+          account,
+          repositoryName: "payments-api",
+          blobId: "blob-malformed"
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
+      })
+    ))
+
+  it.effect("interrupts an in-flight blob provider read", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const interrupted = yield* Ref.make(false)
+      const provider = baseProvider({
+        getBlob: () =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Ref.set(interrupted, true))
+          )
+      })
+      const fiber = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReadClient
+          return yield* client.getBlob({
+            account,
+            repositoryName: "payments-api",
+            blobId: "blob-cancelled"
+          }).pipe(Effect.forkChild)
+        })
+      )
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+
+      assert.isTrue(yield* Ref.get(interrupted))
+    }))
+
   it.effect("decodes immutable pull request revisions from fake provider responses", () =>
     runWithProvider(
       baseProvider(),
