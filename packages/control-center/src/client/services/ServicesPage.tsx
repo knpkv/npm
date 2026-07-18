@@ -334,11 +334,19 @@ const CatalogCard = ({
 )
 
 const ServicePreviewCard = ({
+  actionLabel = "Pair to enable",
+  isActionDisabled = false,
   onEnable,
-  service
+  service,
+  statusLabel = "Available",
+  statusTone = "positive"
 }: {
+  readonly actionLabel?: string
+  readonly isActionDisabled?: boolean
   readonly onEnable: () => void
   readonly service: FirstPartyServiceIdentity
+  readonly statusLabel?: string
+  readonly statusTone?: "critical" | "neutral" | "positive" | "progress"
 }): ReactElement => (
   <Surface as="article" className={styles.card} padding="default" shape="grouped">
     <div className={styles.cardHeading}>
@@ -348,14 +356,14 @@ const ServicePreviewCard = ({
           {service.displayName}
         </Text>
       </div>
-      <StateLabel label="Available" size="compact" tone="positive" />
+      <StateLabel label={statusLabel} size="compact" tone={statusTone} />
     </div>
     <Text tone="secondary" variant="body">
       {service.description}
     </Text>
     <div className={styles.cardAction}>
-      <Button onClick={onEnable} variant="primary">
-        Pair to enable
+      <Button disabled={isActionDisabled} onClick={onEnable} variant="primary">
+        {actionLabel}
       </Button>
     </div>
   </Surface>
@@ -598,13 +606,39 @@ export const ServicesPage = ({
           ))}
         </div>
       ) : connectionsState._tag === "loading" || connectionsState._tag === "idle" ? (
-        <StatePanel description="Reading the services available to this workspace." title="Loading services" />
+        <div className={styles.grid}>
+          {firstPartyServiceIdentities.map((service) => (
+            <ServicePreviewCard
+              actionLabel="Loading connections"
+              isActionDisabled
+              key={service.providerId}
+              onEnable={() => undefined}
+              service={service}
+              statusLabel="Loading"
+              statusTone="progress"
+            />
+          ))}
+        </div>
       ) : connectionsState._tag === "failed" ? (
-        <StatePanel
-          action={<Button onClick={() => setRequestRevision((revision) => revision + 1)}>Try again</Button>}
-          description="Control Center could not load the service catalog."
-          title="Services unavailable"
-        />
+        <>
+          <StatePanel
+            action={<Button onClick={() => setRequestRevision((revision) => revision + 1)}>Try again</Button>}
+            description="Control Center could not load connection details. The installed services remain visible below."
+            title="Connections unavailable"
+          />
+          <div className={styles.grid}>
+            {firstPartyServiceIdentities.map((service) => (
+              <ServicePreviewCard
+                actionLabel="Retry connections"
+                key={service.providerId}
+                onEnable={() => setRequestRevision((revision) => revision + 1)}
+                service={service}
+                statusLabel="Installed"
+                statusTone="neutral"
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <div className={styles.grid}>
           {connectionsState.overview.catalog.flatMap((catalog) => {

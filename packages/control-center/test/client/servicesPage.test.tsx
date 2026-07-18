@@ -138,6 +138,25 @@ const renderAnonymousServices = async (transport: ConnectionTestTransport): Prom
 }
 
 describe("ServicesPage connection tests", () => {
+  it("keeps every service visible while the authenticated overview is still loading", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => new Promise(() => undefined),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+
+    expect(host.querySelectorAll("article")).toHaveLength(5)
+    expect(host.textContent).toContain("CodeCommit")
+    expect(host.textContent).toContain("CodePipeline")
+    expect(host.textContent).toContain("Jira")
+    expect(host.textContent).toContain("Confluence")
+    expect(host.textContent).toContain("Clockify")
+    expect(host.textContent).toContain("Loading connections")
+  })
+
   it("shows every available service before the browser is paired", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
