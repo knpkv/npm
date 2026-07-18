@@ -38,6 +38,8 @@ import {
   ProviderAccountDisplayName,
   ProviderAccountRecord,
   ProviderFamily,
+  providerFamilyForProvider,
+  ProviderFamilyMatchesProvider,
   RecordRevision,
   VendorAccountId,
   VendorResourceId
@@ -109,20 +111,7 @@ const FollowedResourceRow = Schema.Struct({
   revision: RecordRevision,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp
-})
-
-const providerFamilyFor = (providerId: ProviderId): ProviderFamily => {
-  switch (providerId) {
-    case "codecommit":
-    case "codepipeline":
-      return "aws"
-    case "jira":
-    case "confluence":
-      return "atlassian"
-    case "clockify":
-      return "clockify"
-  }
-}
+}).check(ProviderFamilyMatchesProvider)
 
 const makeProviderAccountRepository = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -280,7 +269,7 @@ const makeProviderAccountRepository = Effect.gen(function*() {
       for (const row of rows) {
         const record = yield* decodeProviderAccount(
           workspaceId,
-          typeof row.providerAccountId === "string" ? row.providerAccountId : workspaceId,
+          Schema.is(ProviderAccountId)(row.providerAccountId) ? row.providerAccountId : workspaceId,
           row
         ).pipe(Effect.catchTag("PersistedRecordError", () => Effect.succeed(null)))
         if (record !== null) records.push(record)
@@ -317,7 +306,7 @@ const makeProviderAccountRepository = Effect.gen(function*() {
       input: Omit<typeof CreateFollowedResourceRequest.Type, "workspaceId">
     ) {
       const account = yield* get(workspaceId, input.providerAccountId)
-      if (providerFamilyFor(input.providerId) !== account.providerFamily) {
+      if (providerFamilyForProvider(input.providerId) !== account.providerFamily) {
         return yield* new ProviderAccountInputError({
           operation: "follow-resource",
           reason: "provider-family-mismatch"
@@ -346,7 +335,7 @@ const makeProviderAccountRepository = Effect.gen(function*() {
       for (const row of rows) {
         const record = yield* decodeFollowedResource(
           workspaceId,
-          typeof row.followedResourceId === "string" ? row.followedResourceId : workspaceId,
+          Schema.is(FollowedResourceId)(row.followedResourceId) ? row.followedResourceId : workspaceId,
           row
         ).pipe(Effect.catchTag("PersistedRecordError", () => Effect.succeed(null)))
         if (record !== null) records.push(record)

@@ -246,6 +246,62 @@ describe("provider account repository", () => {
           quarantined.map(({ recordKey }) => recordKey),
           [SECOND_ACCOUNT_ID, PIPELINE_ID]
         )
+
+        yield* database.sql`UPDATE provider_accounts
+          SET provider_account_id = 'not-a-uuid'
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND provider_account_id = ${SECOND_ACCOUNT_ID}`
+        yield* database.sql`UPDATE followed_resources
+          SET followed_resource_id = 'not-a-uuid'
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND followed_resource_id = ${PIPELINE_ID}`
+
+        assert.deepStrictEqual(
+          (yield* accounts.list(WORKSPACE_A)).map(({ providerAccountId }) => providerAccountId),
+          [AWS_ACCOUNT_ID]
+        )
+        assert.deepStrictEqual(
+          (yield* accounts.listResources(WORKSPACE_A, AWS_ACCOUNT_ID)).map(
+            ({ followedResourceId }) => followedResourceId
+          ),
+          [REPOSITORY_ID]
+        )
+        assert.isAtLeast(
+          (yield* quarantine.list(WORKSPACE_A)).filter(({ recordKey }) => recordKey === WORKSPACE_A).length,
+          2
+        )
+      })
+    ))
+
+  it.effect("quarantines followed resources whose service does not belong to their provider family", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspace
+        yield* createAwsAccount
+        const accounts = yield* ProviderAccountRepository
+        const database = yield* Database
+        const quarantine = yield* QuarantineRepository
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: REPOSITORY_ID,
+          providerAccountId: AWS_ACCOUNT_ID,
+          providerId: "codecommit",
+          vendorResourceId: VendorResourceId.make("payments-api"),
+          displayName: FollowedResourceDisplayName.make("Payments API"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+
+        yield* database.sql`PRAGMA ignore_check_constraints = ON`
+        yield* database.sql`UPDATE followed_resources
+          SET provider_id = 'jira'
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND followed_resource_id = ${REPOSITORY_ID}`
+        yield* database.sql`PRAGMA ignore_check_constraints = OFF`
+
+        assert.isEmpty(yield* accounts.listResources(WORKSPACE_A, AWS_ACCOUNT_ID))
+        const quarantined = yield* quarantine.list(WORKSPACE_A)
+        assert.lengthOf(quarantined, 1)
+        assert.strictEqual(quarantined[0]?.recordKey, REPOSITORY_ID)
       })
     ))
 })

@@ -49,6 +49,27 @@ export const ProviderFamily = Schema.Literals(["aws", "atlassian", "clockify"])
 /** Decoded provider family. */
 export type ProviderFamily = typeof ProviderFamily.Type
 
+/** Provider family that owns one concrete first-party service. */
+export const providerFamilyForProvider = (providerId: ProviderId): ProviderFamily => {
+  switch (providerId) {
+    case "codecommit":
+    case "codepipeline":
+      return "aws"
+    case "jira":
+    case "confluence":
+      return "atlassian"
+    case "clockify":
+      return "clockify"
+  }
+}
+
+/** Cross-field persistence invariant shared by followed-resource codecs. */
+export const ProviderFamilyMatchesProvider = Schema.makeFilter(
+  ({ providerFamily, providerId }: { readonly providerFamily: ProviderFamily; readonly providerId: ProviderId }) =>
+    providerFamilyForProvider(providerId) === providerFamily,
+  { expected: "a provider service owned by the persisted provider family" }
+)
+
 /** Human-readable provider-account label. */
 export const ProviderAccountDisplayName = boundedName("ProviderAccountDisplayName").pipe(
   Schema.brand("ProviderAccountDisplayName")
@@ -113,7 +134,7 @@ export const FollowedResourceRecord = Schema.Struct({
   revision: RecordRevision,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp
-})
+}).check(ProviderFamilyMatchesProvider)
 
 /** Decoded followed-resource metadata. */
 export type FollowedResourceRecord = typeof FollowedResourceRecord.Type

@@ -27,6 +27,7 @@ export const mapPersistenceWriteError = (
         error._tag === "AuthorizedShareInputError" ||
         error._tag === "DeliveryGraphInputError" ||
         error._tag === "GovernedActionInputError" ||
+        error._tag === "ProviderAccountInputError" ||
         error._tag === "ReadinessInputError" ||
         error._tag === "RelationshipRepairProposalInputError"
     ? new ApplicationInvalidRequest()
