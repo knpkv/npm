@@ -45,6 +45,29 @@ describe("server lifecycle", () => {
       yield* Fiber.join(waiting)
     }).pipe(Effect.provide(ServerLifecycle.layer)))
 
+  it.effect("keeps nested work admitted when drain begins inside an active mutation", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle
+      const entered = yield* Deferred.make<void>()
+      const continueMutation = yield* Deferred.make<void>()
+      const mutation = yield* lifecycle.runMutation(
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Deferred.await(continueMutation)),
+          Effect.andThen(lifecycle.runMutation(Effect.succeed("completed")))
+        )
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(entered)
+      yield* lifecycle.beginDrain
+      yield* Deferred.succeed(continueMutation, undefined)
+
+      assert.strictEqual(yield* Fiber.join(mutation), "completed")
+      yield* lifecycle.awaitMutationsDrained
+
+      const rejectedMutation = yield* lifecycle.runMutation(Effect.void).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedMutation))
+    }).pipe(Effect.provide(ServerLifecycle.layer)))
+
   it.effect("releases interrupted mutations from the drain barrier", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle

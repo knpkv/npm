@@ -18,10 +18,13 @@ export class ServerDraining extends Schema.TaggedErrorClass<ServerDraining>()(
 ) {}
 
 interface ServerLifecycleState {
+  readonly activeMutationFiberIds: ReadonlySet<number>
   readonly activeMutations: number
   readonly activeStreams: number
   readonly phase: ServerLifecyclePhase
 }
+
+type MutationAdmission = "acquired" | "nested" | "rejected"
 
 interface ServerLifecycleService {
   /** Move to draining exactly once and wake every drain observer. */
@@ -44,6 +47,7 @@ interface ServerLifecycleService {
 
 const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   const state = yield* Ref.make<ServerLifecycleState>({
+    activeMutationFiberIds: new Set(),
     activeMutations: 0,
     activeStreams: 0,
     phase: "accepting"
@@ -67,23 +71,38 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     Effect.asVoid
   )
 
-  const acquireMutation = Ref.modify(state, (current) => {
-    if (current.phase === "draining") return [false, current]
-    return [true, { ...current, activeMutations: current.activeMutations + 1 }]
-  }).pipe(
-    Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new ServerDraining()))
-  )
+  const acquireMutation = (fiberId: number) =>
+    Ref.modify(state, (current): [MutationAdmission, ServerLifecycleState] => {
+      if (current.activeMutationFiberIds.has(fiberId)) return ["nested", current]
+      if (current.phase === "draining") return ["rejected", current]
+      return [
+        "acquired",
+        {
+          ...current,
+          activeMutationFiberIds: new Set(current.activeMutationFiberIds).add(fiberId),
+          activeMutations: current.activeMutations + 1
+        }
+      ]
+    }).pipe(
+      Effect.flatMap((admission) =>
+        admission === "rejected" ? Effect.fail(new ServerDraining()) : Effect.succeed(admission === "acquired")
+      )
+    )
 
-  const releaseMutation = Ref.modify(state, (current) => {
-    const next = {
-      ...current,
-      activeMutations: current.activeMutations - 1
-    }
-    return [next.phase === "draining" && next.activeMutations === 0, next]
-  }).pipe(
-    Effect.flatMap((drained) => drained ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
-    Effect.asVoid
-  )
+  const releaseMutation = (fiberId: number) =>
+    Ref.modify(state, (current) => {
+      const activeMutationFiberIds = new Set(current.activeMutationFiberIds)
+      activeMutationFiberIds.delete(fiberId)
+      const next = {
+        ...current,
+        activeMutationFiberIds,
+        activeMutations: current.activeMutations - 1
+      }
+      return [next.phase === "draining" && next.activeMutations === 0, next]
+    }).pipe(
+      Effect.flatMap((drained) => (drained ? Deferred.succeed(mutationsDrained, undefined) : Effect.void)),
+      Effect.asVoid
+    )
 
   const acquireStreamPermit = Ref.modify(state, (current) => {
     if (current.phase === "draining") return [false, current]
@@ -110,10 +129,12 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     drainWithin,
     phase: Ref.get(state).pipe(Effect.map((current) => current.phase)),
     runMutation: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.acquireUseRelease(
-        acquireMutation,
-        () => effect,
-        () => releaseMutation
+      Effect.withFiber((fiber) =>
+        Effect.acquireUseRelease(
+          acquireMutation(fiber.id),
+          () => effect,
+          (acquired) => (acquired ? releaseMutation(fiber.id) : Effect.void)
+        )
       ),
     acquireStream: Effect.acquireRelease(acquireStreamPermit, () => releaseStream)
   } satisfies ServerLifecycleService
