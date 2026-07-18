@@ -117,6 +117,54 @@ const runWithClient = <A, E>(
   )
 
 describe("CodeCommitPlugin", () => {
+  it.effect("proves repository access and region-scopes the discovered resource identity", () =>
+    Effect.gen(function*() {
+      const probes = yield* Ref.make(0)
+      const client = baseReadClient({
+        listPullRequestsPage: () =>
+          Ref.update(probes, (count) => count + 1).pipe(
+            Effect.as(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [], nextToken: null }))
+          )
+      })
+      const result = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const health = yield* connection.health
+          const discovery = yield* connection.discover
+          return { discovery, health }
+        })
+      )
+
+      assert.strictEqual(result.health._tag, "healthy")
+      assert.strictEqual(result.discovery.workspace?.providerImmutableId, "eu-west-1:payments-api")
+      assert.strictEqual(yield* Ref.get(probes), 2)
+    }))
+
+  it.effect("rejects discovery and health when AWS cannot confirm the configured repository", () =>
+    Effect.gen(function*() {
+      const client = baseReadClient({
+        listPullRequestsPage: () =>
+          Effect.fail(new ReadClient.CodeCommitReadNotFoundError({ operation: "repository-probe" }))
+      })
+      const results = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const health = yield* connection.health.pipe(Effect.result)
+          const discovery = yield* connection.discover.pipe(Effect.result)
+          return { discovery, health }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(results.health))
+      if (Result.isFailure(results.health)) assert.instanceOf(results.health.failure, PluginConfigurationFailure)
+      assert.isTrue(Result.isFailure(results.discovery))
+      if (Result.isFailure(results.discovery)) {
+        assert.instanceOf(results.discovery.failure, PluginConfigurationFailure)
+      }
+    }))
+
   it.effect("normalizes paginated pull-request sync and resumes from the provider cursor", () =>
     Effect.gen(function*() {
       const requestedPages = yield* Ref.make<

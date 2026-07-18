@@ -269,7 +269,13 @@ const makePluginConnectionRepository = Effect.gen(function*() {
     ) {
       yield* database.transaction(
         Effect.gen(function*() {
-          yield* bind({ workspaceId, pluginConnectionId, ...input })
+          yield* bind({ workspaceId, pluginConnectionId, ...input }).pipe(
+            mapAlreadyExists({
+              workspaceId,
+              recordKind: "plugin-connection-resource",
+              recordKey: input.followedResourceId
+            })
+          )
           if ((yield* readChanges(sql)) === 0) {
             return yield* resolveMutationFailure(workspaceId, pluginConnectionId, input.expectedRevision)
           }

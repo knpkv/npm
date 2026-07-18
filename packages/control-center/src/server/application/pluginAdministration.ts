@@ -893,6 +893,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       expectedRevision: draft.revision,
       updatedAt: yield* DateTime.now
     }).pipe(Effect.mapError(mapPersistenceWriteError))
+    let cleanupConnection = enabled
 
     return yield* Effect.gen(function*() {
       yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: request.pluginConnectionId })
@@ -905,6 +906,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       const bound = tested.test._tag === "healthy"
         ? yield* materializeAwsConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
         : enabled
+      cleanupConnection = bound
       yield* persistSetupTestHealth(
         persistence,
         cryptoService,
@@ -918,7 +920,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         configuration: yield* configuration(persistence, secrets, workspaceId, request.pluginConnectionId),
         test: tested.test
       } satisfies CreatePluginConnectionResponse
-    }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, enabled)))
+    }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, cleanupConnection)))
   }).pipe(
     Effect.onExit(() =>
       removeSetupSecretsUnlessConfigured(

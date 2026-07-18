@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import { FollowedResourceId, ProviderAccountId } from "../../domain/identifiers.js"
 import type { PluginDiscoveryV1 } from "../../domain/plugins/discovery.js"
 import { ApplicationInvalidRequest, ApplicationServiceUnavailable } from "../api/ApplicationServices.js"
+import { RecordAlreadyExistsError } from "../persistence/errors.js"
 import type { Persistence } from "../persistence/Persistence.js"
 import type { PluginConnectionRecord } from "../persistence/repositories/models.js"
 import {
@@ -74,6 +75,19 @@ export const materializeAwsConnectionOwnership = Effect.fn(
       isEnabled: true,
       createdAt: materializedAt
     }))
+
+    const connections = yield* persistence.pluginConnections.list(connection.workspaceId)
+    if (
+      connections.some((candidate) =>
+        candidate.followedResourceId === resource.followedResourceId
+      )
+    ) {
+      return yield* new RecordAlreadyExistsError({
+        workspaceId: connection.workspaceId,
+        recordKind: "plugin-connection-resource",
+        recordKey: resource.followedResourceId
+      })
+    }
 
     return yield* persistence.pluginConnections.bindResource(
       connection.workspaceId,

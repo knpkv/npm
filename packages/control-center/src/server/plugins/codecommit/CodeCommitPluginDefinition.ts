@@ -290,16 +290,26 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 ): Effect.fn.Return<PluginConnectionV1, never, ReadClient.CodeCommitReadClient> {
   const readClient = yield* ReadClient.CodeCommitReadClient
   const account = { profile: configuration.profile, region: configuration.region }
+  const probeRepository = readClient.listPullRequestsPage({
+    account,
+    repositoryName: configuration.repositoryName,
+    status: "OPEN",
+    nextToken: null
+  }).pipe(
+    Effect.catch((error) => failRead("repository-probe", error)),
+    Effect.asVoid
+  )
 
   const discover = Effect.gen(function*() {
     const identity = yield* readClient.discoverAccount(account).pipe(
       Effect.catch((error) => failRead("discover", error))
     )
+    yield* probeRepository
     const discoveredAt = yield* now
     return yield* output("discover", PluginDiscoveryV1, {
       account: { providerImmutableId: identity.accountId, displayName: identity.accountId },
       workspace: {
-        providerImmutableId: configuration.repositoryName,
+        providerImmutableId: `${configuration.region}:${configuration.repositoryName}`,
         displayName: configuration.repositoryName
       },
       endpoints: [{
@@ -313,6 +323,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const health = readClient.discoverAccount(account).pipe(
     Effect.catch((error) => failRead("health", error)),
+    Effect.andThen(probeRepository),
     Effect.andThen(now),
     Effect.flatMap((checkedAt) =>
       output("health", PluginHealth, {

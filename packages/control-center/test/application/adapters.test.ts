@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -79,6 +79,7 @@ const CODEPIPELINE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6
 const PROVISIONED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008d")
 const INVALID_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008e")
 const FAILED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008f")
+const DUPLICATE_AWS_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
@@ -809,7 +810,7 @@ describe("application adapters", () => {
       assert.strictEqual(metadata.pluginId, "dev.knpkv.codecommit")
     })))
 
-  it.effect("reuses one discovered AWS account across independently followed repositories and pipelines", () =>
+  it.effect("shares an AWS account while region-scoping resources and rejecting duplicate bindings", () =>
     withApplication(Effect.gen(function*() {
       yield* setup
       const awsConnection = (
@@ -829,7 +830,11 @@ describe("application adapters", () => {
         proposeAction: () => Effect.die("not used")
       })
       const repositoryConnection = awsConnection({
-        providerImmutableId: "payments",
+        providerImmutableId: "eu-west-1:payments",
+        displayName: "payments"
+      })
+      const otherRegionRepositoryConnection = awsConnection({
+        providerImmutableId: "us-east-1:payments",
         displayName: "payments"
       })
       const pipelineConnection = awsConnection({
@@ -842,7 +847,10 @@ describe("application adapters", () => {
             ? Effect.die("AWS setup crossed its requested workspace")
             : pluginConnectionId === PROVISIONED_PLUGIN_ID
             ? Effect.succeed(Context.make(PluginConnection, repositoryConnection))
+            : pluginConnectionId === FAILED_PLUGIN_ID
+            ? Effect.succeed(Context.make(PluginConnection, otherRegionRepositoryConnection))
             : pluginConnectionId === CODEPIPELINE_PLUGIN_ID
+                || pluginConnectionId === DUPLICATE_AWS_PLUGIN_ID
             ? Effect.succeed(Context.make(PluginConnection, pipelineConnection))
             : Effect.die("AWS setup crossed its requested connection"),
         invalidate: () => Effect.void
@@ -876,15 +884,52 @@ describe("application adapters", () => {
           ]
         }
       })
+      const otherRegionRepository = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: FAILED_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Payments repository in us-east-1",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "us-east-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      })
+      const duplicatePipeline = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: DUPLICATE_AWS_PLUGIN_ID,
+          providerId: "codepipeline",
+          displayName: "Duplicate payments release pipeline",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("pipelineName"), value: "payments-release" }
+          ]
+        }
+      }).pipe(Effect.result)
 
       if (
         repository.connection.providerAccountId === null ||
         repository.connection.followedResourceId === null ||
+        otherRegionRepository.connection.providerAccountId === null ||
+        otherRegionRepository.connection.followedResourceId === null ||
         pipeline.connection.providerAccountId === null ||
         pipeline.connection.followedResourceId === null
       ) return assert.fail("healthy AWS setup did not materialize its account and resource ownership")
       assert.strictEqual(repository.connection.providerAccountId, pipeline.connection.providerAccountId)
+      assert.strictEqual(repository.connection.providerAccountId, otherRegionRepository.connection.providerAccountId)
       assert.notStrictEqual(repository.connection.followedResourceId, pipeline.connection.followedResourceId)
+      assert.notStrictEqual(
+        repository.connection.followedResourceId,
+        otherRegionRepository.connection.followedResourceId
+      )
+      assert.isTrue(Result.isFailure(duplicatePipeline))
+      if (Result.isFailure(duplicatePipeline)) {
+        assert.instanceOf(duplicatePipeline.failure, ApplicationConflict)
+      }
 
       const persistence = yield* Persistence
       const accounts = yield* persistence.providerAccounts.list(WORKSPACE_ID)
@@ -895,11 +940,18 @@ describe("application adapters", () => {
         WORKSPACE_ID,
         repository.connection.providerAccountId
       )
-      assert.lengthOf(resources, 2)
+      assert.lengthOf(resources, 3)
       assert.deepStrictEqual(
-        resources.map(({ providerId, vendorResourceId }) => ({ providerId, vendorResourceId })),
+        resources
+          .map(({ providerId, vendorResourceId }) => ({ providerId, vendorResourceId }))
+          .sort(
+            (left, right) =>
+              left.providerId.localeCompare(right.providerId) ||
+              left.vendorResourceId.localeCompare(right.vendorResourceId)
+          ),
         [
-          { providerId: "codecommit", vendorResourceId: "payments" },
+          { providerId: "codecommit", vendorResourceId: "eu-west-1:payments" },
+          { providerId: "codecommit", vendorResourceId: "us-east-1:payments" },
           {
             providerId: "codepipeline",
             vendorResourceId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release"
@@ -916,6 +968,62 @@ describe("application adapters", () => {
         key: PluginConfigurationKey.make("profile"),
         value: "delivery"
       })
+      assert.isFalse(
+        (yield* persistence.pluginConnections.get(WORKSPACE_ID, DUPLICATE_AWS_PLUGIN_ID)).isEnabled
+      )
+    })))
+
+  it.effect("disables a bound AWS connection when setup fails after ownership materialization", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const cryptoService = yield* Crypto.Crypto
+      const uuidCalls = yield* Ref.make(0)
+      const failingInvalidationCrypto = Crypto.Crypto.of({
+        ...cryptoService,
+        randomUUIDv7: Ref.getAndUpdate(uuidCalls, (count) => count + 1).pipe(
+          Effect.flatMap((call) => call < 2 ? cryptoService.randomUUIDv7 : Effect.succeed("not-a-uuid"))
+        )
+      })
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "123456789012", displayName: "123456789012" },
+          workspace: { providerImmutableId: "eu-west-1:payments", displayName: "payments" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }).pipe(Effect.provideService(Crypto.Crypto, failingInvalidationCrypto))
+      const connect = administration.connectAndTest
+      assert.isDefined(connect)
+      const result = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: PROVISIONED_PLUGIN_ID,
+          providerId: "codecommit",
+          displayName: "Payments repository",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
+        }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationServiceUnavailable)
+      const record = yield* (yield* Persistence).pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.isFalse(record.isEnabled)
+      assert.isNotNull(record.providerAccountId)
+      assert.isNotNull(record.followedResourceId)
     })))
 
   it.effect("rejects missing and unknown catalog fields before creating metadata", () =>
