@@ -239,17 +239,6 @@ const findSeedMarkdownFile = Effect.gen(function*() {
   return path.isAbsolute(entry) ? entry : path.join(docsDir, entry)
 })
 
-const expectSeedAssetIncludesAttachmentMedia = Effect.gen(function*() {
-  const seedPath = yield* findSeedMarkdownFile
-  expect(seedPath).not.toBeNull()
-  const content = yield* readText(seedPath!)
-  const attachmentSections = content.match(SEED_ATTACHMENT_SECTION_RE) ?? []
-  expect(attachmentSections).toHaveLength(1)
-  expect(content).toContain("# Attachment media")
-  expect(content).toContain("<!-- adf:mediaSingle")
-  expect(content).toContain(INTEGRATION_ATTACHMENT_FILENAME)
-})
-
 const findPageByPageId = (pageId: string) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -569,6 +558,12 @@ const expectRemoteMediaAttachment = (pageId: string) =>
     expect(snapshot.evidence.types.has("mediaSingle") || snapshot.evidence.types.has("mediaGroup")).toBe(true)
   })
 
+const expectMarkdownAttachmentMedia = (content: string): void => {
+  expect(content).toContain("<!-- adf:mediaSingle")
+  expect(content).toContain("<!-- adf:/mediaSingle")
+  expect(content).toContain("![Attachment proof]")
+}
+
 const uploadSvgAttachmentToPage = (filePath: string, pageId: string) =>
   Effect.gen(function*() {
     yield* copyIntegrationAttachmentAsset
@@ -593,9 +588,7 @@ const uploadSvgAttachmentToPage = (filePath: string, pageId: string) =>
     expect(attachment?.["filename"]).toBe(INTEGRATION_ATTACHMENT_FILENAME)
 
     const updated = yield* readText(filePath)
-    expect(updated).toContain("<!-- adf:mediaSingle")
-    expect(updated).toContain("<!-- adf:/mediaSingle")
-    expect(updated).toContain("![Attachment proof]")
+    expectMarkdownAttachmentMedia(updated)
     expect(updated).toContain("\"alt\":\"Attachment proof\"")
     expect(updated).not.toContain(`![Attachment proof](${INTEGRATION_ATTACHMENT_FILENAME})`)
   })
@@ -680,7 +673,6 @@ describe("CLI Integration - Page Creation Flow", () => {
       await runPlatform(Effect.gen(function*() {
         // 1. Clone pages from Confluence
         yield* clonePages
-        yield* expectSeedAssetIncludesAttachmentMedia
 
         // 2. Create new page from template
         const { createMarker, file, seedPageId, timestamp } = yield* createPageFromSeed
@@ -765,6 +757,7 @@ describe("CLI Integration - Page Creation Flow", () => {
         })
         expect(contentAfterReclone).toContain(createMarker)
         expect(contentAfterReclone).toContain(modifyMarker)
+        expectMarkdownAttachmentMedia(contentAfterReclone)
         yield* expectSidecarMetadata(reclonedFile!, pageId!, contentAfterReclone)
         yield* expectRemoteMediaAttachment(pageId!)
 
