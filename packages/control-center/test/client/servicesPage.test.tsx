@@ -200,6 +200,43 @@ const successfulCreate: ConnectionTestTransport["create"] = (request) =>
     })
   )
 
+const successfulAwsCreate = (
+  request: Parameters<ConnectionTestTransport["create"]>[0],
+  providerAccountId: ProviderAccountId,
+  followedResourceId: FollowedResourceId
+) =>
+  Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+    connection: {
+      pluginConnectionId: request.pluginConnectionId,
+      providerAccountId,
+      followedResourceId,
+      providerId: request.providerId,
+      displayName: request.displayName,
+      isEnabled: true,
+      health: null,
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    },
+    configuration: {
+      pluginConnectionId: request.pluginConnectionId,
+      revision: 1,
+      values: request.values,
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    },
+    test: {
+      _tag: "healthy",
+      pluginConnectionId: request.pluginConnectionId,
+      providerId: request.providerId,
+      checkedAt: "2026-07-14T10:03:00.000Z",
+      latencyMilliseconds: 20,
+      identity: {
+        kind: "account",
+        label: "AWS account",
+        displayName: "Production account",
+        providerImmutableId: "123456789012"
+      }
+    }
+  })
+
 describe("ServicesPage connection tests", () => {
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
@@ -588,6 +625,7 @@ describe("ServicesPage connection tests", () => {
       ({ textContent }) => textContent === "Add repository"
     )
     await act(async () => addRepository?.click())
+    expect(host.textContent).not.toContain("Needs correction")
     const region = host.querySelectorAll<HTMLInputElement>("input")[2]
     if (region !== undefined) await setControlValue(region, "eu-west-1")
     const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
@@ -607,6 +645,106 @@ describe("ServicesPage connection tests", () => {
     expect(accountCard?.textContent).toContain("payments-api")
     expect(accountCard?.textContent).toContain("risk-engine")
     expect(accountCard?.textContent?.match(/Healthy/gu)).toHaveLength(2)
+  })
+
+  it("does not let an aborted account refresh clear a newer create flow", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000186")
+    const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000187")
+    const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000188")
+    const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000189")
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({ ...overview, connections: [] })
+    let overviewCall = 0
+    const loadOverview = vi.fn((_signal: AbortSignal): Promise<PluginOverviewResponse> => {
+      overviewCall += 1
+      if (overviewCall === 1) return Promise.resolve(initialOverview)
+      return new Promise((_resolve, reject) => {
+        _signal.addEventListener("abort", () => reject(new Error("aborted refresh")), { once: true })
+      })
+    })
+    let createCall = 0
+    const create = vi.fn<ConnectionTestTransport["create"]>((request) => {
+      createCall += 1
+      if (createCall === 1) return Promise.resolve(successfulAwsCreate(request, accountId, repositoryId))
+      return new Promise(() => undefined)
+    })
+    const connectionIds = [repositoryConnectionId, pipelineConnectionId]
+    let connectionIdIndex = 0
+    const transport: ConnectionTestTransport = {
+      create,
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(connectionIds[connectionIdIndex++] ?? pipelineConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
+    const firstSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      firstSubmit?.click()
+      await Promise.resolve()
+    })
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+
+    const configurePipeline = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Configure AWS account"
+    )
+    await act(async () => configurePipeline?.click())
+    const nextRegion = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (nextRegion !== undefined) await setControlValue(nextRegion, "eu-west-1")
+    const pipelines = host.querySelectorAll<HTMLTextAreaElement>("textarea")[1]
+    if (pipelines !== undefined) await setControlValue(pipelines, "payments-release")
+    const secondSubmit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      secondSubmit?.click()
+      await Promise.resolve()
+    })
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(host.querySelector("form")).not.toBeNull()
+    expect(host.textContent).toContain("Connect AWS account")
+  })
+
+  it("keeps an optimistic account connection when its refresh fails", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000190")
+    const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000191")
+    const connectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000192")
+    const initialOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({ ...overview, connections: [] })
+    const loadOverview = vi
+      .fn()
+      .mockResolvedValueOnce(initialOverview)
+      .mockRejectedValueOnce(new Error("refresh unavailable"))
+    const transport: ConnectionTestTransport = {
+      create: (request) => Promise.resolve(successfulAwsCreate(request, accountId, resourceId)),
+      overview: loadOverview,
+      makeConnectionId: () => Promise.resolve(connectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const repositories = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositories !== undefined) await setControlValue(repositories, "payments-api")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => {
+      submit?.click()
+      await Promise.resolve()
+    })
+
+    expect(loadOverview).toHaveBeenCalledTimes(2)
+    expect(host.querySelector("form")).toBeNull()
+    expect(host.textContent).toContain("AWS account · payments-api")
   })
 
   it("prefers one discovered OAuth profile for both Jira and Confluence", async () => {

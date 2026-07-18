@@ -572,6 +572,7 @@ export const ServicesPage = ({
             const refreshedOverview = await transport.overview(request.signal)
             if (!request.signal.aborted) setConnectionsState({ _tag: "ready", overview: refreshedOverview })
           } catch (failure: unknown) {
+            if (request.signal.aborted) return false
             if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           }
         }
@@ -793,7 +794,7 @@ export const ServicesPage = ({
                   catalog={catalog}
                   catalogs={connectionsState.overview.catalog}
                   isOpen={openProvider === catalog.providerId}
-                  isRecovery={configured.length > 0}
+                  isRecovery={standaloneConnections.length > 0}
                   isSubmitting={submittingProvider === catalog.providerId}
                   key={`${catalog.providerId}-catalog`}
                   onCancel={() => {

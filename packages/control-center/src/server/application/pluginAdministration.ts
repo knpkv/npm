@@ -293,6 +293,17 @@ const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnable
         expectedRevision: current.revision,
         updatedAt
       })
+      if (current.followedResourceId !== null) {
+        const resource = yield* persistence.providerAccounts.getResource(workspaceId, current.followedResourceId)
+        if (resource.isEnabled !== isEnabled) {
+          yield* persistence.providerAccounts.updateResourceMetadata(workspaceId, current.followedResourceId, {
+            displayName: resource.displayName,
+            isEnabled,
+            expectedRevision: resource.revision,
+            updatedAt
+          })
+        }
+      }
       yield* appendPortfolioInvalidation({
         workspaceId,
         pluginConnectionId,

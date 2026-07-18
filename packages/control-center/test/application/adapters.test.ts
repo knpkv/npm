@@ -963,6 +963,7 @@ describe("application adapters", () => {
       const accountOverview = yield* readAccounts(WORKSPACE_ID)
       assert.lengthOf(accountOverview, 1)
       assert.strictEqual(accountOverview[0]?.providerImmutableId, "123456789012")
+      assert.isTrue(accountOverview[0]?.resources.every(({ isEnabled }) => isEnabled) ?? false)
       assert.deepStrictEqual(
         accountOverview[0]?.resources.map(({ displayName, providerId }) => ({ displayName, providerId })),
         [
@@ -970,6 +971,19 @@ describe("application adapters", () => {
           { displayName: "payments", providerId: "codecommit" },
           { displayName: "payments-release", providerId: "codepipeline" }
         ]
+      )
+      const setEnabled = administration.setConnectionEnabled
+      assert.isDefined(setEnabled)
+      yield* setEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        isEnabled: false
+      })
+      const disabledAccountOverview = yield* readAccounts(WORKSPACE_ID)
+      assert.isFalse(
+        disabledAccountOverview[0]?.resources.find(
+          ({ followedResourceId }) => followedResourceId === repository.connection.followedResourceId
+        )?.isEnabled
       )
       assert.deepInclude(repository.configuration.values, {
         _tag: "text",
