@@ -1,4 +1,4 @@
-import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
+import { HomeDirectoryLive, isTokenExpired } from "@knpkv/atlassian-common/profile-storage"
 import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
@@ -45,7 +45,7 @@ import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
-import { discoverAtlassianProfiles } from "../plugins/atlassian/AtlassianProfiles.js"
+import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
 import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
@@ -62,6 +62,91 @@ const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
+
+type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
+type AtlassianConfigurationValue = CreatePluginConnectionValue | StoredPluginConfigurationValue
+
+const isAtlassianProvider = (
+  providerId: PluginConnectionRecord["providerId"]
+): providerId is AtlassianProviderId => providerId === "jira" || providerId === "confluence"
+
+const configuredText = (
+  values: ReadonlyArray<AtlassianConfigurationValue>,
+  key: string
+): string | null => {
+  const value = values.find((candidate) => candidate.key === key)
+  return value !== undefined && (value._tag === "text" || value._tag === "url")
+    ? value.value
+    : null
+}
+
+const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAtlassianOAuthProfile")(function*(
+  providerId: PluginConnectionRecord["providerId"],
+  values: ReadonlyArray<AtlassianConfigurationValue>,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path
+) {
+  if (!isAtlassianProvider(providerId) || configuredText(values, "authMode") !== "oauth") return
+  const profileId = configuredText(values, "oauthProfileId")
+  const siteUrl = configuredText(values, providerId === "jira" ? "webBaseUrl" : "siteBaseUrl")
+  if (profileId === null || siteUrl === null) return yield* new ApplicationInvalidRequest()
+  const profile = yield* loadAtlassianProfile(providerId, profileId).pipe(
+    Effect.provide([
+      HomeDirectoryLive,
+      Layer.succeed(FileSystem.FileSystem, fileSystem),
+      Layer.succeed(Path.Path, path)
+    ]),
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  if (profile === null || isTokenExpired(profile.token, 0)) return yield* new ApplicationInvalidRequest()
+  const expectedSite = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(siteUrl).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  const profileSite = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(profile.token.site_url).pipe(
+    Effect.mapError(() => new ApplicationInvalidRequest())
+  )
+  if (
+    profileSite.origin !== expectedSite.origin ||
+    (providerId === "confluence" && profile.token.cloud_id !== configuredText(values, "siteId"))
+  ) {
+    return yield* new ApplicationInvalidRequest()
+  }
+})
+
+const validateStoredAtlassianAuthentication = Effect.fn(
+  "PluginAdministration.validateStoredAtlassianAuthentication"
+)(function*(
+  providerId: PluginConnectionRecord["providerId"],
+  pluginId: string,
+  values: ReadonlyArray<StoredPluginConfigurationValue>,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path
+) {
+  if (
+    !isAtlassianProvider(providerId) ||
+    (pluginId !== "dev.knpkv.jira.read" && pluginId !== "dev.knpkv.confluence")
+  ) return
+  const authMode = configuredText(values, "authMode")
+  const valuesByKey = new Map<string, StoredPluginConfigurationValue>(
+    values.map((value) => [value.key, value])
+  )
+  const hasCredential = (key: string): boolean => valuesByKey.get(key)?._tag === "secret-reference"
+  if (authMode === "api-token") {
+    if (!hasCredential("email") || !hasCredential("apiToken") || valuesByKey.has("oauthProfileId")) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return
+  }
+  if (
+    authMode !== "oauth" ||
+    configuredText(values, "oauthProfileId") === null ||
+    valuesByKey.has("email") ||
+    valuesByKey.has("apiToken")
+  ) {
+    return yield* new ApplicationInvalidRequest()
+  }
+  yield* validateAtlassianOAuthProfile(providerId, values, fileSystem, path)
+})
 
 const decodeNegotiatedDescriptor = (descriptorJson: string) => {
   const json = Schema.decodeUnknownResult(Schema.UnknownFromJsonString)(descriptorJson)
@@ -725,12 +810,15 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
   wakeups: DomainEventWakeups["Service"],
   secrets: SecretStore["Service"],
   pluginConnections: PluginConnectionMapV1 | null,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
   workspaceId: WorkspaceId,
   request: CreatePluginConnectionRequest
 ) {
   const catalog = firstPartyService(request.providerId)
   if (catalog === undefined) return yield* new ApplicationInvalidRequest()
   const setupValues = yield* validateSetup(catalog, request)
+  yield* validateAtlassianOAuthProfile(request.providerId, setupValues, fileSystem, path)
   const displayName = yield* Schema.decodeUnknownEffect(PluginConnectionDisplayName)(request.displayName).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
   )
@@ -855,7 +943,17 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
     connectAndTest: ({ request, workspaceId }) =>
-      connectAndTest(persistence, cryptoService, wakeups, secrets, pluginConnections, workspaceId, request),
+      connectAndTest(
+        persistence,
+        cryptoService,
+        wakeups,
+        secrets,
+        pluginConnections,
+        fileSystem,
+        path,
+        workspaceId,
+        request
+      ),
     setConnectionEnabled: ({ isEnabled, pluginConnectionId, workspaceId }) =>
       setConnectionEnabled(
         persistence,
@@ -925,6 +1023,13 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       // Keep operations resolve only the reference stored at the expected revision. The
       // repository CAS then prevents that reference from surviving a concurrent replacement.
       const values = yield* canonicalValues(secrets, currentValues, patch.values, credentialKeys)
+      yield* validateStoredAtlassianAuthentication(
+        connection.providerId,
+        descriptor.descriptor.pluginId,
+        values,
+        fileSystem,
+        path
+      )
       const updatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
       yield* Effect.uninterruptible(
         persistence.pluginConfigurations.update(

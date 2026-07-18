@@ -8,9 +8,9 @@ import type { ProviderId } from "../../../domain/sourceRevision.js"
 
 type AtlassianProviderId = Extract<ProviderId, "jira" | "confluence">
 
-const profileStores: Readonly<Record<AtlassianProviderId, readonly [string, string]>> = {
-  jira: ["jira-cli", "confluence-to-markdown"],
-  confluence: ["confluence-to-markdown", "jira-cli"]
+const profileStores: Readonly<Record<AtlassianProviderId, string>> = {
+  jira: "jira-cli",
+  confluence: "confluence-to-markdown"
 }
 
 interface ProfileWithProvider {
@@ -21,7 +21,7 @@ interface ProfileWithProvider {
 const loadProviderProfiles = Effect.fn("AtlassianProfiles.loadProviderProfiles")(function*(
   provider: AtlassianProviderId
 ) {
-  const store = yield* loadProfiles(profileStores[provider][0])
+  const store = yield* loadProfiles(profileStores[provider])
   return store.profiles.map((profile) => ({ profile, provider }))
 })
 
@@ -41,14 +41,15 @@ export const discoverAtlassianProfiles = Effect.fn("AtlassianProfiles.discover")
     const first = matches[0]
     if (first === undefined) return []
     const { profile } = first
+    const accountEmail = profile.token.user?.email?.trim()
     return [{
       profileId: profile.id,
       name: profile.name,
       siteUrl: profile.token.site_url,
       cloudId: profile.token.cloud_id,
       accountName: profile.token.user?.name ?? null,
-      accountEmail: profile.token.user?.email ?? null,
-      status: isTokenExpired(profile.token, 0) ? "expired" : "valid",
+      accountEmail: accountEmail === undefined || accountEmail.length === 0 ? null : accountEmail,
+      status: matches.some(({ profile: match }) => isTokenExpired(match.token, 0)) ? "expired" : "valid",
       providers: matches.map(({ provider }) => provider)
     }]
   })
@@ -59,10 +60,6 @@ export const loadAtlassianProfile = Effect.fn("AtlassianProfiles.load")(function
   provider: AtlassianProviderId,
   profileId: string
 ) {
-  for (const storeName of profileStores[provider]) {
-    const store = yield* loadProfiles(storeName)
-    const profile = store.profiles.find((candidate) => candidate.id === profileId)
-    if (profile !== undefined) return profile
-  }
-  return null
+  const store = yield* loadProfiles(profileStores[provider])
+  return store.profiles.find((candidate) => candidate.id === profileId) ?? null
 })

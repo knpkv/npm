@@ -35,13 +35,17 @@ const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string |
   const authMode = configured.get("authMode")
   if (authMode === "oauth") {
     const profileId = configured.get("oauthProfileId")
-    return typeof profileId === "string" && profileId.length > 0
+    return typeof profileId === "string" &&
+      profileId.length > 0 &&
+      !configured.has("email") &&
+      !configured.has("apiToken")
   }
   const apiToken = configured.get("apiToken")
   return authMode === "api-token" &&
     Schema.is(AtlassianBasicAuthEmail)(configured.get("email")) &&
     typeof apiToken === "string" &&
-    apiToken.length > 0
+    apiToken.length > 0 &&
+    !configured.has("oauthProfileId")
 }
 
 const jiraSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {

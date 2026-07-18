@@ -1,16 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import * as ConfigProvider from "effect/ConfigProvider"
 import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
-import type * as FileSystem from "effect/FileSystem"
-import type * as Path from "effect/Path"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import * as TestClock from "effect/testing/TestClock"
 
 import {
+  type CreatePluginConnectionRequest,
   OpaqueMediaId,
   OpaqueSecretReference,
   PluginConfigurationKey,
+  type PluginConfigurationPatchValue,
   PluginConnectionTestResult
 } from "../../src/api/index.js"
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
@@ -856,6 +859,136 @@ describe("application adapters", () => {
         yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)
       ))
     })))
+
+  it.effect("validates Atlassian OAuth profiles and mode-specific patch credentials before writes", () =>
+    withApplication(Effect.scoped(Effect.gen(function*() {
+      const persistence = yield* setup
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-oauth-setup-" })
+      const configRoot = path.join(home, ".config")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configRoot })
+      const profileId = "account-1@cloud-1"
+      const profile = (expiresAt: number) => ({
+        id: profileId,
+        name: "Avery Bell @ knpkv.atlassian.net",
+        token: {
+          access_token: "oauth-access-token",
+          refresh_token: "oauth-refresh-token",
+          expires_at: expiresAt,
+          scope: "read:me offline_access",
+          cloud_id: "cloud-1",
+          site_url: "https://knpkv.atlassian.net/",
+          user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+        },
+        created_at: "2026-07-18T10:00:00.000Z",
+        updated_at: "2026-07-18T10:00:00.000Z"
+      })
+      const writeStore = Effect.fn("Test.writeAtlassianProfileStore")(function*(
+        storeName: string,
+        profiles: ReadonlyArray<ReturnType<typeof profile>>
+      ) {
+        const storePath = path.join(configRoot, "atlassian", storeName)
+        yield* fileSystem.makeDirectory(storePath, { recursive: true })
+        yield* fileSystem.writeFileString(
+          path.join(storePath, "profiles.json"),
+          JSON.stringify({ activeProfileId: profileId, profiles })
+        )
+      })
+
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "account-1", displayName: "Avery Bell" },
+          workspace: { providerImmutableId: "cloud-1", displayName: "Knpkv Jira" },
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      })
+      const operation = administration.connectAndTest
+      assert.isDefined(operation)
+      const request: CreatePluginConnectionRequest = {
+        pluginConnectionId: INVALID_PLUGIN_ID,
+        providerId: "jira",
+        displayName: "OAuth Jira",
+        values: [
+          { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+          { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" },
+          { _tag: "text", key: PluginConfigurationKey.make("oauthProfileId"), value: profileId }
+        ]
+      }
+
+      yield* writeStore("confluence-to-markdown", [profile(4_102_444_800_000)])
+      const wrongProvider = yield* operation({ workspaceId: WORKSPACE_ID, request }).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(wrongProvider))
+      if (Result.isFailure(wrongProvider)) assert.instanceOf(wrongProvider.failure, ApplicationInvalidRequest)
+
+      yield* writeStore("jira-cli", [profile(1)])
+      const expired = yield* operation({ workspaceId: WORKSPACE_ID, request }).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(expired))
+      if (Result.isFailure(expired)) assert.instanceOf(expired.failure, ApplicationInvalidRequest)
+
+      yield* writeStore("jira-cli", [profile(4_102_444_800_000)])
+      const connected = yield* operation({ workspaceId: WORKSPACE_ID, request }).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(connected.configuration.revision, 1)
+
+      const adapterValues: ReadonlyArray<PluginConfigurationPatchValue> = [
+        { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+        { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+        { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 50 },
+        { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" }
+      ]
+      const invalidPatches: ReadonlyArray<ReadonlyArray<PluginConfigurationPatchValue>> = [
+        [{ _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" }, ...adapterValues],
+        [{ _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "api-token" }, ...adapterValues]
+      ]
+      for (const values of invalidPatches) {
+        const patched = yield* administration.patchConfiguration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: INVALID_PLUGIN_ID,
+          patch: { expectedRevision: 1, values }
+        }).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider),
+          Effect.result
+        )
+        assert.isTrue(Result.isFailure(patched))
+        if (Result.isFailure(patched)) assert.instanceOf(patched.failure, ApplicationInvalidRequest)
+      }
+
+      const patched = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: INVALID_PLUGIN_ID,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" },
+            { _tag: "text", key: PluginConfigurationKey.make("oauthProfileId"), value: profileId },
+            ...adapterValues
+          ]
+        }
+      }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(patched.revision, 2)
+      const durable = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, INVALID_PLUGIN_ID)
+      assert.isTrue(Option.isSome(durable))
+      if (Option.isSome(durable)) assert.strictEqual(durable.value.revision, 2)
+    }))))
 
   it.effect("keeps a provider-authentication test failure as an enabled usable connection", () =>
     withApplication(Effect.gen(function*() {
