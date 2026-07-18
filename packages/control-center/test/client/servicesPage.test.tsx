@@ -1001,6 +1001,59 @@ describe("ServicesPage connection tests", () => {
     expect(window.location.href).toBe(previousLocation)
   })
 
+  it("cancels a pending OAuth start when switching to API-token mode without blocking a later redirect", async () => {
+    let resolveFirstStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined
+    let firstStartSignal: AbortSignal | undefined
+    const previousLocation = window.location.href
+    const authorizationUrl = new URL("#atlassian-oauth-ready", previousLocation).href
+    const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
+      (signal) => {
+        if (firstStartSignal === undefined) {
+          firstStartSignal = signal
+          return new Promise((resolve) => {
+            resolveFirstStart = resolve
+          })
+        }
+        return Promise.resolve({
+          _tag: "ready",
+          authorizationUrl,
+          callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+        })
+      }
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=confluence")
+    await act(async () => undefined)
+    const buttonWithText = (text: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
+
+    await act(async () => buttonWithText("Sign in with Atlassian")?.click())
+    await act(async () => buttonWithText("Use API token instead")?.click())
+    expect(firstStartSignal?.aborted).toBe(true)
+    await act(async () =>
+      resolveFirstStart?.({
+        _tag: "ready",
+        authorizationUrl: new URL("#late-atlassian-oauth", previousLocation).href,
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      })
+    )
+    expect(window.location.href).toBe(previousLocation)
+
+    await act(async () => buttonWithText("Use OAuth profile")?.click())
+    await act(async () => buttonWithText("Sign in with Atlassian")?.click())
+
+    expect(window.location.href).toBe(authorizationUrl)
+    window.history.replaceState(null, "", previousLocation)
+  })
+
   it("adds an intentional second Atlassian account when both products already exist", async () => {
     const connectionIds = [
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000163"),

@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { HomeDirectoryLive, loadProfiles } from "@knpkv/atlassian-common/config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -52,6 +53,39 @@ const providerClient = HttpClient.make((request) => {
     )
   )
 })
+
+const makeConcurrentProviderClient = (): HttpClient.HttpClient => {
+  let issuedTokens = 0
+  return HttpClient.make((request) => {
+    const identity = request.url.endsWith("/oauth/token")
+      ? String(++issuedTokens)
+      : request.headers.authorization?.endsWith("-2")
+      ? "2"
+      : "1"
+    const body = request.url.endsWith("/oauth/token")
+      ? {
+        access_token: `access-${identity}`,
+        refresh_token: `refresh-${identity}`,
+        expires_in: 3_600,
+        scope: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
+        token_type: "Bearer"
+      }
+      : request.url.endsWith("/accessible-resources")
+      ? [{
+        id: `cloud-${identity}`,
+        name: `Acme ${identity}`,
+        url: `https://acme-${identity}.atlassian.net/`,
+        scopes: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES]
+      }]
+      : { account_id: `account-${identity}`, name: `Avery ${identity}`, email: `avery-${identity}@example.com` }
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+      )
+    )
+  })
+}
 
 describe("AtlassianOAuthGrants", () => {
   it.effect("exchanges a session-bound grant, requires site choice, and saves one shared profile", () =>
@@ -168,6 +202,105 @@ describe("AtlassianOAuthGrants", () => {
       assert.strictEqual(yield* grants.pendingGrantCount, 0)
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("restores a grant when profile snapshots cannot be read", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-snapshot-" })
+      const configHome = path.join(home, "config")
+      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
+      const profilesPath = path.join(jiraStore, "profiles.json")
+      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(jiraStore, "oauth.json"),
+        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
+      )
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      yield* fileSystem.makeDirectory(profilesPath)
+      const failedSnapshot = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(failedSnapshot))
+      yield* fileSystem.remove(profilesPath, { recursive: true })
+
+      const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(completed.cloudId, "cloud-2")
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("preserves both profiles when two grants complete concurrently", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-concurrent-" })
+      const configHome = path.join(home, "config")
+      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
+      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(jiraStore, "oauth.json"),
+        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
+      )
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const prepareGrant = Effect.fn("test.prepareAtlassianOAuthGrant")(function*(authorizationCode: string) {
+        const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+        assert.strictEqual(started._tag, "ready")
+        if (started._tag !== "ready") return yield* Effect.die("OAuth grant did not start")
+        const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+          new URL(started.authorizationUrl).searchParams.get("state")
+        )
+        return yield* grants.exchange(owner, grantId, authorizationCode).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      })
+      const first = yield* prepareGrant("authorization-code-1")
+      const second = yield* prepareGrant("authorization-code-2")
+
+      yield* Effect.all([
+        grants.complete(owner, first.grantId, "cloud-1"),
+        grants.complete(owner, second.grantId, "cloud-2")
+      ], { concurrency: "unbounded" }).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      for (const storeName of ["jira-cli", "confluence-to-markdown"]) {
+        const profiles = yield* loadProfiles(storeName).pipe(
+          Effect.provide(HomeDirectoryLive),
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+        assert.deepStrictEqual(
+          profiles.profiles.map(({ token }) => token.user?.account_id ?? null).sort(),
+          ["account-1", "account-2"]
+        )
+      }
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, makeConcurrentProviderClient()),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

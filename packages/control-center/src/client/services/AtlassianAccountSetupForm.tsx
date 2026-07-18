@@ -187,6 +187,13 @@ export const AtlassianAccountSetupForm = ({
     )
   }
 
+  const useApiToken = (): void => {
+    startRequest.current?.abort()
+    startRequest.current = null
+    setIsStartingOAuth(false)
+    setAuthenticationMode("api-token")
+  }
+
   const discoveryMessage =
     profilesState === "loading"
       ? "Finding local Atlassian OAuth profiles…"
@@ -250,7 +257,7 @@ export const AtlassianAccountSetupForm = ({
               </select>
             )}
           </Field>
-          <Button onClick={() => setAuthenticationMode("api-token")} type="button" variant="quiet">
+          <Button onClick={useApiToken} type="button" variant="quiet">
             Use API token instead
           </Button>
         </>

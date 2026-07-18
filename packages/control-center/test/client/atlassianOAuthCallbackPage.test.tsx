@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 
 import * as Schema from "effect/Schema"
-import { type ReactElement, act, StrictMode } from "react"
+import { type ReactElement, act, StrictMode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { MemoryRouter } from "react-router"
+import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../../src/api/plugins.js"
@@ -53,6 +53,7 @@ const csrfToken = Schema.decodeSync(CsrfToken)("ab".repeat(32))
 
 let root: Root | undefined
 let sessionControls: ReturnType<typeof useBrowserSession> | undefined
+let currentLocation = ""
 type CallbackTransport = Pick<ConnectionTestTransport, "completeAtlassianOAuthGrant" | "exchangeAtlassianOAuthGrant">
 
 const Harness = ({ transport }: { readonly transport: CallbackTransport }): ReactElement => {
@@ -60,10 +61,26 @@ const Harness = ({ transport }: { readonly transport: CallbackTransport }): Reac
   return <AtlassianOAuthCallbackPage transport={transport} />
 }
 
+const DismissibleHarness = ({ transport }: { readonly transport: CallbackTransport }): ReactElement => {
+  sessionControls = useBrowserSession()
+  const location = useLocation()
+  const [isCallbackMounted, setIsCallbackMounted] = useState(true)
+  currentLocation = `${location.pathname}${location.search}`
+  return (
+    <>
+      <button onClick={() => setIsCallbackMounted(false)} type="button">
+        Leave callback
+      </button>
+      {isCallbackMounted ? <AtlassianOAuthCallbackPage transport={transport} /> : null}
+    </>
+  )
+}
+
 afterEach(async () => {
   if (root !== undefined) await act(async () => root?.unmount())
   root = undefined
   sessionControls = undefined
+  currentLocation = ""
   document.body.replaceChildren()
   sessionStorage.clear()
 })
@@ -133,5 +150,47 @@ describe("AtlassianOAuthCallbackPage", () => {
     root = undefined
     await Promise.resolve()
     expect(exchangeSignal?.aborted).toBe(true)
+  })
+
+  it("does not navigate when an aborted save resolves after the callback unmounts", async () => {
+    let resolveSave: ((value: DiscoveredAtlassianProfile) => void) | undefined
+    let saveSignal: AbortSignal | undefined
+    const transport: CallbackTransport = {
+      exchangeAtlassianOAuthGrant: () => Promise.resolve(exchangeResponse),
+      completeAtlassianOAuthGrant: (_grantId, _cloudId, signal) => {
+        saveSignal = signal
+        return new Promise((resolve) => {
+          resolveSave = resolve
+        })
+      }
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+          <BrowserSessionProvider>
+            <DismissibleHarness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    const useSite = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Use this site")
+    )
+    await act(async () => useSite?.click())
+    const leave = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Leave callback")
+    )
+    await act(async () => leave?.click())
+    await Promise.resolve()
+    expect(saveSignal?.aborted).toBe(true)
+
+    await act(async () => resolveSave?.(completedProfile))
+
+    expect(currentLocation).toBe(`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`)
   })
 })

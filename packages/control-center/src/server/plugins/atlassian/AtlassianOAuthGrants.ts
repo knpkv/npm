@@ -37,6 +37,7 @@ import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
@@ -234,6 +235,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const path = yield* Path.Path
   const scope = yield* Scope.Scope
   const grants = yield* Ref.make<PendingGrants>(new Map())
+  const profileStoreLock = yield* Semaphore.make(1)
   const localStorageLayer = Layer.mergeAll(
     HomeDirectoryLive,
     Layer.succeed(FileSystem.FileSystem, fileSystem),
@@ -380,26 +382,30 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         email: pending.user.email
       }
     }
-    const snapshots = yield* Effect.forEach(AUTH_STORE_NAMES, captureAuthStore).pipe(
-      Effect.provide(localStorageLayer),
-      Effect.mapError(unavailable)
-    )
-    const profiles = yield* Effect.forEach(AUTH_STORE_NAMES, (storeName) =>
+    const profiles = yield* profileStoreLock.withPermit(
       Effect.gen(function*() {
-        yield* saveOAuthConfig(storeName, pending.config)
-        return yield* saveProfileToken(storeName, token)
-      }), { concurrency: 1 }).pipe(
-        Effect.provide(localStorageLayer),
-        Effect.tapError(() =>
-          restoreAuthStores(snapshots).pipe(
+        const snapshots = yield* Effect.forEach(AUTH_STORE_NAMES, captureAuthStore).pipe(
+          Effect.provide(localStorageLayer),
+          Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
+          Effect.mapError(unavailable)
+        )
+        return yield* Effect.forEach(AUTH_STORE_NAMES, (storeName) =>
+          Effect.gen(function*() {
+            yield* saveOAuthConfig(storeName, pending.config)
+            return yield* saveProfileToken(storeName, token)
+          }), { concurrency: 1 }).pipe(
             Effect.provide(localStorageLayer),
-            Effect.catch(() => Effect.void)
+            Effect.tapError(() =>
+              restoreAuthStores(snapshots).pipe(
+                Effect.provide(localStorageLayer),
+                Effect.catch(() => Effect.void)
+              )
+            ),
+            Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
+            Effect.mapError(unavailable)
           )
-        ),
-        Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
-        Effect.mapError(unavailable),
-        Effect.uninterruptible
-      )
+      })
+    ).pipe(Effect.uninterruptible)
     const profile = profiles[0]
     if (profile === undefined) return yield* unavailable()
     const accountEmail = pending.user.email.trim()

@@ -38,10 +38,10 @@ export const AtlassianOAuthCallbackPage = ({
   useEffect(() => {
     const generation = ++effectGeneration.current
     const cleanup = (): void => {
+      saveRequest.current?.abort()
       void Promise.resolve().then(() => {
         if (effectGeneration.current !== generation) return
         exchangeRequest.current?.abort()
-        saveRequest.current?.abort()
       })
     }
     if (sessionState._tag !== "authenticated" || exchangeStarted.current) return cleanup
@@ -82,7 +82,9 @@ export const AtlassianOAuthCallbackPage = ({
     saveRequest.current = request
     setState({ _tag: "saving", grant, cloudId })
     void save(grant.grantId, cloudId, request.signal).then(
-      () => navigate("/services?enable=jira", { replace: true }),
+      () => {
+        if (!request.signal.aborted) navigate("/services?enable=jira", { replace: true })
+      },
       () => {
         if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })
       }
