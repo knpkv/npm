@@ -7,9 +7,16 @@
 import { Context, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
 
 import type { AwsClientError } from "../Errors.js"
-import { CodeCommitMalformedResponseError, type CodeCommitReadError, CodeCommitReadNotFoundError } from "./errors.js"
 import {
+  CodeCommitBlobTooLargeError,
+  CodeCommitMalformedResponseError,
+  type CodeCommitReadError,
+  CodeCommitReadNotFoundError
+} from "./errors.js"
+import {
+  CODECOMMIT_BLOB_MAXIMUM_BYTES,
   CodeCommitAccountIdentity,
+  CodeCommitBlobContent,
   CodeCommitBlobId,
   CodeCommitBlobMetadata,
   CodeCommitChangedFile,
@@ -22,6 +29,7 @@ import {
 import {
   CodeCommitReadProvider,
   CodeCommitReadProviderLive,
+  type GetBlobProviderRequest,
   type GetDifferencesProviderPageRequest,
   type GetPullRequestProviderRequest,
   type ListPullRequestsProviderPageRequest
@@ -33,6 +41,8 @@ const RawCallerIdentity = Schema.Struct({
   Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
+
+const RawBlobResponse = Schema.Struct({ content: Schema.Uint8Array })
 
 const RawPullRequestTarget = Schema.Struct({
   repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
@@ -91,14 +101,23 @@ const malformed = (operation: string) =>
   })
 
 const isNotFoundCause = (cause: unknown): boolean =>
+  Predicate.isTagged(cause, "BlobIdDoesNotExistException") ||
   Predicate.isTagged(cause, "PullRequestDoesNotExistException") ||
   Predicate.isTagged(cause, "RepositoryDoesNotExistException") ||
   Predicate.isTagged(cause, "CommitDoesNotExistException")
 
-const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReadError =>
-  error._tag === "AwsApiError" && isNotFoundCause(error.cause)
-    ? new CodeCommitReadNotFoundError({ operation })
+const mapProviderError = (operation: string) => (error: AwsClientError): CodeCommitReadError => {
+  if (error._tag !== "AwsApiError") return error
+  if (isNotFoundCause(error.cause)) return new CodeCommitReadNotFoundError({ operation })
+  return operation === "get-blob" && Predicate.isTagged(error.cause, "FileTooLargeException")
+    ? new CodeCommitBlobTooLargeError({
+      operation,
+      maximumBytes: CODECOMMIT_BLOB_MAXIMUM_BYTES,
+      actualBytes: null,
+      source: "provider"
+    })
     : error
+}
 
 const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
   operation: string,
@@ -159,6 +178,9 @@ export interface CodeCommitReadClientService {
   readonly discoverAccount: (
     account: CodeCommitReadAccount
   ) => Effect.Effect<CodeCommitAccountIdentity, CodeCommitReadError>
+  readonly getBlob: (
+    request: GetBlobProviderRequest
+  ) => Effect.Effect<CodeCommitBlobContent, CodeCommitReadError>
   readonly listPullRequestsPage: (
     request: Omit<ListPullRequestsProviderPageRequest, "maximumResults">
   ) => Effect.Effect<CodeCommitPullRequestPage, CodeCommitReadError>
@@ -203,6 +225,25 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           Effect.mapError(mapProviderError("get-pull-request"))
         )
         return yield* decodePullRequest(raw)
+      })
+
+      const getBlob = Effect.fn("CodeCommitReadClient.getBlob")(function*(request: GetBlobProviderRequest) {
+        const raw = yield* provider.getBlob(request).pipe(
+          Effect.mapError(mapProviderError("get-blob"))
+        )
+        const response = yield* decodeProvider("get-blob", RawBlobResponse, raw)
+        if (response.content.byteLength > CODECOMMIT_BLOB_MAXIMUM_BYTES) {
+          return yield* new CodeCommitBlobTooLargeError({
+            operation: "get-blob",
+            maximumBytes: CODECOMMIT_BLOB_MAXIMUM_BYTES,
+            actualBytes: response.content.byteLength,
+            source: "read-client"
+          })
+        }
+        return new CodeCommitBlobContent({
+          blobId: CodeCommitBlobId.make(request.blobId),
+          bytes: response.content
+        })
       })
 
       const listPullRequestsPage = Effect.fn("CodeCommitReadClient.listPullRequestsPage")(function*(
@@ -263,6 +304,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
 
       return {
         discoverAccount,
+        getBlob,
         getChangedFilesPage,
         getPullRequest,
         listPullRequestsPage,

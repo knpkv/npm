@@ -11,6 +11,9 @@ import { AwsProfileName, AwsRegion, PullRequestId, RepositoryName } from "../Dom
 
 const NonEmptyString = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 
+/** Maximum blob content retained by one CodeCommit read. */
+export const CODECOMMIT_BLOB_MAXIMUM_BYTES = 1_048_576
+
 /** Opaque CodeCommit pagination token. */
 export const CodeCommitPageToken = NonEmptyString.pipe(Schema.brand("CodeCommitPageToken"))
 
@@ -28,6 +31,23 @@ export const CodeCommitBlobId = NonEmptyString.pipe(Schema.brand("CodeCommitBlob
 
 /** Decoded immutable CodeCommit blob identifier. */
 export type CodeCommitBlobId = typeof CodeCommitBlobId.Type
+
+/** Bounded immutable CodeCommit blob content. */
+export class CodeCommitBlobContent extends Schema.Class<CodeCommitBlobContent>(
+  "CodeCommitBlobContent"
+)({
+  blobId: CodeCommitBlobId,
+  bytes: Schema.Uint8Array.check(
+    Schema.makeFilter((bytes) => bytes.byteLength <= CODECOMMIT_BLOB_MAXIMUM_BYTES, {
+      expected: `at most ${CODECOMMIT_BLOB_MAXIMUM_BYTES} blob bytes`
+    })
+  )
+}) {
+  /** Exact decoded content length without duplicated caller-controlled metadata. */
+  get byteLength(): number {
+    return this.bytes.byteLength
+  }
+}
 
 /** Account coordinates used by CodeCommit provider reads. */
 export const CodeCommitReadAccount = Schema.Struct({

@@ -20,10 +20,22 @@ export class CodeCommitReadNotFoundError extends Schema.TaggedErrorClass<CodeCom
   { operation: OperationName }
 ) {}
 
+/** CodeCommit or the bounded read client refused blob content that was too large. */
+export class CodeCommitBlobTooLargeError extends Schema.TaggedErrorClass<CodeCommitBlobTooLargeError>()(
+  "CodeCommitBlobTooLargeError",
+  {
+    operation: OperationName,
+    maximumBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+    actualBytes: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    source: Schema.Literals(["provider", "read-client"])
+  }
+) {}
+
 /** Closed error union for CodeCommit read operations. */
 export type CodeCommitReadError =
   | AwsCredentialError
   | AwsThrottleError
   | AwsApiError
+  | CodeCommitBlobTooLargeError
   | CodeCommitMalformedResponseError
   | CodeCommitReadNotFoundError

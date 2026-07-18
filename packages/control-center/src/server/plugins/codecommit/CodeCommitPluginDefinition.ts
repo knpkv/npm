@@ -133,6 +133,11 @@ const failRead = Effect.fn("CodeCommitPlugin.failRead")(function*(
     }
     case "CodeCommitMalformedResponseError":
       return yield* new PluginMalformedResponseFailure({ operation, diagnosticCode: error.diagnosticCode })
+    case "CodeCommitBlobTooLargeError":
+      return yield* new PluginMalformedResponseFailure({
+        operation,
+        diagnosticCode: "codecommit-blob-too-large"
+      })
     case "CodeCommitReadNotFoundError":
       return yield* new PluginConfigurationFailure({ diagnosticCode: "codecommit-provider-object-not-found" })
     case "AwsApiError": {
