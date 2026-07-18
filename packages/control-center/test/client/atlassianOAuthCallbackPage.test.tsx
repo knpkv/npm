@@ -90,5 +90,10 @@ describe("AtlassianOAuthCallbackPage", () => {
     await act(async () => resolveExchange?.(exchangeResponse))
     expect(host.textContent).toContain("Choose your Atlassian site")
     expect(host.textContent).toContain("Acme Europe")
+
+    await act(async () => root?.unmount())
+    root = undefined
+    await Promise.resolve()
+    expect(exchangeSignal?.aborted).toBe(true)
   })
 })

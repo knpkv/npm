@@ -31,29 +31,44 @@ export const AtlassianOAuthCallbackPage = ({
   const { state: sessionState } = useBrowserSession()
   const [state, setState] = useState<CallbackState>({ _tag: "waiting" })
   const exchangeStarted = useRef(false)
+  const exchangeRequest = useRef<AbortController | null>(null)
+  const saveRequest = useRef<AbortController | null>(null)
+  const effectGeneration = useRef(0)
 
   useEffect(() => {
-    if (sessionState._tag !== "authenticated" || exchangeStarted.current) return
+    const generation = ++effectGeneration.current
+    const cleanup = (): void => {
+      void Promise.resolve().then(() => {
+        if (effectGeneration.current !== generation) return
+        exchangeRequest.current?.abort()
+        saveRequest.current?.abort()
+      })
+    }
+    if (sessionState._tag !== "authenticated" || exchangeStarted.current) return cleanup
     exchangeStarted.current = true
     if (searchParams.has("error")) {
       setState({ _tag: "failed" })
-      return
+      return cleanup
     }
     const grantId = Schema.decodeUnknownResult(AtlassianOAuthGrantId)(searchParams.get("state"))
     const code = Schema.decodeUnknownResult(AuthorizationCode)(searchParams.get("code"))
     const exchange = transport.exchangeAtlassianOAuthGrant
     if (Result.isFailure(grantId) || Result.isFailure(code) || exchange === undefined) {
       setState({ _tag: "failed" })
-      return
+      return cleanup
     }
     const request = new AbortController()
+    exchangeRequest.current = request
     setState({ _tag: "exchanging" })
     exchange(grantId.success, code.success, request.signal).then(
-      (grant) => setState({ _tag: "selecting", grant, saveFailed: false }),
+      (grant) => {
+        if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: false })
+      },
       () => {
         if (!request.signal.aborted) setState({ _tag: "failed" })
       }
     )
+    return cleanup
   }, [searchParams, sessionState, transport])
 
   const complete = (grant: AtlassianOAuthGrantExchangeResponse, cloudId: string): void => {
@@ -63,6 +78,8 @@ export const AtlassianOAuthCallbackPage = ({
       return
     }
     const request = new AbortController()
+    saveRequest.current?.abort()
+    saveRequest.current = request
     setState({ _tag: "saving", grant, cloudId })
     void save(grant.grantId, cloudId, request.signal).then(
       () => navigate("/services?enable=jira", { replace: true }),
