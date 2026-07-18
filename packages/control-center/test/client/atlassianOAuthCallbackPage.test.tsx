@@ -58,6 +58,8 @@ type CallbackTransport = Pick<ConnectionTestTransport, "completeAtlassianOAuthGr
 
 const Harness = ({ transport }: { readonly transport: CallbackTransport }): ReactElement => {
   sessionControls = useBrowserSession()
+  const location = useLocation()
+  currentLocation = `${location.pathname}${location.search}`
   return <AtlassianOAuthCallbackPage transport={transport} />
 }
 
@@ -86,6 +88,56 @@ afterEach(async () => {
 })
 
 describe("AtlassianOAuthCallbackPage", () => {
+  it("removes the OAuth code from the callback location while exchange remains pending", async () => {
+    const exchange = vi.fn<NonNullable<ConnectionTestTransport["exchangeAtlassianOAuthGrant"]>>(
+      () => new Promise<AtlassianOAuthGrantExchangeResponse>(() => undefined)
+    )
+    const transport: CallbackTransport = { exchangeAtlassianOAuthGrant: exchange }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+
+    expect(exchange).toHaveBeenCalledOnce()
+    expect(currentLocation).toBe("/services/oauth/atlassian/callback")
+  })
+
+  it.each([
+    ["missing state", "/services/oauth/atlassian/callback?code=auth-code&continue=services"],
+    ["invalid state", "/services/oauth/atlassian/callback?state=invalid&code=auth-code&continue=services"]
+  ])("preserves the callback location when OAuth parameters have %s", async (_scenario, initialEntry) => {
+    const exchange = vi.fn<NonNullable<ConnectionTestTransport["exchangeAtlassianOAuthGrant"]>>()
+    const transport: CallbackTransport = { exchangeAtlassianOAuthGrant: exchange }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+
+    expect(exchange).not.toHaveBeenCalled()
+    expect(currentLocation).toBe(initialEntry)
+    expect(host.textContent).toContain("Atlassian sign-in did not finish")
+  })
+
   it("keeps exactly one grant exchange alive across StrictMode effect replay", async () => {
     let resolveExchange: ((value: AtlassianOAuthGrantExchangeResponse) => void) | undefined
     let rejectSave: ((reason: Error) => void) | undefined
@@ -191,6 +243,6 @@ describe("AtlassianOAuthCallbackPage", () => {
 
     await act(async () => resolveSave?.(completedProfile))
 
-    expect(currentLocation).toBe(`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`)
+    expect(currentLocation).toBe("/services/oauth/atlassian/callback")
   })
 })

@@ -27,7 +27,7 @@ export const AtlassianOAuthCallbackPage = ({
   readonly transport?: CallbackTransport | undefined
 } = {}): ReactElement => {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { state: sessionState } = useBrowserSession()
   const [state, setState] = useState<CallbackState>({ _tag: "waiting" })
   const exchangeStarted = useRef(false)
@@ -57,6 +57,7 @@ export const AtlassianOAuthCallbackPage = ({
       setState({ _tag: "failed" })
       return cleanup
     }
+    setSearchParams({}, { replace: true })
     const request = new AbortController()
     exchangeRequest.current = request
     setState({ _tag: "exchanging" })
@@ -69,7 +70,7 @@ export const AtlassianOAuthCallbackPage = ({
       }
     )
     return cleanup
-  }, [searchParams, sessionState, transport])
+  }, [searchParams, sessionState, setSearchParams, transport])
 
   const complete = (grant: AtlassianOAuthGrantExchangeResponse, cloudId: string): void => {
     const save = transport.completeAtlassianOAuthGrant

@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
-import { HomeDirectoryLive, loadProfiles } from "@knpkv/atlassian-common/config"
+import { HomeDirectoryLive, loadProfiles, type OAuthToken, saveProfileToken } from "@knpkv/atlassian-common/config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -20,6 +20,21 @@ const owner = {
   sessionId: SessionId.make("0198f6e1-4de2-7a20-8a64-576c88bd9784"),
   workspaceId: WorkspaceId.make("0198f6e1-4de2-7a20-8a64-576c88bd9785")
 }
+
+const SHARED_OAUTH_CONFIG = { clientId: "client-id", clientSecret: "client-secret" }
+
+const writeOAuthConfig = Effect.fn("test.writeAtlassianOAuthConfig")(function*(
+  configHome: string,
+  storeName: string,
+  config = SHARED_OAUTH_CONFIG
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const store = path.join(configHome, "atlassian", storeName)
+  yield* fileSystem.makeDirectory(store, { recursive: true })
+  yield* fileSystem.writeFileString(path.join(store, "oauth.json"), JSON.stringify(config))
+  return store
+})
 
 const providerClient = HttpClient.make((request) => {
   const body = request.url.endsWith("/oauth/token")
@@ -88,18 +103,56 @@ const makeConcurrentProviderClient = (): HttpClient.HttpClient => {
 }
 
 describe("AtlassianOAuthGrants", () => {
+  it.effect("requires the same shared OAuth app in both destination stores", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-config-" })
+      const path = yield* Path.Path
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      assert.deepStrictEqual(started, {
+        _tag: "configuration-required",
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      })
+
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown", {
+        clientId: "other-client-id",
+        clientSecret: "other-client-secret"
+      })
+      const mismatched = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(mismatched._tag, "configuration-required")
+
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const ready = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(ready._tag, "ready")
+      if (ready._tag !== "ready") return
+      const requestedScopes = new URL(ready.authorizationUrl).searchParams.get("scope")?.split(" ").sort()
+      assert.deepStrictEqual(requestedScopes, Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).sort())
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
   it.effect("exchanges a session-bound grant, requires site choice, and saves one shared profile", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-oauth-" })
       const configHome = path.join(home, "config")
-      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
-      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
-      yield* fileSystem.writeFileString(
-        path.join(jiraStore, "oauth.json"),
-        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
-      )
+      const jiraStore = yield* writeOAuthConfig(configHome, "jira-cli")
+      const confluenceStore = yield* writeOAuthConfig(configHome, "confluence-to-markdown")
 
       const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
       const grants = yield* makeAtlassianOAuthGrants()
@@ -129,7 +182,7 @@ describe("AtlassianOAuthGrants", () => {
       assert.deepStrictEqual(exchanged.sites.map(({ cloudId }) => cloudId), ["cloud-2"])
       assert.notInclude(JSON.stringify(exchanged), "secret")
 
-      const confluenceStore = path.join(configHome, "atlassian", "confluence-to-markdown")
+      yield* fileSystem.remove(confluenceStore, { recursive: true })
       yield* fileSystem.writeFileString(confluenceStore, "blocks-directory-creation")
       const failedSave = yield* Effect.result(
         grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
@@ -150,6 +203,10 @@ describe("AtlassianOAuthGrants", () => {
       )
       assert.deepStrictEqual(completed.providers, ["jira", "confluence"])
       assert.strictEqual(completed.siteUrl, "https://labs.atlassian.net/")
+      assert.strictEqual(
+        yield* fileSystem.readFileString(path.join(jiraStore, "oauth.json")),
+        JSON.stringify(SHARED_OAUTH_CONFIG)
+      )
 
       for (const storeName of ["jira-cli", "confluence-to-markdown"]) {
         const store = path.join(configHome, "atlassian", storeName)
@@ -178,12 +235,8 @@ describe("AtlassianOAuthGrants", () => {
       const path = yield* Path.Path
       const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-expiry-" })
       const configHome = path.join(home, "config")
-      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
-      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
-      yield* fileSystem.writeFileString(
-        path.join(jiraStore, "oauth.json"),
-        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
-      )
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
       const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
       const grants = yield* makeAtlassianOAuthGrants()
       const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
@@ -212,13 +265,9 @@ describe("AtlassianOAuthGrants", () => {
       const path = yield* Path.Path
       const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-snapshot-" })
       const configHome = path.join(home, "config")
-      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
+      const jiraStore = yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
       const profilesPath = path.join(jiraStore, "profiles.json")
-      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
-      yield* fileSystem.writeFileString(
-        path.join(jiraStore, "oauth.json"),
-        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
-      )
       const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
       const grants = yield* makeAtlassianOAuthGrants()
       const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
@@ -258,12 +307,8 @@ describe("AtlassianOAuthGrants", () => {
       const path = yield* Path.Path
       const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-concurrent-" })
       const configHome = path.join(home, "config")
-      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
-      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
-      yield* fileSystem.writeFileString(
-        path.join(jiraStore, "oauth.json"),
-        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
-      )
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
       const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
       const grants = yield* makeAtlassianOAuthGrants()
       const prepareGrant = Effect.fn("test.prepareAtlassianOAuthGrant")(function*(authorizationCode: string) {
@@ -301,6 +346,79 @@ describe("AtlassianOAuthGrants", () => {
       }
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, makeConcurrentProviderClient()),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("preserves an incompatible populated destination and restores the grant", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-conflict-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      const confluenceStore = yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const incompatibleConfig = { clientId: "other-client-id", clientSecret: "other-client-secret" }
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown", incompatibleConfig)
+      const existingToken: OAuthToken = {
+        access_token: "existing-access",
+        refresh_token: "existing-refresh",
+        expires_at: 4_102_444_800_000,
+        scope: CONFLUENCE_SCOPES.join(" "),
+        cloud_id: "existing-cloud",
+        site_url: "https://existing.atlassian.net/",
+        user: { account_id: "existing-account", name: "Existing User", email: "existing@example.com" }
+      }
+      yield* saveProfileToken("confluence-to-markdown", existingToken).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const before = yield* Effect.all([
+        fileSystem.readFileString(path.join(confluenceStore, "oauth.json")),
+        fileSystem.readFileString(path.join(confluenceStore, "profiles.json")),
+        fileSystem.readFileString(path.join(confluenceStore, "auth.json"))
+      ])
+
+      const rejected = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(rejected))
+      const after = yield* Effect.all([
+        fileSystem.readFileString(path.join(confluenceStore, "oauth.json")),
+        fileSystem.readFileString(path.join(confluenceStore, "profiles.json")),
+        fileSystem.readFileString(path.join(confluenceStore, "auth.json"))
+      ])
+      assert.deepStrictEqual(after, before)
+
+      yield* fileSystem.remove(path.join(confluenceStore, "profiles.json"))
+      yield* fileSystem.remove(path.join(confluenceStore, "auth.json"))
+      const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(completed.cloudId, "cloud-2")
+      assert.deepStrictEqual(
+        JSON.parse(yield* fileSystem.readFileString(path.join(confluenceStore, "oauth.json"))),
+        SHARED_OAUTH_CONFIG
+      )
+      assert.include(yield* fileSystem.readFileString(path.join(confluenceStore, "profiles.json")), completed.profileId)
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

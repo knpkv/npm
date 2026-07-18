@@ -21,6 +21,7 @@ import {
   HomeDirectoryLive,
   JIRA_REQUIRED_SCOPES,
   loadOAuthConfig,
+  loadProfiles,
   type OAuthConfig,
   type OAuthToken,
   saveOAuthConfig,
@@ -59,7 +60,9 @@ const ATLASSIAN_CALLBACK_PATH = "/services/oauth/atlassian/callback"
 const GRANT_TTL_MILLISECONDS = 10 * 60 * 1_000
 const MAXIMUM_PENDING_GRANTS = 20
 const MAXIMUM_ACCESSIBLE_SITES = 100
-const AUTH_STORE_NAMES: ReadonlyArray<string> = ["jira-cli", "confluence-to-markdown"]
+const JIRA_AUTH_STORE_NAME = "jira-cli"
+const CONFLUENCE_AUTH_STORE_NAME = "confluence-to-markdown"
+const AUTH_STORE_NAMES: ReadonlyArray<string> = [JIRA_AUTH_STORE_NAME, CONFLUENCE_AUTH_STORE_NAME]
 const ATLASSIAN_SCOPES = Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES]))
 const REQUIRED_SHARED_SITE_SCOPES = [
   ...JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
@@ -125,6 +128,11 @@ interface StoredFileSnapshot {
   readonly path: string
 }
 
+interface AuthStoreWritePlan {
+  readonly shouldWriteConfig: boolean
+  readonly storeName: string
+}
+
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
 const isExpired = (grant: PendingGrant, nowMilliseconds: number): boolean =>
@@ -144,12 +152,33 @@ const callbackPort = (publicOrigin: string): number => {
   return origin.protocol === "https:" ? 443 : 80
 }
 
+const sameOAuthConfig = (left: OAuthConfig, right: OAuthConfig): boolean =>
+  left.clientId === right.clientId && left.clientSecret === right.clientSecret
+
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
-  for (const storeName of AUTH_STORE_NAMES) {
-    const config = yield* loadOAuthConfig(storeName)
-    if (config !== null) return config
-  }
-  return null
+  const [jiraConfig, confluenceConfig] = yield* Effect.all([
+    loadOAuthConfig(JIRA_AUTH_STORE_NAME),
+    loadOAuthConfig(CONFLUENCE_AUTH_STORE_NAME)
+  ], { concurrency: 1 })
+  return jiraConfig !== null && confluenceConfig !== null && sameOAuthConfig(jiraConfig, confluenceConfig)
+    ? jiraConfig
+    : null
+})
+
+const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(function*(
+  storeName: string,
+  sharedConfig: OAuthConfig
+) {
+  const [currentConfig, profiles] = yield* Effect.all([
+    loadOAuthConfig(storeName),
+    loadProfiles(storeName)
+  ], { concurrency: 1 })
+  const hasMatchingConfig = currentConfig !== null && sameOAuthConfig(currentConfig, sharedConfig)
+  if (profiles.profiles.length > 0 && !hasMatchingConfig) return yield* unavailable()
+  return {
+    storeName,
+    shouldWriteConfig: !hasMatchingConfig
+  } satisfies AuthStoreWritePlan
 })
 
 const takeGrant = Effect.fn("AtlassianOAuthGrants.takeGrant")(function*(
@@ -389,21 +418,28 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
           Effect.mapError(unavailable)
         )
-        return yield* Effect.forEach(AUTH_STORE_NAMES, (storeName) =>
-          Effect.gen(function*() {
-            yield* saveOAuthConfig(storeName, pending.config)
-            return yield* saveProfileToken(storeName, token)
-          }), { concurrency: 1 }).pipe(
-            Effect.provide(localStorageLayer),
-            Effect.tapError(() =>
-              restoreAuthStores(snapshots).pipe(
-                Effect.provide(localStorageLayer),
-                Effect.catch(() => Effect.void)
-              )
-            ),
-            Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
-            Effect.mapError(unavailable)
+        return yield* Effect.gen(function*() {
+          const plans = yield* Effect.forEach(
+            AUTH_STORE_NAMES,
+            (storeName) => planAuthStoreWrite(storeName, pending.config),
+            { concurrency: 1 }
           )
+          return yield* Effect.forEach(plans, (plan) =>
+            Effect.gen(function*() {
+              if (plan.shouldWriteConfig) yield* saveOAuthConfig(plan.storeName, pending.config)
+              return yield* saveProfileToken(plan.storeName, token)
+            }), { concurrency: 1 })
+        }).pipe(
+          Effect.provide(localStorageLayer),
+          Effect.tapError(() =>
+            restoreAuthStores(snapshots).pipe(
+              Effect.provide(localStorageLayer),
+              Effect.catch(() => Effect.void)
+            )
+          ),
+          Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
+          Effect.mapError(unavailable)
+        )
       })
     ).pipe(Effect.uninterruptible)
     const profile = profiles[0]
