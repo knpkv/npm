@@ -32,3 +32,4 @@ export {
   type ReleaseSynchronizationStartupState
 } from "./ReleaseSynchronizationStartup.js"
 export { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
+export { ServerDraining, ServerLifecycle, type ServerLifecyclePhase } from "./ServerLifecycle.js"

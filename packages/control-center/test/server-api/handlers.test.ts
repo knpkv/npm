@@ -68,6 +68,7 @@ import {
 } from "../../src/server/api/LiveStreamAdmission.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
+import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import { makeNodePortfolioSnapshot } from "../fixtures/portfolio.js"
 
@@ -317,6 +318,7 @@ const liveEventHandlerTestLayer = liveEventHandlersLayer.pipe(
   Layer.provide(sessionMiddlewareLayer),
   Layer.provide(Layer.succeed(Auth, streamAuthentication)),
   Layer.provide(LiveStreamAdmission.layer),
+  Layer.provide(ServerLifecycle.layer),
   Layer.provide(Layer.succeed(LiveEvents, {
     open: ({ after }) => {
       const heartbeat: ControlCenterLiveEvent = {
@@ -483,6 +485,7 @@ describe("Control Center API handlers", () => {
       ).pipe(
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(Layer.mergeAll(
           authorizedSharesLayer,
           deliveryGraphApplicationLayer,
@@ -1555,6 +1558,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(Layer.succeed(Auth, revokedAuthentication)),
         Layer.provide(LiveStreamAdmission.layer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(Layer.succeed(LiveEvents, trackedLiveEvents))
       )
       yield* Effect.gen(function*() {
@@ -1576,6 +1580,53 @@ describe("Control Center API handlers", () => {
           sessionMiddlewareLayer,
           trackedHandler
         ])
+      )
+    }))
+
+  it.effect("closes an existing live stream when server drain begins", () =>
+    Effect.gen(function*() {
+      const activeSubscriptions = yield* Ref.make(0)
+      const closed = yield* Deferred.make<void>()
+      const lifecycle = yield* ServerLifecycle.make
+      const trackedHandler = liveEventHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(Layer.succeed(Auth, streamAuthentication)),
+        Layer.provide(LiveStreamAdmission.layer),
+        Layer.provide(Layer.succeed(LiveEvents, {
+          open: () =>
+            Ref.update(activeSubscriptions, (count) => count + 1).pipe(
+              Effect.as(Stream.never.pipe(
+                Stream.ensuring(
+                  Ref.update(activeSubscriptions, (count) => count - 1).pipe(
+                    Effect.andThen(Deferred.succeed(closed, undefined))
+                  )
+                )
+              ))
+            )
+        })),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["liveEvents"])
+        const eventStream = yield* client.liveEvents.stream({ headers: {}, query: {} })
+        const drained = yield* Stream.runDrain(eventStream).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+
+        yield* lifecycle.beginDrain
+        yield* Fiber.join(drained)
+        yield* Deferred.await(closed)
+
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 0)
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          trackedHandler
+        ]),
+        Effect.provideService(ServerLifecycle, lifecycle)
       )
     }))
 

@@ -28,6 +28,8 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
+`SIGINT` and `SIGTERM` begin graceful drain before scoped runtime resources close. The server rejects new authenticated mutations and live-event streams with a retryable `503`, closes existing live-event streams, and gives already-admitted mutations up to ten seconds to finish. It prints `Control Center drained.` when that barrier clears or reports the hard deadline on standard error before shutdown continues. Background sync claims, durable action recovery, and subsystem-specific flush/reconciliation hooks are the next D09 slice and must join this same lifecycle boundary.
+
 ### Local release agent
 
 Every canonical release page has a release-owned Relay thread. An owner browser sends its bounded prompt and recent thread history through the typed API; the server resolves the current workspace-scoped release projection before each turn and runs the selected local CLI with read-only filesystem access. Provider configuration, credentials, filesystem paths, and raw provider failures remain server-only. Threads are isolated by browser session and currently remain in that tab; provider session identifiers are not treated as durable product state.

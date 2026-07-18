@@ -31,6 +31,7 @@ import {
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
+import { ServerLifecycle } from "./runtime/ServerLifecycle.js"
 import { decodeBindConfig } from "./security/BindConfig.js"
 
 const DEFAULT_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000001")
@@ -204,6 +205,7 @@ const program = Effect.scoped(
       })
     )
     const bootstrap = Context.get(services, ControlCenterBootstrap)
+    const lifecycle = Context.get(services, ServerLifecycle)
 
     yield* writeStdoutLine(`Control Center listening at ${bindConfig.publicOrigin}`)
     if (bootstrap._tag === "pairing-issued") {
@@ -211,7 +213,18 @@ const program = Effect.scoped(
     } else if (bootstrap._tag === "already-initialized") {
       yield* writeStdoutLine("Workspace ready. Use an existing paired browser.")
     }
-    return yield* Effect.never
+    return yield* Effect.never.pipe(
+      Effect.onInterrupt(() =>
+        writeStdoutLine("Control Center draining.").pipe(
+          Effect.andThen(lifecycle.drainWithin("10 seconds")),
+          Effect.flatMap((drained) =>
+            drained
+              ? writeStdoutLine("Control Center drained.")
+              : writeStderrLine("Control Center drain deadline reached.")
+          )
+        )
+      )
+    )
   })
 )
 

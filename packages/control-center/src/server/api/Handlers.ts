@@ -17,6 +17,7 @@ import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
 import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
+import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
@@ -716,10 +717,17 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
       const events = yield* LiveEvents
       const auth = yield* Auth
       const admission = yield* LiveStreamAdmission
+      const lifecycle = yield* ServerLifecycle
       return handlers.handle("stream", ({ headers, query, request }) =>
         Effect.gen(function*() {
           const session = yield* CurrentSession
           yield* requireWorkspaceRead(session)
+          yield* lifecycle.acquireStream.pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          )
           const queryCursor = query.after
           const headerCursor = headers["last-event-id"]
           if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
@@ -742,7 +750,9 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
             }))
           )
           const token = currentSessionToken(request)
-          return eventStream.pipe(Stream.interruptWhen(awaitSessionEnd(auth, token, session)))
+          return eventStream.pipe(
+            Stream.interruptWhen(Effect.race(awaitSessionEnd(auth, token, session), lifecycle.awaitDrain))
+          )
         }))
     })
 )

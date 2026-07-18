@@ -16,7 +16,7 @@ import type {
   TimelineExportAudits,
   TimelineReads
 } from "../api/ApplicationServices.js"
-import { controlCenterApiLayer } from "../api/ControlCenterApiServer.js"
+import { controlCenterApiLayerWithLifecycle } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
 import {
@@ -76,6 +76,7 @@ import {
   type ReleaseSynchronizationStartupOptions
 } from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
+import { ServerLifecycle } from "./ServerLifecycle.js"
 
 type ControlCenterCoreApplicationServices =
   | AuthorizedShares
@@ -168,6 +169,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     options.firstPartyPluginRuntime ?? false
   )
   const domainEventWakeups = DomainEventWakeups.layer
+  const lifecycle = ServerLifecycle.layer
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence),
     Layer.provide(domainEventWakeups)
@@ -195,7 +197,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     liveEventRuntime
   )
   const routes = Layer.mergeAll(
-    controlCenterApiLayer,
+    controlCenterApiLayerWithLifecycle,
     staticApplicationLayer,
     requestUrlBoundaryLayer,
     requestBoundaryLayer,
@@ -206,6 +208,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   return {
     application: routes.pipe(Layer.provideMerge(runtimeServices)),
+    lifecycle,
     runtimeServices
   }
 }
@@ -213,8 +216,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
 export const makeControlCenterApplication = <ApplicationError = never, ApplicationRequirements = never>(
   options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
-): ReturnType<typeof makeApplication<ApplicationError, ApplicationRequirements>>["application"] =>
-  makeApplication(options).application
+): ReturnType<typeof makeApplication<ApplicationError, ApplicationRequirements>>["application"] => {
+  const application = makeApplication(options)
+  return application.application.pipe(Layer.provide(application.lifecycle))
+}
 
 /** Construct the fully runnable Node HTTP/HTTPS server layer. */
 const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
@@ -225,12 +230,14 @@ const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
   )
   const transport = makeNodeTransportLayer(options.bindConfig)
   const application = makeApplication(options)
-  return HttpRouter.serve(application.application, { disableLogger: true }).pipe(
+  const server = HttpRouter.serve(application.application, { disableLogger: true }).pipe(
     Layer.provide(application.runtimeServices),
     Layer.provide(transport),
     Layer.provide(secrets),
-    Layer.provide(nodeOutboundHttpClientLayer)
+    Layer.provide(nodeOutboundHttpClientLayer),
+    Layer.provideMerge(application.lifecycle)
   )
+  return server
 }
 
 /** Construct the fully runnable Node HTTP/HTTPS server layer. */

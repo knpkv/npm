@@ -1,8 +1,9 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
-import { Effect, Fiber, FileSystem, Path, Result, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { createServer } from "node:net"
 
 import {
   decodeControlCenterDataPaths,
@@ -187,6 +188,24 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
     handle.exitCode
   ], { concurrency: "unbounded" })
   return { exitCode, stderr, stdout }
+})
+
+const acquireEphemeralPort = Effect.tryPromise({
+  try: () =>
+    new Promise<number>((resolve, reject) => {
+      const probe = createServer()
+      probe.once("error", reject)
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address()
+        if (address === null || typeof address === "string") {
+          probe.close()
+          reject(new Error("ephemeral listener did not expose an internet port"))
+          return
+        }
+        probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
+      })
+    }),
+  catch: (cause) => new Error("could not reserve an ephemeral test port", { cause })
 })
 
 describe("offline backup commands", () => {
@@ -395,6 +414,62 @@ describe("offline backup commands", () => {
       const restoredTarget = path.join(parent, yield* fileSystem.readLink(restoredRoot))
       assert.isTrue(yield* fileSystem.exists(restoredRoot))
       assert.isTrue(yield* fileSystem.exists(path.join(restoredTarget, "control-center.db")))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
+
+  it.effect("drains the built server before exiting on SIGTERM", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-built-drain-" })
+      const configuredRoot = path.join(parent, "data")
+      const cliEntry = yield* path.fromFileUrl(
+        new URL("../../dist/server/server/cli.js", import.meta.url)
+      )
+      assert.isTrue(
+        yield* fileSystem.exists(cliEntry),
+        "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
+      )
+      const port = yield* acquireEphemeralPort
+      const handle = yield* ChildProcess.make("node", [cliEntry], {
+        env: {
+          CONTROL_CENTER_DATA_ROOT: configuredRoot,
+          CONTROL_CENTER_PORT: String(port)
+        },
+        extendEnv: true
+      })
+      const stdout = yield* Ref.make("")
+      const stderr = yield* Ref.make("")
+      const listening = yield* Deferred.make<void>()
+      const stdoutFiber = yield* handle.stdout.pipe(
+        Stream.decodeText(),
+        Stream.runForEach((chunk) =>
+          Ref.updateAndGet(stdout, (current) => current + chunk).pipe(
+            Effect.flatMap((current) =>
+              current.includes("Control Center listening at")
+                ? Deferred.succeed(listening, undefined)
+                : Effect.void
+            )
+          )
+        ),
+        Effect.forkScoped
+      )
+      const stderrFiber = yield* handle.stderr.pipe(
+        Stream.decodeText(),
+        Stream.runForEach((chunk) => Ref.update(stderr, (current) => current + chunk)),
+        Effect.forkScoped
+      )
+
+      yield* Deferred.await(listening).pipe(Effect.timeout("15 seconds"))
+      yield* handle.kill({ killSignal: "SIGTERM" })
+      const exitCode = yield* handle.exitCode
+      yield* Fiber.join(stdoutFiber)
+      yield* Fiber.join(stderrFiber)
+
+      const output = yield* Ref.get(stdout)
+      assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(130), yield* Ref.get(stderr))
+      assert.include(output, "Control Center draining.\n")
+      assert.include(output, "Control Center drained.\n")
+      assert.strictEqual(yield* Ref.get(stderr), "")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
   it.effect("fails before creating an archive when the configured database is absent", () =>

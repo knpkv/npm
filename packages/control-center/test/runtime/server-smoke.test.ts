@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -57,6 +58,7 @@ import {
   governedActionExecutionStartupLayer
 } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
+import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
@@ -365,6 +367,23 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(portfolio.workspaceId, WORKSPACE_ID)
       assert.deepStrictEqual(portfolio.releases, [])
       assert.deepStrictEqual(portfolio.plugins, [])
+
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* lifecycle.beginDrain
+      const mutationClient = yield* makeControlCenterApiClient({
+        baseUrl: origin,
+        transformClient: (client) =>
+          requestHeaders(client, {
+            cookie: `cc_session=${sessionCookie.valueEncoded}`,
+            origin,
+            "x-csrf-token": paired.csrfToken
+          })
+      })
+      const rejectedMutation = yield* mutationClient.session.logout().pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedMutation))
+      if (Result.isFailure(rejectedMutation)) {
+        assert.strictEqual(rejectedMutation.failure._tag, "ServiceUnavailableApiError")
+      }
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped
