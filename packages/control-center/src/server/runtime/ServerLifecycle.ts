@@ -38,6 +38,7 @@ interface ServerDrainHook {
 interface DrainTransition {
   readonly drainHooks: ReadonlyArray<ServerDrainHook> | null
   readonly mutationBarrierReady: boolean
+  readonly streamBarrierReady: boolean
   readonly workBarrierReady: boolean
 }
 
@@ -94,6 +95,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   const drainStarted = yield* Deferred.make<void>()
   const mutationsDrained = yield* Deferred.make<void>()
   const workDrained = yield* Deferred.make<void>()
+  const streamsDrained = yield* Deferred.make<void>()
   const drainHookSnapshot = yield* Deferred.make<ReadonlyArray<ServerDrainHook>>()
   const drainHooksCompleted = yield* Deferred.make<ReadonlyArray<string>>()
 
@@ -103,13 +105,14 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   const beginDrain = Ref.modify(state, (current): [DrainTransition, ServerLifecycleState] => {
     const barriers = {
       mutationBarrierReady: current.activeMutations === 0,
+      streamBarrierReady: current.activeStreams === 0,
       workBarrierReady: !hasActiveWork(current)
     }
     if (current.phase === "draining") return [{ ...barriers, drainHooks: null }, current]
     const draining: ServerLifecycleState = { ...current, phase: "draining" }
     return [{ ...barriers, drainHooks: [...current.drainHooks.values()] }, draining]
   }).pipe(
-    Effect.flatMap(({ drainHooks, mutationBarrierReady, workBarrierReady }) =>
+    Effect.flatMap(({ drainHooks, mutationBarrierReady, streamBarrierReady, workBarrierReady }) =>
       Deferred.succeed(drainStarted, undefined).pipe(
         Effect.andThen(
           drainHooks === null
@@ -117,6 +120,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
             : Deferred.succeed(drainHookSnapshot, drainHooks)
         ),
         Effect.andThen(mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
+        Effect.andThen(streamBarrierReady ? Deferred.succeed(streamsDrained, undefined) : Effect.void),
         Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
       )
     ),
@@ -188,10 +192,13 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new ServerDraining()))
   )
 
-  const releaseStream = Ref.update(state, (current) => ({
-    ...current,
-    activeStreams: current.activeStreams - 1
-  }))
+  const releaseStream = Ref.modify(state, (current) => {
+    const next = { ...current, activeStreams: current.activeStreams - 1 }
+    return [next.phase === "draining" && next.activeStreams === 0, next]
+  }).pipe(
+    Effect.flatMap((drained) => drained ? Deferred.succeed(streamsDrained, undefined) : Effect.void),
+    Effect.asVoid
+  )
 
   const drainWithin = (duration: Duration.Input) =>
     beginDrain.pipe(
@@ -235,6 +242,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
 
   yield* Deferred.await(drainStarted).pipe(
     Effect.andThen(Deferred.await(workDrained)),
+    Effect.andThen(Deferred.await(streamsDrained)),
     Effect.andThen(Deferred.await(drainHookSnapshot)),
     Effect.flatMap((hooks) =>
       Effect.forEach(

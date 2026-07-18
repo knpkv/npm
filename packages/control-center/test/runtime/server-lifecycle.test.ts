@@ -209,4 +209,32 @@ describe("server lifecycle", () => {
 
       assert.deepStrictEqual(yield* Fiber.join(draining), { _tag: "DeadlineExceeded" })
     })))
+
+  it.effect("waits for admitted streams before running flush hooks", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const hookRan = yield* Deferred.make<void>()
+      const streamEntered = yield* Deferred.make<void>()
+      const releaseStream = yield* Deferred.make<void>()
+      yield* lifecycle.registerDrainHook({
+        hookId: "flush",
+        run: Deferred.succeed(hookRan, undefined).pipe(Effect.asVoid)
+      })
+      const stream = yield* Effect.scoped(
+        lifecycle.acquireStream.pipe(
+          Effect.andThen(Deferred.succeed(streamEntered, undefined)),
+          Effect.andThen(Deferred.await(releaseStream))
+        )
+      ).pipe(Effect.forkChild)
+      yield* Deferred.await(streamEntered)
+
+      const draining = yield* lifecycle.drainWithin("10 seconds").pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      assert.isFalse(Deferred.isDoneUnsafe(hookRan))
+
+      yield* Deferred.succeed(releaseStream, undefined)
+      yield* Fiber.join(stream)
+      assert.deepStrictEqual(yield* Fiber.join(draining), { _tag: "Drained" })
+      assert.isTrue(Deferred.isDoneUnsafe(hookRan))
+    })))
 })
