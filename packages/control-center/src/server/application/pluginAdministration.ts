@@ -12,6 +12,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import type * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
   CreatePluginConnectionRequest,
@@ -73,6 +74,14 @@ const secretEncoder = new TextEncoder()
 
 type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
 type AtlassianConfigurationValue = CreatePluginConnectionValue | StoredPluginConfigurationValue
+type PluginAdministrationOAuthRequirements =
+  | Crypto.Crypto
+  | DomainEventWakeups
+  | FileSystem.FileSystem
+  | HttpClient.HttpClient
+  | Path.Path
+  | Persistence
+  | SecretStore
 
 const isAtlassianProvider = (
   providerId: PluginConnectionRecord["providerId"]
@@ -1172,7 +1181,7 @@ export const makePluginAdministration = makePluginAdministrationWithConnections(
 export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration.makeWithOAuth")(function*(
   pluginConnections: PluginConnectionMapV1 | null,
   publicOrigin: string
-) {
+): Effect.fn.Return<PluginAdministrationService, never, PluginAdministrationOAuthRequirements> {
   const grants = yield* makeAtlassianOAuthGrants()
   return yield* makePluginAdministrationWithConnections(pluginConnections, publicOrigin, grants)
 })
@@ -1181,7 +1190,9 @@ export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration)
 
 /** Live administration layer with browser Atlassian OAuth grants. */
-export const pluginAdministrationOAuthLayer = (publicOrigin: string) =>
+export const pluginAdministrationOAuthLayer = (
+  publicOrigin: string
+): Layer.Layer<PluginAdministration, never, PluginAdministrationOAuthRequirements> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin))
 
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
@@ -1194,7 +1205,8 @@ export const pluginAdministrationLayerWithConnections = (
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin: string
-) => Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
+): Layer.Layer<PluginAdministration, never, PluginAdministrationOAuthRequirements> =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections

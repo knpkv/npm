@@ -92,6 +92,17 @@ describe("AtlassianOAuthGrants", () => {
       )
       assert.deepStrictEqual(exchanged.sites.map(({ cloudId }) => cloudId), ["cloud-1", "cloud-2"])
       assert.notInclude(JSON.stringify(exchanged), "secret")
+
+      const confluenceStore = path.join(configHome, "atlassian", "confluence-to-markdown")
+      yield* fileSystem.writeFileString(confluenceStore, "blocks-directory-creation")
+      const failedSave = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(failedSave))
+      yield* fileSystem.remove(confluenceStore)
+
       const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )

@@ -6,7 +6,7 @@ import { useNavigate, useSearchParams } from "react-router"
 
 import { AtlassianOAuthGrantId, type AtlassianOAuthGrantExchangeResponse } from "../../api/plugins.js"
 import { useBrowserSession } from "../BrowserSession.js"
-import { browserConnectionTestTransport } from "./connectionTestTransport.js"
+import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import styles from "./AtlassianOAuthCallbackPage.module.css"
 
 const AuthorizationCode = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
@@ -14,12 +14,18 @@ const AuthorizationCode = Schema.String.check(Schema.isTrimmed(), Schema.isNonEm
 type CallbackState =
   | { readonly _tag: "waiting" }
   | { readonly _tag: "exchanging" }
-  | { readonly _tag: "selecting"; readonly grant: AtlassianOAuthGrantExchangeResponse }
+  | { readonly _tag: "selecting"; readonly grant: AtlassianOAuthGrantExchangeResponse; readonly saveFailed: boolean }
   | { readonly _tag: "saving"; readonly grant: AtlassianOAuthGrantExchangeResponse; readonly cloudId: string }
   | { readonly _tag: "failed" }
 
+type CallbackTransport = Pick<ConnectionTestTransport, "completeAtlassianOAuthGrant" | "exchangeAtlassianOAuthGrant">
+
 /** Complete a browser OAuth redirect without exposing provider tokens to the browser. */
-export const AtlassianOAuthCallbackPage = (): ReactElement => {
+export const AtlassianOAuthCallbackPage = ({
+  transport = browserConnectionTestTransport
+}: {
+  readonly transport?: CallbackTransport | undefined
+} = {}): ReactElement => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { state: sessionState } = useBrowserSession()
@@ -35,7 +41,7 @@ export const AtlassianOAuthCallbackPage = (): ReactElement => {
     }
     const grantId = Schema.decodeUnknownResult(AtlassianOAuthGrantId)(searchParams.get("state"))
     const code = Schema.decodeUnknownResult(AuthorizationCode)(searchParams.get("code"))
-    const exchange = browserConnectionTestTransport.exchangeAtlassianOAuthGrant
+    const exchange = transport.exchangeAtlassianOAuthGrant
     if (Result.isFailure(grantId) || Result.isFailure(code) || exchange === undefined) {
       setState({ _tag: "failed" })
       return
@@ -43,16 +49,15 @@ export const AtlassianOAuthCallbackPage = (): ReactElement => {
     const request = new AbortController()
     setState({ _tag: "exchanging" })
     exchange(grantId.success, code.success, request.signal).then(
-      (grant) => setState({ _tag: "selecting", grant }),
+      (grant) => setState({ _tag: "selecting", grant, saveFailed: false }),
       () => {
         if (!request.signal.aborted) setState({ _tag: "failed" })
       }
     )
-    return () => request.abort()
-  }, [searchParams, sessionState])
+  }, [searchParams, sessionState, transport])
 
   const complete = (grant: AtlassianOAuthGrantExchangeResponse, cloudId: string): void => {
-    const save = browserConnectionTestTransport.completeAtlassianOAuthGrant
+    const save = transport.completeAtlassianOAuthGrant
     if (save === undefined) {
       setState({ _tag: "failed" })
       return
@@ -62,7 +67,7 @@ export const AtlassianOAuthCallbackPage = (): ReactElement => {
     void save(grant.grantId, cloudId, request.signal).then(
       () => navigate("/services?enable=jira", { replace: true }),
       () => {
-        if (!request.signal.aborted) setState({ _tag: "failed" })
+        if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })
       }
     )
   }
@@ -120,6 +125,11 @@ export const AtlassianOAuthCallbackPage = (): ReactElement => {
         </Text>
       </header>
       <div className={styles.sites}>
+        {state._tag === "selecting" && state.saveFailed ? (
+          <Text as="p" tone="secondary" variant="body">
+            The shared profile could not be saved to both tools. Fix the local profile store and retry this site.
+          </Text>
+        ) : null}
         {state.grant.sites.map((site) => (
           <Surface as="article" className={styles.site} key={site.cloudId} padding="default" shape="grouped">
             <div className={styles.identity}>

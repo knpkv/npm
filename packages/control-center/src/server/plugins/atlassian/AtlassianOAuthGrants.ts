@@ -161,6 +161,19 @@ const decodeSites = Effect.fn("AtlassianOAuthGrants.decodeSites")(function*(site
     }).pipe(Effect.mapError(unavailable)))
 })
 
+const restoreGrantAfterSaveFailure = Effect.fn("AtlassianOAuthGrants.restoreAfterSaveFailure")(function*(
+  grants: Ref.Ref<PendingGrants>,
+  grantId: AtlassianOAuthGrantId,
+  grant: SiteSelectionGrant
+) {
+  const nowMilliseconds = yield* Clock.currentTimeMillis
+  yield* Ref.update(grants, (current) => {
+    const active = activeGrants(current, nowMilliseconds)
+    if (!isExpired(grant, nowMilliseconds)) active.set(grantId, grant)
+    return active
+  })
+})
+
 /** Build one process-local grant manager over Effect platform services. */
 export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -297,6 +310,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         return yield* saveProfileToken(storeName, token)
       }), { concurrency: 1 }).pipe(
         Effect.provide(localStorageLayer),
+        Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
         Effect.mapError(unavailable),
         Effect.uninterruptible
       )
