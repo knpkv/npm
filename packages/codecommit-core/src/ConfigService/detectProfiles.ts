@@ -26,7 +26,7 @@ export const discoverAwsProfiles = Effect.fn("ConfigService.discoverAwsProfiles"
     Arr.reduce(
       HashMap.empty<string, typeof profiles[number]>(),
       (map, p) =>
-        HashMap.has(map, p.name) && p.region === "us-east-1"
+        HashMap.has(map, p.name) && (p.region === undefined || p.region === "us-east-1")
           ? map
           : HashMap.set(map, p.name, p)
     ),

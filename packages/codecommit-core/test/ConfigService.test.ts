@@ -68,7 +68,8 @@ describe("ConfigService", () => {
   it("discovers and deduplicates profiles for another server package", async () => {
     const mock = makeMockFS({
       [`${TEST_HOME}/.aws/config`]: "[profile production]\nregion = eu-west-1\n[profile shared]\nregion = us-east-1",
-      [`${TEST_HOME}/.aws/credentials`]: "[shared]\nregion = eu-central-1\n[personal]\naws_access_key_id = redacted"
+      [`${TEST_HOME}/.aws/credentials`]:
+        "[production]\naws_access_key_id = redacted\n[shared]\nregion = eu-central-1\n[personal]\naws_access_key_id = redacted"
     })
     const profiles = await Effect.runPromise(
       discoverAwsProfiles(TEST_HOME).pipe(Effect.provide(Layer.mergeAll(mock.layer, MockPath)))
@@ -80,6 +81,7 @@ describe("ConfigService", () => {
       expect.objectContaining({ name: "shared", region: "eu-central-1" }),
       expect.objectContaining({ name: "personal" })
     ]))
+    expect(profiles.find(({ name }) => name === "personal")?.region).toBeUndefined()
   })
 
   it("returns empty accounts when no file exists", () =>
