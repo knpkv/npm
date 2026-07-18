@@ -1,9 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -34,6 +39,40 @@ const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
 
+const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
+  const descriptor = providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor
+  return {
+    ...descriptor,
+    configurationFields: descriptor.configurationFields.flatMap((field) => {
+      if (field.key === "authMode" || field.key === "oauthProfileId") return []
+      if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
+      return [{
+        ...field,
+        description: providerId === "jira"
+          ? "Atlassian account email used for Jira Cloud basic authentication."
+          : "Atlassian account email used for Confluence Cloud basic authentication.",
+        required: true
+      }]
+    })
+  }
+}
+
+const oauthProfile = (id: string, expiresAt: number) => ({
+  id,
+  name: `${id} @ knpkv.atlassian.net`,
+  token: {
+    access_token: `${id}-access-token`,
+    refresh_token: `${id}-refresh-token`,
+    expires_at: expiresAt,
+    scope: "read:me offline_access",
+    cloud_id: "cloud-1",
+    site_url: "https://knpkv.atlassian.net/",
+    user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+  },
+  created_at: "2026-07-18T10:00:00.000Z",
+  updated_at: "2026-07-18T10:00:00.000Z"
+})
+
 const fakeClockifyClient = (
   requests: Array<HttpClientRequest.HttpClientRequest>
 ): HttpClient.HttpClient =>
@@ -54,6 +93,230 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
+  it.effect("loads pre-OAuth Atlassian descriptors only with their legacy credential pair", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-legacy-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const dependencies = Layer.mergeAll(
+        persistence,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        const cases: ReadonlyArray<{
+          readonly missing: "none" | "apiToken" | "email"
+          readonly providerId: "jira" | "confluence"
+        }> = [
+          { providerId: "jira", missing: "none" },
+          { providerId: "confluence", missing: "none" },
+          { providerId: "jira", missing: "email" },
+          { providerId: "confluence", missing: "apiToken" }
+        ]
+
+        for (const [index, testCase] of cases.entries()) {
+          const pluginConnectionId = PluginConnectionId.make(
+            `01890f6f-6d6a-7cc0-98d2-${(300 + index).toString().padStart(12, "0")}`
+          )
+          const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+          yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+            pluginConnectionId,
+            providerId: testCase.providerId,
+            displayName: PluginConnectionDisplayName.make(`Legacy ${testCase.providerId} ${index}`),
+            isEnabled: true,
+            createdAt: CREATED_AT
+          })
+          const credentials = [
+            ...(testCase.missing === "apiToken"
+              ? []
+              : [{ _tag: "secret-reference", key: "apiToken", ref: apiTokenRef }]),
+            ...(testCase.missing === "email"
+              ? []
+              : [{ _tag: "text", key: "email", value: "owner@example.com" }])
+          ]
+          const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+            testCase.providerId === "jira"
+              ? [
+                ...credentials,
+                { _tag: "integer", key: "maximumPages", value: 3 },
+                { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+                { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+              ]
+              : [
+                ...credentials,
+                { _tag: "text", key: "probePageId", value: "page-1" },
+                { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
+                { _tag: "text", key: "siteId", value: "cloud-1" },
+                { _tag: "text", key: "spaceId", value: "space-1" }
+              ]
+          )
+          yield* persistenceService.pluginConfigurations.update(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            configuration,
+            0,
+            CREATED_AT
+          )
+          yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            testCase.providerId,
+            preOAuthDescriptor(testCase.providerId),
+            0,
+            CREATED_AT
+          )
+
+          const connections = yield* PluginConnectionMap
+          const outcome = yield* Effect.result(
+            connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
+          )
+          if (testCase.missing === "none") {
+            assert.strictEqual(outcome._tag, "Success")
+            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+          } else {
+            assert.strictEqual(outcome._tag, "Failure")
+            if (outcome._tag === "Failure") {
+              assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+              if (outcome.failure._tag === "PluginConfigurationFailure") {
+                assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-authMode-invalid")
+              }
+            }
+          }
+        }
+        assert.lengthOf(requests, 0)
+      }).pipe(
+        Effect.provide(firstPartyPluginConnectionMapLayer),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("loads current OAuth profiles and rejects expired tokens before client use", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-oauth-" })
+      const configRoot = path.join(home, ".config")
+      const now = DateTime.toEpochMillis(CREATED_AT)
+      yield* TestClock.setTime(now)
+      for (const storeName of ["jira-cli", "confluence-to-markdown"]) {
+        const storePath = path.join(configRoot, "atlassian", storeName)
+        yield* fileSystem.makeDirectory(storePath, { recursive: true })
+        const profiles = [oauthProfile("valid-profile", now + 60_000), oauthProfile("expired-profile", now - 1)]
+        yield* fileSystem.writeFileString(
+          path.join(storePath, "profiles.json"),
+          JSON.stringify({ activeProfileId: "valid-profile", profiles })
+        )
+      }
+
+      const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-oauth-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const dependencies = Layer.mergeAll(
+        persistence,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
+      )
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configRoot })
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        const cases: ReadonlyArray<{
+          readonly profileId: "valid-profile" | "expired-profile"
+          readonly providerId: "jira" | "confluence"
+        }> = [
+          { providerId: "jira", profileId: "valid-profile" },
+          { providerId: "confluence", profileId: "valid-profile" },
+          { providerId: "jira", profileId: "expired-profile" },
+          { providerId: "confluence", profileId: "expired-profile" }
+        ]
+
+        for (const [index, testCase] of cases.entries()) {
+          const pluginConnectionId = PluginConnectionId.make(
+            `01890f6f-6d6a-7cc0-98d2-${(400 + index).toString().padStart(12, "0")}`
+          )
+          yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+            pluginConnectionId,
+            providerId: testCase.providerId,
+            displayName: PluginConnectionDisplayName.make(`OAuth ${testCase.providerId} ${index}`),
+            isEnabled: true,
+            createdAt: CREATED_AT
+          })
+          const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+            testCase.providerId === "jira"
+              ? [
+                { _tag: "text", key: "authMode", value: "oauth" },
+                { _tag: "integer", key: "maximumPages", value: 3 },
+                { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
+                { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+                { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+              ]
+              : [
+                { _tag: "text", key: "authMode", value: "oauth" },
+                { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
+                { _tag: "text", key: "probePageId", value: "page-1" },
+                { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
+                { _tag: "text", key: "siteId", value: "cloud-1" },
+                { _tag: "text", key: "spaceId", value: "space-1" }
+              ]
+          )
+          yield* persistenceService.pluginConfigurations.update(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            configuration,
+            0,
+            CREATED_AT
+          )
+          yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+            WORKSPACE_ID,
+            pluginConnectionId,
+            testCase.providerId,
+            testCase.providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor,
+            0,
+            CREATED_AT
+          )
+
+          const connections = yield* PluginConnectionMap
+          const outcome = yield* Effect.result(
+            connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
+          )
+          if (testCase.profileId === "valid-profile") {
+            assert.strictEqual(outcome._tag, "Success")
+            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+          } else {
+            assert.strictEqual(outcome._tag, "Failure")
+            if (outcome._tag === "Failure") {
+              assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+              if (outcome.failure._tag === "PluginConfigurationFailure") {
+                assert.strictEqual(outcome.failure.diagnosticCode, "plugin-oauth-profile-expired")
+              }
+            }
+          }
+        }
+        assert.lengthOf(requests, 0)
+      }).pipe(
+        Effect.provide(firstPartyPluginConnectionMapLayer),
+        Effect.provide(dependencies),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("loads legacy text and current secret-backed Atlassian emails", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-email-")
@@ -114,6 +377,7 @@ describe("first-party plugin runtime", () => {
             testCase.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 email,
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -122,6 +386,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 email,
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
@@ -217,6 +482,7 @@ describe("first-party plugin runtime", () => {
             invalid.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -225,6 +491,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: invalid.webBaseUrl },

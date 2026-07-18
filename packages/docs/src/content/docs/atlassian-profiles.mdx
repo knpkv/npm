@@ -74,3 +74,9 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/atlassian/<auth-store>/profiles.json
 ```
 
 The auth stores currently inspected are `jira-cli` and `confluence-to-markdown`; Jira Clockify is reported as a consumer of `jira-cli` auth.
+
+## Control Center
+
+Control Center prefers these local OAuth profiles when an owner connects Jira and Confluence. Its Services page shows only safe profile, site, expiry, and user metadata. The selected profile ID is stored with each adapter connection; access and refresh tokens remain in the local XDG auth store and are loaded only by the server runtime.
+
+The account-oriented form creates Jira and Confluence connections together for one site. **Use API token instead** exposes the compatibility fallback when local OAuth is unavailable. Run `atlassian profiles doctor` first if a profile is expired or missing product scopes.

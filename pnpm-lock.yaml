@@ -539,6 +539,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/atlassian-common':
+        specifier: workspace:^
+        version: link:../atlassian-common
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core

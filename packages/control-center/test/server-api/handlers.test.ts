@@ -9,6 +9,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
+  type AtlassianProfileDiscoveryResponse,
   CreatePluginConnectionResponse,
   PluginConfiguration,
   PluginConfigurationKey,
@@ -946,6 +947,47 @@ describe("Control Center API handlers", () => {
       ]))
 
       assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("discovers secret-free Atlassian OAuth profile metadata for workspace owners", () =>
+    Effect.gen(function*() {
+      const expected: AtlassianProfileDiscoveryResponse = [{
+        profileId: "account-1@cloud-1",
+        name: "Avery Bell @ team.atlassian.net",
+        siteUrl: "https://team.atlassian.net/",
+        cloudId: "cloud-1",
+        accountName: "Avery Bell",
+        accountEmail: "avery@example.com",
+        status: "valid",
+        providers: ["jira", "confluence"]
+      }]
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        discoverAtlassianProfiles: () => Effect.succeed(expected),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.discoverAtlassianProfiles()
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+      assert.notInclude(JSON.stringify(result), "access_token")
+      assert.notInclude(JSON.stringify(result), "refresh_token")
     }))
 
   it.effect("runs owner connection setup through the session and CSRF-protected handler", () =>

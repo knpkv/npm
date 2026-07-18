@@ -49,6 +49,10 @@
     "./profile-manager": {
       "import": "./dist/config/ProfileManager.js",
       "types": "./dist/config/ProfileManager.d.ts"
+    },
+    "./profile-storage": {
+      "import": "./dist/config/ProfileStorage.js",
+      "types": "./dist/config/ProfileStorage.d.ts"
     }
   },
   "publishConfig": {

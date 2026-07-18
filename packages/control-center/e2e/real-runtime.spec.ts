@@ -82,7 +82,8 @@ test.describe("repository-managed real runtime", () => {
       await expect(page.getByRole("heading", { level: 2, name: service })).toBeVisible()
     }
     await expect(page.getByRole("button", { name: "Configure AWS account" })).toHaveCount(2)
-    await expect(page.getByRole("button", { name: "Enable service" })).toHaveCount(2)
+    await expect(page.getByRole("button", { name: "Configure Atlassian" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Enable service" })).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Test connection" })).toBeVisible()
     const jiraService = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Runtime Jira" }) })
     await jiraService.getByRole("button", { name: "Disable" }).click()

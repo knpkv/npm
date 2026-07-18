@@ -22,17 +22,31 @@ export const confluencePagePluginDescriptor = {
     },
     {
       _tag: "text",
+      key: "authMode",
+      label: "Authentication",
+      description: "OAuth profile or API token fallback.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "oauthProfileId",
+      label: "OAuth profile",
+      description: "Shared local Atlassian OAuth profile identifier.",
+      required: false
+    },
+    {
+      _tag: "text",
       key: "email",
       label: "Account email",
-      description: "Atlassian account email used for Confluence Cloud basic authentication.",
-      required: true
+      description: "Atlassian account email used only for API token fallback.",
+      required: false
     },
     {
       _tag: "secret-reference",
       key: "apiToken",
       label: "API token",
       description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
-      required: true,
+      required: false,
       secretKind: "token"
     },
     {

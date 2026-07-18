@@ -1,3 +1,4 @@
+import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import { AwsClientConfig, ReadClient } from "@knpkv/codecommit-core"
 import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
@@ -6,12 +7,15 @@ import {
   AtlaskitTransformersLayer,
   MarkdownConverterLayer
 } from "@knpkv/confluence-to-markdown"
-import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "@knpkv/jira-api-client"
+import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -23,6 +27,7 @@ import type { StoredPluginConfiguration } from "../../persistence/repositories/p
 import type { PluginRuntimeRecord } from "../../persistence/repositories/pluginRuntimeModels.js"
 import type { SecretRef } from "../../secrets/SecretRef.js"
 import { SecretStore } from "../../secrets/SecretStore.js"
+import { loadAtlassianProfile } from "../atlassian/AtlassianProfiles.js"
 import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
   ClockifyReadPluginConfiguration,
@@ -100,6 +105,7 @@ interface LoadedRuntime {
   readonly configurationRevision: number
   readonly connectionRevision: number
   readonly descriptor: NegotiatedPluginDescriptorV1
+  readonly descriptorGeneration: "current" | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
 
@@ -206,6 +212,34 @@ const expectedDescriptor = (providerId: ProviderId): unknown => {
   }
 }
 
+const legacyAtlassianDescriptor = (providerId: ProviderId): unknown | undefined => {
+  const descriptor = providerId === "jira"
+    ? jiraReadPluginDescriptor
+    : providerId === "confluence"
+    ? confluencePagePluginDescriptor
+    : undefined
+  if (descriptor === undefined) return undefined
+  return {
+    ...descriptor,
+    configurationFields: descriptor.configurationFields.flatMap((field) => {
+      if (field.key === "authMode" || field.key === "oauthProfileId") return []
+      if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
+      return [{
+        ...field,
+        description: providerId === "jira"
+          ? "Atlassian account email used for Jira Cloud basic authentication."
+          : "Atlassian account email used for Confluence Cloud basic authentication.",
+        required: true
+      }]
+    })
+  }
+}
+
+const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
+  const legacy = legacyAtlassianDescriptor(providerId)
+  return legacy === undefined ? [expectedDescriptor(providerId)] : [expectedDescriptor(providerId), legacy]
+}
+
 const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: PluginRuntimeScope) {
   const persistence = yield* Persistence
   const connection = yield* mapConfigurationFailure(
@@ -227,11 +261,14 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
     persistence.pluginRuntime.getRuntime(scope.workspaceId, scope.pluginConnectionId)
   )
   const descriptor = yield* decodeDescriptor(runtime)
-  const expected = yield* negotiatePluginDescriptorV1(expectedDescriptor(connection.providerId))
+  const expected = yield* Effect.forEach(expectedDescriptors(connection.providerId), negotiatePluginDescriptorV1)
+  const descriptorGeneration = expected.findIndex(
+    (candidate) => JSON.stringify(descriptor) === JSON.stringify(candidate)
+  )
   if (
     runtime.providerId !== connection.providerId ||
     runtime.descriptorSchemaVersion !== descriptor.descriptor.contractVersion.major ||
-    JSON.stringify(descriptor) !== JSON.stringify(expected)
+    descriptorGeneration < 0
   ) {
     return yield* configurationFailure("plugin-runtime-source-mismatch")
   }
@@ -241,6 +278,7 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
     configurationRevision: configurationOption.value.revision,
     connectionRevision: connection.revision,
     descriptor,
+    descriptorGeneration: descriptorGeneration === 0 ? "current" : "legacy-atlassian",
     runtime
   } satisfies LoadedRuntime
 })
@@ -281,14 +319,82 @@ const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(funct
   }
 })
 
+interface AtlassianAuthenticationMode {
+  readonly includesModeKey: boolean
+  readonly value: string
+}
+
+const atlassianAuthenticationMode = (
+  loaded: LoadedRuntime
+): Effect.Effect<AtlassianAuthenticationMode, PluginConfigurationFailure> => {
+  const { configuration } = loaded
+  if (findValue(configuration, "authMode") !== undefined) {
+    return Effect.map(textValue(configuration, "authMode"), (value) => ({ includesModeKey: true, value }))
+  }
+  return loaded.descriptorGeneration === "legacy-atlassian" &&
+      findValue(configuration, "email") !== undefined &&
+      findValue(configuration, "apiToken") !== undefined
+    ? Effect.succeed({ includesModeKey: false, value: "api-token" })
+    : Effect.fail(configurationFailure("plugin-configuration-authMode-invalid"))
+}
+
+const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuthentication")(function*(
+  loaded: LoadedRuntime,
+  authMode: string,
+  provider: "jira" | "confluence",
+  expectedSiteOrigin: string,
+  expectedCloudId?: string
+) {
+  if (authMode === "oauth") {
+    const profileId = yield* textValue(loaded.configuration, "oauthProfileId")
+    const profile = yield* loadAtlassianProfile(provider, profileId).pipe(
+      Effect.provide(HomeDirectoryLive),
+      Effect.mapError(() => configurationFailure("plugin-oauth-profile-unavailable"))
+    )
+    if (profile === null) return yield* configurationFailure("plugin-oauth-profile-unavailable")
+    const profileSite = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(profile.token.site_url).pipe(
+      Effect.mapError(() => configurationFailure("plugin-oauth-profile-invalid"))
+    )
+    if (
+      profileSite.origin !== expectedSiteOrigin ||
+      (expectedCloudId !== undefined && profile.token.cloud_id !== expectedCloudId)
+    ) {
+      return yield* configurationFailure("plugin-oauth-profile-site-mismatch")
+    }
+    if (profile.token.expires_at <= (yield* Clock.currentTimeMillis)) {
+      return yield* configurationFailure("plugin-oauth-profile-expired")
+    }
+    return {
+      credentialGeneration: `oauth:${profile.id}:${profile.updated_at}`,
+      auth: {
+        type: "oauth2",
+        accessToken: Redacted.make(profile.token.access_token),
+        cloudId: profile.token.cloud_id
+      }
+    } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+  }
+  if (authMode !== "api-token") return yield* configurationFailure("plugin-authentication-mode-invalid")
+  const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
+  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
+    emailCredential.value
+  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
+  const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
+  const apiToken = yield* decodeSecret(apiTokenRef)
+  return {
+    credentialGeneration: `api-token:${emailCredential.generation}\0${apiTokenRef}`,
+    auth: { type: "basic", email, apiToken: Redacted.make(apiToken) }
+  } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+})
+
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
+  const authMode = yield* atlassianAuthenticationMode(loaded)
   const expectedKeys = new Set([
-    "apiToken",
-    "email",
+    ...(authMode.includesModeKey ? ["authMode"] : []),
     "maximumPages",
     "operationTimeoutMillis",
     "pageSize",
-    "webBaseUrl"
+    "webBaseUrl",
+    ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const configurationInput = {
@@ -300,22 +406,22 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const configuration = yield* Schema.decodeUnknownEffect(JiraReadPluginConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
-  const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
-  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
-    emailCredential.value
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
-  const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
-  const apiToken = yield* decodeSecret(apiTokenRef)
+  const authentication = yield* atlassianAuthentication(
+    loaded,
+    authMode.value,
+    "jira",
+    configuration.webBaseUrl.origin
+  )
   const client = JiraApiClient.layer.pipe(
     Layer.provide(Layer.succeed(JiraApiConfig, {
       baseUrl: configuration.webBaseUrl.origin,
-      auth: { type: "basic", email, apiToken: Redacted.make(apiToken) }
+      auth: authentication.auth
     }))
   )
   const plugin = Layer.unwrap(
     makeJiraReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
   ).pipe(Layer.provide(client))
-  return { credentialGeneration: `${emailCredential.generation}\0${apiTokenRef}`, layer: plugin }
+  return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
 
 const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(function*(loaded: LoadedRuntime) {
@@ -359,7 +465,15 @@ const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(functio
 })
 
 const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(function*(loaded: LoadedRuntime) {
-  const expectedKeys = new Set(["apiToken", "email", "probePageId", "siteBaseUrl", "siteId", "spaceId"])
+  const authMode = yield* atlassianAuthenticationMode(loaded)
+  const expectedKeys = new Set([
+    ...(authMode.includesModeKey ? ["authMode"] : []),
+    "probePageId",
+    "siteBaseUrl",
+    "siteId",
+    "spaceId",
+    ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
+  ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const configurationInput = {
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
@@ -370,16 +484,17 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
-  const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
-  const email = yield* Schema.decodeUnknownEffect(AtlassianBasicAuthEmail)(
-    emailCredential.value
-  ).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
-  const apiTokenRef = yield* secretValue(loaded.configuration, "apiToken")
-  const apiToken = yield* decodeSecret(apiTokenRef)
+  const authentication = yield* atlassianAuthentication(
+    loaded,
+    authMode.value,
+    "confluence",
+    configuration.siteBaseUrl.origin,
+    configuration.siteId
+  )
   const apiClient = ConfluenceApiClient.layer.pipe(
     Layer.provide(Layer.succeed(ConfluenceApiConfig, {
       baseUrl: configuration.siteBaseUrl.origin,
-      auth: { type: "basic", email, apiToken: Redacted.make(apiToken) }
+      auth: authentication.auth
     }))
   )
   const pageClient = confluencePageClientLayer.pipe(Layer.provide(apiClient))
@@ -389,7 +504,7 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const plugin = buildPluginDefinitionLayer(confluencePagePluginDefinition, configurationInput).pipe(
     Layer.provide(Layer.merge(pageClient, converter))
   )
-  return { credentialGeneration: `${emailCredential.generation}\0${apiTokenRef}`, layer: plugin }
+  return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
 
 const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(loaded: LoadedRuntime) {
@@ -461,12 +576,16 @@ const makeRegistry = Effect.gen(function*() {
   const secrets = yield* SecretStore
   const cryptoService = yield* Crypto.Crypto
   const httpClient = yield* HttpClient.HttpClient
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
   const requirements = Layer.mergeAll(
     Layer.succeed(Persistence, persistence),
     Layer.succeed(SecretStore, secrets),
     Layer.succeed(Crypto.Crypto, cryptoService),
-    Layer.succeed(HttpClient.HttpClient, httpClient)
+    Layer.succeed(HttpClient.HttpClient, httpClient),
+    Layer.succeed(FileSystem.FileSystem, fileSystem),
+    Layer.succeed(Path.Path, path)
   )
 
   return {
