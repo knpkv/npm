@@ -302,6 +302,14 @@ export const CreatePluginConnectionResponse = Schema.Struct({
 /** Decoded redacted first-party connection setup response. */
 export type CreatePluginConnectionResponse = typeof CreatePluginConnectionResponse.Type
 
+/** Owner-only transition for independently enabling or disabling one connection. */
+export const SetPluginConnectionEnabledRequest = Schema.Struct({
+  isEnabled: Schema.Boolean
+}).annotate({ identifier: "SetPluginConnectionEnabledRequest" })
+
+/** Decoded connection enablement transition. */
+export type SetPluginConnectionEnabledRequest = typeof SetPluginConnectionEnabledRequest.Type
+
 /** Secret-free configuration contract exposed to settings views. */
 export const PluginConfigurationMetadata = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
@@ -342,6 +350,15 @@ const overview = HttpApiEndpoint.get("overview", "/overview", {
 const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
   payload: CreatePluginConnectionRequest,
   success: CreatePluginConnectionResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const setConnectionEnabled = HttpApiEndpoint.patch("setConnectionEnabled", "/connections/:pluginConnectionId", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  payload: SetPluginConnectionEnabledRequest,
+  success: PluginConnectionSummary,
   error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
 })
   .middleware(SessionCookieAuth)
@@ -392,6 +409,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     list,
     overview,
     createConnection,
+    setConnectionEnabled,
     health,
     testConnection,
     configurationMetadata,

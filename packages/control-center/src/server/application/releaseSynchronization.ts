@@ -1,4 +1,4 @@
-import * as Crypto from "effect/Crypto"
+import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -8,16 +8,14 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { Person, type PersonSourceIdentity } from "../../domain/actors.js"
-import type { PortfolioInvalidationReason } from "../../domain/domainEvent.js"
 import { PluginHealth, type PluginHealth as PluginHealthType } from "../../domain/freshness.js"
-import { DomainEventId, type PluginConnectionId, type ReleaseId, type WorkspaceId } from "../../domain/identifiers.js"
+import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 import { PluginCheckpointV1, PluginSyncRequestV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
-import { PersistenceOperationError, SourceIdentityMismatchError } from "../persistence/errors.js"
+import { SourceIdentityMismatchError } from "../persistence/errors.js"
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
-import { DomainEventDedupeKey } from "../persistence/repositories/domainEventModels.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { type PluginFailure, pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
@@ -29,6 +27,7 @@ import {
   normalizeFakeReleaseCache,
   prevalidateFakeReleasePage
 } from "./fakeReleaseNormalization.js"
+import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const pluginFailureTags = new Set([
   "PluginAuthenticationFailure",
@@ -108,41 +107,6 @@ const failureHealth = Effect.fn("ReleaseSynchronization.failureHealth")(function
     failureClass: pluginFailureClass(failure),
     retryAt: failure._tag === "PluginRateLimitFailure" ? failure.retryAt : null,
     safeMessage: safeFailureMessage(failure)
-  })
-})
-
-const appendPortfolioInvalidation = Effect.fn(
-  "ReleaseSynchronization.appendPortfolioInvalidation"
-)(function*(input: {
-  readonly workspaceId: WorkspaceId
-  readonly pluginConnectionId: PluginConnectionId
-  readonly releaseId: ReleaseId | null
-  readonly occurredAt: UtcTimestamp
-  readonly reason: PortfolioInvalidationReason
-}) {
-  const cryptoService = yield* Crypto.Crypto
-  const persistence = yield* Persistence
-  const eventId = yield* cryptoService.randomUUIDv7.pipe(
-    Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.random-id" })),
-    Effect.flatMap((value) =>
-      Schema.decodeUnknownEffect(DomainEventId)(value).pipe(
-        Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.random-id" }))
-      )
-    )
-  )
-  return yield* persistence.events.append(input.workspaceId, {
-    dedupeKey: DomainEventDedupeKey.make(eventId),
-    schemaVersion: 1,
-    eventId,
-    eventType: "portfolio-invalidated",
-    occurredAt: input.occurredAt,
-    causationId: null,
-    correlationId: null,
-    metadata: {
-      ...(input.releaseId === null ? {} : { releaseId: input.releaseId }),
-      pluginConnectionId: input.pluginConnectionId
-    },
-    payload: { reason: input.reason }
   })
 })
 

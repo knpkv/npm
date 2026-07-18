@@ -1,5 +1,6 @@
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -44,9 +45,11 @@ import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
 import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
+import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
+import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
@@ -74,6 +77,16 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
   persistence: Persistence["Service"],
   connection: PluginConnectionRecord
 ) {
+  if (!connection.isEnabled) {
+    return {
+      pluginConnectionId: connection.pluginConnectionId,
+      providerId: connection.providerId,
+      displayName: connection.displayName,
+      isEnabled: false,
+      health: { _tag: "disabled", checkedAt: connection.updatedAt },
+      updatedAt: connection.updatedAt
+    } satisfies PluginConnectionSummary
+  }
   const runtime = yield* persistence.pluginRuntime.getRuntime(
     connection.workspaceId,
     connection.pluginConnectionId
@@ -112,6 +125,51 @@ const requireConnection = (
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId
 ) => mapPersistenceRead(persistence.pluginConnections.get(workspaceId, pluginConnectionId))
+
+const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnabled")(function*(
+  persistence: Persistence["Service"],
+  cryptoService: Crypto.Crypto,
+  wakeups: DomainEventWakeups["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  isEnabled: boolean
+) {
+  const current = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  if (current.isEnabled === isEnabled) return yield* connectionSummary(persistence, current)
+  if (isEnabled && pluginConnections === null) return yield* unavailable()
+  const updatedAt = yield* DateTime.now
+  const updated = yield* Effect.uninterruptible(
+    persistence.transact(Effect.gen(function*() {
+      const changed = yield* persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
+        displayName: current.displayName,
+        isEnabled,
+        expectedRevision: current.revision,
+        updatedAt
+      })
+      yield* appendPortfolioInvalidation({
+        workspaceId,
+        pluginConnectionId,
+        releaseId: null,
+        occurredAt: updatedAt,
+        reason: "plugin-health"
+      }).pipe(
+        Effect.provideService(Crypto.Crypto, cryptoService),
+        Effect.provideService(Persistence, persistence)
+      )
+      return changed
+    })).pipe(
+      Effect.mapError(mapPersistenceWriteError),
+      Effect.tap(() =>
+        pluginConnections === null
+          ? Effect.void
+          : pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      ),
+      Effect.tap(() => wakeups.notify(workspaceId))
+    )
+  )
+  return yield* connectionSummary(persistence, updated)
+})
 
 const identityLabel = (providerId: PluginConnectionRecord["providerId"]): string => {
   switch (providerId) {
@@ -614,11 +672,12 @@ const disableAfterSetupFailure = (
 
 const persistSetupTestHealth = Effect.fn("PluginAdministration.persistSetupTestHealth")(function*(
   persistence: Persistence["Service"],
+  cryptoService: Crypto.Crypto,
+  wakeups: DomainEventWakeups["Service"],
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
   test: PluginConnectionTestResult
 ) {
-  const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
   const health: PluginHealth = test._tag === "healthy"
     ? { _tag: "healthy", checkedAt: test.checkedAt }
     : {
@@ -628,17 +687,33 @@ const persistSetupTestHealth = Effect.fn("PluginAdministration.persistSetupTestH
       retryAt: test.retryAt,
       safeMessage: test.safeMessage
     }
-  yield* persistence.pluginRuntime.recordHealth(
-    workspaceId,
-    pluginConnectionId,
-    runtime.revision,
-    health,
-    test._tag === "healthy" ? 0 : runtime.consecutiveFailures + 1
-  ).pipe(Effect.mapError(mapPersistenceWriteError))
+  yield* persistence.transact(Effect.gen(function*() {
+    const runtime = yield* persistence.pluginRuntime.getRuntime(workspaceId, pluginConnectionId)
+    yield* persistence.pluginRuntime.recordHealth(
+      workspaceId,
+      pluginConnectionId,
+      runtime.revision,
+      health,
+      test._tag === "healthy" ? 0 : runtime.consecutiveFailures + 1
+    )
+    yield* appendPortfolioInvalidation({
+      workspaceId,
+      pluginConnectionId,
+      releaseId: null,
+      occurredAt: test.checkedAt,
+      reason: "plugin-health"
+    }).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.provideService(Persistence, persistence)
+    )
+  })).pipe(Effect.mapError(mapPersistenceWriteError))
+  yield* wakeups.notify(workspaceId)
 })
 
 const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function*(
   persistence: Persistence["Service"],
+  cryptoService: Crypto.Crypto,
+  wakeups: DomainEventWakeups["Service"],
   secrets: SecretStore["Service"],
   pluginConnections: PluginConnectionMapV1 | null,
   workspaceId: WorkspaceId,
@@ -704,7 +779,14 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         workspaceId,
         request.pluginConnectionId
       )
-      yield* persistSetupTestHealth(persistence, workspaceId, request.pluginConnectionId, test)
+      yield* persistSetupTestHealth(
+        persistence,
+        cryptoService,
+        wakeups,
+        workspaceId,
+        request.pluginConnectionId,
+        test
+      )
       return {
         connection: yield* connectionSummary(persistence, enabled),
         configuration: yield* configuration(persistence, secrets, workspaceId, request.pluginConnectionId),
@@ -729,19 +811,52 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
   pluginConnections: PluginConnectionMapV1 | null
 ) {
   const persistence = yield* Persistence
+  const cryptoService = yield* Crypto.Crypto
+  const wakeups = yield* DomainEventWakeups
   const secrets = yield* SecretStore
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
     connectAndTest: ({ request, workspaceId }) =>
-      connectAndTest(persistence, secrets, pluginConnections, workspaceId, request),
+      connectAndTest(persistence, cryptoService, wakeups, secrets, pluginConnections, workspaceId, request),
+    setConnectionEnabled: ({ isEnabled, pluginConnectionId, workspaceId }) =>
+      setConnectionEnabled(
+        persistence,
+        cryptoService,
+        wakeups,
+        pluginConnections,
+        workspaceId,
+        pluginConnectionId,
+        isEnabled
+      ),
     health: Effect.fn("PluginAdministration.health")(function*({ pluginConnectionId, workspaceId }) {
-      yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      if (!connection.isEnabled) {
+        return {
+          pluginConnectionId,
+          health: { _tag: "disabled", checkedAt: connection.updatedAt }
+        }
+      }
       const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)
       return { pluginConnectionId, health: runtime.health }
     }),
-    testConnection: ({ pluginConnectionId, workspaceId }) =>
-      testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId),
+    testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
+      const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const test = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
+      if (connection.isEnabled) {
+        yield* persistSetupTestHealth(
+          persistence,
+          cryptoService,
+          wakeups,
+          workspaceId,
+          pluginConnectionId,
+          test
+        ).pipe(
+          Effect.mapError(() => unavailable())
+        )
+      }
+      return test
+    }),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
     configuration: ({ pluginConnectionId, workspaceId }) =>

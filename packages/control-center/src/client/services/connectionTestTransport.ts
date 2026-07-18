@@ -8,6 +8,7 @@ import { makeControlCenterApiClient } from "../../api/client.js"
 import type {
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
+  PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginOverviewResponse
 } from "../../api/index.js"
@@ -22,6 +23,11 @@ export interface ConnectionTestTransport {
     signal: AbortSignal
   ) => Promise<CreatePluginConnectionResponse>
   readonly makeConnectionId: () => Promise<PluginConnectionId>
+  readonly setEnabled: (
+    pluginConnectionId: PluginConnectionId,
+    isEnabled: boolean,
+    signal: AbortSignal
+  ) => Promise<PluginConnectionSummary>
   readonly test: (pluginConnectionId: PluginConnectionId, signal: AbortSignal) => Promise<PluginConnectionTestResult>
 }
 
@@ -49,6 +55,17 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
         const cryptoService = yield* Crypto.Crypto
         return yield* Schema.decodeUnknownEffect(PluginConnectionId)(yield* cryptoService.randomUUIDv7)
       }).pipe(Effect.provide(BrowserCrypto.layer))
+    ),
+  setEnabled: (pluginConnectionId, isEnabled, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.setConnectionEnabled({
+          params: { pluginConnectionId },
+          payload: { isEnabled }
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
     ),
   test: (pluginConnectionId, signal) =>
     Effect.runPromise(

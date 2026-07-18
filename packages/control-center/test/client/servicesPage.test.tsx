@@ -108,6 +108,31 @@ const renderServices = async (transport: ConnectionTestTransport): Promise<HTMLE
 }
 
 describe("ServicesPage connection tests", () => {
+  it("does not present stale disabled health as current for an enabled connection", async () => {
+    const enabledWithStaleHealth = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(connection),
+      isEnabled: true,
+      health: {
+        _tag: "disabled",
+        checkedAt: "2026-07-14T10:00:00.000Z"
+      }
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve({ ...overview, connections: [enabledWithStaleHealth] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const connectionCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("Payments Jira")
+    )
+    expect(connectionCard?.textContent).toContain("Not checked")
+    expect(connectionCard?.textContent).not.toContain("Disabled")
+  })
+
   it("renders the fresh five, opens setup, submits, and shows the immediate identity", async () => {
     const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
       connection: {
@@ -143,6 +168,7 @@ describe("ServicesPage connection tests", () => {
       create,
       overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
       test: vi.fn()
     }
     const host = await renderServices(transport)
@@ -150,7 +176,7 @@ describe("ServicesPage connection tests", () => {
     expect(host.querySelectorAll("article")).toHaveLength(5)
 
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Configure")
+      textContent?.includes("Enable service")
     )
     await act(async () => configure?.click())
     const name = host.querySelector<HTMLInputElement>('input[aria-labelledby*="label"]')
@@ -162,7 +188,7 @@ describe("ServicesPage connection tests", () => {
       })
     }
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect and test")
+      textContent?.includes("Enable and test")
     )
     await act(async () => submit?.click())
     expect(create).toHaveBeenCalledTimes(1)
@@ -207,22 +233,23 @@ describe("ServicesPage connection tests", () => {
       create: vi.fn().mockResolvedValue(created),
       overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
       test: vi.fn()
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Configure")
+      textContent?.includes("Enable service")
     )
     await act(async () => configure?.click())
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect and test")
+      textContent?.includes("Enable and test")
     )
     await act(async () => submit?.click())
 
     expect(host.textContent).toContain("The provider rejected these credentials.")
     expect(host.textContent).toContain("Needs correction")
-    expect(host.textContent).toContain("Connect and test")
+    expect(host.textContent).toContain("Enable and test")
     expect(host.querySelector("form")).not.toBeNull()
   })
 
@@ -231,20 +258,21 @@ describe("ServicesPage connection tests", () => {
       create: vi.fn().mockRejectedValue(new Error("unavailable")),
       overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
       test: vi.fn()
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Configure")
+      textContent?.includes("Enable service")
     )
     await act(async () => configure?.click())
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect and test")
+      textContent?.includes("Enable and test")
     )
     await act(async () => submit?.click())
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("could not create")
-    expect(host.textContent).toContain("Connect and test")
+    expect(host.textContent).toContain("Enable and test")
   })
 
   it("aborts an in-flight setup request when the browser session changes", async () => {
@@ -256,16 +284,17 @@ describe("ServicesPage connection tests", () => {
       },
       overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
       test: vi.fn()
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
     const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Configure")
+      textContent?.includes("Enable service")
     )
     await act(async () => configure?.click())
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect and test")
+      textContent?.includes("Enable and test")
     )
     await act(async () => submit?.click())
     await act(async () => undefined)
@@ -275,11 +304,11 @@ describe("ServicesPage connection tests", () => {
     await act(async () => sessionControls?.establishSession(csrfToken, session))
     await act(async () => undefined)
     const configureAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Configure")
+      textContent?.includes("Enable service")
     )
     await act(async () => configureAfterReconnect?.click())
     const submitAfterReconnect = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
-      textContent?.includes("Connect and test")
+      textContent?.includes("Enable and test")
     )
     expect(submitAfterReconnect?.disabled).toBe(false)
   })
@@ -320,6 +349,7 @@ describe("ServicesPage connection tests", () => {
       create: vi.fn(),
       overview: () => Promise.resolve(overview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
       test
     }
     const host = await renderServices(transport)
@@ -346,5 +376,105 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Avery Bell")
     expect(host.textContent).toContain("atlassian-account-123")
     expect(host.textContent).toContain("84 ms")
+  })
+
+  it("enables and tests a disabled connection, then lets the owner disable it again", async () => {
+    const disabled = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(connection),
+      isEnabled: false,
+      health: {
+        _tag: "healthy",
+        checkedAt: "2026-07-14T10:00:00.000Z"
+      }
+    })
+    const healthy = Schema.decodeSync(PluginConnectionTestResult)({
+      _tag: "healthy",
+      pluginConnectionId: connection.pluginConnectionId,
+      providerId: "jira",
+      checkedAt: "2026-07-14T10:03:00.000Z",
+      latencyMilliseconds: 84,
+      identity: {
+        kind: "user",
+        label: "Atlassian user",
+        displayName: "Avery Bell",
+        providerImmutableId: "atlassian-account-123"
+      }
+    })
+    const setEnabled = vi.fn((pluginConnectionId, isEnabled) =>
+      Promise.resolve(
+        Schema.decodeSync(PluginConnectionSummary)({
+          ...Schema.encodeSync(PluginConnectionSummary)(disabled),
+          pluginConnectionId,
+          isEnabled,
+          updatedAt: "2026-07-14T10:04:00.000Z"
+        })
+      )
+    )
+    const test = vi.fn().mockResolvedValue(healthy)
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve({ ...overview, connections: [disabled] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled,
+      test
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const connectionCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("Payments Jira")
+    )
+    expect(connectionCard?.textContent).toContain("Disabled")
+    expect(connectionCard?.textContent).not.toContain("Healthy")
+
+    const enable = [...(connectionCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(({ textContent }) =>
+      textContent?.includes("Enable service")
+    )
+    await act(async () => enable?.click())
+    expect(setEnabled).toHaveBeenLastCalledWith(connection.pluginConnectionId, true, expect.any(AbortSignal))
+    expect(test).toHaveBeenCalledWith(connection.pluginConnectionId, expect.any(AbortSignal))
+    expect(connectionCard?.textContent).toContain("Connection healthy")
+
+    const disable = [...(connectionCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(({ textContent }) =>
+      textContent?.includes("Disable")
+    )
+    await act(async () => disable?.click())
+    expect(setEnabled).toHaveBeenLastCalledWith(connection.pluginConnectionId, false, expect.any(AbortSignal))
+    expect(connectionCard?.textContent).toContain("Disabled")
+    expect(connectionCard?.textContent).not.toContain("Connection healthy")
+  })
+
+  it("recovers the test action when disabling aborts a test but the mutation fails", async () => {
+    let testSignal: AbortSignal | undefined
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(overview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn().mockRejectedValue(new Error("conflict")),
+      test: (_pluginConnectionId, signal) => {
+        testSignal = signal
+        return new Promise(() => undefined)
+      }
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const connectionCard = [...host.querySelectorAll<HTMLElement>("article")].find((card) =>
+      card.textContent?.includes("Payments Jira")
+    )
+    const test = [...(connectionCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(({ textContent }) =>
+      textContent?.includes("Test connection")
+    )
+    await act(async () => test?.click())
+    expect(testSignal?.aborted).toBe(false)
+
+    const disable = [...(connectionCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(({ textContent }) =>
+      textContent?.includes("Disable")
+    )
+    await act(async () => disable?.click())
+    expect(testSignal?.aborted).toBe(true)
+    expect(connectionCard?.textContent).toContain("could not change this service")
+    const recoveredTest = [...(connectionCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent?.includes("Test connection")
+    )
+    expect(recoveredTest?.disabled).toBe(false)
   })
 })

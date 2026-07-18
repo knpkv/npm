@@ -59,7 +59,9 @@ describe("PortfolioOverviewView", () => {
       portfolio: presentPortfolio(makePortfolioSnapshot("empty"))
     })
     expect(markup).toContain("No releases yet")
-    expect(markup).toContain("Sync a connected service")
+    expect(markup).toContain("Enable and verify a service")
+    expect(markup).toContain('href="/services"')
+    expect(markup).toContain("Enable a service")
     expect(markup).not.toContain("Ready to ship")
   })
 

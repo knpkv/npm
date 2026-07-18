@@ -77,8 +77,14 @@ test.describe("repository-managed real runtime", () => {
     for (const service of ["CodeCommit", "CodePipeline", "Runtime Jira", "Confluence", "Clockify"]) {
       await expect(page.getByRole("heading", { level: 2, name: service })).toBeVisible()
     }
-    await expect(page.getByRole("button", { name: "Configure" })).toHaveCount(4)
+    await expect(page.getByRole("button", { name: "Enable service" })).toHaveCount(4)
     await expect(page.getByRole("button", { name: "Test connection" })).toBeVisible()
+    const jiraService = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Runtime Jira" }) })
+    await jiraService.getByRole("button", { name: "Disable" }).click()
+    await expect(jiraService.getByText("Disabled", { exact: true })).toBeVisible()
+    await jiraService.getByRole("button", { name: "Enable service" }).click()
+    await expect(jiraService.getByText("Unavailable", { exact: true })).toBeVisible()
+    await expect(jiraService.getByText("The provider is currently unavailable.", { exact: true })).toBeVisible()
     await page.getByRole("link", { name: "Overview" }).click()
     await expect(page).toHaveURL(`${realRuntime.origin}/w/${REAL_WORKSPACE_ID}/overview`)
 

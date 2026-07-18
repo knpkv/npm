@@ -107,6 +107,14 @@ export interface PluginAdministrationService {
     CreatePluginConnectionResponse,
     ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
   >
+  readonly setConnectionEnabled?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly isEnabled: boolean
+  }) => Effect.Effect<
+    PluginConnectionSummary,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly health: (input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId
