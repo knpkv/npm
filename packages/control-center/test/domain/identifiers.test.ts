@@ -7,9 +7,11 @@ import {
   EntityId,
   EnvironmentId,
   EventCursor,
+  FollowedResourceId,
   JobId,
   PersonId,
   PluginConnectionId,
+  ProviderAccountId,
   ReleaseId,
   RoleAssignmentId,
   WorkspaceId
@@ -27,6 +29,8 @@ const identifierSchemas = [
   { name: "job", schema: JobId },
   { name: "environment", schema: EnvironmentId },
   { name: "plugin connection", schema: PluginConnectionId },
+  { name: "provider account", schema: ProviderAccountId },
+  { name: "followed resource", schema: FollowedResourceId },
   { name: "role assignment", schema: RoleAssignmentId }
 ]
 

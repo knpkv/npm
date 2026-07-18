@@ -3,6 +3,15 @@ import * as Sqlite from "effect-qb/sqlite"
 
 import type { RenderedSql } from "./types.js"
 
+export {
+  type CreateFollowedResourceQueryInput,
+  type FollowedResourceQueryInput,
+  renderCreateFollowedResourceQuery,
+  renderFollowedResourceQuery,
+  renderFollowedResourcesQuery,
+  renderUpdateFollowedResourceQuery,
+  type UpdateFollowedResourceQueryInput
+} from "./followedResources.js"
 export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
 export {
   type OpenPluginSyncAttemptsQueryInput,
@@ -10,6 +19,17 @@ export {
   renderOpenPluginSyncAttemptsQuery,
   renderPluginSyncAttemptsQuery
 } from "./pluginSyncAttempts.js"
+export {
+  type CreateProviderAccountQueryInput,
+  type ProviderAccountIdentityQueryInput,
+  type ProviderAccountQueryInput,
+  renderCreateProviderAccountQuery,
+  renderProviderAccountIdentityQuery,
+  renderProviderAccountQuery,
+  renderProviderAccountsQuery,
+  renderUpdateProviderAccountQuery,
+  type UpdateProviderAccountQueryInput
+} from "./providerAccounts.js"
 export {
   type RenderedTimelineQuery,
   renderTimelineDetailQueries,

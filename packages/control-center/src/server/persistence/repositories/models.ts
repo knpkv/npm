@@ -1,7 +1,13 @@
 import * as Schema from "effect/Schema"
 
 import { Person, RoleAssignment } from "../../../domain/actors.js"
-import { EntityId, PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
+import {
+  EntityId,
+  FollowedResourceId,
+  PluginConnectionId,
+  ProviderAccountId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
 import { Release } from "../../../domain/release.js"
 import { ProviderId, SourceRevision } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
@@ -36,6 +42,102 @@ export const WorkspaceRecord = Schema.Struct({
 
 /** Decoded persisted workspace row. */
 export type WorkspaceRecord = typeof WorkspaceRecord.Type
+
+/** Provider family sharing one external account and local authentication context. */
+export const ProviderFamily = Schema.Literals(["aws", "atlassian", "clockify"])
+
+/** Decoded provider family. */
+export type ProviderFamily = typeof ProviderFamily.Type
+
+/** Provider family that owns one concrete first-party service. */
+export const providerFamilyForProvider = (providerId: ProviderId): ProviderFamily => {
+  switch (providerId) {
+    case "codecommit":
+    case "codepipeline":
+      return "aws"
+    case "jira":
+    case "confluence":
+      return "atlassian"
+    case "clockify":
+      return "clockify"
+  }
+}
+
+/** Cross-field persistence invariant shared by followed-resource codecs. */
+export const ProviderFamilyMatchesProvider = Schema.makeFilter(
+  ({ providerFamily, providerId }: { readonly providerFamily: ProviderFamily; readonly providerId: ProviderId }) =>
+    providerFamilyForProvider(providerId) === providerFamily,
+  { expected: "a provider service owned by the persisted provider family" }
+)
+
+/** Human-readable provider-account label. */
+export const ProviderAccountDisplayName = boundedName("ProviderAccountDisplayName").pipe(
+  Schema.brand("ProviderAccountDisplayName")
+)
+
+/** Decoded provider-account display name. */
+export type ProviderAccountDisplayName = typeof ProviderAccountDisplayName.Type
+
+/** Immutable account identifier assigned by the external provider. */
+export const VendorAccountId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+).pipe(Schema.brand("VendorAccountId"))
+
+/** Decoded external provider-account identifier. */
+export type VendorAccountId = typeof VendorAccountId.Type
+
+/** Public, non-secret metadata for one external provider account. */
+export const ProviderAccountRecord = Schema.Struct({
+  workspaceId: WorkspaceId,
+  providerAccountId: ProviderAccountId,
+  providerFamily: ProviderFamily,
+  vendorAccountId: VendorAccountId,
+  displayName: ProviderAccountDisplayName,
+  revision: RecordRevision,
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp
+})
+
+/** Decoded external provider-account metadata. */
+export type ProviderAccountRecord = typeof ProviderAccountRecord.Type
+
+/** Human-readable followed-resource label. */
+export const FollowedResourceDisplayName = boundedName("FollowedResourceDisplayName").pipe(
+  Schema.brand("FollowedResourceDisplayName")
+)
+
+/** Decoded followed-resource display name. */
+export type FollowedResourceDisplayName = typeof FollowedResourceDisplayName.Type
+
+/** Immutable repository, pipeline, site, or workspace identifier assigned by its provider. */
+export const VendorResourceId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+).pipe(Schema.brand("VendorResourceId"))
+
+/** Decoded external followed-resource identifier. */
+export type VendorResourceId = typeof VendorResourceId.Type
+
+/** Public metadata for one provider resource selected by the workspace. */
+export const FollowedResourceRecord = Schema.Struct({
+  workspaceId: WorkspaceId,
+  followedResourceId: FollowedResourceId,
+  providerAccountId: ProviderAccountId,
+  providerFamily: ProviderFamily,
+  providerId: ProviderId,
+  vendorResourceId: VendorResourceId,
+  displayName: FollowedResourceDisplayName,
+  isEnabled: Schema.Boolean,
+  revision: RecordRevision,
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp
+}).check(ProviderFamilyMatchesProvider)
+
+/** Decoded followed-resource metadata. */
+export type FollowedResourceRecord = typeof FollowedResourceRecord.Type
 
 /** Plugin-connection label shown without exposing credentials or configuration. */
 export const PluginConnectionDisplayName = boundedName("PluginConnectionDisplayName").pipe(
@@ -162,6 +264,7 @@ export const QuarantineRecordKind = Schema.Literals([
   "evidence-claim",
   "evidence-freshness",
   "evidence-item",
+  "followed-resource",
   "governed-action",
   "governed-action-policy-evaluation",
   "governed-action-authorization",
@@ -175,6 +278,7 @@ export const QuarantineRecordKind = Schema.Literals([
   "plugin-configuration",
   "plugin-descriptor",
   "plugin-sync-page",
+  "provider-account",
   "release-head",
   "release-revision",
   "readiness-assessment",
@@ -203,6 +307,7 @@ export const QuarantineReasonCode = Schema.Literals([
   "evidence-claim-schema-invalid",
   "evidence-freshness-schema-invalid",
   "evidence-item-schema-invalid",
+  "followed-resource-schema-invalid",
   "governed-action-schema-invalid",
   "governed-action-digest-mismatch",
   "governed-action-identity-mismatch",
@@ -224,6 +329,7 @@ export const QuarantineReasonCode = Schema.Literals([
   "plugin-negotiated-descriptor-invalid",
   "plugin-descriptor-provider-mismatch",
   "plugin-sync-page-schema-invalid",
+  "provider-account-schema-invalid",
   "release-head-schema-invalid",
   "release-revision-envelope-invalid",
   "readiness-assessment-digest-mismatch",
@@ -263,6 +369,7 @@ export const QuarantineDiagnosticSummary = Schema.Literals([
   "Stored evidence claim failed schema validation.",
   "Stored evidence freshness failed schema validation.",
   "Stored evidence item failed schema validation.",
+  "Stored followed-resource failed schema validation.",
   "Stored governed action failed schema validation.",
   "Stored governed action digest does not match its content.",
   "Stored governed action identity does not match its repository key.",
@@ -285,6 +392,7 @@ export const QuarantineDiagnosticSummary = Schema.Literals([
   "Negotiated plugin descriptor failed schema validation.",
   "Plugin descriptor provider does not match its connection.",
   "Plugin sync page failed schema validation.",
+  "Stored provider-account failed schema validation.",
   "Stored release head failed schema validation.",
   "Stored release revision envelope failed schema validation.",
   "Stored readiness assessment digest does not match its content.",
