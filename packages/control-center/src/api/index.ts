@@ -71,7 +71,8 @@ export {
   PluginsApiGroup,
   PluginServiceCatalogEntry,
   PluginServiceCatalogField,
-  RedactedPluginConfigurationValue
+  RedactedPluginConfigurationValue,
+  SetPluginConnectionEnabledRequest
 } from "./plugins.js"
 export {
   PortfolioApiGroup,

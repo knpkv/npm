@@ -328,6 +328,59 @@ describe("application adapters", () => {
     )
   })
 
+  it.effect("enables and disables one connection without rebuilding the service registry", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+      const invalidations = yield* Ref.make(0)
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.die("enablement does not acquire a provider client"),
+        invalidate: () => Ref.update(invalidations, (count) => count + 1)
+      })
+      const setEnabled = administration.setConnectionEnabled
+      assert.isDefined(setEnabled)
+
+      const enabled = yield* setEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID,
+        isEnabled: true
+      })
+      assert.isTrue(enabled.isEnabled)
+      assert.strictEqual(yield* Ref.get(invalidations), 1)
+
+      const unchanged = yield* setEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID,
+        isEnabled: true
+      })
+      assert.isTrue(unchanged.isEnabled)
+      assert.strictEqual(yield* Ref.get(invalidations), 1)
+
+      const disabled = yield* setEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID,
+        isEnabled: false
+      })
+      assert.isFalse(disabled.isEnabled)
+      assert.strictEqual(yield* Ref.get(invalidations), 2)
+      const persistence = yield* Persistence
+      assert.isFalse((yield* persistence.pluginConnections.get(WORKSPACE_ID, UNREADY_PLUGIN_ID)).isEnabled)
+
+      const disconnectedAdministration = yield* makePluginAdministration
+      const disconnectedSetEnabled = disconnectedAdministration.setConnectionEnabled
+      assert.isDefined(disconnectedSetEnabled)
+      const enableWithoutRuntime = yield* disconnectedSetEnabled({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: UNREADY_PLUGIN_ID,
+        isEnabled: true
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(enableWithoutRuntime))
+      if (Result.isFailure(enableWithoutRuntime)) {
+        assert.instanceOf(enableWithoutRuntime.failure, ApplicationServiceUnavailable)
+      }
+      assert.isFalse((yield* persistence.pluginConnections.get(WORKSPACE_ID, UNREADY_PLUGIN_ID)).isEnabled)
+    })))
+
   it.effect("keeps setup fields aligned with every canonical runtime descriptor", () =>
     Effect.gen(function*() {
       const providerIds: ReadonlyArray<ProviderId> = ["codecommit", "codepipeline", "jira", "confluence", "clockify"]

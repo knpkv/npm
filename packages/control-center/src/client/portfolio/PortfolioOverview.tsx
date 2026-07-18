@@ -97,8 +97,13 @@ const PortfolioLiveStatus = ({
 
 const EmptyPortfolio = (): ReactElement => (
   <StatePanel
+    action={
+      <Link className={styles.pairAction} to="/services">
+        Enable a service
+      </Link>
+    }
     className={styles.statePanel}
-    description="Sync a connected service. The first normalized release will appear here with its people and source facts."
+    description="Enable and verify a service. Its first normalized release will appear here with people and source facts."
     title="No releases yet"
   />
 )

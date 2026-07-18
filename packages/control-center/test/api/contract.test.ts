@@ -226,6 +226,7 @@ describe("ControlCenterApi contract", () => {
         ["list", "GET", "/api/v1/plugins"],
         ["overview", "GET", "/api/v1/plugins/overview"],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
+        ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
         ["configurationMetadata", "GET", "/api/v1/plugins/:pluginConnectionId/configuration-metadata"],
@@ -306,6 +307,7 @@ describe("ControlCenterApi contract", () => {
     const specification = OpenApi.fromApi(ControlCenterApi)
     assert.isDefined(specification.paths["/api/v1/plugins"]?.get)
     assert.isDefined(specification.paths["/api/v1/plugins/overview"]?.get)
+    assert.isDefined(specification.paths["/api/v1/plugins/connections/{pluginConnectionId}"]?.patch)
   })
 
   it("requires cookie auth for private reads and separate CSRF proof for mutations", () => {
@@ -332,6 +334,7 @@ describe("ControlCenterApi contract", () => {
       list: [SessionCookieAuth.key],
       overview: [SessionCookieAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
+      setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       configurationMetadata: [SessionCookieAuth.key],
@@ -407,6 +410,10 @@ describe("ControlCenterApi contract", () => {
     )
     assert.strictEqual(urls.plugins.list(), "https://control.example/api/v1/plugins")
     assert.strictEqual(urls.plugins.overview(), "https://control.example/api/v1/plugins/overview")
+    assert.strictEqual(
+      urls.plugins.setConnectionEnabled({ params: { pluginConnectionId } }),
+      "https://control.example/api/v1/plugins/connections/01890f6f-6d6a-7cc0-98d2-000000000092"
+    )
     assert.strictEqual(
       urls.media.read({ params: { mediaId } }),
       `https://control.example/api/v1/media/media_${"ab".repeat(32)}`

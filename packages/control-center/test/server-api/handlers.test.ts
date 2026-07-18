@@ -821,6 +821,50 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result, expected)
     }))
 
+  it.effect("lets a workspace owner enable a connection through the generated client", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeSync(PluginConnectionSummary)({
+        pluginConnectionId,
+        providerId: "jira",
+        displayName: "Delivery Jira",
+        isEnabled: true,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        setConnectionEnabled: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId &&
+            input.isEnabled
+            ? Effect.succeed(expected)
+            : Effect.die("enablement crossed its authenticated scope"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.setConnectionEnabled({
+          params: { pluginConnectionId },
+          payload: { isEnabled: true }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
   it.effect("keeps the v1 plugin list and serves the catalog overview separately", () =>
     Effect.gen(function*() {
       const expected = Schema.decodeUnknownSync(PluginConnectionSummary)({
@@ -1942,6 +1986,18 @@ describe("Control Center API handlers", () => {
           403
         ],
         [
+          new Request(`${origin}/api/v1/plugins/connections/01890f6f-6d6a-7cc0-98d2-000000000092`, {
+            method: "PATCH",
+            headers: {
+              ...headers,
+              "content-type": "application/json",
+              "x-csrf-token": recoveredCsrf
+            },
+            body: JSON.stringify({ isEnabled: true })
+          }),
+          403
+        ],
+        [
           new Request(`${origin}/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/configuration`, {
             method: "PATCH",
             headers: {
@@ -1996,6 +2052,7 @@ describe("Control Center API handlers", () => {
       health: () => Effect.die("not used"),
       list: () => Effect.succeed([]),
       patchConfiguration: () => Effect.die("non-owner reached plugin mutation"),
+      setConnectionEnabled: () => Effect.die("non-owner reached connection enablement"),
       testConnection: () => Effect.die("non-owner reached connection test")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })

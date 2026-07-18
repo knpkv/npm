@@ -113,6 +113,26 @@ const requireConnection = (
   pluginConnectionId: PluginConnectionId
 ) => mapPersistenceRead(persistence.pluginConnections.get(workspaceId, pluginConnectionId))
 
+const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnabled")(function*(
+  persistence: Persistence["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  isEnabled: boolean
+) {
+  const current = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+  if (current.isEnabled === isEnabled) return yield* connectionSummary(persistence, current)
+  if (isEnabled && pluginConnections === null) return yield* unavailable()
+  const updated = yield* persistence.pluginConnections.updateMetadata(workspaceId, pluginConnectionId, {
+    displayName: current.displayName,
+    isEnabled,
+    expectedRevision: current.revision,
+    updatedAt: yield* DateTime.now
+  }).pipe(Effect.mapError(mapPersistenceWriteError))
+  if (pluginConnections !== null) yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+  return yield* connectionSummary(persistence, updated)
+})
+
 const identityLabel = (providerId: PluginConnectionRecord["providerId"]): string => {
   switch (providerId) {
     case "jira":
@@ -735,6 +755,8 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(persistence, secrets, pluginConnections, workspaceId, request),
+    setConnectionEnabled: ({ isEnabled, pluginConnectionId, workspaceId }) =>
+      setConnectionEnabled(persistence, pluginConnections, workspaceId, pluginConnectionId, isEnabled),
     health: Effect.fn("PluginAdministration.health")(function*({ pluginConnectionId, workspaceId }) {
       yield* requireConnection(persistence, workspaceId, pluginConnectionId)
       const runtime = yield* readRuntime(persistence, workspaceId, pluginConnectionId)

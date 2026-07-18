@@ -23,6 +23,8 @@ type ConnectionTestState =
   | { readonly _tag: "result"; readonly result: PluginConnectionTestResult }
   | { readonly _tag: "request-failed" }
 
+type ConnectionEnablementState = "changing" | "request-failed"
+
 type ConnectionsState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
@@ -30,8 +32,16 @@ type ConnectionsState =
   | { readonly _tag: "ready"; readonly overview: PluginOverviewResponse }
 
 const statusFor = (
-  connection: PluginConnectionSummary
-): { readonly label: string; readonly tone: "neutral" | "positive" | "critical" | "caution" } => {
+  connection: PluginConnectionSummary,
+  testState: ConnectionTestState | undefined
+): { readonly label: string; readonly tone: "neutral" | "positive" | "critical" | "caution" | "progress" } => {
+  if (!connection.isEnabled) return { label: "Disabled", tone: "neutral" }
+  if (testState?._tag === "testing") return { label: "Checking", tone: "progress" }
+  if (testState?._tag === "result") {
+    return testState.result._tag === "healthy"
+      ? { label: "Healthy", tone: "positive" }
+      : { label: "Unavailable", tone: "critical" }
+  }
   if (connection.health === null) return { label: "Not checked", tone: "neutral" }
   switch (connection.health._tag) {
     case "healthy":
@@ -94,20 +104,25 @@ const ConnectionCard = ({
   canConfigure,
   canTest,
   connection,
+  enablementState,
   onConfigure,
+  onSetEnabled,
   onTest,
   testState
 }: {
   readonly canConfigure: boolean
   readonly canTest: boolean
   readonly connection: PluginConnectionSummary
+  readonly enablementState: ConnectionEnablementState | undefined
   readonly onConfigure: () => void
+  readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testState: ConnectionTestState | undefined
 }): ReactElement => {
-  const status = statusFor(connection)
   const isTesting = testState?._tag === "testing"
   const hasTested = testState !== undefined && testState._tag !== "testing"
+  const isChanging = enablementState === "changing"
+  const status = statusFor(connection, testState)
   return (
     <Surface as="article" className={styles.card} padding="default" shape="grouped">
       <div className={styles.cardHeading}>
@@ -122,7 +137,7 @@ const ConnectionCard = ({
       <TestEvidence state={testState} />
       <div className={styles.cardAction}>
         <Button
-          disabled={!canTest || isTesting || !connection.isEnabled}
+          disabled={!canTest || isChanging || isTesting || !connection.isEnabled}
           loading={isTesting}
           onClick={() => onTest(connection.pluginConnectionId)}
           variant="secondary"
@@ -132,12 +147,25 @@ const ConnectionCard = ({
         <Button disabled={!canConfigure} onClick={onConfigure} variant="secondary">
           Add connection
         </Button>
+        <Button
+          disabled={!canConfigure || isChanging}
+          loading={isChanging}
+          onClick={() => onSetEnabled(connection.pluginConnectionId, !connection.isEnabled)}
+          variant={connection.isEnabled ? "secondary" : "primary"}
+        >
+          {connection.isEnabled ? "Disable" : "Enable service"}
+        </Button>
         {!canTest ? (
           <Text tone="secondary" variant="meta">
             Owner access is required.
           </Text>
         ) : null}
       </div>
+      {enablementState === "request-failed" ? (
+        <Text as="p" className={styles.setupError} role="alert" variant="body">
+          Control Center could not change this service. Refresh and try again.
+        </Text>
+      ) : null}
     </Surface>
   )
 }
@@ -243,7 +271,7 @@ const SetupForm = ({
           Cancel
         </Button>
         <Button loading={isSubmitting} type="submit" variant="primary">
-          Connect and test
+          Enable and test
         </Button>
       </div>
     </form>
@@ -291,7 +319,7 @@ const CatalogCard = ({
     ) : (
       <div className={styles.cardAction}>
         <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
-          Configure
+          Enable service
         </Button>
         {!canConfigure ? (
           <Text tone="secondary" variant="meta">
@@ -314,10 +342,14 @@ export const ServicesPage = ({
   const [requestRevision, setRequestRevision] = useState(0)
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
+  const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
+    new Map()
+  )
   const [openProvider, setOpenProvider] = useState<ProviderId | null>(null)
   const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
   const testRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const createRequest = useRef<AbortController | null>(null)
+  const enablementRequests = useRef(new Map<PluginConnectionId, AbortController>())
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -341,6 +373,7 @@ export const ServicesPage = ({
 
   useEffect(() => {
     setTestStates(new Map())
+    setEnablementStates(new Map())
     setOpenProvider(null)
     setSubmittingProvider(null)
     return () => {
@@ -348,6 +381,8 @@ export const ServicesPage = ({
       testRequests.current.clear()
       createRequest.current?.abort()
       createRequest.current = null
+      for (const request of enablementRequests.current.values()) request.abort()
+      enablementRequests.current.clear()
     }
   }, [sessionKey])
 
@@ -428,6 +463,60 @@ export const ServicesPage = ({
     [invalidateSession, sessionKey, transport]
   )
 
+  const setConnectionEnabled = useCallback(
+    (pluginConnectionId: PluginConnectionId, isEnabled: boolean): void => {
+      if (sessionKey === null) return
+      if (!isEnabled) {
+        testRequests.current.get(pluginConnectionId)?.abort()
+        testRequests.current.delete(pluginConnectionId)
+      }
+      enablementRequests.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      enablementRequests.current.set(pluginConnectionId, request)
+      setEnablementStates((current) => new Map(current).set(pluginConnectionId, "changing"))
+      transport.setEnabled(pluginConnectionId, isEnabled, request.signal).then(
+        (connection) => {
+          if (request.signal.aborted) return
+          enablementRequests.current.delete(pluginConnectionId)
+          setConnectionsState((current) =>
+            current._tag === "ready"
+              ? {
+                  _tag: "ready",
+                  overview: {
+                    ...current.overview,
+                    connections: current.overview.connections.map((candidate) =>
+                      candidate.pluginConnectionId === pluginConnectionId ? connection : candidate
+                    )
+                  }
+                }
+              : current
+          )
+          setEnablementStates((current) => {
+            const next = new Map(current)
+            next.delete(pluginConnectionId)
+            return next
+          })
+          if (isEnabled) {
+            testConnection(pluginConnectionId)
+          } else {
+            setTestStates((current) => {
+              const next = new Map(current)
+              next.delete(pluginConnectionId)
+              return next
+            })
+          }
+        },
+        (failure) => {
+          if (request.signal.aborted) return
+          enablementRequests.current.delete(pluginConnectionId)
+          if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+          setEnablementStates((current) => new Map(current).set(pluginConnectionId, "request-failed"))
+        }
+      )
+    },
+    [invalidateSession, sessionKey, testConnection, transport]
+  )
+
   const session =
     sessionState._tag === "authenticated" || sessionState._tag === "storage-unavailable" ? sessionState.session : null
   const canConfigure = sessionState._tag === "authenticated" && sessionState.session.permission === "workspace-owner"
@@ -439,7 +528,9 @@ export const ServicesPage = ({
           Services
         </Text>
         <Text tone="secondary" variant="body-large">
-          Configure first-party providers and verify the exact account each connection represents.
+          {connectionsState._tag === "ready" && connectionsState.overview.connections.length === 0
+            ? "Choose a service below. Control Center will enable it and verify the exact account before using it."
+            : "Configure first-party providers and verify the exact account each connection represents."}
         </Text>
       </header>
       {session === null ? (
@@ -471,8 +562,10 @@ export const ServicesPage = ({
                 canConfigure={canConfigure}
                 canTest={canConfigure}
                 connection={connection}
+                enablementState={enablementStates.get(connection.pluginConnectionId)}
                 key={connection.pluginConnectionId}
                 onConfigure={() => setOpenProvider(catalog.providerId)}
+                onSetEnabled={setConnectionEnabled}
                 onTest={testConnection}
                 testState={testStates.get(connection.pluginConnectionId)}
               />
