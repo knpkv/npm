@@ -126,7 +126,7 @@ const liveApplicationServices = (
 ): Layer.Layer<
   ControlCenterCoreApplicationServices,
   never,
-  Crypto.Crypto | HttpClient.HttpClient | Persistence | SecretStore
+  Crypto.Crypto | DomainEventWakeups | HttpClient.HttpClient | Persistence | SecretStore
 > =>
   Layer.mergeAll(
     authorizedSharesLayer,
@@ -162,13 +162,15 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
-    ApplicationRequirements | Crypto.Crypto | HttpClient.HttpClient | Persistence | SecretStore
+    ApplicationRequirements | Crypto.Crypto | DomainEventWakeups | HttpClient.HttpClient | Persistence | SecretStore
   > = options.applicationServices ?? liveApplicationServices(
     options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null,
     options.firstPartyPluginRuntime ?? false
   )
+  const domainEventWakeups = DomainEventWakeups.layer
   const applicationServices = selectedApplicationServices.pipe(
-    Layer.provide(persistence)
+    Layer.provide(persistence),
+    Layer.provide(domainEventWakeups)
   )
   const releaseAgent = options.releaseAgent === undefined || options.releaseAgent === null
     ? releaseAgentUnavailableLayer
@@ -176,7 +178,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),
-    Layer.provideMerge(DomainEventWakeups.layer)
+    Layer.provideMerge(domainEventWakeups)
   )
   const governedActionExecution = governedActionExecutionServerLayer(
     options.governedActionExecution ?? null

@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -14,6 +15,7 @@ import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   EnvironmentId,
+  EventCursor,
   PersonId,
   PluginConnectionId,
   RelationshipId,
@@ -56,6 +58,7 @@ import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiatio
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
+import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -212,7 +215,7 @@ const currentRelease = Schema.decodeSync(Release)({
 })
 
 const withApplication = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, Database | Persistence | SecretStore>
+  use: Effect.Effect<Success, Failure, Crypto.Crypto | Database | DomainEventWakeups | Persistence | SecretStore>
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-application-")
@@ -221,6 +224,7 @@ const withApplication = <Success, Failure>(
     const applicationDependencies = Layer.mergeAll(
       database,
       persistenceLayerFromDatabase(config).pipe(Layer.provide(database)),
+      DomainEventWakeups.layer,
       SecretStore.layer({ secretRoot })
     )
     return yield* use.pipe(Effect.provide(applicationDependencies))
@@ -380,6 +384,66 @@ describe("application adapters", () => {
       }
       assert.isFalse((yield* persistence.pluginConnections.get(WORKSPACE_ID, UNREADY_PLUGIN_ID)).isEnabled)
     })))
+
+  it.effect("projects disabled health and invalidates live portfolios only for real state changes", () =>
+    withApplication(
+      Effect.gen(function*() {
+        const persistence = yield* setup
+        const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+        yield* persistence.pluginRuntime.recordHealth(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          runtime.revision,
+          { _tag: "healthy", checkedAt: T0 },
+          0
+        )
+        yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+        const administration = yield* makePluginAdministrationWithConnections({
+          contextEffect: () => Effect.die("enablement does not acquire a provider client"),
+          invalidate: () => Effect.void
+        })
+        const setEnabled = administration.setConnectionEnabled
+        assert.isDefined(setEnabled)
+
+        const unchanged = yield* setEnabled({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          isEnabled: true
+        })
+        assert.strictEqual(unchanged.health?._tag, "healthy")
+
+        const wakeups = yield* DomainEventWakeups
+        const wakeStream = yield* wakeups.subscribe(WORKSPACE_ID)
+        const wakeFiber = yield* Stream.runHead(wakeStream).pipe(
+          Effect.scoped,
+          Effect.forkChild({ startImmediately: true })
+        )
+        const disabled = yield* setEnabled({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          isEnabled: false
+        })
+        assert.strictEqual(disabled.health?._tag, "disabled")
+        assert.deepStrictEqual(yield* Fiber.join(wakeFiber), Option.some(WORKSPACE_ID))
+        assert.strictEqual(
+          (yield* administration.list(WORKSPACE_ID)).find(({ pluginConnectionId }) => pluginConnectionId === PLUGIN_ID)
+            ?.health?._tag,
+          "disabled"
+        )
+        assert.strictEqual(
+          (yield* administration.health({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID })).health._tag,
+          "disabled"
+        )
+
+        yield* setEnabled({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID, isEnabled: false })
+        const events = yield* persistence.events.pageAfter(WORKSPACE_ID, EventCursor.make(0), 128)
+        assert.strictEqual(events._tag, "page")
+        if (events._tag === "page") {
+          assert.lengthOf(events.events, 1)
+          assert.strictEqual(events.events[0]?.payload.reason, "plugin-health")
+        }
+      }).pipe(Effect.scoped)
+    ))
 
   it.effect("finishes runtime invalidation when enablement is interrupted after its metadata commit", () =>
     withApplication(
@@ -1913,7 +1977,7 @@ describe("application adapters", () => {
       const listed = yield* administration.list(WORKSPACE_ID)
       assert.lengthOf(listed, 2)
       assert.strictEqual(listed[0]?.health?._tag, "healthy")
-      assert.isNull(listed[1]?.health)
+      assert.strictEqual(listed[1]?.health?._tag, "disabled")
 
       const metadata = yield* administration.configurationMetadata({
         workspaceId: WORKSPACE_ID,
@@ -2267,7 +2331,59 @@ describe("application adapters", () => {
       assert.strictEqual(result._tag, "failed")
       assert.strictEqual(result._tag === "failed" ? result.safeMessage : null, "This connection is disabled.")
       assert.strictEqual(yield* Ref.get(acquisitions), 0)
+      const persistence = yield* Persistence
+      const events = yield* persistence.events.pageAfter(WORKSPACE_ID, EventCursor.make(0), 128)
+      assert.strictEqual(events._tag, "page")
+      if (events._tag === "page") assert.lengthOf(events.events, 0)
     })))
+
+  it.effect("persists manual connection health and wakes live portfolio readers", () =>
+    withApplication(
+      Effect.gen(function*() {
+        const persistence = yield* setup
+        const connection: PluginConnectionV1 = {
+          descriptor: negotiatedDescriptor,
+          discover: Effect.succeed({
+            account: { providerImmutableId: "user-123", displayName: "Avery Bell" },
+            workspace: { providerImmutableId: "site-456", displayName: "Payments Jira" },
+            endpoints: [],
+            discoveredAt: T0
+          }),
+          health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+          sync: () => Stream.die("not used"),
+          readEntity: () => Effect.die("not used"),
+          diff: Option.none(),
+          proposeAction: () => Effect.die("not used")
+        }
+        const administration = yield* makePluginAdministrationWithConnections({
+          contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+          invalidate: () => Effect.void
+        })
+        const wakeups = yield* DomainEventWakeups
+        const wakeStream = yield* wakeups.subscribe(WORKSPACE_ID)
+        const wakeFiber = yield* Stream.runHead(wakeStream).pipe(
+          Effect.scoped,
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        const result = yield* administration.testConnection({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID
+        })
+        assert.strictEqual(result._tag, "healthy")
+        assert.deepStrictEqual(yield* Fiber.join(wakeFiber), Option.some(WORKSPACE_ID))
+        assert.strictEqual(
+          (yield* administration.health({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID })).health._tag,
+          "healthy"
+        )
+        const events = yield* persistence.events.pageAfter(WORKSPACE_ID, EventCursor.make(0), 128)
+        assert.strictEqual(events._tag, "page")
+        if (events._tag === "page") {
+          assert.lengthOf(events.events, 1)
+          assert.strictEqual(events.events[0]?.payload.reason, "plugin-health")
+        }
+      }).pipe(Effect.scoped)
+    ))
 
   it.effect("bounds provider-reported health messages for the API response", () =>
     withApplication(Effect.gen(function*() {
