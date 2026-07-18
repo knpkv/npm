@@ -6,6 +6,10 @@ import {
   type PluginServiceCatalogEntry,
   type PluginServiceCatalogField
 } from "../../../api/plugins.js"
+import {
+  type FirstPartyServiceIdentity,
+  firstPartyServiceIdentityByProvider
+} from "../../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../../domain/sourceRevision.js"
 import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import { ClockifyReadPluginConfiguration, clockifyReadPluginDescriptor } from "../clockify/ClockifyReadPlugin.js"
@@ -218,14 +222,12 @@ const clockifyFields = [
 ]
 
 const entry = (
-  providerId: ProviderId,
-  displayName: string,
-  description: string,
+  identity: FirstPartyServiceIdentity,
   configurationFields: ReadonlyArray<PluginServiceCatalogField>,
   rawDescriptor: unknown,
   validatesSetup: FirstPartyServiceCatalogEntry["validatesSetup"]
 ): FirstPartyServiceCatalogEntry => ({
-  metadata: { providerId, displayName, description, configurationFields },
+  metadata: { ...identity, configurationFields },
   rawDescriptor,
   validatesSetup
 })
@@ -233,41 +235,31 @@ const entry = (
 /** Fixed server-owned catalog paired with each runtime's canonical descriptor. */
 export const firstPartyServiceCatalog: ReadonlyArray<FirstPartyServiceCatalogEntry> = [
   entry(
-    "codecommit",
-    "CodeCommit",
-    "Read pull requests from one AWS CodeCommit repository.",
+    firstPartyServiceIdentityByProvider.codecommit,
     codeCommitFields,
     codeCommitPluginDefinition.rawDescriptor,
     codeCommitSetupIsValid
   ),
   entry(
-    "codepipeline",
-    "CodePipeline",
-    "Read pipeline and execution state from AWS CodePipeline.",
+    firstPartyServiceIdentityByProvider.codepipeline,
     codePipelineFields,
     codePipelinePluginDefinition.rawDescriptor,
     codePipelineSetupIsValid
   ),
   entry(
-    "jira",
-    "Jira",
-    "Read delivery issues from Jira Cloud.",
+    firstPartyServiceIdentityByProvider.jira,
     jiraFields,
     jiraReadPluginDescriptor,
     jiraSetupIsValid
   ),
   entry(
-    "confluence",
-    "Confluence",
-    "Read release documentation from Confluence Cloud.",
+    firstPartyServiceIdentityByProvider.confluence,
     confluenceFields,
     confluencePagePluginDescriptor,
     confluenceSetupIsValid
   ),
   entry(
-    "clockify",
-    "Clockify",
-    "Read bounded time-entry evidence from Clockify.",
+    firstPartyServiceIdentityByProvider.clockify,
     clockifyFields,
     clockifyReadPluginDescriptor,
     clockifySetupIsValid

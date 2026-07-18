@@ -56,8 +56,12 @@ test.describe("repository-managed real runtime", () => {
     ).toBe("37px")
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
     await expect(
-      page.getByText("Configure first-party providers and verify the exact account each connection represents.")
+      page.getByText(
+        "Choose a service below. Control Center will enable it and verify the exact account before using it."
+      )
     ).toBeVisible()
+    await expect(page.getByRole("article")).toHaveCount(5)
+    await expect(page.getByRole("button", { name: "Pair to enable" })).toHaveCount(5)
 
     await realRuntime.pairThroughUi(page)
     await expect(page).toHaveURL(`${realRuntime.origin}/w/${REAL_WORKSPACE_ID}/overview`)

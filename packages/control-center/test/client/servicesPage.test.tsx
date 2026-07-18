@@ -3,7 +3,7 @@
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { MemoryRouter } from "react-router"
+import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -76,6 +76,13 @@ const csrfToken = Schema.decodeSync(CsrfToken)("ab".repeat(32))
 
 let root: Root | undefined
 let sessionControls: ReturnType<typeof useBrowserSession> | undefined
+let currentLocation = ""
+
+const LocationProbe = (): null => {
+  const location = useLocation()
+  currentLocation = `${location.pathname}${location.search}`
+  return null
+}
 
 const Harness = ({ transport }: { readonly transport: ConnectionTestTransport }): ReactElement => {
   sessionControls = useBrowserSession()
@@ -86,19 +93,21 @@ afterEach(async () => {
   if (root !== undefined) await act(async () => root?.unmount())
   root = undefined
   sessionControls = undefined
+  currentLocation = ""
   document.body.replaceChildren()
   sessionStorage.clear()
 })
 
-const renderServices = async (transport: ConnectionTestTransport): Promise<HTMLElement> => {
+const renderServices = async (transport: ConnectionTestTransport, initialEntry = "/"): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
   await act(async () =>
     root?.render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <BrowserSessionProvider>
           <Harness transport={transport} />
+          <LocationProbe />
         </BrowserSessionProvider>
       </MemoryRouter>
     )
@@ -107,7 +116,68 @@ const renderServices = async (transport: ConnectionTestTransport): Promise<HTMLE
   return host
 }
 
+const renderAnonymousServices = async (transport: ConnectionTestTransport): Promise<HTMLElement> => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  root = createRoot(host)
+  await act(async () =>
+    root?.render(
+      <MemoryRouter>
+        <BrowserSessionProvider>
+          <Harness transport={transport} />
+          <LocationProbe />
+        </BrowserSessionProvider>
+      </MemoryRouter>
+    )
+  )
+  const hydrationAttempt = sessionControls?.beginHydration()
+  if (hydrationAttempt !== undefined) {
+    await act(async () => sessionControls?.completeHydration(hydrationAttempt, { _tag: "anonymous" }))
+  }
+  return host
+}
+
 describe("ServicesPage connection tests", () => {
+  it("shows every available service before the browser is paired", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderAnonymousServices(transport)
+
+    expect(host.querySelectorAll("article")).toHaveLength(5)
+    expect(host.textContent).toContain("CodeCommit")
+    expect(host.textContent).toContain("CodePipeline")
+    expect(host.textContent).toContain("Jira")
+    expect(host.textContent).toContain("Confluence")
+    expect(host.textContent).toContain("Clockify")
+    const actions = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(({ textContent }) =>
+      textContent?.includes("Pair to enable")
+    )
+    expect(actions).toHaveLength(5)
+    await act(async () => actions[2]?.click())
+    expect(currentLocation).toBe("/pair?service=jira")
+  })
+
+  it("opens the selected service setup after pairing", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=jira")
+    await act(async () => undefined)
+
+    expect(host.querySelector("form")).not.toBeNull()
+    expect(host.querySelector<HTMLInputElement>('input[value="jira"]')).not.toBeNull()
+    expect(currentLocation).toBe("/services")
+  })
+
   it("does not present stale disabled health as current for an enabled connection", async () => {
     const enabledWithStaleHealth = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),
