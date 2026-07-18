@@ -102,6 +102,25 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
   const hasActiveWork = (current: ServerLifecycleState): boolean =>
     current.activeMutations > 0 || current.activeBackgroundJobs > 0
 
+  const runDrainHooks = Deferred.await(drainStarted).pipe(
+    Effect.andThen(Deferred.await(workDrained)),
+    Effect.andThen(Deferred.await(streamsDrained)),
+    Effect.andThen(Deferred.await(drainHookSnapshot)),
+    Effect.flatMap((hooks) =>
+      Effect.forEach(
+        Array.from(hooks).sort((left, right) => left.hookId.localeCompare(right.hookId)),
+        (hook) =>
+          hook.run.pipe(
+            Effect.as(null),
+            Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(hook.hookId))
+          ),
+        { concurrency: 1 }
+      )
+    ),
+    Effect.map((results) => results.filter((hookId): hookId is string => hookId !== null)),
+    Effect.flatMap((hookIds) => Deferred.succeed(drainHooksCompleted, hookIds))
+  )
+
   const beginDrain = Ref.modify(state, (current): [DrainTransition, ServerLifecycleState] => {
     const barriers = {
       mutationBarrierReady: current.activeMutations === 0,
@@ -121,7 +140,10 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         ),
         Effect.andThen(mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
         Effect.andThen(streamBarrierReady ? Deferred.succeed(streamsDrained, undefined) : Effect.void),
-        Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
+        Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void),
+        // Drain is terminal: detach only after the one winning transition so direct construction
+        // stays unscoped and an idle lifecycle never owns a waiting background fiber.
+        Effect.andThen(drainHooks === null ? Effect.void : runDrainHooks.pipe(Effect.forkDetach))
       )
     ),
     Effect.asVoid
@@ -239,26 +261,6 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
           return { ...current, drainHooks }
         })
     )
-
-  yield* Deferred.await(drainStarted).pipe(
-    Effect.andThen(Deferred.await(workDrained)),
-    Effect.andThen(Deferred.await(streamsDrained)),
-    Effect.andThen(Deferred.await(drainHookSnapshot)),
-    Effect.flatMap((hooks) =>
-      Effect.forEach(
-        Array.from(hooks).sort((left, right) => left.hookId.localeCompare(right.hookId)),
-        (hook) =>
-          hook.run.pipe(
-            Effect.as(null),
-            Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(hook.hookId))
-          ),
-        { concurrency: 1 }
-      )
-    ),
-    Effect.map((results) => results.filter((hookId): hookId is string => hookId !== null)),
-    Effect.flatMap((hookIds) => Deferred.succeed(drainHooksCompleted, hookIds)),
-    Effect.forkScoped
-  )
 
   return {
     beginDrain,

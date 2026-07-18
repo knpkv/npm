@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -10,6 +11,12 @@ import * as TestClock from "effect/testing/TestClock"
 import { ServerDrainHookConflict, ServerDraining, ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 
 describe("server lifecycle", () => {
+  it("constructs directly without an ambient scope", async () => {
+    const exit = await Effect.runPromiseExit(ServerLifecycle.make)
+
+    assert.isTrue(Exit.isSuccess(exit))
+  })
+
   it.effect("stops new work while allowing an admitted mutation to finish", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle
