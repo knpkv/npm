@@ -53,10 +53,12 @@ export {
 } from "./liveEvents.js"
 export { MediaApiGroup, MediaResponseHeaders, OpaqueMediaId, SafeMediaContentType } from "./media.js"
 export {
+  AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionValue,
+  DiscoveredAtlassianProfile,
   DiscoveredAwsProfile,
   OpaqueSecretReference,
   PatchPluginConfigurationRequest,

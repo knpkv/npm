@@ -16,6 +16,7 @@ const validManifest = {
     "@effect/sql-libsql": "4.0.0-beta.98",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
+    "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/confluence-api-client": "workspace:^",

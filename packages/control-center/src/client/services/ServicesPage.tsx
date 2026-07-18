@@ -6,6 +6,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useS
 import { useNavigate, useSearchParams } from "react-router"
 
 import type {
+  AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionValue,
   PluginConnectionSummary,
@@ -17,6 +18,7 @@ import type { PluginConnectionId } from "../../domain/identifiers.js"
 import { firstPartyServiceIdentities, type FirstPartyServiceIdentity } from "../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
+import { AtlassianAccountSetupForm } from "./AtlassianAccountSetupForm.js"
 import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
@@ -35,6 +37,12 @@ type AwsProfilesState =
   | { readonly _tag: "loading" }
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly profiles: AwsProfileDiscoveryResponse }
+
+type AtlassianProfilesState =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "failed" }
+  | { readonly _tag: "ready"; readonly profiles: AtlassianProfileDiscoveryResponse }
 
 type ConnectionsState =
   | { readonly _tag: "idle" }
@@ -286,6 +294,8 @@ const SetupForm = ({
 }
 
 const CatalogCard = ({
+  atlassianProfiles,
+  atlassianProfilesState,
   awsProfiles,
   awsProfilesState,
   canConfigure,
@@ -297,8 +307,11 @@ const CatalogCard = ({
   onCancel,
   onOpen,
   onSubmit,
+  onSubmitAtlassian,
   onSubmitAws
 }: {
+  readonly atlassianProfiles: AtlassianProfileDiscoveryResponse
+  readonly atlassianProfilesState: AtlassianProfilesState["_tag"]
   readonly awsProfiles: AwsProfileDiscoveryResponse
   readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly canConfigure: boolean
@@ -310,9 +323,11 @@ const CatalogCard = ({
   readonly onCancel: () => void
   readonly onOpen: () => void
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
+  readonly onSubmitAtlassian: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly onSubmitAws: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
 }): ReactElement => {
   const isAws = catalog.providerId === "codecommit" || catalog.providerId === "codepipeline"
+  const isAtlassian = catalog.providerId === "jira" || catalog.providerId === "confluence"
   return (
     <Surface as="article" className={styles.card} padding="default" shape="grouped">
       <div className={styles.cardHeading}>
@@ -341,13 +356,22 @@ const CatalogCard = ({
             onCancel={onCancel}
             onSubmit={onSubmitAws}
           />
+        ) : isAtlassian ? (
+          <AtlassianAccountSetupForm
+            catalogs={catalogs}
+            isSubmitting={isSubmitting}
+            onCancel={onCancel}
+            onSubmit={onSubmitAtlassian}
+            profiles={atlassianProfiles}
+            profilesState={atlassianProfilesState}
+          />
         ) : (
           <SetupForm catalog={catalog} isSubmitting={isSubmitting} onCancel={onCancel} onSubmit={onSubmit} />
         )
       ) : (
         <div className={styles.cardAction}>
           <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
-            {isAws ? "Configure AWS account" : "Enable service"}
+            {isAws ? "Configure AWS account" : isAtlassian ? "Configure Atlassian" : "Enable service"}
           </Button>
           {!canConfigure ? (
             <Text tone="secondary" variant="meta">
@@ -409,6 +433,7 @@ export const ServicesPage = ({
   const [requestRevision, setRequestRevision] = useState(0)
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
   const [awsProfilesState, setAwsProfilesState] = useState<AwsProfilesState>({ _tag: "idle" })
+  const [atlassianProfilesState, setAtlassianProfilesState] = useState<AtlassianProfilesState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
   const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
     new Map()
@@ -420,6 +445,7 @@ export const ServicesPage = ({
   const completedBatchDrafts = useRef(new Map<ProviderId, Set<string>>())
   const enablementRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const awsProfileRequest = useRef<AbortController | null>(null)
+  const atlassianProfileRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -466,11 +492,36 @@ export const ServicesPage = ({
   }, [invalidateSession, openProvider, sessionKey, transport])
 
   useEffect(() => {
+    if (sessionKey === null || (openProvider !== "jira" && openProvider !== "confluence")) return
+    atlassianProfileRequest.current?.abort()
+    const request = new AbortController()
+    atlassianProfileRequest.current = request
+    setAtlassianProfilesState({ _tag: "loading" })
+    const discoverAtlassianProfiles = transport.discoverAtlassianProfiles
+    if (discoverAtlassianProfiles === undefined) {
+      setAtlassianProfilesState({ _tag: "failed" })
+      return () => request.abort()
+    }
+    discoverAtlassianProfiles(request.signal).then(
+      (profiles) => {
+        if (!request.signal.aborted) setAtlassianProfilesState({ _tag: "ready", profiles })
+      },
+      (failure) => {
+        if (request.signal.aborted) return
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        setAtlassianProfilesState({ _tag: "failed" })
+      }
+    )
+    return () => request.abort()
+  }, [invalidateSession, openProvider, sessionKey, transport])
+
+  useEffect(() => {
     setTestStates(new Map())
     setEnablementStates(new Map())
     setOpenProvider(null)
     setSubmittingProvider(null)
     setAwsProfilesState({ _tag: "idle" })
+    setAtlassianProfilesState({ _tag: "idle" })
     completedBatchDrafts.current.clear()
     return () => {
       for (const request of testRequests.current.values()) request.abort()
@@ -479,6 +530,8 @@ export const ServicesPage = ({
       createRequest.current = null
       awsProfileRequest.current?.abort()
       awsProfileRequest.current = null
+      atlassianProfileRequest.current?.abort()
+      atlassianProfileRequest.current = null
       for (const request of enablementRequests.current.values()) request.abort()
       enablementRequests.current.clear()
     }
@@ -737,6 +790,8 @@ export const ServicesPage = ({
             return [
               ...cards,
               <CatalogCard
+                atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
+                atlassianProfilesState={atlassianProfilesState._tag}
                 awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
                 awsProfilesState={awsProfilesState._tag}
                 canConfigure={canConfigure}
@@ -755,6 +810,7 @@ export const ServicesPage = ({
                   setOpenProvider(catalog.providerId)
                 }}
                 onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
+                onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}
                 onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
               />
             ]

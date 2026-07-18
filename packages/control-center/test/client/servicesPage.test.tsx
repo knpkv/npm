@@ -203,7 +203,7 @@ describe("ServicesPage connection tests", () => {
     await act(async () => undefined)
 
     expect(host.querySelector("form")).not.toBeNull()
-    expect(host.querySelector<HTMLInputElement>('input[value="jira"]')).not.toBeNull()
+    expect(host.textContent).toContain("One identity. Jira and Confluence together.")
     expect(currentLocation).toBe("/services")
   })
 
@@ -260,6 +260,145 @@ describe("ServicesPage connection tests", () => {
     }
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+  })
+
+  it("prefers one discovered OAuth profile for both Jira and Confluence", async () => {
+    const field = (
+      key: string,
+      kind: "integer" | "secret" | "text" | "url" = "text",
+      defaultValue: string | null = null,
+      required = true
+    ) => ({
+      key,
+      label: key,
+      description: `Configure ${key}.`,
+      kind,
+      scope: kind === "secret" || key === "email" ? "credential" : "adapter",
+      required,
+      defaultValue,
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    })
+    const jira = catalogEntry("jira")
+    const confluence = catalogEntry("confluence")
+    const atlassianOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        {
+          ...jira,
+          configurationFields: [
+            field("webBaseUrl", "url"),
+            field("authMode", "text", "oauth"),
+            field("oauthProfileId", "text", null, false),
+            field("email", "text", null, false),
+            field("apiToken", "secret", null, false),
+            field("pageSize", "integer", "50"),
+            field("maximumPages", "integer", "5"),
+            field("operationTimeoutMillis", "integer", "30000")
+          ]
+        },
+        {
+          ...confluence,
+          configurationFields: [
+            field("siteBaseUrl", "url"),
+            field("authMode", "text", "oauth"),
+            field("oauthProfileId", "text", null, false),
+            field("email", "text", null, false),
+            field("apiToken", "secret", null, false),
+            field("siteId"),
+            field("spaceId"),
+            field("probePageId")
+          ]
+        },
+        catalogEntry("clockify")
+      ],
+      connections: []
+    })
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000161"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000162")
+    ]
+    const create = vi.fn<ConnectionTestTransport["create"]>((request) =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+          connection: {
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            displayName: request.displayName,
+            isEnabled: true,
+            health: null,
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          configuration: {
+            pluginConnectionId: request.pluginConnectionId,
+            revision: 1,
+            values: request.values.map((value) =>
+              value._tag === "secret" ? { _tag: "secret-reference", key: value.key, state: "configured" } : value
+            ),
+            updatedAt: "2026-07-14T10:03:00.000Z"
+          },
+          test: {
+            _tag: "healthy",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            identity: {
+              kind: "user",
+              label: "Atlassian user",
+              displayName: "Avery Bell",
+              providerImmutableId: "account-1"
+            }
+          }
+        })
+      )
+    )
+    const makeConnectionId = vi.fn().mockResolvedValueOnce(connectionIds[0]).mockResolvedValueOnce(connectionIds[1])
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAtlassianProfiles: () =>
+        Promise.resolve([
+          {
+            profileId: "account-1@cloud-1",
+            name: "Avery Bell @ team.atlassian.net",
+            siteUrl: "https://team.atlassian.net/",
+            cloudId: "cloud-1",
+            accountName: "Avery Bell",
+            accountEmail: "avery@example.com",
+            status: "valid",
+            providers: ["jira", "confluence"]
+          }
+        ]),
+      overview: () => Promise.resolve(atlassianOverview),
+      makeConnectionId,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=jira")
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Avery Bell @ team.atlassian.net")
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[3] !== undefined) await setControlValue(inputs[3], "space-1")
+    if (inputs[4] !== undefined) await setControlValue(inputs[4], "page-1")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect Atlassian")
+    )
+    await act(async () => submit?.click())
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(create.mock.calls.map(([request]) => request.providerId)).toEqual(["jira", "confluence"])
+    for (const [request] of create.mock.calls) {
+      expect(request.values).toContainEqual({ _tag: "text", key: "authMode", value: "oauth" })
+      expect(request.values).toContainEqual({
+        _tag: "text",
+        key: "oauthProfileId",
+        value: "account-1@cloud-1"
+      })
+      expect(request.values.some(({ key }) => key === "apiToken" || key === "email")).toBe(false)
+    }
   })
 
   it("connects several repositories and pipelines through one AWS account form", async () => {

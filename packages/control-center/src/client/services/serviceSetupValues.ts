@@ -28,6 +28,7 @@ export const serviceSetupValues = (
   catalog: PluginServiceCatalogEntry,
   overrides: ReadonlyMap<string, string>
 ): ReadonlyArray<CreatePluginConnectionValue> =>
-  catalog.configurationFields.map((field) =>
-    serviceSetupValue(field, overrides.get(field.key) ?? field.defaultValue ?? "")
-  )
+  catalog.configurationFields.flatMap((field) => {
+    const value = overrides.get(field.key) ?? field.defaultValue
+    return value === null && !field.required ? [] : [serviceSetupValue(field, value ?? "")]
+  })

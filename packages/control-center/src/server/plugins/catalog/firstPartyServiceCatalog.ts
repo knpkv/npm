@@ -31,6 +31,19 @@ interface FirstPartyServiceCatalogEntry {
 const setupValues = (values: ReadonlyArray<CreatePluginConnectionValue>): ReadonlyMap<string, string | number> =>
   new Map(values.map((value) => [value.key, value.value]))
 
+const atlassianAuthenticationIsValid = (configured: ReadonlyMap<string, string | number>): boolean => {
+  const authMode = configured.get("authMode")
+  if (authMode === "oauth") {
+    const profileId = configured.get("oauthProfileId")
+    return typeof profileId === "string" && profileId.length > 0
+  }
+  const apiToken = configured.get("apiToken")
+  return authMode === "api-token" &&
+    Schema.is(AtlassianBasicAuthEmail)(configured.get("email")) &&
+    typeof apiToken === "string" &&
+    apiToken.length > 0
+}
+
 const jiraSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
   const configured = setupValues(values)
   return Result.isSuccess(
@@ -40,7 +53,7 @@ const jiraSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): b
       maximumPages: configured.get("maximumPages"),
       operationTimeoutMillis: configured.get("operationTimeoutMillis")
     })
-  ) && Schema.is(AtlassianBasicAuthEmail)(configured.get("email"))
+  ) && atlassianAuthenticationIsValid(configured)
 }
 
 const confluenceSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
@@ -52,7 +65,7 @@ const confluenceSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValu
       spaceId: configured.get("spaceId"),
       probePageId: configured.get("probePageId")
     })
-  ) && Schema.is(AtlassianBasicAuthEmail)(configured.get("email"))
+  ) && atlassianAuthenticationIsValid(configured)
 }
 
 const clockifySetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): boolean => {
@@ -105,6 +118,7 @@ const field = (
   options: {
     readonly defaultValue?: string
     readonly isReadOnly?: boolean
+    readonly required?: boolean
     readonly scope?: PluginServiceCatalogField["scope"]
     readonly minimum?: number
     readonly maximum?: number
@@ -115,7 +129,7 @@ const field = (
   description,
   kind,
   scope: options.scope ?? "adapter",
-  required: true,
+  required: options.required ?? true,
   defaultValue: options.defaultValue ?? null,
   isReadOnly: options.isReadOnly ?? false,
   minimum: options.minimum ?? null,
@@ -159,9 +173,17 @@ const codePipelineFields = [
 ]
 const jiraFields = [
   field("webBaseUrl", "Jira site URL", "Root URL of the Jira Cloud site.", "url"),
-  field("email", "Atlassian email", "Email paired with the Jira API token.", "text", { scope: "credential" }),
+  field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
+    defaultValue: "api-token"
+  }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("email", "Atlassian email", "Email paired with the Jira API token.", "text", {
+    scope: "credential",
+    required: false
+  }),
   field("apiToken", "API token", "Atlassian API token stored only in the server secret store.", "secret", {
-    scope: "credential"
+    scope: "credential",
+    required: false
   }),
   field("pageSize", "Activity page size", "Comments and history entries requested per page.", "integer", {
     defaultValue: "50",
@@ -181,9 +203,17 @@ const jiraFields = [
 ]
 const confluenceFields = [
   field("siteBaseUrl", "Confluence site URL", "Root URL of the Confluence Cloud site.", "url"),
-  field("email", "Atlassian email", "Email paired with the Confluence API token.", "text", { scope: "credential" }),
+  field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
+    defaultValue: "api-token"
+  }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("email", "Atlassian email", "Email paired with the Confluence API token.", "text", {
+    scope: "credential",
+    required: false
+  }),
   field("apiToken", "API token", "Atlassian API token stored only in the server secret store.", "secret", {
-    scope: "credential"
+    scope: "credential",
+    required: false
   }),
   field("siteId", "Site ID", "Stable Atlassian site identity.", "text"),
   field("spaceId", "Space ID", "Confluence space visible through this connection.", "text"),

@@ -1,3 +1,4 @@
+import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
@@ -44,6 +45,7 @@ import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
+import { discoverAtlassianProfiles } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
 import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
@@ -57,6 +59,7 @@ import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
+const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
 
@@ -592,6 +595,7 @@ const validateSetup = Effect.fn("PluginAdministration.validateSetup")(function*(
   const values: Array<CreatePluginConnectionValue> = []
   for (const field of catalog.metadata.configurationFields) {
     const supplied = valuesByKey.get(field.key)
+    if (supplied === undefined && field.defaultValue === null && !field.required) continue
     const value = supplied ?? (yield* defaultSetupValue(field))
     if (!valueMatchesCatalogField(field, value)) return yield* new ApplicationInvalidRequest()
     if (field.isReadOnly && field.defaultValue !== String(value.value)) {
@@ -837,6 +841,18 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       return profiles
         .map(({ name, region }) => ({ profile: name, region: region ?? null }))
         .sort((left, right) => left.profile.localeCompare(right.profile))
+    }),
+    discoverAtlassianProfiles: Effect.fn("PluginAdministration.discoverAtlassianProfiles")(function*() {
+      const profiles = yield* discoverAtlassianProfiles().pipe(
+        Effect.provide([
+          HomeDirectoryLive,
+          Layer.succeed(FileSystem.FileSystem, fileSystem),
+          Layer.succeed(Path.Path, path)
+        ]),
+        Effect.mapError(() => unavailable())
+      )
+      if (profiles.length > MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES) return yield* unavailable()
+      return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(persistence, cryptoService, wakeups, secrets, pluginConnections, workspaceId, request),

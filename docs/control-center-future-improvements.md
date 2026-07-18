@@ -10,7 +10,7 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Atlassian authorization
 
-- Prefer a shared browser OAuth grant for Jira and Confluence, with API tokens retained as a deliberate compatibility fallback.
+- Add an in-app browser OAuth grant and callback. The current OAuth-first setup safely reuses local `jira-cli` and `confluence-to-markdown` profiles, with API tokens retained as a deliberate compatibility fallback.
 - Persist the selected Atlassian site separately from followed Jira projects and Confluence spaces.
 
 ## Build performance

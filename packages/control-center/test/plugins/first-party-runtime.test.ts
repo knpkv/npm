@@ -114,6 +114,7 @@ describe("first-party plugin runtime", () => {
             testCase.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 email,
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -122,6 +123,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 email,
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
@@ -217,6 +219,7 @@ describe("first-party plugin runtime", () => {
             invalid.providerId === "jira"
               ? [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -225,6 +228,7 @@ describe("first-party plugin runtime", () => {
               ]
               : [
                 { _tag: "secret-reference", key: "apiToken", ref: missingSecretRef },
+                { _tag: "text", key: "authMode", value: "api-token" },
                 { _tag: "secret-reference", key: "email", ref: missingEmailRef },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: invalid.webBaseUrl },

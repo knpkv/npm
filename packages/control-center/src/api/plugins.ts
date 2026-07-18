@@ -27,6 +27,7 @@ import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
+const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
 const MAXIMUM_SECRET_VALUE_LENGTH = 16_384
 
@@ -210,6 +211,31 @@ export const AwsProfileDiscoveryResponse = Schema.Array(DiscoveredAwsProfile).ch
 /** Decoded bounded AWS profile discovery response. */
 export type AwsProfileDiscoveryResponse = typeof AwsProfileDiscoveryResponse.Type
 
+/** One local OAuth profile available to first-party Atlassian adapters. */
+export const DiscoveredAtlassianProfile = Schema.Struct({
+  profileId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  siteUrl: BoundedConfigurationUrl,
+  cloudId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  accountName: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))),
+  accountEmail: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))),
+  status: Schema.Literals(["valid", "expired"]),
+  providers: Schema.Array(Schema.Literals(["jira", "confluence"])).check(Schema.isNonEmpty())
+}).annotate({ identifier: "DiscoveredAtlassianProfile" })
+
+/** Decoded secret-free metadata for one local Atlassian OAuth profile. */
+export type DiscoveredAtlassianProfile = typeof DiscoveredAtlassianProfile.Type
+
+/** Bounded local Atlassian OAuth profile discovery response. */
+export const AtlassianProfileDiscoveryResponse = Schema.Array(DiscoveredAtlassianProfile).check(
+  Schema.makeFilter((profiles) => profiles.length <= MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES, {
+    expected: `at most ${MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES} discovered Atlassian profiles`
+  })
+)
+
+/** Decoded bounded local Atlassian profile discovery response. */
+export type AtlassianProfileDiscoveryResponse = typeof AtlassianProfileDiscoveryResponse.Type
+
 /** Bounded plugin-navigation and portfolio response retained for v1 clients. */
 export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
   Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
@@ -372,6 +398,15 @@ const discoverAwsProfiles = HttpApiEndpoint.get("discoverAwsProfiles", "/discove
   error: pluginReadErrors
 }).middleware(SessionCookieAuth)
 
+const discoverAtlassianProfiles = HttpApiEndpoint.get(
+  "discoverAtlassianProfiles",
+  "/discovery/atlassian-profiles",
+  {
+    success: AtlassianProfileDiscoveryResponse,
+    error: pluginReadErrors
+  }
+).middleware(SessionCookieAuth)
+
 const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
   payload: CreatePluginConnectionRequest,
   success: CreatePluginConnectionResponse,
@@ -434,6 +469,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     list,
     overview,
     discoverAwsProfiles,
+    discoverAtlassianProfiles,
     createConnection,
     setConnectionEnabled,
     health,

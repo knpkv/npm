@@ -605,6 +605,7 @@ describe("application adapters", () => {
         patch: {
           expectedRevision: response.configuration.revision,
           values: [
+            { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "api-token" },
             {
               _tag: "secret-reference",
               key: PluginConfigurationKey.make("apiToken"),

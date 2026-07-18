@@ -292,6 +292,20 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
           }))
+        .handle("discoverAtlassianProfiles", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const discoverAtlassianProfiles = plugins.discoverAtlassianProfiles
+            if (discoverAtlassianProfiles === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* discoverAtlassianProfiles().pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+          }))
         .handle("createConnection", ({ payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

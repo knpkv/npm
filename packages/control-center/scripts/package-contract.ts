@@ -57,6 +57,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@effect/sql-libsql",
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
+    "@knpkv/atlassian-common",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
@@ -85,6 +86,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   const workspaceDependencies: ReadonlyArray<
     | "@knpkv/ai-claude"
     | "@knpkv/ai-codex"
+    | "@knpkv/atlassian-common"
     | "@knpkv/codecommit-core"
     | "@knpkv/clockify-api-client"
     | "@knpkv/confluence-api-client"
@@ -93,6 +95,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   > = [
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
+    "@knpkv/atlassian-common",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
