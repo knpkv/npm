@@ -12,7 +12,7 @@ import { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import { ProviderId } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
-import { PersistedRecordError, RecordNotFoundError } from "../errors.js"
+import { PersistedRecordError, PluginConnectionLimitError, RecordNotFoundError } from "../errors.js"
 import {
   mapAlreadyExists,
   mapPersistenceOperation,
@@ -48,6 +48,11 @@ const CreatePluginConnectionRequest = Schema.Struct({
   displayName: PluginConnectionDisplayName,
   isEnabled: Schema.Boolean,
   createdAt: UtcTimestamp
+})
+
+const CreateBoundedPluginConnectionRequest = Schema.Struct({
+  ...CreatePluginConnectionRequest.fields,
+  maximum: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
 })
 
 const UpdatePluginConnectionRequest = Schema.Struct({
@@ -150,6 +155,22 @@ const makePluginConnectionRepository = Effect.gen(function*() {
           )`
   })
 
+  const boundedInsert = SqlSchema.void({
+    Request: CreateBoundedPluginConnectionRequest,
+    execute: ({ createdAt, displayName, isEnabled, maximum, pluginConnectionId, providerId, workspaceId }) =>
+      sql`INSERT INTO plugin_connections (
+            workspace_id, plugin_connection_id, provider_id, display_name,
+            revision, is_enabled, created_at, updated_at
+          )
+          SELECT
+            ${workspaceId}, ${pluginConnectionId}, ${providerId}, ${displayName},
+            1, ${isEnabled ? 1 : 0}, ${createdAt}, ${createdAt}
+          WHERE (
+            SELECT COUNT(*) FROM plugin_connections
+            WHERE workspace_id = ${workspaceId}
+          ) < ${maximum}`
+  })
+
   const update = SqlSchema.void({
     Request: UpdatePluginConnectionRequest,
     execute: ({ displayName, expectedRevision, isEnabled, pluginConnectionId, updatedAt, workspaceId }) =>
@@ -181,6 +202,34 @@ const makePluginConnectionRepository = Effect.gen(function*() {
           recordKey: input.pluginConnectionId
         }),
         mapPersistenceOperation("plugin-connection.create")
+      )
+      return yield* get(workspaceId, input.pluginConnectionId)
+    }),
+    createBounded: Effect.fn("PluginConnectionRepository.createBounded")(function*(
+      workspaceId: WorkspaceId,
+      input: {
+        readonly pluginConnectionId: PluginConnectionId
+        readonly providerId: ProviderId
+        readonly displayName: PluginConnectionDisplayName
+        readonly isEnabled: boolean
+        readonly createdAt: UtcTimestamp
+        readonly maximum: number
+      }
+    ) {
+      yield* database.transaction(
+        Effect.gen(function*() {
+          yield* boundedInsert({ workspaceId, ...input })
+          if ((yield* readChanges(sql)) === 0) {
+            return yield* new PluginConnectionLimitError({ workspaceId, maximum: input.maximum })
+          }
+        })
+      ).pipe(
+        mapAlreadyExists({
+          workspaceId,
+          recordKind: "plugin-connection",
+          recordKey: input.pluginConnectionId
+        }),
+        mapPersistenceOperation("plugin-connection.create-bounded")
       )
       return yield* get(workspaceId, input.pluginConnectionId)
     }),

@@ -474,9 +474,38 @@ describe("application adapters", () => {
         value: 49
       })
 
+      const plaintextCredentialPatch = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        patch: {
+          expectedRevision: roundTripped.revision,
+          values: [
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "plaintext@example.com" },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 49 },
+            {
+              _tag: "url",
+              key: PluginConfigurationKey.make("webBaseUrl"),
+              value: "https://knpkv.atlassian.net/"
+            }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(plaintextCredentialPatch))
+      if (Result.isFailure(plaintextCredentialPatch)) {
+        assert.instanceOf(plaintextCredentialPatch.failure, ApplicationInvalidRequest)
+      }
+
       const currentConfiguration = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.isTrue(Option.isSome(currentConfiguration))
       if (Option.isSome(currentConfiguration)) {
+        assert.notInclude(JSON.stringify(currentConfiguration.value), "plaintext@example.com")
         const legacyConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
           currentConfiguration.value.values.map((value) =>
             value.key === "email"
@@ -578,6 +607,13 @@ describe("application adapters", () => {
       const draft = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.isFalse(draft.isEnabled)
       assert.isTrue(Option.isSome(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)))
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.strictEqual(runtime.health._tag, "disabled")
+      const listed = yield* administration.list(WORKSPACE_ID)
+      assert.strictEqual(
+        listed.find(({ pluginConnectionId }) => pluginConnectionId === PROVISIONED_PLUGIN_ID)?.health?._tag,
+        "disabled"
+      )
       const metadata = yield* administration.configurationMetadata({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PROVISIONED_PLUGIN_ID
@@ -700,7 +736,7 @@ describe("application adapters", () => {
       )
     })))
 
-  it.effect("accepts the hundredth connection and rejects the hundred-and-first before writes", () =>
+  it.effect("admits only one of two concurrent hundredth connections", () =>
     withApplication(Effect.gen(function*() {
       const persistence = yield* setup
       yield* Effect.forEach(
@@ -734,52 +770,41 @@ describe("application adapters", () => {
         proposeAction: () => Effect.die("not used")
       }
       const administration = yield* makePluginAdministrationWithConnections({
-        contextEffect: ({ pluginConnectionId }) =>
-          pluginConnectionId === hundredthId
-            ? Effect.succeed(Context.make(PluginConnection, connection))
-            : Effect.die("the rejected connection must not acquire a runtime"),
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
         invalidate: () => Effect.void
       })
       const operation = administration.connectAndTest
       assert.isDefined(operation)
-      const hundredth = yield* operation({
-        workspaceId: WORKSPACE_ID,
-        request: {
-          pluginConnectionId: hundredthId,
-          providerId: "codecommit",
-          displayName: "Connection 100",
-          values: [
-            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
-            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
-            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
-          ]
-        }
-      })
-      assert.strictEqual(hundredth.connection.pluginConnectionId, hundredthId)
-      assert.lengthOf(yield* administration.list(WORKSPACE_ID), 100)
+      const requests = [hundredthId, rejectedId].map((pluginConnectionId, index) =>
+        operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId,
+            providerId: "codecommit",
+            displayName: `Connection ${100 + index}`,
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          }
+        }).pipe(Effect.result)
+      )
+      const results = yield* Effect.all(requests, { concurrency: "unbounded" })
+      const accepted = results.filter(Result.isSuccess)
+      const rejected = results.filter(Result.isFailure)
 
-      const rejected = yield* operation({
-        workspaceId: WORKSPACE_ID,
-        request: {
-          pluginConnectionId: rejectedId,
-          providerId: "jira",
-          displayName: "Connection 101",
-          values: [
-            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
-            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
-            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "must-not-be-created" }
-          ]
-        }
-      }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(rejected))
-      if (Result.isFailure(rejected)) assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
-      assert.isTrue(Result.isFailure(
-        yield* persistence.pluginConnections.get(WORKSPACE_ID, rejectedId).pipe(Effect.result)
-      ))
-      assert.isTrue(Option.isNone(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, rejectedId)))
-      assert.isTrue(Result.isFailure(
-        yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, rejectedId).pipe(Effect.result)
-      ))
+      assert.lengthOf(accepted, 1)
+      assert.lengthOf(rejected, 1)
+      if (rejected[0] !== undefined) {
+        assert.instanceOf(rejected[0].failure, ApplicationInvalidRequest)
+      }
+      assert.lengthOf(yield* administration.list(WORKSPACE_ID), 100)
+      const configurations = yield* Effect.all([
+        persistence.pluginConfigurations.get(WORKSPACE_ID, hundredthId),
+        persistence.pluginConfigurations.get(WORKSPACE_ID, rejectedId)
+      ])
+      assert.strictEqual(configurations.filter(Option.isSome).length, 1)
     })))
 
   it.effect("removes setup secrets when interrupted before durable configuration", () =>
@@ -830,6 +855,69 @@ describe("application adapters", () => {
       assert.deepStrictEqual(yield* Ref.get(removals), [reference])
       const persistence = yield* Persistence
       assert.isTrue(Option.isNone(yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)))
+    })))
+
+  it.effect("retains setup secrets when interruption follows the durable configuration commit", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const configurationCommitted = yield* Deferred.make<void>()
+      const creates = yield* Ref.make(0)
+      const removals = yield* Ref.make<ReadonlyArray<SecretRef>>([])
+      const instrumentedPersistence = Persistence.of({
+        ...persistence,
+        pluginConfigurations: {
+          ...persistence.pluginConfigurations,
+          update: (workspaceId, pluginConnectionId, values, expectedRevision, updatedAt) =>
+            persistence.pluginConfigurations.update(
+              workspaceId,
+              pluginConnectionId,
+              values,
+              expectedRevision,
+              updatedAt
+            ).pipe(
+              Effect.tap(() => Deferred.succeed(configurationCommitted, undefined)),
+              Effect.andThen(Effect.never)
+            )
+        }
+      })
+      const instrumentedSecrets = SecretStore.of({
+        create: () =>
+          Ref.getAndUpdate(creates, (count) => count + 1).pipe(
+            Effect.map((count) => SecretRef.make(`secret_${count.toString(16).padStart(64, "0")}`))
+          ),
+        remove: (removed) => Ref.update(removals, (references) => [...references, removed]),
+        resolve: () => Effect.die("interrupted setup must not resolve a secret"),
+        rotate: () => Effect.die("interrupted setup must not rotate a secret")
+      })
+      const fiber = yield* Effect.gen(function*() {
+        const administration = yield* makePluginAdministration
+        const operation = administration.connectAndTest
+        assert.isDefined(operation)
+        return yield* operation({
+          workspaceId: WORKSPACE_ID,
+          request: {
+            pluginConnectionId: FAILED_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Committed Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "durable-token" }
+            ]
+          }
+        })
+      }).pipe(
+        Effect.provideService(Persistence, instrumentedPersistence),
+        Effect.provideService(SecretStore, instrumentedSecrets),
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* Deferred.await(configurationCommitted)
+      yield* Fiber.interrupt(fiber)
+      assert.deepStrictEqual(yield* Ref.get(removals), [])
+      assert.isTrue(Option.isSome(
+        yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      ))
     })))
 
   it.effect("removes newly-created secrets when metadata creation fails before durable configuration", () =>

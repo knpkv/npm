@@ -388,7 +388,7 @@ const matchesField = (
   credentialKeys: ReadonlySet<string>
 ): boolean => {
   if (field.key !== value.key) return false
-  if (credentialKeys.has(field.key) && value._tag === "secret-reference") return true
+  if (credentialKeys.has(field.key)) return value._tag === "secret-reference"
   if (field._tag !== value._tag) return false
   if (field._tag === "integer" && value._tag === "integer") {
     return (field.minimum === null || value.value >= field.minimum) &&
@@ -580,6 +580,23 @@ const removeSetupSecrets = (
     { discard: true }
   )
 
+const removeSetupSecretsUnlessConfigured = Effect.fn(
+  "PluginAdministration.removeSetupSecretsUnlessConfigured"
+)(function*(
+  persistence: Persistence["Service"],
+  secrets: SecretStore["Service"],
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  references: ReadonlyArray<SecretRef>
+) {
+  const configuration = yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+    Effect.result
+  )
+  if (Result.isSuccess(configuration) && Option.isNone(configuration.success)) {
+    yield* removeSetupSecrets(secrets, references)
+  }
+})
+
 const disableAfterSetupFailure = (
   persistence: Persistence["Service"],
   workspaceId: WorkspaceId,
@@ -629,28 +646,22 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
 ) {
   const catalog = firstPartyService(request.providerId)
   if (catalog === undefined) return yield* new ApplicationInvalidRequest()
-  const existingConnections = yield* persistence.pluginConnections.list(workspaceId).pipe(
-    Effect.mapError(() => unavailable())
-  )
-  if (existingConnections.length >= MAXIMUM_PLUGIN_CONNECTIONS) {
-    return yield* new ApplicationInvalidRequest()
-  }
   const setupValues = yield* validateSetup(catalog, request)
   const displayName = yield* Schema.decodeUnknownEffect(PluginConnectionDisplayName)(request.displayName).pipe(
     Effect.mapError(() => new ApplicationInvalidRequest())
   )
   const createdSecretReferences: Array<SecretRef> = []
-  let hasDurableConfiguration = false
 
   return yield* Effect.gen(function*() {
     const values = yield* storeSetupValues(secrets, catalog, setupValues, createdSecretReferences)
     const createdAt = yield* DateTime.now
-    const draft = yield* persistence.pluginConnections.create(workspaceId, {
+    const draft = yield* persistence.pluginConnections.createBounded(workspaceId, {
       pluginConnectionId: request.pluginConnectionId,
       providerId: request.providerId,
       displayName,
       isEnabled: false,
-      createdAt
+      createdAt,
+      maximum: MAXIMUM_PLUGIN_CONNECTIONS
     }).pipe(Effect.mapError(mapPersistenceWriteError))
     yield* persistence.pluginConfigurations.update(
       workspaceId,
@@ -659,15 +670,23 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       0,
       createdAt
     ).pipe(Effect.mapError(mapPersistenceWriteError))
-    hasDurableConfiguration = true
-    yield* persistence.pluginRuntime.acceptPluginDescriptor(
-      workspaceId,
-      request.pluginConnectionId,
-      request.providerId,
-      catalog.rawDescriptor,
-      0,
-      createdAt
-    ).pipe(Effect.mapError(mapPersistenceWriteError))
+    yield* Effect.uninterruptible(Effect.gen(function*() {
+      const runtime = yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        workspaceId,
+        request.pluginConnectionId,
+        request.providerId,
+        catalog.rawDescriptor,
+        0,
+        createdAt
+      ).pipe(Effect.mapError(mapPersistenceWriteError))
+      yield* persistence.pluginRuntime.recordHealth(
+        workspaceId,
+        request.pluginConnectionId,
+        runtime.revision,
+        { _tag: "disabled", checkedAt: createdAt },
+        0
+      ).pipe(Effect.mapError(mapPersistenceWriteError))
+    }))
 
     if (pluginConnections === null) return yield* unavailable()
     const enabled = yield* persistence.pluginConnections.updateMetadata(workspaceId, request.pluginConnectionId, {
@@ -693,7 +712,15 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       } satisfies CreatePluginConnectionResponse
     }).pipe(Effect.tapError(() => disableAfterSetupFailure(persistence, workspaceId, enabled)))
   }).pipe(
-    Effect.onExit(() => hasDurableConfiguration ? Effect.void : removeSetupSecrets(secrets, createdSecretReferences))
+    Effect.onExit(() =>
+      removeSetupSecretsUnlessConfigured(
+        persistence,
+        secrets,
+        workspaceId,
+        request.pluginConnectionId,
+        createdSecretReferences
+      )
+    )
   )
 })
 

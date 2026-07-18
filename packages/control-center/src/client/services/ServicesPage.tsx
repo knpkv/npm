@@ -91,13 +91,17 @@ const TestEvidence = ({ state }: { readonly state: ConnectionTestState | undefin
 }
 
 const ConnectionCard = ({
+  canConfigure,
   canTest,
   connection,
+  onConfigure,
   onTest,
   testState
 }: {
+  readonly canConfigure: boolean
   readonly canTest: boolean
   readonly connection: PluginConnectionSummary
+  readonly onConfigure: () => void
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testState: ConnectionTestState | undefined
 }): ReactElement => {
@@ -124,6 +128,9 @@ const ConnectionCard = ({
           variant="secondary"
         >
           {hasTested ? "Retry test" : "Test connection"}
+        </Button>
+        <Button disabled={!canConfigure} onClick={onConfigure} variant="secondary">
+          Add connection
         </Button>
         {!canTest ? (
           <Text tone="secondary" variant="meta">
@@ -247,6 +254,7 @@ const CatalogCard = ({
   canConfigure,
   catalog,
   isOpen,
+  isRecovery,
   isSubmitting,
   onCancel,
   onOpen,
@@ -256,6 +264,7 @@ const CatalogCard = ({
   readonly catalog: PluginServiceCatalogEntry
   readonly isOpen: boolean
   readonly isSubmitting: boolean
+  readonly isRecovery: boolean
   readonly onCancel: () => void
   readonly onOpen: () => void
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
@@ -268,7 +277,11 @@ const CatalogCard = ({
           {catalog.displayName}
         </Text>
       </div>
-      <StateLabel label="Not configured" size="compact" tone="neutral" />
+      <StateLabel
+        label={isRecovery ? "Needs correction" : "Not configured"}
+        size="compact"
+        tone={isRecovery ? "critical" : "neutral"}
+      />
     </div>
     <Text tone="secondary" variant="body">
       {catalog.description}
@@ -399,7 +412,7 @@ export const ServicesPage = ({
                 result: response.test
               })
             )
-            setOpenProvider(null)
+            setOpenProvider(response.test._tag === "healthy" ? null : catalog.providerId)
             setSubmittingProvider(null)
             return true
           },
@@ -453,28 +466,32 @@ export const ServicesPage = ({
             const configured = connectionsState.overview.connections.filter(
               (connection) => connection.providerId === catalog.providerId
             )
-            return configured.length > 0
-              ? configured.map((connection) => (
-                  <ConnectionCard
-                    canTest={canConfigure}
-                    connection={connection}
-                    key={connection.pluginConnectionId}
-                    onTest={testConnection}
-                    testState={testStates.get(connection.pluginConnectionId)}
-                  />
-                ))
-              : [
-                  <CatalogCard
-                    canConfigure={canConfigure}
-                    catalog={catalog}
-                    isOpen={openProvider === catalog.providerId}
-                    isSubmitting={submittingProvider === catalog.providerId}
-                    key={catalog.providerId}
-                    onCancel={() => setOpenProvider(null)}
-                    onOpen={() => setOpenProvider(catalog.providerId)}
-                    onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
-                  />
-                ]
+            const cards = configured.map((connection) => (
+              <ConnectionCard
+                canConfigure={canConfigure}
+                canTest={canConfigure}
+                connection={connection}
+                key={connection.pluginConnectionId}
+                onConfigure={() => setOpenProvider(catalog.providerId)}
+                onTest={testConnection}
+                testState={testStates.get(connection.pluginConnectionId)}
+              />
+            ))
+            if (configured.length > 0 && openProvider !== catalog.providerId) return cards
+            return [
+              ...cards,
+              <CatalogCard
+                canConfigure={canConfigure}
+                catalog={catalog}
+                isOpen={openProvider === catalog.providerId}
+                isRecovery={configured.length > 0}
+                isSubmitting={submittingProvider === catalog.providerId}
+                key={`${catalog.providerId}-catalog`}
+                onCancel={() => setOpenProvider(null)}
+                onOpen={() => setOpenProvider(catalog.providerId)}
+                onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
+              />
+            ]
           })}
         </div>
       )}

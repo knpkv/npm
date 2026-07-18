@@ -58,6 +58,15 @@ export class RecordAlreadyExistsError extends Schema.TaggedErrorClass<RecordAlre
   }
 ) {}
 
+/** Raised when a workspace has reached its bounded plugin-connection capacity. */
+export class PluginConnectionLimitError extends Schema.TaggedErrorClass<PluginConnectionLimitError>()(
+  "PluginConnectionLimitError",
+  {
+    maximum: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+    workspaceId: WorkspaceId
+  }
+) {}
+
 /** Raised when an entity update attempts to replace its immutable vendor identity. */
 export class SourceIdentityMismatchError extends Schema.TaggedErrorClass<SourceIdentityMismatchError>()(
   "SourceIdentityMismatchError",

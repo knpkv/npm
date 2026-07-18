@@ -170,6 +170,62 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("123456789012")
   })
 
+  it("keeps a correction form visible when the initial connection test fails", async () => {
+    const created = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: {
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        displayName: "Rejected CodeCommit",
+        isEnabled: true,
+        health: {
+          _tag: "unavailable",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          failureClass: "authentication",
+          retryAt: null,
+          safeMessage: "The provider rejected these credentials."
+        },
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 1,
+        values: [{ _tag: "text", key: "profile", value: "default" }],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: {
+        _tag: "failed",
+        pluginConnectionId: connection.pluginConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:03:00.000Z",
+        latencyMilliseconds: 42,
+        failureClass: "authentication",
+        retryAt: null,
+        safeMessage: "The provider rejected these credentials."
+      }
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn().mockResolvedValue(created),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const configure = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Configure")
+    )
+    await act(async () => configure?.click())
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect and test")
+    )
+    await act(async () => submit?.click())
+
+    expect(host.textContent).toContain("The provider rejected these credentials.")
+    expect(host.textContent).toContain("Needs correction")
+    expect(host.textContent).toContain("Connect and test")
+    expect(host.querySelector("form")).not.toBeNull()
+  })
+
   it("keeps setup open and announces an inline error when creation fails", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn().mockRejectedValue(new Error("unavailable")),
