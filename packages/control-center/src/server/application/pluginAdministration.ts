@@ -351,7 +351,8 @@ const configuration = Effect.fn("PluginAdministration.configuration")(function*(
     const stored = valuesByKey.get(field.key)
     if (
       stored !== undefined &&
-      (stored._tag === field._tag || (credentialKeys.has(field.key) && stored._tag === "secret-reference"))
+      ((stored._tag === field._tag && !credentialKeys.has(field.key)) ||
+        (credentialKeys.has(field.key) && stored._tag === "secret-reference"))
     ) {
       values.push(stored)
     } else if (field._tag === "secret-reference" || credentialKeys.has(field.key)) {

@@ -49,6 +49,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { BlobNotFoundError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
 import { firstPartyService } from "../../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
@@ -433,6 +434,35 @@ describe("application adapters", () => {
       assert.notInclude(JSON.stringify(response), "plaintext-token-canary")
       assert.notInclude(JSON.stringify(response), "owner@example.com")
       assert.notMatch(JSON.stringify(response), /secret_[0-9a-f]{64}/u)
+
+      const currentConfiguration = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      assert.isTrue(Option.isSome(currentConfiguration))
+      if (Option.isSome(currentConfiguration)) {
+        const legacyConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)(
+          currentConfiguration.value.values.map((value) =>
+            value.key === "email"
+              ? { _tag: "text", key: "email", value: "legacy-owner@example.com" }
+              : value
+          )
+        )
+        yield* persistence.pluginConfigurations.update(
+          WORKSPACE_ID,
+          PROVISIONED_PLUGIN_ID,
+          legacyConfiguration,
+          currentConfiguration.value.revision,
+          T0
+        )
+        const legacyRead = yield* administration.configuration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PROVISIONED_PLUGIN_ID
+        })
+        assert.deepInclude(legacyRead.values, {
+          _tag: "secret-reference",
+          key: PluginConfigurationKey.make("email"),
+          state: "configured"
+        })
+        assert.notInclude(JSON.stringify(legacyRead), "legacy-owner@example.com")
+      }
 
       const confluence = yield* operation({
         workspaceId: WORKSPACE_ID,
