@@ -133,19 +133,27 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
       const auth = yield* Auth
       const config = yield* ApiBindConfiguration
       const cookie = sessionCookiePolicy(config)
+      const lifecycle = yield* ServerLifecycle
       return handlers
         .handle("pair", ({ payload }) =>
-          Effect.gen(function*() {
-            yield* authorizePairingRequest()
-            const issued = yield* mapCredentialAuthenticationFailures(
-              auth.consumePairingCode(Redacted.make(payload.pairingCode))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              yield* authorizePairingRequest()
+              const issued = yield* mapCredentialAuthenticationFailures(
+                auth.consumePairingCode(Redacted.make(payload.pairingCode))
+              )
+              yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
+              return {
+                csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
+                session: issued.session
+              }
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
-            yield* HttpApiBuilder.securitySetCookie(sessionCookie, issued.sessionToken, cookie)
-            return {
-              csrfToken: CsrfToken.make(Redacted.value(issued.csrfToken)),
-              session: issued.session
-            }
-          }))
+          ))
         .handle("current", ({ request }) =>
           Effect.gen(function*() {
             const recovered = yield* mapAuthenticationFailures(

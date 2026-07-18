@@ -73,20 +73,28 @@ export const sessionCookieAuthLayer = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* Auth
     const config = yield* ApiBindConfiguration
+    const lifecycle = yield* ServerLifecycle
     return {
       sessionCookie: (effect, { credential, endpoint, group }) =>
-        Effect.gen(function*() {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
-            yield* authorizeAuthenticatedRead({
-              capability: capabilityFor(group.identifier, endpoint.identifier),
-              config,
-              request: requestShape(request)
-            }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
-          }
-          const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
-          return yield* Effect.provideService(effect, CurrentSession, session)
-        })
+        lifecycle.runMutation(
+          Effect.gen(function*() {
+            const request = yield* HttpServerRequest.HttpServerRequest
+            if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
+              yield* authorizeAuthenticatedRead({
+                capability: capabilityFor(group.identifier, endpoint.identifier),
+                config,
+                request: requestShape(request)
+              }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
+            }
+            const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
+            return yield* Effect.provideService(effect, CurrentSession, session)
+          })
+        ).pipe(
+          Effect.catchTag(
+            "ServerDraining",
+            () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+          )
+        )
     }
   })
 )

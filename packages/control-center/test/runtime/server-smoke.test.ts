@@ -31,7 +31,7 @@ import {
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
@@ -368,7 +368,20 @@ describe("Control Center closed runtime", () => {
       assert.deepStrictEqual(portfolio.releases, [])
       assert.deepStrictEqual(portfolio.plugins, [])
 
+      const inspectionContext = yield* Layer.build(databaseLayer(persistenceConfig))
+      const inspectionDatabase = Context.get(inspectionContext, Database)
+      const beforeDrain = yield* inspectionDatabase.sql<{
+        readonly auditCount: number
+        readonly lastSeenAt: string
+      }>`SELECT
+        (SELECT COUNT(*) FROM timeline_export_audits) AS auditCount,
+        last_seen_at AS lastSeenAt
+      FROM sessions
+      WHERE session_id = ${paired.session.sessionId}`
+      assert.strictEqual(beforeDrain[0]?.auditCount, 0)
+
       const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* TestClock.adjust("1 minute")
       yield* lifecycle.beginDrain
       const mutationClient = yield* makeControlCenterApiClient({
         baseUrl: origin,
@@ -384,6 +397,87 @@ describe("Control Center closed runtime", () => {
       if (Result.isFailure(rejectedMutation)) {
         assert.strictEqual(rejectedMutation.failure._tag, "ServiceUnavailableApiError")
       }
+      const rejectedExport = yield* authenticatedClient.timeline.exportJson({
+        query: { limit: 1 }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedExport))
+      if (Result.isFailure(rejectedExport)) {
+        assert.strictEqual(rejectedExport.failure._tag, "ServiceUnavailableApiError")
+      }
+      const rejectedStream = yield* authenticatedClient.liveEvents.stream({
+        headers: {},
+        query: {}
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedStream))
+      if (Result.isFailure(rejectedStream)) {
+        assert.strictEqual(rejectedStream.failure._tag, "ServiceUnavailableApiError")
+      }
+      const afterDrain = yield* inspectionDatabase.sql<{
+        readonly auditCount: number
+        readonly lastSeenAt: string
+      }>`SELECT
+        (SELECT COUNT(*) FROM timeline_export_audits) AS auditCount,
+        last_seen_at AS lastSeenAt
+      FROM sessions
+      WHERE session_id = ${paired.session.sessionId}`
+      assert.deepStrictEqual(afterDrain, beforeDrain)
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("rejects pairing after drain without consuming the issued code", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-drain-pair-" })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const origin = `http://127.0.0.1:${port}`
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+        maxConnections: 1
+      }
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig: yield* decodeBindConfig({ port }),
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        bootstrap: {
+          workspaceId: WORKSPACE_ID,
+          workspaceName: WorkspaceName.make("Runtime drain pairing"),
+          owner: { _tag: "human", personId: OWNER_ID }
+        }
+      }))
+      const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
+      assert.strictEqual(bootstrapState._tag, "pairing-issued")
+      if (bootstrapState._tag !== "pairing-issued") return
+
+      yield* Context.get(runtime, ServerLifecycle).beginDrain
+      const pairClient = yield* makeControlCenterApiClient({
+        baseUrl: origin,
+        transformClient: (client) => client.pipe(HttpClient.mapRequest(HttpClientRequest.setHeader("origin", origin)))
+      })
+      const rejected = yield* pairClient.session.pair({
+        payload: { pairingCode: PairingCode.make(Redacted.value(bootstrapState.pairingCode)) }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+
+      const inspectionContext = yield* Layer.build(databaseLayer(persistenceConfig))
+      const inspectionDatabase = Context.get(inspectionContext, Database)
+      const persisted = yield* inspectionDatabase.sql<{
+        readonly sessionCount: number
+        readonly unusedPairingCodeCount: number
+      }>`SELECT
+        (SELECT COUNT(*) FROM sessions) AS sessionCount,
+        (SELECT COUNT(*) FROM pairing_codes WHERE consumed_at IS NULL) AS unusedPairingCodeCount`
+      assert.deepStrictEqual(persisted, [{ sessionCount: 0, unusedPairingCodeCount: 1 }])
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped
