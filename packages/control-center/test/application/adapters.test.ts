@@ -58,7 +58,9 @@ import { Persistence, persistenceLayerFromDatabase } from "../../src/server/pers
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
 import { firstPartyService } from "../../src/server/plugins/catalog/firstPartyServiceCatalog.js"
+import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
+import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
@@ -160,6 +162,24 @@ const negotiatedDescriptor = Schema.decodeUnknownSync(NegotiatedPluginDescriptor
   descriptor,
   capabilities: [{ capabilityId: "entity.read", version: 1 }]
 })
+
+const preOAuthAtlassianDescriptor = (providerId: "jira" | "confluence") => {
+  const descriptor = providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor
+  return {
+    ...descriptor,
+    configurationFields: descriptor.configurationFields.flatMap((field) => {
+      if (field.key === "authMode" || field.key === "oauthProfileId") return []
+      if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
+      return [{
+        ...field,
+        description: providerId === "jira"
+          ? "Atlassian account email used for Jira Cloud basic authentication."
+          : "Atlassian account email used for Confluence Cloud basic authentication.",
+        required: true
+      }]
+    })
+  }
+}
 
 const release = Schema.decodeSync(Release)({
   createdAt: "2026-07-14T10:00:00.000Z",
@@ -989,6 +1009,154 @@ describe("application adapters", () => {
       assert.isTrue(Option.isSome(durable))
       if (Option.isSome(durable)) assert.strictEqual(durable.value.revision, 2)
     }))))
+
+  it.effect("patches pre-OAuth Atlassian configurations without requiring current authentication fields", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      yield* TestClock.setTime(epochMillis(SNAPSHOT_AT))
+      const secrets = yield* SecretStore
+      const administration = yield* makePluginAdministration
+      const jiraConnectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000092")
+      const confluenceConnectionId = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000093")
+      const originalToken = yield* secrets.create(new TextEncoder().encode("original-token"))
+      const replacementToken = yield* secrets.create(new TextEncoder().encode("replacement-token"))
+      const confluenceToken = yield* secrets.create(new TextEncoder().encode("confluence-token"))
+
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: jiraConnectionId,
+        providerId: "jira",
+        displayName: PluginConnectionDisplayName.make("Legacy Jira"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        jiraConnectionId,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiToken", ref: originalToken },
+          { _tag: "text", key: "email", value: "owner@example.com" },
+          { _tag: "integer", key: "maximumPages", value: 3 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+          { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+        ]),
+        0,
+        T0
+      )
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        jiraConnectionId,
+        "jira",
+        preOAuthAtlassianDescriptor("jira"),
+        0,
+        T0
+      )
+
+      const patchedJira = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: jiraConnectionId,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "replace", reference: OpaqueSecretReference.make(replacementToken) }
+            },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("email"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 3 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 5_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 10 },
+            {
+              _tag: "url",
+              key: PluginConfigurationKey.make("webBaseUrl"),
+              value: "https://knpkv.atlassian.net/"
+            }
+          ]
+        }
+      })
+      assert.strictEqual(patchedJira.revision, 2)
+      const durableJira = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, jiraConnectionId)
+      assert.isTrue(Option.isSome(durableJira))
+      if (Option.isSome(durableJira)) {
+        const apiToken = durableJira.value.values.find(({ key }) => key === "apiToken")
+        assert.strictEqual(apiToken?._tag, "secret-reference")
+        if (apiToken?._tag === "secret-reference") assert.strictEqual(apiToken.ref, replacementToken)
+        const email = durableJira.value.values.find(({ key }) => key === "email")
+        assert.strictEqual(email?._tag, "text")
+        if (email?._tag === "text") assert.strictEqual(email.value, "owner@example.com")
+      }
+
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: confluenceConnectionId,
+        providerId: "confluence",
+        displayName: PluginConnectionDisplayName.make("Legacy Confluence"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        confluenceConnectionId,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiToken", ref: confluenceToken },
+          { _tag: "text", key: "email", value: "owner@example.com" },
+          { _tag: "text", key: "probePageId", value: "page-1" },
+          { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
+          { _tag: "text", key: "siteId", value: "cloud-1" },
+          { _tag: "text", key: "spaceId", value: "space-1" }
+        ]),
+        0,
+        T0
+      )
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        confluenceConnectionId,
+        "confluence",
+        preOAuthAtlassianDescriptor("confluence"),
+        0,
+        T0
+      )
+
+      const patchedConfluence = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: confluenceConnectionId,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("email"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-1" },
+            {
+              _tag: "url",
+              key: PluginConfigurationKey.make("siteBaseUrl"),
+              value: "https://knpkv.atlassian.net/"
+            },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-2" }
+          ]
+        }
+      })
+      assert.strictEqual(patchedConfluence.revision, 2)
+      const durableConfluence = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, confluenceConnectionId)
+      assert.isTrue(Option.isSome(durableConfluence))
+      if (Option.isSome(durableConfluence)) {
+        const spaceId = durableConfluence.value.values.find(({ key }) => key === "spaceId")
+        assert.strictEqual(spaceId?._tag, "text")
+        if (spaceId?._tag === "text") assert.strictEqual(spaceId.value, "space-2")
+      }
+    })))
 
   it.effect("keeps a provider-authentication test failure as an enabled usable connection", () =>
     withApplication(Effect.gen(function*() {

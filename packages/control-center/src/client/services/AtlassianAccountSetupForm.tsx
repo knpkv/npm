@@ -10,14 +10,19 @@ import styles from "./AtlassianAccountSetupForm.module.css"
 import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupValues.js"
 
 type AuthenticationMode = "oauth" | "api-token"
+type AtlassianProviderId = "confluence" | "jira"
+
+export interface AtlassianSetupIntent {
+  readonly providers: ReadonlyArray<AtlassianProviderId>
+}
 
 const selectedProfile = (
   profiles: AtlassianProfileDiscoveryResponse,
   profileId: string
 ): DiscoveredAtlassianProfile | undefined => profiles.find((profile) => profile.profileId === profileId)
 
-const isSharedUsableProfile = (profile: DiscoveredAtlassianProfile): boolean =>
-  profile.status === "valid" && profile.providers.includes("jira") && profile.providers.includes("confluence")
+const isUsableProfile = (profile: DiscoveredAtlassianProfile, intent: AtlassianSetupIntent): boolean =>
+  profile.status === "valid" && intent.providers.every((providerId) => profile.providers.includes(providerId))
 
 const profileAvailability = (profile: DiscoveredAtlassianProfile): string => {
   if (profile.status === "expired") return "expired"
@@ -33,7 +38,8 @@ export const AtlassianAccountSetupForm = ({
   onCancel,
   onSubmit,
   profiles,
-  profilesState
+  profilesState,
+  setupIntent
 }: {
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isSubmitting: boolean
@@ -41,9 +47,12 @@ export const AtlassianAccountSetupForm = ({
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
   readonly profilesState: "failed" | "idle" | "loading" | "ready"
+  readonly setupIntent: AtlassianSetupIntent
 }): ReactElement => {
   const jira = catalogs.find(({ providerId }) => providerId === "jira")
   const confluence = catalogs.find(({ providerId }) => providerId === "confluence")
+  const setupJira = setupIntent.providers.includes("jira")
+  const setupConfluence = setupIntent.providers.includes("confluence")
   const [accountName, setAccountName] = useState("Atlassian workspace")
   const [authenticationMode, setAuthenticationMode] = useState<AuthenticationMode>("oauth")
   const [profileId, setProfileId] = useState("")
@@ -57,9 +66,9 @@ export const AtlassianAccountSetupForm = ({
 
   useEffect(() => {
     if (authenticationMode !== "oauth" || profileId.length > 0) return
-    const firstSharedProfile = profiles.find(isSharedUsableProfile)
-    if (firstSharedProfile !== undefined) setProfileId(firstSharedProfile.profileId)
-  }, [authenticationMode, profileId, profiles])
+    const firstUsableProfile = profiles.find((profile) => isUsableProfile(profile, setupIntent))
+    if (firstUsableProfile !== undefined) setProfileId(firstUsableProfile.profileId)
+  }, [authenticationMode, profileId, profiles, setupIntent])
 
   useEffect(() => {
     if (authenticationMode !== "oauth") return
@@ -72,7 +81,7 @@ export const AtlassianAccountSetupForm = ({
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     setSetupError(null)
-    if (jira === undefined || confluence === undefined) {
+    if ((setupJira && jira === undefined) || (setupConfluence && confluence === undefined)) {
       setSetupError("The installed Atlassian adapters are unavailable.")
       return
     }
@@ -84,9 +93,8 @@ export const AtlassianAccountSetupForm = ({
     if (
       normalizedAccountName.length === 0 ||
       normalizedSiteUrl.length === 0 ||
-      normalizedSiteId.length === 0 ||
-      normalizedSpaceId.length === 0 ||
-      normalizedProbePageId.length === 0
+      (setupConfluence &&
+        (normalizedSiteId.length === 0 || normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
     ) {
       setSetupError("Add the Atlassian site, Confluence space, and readable health page.")
       return
@@ -103,8 +111,8 @@ export const AtlassianAccountSetupForm = ({
             ["apiToken", apiToken]
           ]
     const oauthProfile = selectedProfile(profiles, profileId)
-    if (authenticationMode === "oauth" && (oauthProfile === undefined || !isSharedUsableProfile(oauthProfile))) {
-      setSetupError("Choose a valid profile shared by Jira and Confluence, or use an API token instead.")
+    if (authenticationMode === "oauth" && (oauthProfile === undefined || !isUsableProfile(oauthProfile, setupIntent))) {
+      setSetupError("Choose a valid profile for the products being connected, or use an API token instead.")
       return
     }
     if (authenticationMode === "api-token" && (email.trim().length === 0 || apiToken.length === 0)) {
@@ -121,16 +129,24 @@ export const AtlassianAccountSetupForm = ({
     ]
     const overrides = new Map<string, string>(sharedValues)
     const drafts: ReadonlyArray<ServiceConnectionDraft> = [
-      {
-        catalog: jira,
-        displayName: `${normalizedAccountName} · Jira`,
-        values: serviceSetupValues(jira, overrides)
-      },
-      {
-        catalog: confluence,
-        displayName: `${normalizedAccountName} · Confluence`,
-        values: serviceSetupValues(confluence, overrides)
-      }
+      ...(setupJira && jira !== undefined
+        ? [
+            {
+              catalog: jira,
+              displayName: `${normalizedAccountName} · Jira`,
+              values: serviceSetupValues(jira, overrides)
+            }
+          ]
+        : []),
+      ...(setupConfluence && confluence !== undefined
+        ? [
+            {
+              catalog: confluence,
+              displayName: `${normalizedAccountName} · Confluence`,
+              values: serviceSetupValues(confluence, overrides)
+            }
+          ]
+        : [])
     ]
     void onSubmit(drafts).then((didCreate) => {
       if (!didCreate) setSetupError("Some Atlassian services could not be connected. Review the cards below and retry.")
@@ -143,14 +159,18 @@ export const AtlassianAccountSetupForm = ({
       : profilesState === "failed"
         ? "OAuth profile discovery is unavailable. API token fallback remains available."
         : profilesState === "ready"
-          ? `${profiles.filter(isSharedUsableProfile).length} shared OAuth ${profiles.filter(isSharedUsableProfile).length === 1 ? "profile" : "profiles"} ready`
+          ? `${profiles.filter((profile) => isUsableProfile(profile, setupIntent)).length} ${setupJira && setupConfluence ? "shared " : ""}OAuth ${profiles.filter((profile) => isUsableProfile(profile, setupIntent)).length === 1 ? "profile" : "profiles"} ready`
           : "OAuth profiles stay on this machine and are shared by Jira and Confluence."
 
   return (
     <form className={styles.form} onSubmit={submit}>
       <div className={styles.intro}>
         <Text as="h3" variant="card-title">
-          One identity. Jira and Confluence together.
+          {setupJira && setupConfluence
+            ? "One identity. Jira and Confluence together."
+            : setupJira
+              ? "Connect Jira with your Atlassian identity."
+              : "Connect Confluence with your Atlassian identity."}
         </Text>
         <Text tone="secondary" variant="body">
           OAuth is preferred. Control Center reads the selected local profile only inside the server runtime.
@@ -176,7 +196,11 @@ export const AtlassianAccountSetupForm = ({
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
                 <option value="">Choose a local profile</option>
                 {profiles.map((profile) => (
-                  <option disabled={!isSharedUsableProfile(profile)} key={profile.profileId} value={profile.profileId}>
+                  <option
+                    disabled={!isUsableProfile(profile, setupIntent)}
+                    key={profile.profileId}
+                    value={profile.profileId}
+                  >
                     {profile.name} · {profileAvailability(profile)}
                   </option>
                 ))}
@@ -229,42 +253,46 @@ export const AtlassianAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field
-        description="The stable Atlassian cloud ID; filled from OAuth when available."
-        label="Site ID"
-        required
-        size="compact"
-      >
-        {(controlProps) => (
-          <input
-            {...controlProps}
-            disabled={authenticationMode === "oauth"}
-            onChange={(event) => setSiteId(event.currentTarget.value)}
-            value={siteId}
-          />
-        )}
-      </Field>
-      <div className={styles.resources}>
-        <Field label="Confluence space ID" required size="compact">
-          {(controlProps) => (
-            <input {...controlProps} onChange={(event) => setSpaceId(event.currentTarget.value)} value={spaceId} />
-          )}
-        </Field>
+      {setupConfluence ? (
         <Field
-          description="A readable page used only for the connection check."
-          label="Health page ID"
+          description="The stable Atlassian cloud ID; filled from OAuth when available."
+          label="Site ID"
           required
           size="compact"
         >
           {(controlProps) => (
             <input
               {...controlProps}
-              onChange={(event) => setProbePageId(event.currentTarget.value)}
-              value={probePageId}
+              disabled={authenticationMode === "oauth"}
+              onChange={(event) => setSiteId(event.currentTarget.value)}
+              value={siteId}
             />
           )}
         </Field>
-      </div>
+      ) : null}
+      {setupConfluence ? (
+        <div className={styles.resources}>
+          <Field label="Confluence space ID" required size="compact">
+            {(controlProps) => (
+              <input {...controlProps} onChange={(event) => setSpaceId(event.currentTarget.value)} value={spaceId} />
+            )}
+          </Field>
+          <Field
+            description="A readable page used only for the connection check."
+            label="Health page ID"
+            required
+            size="compact"
+          >
+            {(controlProps) => (
+              <input
+                {...controlProps}
+                onChange={(event) => setProbePageId(event.currentTarget.value)}
+                value={probePageId}
+              />
+            )}
+          </Field>
+        </div>
+      ) : null}
       {setupError === null ? null : (
         <Text as="p" className={styles.error} role="alert" variant="body">
           {setupError}

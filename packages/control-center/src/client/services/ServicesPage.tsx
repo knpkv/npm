@@ -18,7 +18,7 @@ import type { PluginConnectionId } from "../../domain/identifiers.js"
 import { firstPartyServiceIdentities, type FirstPartyServiceIdentity } from "../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
-import { AtlassianAccountSetupForm } from "./AtlassianAccountSetupForm.js"
+import { AtlassianAccountSetupForm, type AtlassianSetupIntent } from "./AtlassianAccountSetupForm.js"
 import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
@@ -51,6 +51,15 @@ type ConnectionsState =
   | { readonly _tag: "ready"; readonly overview: PluginOverviewResponse }
 
 const setupDraftKey = (draft: ServiceConnectionDraft): string => `${draft.catalog.providerId}\0${draft.displayName}`
+
+const allAtlassianProductsIntent: AtlassianSetupIntent = { providers: ["jira", "confluence"] }
+
+const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnectionSummary>): AtlassianSetupIntent => {
+  const providers = allAtlassianProductsIntent.providers.filter(
+    (providerId) => !connections.some((connection) => connection.providerId === providerId)
+  )
+  return providers.length === 0 ? allAtlassianProductsIntent : { providers }
+}
 
 const statusFor = (
   connection: PluginConnectionSummary,
@@ -296,6 +305,7 @@ const SetupForm = ({
 const CatalogCard = ({
   atlassianProfiles,
   atlassianProfilesState,
+  atlassianSetupIntent,
   awsProfiles,
   awsProfilesState,
   canConfigure,
@@ -312,6 +322,7 @@ const CatalogCard = ({
 }: {
   readonly atlassianProfiles: AtlassianProfileDiscoveryResponse
   readonly atlassianProfilesState: AtlassianProfilesState["_tag"]
+  readonly atlassianSetupIntent: AtlassianSetupIntent
   readonly awsProfiles: AwsProfileDiscoveryResponse
   readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly canConfigure: boolean
@@ -364,6 +375,7 @@ const CatalogCard = ({
             onSubmit={onSubmitAtlassian}
             profiles={atlassianProfiles}
             profilesState={atlassianProfilesState}
+            setupIntent={atlassianSetupIntent}
           />
         ) : (
           <SetupForm catalog={catalog} isSubmitting={isSubmitting} onCancel={onCancel} onSubmit={onSubmit} />
@@ -439,6 +451,7 @@ export const ServicesPage = ({
     new Map()
   )
   const [openProvider, setOpenProvider] = useState<ProviderId | null>(null)
+  const [atlassianSetupIntent, setAtlassianSetupIntent] = useState<AtlassianSetupIntent | null>(null)
   const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
   const testRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const createRequest = useRef<AbortController | null>(null)
@@ -519,6 +532,7 @@ export const ServicesPage = ({
     setTestStates(new Map())
     setEnablementStates(new Map())
     setOpenProvider(null)
+    setAtlassianSetupIntent(null)
     setSubmittingProvider(null)
     setAwsProfilesState({ _tag: "idle" })
     setAtlassianProfilesState({ _tag: "idle" })
@@ -548,6 +562,9 @@ export const ServicesPage = ({
     const requestedProvider = selectedServiceProvider(searchParams, "enable")
     if (requestedProvider === null) return
     if (!connectionsState.overview.catalog.some(({ providerId }) => providerId === requestedProvider)) return
+    if (requestedProvider === "jira" || requestedProvider === "confluence") {
+      setAtlassianSetupIntent(missingAtlassianProductsIntent(connectionsState.overview.connections))
+    }
     setOpenProvider(requestedProvider)
     const nextSearchParams = new URLSearchParams(searchParams)
     nextSearchParams.delete("enable")
@@ -773,6 +790,7 @@ export const ServicesPage = ({
             const configured = connectionsState.overview.connections.filter(
               (connection) => connection.providerId === catalog.providerId
             )
+            const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
             const cards = configured.map((connection) => (
               <ConnectionCard
                 canConfigure={canConfigure}
@@ -780,7 +798,12 @@ export const ServicesPage = ({
                 connection={connection}
                 enablementState={enablementStates.get(connection.pluginConnectionId)}
                 key={connection.pluginConnectionId}
-                onConfigure={() => setOpenProvider(catalog.providerId)}
+                onConfigure={() => {
+                  if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
+                    setAtlassianSetupIntent(allAtlassianProductsIntent)
+                  }
+                  setOpenProvider(catalog.providerId)
+                }}
                 onSetEnabled={setConnectionEnabled}
                 onTest={testConnection}
                 testState={testStates.get(connection.pluginConnectionId)}
@@ -792,6 +815,7 @@ export const ServicesPage = ({
               <CatalogCard
                 atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
                 atlassianProfilesState={atlassianProfilesState._tag}
+                atlassianSetupIntent={atlassianSetupIntent ?? missingAtlassianIntent}
                 awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
                 awsProfilesState={awsProfilesState._tag}
                 canConfigure={canConfigure}
@@ -803,24 +827,18 @@ export const ServicesPage = ({
                 key={`${catalog.providerId}-catalog`}
                 onCancel={() => {
                   completedBatchDrafts.current.delete(catalog.providerId)
+                  setAtlassianSetupIntent(null)
                   setOpenProvider(null)
                 }}
                 onOpen={() => {
                   completedBatchDrafts.current.delete(catalog.providerId)
+                  if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
+                    setAtlassianSetupIntent(missingAtlassianIntent)
+                  }
                   setOpenProvider(catalog.providerId)
                 }}
                 onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
-                onSubmitAtlassian={(drafts) =>
-                  createConnections(
-                    drafts.filter(
-                      (draft) =>
-                        !connectionsState.overview.connections.some(
-                          (connection) => connection.providerId === draft.catalog.providerId
-                        )
-                    ),
-                    catalog.providerId
-                  )
-                }
+                onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}
                 onSubmitAws={(drafts) => createConnections(drafts, catalog.providerId)}
               />
             ]

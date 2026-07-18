@@ -117,20 +117,31 @@ const validateStoredAtlassianAuthentication = Effect.fn(
   "PluginAdministration.validateStoredAtlassianAuthentication"
 )(function*(
   providerId: PluginConnectionRecord["providerId"],
-  pluginId: string,
+  descriptor: typeof NegotiatedPluginDescriptorV1.Type,
   values: ReadonlyArray<StoredPluginConfigurationValue>,
   fileSystem: FileSystem.FileSystem,
   path: Path.Path
 ) {
   if (
     !isAtlassianProvider(providerId) ||
-    (pluginId !== "dev.knpkv.jira.read" && pluginId !== "dev.knpkv.confluence")
+    (descriptor.descriptor.pluginId !== "dev.knpkv.jira.read" &&
+      descriptor.descriptor.pluginId !== "dev.knpkv.confluence")
   ) return
   const authMode = configuredText(values, "authMode")
   const valuesByKey = new Map<string, StoredPluginConfigurationValue>(
     values.map((value) => [value.key, value])
   )
   const hasCredential = (key: string): boolean => valuesByKey.get(key)?._tag === "secret-reference"
+  const usesLegacyAuthentication = descriptor.descriptor.configurationFields.every(
+    ({ key }) => key !== "authMode" && key !== "oauthProfileId"
+  )
+  if (authMode === null && usesLegacyAuthentication) {
+    const email = valuesByKey.get("email")
+    if ((email?._tag !== "text" && email?._tag !== "secret-reference") || !hasCredential("apiToken")) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return
+  }
   if (authMode === "api-token") {
     if (!hasCredential("email") || !hasCredential("apiToken") || valuesByKey.has("oauthProfileId")) {
       return yield* new ApplicationInvalidRequest()
@@ -1025,7 +1036,7 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       const values = yield* canonicalValues(secrets, currentValues, patch.values, credentialKeys)
       yield* validateStoredAtlassianAuthentication(
         connection.providerId,
-        descriptor.descriptor.pluginId,
+        descriptor,
         values,
         fileSystem,
         path
